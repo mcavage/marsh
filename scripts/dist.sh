@@ -78,7 +78,14 @@ for guest in marsh marsh-local marsh-byte-exec marsh-worker marsh-relay marshd; 
   install -m 755 "$GUEST_ARTIFACTS/$guest-linux-arm64" "$root/libexec/marsh/$guest-linux-arm64"
 done
 install -m 644 "$KIT_COMMANDS" "$root/libexec/marsh/commands.json"
-install -m 644 packaging/agents.json "$root/libexec/marsh/agents.json"
+if test "$LOCAL" = 1; then
+  install -m 644 packaging/agents.json "$root/libexec/marsh/agents.json"
+else
+  # Immutable Kits need their pinned reference as the ACP workload_digest.
+  python3 scripts/pin-agents.py "$KIT_COMMANDS" packaging/agents.json "$root/libexec/marsh/agents.json" ||
+    die "cannot pin ACP workload digests"
+  chmod 644 "$root/libexec/marsh/agents.json"
+fi
 install -m 644 "$SHELL_IMAGE" "$root/libexec/marsh/shell-image"
 if test -f "$SHELL_IMAGE.build.json"; then
   install -m 644 "$SHELL_IMAGE.build.json" "$root/libexec/marsh/shell-image.build.json"
@@ -104,6 +111,12 @@ if test "$LOCAL" = 1; then
     echo "Install it on that Mac only. 'marsh --version' says \"local build\"."
   } > "$root/LOCAL-BUILD.txt"
 fi
+
+# The packaged daemon validates its own packaged configuration (same loaders
+# and ACP Kit binding as startup; no sbx, VM or network). A tarball whose
+# registries disagree must not be produced.
+"$root/bin/marshd" --check-config "$root/libexec/marsh" ||
+  die "the packaged configuration is invalid (marshd --check-config)"
 
 for page in "$MAN_DIR"/*.1; do
   test -f "$page" || die "no man pages in $MAN_DIR (make man)"

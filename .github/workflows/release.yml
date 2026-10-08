@@ -168,6 +168,9 @@ jobs:
           sh scripts/install.sh --tarball "target/dist/marsh-$VERSION-darwin-arm64.tar.gz" --prefix "$RUNNER_TEMP/prefix"
           "$RUNNER_TEMP/prefix/bin/marsh" --version | grep -qx "marsh $VERSION"
           "$RUNNER_TEMP/prefix/bin/msh" --help >/dev/null
+          # The installed daemon must accept its own packaged commands.json,
+          # agents.json and shell-image (offline: no sbx, VM or network).
+          "$RUNNER_TEMP/prefix/bin/marshd" --check-config
           MANPATH="$RUNNER_TEMP/prefix/share/man" man -w marsh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

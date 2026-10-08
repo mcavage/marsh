@@ -36,6 +36,21 @@ fn main() {
             }
         }
     }
+    if arguments
+        .first()
+        .is_some_and(|word| word == "--check-config")
+    {
+        match check_config(&arguments[1..]) {
+            Ok(summary) => {
+                println!("{summary}");
+                return;
+            }
+            Err(error) => {
+                eprintln!("marshd: --check-config: {error}");
+                std::process::exit(1);
+            }
+        }
+    }
     if let Err(error) = run() {
         eprintln!("marshd: {error}");
         std::process::exit(1);
@@ -190,6 +205,81 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     drop(startup_lock);
     server.serve_until(|| stopping.load(Ordering::Relaxed))?;
     Ok(())
+}
+
+/// `marshd --check-config [DIR]`: validate an install's packaged configuration
+/// (`commands.json`, `agents.json`, `shell-image`; DIR defaults to this
+/// binary's `libexec/marsh`) with the same loaders and ACP Kit binding startup
+/// uses. It never touches `sbx`, VMs, the network or the control home, so a
+/// release can be checked before publishing. Registries a user adds under
+/// the control home are not consulted.
+fn check_config(arguments: &[std::ffi::OsString]) -> Result<String, Box<dyn std::error::Error>> {
+    let guest_artifacts = match arguments {
+        [] => {
+            let executable = fs::canonicalize(env::current_exe()?)?;
+            executable
+                .parent()
+                .and_then(Path::parent)
+                .ok_or("marshd has no install prefix")?
+                .join("libexec/marsh")
+        }
+        [dir] => PathBuf::from(dir).canonicalize()?,
+        _ => return Err("usage: marshd --check-config [LIBEXEC_MARSH_DIR]".into()),
+    };
+    let no_user = guest_artifacts.join(".check-config-no-user-registry");
+    let commands = load_commands(&guest_artifacts.join("commands.json"), &no_user)?;
+    let agents = load_agents(&guest_artifacts.join("agents.json"), &no_user)?;
+    let shell_image = fs::read_to_string(guest_artifacts.join("shell-image"))
+        .map_err(|_| "cannot read shell-image")?;
+    let shell_image = OciImage::parse(shell_image.trim().to_owned())?;
+    let local = guest_artifacts.join("local-build").exists();
+    if !local
+        && commands
+            .iter()
+            .any(|(_, kit)| kit.workload.source_dir().is_some())
+    {
+        return Err("a release install must pin every Kit by digest (found a source Kit)".into());
+    }
+    let scratch = guest_artifacts.clone();
+    let config = BackendConfig {
+        worker_binary: guest_artifacts.join("marsh-worker-linux-arm64"),
+        relay_binary: guest_artifacts.join("marsh-relay-linux-arm64"),
+        daemon_home: scratch.clone(),
+        control_home: scratch.clone(),
+        protected_guest_roots: Vec::new(),
+        shell: ShellVmSpec {
+            name: "check-config".into(),
+            image: shell_image,
+            shell_binary: guest_artifacts.join("marsh-linux-arm64"),
+            user: ShellUser {
+                name: "check".into(),
+                uid: 0,
+                gid: 0,
+                home: scratch,
+            },
+        },
+        resources: JobDefaults::from_environment(|_| None)?.resources,
+        env: EnvironmentConfig::default(),
+    };
+    // StockSbx is built but never invoked: binding reads only the registry.
+    let stock = Arc::new(StockSbx::new(
+        guest_artifacts.join("unused-sbx"),
+        Arc::new(SystemCommandRunner::new(
+            guest_artifacts.as_os_str().to_os_string(),
+        )),
+    ));
+    let declared = agents.declarations().count();
+    backend_with_agents(stock, commands.clone(), config, &agents).map_err(|error| {
+        format!(
+            "invalid ACP Kit binding ({error}); {} against commands.json",
+            guest_artifacts.join("agents.json").display()
+        )
+    })?;
+    Ok(format!(
+        "marshd: configuration ok ({} commands, {declared} ACP agents) in {}",
+        commands.len(),
+        guest_artifacts.display()
+    ))
 }
 
 #[cfg(test)]
@@ -675,6 +765,47 @@ mod tests {
         let mismatched = load_agents(&packaged, &user).unwrap();
         assert!(mismatched.resolve_acp("agent-session").is_ok());
         assert!(backend_with_agents(stock, commands, config, &mismatched).is_err());
+    }
+
+    #[test]
+    fn check_config_requires_agent_digests_to_match_pinned_kits() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path();
+        let kit = format!("example/agent@sha256:{}", "a".repeat(64));
+        fs::write(
+            dir.join("commands.json"),
+            format!("{{\"agent-kit\":\"{kit}\"}}"),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("shell-image"),
+            format!("example/shell@sha256:{}\n", "b".repeat(64)),
+        )
+        .unwrap();
+        let agents = |digest: &str| {
+            format!(
+                "[{{\"schema_version\":1,\"name\":\"agent-session\",\"protocol\":\"acp_v1\",\"command\":\"agent-kit\"{digest}}}]"
+            )
+        };
+        let arguments = [dir.as_os_str().to_os_string()];
+        // The release-0.1.0 defect: an OCI Kit with no workload digest.
+        fs::write(dir.join("agents.json"), agents("")).unwrap();
+        assert!(check_config(&arguments).is_err());
+        fs::write(
+            dir.join("agents.json"),
+            agents(&format!(
+                ",\"workload_digest\":\"example/agent@sha256:{}\"",
+                "c".repeat(64)
+            )),
+        )
+        .unwrap();
+        assert!(check_config(&arguments).is_err());
+        fs::write(
+            dir.join("agents.json"),
+            agents(&format!(",\"workload_digest\":\"{kit}\"")),
+        )
+        .unwrap();
+        assert!(check_config(&arguments).unwrap().contains("1 ACP agents"));
     }
 
     #[test]
