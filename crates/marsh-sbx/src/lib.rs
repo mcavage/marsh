@@ -3196,6 +3196,70 @@ impl StockSbx {
         Ok(())
     }
 
+    /// Whether starting a fresh VM for this Kit will pull its job image from
+    /// a registry: a published image with no verified archive in this home's
+    /// Kit image cache. Local-source Kits build their image instead.
+    #[must_use]
+    pub fn kit_image_download_needed(&self, spec: &KitVmSpec) -> bool {
+        let NativeKitLocation::ImmutableOci(image) = &spec.workload_kit.location else {
+            return false;
+        };
+        if published_image_digest(image).is_none() {
+            return false;
+        }
+        match self
+            .kit_image_cache
+            .as_deref()
+            .filter(|_| self.published_image_cache)
+        {
+            Some(cache) => cached_published_image(cache, image).is_none(),
+            None => true,
+        }
+    }
+
+    /// Whether creating this shell VM will probably download its template:
+    /// the VM does not exist, the template is a registry image, and stock
+    /// SBX's image store does not list that template's tag. When the store
+    /// cannot be listed this answers true; a needless hint is harmless.
+    #[must_use]
+    pub fn shell_image_download_needed(&self, spec: &ShellVmSpec) -> bool {
+        let Ok(template) = ShellTemplateReference::parse(spec.image.as_str()) else {
+            return false;
+        };
+        if template.requires_local_authority()
+            || !matches!(self.classify_vm(&spec.name, false), Ok(VmClass::Absent))
+        {
+            return false;
+        }
+        let digest_tag = template.digest().replace(':', "-");
+        let tag = template.tag().map(str::to_owned);
+        let listed = self
+            .run_bounded_os(
+                "list templates",
+                Duration::from_secs(10),
+                ["template", "ls", "--json"],
+            )
+            .ok()
+            .filter(CommandOutput::succeeded)
+            .and_then(|output| serde_json::from_slice::<serde_json::Value>(&output.stdout).ok());
+        let Some(listed) = listed else {
+            return true;
+        };
+        !listed
+            .get("images")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|images| {
+                images.iter().any(|image| {
+                    image
+                        .get("tag")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|candidate| {
+                            candidate == digest_tag || tag.as_deref() == Some(candidate)
+                        })
+                })
+            })
+    }
+
     fn published_image_id(&self, vm: &str, reference: &OciImage) -> Result<OciImage, SbxError> {
         let inspected = self.run([
             "exec",

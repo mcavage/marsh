@@ -159,9 +159,9 @@ impl StockDaemonBackend {
                 let spec = self.kit_spec_for_session(&command, session, store)?;
                 let mut cold_started = false;
                 let token = store.ephemeral_home_token(&session.session_id);
-                let vm = self.prepare_one_authorized(&spec, store, token.as_ref(), || {
+                let vm = self.prepare_one_authorized(&spec, store, token.as_ref(), |download| {
                     cold_started = true;
-                    progress.cold_boot(command.clone())
+                    progress.cold_boot(command.clone(), download)
                 })?;
                 let pins = self
                     .sbx
@@ -524,7 +524,7 @@ impl StockDaemonBackend {
         &self,
         spec: &KitVmSpec,
         store: &DaemonStore,
-        cold_boot: impl FnOnce() -> Result<(), DaemonError>,
+        cold_boot: impl FnOnce(bool) -> Result<(), DaemonError>,
     ) -> Result<ReadyKitVm, DaemonError> {
         self.prepare_one_authorized(spec, store, None, cold_boot)
     }
@@ -548,7 +548,7 @@ impl StockDaemonBackend {
         spec: &KitVmSpec,
         store: &DaemonStore,
         ephemeral: Option<&marsh_sbx::EphemeralHomeToken>,
-        cold_boot: impl FnOnce() -> Result<(), DaemonError>,
+        cold_boot: impl FnOnce(bool) -> Result<(), DaemonError>,
     ) -> Result<ReadyKitVm, DaemonError> {
         let key = self.kit_flight_key(spec, ephemeral.is_some())?;
         if let Some(token) = ephemeral {
@@ -606,7 +606,7 @@ impl StockDaemonBackend {
             let repair_claimed = store.begin_worker_repair(&spec.name, &spec.name)?;
             let prepared = (|| {
                 if !self.sbx.kit_vm_exists(spec).map_err(backend_error)? {
-                    cold_boot()?;
+                    cold_boot(self.sbx.kit_image_download_needed(spec))?;
                 }
                 let vm = if let Some(token) = ephemeral {
                     self.sbx.ensure_ephemeral_kit_vm(spec, token)
@@ -810,7 +810,7 @@ impl DaemonBackend for StockDaemonBackend {
         command_registry::validate_references(&path, &updated).map_err(backend_error)?;
         let workload = NativeKitRef::immutable_oci(reference.clone()).map_err(backend_error)?;
         let spec = self.kit_spec_for_workload(workload.clone())?;
-        let vm = self.prepare_one_with_progress(&spec, &store, || Ok(()))?;
+        let vm = self.prepare_one_with_progress(&spec, &store, |_| Ok(()))?;
         self.register_worker(&store, &vm)?;
         self.persist_installed_command(&previous, &updated)?;
         self.installed_commands
@@ -1258,9 +1258,10 @@ impl DaemonBackend for StockDaemonBackend {
         };
         let token = store.ephemeral_home_token(&request.session.session_id);
         let vm = self
-            .prepare_one_authorized(&spec, &store, token.as_ref(), || {
+            .prepare_one_authorized(&spec, &store, token.as_ref(), |download| {
                 attachment.send(&AttachmentFrame::ColdBoot {
                     kit: request.command.clone(),
+                    download,
                 })
             })
             .map_err(|error| quarantine_hint(error, &request.command))?;
@@ -1824,11 +1825,20 @@ impl DaemonBackend for StockDaemonBackend {
             }
             shell_attachment::require_controller(&attachment)?;
             self.finish_shell_warmup();
-            let vm = self.sbx.ensure_shell_vm(&shell).map_err(backend_error)?;
-            shell_attachment::require_controller(&attachment)?;
-            if vm.cold_started {
+            // Announce a template download before it starts, not after.
+            let announced = self.sbx.shell_image_download_needed(&shell);
+            if announced {
                 attachment.send(&AttachmentFrame::ColdBoot {
                     kit: "shell".into(),
+                    download: true,
+                })?;
+            }
+            let vm = self.sbx.ensure_shell_vm(&shell).map_err(backend_error)?;
+            shell_attachment::require_controller(&attachment)?;
+            if vm.cold_started && !announced {
+                attachment.send(&AttachmentFrame::ColdBoot {
+                    kit: "shell".into(),
+                    download: false,
                 })?;
             }
             // Observe and pin stock's actual UUID BEFORE any grant submission.
@@ -4207,7 +4217,7 @@ mod tests {
 
         let store = DaemonStore::new(home.path());
         let error = backend
-            .prepare_one_with_progress(&spec, &store, || Ok(()))
+            .prepare_one_with_progress(&spec, &store, |_| Ok(()))
             .unwrap_err();
         assert!(
             error
@@ -4253,7 +4263,7 @@ mod tests {
 
         let spec = backend.kit_spec("agent").unwrap();
         let error = backend
-            .prepare_one_with_progress(&spec, &store, || Ok(()))
+            .prepare_one_with_progress(&spec, &store, |_| Ok(()))
             .unwrap_err();
         assert!(error.to_string().contains("cannot be repaired"));
     }
@@ -4314,7 +4324,7 @@ mod tests {
         store.reserve_worker(&job, &spec.name, &spec.name).unwrap();
 
         let error = backend
-            .prepare_one_with_progress(&spec, &store, || Ok(()))
+            .prepare_one_with_progress(&spec, &store, |_| Ok(()))
             .unwrap_err();
         assert!(error.to_string().contains("cannot be repaired"));
         assert_eq!(store.status(None).workers[0].health, WorkerHealth::Ready);

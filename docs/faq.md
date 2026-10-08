@@ -92,6 +92,8 @@ Time
   Kit's VM, and marsh prints `[starting NAME worker VM…]`. Later calls reuse
   warm VMs. `marsh --load all` boots every Kit VM before your first prompt.
   `marsh join --timing` prints marsh's own overhead for a split.
+  A Kit image that is not yet cached is downloaded on first use (about
+  3.5 GB, a few minutes); marsh prints a notice before it starts.
 
 CPU and memory
 : Each job gets 4 CPUs and 8 GiB by default. At most 8 jobs run at once. These

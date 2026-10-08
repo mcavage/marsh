@@ -779,6 +779,8 @@ pub enum PublicReply {
     #[serde(rename = "cold_boot")]
     AcpColdBoot {
         kit: String,
+        #[serde(default)]
+        download: bool,
     },
     InstalledKit {
         command: String,
@@ -950,6 +952,9 @@ pub struct ShellSpec {
 pub enum AttachmentFrame {
     ColdBoot {
         kit: String,
+        /// The start will probably download the image first.
+        #[serde(default)]
+        download: bool,
     },
     /// Guest preparation completed; terminal input may now be admitted.
     ShellReady,
@@ -1000,9 +1005,33 @@ pub enum AttachmentControlError {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PreparationFrame {
-    ColdBoot { kit: String },
-    Complete { result: PreparationResult },
-    Failed { message: String },
+    ColdBoot {
+        kit: String,
+        #[serde(default)]
+        download: bool,
+    },
+    Complete {
+        result: PreparationResult,
+    },
+    Failed {
+        message: String,
+    },
+}
+
+/// The one-line progress notice for a cold VM start. `download` is set only
+/// when the daemon knows the image is not cached and the start will pull it.
+#[must_use]
+pub fn cold_boot_notice(kit: &str, download: bool) -> String {
+    match (download, kit) {
+        (false, _) => format!("[starting {kit} worker VM…]"),
+        (true, "shell") => {
+            "[starting shell VM… first use may download the shell image, this can take a few minutes]"
+                .into()
+        }
+        (true, _) => format!(
+            "[starting {kit} worker VM… first use downloads the Kit image (~3.5 GB), this takes a few minutes]"
+        ),
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -3668,6 +3697,18 @@ impl ConnectionHandler {
                     let host = self.mcp_host.as_ref().ok_or_else(|| {
                         PublicationOutcome::rejected("host MCP publication is unavailable")
                     })?;
+                    // Neither a declaration nor a pending revocation marker: this
+                    // name was never published (or is already fully revoked).
+                    let declaration = host
+                        .declaration_path(&session, PublicationKind::Mcp, &name)
+                        .map_err(PublicationOutcome::rejected)?;
+                    if fs::symlink_metadata(&declaration).is_err()
+                        && fs::symlink_metadata(declaration.with_extension("revoke")).is_err()
+                    {
+                        return Err(PublicationOutcome::rejected(format!(
+                            "{name} is not published"
+                        )));
+                    }
                     let publication_lock = host.publication_lock(&scope, &name);
                     // Fence a slow admitted load before waiting for its lock.
                     // This does not claim cancellation of backend preparation.
@@ -4724,8 +4765,11 @@ impl PreparationProgress {
         }
     }
 
-    pub fn cold_boot(&self, kit: impl Into<String>) -> Result<(), DaemonError> {
-        self.send(&PreparationFrame::ColdBoot { kit: kit.into() })
+    pub fn cold_boot(&self, kit: impl Into<String>, download: bool) -> Result<(), DaemonError> {
+        self.send(&PreparationFrame::ColdBoot {
+            kit: kit.into(),
+            download,
+        })
     }
 
     fn send(&self, frame: &PreparationFrame) -> Result<(), DaemonError> {
@@ -5461,8 +5505,8 @@ impl Client {
             let reply = read_frame(&mut stream).map_err(|error| DaemonError::Publication(
                 PublicationOutcome::uncertain(format!("publication reply lost after dispatch: {error}; inspect state before retrying (not cancelled)"))))?;
             let outcome = match reply {
-                PublicReply::AcpColdBoot { kit } => {
-                    eprintln!("[starting {kit} worker VM…]");
+                PublicReply::AcpColdBoot { kit, download } => {
+                    eprintln!("{}", cold_boot_notice(&kit, download));
                     continue;
                 }
                 PublicReply::AcpPublication { outcome } if acp => outcome,
@@ -5645,8 +5689,8 @@ impl Client {
         }?;
         loop {
             match read_frame::<PreparationFrame>(&mut stream)? {
-                PreparationFrame::ColdBoot { kit } => {
-                    writeln!(progress_output, "[starting {kit} worker VM…]")?;
+                PreparationFrame::ColdBoot { kit, download } => {
+                    writeln!(progress_output, "{}", cold_boot_notice(&kit, download))?;
                     progress_output.flush()?;
                 }
                 PreparationFrame::Complete { result } => return Ok(result),
@@ -5963,11 +6007,12 @@ fn relay_attachment<R: Read + Send + 'static, O: Write, E: Write>(
             // A background job (not the terminal's foreground process group)
             // stays quiet: its notice would land over the prompt.
             AttachmentFrame::ColdBoot { .. } if background_of_terminal() => {}
-            AttachmentFrame::ColdBoot { kit } => {
+            AttachmentFrame::ColdBoot { kit, download } => {
+                let notice = cold_boot_notice(&kit, download);
                 if terminal {
-                    write!(error, "[starting {kit} worker VM…]\r\n")?;
+                    write!(error, "{notice}\r\n")?;
                 } else {
-                    writeln!(error, "[starting {kit} worker VM…]")?;
+                    writeln!(error, "{notice}")?;
                 }
                 error.flush()?;
             }

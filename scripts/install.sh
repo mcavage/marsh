@@ -146,9 +146,15 @@ if [ ! -w "$PREFIX" ] || { [ -e "$PREFIX/bin" ] && [ ! -w "$PREFIX/bin" ]; }; th
   sudo=sudo
 fi
 
-if pgrep -x marshd >/dev/null 2>&1; then
-  warn "a marsh daemon is running. It keeps the old binaries until it stops; run 'marsh stop' when idle."
-fi
+# Only a daemon running this prefix's marshd keeps the old binaries; daemons
+# from other installs or homes are unrelated.
+for pid in $(pgrep -x marshd 2>/dev/null); do
+  exe=$(ps -p "$pid" -o comm= 2>/dev/null || true)
+  if [ "$exe" = "$PREFIX/bin/marshd" ]; then
+    warn "a marsh daemon from $PREFIX is running. It keeps the old binaries until it stops; run 'marsh stop' when idle."
+    break
+  fi
+done
 
 $sudo mkdir -p "$PREFIX/bin" "$PREFIX/libexec" "$PREFIX/share/man/man1" "$PREFIX/share/licenses"
 # Replace libexec/marsh as a whole so files from an older release do not linger.

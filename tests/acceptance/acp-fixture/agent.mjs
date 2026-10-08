@@ -42,6 +42,10 @@ for await (const line of inputLines) {
       break;
     case "session/new":
       send({ id, result: { sessionId } });
+      // Real agents announce their command list right after session/new.
+      // It is session state, not a stray update: status must not report it.
+      send({ method: "session/update", params: { sessionId, update: {
+        sessionUpdate: "available_commands_update", availableCommands: [] } } });
       break;
     case "session/prompt": {
       const text = params?.prompt?.[0]?.text;

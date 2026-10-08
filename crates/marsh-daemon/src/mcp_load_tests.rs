@@ -22,7 +22,7 @@ impl DaemonBackend for Kits {
         _: DaemonStore,
     ) -> Result<PreparationResult, DaemonError> {
         self.prepared.fetch_add(1, Ordering::SeqCst);
-        progress.cold_boot("other-kit")?;
+        progress.cold_boot("other-kit", false)?;
         if self.root.join("long-prepare").exists() {
             thread::sleep(Duration::from_secs(305));
         }

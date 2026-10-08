@@ -870,9 +870,9 @@ class Processes(Workspaces):
         top = self.one_top(receipts, "inspection")
         kid = next(r for r in receipts if r is not top)
         tree = text(self.cli(["jobs", "--tree"], self.project, timeout=60).stdout)
-        require(re.search(rf"^{top['job_id'][:8]}  \d+[smhd] ago +finished +0 +[\d.]+s  "
+        require(re.search(rf"^{top['job_id'][:8]} +\d+[smhd] ago +finished +0 +[\d.]+s  "
                           rf"fixture pipeline \"\|\" bash -c ['\"]fixture identity", tree, re.M)
-                and re.search(rf"^{kid['job_id'][:8]}  \d+[smhd] ago +finished +0 +[\d.]+s  "
+                and re.search(rf"^{kid['job_id'][:8]} +\d+[smhd] ago +finished +0 +[\d.]+s  "
                               rf"└─ fixture identity$", tree, re.M),
                 f"`jobs --tree` text lacks start, state, exit, duration, command, or nesting: {tree[:800]!r}")
         shown = text(self.cli(["jobs", "show", kid["job_id"][:8]], self.project, timeout=60).stdout)
@@ -992,20 +992,21 @@ class Processes(Workspaces):
         tree = out.split("rc=0", 1)[1]
         ago = r"\d+[smhd] ago +"
         want = [
-            rf"^{split[:8]}  {ago}joined +0 +\S+  split \(fix, review\)$",
-            rf"^-  +{ago}finished +0 +\S+  ├─ fix: fixture pipeline",
-            rf"^{fix['job_id'][:8]}  {ago}finished +0 +\S+  │  └─ fixture pipeline",
-            rf"^{nested[0]['job_id'][:8]}  {ago}finished +0 +\S+  │     └─ fixture identity$",
-            rf"^-  +{ago}finished +0 +\S+  └─ review: fixture identity",
-            rf"^{review[0]['job_id'][:8]}  {ago}finished +0 +\S+     └─ fixture identity$",
-            rf"^{consumer[0]['job_id'][:8]}  {ago}finished +0 +\S+  fixture identity  \(consumes split {split[:8]}\)$",
+            rf"^{split[:8]} +{ago}joined +0 +\S+  split \(fix, review\)$",
+            rf"^{split[:8]}/fix +{ago}finished +0 +\S+  ├─ fix: fixture pipeline",
+            rf"^{fix['job_id'][:8]} +{ago}finished +0 +\S+  │  └─ fixture pipeline",
+            rf"^{nested[0]['job_id'][:8]} +{ago}finished +0 +\S+  │     └─ fixture identity$",
+            rf"^{split[:8]}/review +{ago}finished +0 +\S+  └─ review: fixture identity",
+            rf"^{review[0]['job_id'][:8]} +{ago}finished +0 +\S+     └─ fixture identity$",
+            rf"^{consumer[0]['job_id'][:8]} +{ago}finished +0 +\S+  fixture identity  \(consumes split {split[:8]}\)$",
         ]
         for pattern in want:
             require(re.search(pattern, tree, re.M), f"`jobs --tree` lacks {pattern!r}:\n{tree}")
         rows = [line for line in tree.splitlines() if line[:1] not in ("", "I")]
         start = next(i for i, line in enumerate(rows) if " split (fix, review)" in line)
-        require([row.split("  ")[0] for row in rows[start + 1:start + 6]]
-                == ["-", fix["job_id"][:8], nested[0]["job_id"][:8], "-", review[0]["job_id"][:8]],
+        require([row.split()[0] for row in rows[start + 1:start + 6]]
+                == [f"{split[:8]}/fix", fix["job_id"][:8], nested[0]["job_id"][:8],
+                    f"{split[:8]}/review", review[0]["job_id"][:8]],
                 f"split subtree rows out of order:\n{tree}")
         self.verify_deleted(receipts)
 
@@ -1068,8 +1069,8 @@ class Processes(Workspaces):
         require(set(parts) == {"tree", "flat", "all", "json"}, f"listing sections missing: {listed[-1200:]!r}")
         for name in ("tree", "flat"):
             section = parts[name]
-            require(section.startswith("ID        STARTED   STATE"), f"`jobs` {name} has no header: {section!r}")
-            require(re.search(rf"^{mine['job_id'][:8]}  \d+s ago +finished +0 .*fixture identity$", section, re.M),
+            require(re.match(r"ID +STARTED   STATE", section), f"`jobs` {name} has no header: {section!r}")
+            require(re.search(rf"^{mine['job_id'][:8]} +\d+s ago +finished +0 .*fixture identity$", section, re.M),
                     f"session `jobs` {name} lacks this session's job: {section!r}")
             require(other["job_id"][:8] not in section, f"session `jobs` {name} lists another session's job: {section!r}")
         require(mine["job_id"][:8] in parts["all"] and other["job_id"][:8] in parts["all"],

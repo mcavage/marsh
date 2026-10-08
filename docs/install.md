@@ -25,7 +25,7 @@ creates the shell VM, so it is slower. Later runs reuse it.
 
 - A Mac with Apple Silicon. marsh does not run on Intel Macs or Linux hosts.
 - Docker Sandboxes (`sbx`) 0.45.0 or newer, signed in. Check with
-  `sbx version`. marsh is tested with 0.46.0. marsh uses `sbx` as installed and
+  `sbx version`. marsh is tested with 0.46.0 and 0.47.0. marsh uses `sbx` as installed and
   never changes it. Error messages for a missing or old `sbx` are in
 [Troubleshooting](troubleshooting.md#missing-or-old-sbx).
 

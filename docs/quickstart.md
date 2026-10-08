@@ -12,6 +12,12 @@ sbx login
 Each agent in the examples needs a credential first
 ([Agent credentials](#agent-credentials)).
 
+The first use of each agent downloads its Kit image (about 3.5 GB) into a new
+VM, which takes a few minutes. marsh says so when it happens:
+`[starting claude worker VM… first use downloads the Kit image (~3.5 GB), this takes a few minutes]`.
+The first shell VM can download its template the same way. Marsh keeps a copy
+of each Kit image, so later VMs for the same Kit start much faster.
+
 ## Split a task
 
 Open marsh in a project. It works in a Git repository or a plain directory.

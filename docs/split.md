@@ -322,17 +322,17 @@ branches and every job they started. It does this even after `join` removed
 the split. A job started after `join` says which split it read:
 
 ```text
-ID        STARTED   STATE      EXIT      RUN  COMMAND
-524499e5  0s ago    finished      0     0.2s  claude -p "apply the good ones…"  (consumes split 8d5c8fdd)
-8d5c8fdd  1m ago    joined        0    1m01s  split (fix, review)
--         1m ago    finished      0    1m01s  ├─ fix: claude -p "find and fix one small bug…"
-9f47f6af  1m ago    finished      0    58.2s  │  └─ claude -p "find and fix one small bug…"
-b982a277  1m ago    finished      0    20.1s  │     └─ codex exec "…"
--         1m ago    finished      0    48.4s  └─ review: codex exec "suggest one small improvement…"
-149f157c  1m ago    finished      0    47.9s     └─ codex exec "suggest one small improvement…"
+ID               STARTED   STATE      EXIT      RUN  COMMAND
+524499e5         0s ago    finished      0     0.2s  claude -p "apply the good ones…"  (consumes split 8d5c8fdd)
+8d5c8fdd         1m ago    joined        0    1m01s  split (fix, review)
+8d5c8fdd/fix     1m ago    finished      0    1m01s  ├─ fix: claude -p "find and fix one small bug…"
+9f47f6af         1m ago    finished      0    58.2s  │  └─ claude -p "find and fix one small bug…"
+b982a277         1m ago    finished      0    20.1s  │     └─ codex exec "…"
+8d5c8fdd/review  1m ago    finished      0    48.4s  └─ review: codex exec "suggest one small improvement…"
+149f157c         1m ago    finished      0    47.9s     └─ codex exec "suggest one small improvement…"
 ```
 
-A shell branch's row (`-`) times the whole branch. The job rows under it time
+A shell branch's row (`SPLIT/label`) times the whole branch. The job rows under it time
 each Kit job from its start. The gap between them is shell startup plus any
 Kit VM boot.
 

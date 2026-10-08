@@ -696,6 +696,7 @@ impl AcpClient {
                     shared.dropped_updates.fetch_add(1, Ordering::Relaxed);
                     None
                 }
+                _ if is_session_state_update(&params) => None,
                 _ => {
                     shared.out_of_turn_updates.fetch_add(1, Ordering::Relaxed);
                     None
@@ -1268,6 +1269,25 @@ impl AcpClient {
 
         Ok(ResumeSessionResponse {})
     }
+}
+
+/// Agent session state announced outside any prompt turn (for example the
+/// command list an agent sends right after `session/new`). It carries no turn
+/// output, so it is neither a lost update nor part of a turn transcript.
+fn is_session_state_update(params: &serde_json::Value) -> bool {
+    params
+        .get("update")
+        .and_then(|update| update.get("sessionUpdate"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|kind| {
+            matches!(
+                kind,
+                "available_commands_update"
+                    | "current_mode_update"
+                    | "config_option_update"
+                    | "session_info_update"
+            )
+        })
 }
 
 #[cfg(test)]

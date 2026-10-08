@@ -242,7 +242,7 @@ fn jobs_p_names_group_leader_while_background_pid_names_rightmost() {
     );
     // Polling may remove the group leader before jobs prints it; its identity must remain.
     differential_with_input_mode(
-        "sh -c 'echo $$ >left; exit 7' | sh -c 'echo $$ >right; sleep 0.15; exit 23' & pid=$!\nsleep 0.05\njobs -p >group\nwait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; exit \"$status\"\n",
+        "sh -c 'echo $$ >left; exit 7' | sh -c 'echo $$ >right; sleep 0.6; exit 23' & pid=$!\nuntil test -s left && test -s right; do sleep 0.01; done\nsleep 0.05\njobs -p >group\nwait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; exit \"$status\"\n",
         23,
         b"",
         true,

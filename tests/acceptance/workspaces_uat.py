@@ -718,7 +718,7 @@ class Workspaces(Smoke):
         tree = text(self.cli(["jobs", "--tree", "--all"], project, timeout=60).stdout)
         for split_id in (failed, kept, cmd_failed):
             line = next((row for row in tree.splitlines() if row.startswith(split_id[:8])), "")
-            require(re.match(rf"{split_id[:8]}  \S+ ago +removed ", line),
+            require(re.match(rf"{split_id[:8]} +\S+ ago +removed ", line),
                     f"`jobs --tree` shows removed split {split_id} as: {line!r}")
 
     def kit_confinement(self) -> None:

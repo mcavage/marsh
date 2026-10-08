@@ -84,6 +84,15 @@ impl ShellTemplateReference {
         })
     }
 
+    /// The optional tag written alongside the digest (`name:tag@sha256:...`).
+    #[must_use]
+    pub fn tag(&self) -> Option<&str> {
+        self.1
+            .as_deref()
+            .and_then(|tagged| tagged.rsplit_once(':'))
+            .map(|(_, tag)| tag)
+    }
+
     /// The immutable `sha256:` digest this template must resolve to.
     #[must_use]
     pub fn digest(&self) -> &str {

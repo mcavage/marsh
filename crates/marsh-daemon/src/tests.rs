@@ -868,6 +868,23 @@ fn attached_relay_waits_for_slow_mcp_host_reply() {
     spec.username = "owner".into();
     spec.uid = rustix::process::geteuid().as_raw();
     spec.gid = rustix::process::getegid().as_raw();
+    // The scripted host peer commits without writing a declaration, so stand
+    // one in: unpublishing a name that was never published is refused.
+    let declaration = server
+        .mcp_host
+        .as_ref()
+        .unwrap()
+        .declaration_path(&spec, PublicationKind::Mcp, "slow")
+        .unwrap();
+    {
+        use std::os::unix::fs::DirBuilderExt as _;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(declaration.parent().unwrap())
+            .unwrap();
+    }
+    fs::write(&declaration, b"{}").unwrap();
     let server = Arc::new(server);
     for publish in [true, false] {
         let task_server = Arc::clone(&server);
@@ -3015,7 +3032,7 @@ impl DaemonBackend for EchoBackend {
         progress: PreparationProgress,
         _store: DaemonStore,
     ) -> Result<PreparationResult, DaemonError> {
-        progress.cold_boot("fixture")?;
+        progress.cold_boot("fixture", false)?;
         Ok(PreparationResult {
             cold_kits: match selection {
                 LoadSelection::All => vec!["fixture".into()],

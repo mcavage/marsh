@@ -2518,6 +2518,14 @@ fn unpublish_mcp(name: &str, transaction: &mut mcp_load::HostPublication) -> Res
         &add_command,
         true,
     )?;
+    // A retry after a partial revocation still has the pending marker or the
+    // host registration; with neither, this name was never published.
+    if !registered
+        && std::fs::symlink_metadata(&declaration_path).is_err()
+        && std::fs::symlink_metadata(declaration_path.with_extension("revoke")).is_err()
+    {
+        return Err(RunError::new(format!("{name} is not published"), 1));
+    }
     match std::fs::remove_file(&declaration_path) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}

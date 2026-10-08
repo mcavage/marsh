@@ -44,8 +44,8 @@ curl -fsSL https://runmar.sh/install | sh
 ```
 
 The script verifies a release from GitHub and installs into `~/.local`. The
-tap, the installer, and GitHub Releases go live with the first release; until
-then, build from source (`make install`, or `make dist-local` for a tarball).
+Homebrew tap, the installer, and GitHub Releases are live. To build from
+source instead, use `make install` (or `make dist-local` for a tarball).
 See [Install](docs/install.md) for options, upgrading, and removal.
 
 ## Quickstart

@@ -138,8 +138,8 @@ pub(super) fn wait_ready(
     loop {
         match execution.receive()? {
             AttachmentFrame::ShellReady => return Ok(()),
-            AttachmentFrame::ColdBoot { kit } => {
-                writeln!(error, "[starting {kit} worker VM…]")?;
+            AttachmentFrame::ColdBoot { kit, download } => {
+                writeln!(error, "{}", crate::cold_boot_notice(&kit, download))?;
                 error.flush()?;
             }
             AttachmentFrame::Failed { message } => return Err(DaemonError::Remote(message)),

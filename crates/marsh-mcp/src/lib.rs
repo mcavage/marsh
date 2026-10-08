@@ -3182,7 +3182,10 @@ fn validate_trusted_parent_chain(path: &Path) -> Result<(), String> {
             ));
         }
         let mode = metadata.permissions().mode();
-        if mode & 0o022 != 0 && !is_allowed_platform_temp_root(directory, mode) {
+        if mode & 0o022 != 0
+            && !is_allowed_platform_temp_root(directory, mode)
+            && !is_admin_group_writable(mode, metadata.gid())
+        {
             return Err(format!(
                 "executable parent must not be writable by group or other users: {}",
                 directory.display()
@@ -3190,6 +3193,16 @@ fn validate_trusted_parent_chain(path: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Stock Homebrew creates `/opt/homebrew/Cellar` as `0775 <user>:admin`.
+/// Accept group write only when the group is the macOS `admin` group (gid 80,
+/// whose members are already administrators) and the directory is not
+/// world-writable. The caller has already required root or the current user
+/// as owner. Any other group, and any other-writable directory, is rejected.
+fn is_admin_group_writable(mode: u32, gid: u32) -> bool {
+    const MACOS_ADMIN_GID: u32 = 80;
+    cfg!(target_os = "macos") && mode & 0o002 == 0 && gid == MACOS_ADMIN_GID
 }
 
 fn is_allowed_platform_temp_root(path: &Path, mode: u32) -> bool {
@@ -4616,6 +4629,37 @@ mod tests {
                 .unwrap()
                 .contains("must not be writable by group or other users")
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn marsh_accepts_only_an_admin_group_writable_executable_parent() {
+        // Mirrors stock Homebrew: /opt/homebrew/Cellar is 0775 user:admin.
+        let build = |group: u32, mode: u32| {
+            let root = tempfile::tempdir().unwrap();
+            let workspace = root.path().join("workspace");
+            let home = root.path().join("home");
+            let bin = root.path().join("cellar");
+            fs::create_dir(&workspace).unwrap();
+            fs::create_dir(&bin).unwrap();
+            std::os::unix::fs::chown(&bin, None, Some(group)).ok()?;
+            fs::set_permissions(&bin, fs::Permissions::from_mode(mode)).unwrap();
+            let marsh = bin.join("marsh");
+            executable(&marsh, "#!/bin/sh\nexit 0\n");
+            let sbx = supporting_executables(&marsh);
+            Some((
+                HostConfig::new(&workspace, &home, &marsh, &sbx, false),
+                root,
+            ))
+        };
+        let Some((admin, _keep)) = build(80, 0o775) else {
+            return; // the test user is not in the admin group
+        };
+        admin.unwrap();
+        let (world, _keep) = build(80, 0o777).unwrap();
+        assert!(world.unwrap_err().contains("must not be writable"));
+        let (other, _keep) = build(rustix::process::getegid().as_raw(), 0o775).unwrap();
+        assert!(other.unwrap_err().contains("must not be writable"));
     }
 
     #[test]

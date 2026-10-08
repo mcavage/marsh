@@ -516,9 +516,16 @@ pub fn render_jobs(
         if !tree {
             rows.sort_by_key(|row| (!row.active, std::cmp::Reverse(row.created)));
         }
+        // A shell branch's `SPLIT/label` id is wider than a job's eight.
+        let id_width = rows
+            .iter()
+            .map(|row| row_id(row).chars().count())
+            .max()
+            .unwrap_or(0)
+            .max(8);
         let _ = writeln!(
             out,
-            "{:<8}  {:<8}  {:<9}  {:>4}  {:>7}  {}COMMAND",
+            "{:<id_width$}  {:<8}  {:<9}  {:>4}  {:>7}  {}COMMAND",
             "ID",
             "STARTED",
             "STATE",
@@ -527,7 +534,7 @@ pub fn render_jobs(
             if tree { "" } else { "PARENT    " }
         );
         for row in rows {
-            let _ = writeln!(out, "{}", row_line(&row, tree, now));
+            let _ = writeln!(out, "{}", row_line(&row, tree, now, id_width));
         }
     }
     if hidden > 0 {
@@ -542,7 +549,7 @@ pub fn render_jobs(
 }
 
 /// One listing line (`render_jobs`): a job, a split, or a split branch.
-fn row_line(row: &Row<'_>, tree: bool, now: i64) -> String {
+fn row_line(row: &Row<'_>, tree: bool, now: i64, id_width: usize) -> String {
     let job = row.node;
     let created = number(job, "created_unix_ms");
     let started = created.map_or_else(|| "-".to_owned(), |at| ago(now - at));
@@ -558,31 +565,22 @@ fn row_line(row: &Row<'_>, tree: bool, now: i64) -> String {
     } else {
         format!("{:<8}  ", row.parent.map_or("-", short))
     };
-    let (id, state, command) = match text(job, "node") {
-        "fanout" => (
-            text(job, "fanout_id"),
-            text(job, "state"),
-            group_line("fanout", job),
-        ),
-        "split" => (
-            text(job, "split_id"),
-            split_state(text(job, "state")),
-            split_line(job),
-        ),
+    let id = row_id(row);
+    let (state, command) = match text(job, "node") {
+        "fanout" => (text(job, "state"), group_line("fanout", job)),
+        "split" => (split_state(text(job, "state")), split_line(job)),
         "branch" => match row.merged {
             // An argv branch is its job: one line, `label: command`.
             Some(merged) => (
-                text(merged, "job_id"),
                 text(merged, "state"),
                 labelled(text(job, "label"), &command_line(merged)),
             ),
             None => (
-                "-",
                 branch_state(text(job, "state")),
                 labelled(text(job, "label"), &printable(text(job, "command"))),
             ),
         },
-        _ => (text(job, "job_id"), text(job, "state"), command_line(job)),
+        _ => (text(job, "state"), command_line(job)),
     };
     let row_node = row.merged.unwrap_or(job);
     let (exit, elapsed, started) = match row.merged {
@@ -600,8 +598,7 @@ fn row_line(row: &Row<'_>, tree: bool, now: i64) -> String {
         None => (exit, elapsed, started),
     };
     let mut line = format!(
-        "{:<8}  {started:<8}  {state:<9}  {exit:>4}  {elapsed:>7}  {parent}{}{command}",
-        short(id),
+        "{id:<id_width$}  {started:<8}  {state:<9}  {exit:>4}  {elapsed:>7}  {parent}{}{command}",
         row.prefix,
     );
     if let Some(split) = row_node
@@ -619,6 +616,26 @@ fn row_line(row: &Row<'_>, tree: bool, now: i64) -> String {
         );
     }
     line.trim_end().to_owned()
+}
+
+/// The ID column: a job's, split's or fanout's short id; an argv branch's own
+/// job; for a shell branch, which has no job, `SPLIT/label`.
+fn row_id(row: &Row<'_>) -> String {
+    let job = row.node;
+    match text(job, "node") {
+        "fanout" => short(text(job, "fanout_id")).to_owned(),
+        "split" => short(text(job, "split_id")).to_owned(),
+        "branch" => match row.merged {
+            Some(merged) => short(text(merged, "job_id")).to_owned(),
+            None => match (row.parent, text(job, "label")) {
+                (Some(split), label) if !split.is_empty() && !label.is_empty() => {
+                    format!("{}/{label}", short(split))
+                }
+                _ => "-".to_owned(),
+            },
+        },
+        _ => short(text(job, "job_id")).to_owned(),
+    }
 }
 
 /// `split (fix, review)`: a split row's command column.
@@ -1128,13 +1145,14 @@ mod tests {
             "{tree}"
         );
         assert!(
-            lines[2]
-                .starts_with("1a2b3c4d  1m ago    joined        0    1m01s  split (fix, review)"),
+            lines[2].starts_with(
+                "1a2b3c4d      1m ago    joined        0    1m01s  split (fix, review)"
+            ),
             "{tree}"
         );
         assert!(
             lines[3].starts_with(
-                "-         1m ago    finished      0    51.0s  ├─ fix: claude -p 'find and fix'"
+                "1a2b3c4d/fix  1m ago    finished      0    51.0s  ├─ fix: claude -p 'find and fix'"
             ),
             "{tree}"
         );

@@ -73,7 +73,7 @@ impl DaemonBackend for Fixture {
                 "fixture preparation failed".into(),
             ));
         }
-        progress.cold_boot("fixture")?;
+        progress.cold_boot("fixture", false)?;
         // One progress frame, then a genuinely quiet backend preparation.
         thread::sleep(Duration::from_millis(
             self.preparation_delay_ms.load(Ordering::SeqCst),

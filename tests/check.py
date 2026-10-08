@@ -199,6 +199,7 @@ class Scope:
             subprocess.run(["git", "init", "-q", str(self.project)], check=True, timeout=30)
             self.git("config", "user.email", "check@marsh.invalid")
             self.git("config", "user.name", "marsh check")
+            self.git("config", "commit.gpgsign", "false")
             (self.project / ".git" / "info" / "exclude").write_text(".marsh/\n")
             (self.project / "notes.txt").write_bytes(self.NOTES)
             self.git("add", "notes.txt")
@@ -427,6 +428,9 @@ def check_mcp(scope: Scope, run_id: str) -> dict[str, Any]:
         unpublished = scope.marsh_run("-c", f"mcp unpublish {tool}")
         require(unpublished.returncode == 0, f"mcp unpublish exited {unpublished.returncode}")
         published = False
+        again = scope.marsh_run("-c", f"mcp unpublish {tool}")
+        require(again.returncode != 0 and f"{tool} is not published" in text(again.stderr + again.stdout),
+                f"unpublishing a revoked name: {again.returncode} {text(again.stderr)}")
         denied = call("again\n")["call"]
         result = (denied or {}).get("result") or {}
         require("error" in (denied or {}) or result.get("isError") is True
@@ -443,6 +447,9 @@ id=$(acp reserve fixture-session) || exit 30
 acp run --reservation "$id" fixture-session >/dev/null 2>&1 &
 run_pid=$!
 acp list --mine --wait "$id" >/dev/null || exit 31
+fresh=$(acp status "$id") || exit 32
+case $fresh in *omitted*) exit 33 ;; esac
+acp status "$id" --json | grep -q '"out_of_turn_updates":0' || exit 34
 acp stop "$id" >/dev/null || exit 44
 wait "$run_pid"
 printf 'wait=%s
