@@ -1,0 +1,2343 @@
+{
+  "schema": "marsh.public-rust-lock-notices/v1",
+  "lock_url": "https://raw.githubusercontent.com/BurntSushi/ripgrep/e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/Cargo.lock",
+  "lock_sha256": "7a7d39cda8a03930e578f1dbb724e055771901842eca239e03b01e19da946a64",
+  "package_count": 59,
+  "scope": "All public packages in exact release lock, including optional, build, test and other-platform crates; not a computed enabled-feature graph or a complete native/static dependency inventory. No cargo/build scripts executed.",
+  "archives": [
+    {
+      "url": "https://codeload.github.com/BurntSushi/ripgrep/tar.gz/e89fff89ac9af12e8d4ce9d5fd07beb408ca730f",
+      "expected_sha256": "af40d0f4cb7a55994906c009a7ba865047f0d487c95bceb8db59ffc4f2173d20",
+      "packages": [
+        {
+          "name": "globset",
+          "version": "0.4.19"
+        },
+        {
+          "name": "grep",
+          "version": "0.4.1"
+        },
+        {
+          "name": "grep-cli",
+          "version": "0.1.12"
+        },
+        {
+          "name": "grep-matcher",
+          "version": "0.1.9"
+        },
+        {
+          "name": "grep-pcre2",
+          "version": "0.1.10"
+        },
+        {
+          "name": "grep-printer",
+          "version": "0.3.1"
+        },
+        {
+          "name": "grep-regex",
+          "version": "0.1.14"
+        },
+        {
+          "name": "grep-searcher",
+          "version": "0.1.17"
+        },
+        {
+          "name": "ignore",
+          "version": "0.4.29"
+        },
+        {
+          "name": "ripgrep",
+          "version": "15.2.0"
+        }
+      ],
+      "acquisition": {
+        "url": "https://codeload.github.com/BurntSushi/ripgrep/tar.gz/e89fff89ac9af12e8d4ce9d5fd07beb408ca730f",
+        "sha256": "af40d0f4cb7a55994906c009a7ba865047f0d487c95bceb8db59ffc4f2173d20",
+        "size": 607432,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/Cargo.toml",
+          "sha256": "c7918574de41825502c6e6e923cd26c88e3f5a07bf42106406af8f5277c939ab",
+          "name": "ripgrep",
+          "version": "15.2.0",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/ripgrep"
+        },
+        {
+          "path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/cli/Cargo.toml",
+          "sha256": "b24e072950632ed43ab628602a8e4202a1e6dde4d62b3da4321692028c05cb16",
+          "name": "grep-cli",
+          "version": "0.1.12",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/cli"
+        },
+        {
+          "path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/globset/Cargo.toml",
+          "sha256": "a30097a90d753c2a2f7567343651c2ad1ebba98ae1b0db74d6d5d90fa87dc52f",
+          "name": "globset",
+          "version": "0.4.19",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/globset"
+        },
+        {
+          "path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/grep/Cargo.toml",
+          "sha256": "6c23af13f11a36bf47d5ff3173d9ac61b91cd189466ac42305cd79d35c2156da",
+          "name": "grep",
+          "version": "0.4.1",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/grep"
+        },
+        {
+          "path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/ignore/Cargo.toml",
+          "sha256": "2a4f8d8405bf0c922357ea3200d29e5adef45c813bd582a23081e51f4906ca83",
+          "name": "ignore",
+          "version": "0.4.29",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore"
+        },
+        {
+          "path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/matcher/Cargo.toml",
+          "sha256": "f85335baacf1571e7187c15aa2ecb1270f832c7c1514e33c4225ca2d4d5826ba",
+          "name": "grep-matcher",
+          "version": "0.1.9",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/matcher"
+        },
+        {
+          "path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/pcre2/Cargo.toml",
+          "sha256": "ab7c7d265b708a983373a3979b47ee02b3932672b73264fc3aaa08ab6e9ab796",
+          "name": "grep-pcre2",
+          "version": "0.1.10",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/pcre2"
+        },
+        {
+          "path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/printer/Cargo.toml",
+          "sha256": "6edd8dcf4d1951b322267f2dda06069b39d1c04c202a5593b1d3cb6ea9b7b4ae",
+          "name": "grep-printer",
+          "version": "0.3.1",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/printer"
+        },
+        {
+          "path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/regex/Cargo.toml",
+          "sha256": "2da48951703c48138a063bcfc8cb5d5748f03c7fedf3443ed0d0bfde24a870e9",
+          "name": "grep-regex",
+          "version": "0.1.14",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/regex"
+        },
+        {
+          "path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/searcher/Cargo.toml",
+          "sha256": "0f0753b7dd0c0543773c6d6ff4ddce5a8d5d69c2717151016dbf8e79a408f2d3",
+          "name": "grep-searcher",
+          "version": "0.1.17",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/ripgrep/tree/master/crates/searcher"
+        },
+        {
+          "path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/fuzz/Cargo.toml",
+          "sha256": "b8948efb524b815c1311ed06643f72541d5f3366d83bbdad80029ed0dcfcc8ef",
+          "name": "fuzz",
+          "version": "0.0.1"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/cli/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/cli/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/globset/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/globset/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/globset/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/grep/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/grep/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/grep/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/ignore/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/ignore/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/ignore/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/matcher/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/matcher/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/pcre2/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/pcre2/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/printer/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/printer/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/regex/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/regex/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/searcher/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "ripgrep-e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/crates/searcher/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/aho-corasick/aho-corasick-1.1.4.crate",
+      "expected_sha256": "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301",
+      "packages": [
+        {
+          "name": "aho-corasick",
+          "version": "1.1.4",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/aho-corasick/aho-corasick-1.1.4.crate",
+        "sha256": "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301",
+        "size": 184015,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "aho-corasick-1.1.4/Cargo.toml",
+          "sha256": "9384d7c725c5c2ebc8adc602081e7cbce8b214693e9e27edef1c40f33e925810",
+          "name": "aho-corasick",
+          "version": "1.1.4",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/aho-corasick"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "aho-corasick-1.1.4/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "aho-corasick-1.1.4/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "aho-corasick-1.1.4/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/anyhow/anyhow-1.0.103.crate",
+      "expected_sha256": "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3",
+      "packages": [
+        {
+          "name": "anyhow",
+          "version": "1.0.103",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/anyhow/anyhow-1.0.103.crate",
+        "sha256": "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3",
+        "size": 48746,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "anyhow-1.0.103/Cargo.toml",
+          "sha256": "dc1557f23ac90829bc4cb26366aa1702934c8c2cdcc50ee95b6ea690d4cf786b",
+          "name": "anyhow",
+          "version": "1.0.103",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/dtolnay/anyhow"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "anyhow-1.0.103/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "source_path": "anyhow-1.0.103/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/arbitrary/arbitrary-1.4.2.crate",
+      "expected_sha256": "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1",
+      "packages": [
+        {
+          "name": "arbitrary",
+          "version": "1.4.2",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/arbitrary/arbitrary-1.4.2.crate",
+        "sha256": "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1",
+        "size": 38307,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "arbitrary-1.4.2/Cargo.toml",
+          "sha256": "18431fa35c62df4019339b0b105a0ee12e8db49ca178e68f0fb3b9b7e5e8ec01",
+          "name": "arbitrary",
+          "version": "1.4.2",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-fuzz/arbitrary/"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "arbitrary-1.4.2/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "arbitrary-1.4.2/LICENSE-MIT",
+          "sha256": "15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c",
+          "file": "texts/15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/bstr/bstr-1.13.0.crate",
+      "expected_sha256": "1f7dc094d718f2e1c1559ad110e27eeaae14a5465d3d56dd6dbd793079fbd530",
+      "packages": [
+        {
+          "name": "bstr",
+          "version": "1.13.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "1f7dc094d718f2e1c1559ad110e27eeaae14a5465d3d56dd6dbd793079fbd530"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/bstr/bstr-1.13.0.crate",
+        "sha256": "1f7dc094d718f2e1c1559ad110e27eeaae14a5465d3d56dd6dbd793079fbd530",
+        "size": 355737,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "bstr-1.13.0/Cargo.toml",
+          "sha256": "f067bc0e0d1772c740546b49c691728ad44fe51b52a6ec60ed7cbd5a95f4f32c",
+          "name": "bstr",
+          "version": "1.13.0",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/BurntSushi/bstr"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "bstr-1.13.0/COPYING",
+          "sha256": "68653aaa727a2bfa31b7a751e31701ce33c49d695c12dd291a07d1c54da4c14b",
+          "file": "texts/68653aaa727a2bfa31b7a751e31701ce33c49d695c12dd291a07d1c54da4c14b.txt"
+        },
+        {
+          "source_path": "bstr-1.13.0/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "bstr-1.13.0/LICENSE-MIT",
+          "sha256": "6b7374c39a57e57fc2c38eb529c4c88340152b10f51dd5ae2d819dfa67f61715",
+          "file": "texts/6b7374c39a57e57fc2c38eb529c4c88340152b10f51dd5ae2d819dfa67f61715.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/cc/cc-1.2.67.crate",
+      "expected_sha256": "e17dd265a7d0f31ef544e1b20e03add05d3b45b491b633b10d67145d2acc1a38",
+      "packages": [
+        {
+          "name": "cc",
+          "version": "1.2.67",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "e17dd265a7d0f31ef544e1b20e03add05d3b45b491b633b10d67145d2acc1a38"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/cc/cc-1.2.67.crate",
+        "sha256": "e17dd265a7d0f31ef544e1b20e03add05d3b45b491b633b10d67145d2acc1a38",
+        "size": 96261,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "cc-1.2.67/Cargo.toml",
+          "sha256": "fe3f382a62099c27d00e645ecd9e679b00830c4f7fadd886eb44933f0d4e3596",
+          "name": "cc",
+          "version": "1.2.67",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-lang/cc-rs"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "cc-1.2.67/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "cc-1.2.67/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "file": "texts/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/cfg-if/cfg-if-1.0.4.crate",
+      "expected_sha256": "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801",
+      "packages": [
+        {
+          "name": "cfg-if",
+          "version": "1.0.4",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/cfg-if/cfg-if-1.0.4.crate",
+        "sha256": "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801",
+        "size": 9360,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "cfg-if-1.0.4/Cargo.toml",
+          "sha256": "281d508beb1fe3927cf03d3f2f8c9a5117b1e4fe97ae21b9026cf318e8c35273",
+          "name": "cfg-if",
+          "version": "1.0.4",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-lang/cfg-if"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "cfg-if-1.0.4/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "cfg-if-1.0.4/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "file": "texts/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/crossbeam-channel/crossbeam-channel-0.5.16.crate",
+      "expected_sha256": "d85363c37faeca707aef026efa9f3b34d077bce547e48f770770625c6013679e",
+      "packages": [
+        {
+          "name": "crossbeam-channel",
+          "version": "0.5.16",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "d85363c37faeca707aef026efa9f3b34d077bce547e48f770770625c6013679e"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/crossbeam-channel/crossbeam-channel-0.5.16.crate",
+        "sha256": "d85363c37faeca707aef026efa9f3b34d077bce547e48f770770625c6013679e",
+        "size": 93189,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "crossbeam-channel-0.5.16/Cargo.toml",
+          "sha256": "29527fb88615c06cf0e5ebfa12e0cac447b653dc8110de5ca3fe515cab63b7fb",
+          "name": "crossbeam-channel",
+          "version": "0.5.16",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/crossbeam-rs/crossbeam"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "crossbeam-channel-0.5.16/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "crossbeam-channel-0.5.16/LICENSE-MIT",
+          "sha256": "5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab",
+          "file": "texts/5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab.txt"
+        },
+        {
+          "source_path": "crossbeam-channel-0.5.16/LICENSE-THIRD-PARTY",
+          "sha256": "b16db96b93b1d7cf7bea533f572091ec6bca3234fbe0a83038be772ff391a44c",
+          "file": "texts/b16db96b93b1d7cf7bea533f572091ec6bca3234fbe0a83038be772ff391a44c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/crossbeam-deque/crossbeam-deque-0.8.7.crate",
+      "expected_sha256": "5181e0de7b61eb03a81e347d6dd8797bae9da5146707b51077e2d71a54ec0ceb",
+      "packages": [
+        {
+          "name": "crossbeam-deque",
+          "version": "0.8.7",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "5181e0de7b61eb03a81e347d6dd8797bae9da5146707b51077e2d71a54ec0ceb"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/crossbeam-deque/crossbeam-deque-0.8.7.crate",
+        "sha256": "5181e0de7b61eb03a81e347d6dd8797bae9da5146707b51077e2d71a54ec0ceb",
+        "size": 24141,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "crossbeam-deque-0.8.7/Cargo.toml",
+          "sha256": "c9632c8308c019ec51fe44db580bb727dbd50e53bd970daa7a48fe4e776ab8a9",
+          "name": "crossbeam-deque",
+          "version": "0.8.7",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/crossbeam-rs/crossbeam"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "crossbeam-deque-0.8.7/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "crossbeam-deque-0.8.7/LICENSE-MIT",
+          "sha256": "5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab",
+          "file": "texts/5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/crossbeam-epoch/crossbeam-epoch-0.9.20.crate",
+      "expected_sha256": "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f",
+      "packages": [
+        {
+          "name": "crossbeam-epoch",
+          "version": "0.9.20",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/crossbeam-epoch/crossbeam-epoch-0.9.20.crate",
+        "sha256": "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f",
+        "size": 47545,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "crossbeam-epoch-0.9.20/Cargo.toml",
+          "sha256": "aa33b807f5f74c0336045aecd27e90f9f4c8e0fceceb3967fdc154237b76c3a6",
+          "name": "crossbeam-epoch",
+          "version": "0.9.20",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/crossbeam-rs/crossbeam"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "crossbeam-epoch-0.9.20/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "crossbeam-epoch-0.9.20/LICENSE-MIT",
+          "sha256": "5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab",
+          "file": "texts/5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/crossbeam-utils/crossbeam-utils-0.8.22.crate",
+      "expected_sha256": "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17",
+      "packages": [
+        {
+          "name": "crossbeam-utils",
+          "version": "0.8.22",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/crossbeam-utils/crossbeam-utils-0.8.22.crate",
+        "sha256": "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17",
+        "size": 46874,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "crossbeam-utils-0.8.22/Cargo.toml",
+          "sha256": "c72b40382ceeea681815419eefa47b02c00afeb97ff27fb365d6c14af1b14ab4",
+          "name": "crossbeam-utils",
+          "version": "0.8.22",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/crossbeam-rs/crossbeam"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "crossbeam-utils-0.8.22/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "crossbeam-utils-0.8.22/LICENSE-MIT",
+          "sha256": "5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab",
+          "file": "texts/5734ed989dfca1f625b40281ee9f4530f91b2411ec01cb748223e7eb87e201ab.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/derive_arbitrary/derive_arbitrary-1.4.2.crate",
+      "expected_sha256": "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a",
+      "packages": [
+        {
+          "name": "derive_arbitrary",
+          "version": "1.4.2",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/derive_arbitrary/derive_arbitrary-1.4.2.crate",
+        "sha256": "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a",
+        "size": 12290,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "derive_arbitrary-1.4.2/Cargo.toml",
+          "sha256": "9d192295495fc57bcf38f38c912c642ef44cff23fbac84b85c577627ecbb6863",
+          "name": "derive_arbitrary",
+          "version": "1.4.2",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-fuzz/arbitrary"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "derive_arbitrary-1.4.2/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "derive_arbitrary-1.4.2/LICENSE-MIT",
+          "sha256": "15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c",
+          "file": "texts/15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/encoding_rs/encoding_rs-0.8.35.crate",
+      "expected_sha256": "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3",
+      "packages": [
+        {
+          "name": "encoding_rs",
+          "version": "0.8.35",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/encoding_rs/encoding_rs-0.8.35.crate",
+        "sha256": "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3",
+        "size": 1381050,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "encoding_rs-0.8.35/Cargo.toml",
+          "sha256": "d7405d2bcf99cf9729075473c45f677630f4c1947c8ba9757db607f2025a7da2",
+          "name": "encoding_rs",
+          "version": "0.8.35",
+          "license": "(Apache-2.0 OR MIT) AND BSD-3-Clause",
+          "repository": "https://github.com/hsivonen/encoding_rs"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "encoding_rs-0.8.35/COPYRIGHT",
+          "sha256": "11789f45bb180841cd362a5eee6789c68ddb573a11105e30768c308a6add0190",
+          "file": "texts/11789f45bb180841cd362a5eee6789c68ddb573a11105e30768c308a6add0190.txt"
+        },
+        {
+          "source_path": "encoding_rs-0.8.35/LICENSE-APACHE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        },
+        {
+          "source_path": "encoding_rs-0.8.35/LICENSE-MIT",
+          "sha256": "3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c",
+          "file": "texts/3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c.txt"
+        },
+        {
+          "source_path": "encoding_rs-0.8.35/LICENSE-WHATWG",
+          "sha256": "838118388fe5c2e7f1dbbaeed13e1c7f3ebf88be91319c7c1d77c18e987d1a50",
+          "file": "texts/838118388fe5c2e7f1dbbaeed13e1c7f3ebf88be91319c7c1d77c18e987d1a50.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/encoding_rs_io/encoding_rs_io-0.1.7.crate",
+      "expected_sha256": "1cc3c5651fb62ab8aa3103998dade57efdd028544bd300516baa31840c252a83",
+      "packages": [
+        {
+          "name": "encoding_rs_io",
+          "version": "0.1.7",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "1cc3c5651fb62ab8aa3103998dade57efdd028544bd300516baa31840c252a83"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/encoding_rs_io/encoding_rs_io-0.1.7.crate",
+        "sha256": "1cc3c5651fb62ab8aa3103998dade57efdd028544bd300516baa31840c252a83",
+        "size": 16969,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "encoding_rs_io-0.1.7/Cargo.toml",
+          "sha256": "f1bddafde5d8793efec42e14fea668e56280eceb5258d0af6dd9b0f77e492649",
+          "name": "encoding_rs_io",
+          "version": "0.1.7",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/BurntSushi/encoding_rs_io"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "encoding_rs_io-0.1.7/COPYING",
+          "sha256": "13361f93b3db60ddb43f8fdc97ba469461019bbf7589f6bde833eb3d995d2497",
+          "file": "texts/13361f93b3db60ddb43f8fdc97ba469461019bbf7589f6bde833eb3d995d2497.txt"
+        },
+        {
+          "source_path": "encoding_rs_io-0.1.7/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "encoding_rs_io-0.1.7/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/find-msvc-tools/find-msvc-tools-0.1.9.crate",
+      "expected_sha256": "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582",
+      "packages": [
+        {
+          "name": "find-msvc-tools",
+          "version": "0.1.9",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/find-msvc-tools/find-msvc-tools-0.1.9.crate",
+        "sha256": "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582",
+        "size": 31493,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "find-msvc-tools-0.1.9/Cargo.toml",
+          "sha256": "1162710613011a622ba62b035b570cc13584516082f9cf579cfaf2f144a77a76",
+          "name": "find-msvc-tools",
+          "version": "0.1.9",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-lang/cc-rs"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "find-msvc-tools-0.1.9/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "find-msvc-tools-0.1.9/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "file": "texts/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/getrandom/getrandom-0.4.3.crate",
+      "expected_sha256": "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099",
+      "packages": [
+        {
+          "name": "getrandom",
+          "version": "0.4.3",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/getrandom/getrandom-0.4.3.crate",
+        "sha256": "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099",
+        "size": 52437,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "getrandom-0.4.3/Cargo.toml",
+          "sha256": "4f107fe4ceacee71d0068cfbbc69554b3d8523a1fcbb99b17e9fa0d008961ff9",
+          "name": "getrandom",
+          "version": "0.4.3",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-random/getrandom"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "getrandom-0.4.3/LICENSE-APACHE",
+          "sha256": "aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf",
+          "file": "texts/aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf.txt"
+        },
+        {
+          "source_path": "getrandom-0.4.3/LICENSE-MIT",
+          "sha256": "523a42c25d245dde9c015f882cec7f4555aad883382a6cf19b4b7d9b2cd5419b",
+          "file": "texts/523a42c25d245dde9c015f882cec7f4555aad883382a6cf19b4b7d9b2cd5419b.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/glob/glob-0.3.3.crate",
+      "expected_sha256": "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280",
+      "packages": [
+        {
+          "name": "glob",
+          "version": "0.3.3",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/glob/glob-0.3.3.crate",
+        "sha256": "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280",
+        "size": 22861,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "glob-0.3.3/Cargo.toml",
+          "sha256": "1962525cc2a684e334a07ad2996eb587b5dbf678e58eb65733471570b49c0b6c",
+          "name": "glob",
+          "version": "0.3.3",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-lang/glob"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "glob-0.3.3/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "glob-0.3.3/LICENSE-MIT",
+          "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+          "file": "texts/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/itoa/itoa-1.0.18.crate",
+      "expected_sha256": "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682",
+      "packages": [
+        {
+          "name": "itoa",
+          "version": "1.0.18",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/itoa/itoa-1.0.18.crate",
+        "sha256": "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682",
+        "size": 15935,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "itoa-1.0.18/Cargo.toml",
+          "sha256": "894c215e4e7e973b556b0e9627bf9b6a719a043fac9b5af9838660816392a09f",
+          "name": "itoa",
+          "version": "1.0.18",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/dtolnay/itoa"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "itoa-1.0.18/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "source_path": "itoa-1.0.18/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/jobserver/jobserver-0.1.35.crate",
+      "expected_sha256": "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3",
+      "packages": [
+        {
+          "name": "jobserver",
+          "version": "0.1.35",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/jobserver/jobserver-0.1.35.crate",
+        "sha256": "1c00acbd29eabad4a2392fa0e921c874934dbbf4194312ad20f04a0ed67a3cb3",
+        "size": 28890,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "jobserver-0.1.35/Cargo.toml",
+          "sha256": "5475de657d1c10b1c27f76a2d54fdd3162027705f663410b091294cd08482a72",
+          "name": "jobserver",
+          "version": "0.1.35",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-lang/jobserver-rs"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "jobserver-0.1.35/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "jobserver-0.1.35/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "file": "texts/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/lexopt/lexopt-0.3.2.crate",
+      "expected_sha256": "803ec87c9cfb29b9d2633f20cba1f488db3fd53f2158b1024cbefb47ba05d413",
+      "packages": [
+        {
+          "name": "lexopt",
+          "version": "0.3.2",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "803ec87c9cfb29b9d2633f20cba1f488db3fd53f2158b1024cbefb47ba05d413"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/lexopt/lexopt-0.3.2.crate",
+        "sha256": "803ec87c9cfb29b9d2633f20cba1f488db3fd53f2158b1024cbefb47ba05d413",
+        "size": 27407,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "lexopt-0.3.2/Cargo.toml",
+          "sha256": "e525e22c9b09d8b0511eeb210438a88404eed1dae8fb9fa5c63135c8b19fd46c",
+          "name": "lexopt",
+          "version": "0.3.2",
+          "license": "MIT",
+          "repository": "https://github.com/blyxxyz/lexopt"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "lexopt-0.3.2/LICENSE",
+          "sha256": "8d43b7fa3b2f928cd4ea6346853b95f1ca5d883f4eaad3a40f8af202bfb45d6f",
+          "file": "texts/8d43b7fa3b2f928cd4ea6346853b95f1ca5d883f4eaad3a40f8af202bfb45d6f.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/libc/libc-0.2.186.crate",
+      "expected_sha256": "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66",
+      "packages": [
+        {
+          "name": "libc",
+          "version": "0.2.186",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/libc/libc-0.2.186.crate",
+        "sha256": "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66",
+        "size": 821883,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "libc-0.2.186/Cargo.toml",
+          "sha256": "9a45433b9dc5f1dcd397062608a320c2ab472319e79566ea4646dfff3ca67821",
+          "name": "libc",
+          "version": "0.2.186",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-lang/libc"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "libc-0.2.186/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "source_path": "libc-0.2.186/LICENSE-MIT",
+          "sha256": "123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e",
+          "file": "texts/123a331b5dbf04c30097fa43b8f858bc85df671fe776de498d01f3d6b7c1f69e.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/log/log-0.4.33.crate",
+      "expected_sha256": "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad",
+      "packages": [
+        {
+          "name": "log",
+          "version": "0.4.33",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/log/log-0.4.33.crate",
+        "sha256": "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad",
+        "size": 52997,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "log-0.4.33/Cargo.toml",
+          "sha256": "30526edc6bcb57820b7500b686f98bd63fe768645914a0646504527c1b727225",
+          "name": "log",
+          "version": "0.4.33",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-lang/log"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "log-0.4.33/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "log-0.4.33/LICENSE-MIT",
+          "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+          "file": "texts/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/memchr/memchr-2.8.3.crate",
+      "expected_sha256": "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98",
+      "packages": [
+        {
+          "name": "memchr",
+          "version": "2.8.3",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/memchr/memchr-2.8.3.crate",
+        "sha256": "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98",
+        "size": 99165,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "memchr-2.8.3/Cargo.toml",
+          "sha256": "a14f68b8fa55f15fd03b15dced37bcf66a0a628f568eedc82817cdb7f9281951",
+          "name": "memchr",
+          "version": "2.8.3",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/memchr"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "memchr-2.8.3/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "memchr-2.8.3/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "memchr-2.8.3/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/memmap2/memmap2-0.9.11.crate",
+      "expected_sha256": "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0",
+      "packages": [
+        {
+          "name": "memmap2",
+          "version": "0.9.11",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/memmap2/memmap2-0.9.11.crate",
+        "sha256": "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0",
+        "size": 35116,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "memmap2-0.9.11/Cargo.toml",
+          "sha256": "68107d762f4ea1a1360856e14d048ea68c573993045cabd379165005b0f4a13a",
+          "name": "memmap2",
+          "version": "0.9.11",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/RazrFalcon/memmap2-rs"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "memmap2-0.9.11/LICENSE-APACHE",
+          "sha256": "04ea4849dba9dcae07113850c6f1b1a69052c625210639914eee352023f750ad",
+          "file": "texts/04ea4849dba9dcae07113850c6f1b1a69052c625210639914eee352023f750ad.txt"
+        },
+        {
+          "source_path": "memmap2-0.9.11/LICENSE-MIT",
+          "sha256": "0d25d03b5ab49576178ad0cae7a2648d12c17ad0452fe49c07e55e4b59aa5257",
+          "file": "texts/0d25d03b5ab49576178ad0cae7a2648d12c17ad0452fe49c07e55e4b59aa5257.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/pcre2-sys/pcre2-sys-0.2.10.crate",
+      "expected_sha256": "18b9073c1a2549bd409bf4a32c94d903bb1a09bf845bc306ae148897fa0760a4",
+      "packages": [
+        {
+          "name": "pcre2-sys",
+          "version": "0.2.10",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "18b9073c1a2549bd409bf4a32c94d903bb1a09bf845bc306ae148897fa0760a4"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/pcre2-sys/pcre2-sys-0.2.10.crate",
+        "sha256": "18b9073c1a2549bd409bf4a32c94d903bb1a09bf845bc306ae148897fa0760a4",
+        "size": 771875,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "pcre2-sys-0.2.10/Cargo.toml",
+          "sha256": "6d1f04fe87816fd6c47091e2ec70f6a1b424d45cd8f36e22d41d41e1621e085e",
+          "name": "pcre2-sys",
+          "version": "0.2.10",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/rust-pcre2"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "pcre2-sys-0.2.10/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "pcre2-sys-0.2.10/LICENSE-MIT",
+          "sha256": "cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14",
+          "file": "texts/cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14.txt"
+        },
+        {
+          "source_path": "pcre2-sys-0.2.10/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/pcre2/pcre2-0.2.11.crate",
+      "expected_sha256": "9e970b0fcce0c7ee6ef662744ff711f21ccd6f11b7cf03cd187a80e89797fc67",
+      "packages": [
+        {
+          "name": "pcre2",
+          "version": "0.2.11",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "9e970b0fcce0c7ee6ef662744ff711f21ccd6f11b7cf03cd187a80e89797fc67"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/pcre2/pcre2-0.2.11.crate",
+        "sha256": "9e970b0fcce0c7ee6ef662744ff711f21ccd6f11b7cf03cd187a80e89797fc67",
+        "size": 32440,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "pcre2-0.2.11/Cargo.toml",
+          "sha256": "b8b5c07653ed9063d93cf3e77bc5ae1797b9e156a61dfd74a2509a1e784059f5",
+          "name": "pcre2",
+          "version": "0.2.11",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/rust-pcre2"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "pcre2-0.2.11/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "pcre2-0.2.11/LICENSE-MIT",
+          "sha256": "cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14",
+          "file": "texts/cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14.txt"
+        },
+        {
+          "source_path": "pcre2-0.2.11/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/pkg-config/pkg-config-0.3.33.crate",
+      "expected_sha256": "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e",
+      "packages": [
+        {
+          "name": "pkg-config",
+          "version": "0.3.33",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/pkg-config/pkg-config-0.3.33.crate",
+        "sha256": "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e",
+        "size": 21590,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "pkg-config-0.3.33/Cargo.toml",
+          "sha256": "37ce80d4e6e58a7cfd605a9f298da4dd9f43dc4412382b40a9d06fc925298da3",
+          "name": "pkg-config",
+          "version": "0.3.33",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-lang/pkg-config-rs"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "pkg-config-0.3.33/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "pkg-config-0.3.33/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "file": "texts/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/proc-macro2/proc-macro2-1.0.106.crate",
+      "expected_sha256": "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934",
+      "packages": [
+        {
+          "name": "proc-macro2",
+          "version": "1.0.106",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/proc-macro2/proc-macro2-1.0.106.crate",
+        "sha256": "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934",
+        "size": 59765,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "proc-macro2-1.0.106/Cargo.toml",
+          "sha256": "7408af188c9656c1c2a6012f61026df0e2dfc0275e0edf1e01f1d59b3e39c194",
+          "name": "proc-macro2",
+          "version": "1.0.106",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/dtolnay/proc-macro2"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "proc-macro2-1.0.106/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "source_path": "proc-macro2-1.0.106/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/quote/quote-1.0.46.crate",
+      "expected_sha256": "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368",
+      "packages": [
+        {
+          "name": "quote",
+          "version": "1.0.46",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/quote/quote-1.0.46.crate",
+        "sha256": "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368",
+        "size": 31628,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "quote-1.0.46/Cargo.toml",
+          "sha256": "317b213af73aaf00108f9003cc69798538660e5e509a439d3482746612333912",
+          "name": "quote",
+          "version": "1.0.46",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/dtolnay/quote"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "quote-1.0.46/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "source_path": "quote-1.0.46/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/r-efi/r-efi-6.0.0.crate",
+      "expected_sha256": "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf",
+      "packages": [
+        {
+          "name": "r-efi",
+          "version": "6.0.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/r-efi/r-efi-6.0.0.crate",
+        "sha256": "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf",
+        "size": 65303,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "r-efi-6.0.0/Cargo.toml",
+          "sha256": "a021f9fb0645cc5de5770cf7f41594c1deff4b388eca933b289752aa52666829",
+          "name": "r-efi",
+          "version": "6.0.0",
+          "license": "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
+          "repository": "https://github.com/r-efi/r-efi"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "r-efi-6.0.0/AUTHORS",
+          "sha256": "d027e91dbc9cdbb2f1190068e498bd6b61cff022b6a032b191021ba658d96111",
+          "file": "texts/d027e91dbc9cdbb2f1190068e498bd6b61cff022b6a032b191021ba658d96111.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/regex-automata/regex-automata-0.4.15.crate",
+      "expected_sha256": "1f388202e4b80542a0921078cc23b6333bcf1409c1e3f86404cae4766a6131db",
+      "packages": [
+        {
+          "name": "regex-automata",
+          "version": "0.4.15",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "1f388202e4b80542a0921078cc23b6333bcf1409c1e3f86404cae4766a6131db"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/regex-automata/regex-automata-0.4.15.crate",
+        "sha256": "1f388202e4b80542a0921078cc23b6333bcf1409c1e3f86404cae4766a6131db",
+        "size": 618603,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "regex-automata-0.4.15/Cargo.toml",
+          "sha256": "4f16722f894918b749f6bfaa7e2be75c4e54d26db94697d128acd97440135da2",
+          "name": "regex-automata",
+          "version": "0.4.15",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-lang/regex"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "regex-automata-0.4.15/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "regex-automata-0.4.15/LICENSE-MIT",
+          "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+          "file": "texts/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/regex-syntax/regex-syntax-0.8.11.crate",
+      "expected_sha256": "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4",
+      "packages": [
+        {
+          "name": "regex-syntax",
+          "version": "0.8.11",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/regex-syntax/regex-syntax-0.8.11.crate",
+        "sha256": "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4",
+        "size": 359055,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "regex-syntax-0.8.11/Cargo.toml",
+          "sha256": "10c3f14629c0900ac452dd6d55a62aab561bbabbdf5774a802c8d223933cfa3b",
+          "name": "regex-syntax",
+          "version": "0.8.11",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-lang/regex"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "regex-syntax-0.8.11/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "regex-syntax-0.8.11/LICENSE-MIT",
+          "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+          "file": "texts/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb.txt"
+        },
+        {
+          "source_path": "regex-syntax-0.8.11/src/unicode_tables/LICENSE-UNICODE",
+          "sha256": "74db5baf44a41b1000312c673544b3374e4198af5605c7f9080a402cec42cfa3",
+          "file": "texts/74db5baf44a41b1000312c673544b3374e4198af5605c7f9080a402cec42cfa3.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/regex/regex-1.13.0.crate",
+      "expected_sha256": "2a0e75113e14dc5acb068cd0786884f214f1312650a3d36d269f5c4f3cdee8a2",
+      "packages": [
+        {
+          "name": "regex",
+          "version": "1.13.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "2a0e75113e14dc5acb068cd0786884f214f1312650a3d36d269f5c4f3cdee8a2"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/regex/regex-1.13.0.crate",
+        "sha256": "2a0e75113e14dc5acb068cd0786884f214f1312650a3d36d269f5c4f3cdee8a2",
+        "size": 155857,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "regex-1.13.0/Cargo.toml",
+          "sha256": "8e65901633c31baa66d5629ceef1ac7f2f8613ee0b4ef927d5204417e3a2fcd0",
+          "name": "regex",
+          "version": "1.13.0",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/rust-lang/regex"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "regex-1.13.0/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "regex-1.13.0/LICENSE-MIT",
+          "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+          "file": "texts/6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/same-file/same-file-1.0.6.crate",
+      "expected_sha256": "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502",
+      "packages": [
+        {
+          "name": "same-file",
+          "version": "1.0.6",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/same-file/same-file-1.0.6.crate",
+        "sha256": "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502",
+        "size": 10183,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "same-file-1.0.6/Cargo.toml",
+          "sha256": "991f8df8fa5a259801900a56908cf21a66c5cf7b238bc81ba9bdf348e233252e",
+          "name": "same-file",
+          "version": "1.0.6",
+          "license": "Unlicense/MIT",
+          "repository": "https://github.com/BurntSushi/same-file"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "same-file-1.0.6/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "same-file-1.0.6/LICENSE-MIT",
+          "sha256": "cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14",
+          "file": "texts/cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14.txt"
+        },
+        {
+          "source_path": "same-file-1.0.6/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/serde/serde-1.0.228.crate",
+      "expected_sha256": "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e",
+      "packages": [
+        {
+          "name": "serde",
+          "version": "1.0.228",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/serde/serde-1.0.228.crate",
+        "sha256": "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e",
+        "size": 83652,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "serde-1.0.228/Cargo.toml",
+          "sha256": "d7fc24e39691a0831eaa0eac677b46ecbae407a40fa816b904759822d10f42e8",
+          "name": "serde",
+          "version": "1.0.228",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/serde-rs/serde"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "serde-1.0.228/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "source_path": "serde-1.0.228/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/serde_core/serde_core-1.0.228.crate",
+      "expected_sha256": "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad",
+      "packages": [
+        {
+          "name": "serde_core",
+          "version": "1.0.228",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/serde_core/serde_core-1.0.228.crate",
+        "sha256": "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad",
+        "size": 63111,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "serde_core-1.0.228/Cargo.toml",
+          "sha256": "b1c07acb994f88418a0bbb0d393f76c4ca4276d9f4497ca734eb182286169ea8",
+          "name": "serde_core",
+          "version": "1.0.228",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/serde-rs/serde"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "serde_core-1.0.228/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "source_path": "serde_core-1.0.228/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/serde_derive/serde_derive-1.0.228.crate",
+      "expected_sha256": "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79",
+      "packages": [
+        {
+          "name": "serde_derive",
+          "version": "1.0.228",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/serde_derive/serde_derive-1.0.228.crate",
+        "sha256": "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79",
+        "size": 59605,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "serde_derive-1.0.228/Cargo.toml",
+          "sha256": "3de014980e9645f2e33779acd06919c9f3b717a79e10f56004918d12c4365c27",
+          "name": "serde_derive",
+          "version": "1.0.228",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/serde-rs/serde"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "serde_derive-1.0.228/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "source_path": "serde_derive-1.0.228/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/serde_json/serde_json-1.0.150.crate",
+      "expected_sha256": "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9",
+      "packages": [
+        {
+          "name": "serde_json",
+          "version": "1.0.150",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/serde_json/serde_json-1.0.150.crate",
+        "sha256": "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9",
+        "size": 155574,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "serde_json-1.0.150/Cargo.toml",
+          "sha256": "96f36f0d4419ce7ab53008df556017ef7b8891c1e913ac648e9b2b7f0537a472",
+          "name": "serde_json",
+          "version": "1.0.150",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/serde-rs/json"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "serde_json-1.0.150/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "source_path": "serde_json-1.0.150/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/shlex/shlex-2.0.1.crate",
+      "expected_sha256": "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba",
+      "packages": [
+        {
+          "name": "shlex",
+          "version": "2.0.1",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/shlex/shlex-2.0.1.crate",
+        "sha256": "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba",
+        "size": 19332,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "shlex-2.0.1/Cargo.toml",
+          "sha256": "b6ead6cf404555ced33f7574c6c11413e29e7bcd5eb0ceeb59452830a46675ed",
+          "name": "shlex",
+          "version": "2.0.1",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/comex/rust-shlex"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "shlex-2.0.1/LICENSE-APACHE",
+          "sha256": "553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583",
+          "file": "texts/553fffcd9b1cb158bc3e9edc35da85ca5c3b3d7d2e61c883ebcfa8a65814b583.txt"
+        },
+        {
+          "source_path": "shlex-2.0.1/LICENSE-MIT",
+          "sha256": "4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1",
+          "file": "texts/4455bf75a91154108304cb283e0fea9948c14f13e20d60887cf2552449dea3b1.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/syn/syn-2.0.119.crate",
+      "expected_sha256": "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297",
+      "packages": [
+        {
+          "name": "syn",
+          "version": "2.0.119",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/syn/syn-2.0.119.crate",
+        "sha256": "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297",
+        "size": 307407,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "syn-2.0.119/Cargo.toml",
+          "sha256": "da8b83ac2c66a7b404dc55d88ae42592f70714823251f51b620ae349b246a18f",
+          "name": "syn",
+          "version": "2.0.119",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/dtolnay/syn"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "syn-2.0.119/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "source_path": "syn-2.0.119/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/termcolor/termcolor-1.4.1.crate",
+      "expected_sha256": "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755",
+      "packages": [
+        {
+          "name": "termcolor",
+          "version": "1.4.1",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/termcolor/termcolor-1.4.1.crate",
+        "sha256": "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755",
+        "size": 18773,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "termcolor-1.4.1/Cargo.toml",
+          "sha256": "572fae34cf0bee9ca39a1398501c17fed5e98a2de908136cabbaba98cf97208e",
+          "name": "termcolor",
+          "version": "1.4.1",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/termcolor"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "termcolor-1.4.1/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "termcolor-1.4.1/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "termcolor-1.4.1/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/textwrap/textwrap-0.16.2.crate",
+      "expected_sha256": "c13547615a44dc9c452a8a534638acdf07120d4b6847c8178705da06306a3057",
+      "packages": [
+        {
+          "name": "textwrap",
+          "version": "0.16.2",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "c13547615a44dc9c452a8a534638acdf07120d4b6847c8178705da06306a3057"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/textwrap/textwrap-0.16.2.crate",
+        "sha256": "c13547615a44dc9c452a8a534638acdf07120d4b6847c8178705da06306a3057",
+        "size": 57077,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "textwrap-0.16.2/Cargo.toml",
+          "sha256": "7dd1dff309ceeb9643053c0dc9369adb8cc8d24277e01c15894d176bdc309a29",
+          "name": "textwrap",
+          "version": "0.16.2",
+          "license": "MIT",
+          "repository": "https://github.com/mgeisler/textwrap"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "textwrap-0.16.2/LICENSE",
+          "sha256": "ce93600c49fbb3e14df32efe752264644f6a2f8e08a735ba981725799e5309ef",
+          "file": "texts/ce93600c49fbb3e14df32efe752264644f6a2f8e08a735ba981725799e5309ef.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/tikv-jemalloc-sys/tikv-jemalloc-sys-0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8.crate",
+      "expected_sha256": "1a2825c78386b4ae0314074867860ba9577875de945f05992c38815cbec327f0",
+      "packages": [
+        {
+          "name": "tikv-jemalloc-sys",
+          "version": "0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "1a2825c78386b4ae0314074867860ba9577875de945f05992c38815cbec327f0"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/tikv-jemalloc-sys/tikv-jemalloc-sys-0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8.crate",
+        "sha256": "1a2825c78386b4ae0314074867860ba9577875de945f05992c38815cbec327f0",
+        "size": 1037885,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "tikv-jemalloc-sys-0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8/Cargo.toml",
+          "sha256": "440f4623806aff32a6d90f04f48d45a72acccedbdc9eecd0f92c8d6d9896e306",
+          "name": "tikv-jemalloc-sys",
+          "version": "0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8",
+          "license": "MIT/Apache-2.0",
+          "repository": "https://github.com/tikv/jemallocator"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "tikv-jemalloc-sys-0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "tikv-jemalloc-sys-0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "file": "texts/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397.txt"
+        },
+        {
+          "source_path": "tikv-jemalloc-sys-0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8/jemalloc/COPYING",
+          "sha256": "94aa2caa98c25d942f58b956c71dba6a99ff98fc3a31cbc669fe2a4cd0268b53",
+          "file": "texts/94aa2caa98c25d942f58b956c71dba6a99ff98fc3a31cbc669fe2a4cd0268b53.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/tikv-jemallocator/tikv-jemallocator-0.7.0.crate",
+      "expected_sha256": "249f09e49ab1609436f34c776e84231bead18d6a955f119f939bdc1d847561bd",
+      "packages": [
+        {
+          "name": "tikv-jemallocator",
+          "version": "0.7.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "249f09e49ab1609436f34c776e84231bead18d6a955f119f939bdc1d847561bd"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/tikv-jemallocator/tikv-jemallocator-0.7.0.crate",
+        "sha256": "249f09e49ab1609436f34c776e84231bead18d6a955f119f939bdc1d847561bd",
+        "size": 14004,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "tikv-jemallocator-0.7.0/Cargo.toml",
+          "sha256": "0a6702981160542f3945659d9386fd58c953bab6635354fbca973955411c2627",
+          "name": "tikv-jemallocator",
+          "version": "0.7.0",
+          "license": "MIT/Apache-2.0",
+          "repository": "https://github.com/tikv/jemallocator"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "tikv-jemallocator-0.7.0/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "tikv-jemallocator-0.7.0/LICENSE-MIT",
+          "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+          "file": "texts/378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/unicode-ident/unicode-ident-1.0.24.crate",
+      "expected_sha256": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75",
+      "packages": [
+        {
+          "name": "unicode-ident",
+          "version": "1.0.24",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/unicode-ident/unicode-ident-1.0.24.crate",
+        "sha256": "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75",
+        "size": 49298,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "unicode-ident-1.0.24/Cargo.toml",
+          "sha256": "0bb9c0e006a21355cb85c7df72e78dd8ba6fffbb7dc3f1e7a4c19af53cd354da",
+          "name": "unicode-ident",
+          "version": "1.0.24",
+          "license": "(MIT OR Apache-2.0) AND Unicode-3.0",
+          "repository": "https://github.com/dtolnay/unicode-ident"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "unicode-ident-1.0.24/LICENSE-APACHE",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt"
+        },
+        {
+          "source_path": "unicode-ident-1.0.24/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        },
+        {
+          "source_path": "unicode-ident-1.0.24/LICENSE-UNICODE",
+          "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1",
+          "file": "texts/f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/walkdir/walkdir-2.5.0.crate",
+      "expected_sha256": "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b",
+      "packages": [
+        {
+          "name": "walkdir",
+          "version": "2.5.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/walkdir/walkdir-2.5.0.crate",
+        "sha256": "29790946404f91d9c5d06f9874efddea1dc06c5efe94541a7d6863108e3a5e4b",
+        "size": 23951,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "walkdir-2.5.0/Cargo.toml",
+          "sha256": "425547c73a8eae93c39110869fd5ecac3a99a984c715ad7ab1d6a40b7efb0ee5",
+          "name": "walkdir",
+          "version": "2.5.0",
+          "license": "Unlicense/MIT",
+          "repository": "https://github.com/BurntSushi/walkdir"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "walkdir-2.5.0/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "walkdir-2.5.0/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "source_path": "walkdir-2.5.0/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/winapi-util/winapi-util-0.1.11.crate",
+      "expected_sha256": "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22",
+      "packages": [
+        {
+          "name": "winapi-util",
+          "version": "0.1.11",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/winapi-util/winapi-util-0.1.11.crate",
+        "sha256": "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22",
+        "size": 13368,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "winapi-util-0.1.11/Cargo.toml",
+          "sha256": "90ba2d06ba1317a8807c94508ecf576a2c10ebc6b2445f3d842ba734415a6a68",
+          "name": "winapi-util",
+          "version": "0.1.11",
+          "license": "Unlicense OR MIT",
+          "repository": "https://github.com/BurntSushi/winapi-util"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "winapi-util-0.1.11/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        },
+        {
+          "source_path": "winapi-util-0.1.11/LICENSE-MIT",
+          "sha256": "cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14",
+          "file": "texts/cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14.txt"
+        },
+        {
+          "source_path": "winapi-util-0.1.11/UNLICENSE",
+          "sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+          "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/windows-link/windows-link-0.2.1.crate",
+      "expected_sha256": "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5",
+      "packages": [
+        {
+          "name": "windows-link",
+          "version": "0.2.1",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/windows-link/windows-link-0.2.1.crate",
+        "sha256": "f0805222e57f7521d6a62e36fa9163bc891acd422f971defe97d64e70d0a4fe5",
+        "size": 6133,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "windows-link-0.2.1/Cargo.toml",
+          "sha256": "abf0b74b168ec7d7c600f44eb90502c47e44480a199b9adc9ec74ea990605707",
+          "name": "windows-link",
+          "version": "0.2.1",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/microsoft/windows-rs"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "windows-link-0.2.1/license-apache-2.0",
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b",
+          "file": "texts/c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b.txt"
+        },
+        {
+          "source_path": "windows-link-0.2.1/license-mit",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "file": "texts/c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/windows-sys/windows-sys-0.61.2.crate",
+      "expected_sha256": "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc",
+      "packages": [
+        {
+          "name": "windows-sys",
+          "version": "0.61.2",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/windows-sys/windows-sys-0.61.2.crate",
+        "sha256": "ae137229bcbd6cdf0f7b80a31df61766145077ddf49416a728b02cb3921ff3fc",
+        "size": 2517186,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "windows-sys-0.61.2/Cargo.toml",
+          "sha256": "1adbc955d5460fa64dc16e6c8198b25672e8d4b97d45ecfb262eb2693ce08422",
+          "name": "windows-sys",
+          "version": "0.61.2",
+          "license": "MIT OR Apache-2.0",
+          "repository": "https://github.com/microsoft/windows-rs"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "windows-sys-0.61.2/license-apache-2.0",
+          "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b",
+          "file": "texts/c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b.txt"
+        },
+        {
+          "source_path": "windows-sys-0.61.2/license-mit",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "file": "texts/c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383.txt"
+        }
+      ]
+    },
+    {
+      "url": "https://static.crates.io/crates/zmij/zmij-1.0.23.crate",
+      "expected_sha256": "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b",
+      "packages": [
+        {
+          "name": "zmij",
+          "version": "1.0.23",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+        }
+      ],
+      "acquisition": {
+        "url": "https://static.crates.io/crates/zmij/zmij-1.0.23.crate",
+        "sha256": "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b",
+        "size": 28612,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "package_manifests": [
+        {
+          "path": "zmij-1.0.23/Cargo.toml",
+          "sha256": "b31420c7a806fae5b9ea2438dd4cbb99dcb3a22da67697fdf2776cc44a69527e",
+          "name": "zmij",
+          "version": "1.0.23",
+          "license": "MIT",
+          "repository": "https://github.com/dtolnay/zmij"
+        }
+      ],
+      "notices": [
+        {
+          "source_path": "zmij-1.0.23/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        }
+      ]
+    }
+  ],
+  "failures": [],
+  "missing_notices": []
+}

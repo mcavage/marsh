@@ -1,0 +1,764 @@
+diff --git a/brush-core/src/split.rs b/brush-core/src/split.rs
+index 5f918f0..80c2bdf 100644
+--- a/brush-core/src/split.rs
++++ b/brush-core/src/split.rs
+@@ -1,110 +1,68 @@
+-//! Embedding hook for marsh `split { ... } | join` private branch workspaces.
++//! Embedding hook for marsh `split { ... } | join`.
+ //!
+-//! Brush owns the composition: spooling input, running branches, capture
+-//! budgets, cancellation, and the join stage. The embedding owns every write
+-//! to the user's repository: snapshot, per-branch workspace allocation,
+-//! result capture, the manifest and its rendering, and release.
++//! Brush is a thin client: it spools the prefix, hands the branch sources to
++//! the embedding (which asks the marsh daemon to snapshot, fork, run, and
++//! capture every branch), then runs the stages after `join` with the split's
++//! environment and releases the split with the last stage's status.
+ 
+-use std::path::{Path, PathBuf};
++use std::path::Path;
+ use std::sync::{Arc, OnceLock};
+-use std::time::Duration;
+ 
+-/// How a branch ended.
+-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+-pub enum SplitBranchState {
+-    /// The branch exited on its own.
+-    Exited,
+-    /// The branch was interrupted by the split.
+-    Cancelled,
+-}
+-
+-/// One branch's captured result, in declaration order.
++/// One branch: its label and shell source.
+ #[derive(Clone, Debug)]
+-pub struct SplitBranchOutcome {
++pub struct SplitBranchRequest {
+     /// Branch label.
+     pub label: String,
+-    /// How the branch ended.
+-    pub state: SplitBranchState,
+-    /// Exit status.
+-    pub status: u8,
+-    /// Wall time from launch to reap.
+-    pub elapsed: Duration,
+-    /// Captured standard output (within the shared budget).
+-    pub stdout: Vec<u8>,
+-    /// Captured standard error (within the shared budget).
+-    pub stderr: Vec<u8>,
+-}
+-
+-/// Rendering options read from the `join` stage.
+-#[derive(Clone, Copy, Debug, Default)]
+-pub struct SplitRenderOptions {
+-    /// Emit the manifest instead of the text rendering.
+-    pub json: bool,
+-    /// Append the timing table to the text rendering.
+-    pub timing: bool,
++    /// The branch body as shell source.
++    pub source: String,
+ }
+ 
+-/// The completed result bundle handed to `join`.
+-#[derive(Clone, Debug)]
+-pub struct SplitBundle {
+-    /// Bytes for the join stage's standard input (rendering or manifest).
++/// A completed split, ready for `join`.
++pub struct SplitRun {
++    /// The split stage status (first nonzero branch status), or 130 when cancelled.
++    pub status: u8,
++    /// Whether the split was cancelled (join and later stages do not run).
++    pub cancelled: bool,
++    /// Bytes for the join stage's standard output (rendering or manifest).
+     pub input: Vec<u8>,
+-    /// Exported environment for the pipeline stages after `join`.
++    /// Exported environment for the stages after `join`.
+     pub environment: Vec<(String, String)>,
++    /// Release with the last stage's status and `--keep`; returns stderr lines.
++    pub release: Box<dyn FnOnce(u8, bool) -> Vec<String> + Send>,
+ }
+ 
+-/// How the split ended, for release.
+-#[derive(Clone, Debug)]
+-pub enum SplitRelease {
+-    /// Remove every workspace and the split directory.
+-    Remove,
+-    /// Keep everything and report why.
+-    Retain(String),
+-    /// Cancelled: remove reaped branches' workspaces; retain the listed unreaped ones.
+-    Cancelled {
+-        /// Labels whose exit was never confirmed.
+-        unreaped: Vec<String>,
+-    },
+-}
+-
+-/// One prepared split: a snapshot plus one private workspace per branch.
+-pub trait SplitPlan: Send {
+-    /// Split identity.
+-    fn id(&self) -> &str;
+-    /// The working directory for `label` (the user's relative directory in its workspace).
+-    fn branch_dir(&self, label: &str) -> PathBuf;
+-    /// Exported environment for `label`'s branch.
+-    fn branch_environment(&self, label: &str) -> Vec<(String, String)>;
+-    /// Diagnostics to show before branches run (for example abandoned splits).
+-    fn notices(&self) -> Vec<String>;
+-    /// Capture every branch, detect drift, and write the manifest.
++/// A started split: wait for it, or cancel it from another task.
++pub trait SplitHandle: Send {
++    /// A function that cancels the split (Ctrl-C at the shell).
++    fn canceller(&self) -> Box<dyn Fn() + Send + Sync>;
++    /// Block until every branch is captured or the split is cancelled.
+     ///
+     /// # Errors
+     ///
+-    /// Returns a one-line diagnostic when capture fails.
+-    fn complete(
+-        &mut self,
+-        branches: &[SplitBranchOutcome],
+-        total: Duration,
+-        options: SplitRenderOptions,
+-    ) -> Result<SplitBundle, String>;
+-    /// Remove or retain workspaces, returning lines for standard error.
+-    fn release(&mut self, outcome: SplitRelease) -> Vec<String>;
++    /// Returns a one-line diagnostic when the split failed.
++    fn wait(self: Box<Self>) -> Result<SplitRun, String>;
+ }
+ 
+-/// The embedding's workspace provider.
++/// The embedding's split provider.
+ pub trait SplitWorkspace: Send + Sync {
+-    /// Preflight, snapshot, and allocate one workspace per label from `cwd`.
++    /// Start every branch from `cwd` with `input` on stdin.
+     ///
+     /// # Errors
+     ///
+-    /// Returns a one-line diagnostic; nothing is left behind on failure.
+-    fn prepare(&self, cwd: &Path, labels: &[String]) -> Result<Box<dyn SplitPlan>, String>;
++    /// Returns a one-line diagnostic for a setup failure (status 2).
++    fn start(
++        &self,
++        cwd: &Path,
++        branches: &[SplitBranchRequest],
++        environment: Vec<(String, String)>,
++        input: Vec<u8>,
++        json: bool,
++    ) -> Result<Box<dyn SplitHandle>, String>;
+ }
+ 
+ static SPLIT_WORKSPACE: OnceLock<Arc<dyn SplitWorkspace>> = OnceLock::new();
+ 
+-/// Installs the process-wide split workspace provider. Only the first call takes effect.
++/// Installs the process-wide split provider. Only the first call takes effect.
+ pub fn install_split_workspace_hook(hook: Arc<dyn SplitWorkspace>) {
+     let _ = SPLIT_WORKSPACE.set(hook);
+ }
+diff --git a/brush-core/src/split_interp.rs b/brush-core/src/split_interp.rs
+index 9a176c9..6d1a0e4 100644
+--- a/brush-core/src/split_interp.rs
++++ b/brush-core/src/split_interp.rs
+@@ -1,30 +1,16 @@
+-//! marsh `split { ... } | join` execution.
+-//!
+-//! Each branch runs as a real forked shell in its own process group, with its
+-//! working directory inside a private workspace prepared by the embedding
+-//! (`crate::split`). The split, not the terminal, delivers interrupts to
+-//! branches, so it can wait for every branch to be reaped before it releases
+-//! any workspace.
++//! marsh `split { ... } | join` execution: a thin client of the embedding's
++//! split provider (the marsh daemon runs, captures, and keeps every branch).
+ 
+ use std::io::Write;
+-use std::path::PathBuf;
+-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+-use std::sync::{Arc, Mutex};
+-use std::time::{Duration, Instant};
+ 
+ use brush_parser::ast::{self, CommandPrefixOrSuffixItem};
+ 
+ use crate::interp::{
+-    COMPOSITION_OUTPUT_LIMIT, CompositionFile, capture_bounded, composition_input,
+-    execute_composition_segment, join_capture, setup_redirect,
++    CompositionFile, composition_input, execute_composition_segment, setup_redirect,
+ };
+ use crate::openfiles::OpenFiles;
+-use crate::split::{
+-    SplitBranchOutcome, SplitBranchState, SplitPlan, SplitRelease, SplitRenderOptions,
+-};
+-use crate::{
+-    ExecutionExitCode, ExecutionParameters, ExecutionResult, Shell, error, extensions, sys,
+-};
++use crate::split::SplitBranchRequest;
++use crate::{ExecutionExitCode, ExecutionParameters, ExecutionResult, Shell, error, extensions};
+ 
+ /// Where the split and its join sit in a pipeline.
+ #[derive(Clone, Copy)]
+@@ -48,16 +34,11 @@ pub(crate) fn split_shape(pipeline: &ast::Pipeline) -> Option<SplitShape> {
+     Some(SplitShape { split, join })
+ }
+ 
+-const JOIN_HELP: &str = "join - receive split results\n\nUsage: split { ... } | join [--json] [--timing] [--keep] [| COMMAND ...]\n\n  --json    the manifest instead of the text rendering\n  --timing  append per-branch and total wall time\n  --keep    keep the split directory even when the pipeline succeeds\n\njoin prints the rendering. Later pipeline stages read it on stdin with\nSPLIT_ID, SPLIT_DIR and SPLIT_MANIFEST exported, from the original directory;\nthe split directory lives until the whole pipeline finishes.\nUse `command join` for coreutils join.\n";
+-
+-/// Grace period between SIGINT and SIGKILL for cancelled branches.
+-const CANCEL_GRACE: Duration = Duration::from_secs(10);
+-/// How long to wait for a killed branch group to disappear.
+-const KILL_GRACE: Duration = Duration::from_secs(2);
++const JOIN_HELP: &str = "join - receive split results\n\nUsage: split { ... } | join [--json] [--keep] [| COMMAND ...]\n\n  --json    the manifest instead of the text rendering\n  --keep    keep the split even when the pipeline succeeds\n\njoin prints the rendering. Later pipeline stages read it on stdin with\nSPLIT_ID, SPLIT_DIR (the out/ directory), SPLIT_MANIFEST and SPLIT_OBJECTS\nexported, from the original directory. Use `command join` for coreutils join.\n";
+ 
+ #[derive(Default)]
+ struct JoinStage {
+-    options: SplitRenderOptions,
++    json: bool,
+     keep: bool,
+     help: bool,
+     redirects: Vec<ast::IoRedirect>,
+@@ -76,8 +57,7 @@ fn parse_join_stage(command: Option<&ast::Command>) -> Result<JoinStage, String>
+                 stage.redirects.push(redirect.clone());
+             }
+             CommandPrefixOrSuffixItem::Word(word) => match word.value.as_str() {
+-                "--json" => stage.options.json = true,
+-                "--timing" => stage.options.timing = true,
++                "--json" => stage.json = true,
+                 "--keep" => stage.keep = true,
+                 "-h" | "--help" => stage.help = true,
+                 option if option.starts_with('-') => {
+@@ -210,96 +190,62 @@ pub(crate) async fn execute_split_pipeline<SE: extensions::ShellExtensions>(
+     let Some(workspace) = crate::split::workspace() else {
+         writeln!(
+             params.stderr(shell),
+-            "split: private workspaces are unavailable here"
++            "split: workspaces are unavailable here"
+         )?;
+         fail_stages(&mut statuses, shape, 2);
+         return Ok(settle(shell, pipeline, statuses, 2));
+     };
+-    let labels = split
++    let branches = split
+         .branches
+         .iter()
+-        .map(|branch| branch.label.clone())
++        .map(|branch| SplitBranchRequest {
++            label: branch.label.clone(),
++            source: branch.body.to_string(),
++        })
+         .collect::<Vec<_>>();
+-    let started = Instant::now();
+-    let mut plan = match workspace.prepare(shell.working_dir(), &labels) {
+-        Ok(plan) => plan,
+-        Err(message) => {
+-            writeln!(params.stderr(shell), "split: {message}")?;
+-            fail_stages(&mut statuses, shape, 2);
+-            return Ok(settle(shell, pipeline, statuses, 2));
+-        }
+-    };
+-    write_lines(shell, params, &plan.notices())?;
+-
+-    #[cfg(unix)]
+-    let ran = run_branches(split, shell, params, plan.as_mut(), Arc::new(input)).await?;
+-    #[cfg(not(unix))]
+-    let ran = {
+-        drop(input);
+-        BranchRun::Failed("split requires a Unix host".into())
+-    };
+-    let (outcomes, live_groups) = match ran {
+-        BranchRun::Complete {
+-            outcomes,
+-            live_groups,
+-        } => (outcomes, live_groups),
+-        BranchRun::Failed(message) => {
+-            writeln!(params.stderr(shell), "split: {message}")?;
+-            let lines = plan.release(SplitRelease::Cancelled {
+-                unreaped: Vec::new(),
+-            });
+-            write_lines(shell, params, &lines)?;
+-            fail_stages(&mut statuses, shape, 2);
+-            return Ok(settle(shell, pipeline, statuses, 2));
+-        }
+-        BranchRun::Cancelled {
+-            status,
+-            message,
+-            unreaped,
+-        } => {
+-            if let Some(message) = message {
+-                writeln!(params.stderr(shell), "split: {message}")?;
+-            }
+-            let lines = plan.release(SplitRelease::Cancelled { unreaped });
+-            write_lines(shell, params, &lines)?;
+-            fail_stages(&mut statuses, shape, status);
+-            let result = settle(shell, pipeline, statuses, status);
+-            #[cfg(unix)]
+-            if status == 143 {
+-                let signal = crate::traps::TrapSignal::Signal(sys::signal::Signal::SIGTERM);
+-                let trap_result = shell.invoke_trap_handler(signal, params).await?;
+-                if !trap_result.is_normal_flow() {
+-                    return Ok(trap_result);
++    let environment = shell
++        .env()
++        .iter_exported()
++        .filter(|(_, value)| value.value().is_set())
++        .map(|(name, value)| (name.clone(), value.value().to_cow_str(shell).into_owned()))
++        .collect();
++    // Ctrl-C cancels the daemon-side split; the wait then reports it.
++    let started = workspace.start(
++        shell.working_dir(),
++        &branches,
++        environment,
++        input,
++        join.json,
++    );
++    let run = match started {
++        Ok(handle) => {
++            let cancel = handle.canceller();
++            let waiter = tokio::task::spawn_blocking(move || handle.wait());
++            tokio::pin!(waiter);
++            loop {
++                tokio::select! {
++                    result = &mut waiter => {
++                        break result.map_err(|error| error.to_string()).and_then(|run| run);
++                    }
++                    _ = crate::sys::signal::await_ctrl_c() => cancel(),
+                 }
+             }
+-            return Ok(result);
+         }
++        Err(message) => Err(message),
+     };
+-
+-    let branch_failure = outcomes
+-        .iter()
+-        .find(|outcome| outcome.status != 0)
+-        .map_or(0, |outcome| outcome.status);
+-    let bundle = match plan.complete(&outcomes, started.elapsed(), join.options) {
+-        Ok(bundle) => bundle,
++    let run = match run {
++        Ok(run) => run,
+         Err(message) => {
+             writeln!(params.stderr(shell), "split: {message}")?;
+-            let lines = plan.release(SplitRelease::Retain("capture failed".into()));
+-            write_lines(shell, params, &lines)?;
+             fail_stages(&mut statuses, shape, 2);
+             return Ok(settle(shell, pipeline, statuses, 2));
+         }
+     };
+-    for outcome in &outcomes {
+-        if !outcome.stderr.is_empty() {
+-            let mut stderr = params.stderr(shell);
+-            writeln!(stderr, "== {} stderr ==", outcome.label)?;
+-            stderr.write_all(&outcome.stderr)?;
+-            if !outcome.stderr.ends_with(b"\n") {
+-                writeln!(stderr)?;
+-            }
+-        }
++    if run.cancelled {
++        fail_stages(&mut statuses, shape, 130);
++        return Ok(settle(shell, pipeline, statuses, 130));
+     }
++    let branch_failure = run.status;
+     statuses.push(branch_failure);
+ 
+     let typed_end = shape.join.unwrap_or(shape.split) + 1;
+@@ -316,17 +262,17 @@ pub(crate) async fn execute_split_pipeline<SE: extensions::ShellExtensions>(
+     for redirect in &join.redirects {
+         setup_redirect(shell, &mut join_params, redirect).await?;
+     }
+-    join_params.stdout(shell).write_all(&bundle.input)?;
++    join_params.stdout(shell).write_all(&run.input)?;
+     drop(join_params);
+     if shape.join.is_some() {
+         statuses.push(branch_failure);
+     }
+-    // The split directory stays alive until every downstream stage has
+-    // exited; those stages see SPLIT_ID, SPLIT_DIR and SPLIT_MANIFEST.
++    // The stages after `join` see SPLIT_ID, SPLIT_DIR, SPLIT_MANIFEST and
++    // SPLIT_OBJECTS; the split is released after the last stage.
+     let (last_status, mut status) = if let Some(rendered) = &rendered {
+         let mut suffix_params = params.clone();
+         suffix_params.set_fd(OpenFiles::STDIN_FD, rendered.read()?.into());
+-        push_split_environment(shell, &bundle.environment)?;
++        push_split_environment(shell, &run.environment)?;
+         let result = execute_composition_segment(suffix, shell, &suffix_params).await;
+         shell
+             .env_mut()
+@@ -347,381 +293,8 @@ pub(crate) async fn execute_split_pipeline<SE: extensions::ShellExtensions>(
+     {
+         status = *failure;
+     }
+-
+-    // Retention follows the last stage's own status (not pipefail): a
+-    // pipeline whose final consumer succeeded has used the results.
+-    let release = if last_status != 0 {
+-        SplitRelease::Retain(format!("last stage exited {last_status}"))
+-    } else if join.keep {
+-        SplitRelease::Retain("--keep".into())
+-    } else if !live_groups.is_empty() {
+-        SplitRelease::Retain(format!(
+-            "branch processes still running: {}",
+-            live_groups.join(", ")
+-        ))
+-    } else {
+-        SplitRelease::Remove
+-    };
+-    let lines = plan.release(release);
++    // Retention follows the last stage's own status (not pipefail).
++    let lines = (run.release)(last_status, join.keep);
+     write_lines(shell, params, &lines)?;
+     Ok(settle(shell, pipeline, statuses, status))
+ }
+-
+-enum BranchRun {
+-    Complete {
+-        outcomes: Vec<SplitBranchOutcome>,
+-        /// Labels whose process group still had members after the branch shell exited.
+-        live_groups: Vec<String>,
+-    },
+-    Failed(String),
+-    Cancelled {
+-        status: u8,
+-        message: Option<String>,
+-        unreaped: Vec<String>,
+-    },
+-}
+-
+-#[cfg(unix)]
+-struct Launched {
+-    label: String,
+-    pid: i32,
+-    started: Instant,
+-    stdout: std::thread::JoinHandle<std::io::Result<Vec<u8>>>,
+-    stderr: std::thread::JoinHandle<std::io::Result<Vec<u8>>>,
+-    input: std::thread::JoinHandle<std::io::Result<()>>,
+-}
+-
+-#[cfg(unix)]
+-struct Budget {
+-    remaining: Arc<AtomicU64>,
+-    exceeded: Arc<AtomicBool>,
+-    reached: Arc<tokio::sync::Notify>,
+-}
+-
+-/// A forked branch whose I/O threads have not started yet.
+-#[cfg(unix)]
+-struct Forked {
+-    label: String,
+-    pid: i32,
+-    started: Instant,
+-    input: std::io::PipeWriter,
+-    stdout: std::io::PipeReader,
+-    stderr: std::io::PipeReader,
+-}
+-
+-/// Forks one branch shell. Spawns no thread: a thread starting while another
+-/// branch forks can hold a runtime lock that the forked child then waits on
+-/// forever, so every fork happens before any branch I/O thread starts.
+-#[cfg(unix)]
+-fn fork_branch<SE: extensions::ShellExtensions>(
+-    branch: &ast::FanoutBranch,
+-    shell: &Shell<SE>,
+-    params: &ExecutionParameters,
+-    dir: PathBuf,
+-    environment: Vec<(String, String)>,
+-) -> Result<Option<Forked>, error::Error> {
+-    let (input_reader, input_writer) = std::io::pipe()?;
+-    let (stdout_reader, stdout_writer) = std::io::pipe()?;
+-    let (stderr_reader, stderr_writer) = std::io::pipe()?;
+-
+-    let mut child_shell = shell.clone();
+-    child_shell.options_mut().interactive = false;
+-    child_shell.options_mut().enable_job_control = false;
+-    child_shell.jobs_mut().clear_inherited();
+-    child_shell.set_working_dir(&dir)?;
+-    for (name, value) in environment {
+-        let mut variable = crate::ShellVariable::new(value);
+-        variable.export();
+-        child_shell.set_env_global(&name, variable)?;
+-    }
+-    let mut child_params = params.clone();
+-    child_params.set_fd(OpenFiles::STDIN_FD, input_reader.into());
+-    child_params.set_fd(OpenFiles::STDOUT_FD, stdout_writer.into());
+-    child_params.set_fd(OpenFiles::STDERR_FD, stderr_writer.into());
+-    child_params.process_group_policy = crate::ProcessGroupPolicy::SameProcessGroup;
+-    let body = branch.body.clone();
+-    let child = crate::interp::fork_child(
+-        child_shell,
+-        child_params,
+-        crate::subshell::ChildGroup::New { foreground: false },
+-        false,
+-        Box::new(move |shell, params| {
+-            Box::pin(async move {
+-                crate::interp::run_list_reporting_errors(&body, shell, &params).await
+-            })
+-        }),
+-    )?;
+-    let Some(pid) = child.as_ref().and_then(crate::processes::ChildProcess::pid) else {
+-        return Ok(None);
+-    };
+-    Ok(Some(Forked {
+-        label: branch.label.clone(),
+-        pid,
+-        started: Instant::now(),
+-        input: input_writer,
+-        stdout: stdout_reader,
+-        stderr: stderr_reader,
+-    }))
+-}
+-
+-/// Starts a forked branch's input pump and output capture threads.
+-#[cfg(unix)]
+-fn start_branch_io(forked: Forked, input: Arc<Vec<u8>>, budget: &Budget) -> Launched {
+-    let mut writer = forked.input;
+-    let input = std::thread::spawn(move || match writer.write_all(&input) {
+-        Ok(()) => Ok(()),
+-        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+-        Err(error) => Err(error),
+-    });
+-    let capture = |reader: std::io::PipeReader| {
+-        let remaining = Arc::clone(&budget.remaining);
+-        let exceeded = Arc::clone(&budget.exceeded);
+-        let reached = Arc::clone(&budget.reached);
+-        std::thread::spawn(move || capture_bounded(reader, &remaining, &exceeded, &reached))
+-    };
+-    Launched {
+-        label: forked.label,
+-        pid: forked.pid,
+-        started: forked.started,
+-        stdout: capture(forked.stdout),
+-        stderr: capture(forked.stderr),
+-        input,
+-    }
+-}
+-
+-/// Whether any process remains in the group led by `pgid`.
+-#[cfg(unix)]
+-fn group_alive(pgid: i32) -> bool {
+-    // SAFETY: signal 0 only probes for existence and permission.
+-    unsafe { libc::killpg(pgid, 0) == 0 }
+-}
+-
+-#[cfg(unix)]
+-fn signal_group(pgid: i32, signal: i32) {
+-    // SAFETY: signals only the branch's own process group.
+-    unsafe {
+-        libc::killpg(pgid, signal);
+-    }
+-}
+-
+-#[cfg(unix)]
+-fn exit_status_byte(status: std::process::ExitStatus) -> u8 {
+-    use std::os::unix::process::ExitStatusExt as _;
+-    let code = status
+-        .code()
+-        .unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
+-    u8::try_from(code & 0xff).unwrap_or(u8::MAX)
+-}
+-
+-/// Reaps a branch shell without blocking. `true` once it has exited.
+-#[cfg(unix)]
+-fn try_reap(pid: i32) -> Option<u8> {
+-    use std::os::unix::process::ExitStatusExt as _;
+-    let mut status = 0;
+-    // SAFETY: waits only for this specific child, without blocking.
+-    let result = unsafe { libc::waitpid(pid, &raw mut status, libc::WNOHANG) };
+-    if result == pid {
+-        Some(exit_status_byte(std::process::ExitStatus::from_raw(status)))
+-    } else if result == -1 {
+-        // Already reaped elsewhere (ECHILD): nothing left to wait for.
+-        Some(255)
+-    } else {
+-        None
+-    }
+-}
+-
+-/// Interrupts every branch that has not been reaped, waits for each branch
+-/// shell and its whole process group to exit, then kills what remains.
+-/// Returns the labels whose exit could not be confirmed.
+-#[cfg(unix)]
+-async fn cancel_branches(
+-    launched: &[Launched],
+-    reaped: &Mutex<Vec<Option<(u8, Duration)>>>,
+-) -> Vec<String> {
+-    let mut done = reaped
+-        .lock()
+-        .map(|reaped| reaped.iter().map(Option::is_some).collect::<Vec<_>>())
+-        .unwrap_or_else(|_| vec![false; launched.len()]);
+-    let settled = |done: &mut Vec<bool>| {
+-        for (index, branch) in launched.iter().enumerate() {
+-            if !done[index] && try_reap(branch.pid).is_some() {
+-                done[index] = true;
+-            }
+-        }
+-        launched
+-            .iter()
+-            .enumerate()
+-            .all(|(index, branch)| done[index] && !group_alive(branch.pid))
+-    };
+-    for branch in launched {
+-        if group_alive(branch.pid) {
+-            signal_group(branch.pid, libc::SIGINT);
+-        }
+-    }
+-    for (grace, kill) in [(CANCEL_GRACE, true), (KILL_GRACE, false)] {
+-        let deadline = Instant::now() + grace;
+-        while Instant::now() < deadline {
+-            if settled(&mut done) {
+-                return Vec::new();
+-            }
+-            tokio::time::sleep(Duration::from_millis(50)).await;
+-        }
+-        if settled(&mut done) {
+-            return Vec::new();
+-        }
+-        if kill {
+-            for branch in launched {
+-                if group_alive(branch.pid) {
+-                    signal_group(branch.pid, libc::SIGKILL);
+-                }
+-            }
+-        }
+-    }
+-    launched
+-        .iter()
+-        .enumerate()
+-        .filter(|(index, branch)| !done[*index] || group_alive(branch.pid))
+-        .map(|(_, branch)| branch.label.clone())
+-        .collect()
+-}
+-
+-#[cfg(unix)]
+-async fn run_branches<SE: extensions::ShellExtensions>(
+-    split: &ast::FanoutCommand,
+-    shell: &Shell<SE>,
+-    params: &ExecutionParameters,
+-    plan: &mut dyn SplitPlan,
+-    input: Arc<Vec<u8>>,
+-) -> Result<BranchRun, error::Error> {
+-    let budget = Budget {
+-        remaining: Arc::new(AtomicU64::new(COMPOSITION_OUTPUT_LIMIT)),
+-        exceeded: Arc::new(AtomicBool::new(false)),
+-        reached: Arc::new(tokio::sync::Notify::new()),
+-    };
+-    let reaped = Arc::new(Mutex::new(vec![None; split.branches.len()]));
+-    let mut forked = Vec::with_capacity(split.branches.len());
+-    let mut failure = None;
+-    for branch in &split.branches {
+-        match fork_branch(
+-            branch,
+-            shell,
+-            params,
+-            plan.branch_dir(&branch.label),
+-            plan.branch_environment(&branch.label),
+-        ) {
+-            Ok(Some(child)) => forked.push(child),
+-            Ok(None) => {
+-                failure = Some("private branches need real-process subshells".to_owned());
+-                break;
+-            }
+-            Err(error) => {
+-                failure = Some(format!("cannot start branch {}: {error}", branch.label));
+-                break;
+-            }
+-        }
+-    }
+-    let launched = forked
+-        .into_iter()
+-        .map(|child| start_branch_io(child, Arc::clone(&input), &budget))
+-        .collect::<Vec<_>>();
+-    if let Some(message) = failure {
+-        let unreaped = cancel_branches(&launched, &reaped).await;
+-        return Ok(if unreaped.is_empty() {
+-            BranchRun::Failed(message)
+-        } else {
+-            BranchRun::Cancelled {
+-                status: 2,
+-                message: Some(message),
+-                unreaped,
+-            }
+-        });
+-    }
+-
+-    let waits = launched.iter().enumerate().map(|(index, branch)| {
+-        let reaped = Arc::clone(&reaped);
+-        let pid = branch.pid;
+-        let started = branch.started;
+-        async move {
+-            let status = match crate::subshell::wait_for_pid(pid).await {
+-                Ok(output) => exit_status_byte(output.status),
+-                Err(_) => 255,
+-            };
+-            if let Ok(mut reaped) = reaped.lock() {
+-                reaped[index] = Some((status, started.elapsed()));
+-            }
+-        }
+-    });
+-    enum Completion {
+-        Complete,
+-        OutputLimit,
+-        Interrupted,
+-        Terminated,
+-    }
+-    let term_trapped = shell.traps().handles(crate::traps::TrapSignal::Signal(
+-        sys::signal::Signal::SIGTERM,
+-    ));
+-    let completion = {
+-        let all = futures::future::join_all(waits);
+-        tokio::pin!(all);
+-        tokio::select! {
+-            _ = &mut all => Completion::Complete,
+-            () = budget.reached.notified() => Completion::OutputLimit,
+-            result = sys::signal::await_ctrl_c() => {
+-                result?;
+-                Completion::Interrupted
+-            },
+-            result = sys::signal::await_term(), if term_trapped => {
+-                result?;
+-                Completion::Terminated
+-            },
+-        }
+-    };
+-    let (status, message) = match completion {
+-        Completion::Complete if !budget.exceeded.load(Ordering::Relaxed) => {
+-            let statuses = reaped
+-                .lock()
+-                .map(|reaped| reaped.clone())
+-                .unwrap_or_default();
+-            let live_groups = launched
+-                .iter()
+-                .filter(|branch| group_alive(branch.pid))
+-                .map(|branch| branch.label.clone())
+-                .collect();
+-            let mut outcomes = Vec::with_capacity(launched.len());
+-            for (branch, reaped) in launched.into_iter().zip(statuses) {
+-                let (status, elapsed) = reaped.unwrap_or((255, Duration::ZERO));
+-                branch
+-                    .input
+-                    .join()
+-                    .map_err(|_| std::io::Error::other("split input thread panicked"))??;
+-                outcomes.push(SplitBranchOutcome {
+-                    label: branch.label,
+-                    state: SplitBranchState::Exited,
+-                    status,
+-                    elapsed,
+-                    stdout: join_capture(branch.stdout)?,
+-                    stderr: join_capture(branch.stderr)?,
+-                });
+-            }
+-            return Ok(BranchRun::Complete {
+-                outcomes,
+-                live_groups,
+-            });
+-        }
+-        Completion::Complete | Completion::OutputLimit => (
+-            130,
+-            Some("split combined output exceeds 16 MiB limit; branches cancelled".to_owned()),
+-        ),
+-        Completion::Interrupted => (130, None),
+-        Completion::Terminated => (143, None),
+-    };
+-    let unreaped = cancel_branches(&launched, &reaped).await;
+-    // Capture threads end when the branch groups close their pipes; they hold
+-    // nothing the split still needs.
+-    drop(launched);
+-    Ok(BranchRun::Cancelled {
+-        status,
+-        message,
+-        unreaped,
+-    })
+-}

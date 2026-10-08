@@ -1,0 +1,29 @@
+[
+  {
+    "schema_version": 1,
+    "name": "claude-session",
+    "protocol": "acp_v1",
+    "command": "claude",
+    "arguments": ["--acp"],
+    "required_capabilities": [],
+    "description": "Claude through the official ACP adapter (claude Kit, ACP mode)"
+  },
+  {
+    "schema_version": 1,
+    "name": "codex-session",
+    "protocol": "acp_v1",
+    "command": "codex",
+    "arguments": ["--acp"],
+    "required_capabilities": [],
+    "description": "Codex through the official ACP adapter (codex Kit, ACP mode)"
+  },
+  {
+    "schema_version": 1,
+    "name": "pi-session",
+    "protocol": "acp_v1",
+    "command": "pi",
+    "arguments": ["--acp"],
+    "required_capabilities": [],
+    "description": "Pi through the community ACP adapter (pi Kit, ACP mode)"
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "name": "marsh-codex-acp-kit",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "@agentclientprotocol/codex-acp": "1.13.1"
+  }
+}

@@ -1,0 +1,32 @@
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -1114,14 +1114,28 @@
+     let output_limit_reached = Arc::new(tokio::sync::Notify::new());
+     let branch_shell = shell.clone();
+     let branch_params = params.clone();
++    // Jobs started by a branch carry `FANOUT_BRANCH=<id>/<label>` so
++    // `marsh jobs --tree` can group them under one fanout node.
++    let fanout_id = format!("{:016x}", rand::random::<u64>());
+     let futures = fanout.branches.iter().map(|branch| {
+-        let shell = branch_shell.clone();
++        let mut shell = branch_shell.clone();
++        let lineage = format!("{fanout_id}/{}", branch.label);
+         let params = branch_params.clone();
+         let input = Arc::clone(&input);
+         let remaining_output = Arc::clone(&remaining_output);
+         let output_exceeded = Arc::clone(&output_exceeded);
+         let output_limit_reached = Arc::clone(&output_limit_reached);
+         async move {
++            shell.env_mut().update_or_add(
++                "FANOUT_BRANCH",
++                ShellValueLiteral::Scalar(lineage),
++                |variable| {
++                    variable.export();
++                    Ok(())
++                },
++                EnvironmentLookup::Anywhere,
++                EnvironmentScope::Global,
++            )?;
+             execute_fanout_branch(
+                 branch,
+                 shell,

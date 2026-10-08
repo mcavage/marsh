@@ -1,0 +1,11 @@
+/target/
+/.marsh-dev/
+__pycache__/
+*.py[cod]
+.DS_Store
+*.swp
+*.swo
+/.pi-agent/
+/.pi-sessions/
+/.marsh-evidence/
+**/*_TTrace_*

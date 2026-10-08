@@ -1,0 +1,275 @@
+diff --git a/brush-core/src/split.rs b/brush-core/src/split.rs
+index 735725d..5f918f0 100644
+--- a/brush-core/src/split.rs
++++ b/brush-core/src/split.rs
+@@ -49,7 +49,7 @@ pub struct SplitRenderOptions {
+ pub struct SplitBundle {
+     /// Bytes for the join stage's standard input (rendering or manifest).
+     pub input: Vec<u8>,
+-    /// Exported environment for a join command.
++    /// Exported environment for the pipeline stages after `join`.
+     pub environment: Vec<(String, String)>,
+ }
+ 
+diff --git a/brush-core/src/split_interp.rs b/brush-core/src/split_interp.rs
+index 11ea5aa..9a176c9 100644
+--- a/brush-core/src/split_interp.rs
++++ b/brush-core/src/split_interp.rs
+@@ -48,7 +48,7 @@ pub(crate) fn split_shape(pipeline: &ast::Pipeline) -> Option<SplitShape> {
+     Some(SplitShape { split, join })
+ }
+ 
+-const JOIN_HELP: &str = "join - receive split results\n\nUsage: split { ... } | join [--json] [--timing] [--keep] [--] [COMMAND [ARG...]]\n\n  --json    the manifest instead of the text rendering\n  --timing  append per-branch and total wall time\n  --keep    keep the split directory even when join succeeds\n\nWith no COMMAND, join prints the rendering. COMMAND reads it on stdin with\nSPLIT_ID, SPLIT_DIR and SPLIT_MANIFEST exported, from the original directory.\nUse `command join` for coreutils join.\n";
++const JOIN_HELP: &str = "join - receive split results\n\nUsage: split { ... } | join [--json] [--timing] [--keep] [| COMMAND ...]\n\n  --json    the manifest instead of the text rendering\n  --timing  append per-branch and total wall time\n  --keep    keep the split directory even when the pipeline succeeds\n\njoin prints the rendering. Later pipeline stages read it on stdin with\nSPLIT_ID, SPLIT_DIR and SPLIT_MANIFEST exported, from the original directory;\nthe split directory lives until the whole pipeline finishes.\nUse `command join` for coreutils join.\n";
+ 
+ /// Grace period between SIGINT and SIGKILL for cancelled branches.
+ const CANCEL_GRACE: Duration = Duration::from_secs(10);
+@@ -60,99 +60,71 @@ struct JoinStage {
+     options: SplitRenderOptions,
+     keep: bool,
+     help: bool,
+-    command: Option<(ast::Word, Vec<CommandPrefixOrSuffixItem>)>,
+     redirects: Vec<ast::IoRedirect>,
+ }
+ 
+-/// Reads `join` options up to the first non-option word or `--`; the rest is
+-/// the join command, executed as an ordinary simple command.
++/// Reads `join` options and redirections. `join` takes no command: later
++/// pipeline stages consume its output (`split { ... } | join | CMD`).
+ fn parse_join_stage(command: Option<&ast::Command>) -> Result<JoinStage, String> {
+     let mut stage = JoinStage::default();
+     let Some(ast::Command::Simple(simple)) = command else {
+         return Ok(stage);
+     };
+-    let mut options_done = false;
+-    let mut command_word = None;
+-    let mut rest = Vec::new();
+     for item in simple.suffix.iter().flat_map(|suffix| suffix.0.iter()) {
+-        if command_word.is_some() {
+-            rest.push(item.clone());
+-            continue;
+-        }
+         match item {
+             CommandPrefixOrSuffixItem::IoRedirect(redirect) => {
+                 stage.redirects.push(redirect.clone());
+             }
+-            CommandPrefixOrSuffixItem::Word(word) if !options_done => match word.value.as_str() {
++            CommandPrefixOrSuffixItem::Word(word) => match word.value.as_str() {
+                 "--json" => stage.options.json = true,
+                 "--timing" => stage.options.timing = true,
+                 "--keep" => stage.keep = true,
+                 "-h" | "--help" => stage.help = true,
+-                "--" => options_done = true,
+                 option if option.starts_with('-') => {
+                     return Err(format!(
+                         "join: unknown option: {option} (use `command join` for coreutils join)"
+                     ));
+                 }
+-                _ => command_word = Some(word.clone()),
++                word => {
++                    return Err(format!(
++                        "join: takes no command (got `{word}`); pipe into it: split {{ ... }} | join | {word} ... (use `command join` for coreutils join)"
++                    ));
++                }
+             },
+-            CommandPrefixOrSuffixItem::Word(word)
+-            | CommandPrefixOrSuffixItem::AssignmentWord(_, word) => {
+-                command_word = Some(word.clone());
++            CommandPrefixOrSuffixItem::AssignmentWord(_, word) => {
++                return Err(format!(
++                    "join: takes no command (got `{}`); pipe into it: split {{ ... }} | join | CMD",
++                    word.value
++                ));
+             }
+             CommandPrefixOrSuffixItem::ProcessSubstitution(..) => {
+-                return Err("join: a process substitution cannot name the join command".into());
++                return Err("join: takes no command or process substitution".into());
+             }
+         }
+     }
+-    if let Some(word) = command_word {
+-        rest.extend(
+-            stage
+-                .redirects
+-                .drain(..)
+-                .map(CommandPrefixOrSuffixItem::IoRedirect),
+-        );
+-        stage.command = Some((word, rest));
+-    }
+     Ok(stage)
+ }
+ 
+-fn single_quoted(value: &str) -> String {
+-    format!("'{}'", value.replace('\'', "'\\''"))
+-}
+-
+-/// The join command as an ordinary simple command with exported split context.
+-fn join_simple_command(
+-    word: &ast::Word,
+-    rest: &[CommandPrefixOrSuffixItem],
++/// Exports the split context into a command-scope environment for the stages
++/// after `join`, so every downstream stage (function, builtin, Kit command,
++/// or PATH program) sees it. The scope is popped when the pipeline finishes.
++fn push_split_environment<SE: extensions::ShellExtensions>(
++    shell: &mut Shell<SE>,
+     environment: &[(String, String)],
+-) -> ast::SimpleCommand {
+-    let prefix = environment
+-        .iter()
+-        .map(|(name, value)| {
+-            let value = ast::Word {
+-                value: single_quoted(value),
+-                loc: None,
+-            };
+-            CommandPrefixOrSuffixItem::AssignmentWord(
+-                ast::Assignment {
+-                    name: ast::AssignmentName::VariableName(name.clone()),
+-                    value: ast::AssignmentValue::Scalar(value.clone()),
+-                    append: false,
+-                    loc: brush_parser::SourceSpan::default(),
+-                },
+-                ast::Word {
+-                    value: format!("{name}={}", value.value),
+-                    loc: None,
+-                },
+-            )
+-        })
+-        .collect::<Vec<_>>();
+-    ast::SimpleCommand {
+-        prefix: (!prefix.is_empty()).then_some(ast::CommandPrefix(prefix)),
+-        word_or_name: Some(word.clone()),
+-        suffix: (!rest.is_empty()).then(|| ast::CommandSuffix(rest.to_vec())),
++) -> Result<(), error::Error> {
++    shell
++        .env_mut()
++        .push_scope(crate::env::EnvironmentScope::Command);
++    for (name, value) in environment {
++        let mut variable = crate::ShellVariable::new(value.as_str());
++        variable.export();
++        shell.env_mut().add(
++            name.as_str(),
++            variable,
++            crate::env::EnvironmentScope::Command,
++        )?;
+     }
++    Ok(())
+ }
+ 
+ fn settle<SE: extensions::ShellExtensions>(
+@@ -332,50 +304,43 @@ pub(crate) async fn execute_split_pipeline<SE: extensions::ShellExtensions>(
+ 
+     let typed_end = shape.join.unwrap_or(shape.split) + 1;
+     let suffix = &pipeline.seq[typed_end..];
+-    let input_file = CompositionFile::create("split-input")?;
+-    input_file.write()?.write_all(&bundle.input)?;
+-    let (join_status, mut status) = if let Some((word, rest)) = &join.command {
+-        let mut segment = vec![ast::Command::Simple(join_simple_command(
+-            word,
+-            rest,
+-            &bundle.environment,
+-        ))];
+-        segment.extend_from_slice(suffix);
+-        let mut join_params = params.clone();
+-        join_params.set_fd(OpenFiles::STDIN_FD, input_file.read()?.into());
+-        let result = execute_composition_segment(&segment, shell, &join_params).await?;
++    // `join` (explicit or implied) writes the rendering, or the manifest with
++    // `--json`, to its stdout; its stage status is the first failed branch's.
++    let mut join_params = params.clone();
++    let rendered = (!suffix.is_empty())
++        .then(|| CompositionFile::create("join-output"))
++        .transpose()?;
++    if let Some(rendered) = &rendered {
++        join_params.set_fd(OpenFiles::STDOUT_FD, rendered.write()?.into());
++    }
++    for redirect in &join.redirects {
++        setup_redirect(shell, &mut join_params, redirect).await?;
++    }
++    join_params.stdout(shell).write_all(&bundle.input)?;
++    drop(join_params);
++    if shape.join.is_some() {
++        statuses.push(branch_failure);
++    }
++    // The split directory stays alive until every downstream stage has
++    // exited; those stages see SPLIT_ID, SPLIT_DIR and SPLIT_MANIFEST.
++    let (last_status, mut status) = if let Some(rendered) = &rendered {
++        let mut suffix_params = params.clone();
++        suffix_params.set_fd(OpenFiles::STDIN_FD, rendered.read()?.into());
++        push_split_environment(shell, &bundle.environment)?;
++        let result = execute_composition_segment(suffix, shell, &suffix_params).await;
++        shell
++            .env_mut()
++            .pop_scope(crate::env::EnvironmentScope::Command)?;
++        let result = result?;
+         let segment_statuses = shell.last_pipeline_statuses().to_vec();
+-        let join_status = segment_statuses
+-            .first()
++        let last = segment_statuses
++            .last()
+             .copied()
+             .unwrap_or_else(|| result.exit_code.into());
+         statuses.extend_from_slice(&segment_statuses);
+-        (join_status, u8::from(result.exit_code))
++        (last, u8::from(result.exit_code))
+     } else {
+-        let mut join_params = params.clone();
+-        let rendered = (!suffix.is_empty())
+-            .then(|| CompositionFile::create("join-output"))
+-            .transpose()?;
+-        if let Some(rendered) = &rendered {
+-            join_params.set_fd(OpenFiles::STDOUT_FD, rendered.write()?.into());
+-        }
+-        for redirect in &join.redirects {
+-            setup_redirect(shell, &mut join_params, redirect).await?;
+-        }
+-        join_params.stdout(shell).write_all(&bundle.input)?;
+-        drop(join_params);
+-        if shape.join.is_some() {
+-            statuses.push(branch_failure);
+-        }
+-        if let Some(rendered) = &rendered {
+-            let mut suffix_params = params.clone();
+-            suffix_params.set_fd(OpenFiles::STDIN_FD, rendered.read()?.into());
+-            let result = execute_composition_segment(suffix, shell, &suffix_params).await?;
+-            statuses.extend_from_slice(shell.last_pipeline_statuses());
+-            (branch_failure, u8::from(result.exit_code))
+-        } else {
+-            (branch_failure, branch_failure)
+-        }
++        (branch_failure, branch_failure)
+     };
+     if shell.options().return_last_failure_from_pipeline
+         && let Some(failure) = statuses.iter().rev().find(|status| **status != 0)
+@@ -383,8 +348,10 @@ pub(crate) async fn execute_split_pipeline<SE: extensions::ShellExtensions>(
+         status = *failure;
+     }
+ 
+-    let release = if join_status != 0 {
+-        SplitRelease::Retain(format!("join exited {join_status}"))
++    // Retention follows the last stage's own status (not pipefail): a
++    // pipeline whose final consumer succeeded has used the results.
++    let release = if last_status != 0 {
++        SplitRelease::Retain(format!("last stage exited {last_status}"))
+     } else if join.keep {
+         SplitRelease::Retain("--keep".into())
+     } else if !live_groups.is_empty() {
+diff --git a/brush-parser/src/parser/tests/composition.rs b/brush-parser/src/parser/tests/composition.rs
+index 2fccc32..65e6cfb 100644
+--- a/brush-parser/src/parser/tests/composition.rs
++++ b/brush-parser/src/parser/tests/composition.rs
+@@ -98,7 +98,7 @@ fn split_is_gated_and_parses_labels_shorthand_and_join() {
+     ));
+ 
+     let program = parse(
+-        "printf in | split { fix: claude -p x, tests: codex exec y; pi } | join --json claude -p z | cat\n",
++        "printf in | split { fix: claude -p x, tests: codex exec y; pi } | join --json | claude -p z | cat\n",
+         true,
+     )
+     .unwrap();
+@@ -116,6 +116,7 @@ fn split_is_gated_and_parses_labels_shorthand_and_join() {
+     );
+     assert!(pipeline.seq[2].is_split_join_stage());
+     assert!(matches!(pipeline.seq[3], Command::Simple(_)));
++    assert!(matches!(pipeline.seq[4], Command::Simple(_)));
+ }
+ 
+ #[test]

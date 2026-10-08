@@ -1,0 +1,47 @@
+diff --git a/brush-core/src/arithmetic.rs b/brush-core/src/arithmetic.rs
+index cca76f6..894e118 100644
+--- a/brush-core/src/arithmetic.rs
++++ b/brush-core/src/arithmetic.rs
+@@ -200,7 +200,7 @@ fn deref_lvalue(
+     let value_str: Cow<'_, str> = match lvalue {
+         ast::ArithmeticTarget::Variable(name) => get_var_value(shell, name.as_str())?,
+         ast::ArithmeticTarget::ArrayElement(name, index_expr) => {
+-            let index_str = eval_expr_impl(index_expr, shell, depth)?.to_string();
++            let index_str = element_subscript(shell, name, index_expr, depth)?;
+ 
+             shell
+                 .env()
+@@ -361,6 +361,24 @@ fn apply_unary_assignment_op(
+     }
+ }
+ 
++/// Returns an array element's subscript: an associative array's key is the
++/// subscript text (already expanded), an indexed array's is its arithmetic value.
++fn element_subscript(
++    shell: &mut Shell<impl extensions::ShellExtensions>,
++    name: &str,
++    index_expr: &ast::ArithmeticExpr,
++    depth: u32,
++) -> Result<String, EvalError> {
++    if shell
++        .env()
++        .get(name)
++        .is_some_and(|(_, var)| var.value().is_associative_array())
++    {
++        return Ok(index_expr.to_string());
++    }
++    Ok(eval_expr_impl(index_expr, shell, depth)?.to_string())
++}
++
+ fn assign(
+     shell: &mut Shell<impl extensions::ShellExtensions>,
+     lvalue: &ast::ArithmeticTarget,
+@@ -381,7 +399,7 @@ fn assign(
+                 .map_err(|_err| EvalError::FailedToUpdateEnvironment)?;
+         }
+         ast::ArithmeticTarget::ArrayElement(name, index_expr) => {
+-            let index_str = eval_expr_impl(index_expr, shell, depth)?.to_string();
++            let index_str = element_subscript(shell, name, index_expr, depth)?;
+ 
+             shell
+                 .env_mut()

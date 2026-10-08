@@ -1,0 +1,1517 @@
+diff --git a/brush-builtins/src/exec.rs b/brush-builtins/src/exec.rs
+index 8342094..0f8da49 100644
+--- a/brush-builtins/src/exec.rs
++++ b/brush-builtins/src/exec.rs
+@@ -45,7 +45,7 @@ impl builtins::Command for ExecCommand {
+         // unsafe, since it would also replace the *parent* shell instance. We instead
+         // delegate to the `command` builtin to perform the execution, with an expectation
+         // of returning.
+-        if context.shell.is_subshell() {
++        if context.shell.is_subshell() && !context.shell.owns_process() {
+             if self.empty_environment || self.exec_as_login || self.name_for_argv0.is_some() {
+                 return brush_core::error::unimp("exec with options in subshell not yet supported");
+             }
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index 5377554..686792d 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -364,6 +364,10 @@ pub struct SimpleCommand<'a, SE: extensions::ShellExtensions> {
+     /// spawned process. When `None`, `command_name` is used.
+     pub argv0: Option<String>,
+ 
++    /// Whether an external command replaces this (forked child) process instead
++    /// of running as a new child.
++    pub exec_in_place: bool,
++
+     /// Optionally provides a function that can run after execution occurs. Note
+     /// that it is *not* invoked if the shell is discarded during the execution
+     /// process.
+@@ -398,6 +402,7 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
+             path_dirs: None,
+             process_group_id: None,
+             argv0: None,
++            exec_in_place: false,
+             post_execute: None,
+         }
+     }
+@@ -599,13 +604,22 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
+         };
+ 
+         let resolved_path = path.to_string_lossy();
+-        let result = execute_external_command(
+-            cmd_context,
+-            resolved_path.as_ref(),
+-            self.process_group_id,
+-            self.argv0.as_deref(),
+-            &self.args[1..],
+-        );
++        let result = if self.exec_in_place {
++            exec_external_command_in_place(
++                cmd_context,
++                resolved_path.as_ref(),
++                self.argv0.as_deref(),
++                &self.args[1..],
++            )
++        } else {
++            execute_external_command(
++                cmd_context,
++                resolved_path.as_ref(),
++                self.process_group_id,
++                self.argv0.as_deref(),
++                &self.args[1..],
++            )
++        };
+ 
+         // Update $_ after command execution.
+         shell.update_last_arg_variable(last_arg);
+@@ -631,6 +645,66 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
+     }
+ }
+ 
++/// Replaces this forked child with the external command, as Bash does for the
++/// last command of a subshell. Returns only if the command cannot run.
++#[cfg(unix)]
++fn exec_external_command_in_place(
++    context: ExecutionContext<'_, impl extensions::ShellExtensions>,
++    executable_path: &str,
++    argv0_override: Option<&str>,
++    args: &[CommandArg],
++) -> Result<ExecutionSpawnResult, error::Error> {
++    use std::io::Write as _;
++    let cmd_args = args
++        .iter()
++        .filter_map(|e| {
++            if let CommandArg::String(s) = e {
++                Some(s)
++            } else {
++                None
++            }
++        })
++        .collect::<Vec<_>>();
++    let argv0 = argv0_override.unwrap_or(context.command_name.as_str());
++    let mut cmd = compose_std_command(
++        &context,
++        executable_path,
++        argv0,
++        cmd_args.as_slice(),
++        false, /* empty environment? */
++    )?;
++    sys::commands::exec_with_script_fallback(
++        &mut cmd,
++        OsStr::new(argv0),
++        OsStr::new(executable_path),
++        context.iter_fds().map(|(fd, _)| fd),
++    )?;
++    let _ = std::io::stdout().flush();
++    let _ = std::io::stderr().flush();
++    let spawn_err = sys::commands::CommandExt::exec(&mut cmd);
++    if spawn_err.kind() == std::io::ErrorKind::NotFound {
++        if !context.shell.working_dir().exists() {
++            Err(error::ErrorKind::WorkingDirMissing(context.shell.working_dir().to_owned()).into())
++        } else if context.shell.absolute_path(executable_path).exists() {
++            Err(error::ErrorKind::FailedToExecuteCommand(context.command_name, spawn_err).into())
++        } else {
++            Err(error::ErrorKind::CommandNotFound(context.command_name).into())
++        }
++    } else {
++        Err(error::ErrorKind::FailedToExecuteCommand(context.command_name, spawn_err).into())
++    }
++}
++
++#[cfg(not(unix))]
++fn exec_external_command_in_place(
++    context: ExecutionContext<'_, impl extensions::ShellExtensions>,
++    executable_path: &str,
++    argv0_override: Option<&str>,
++    args: &[CommandArg],
++) -> Result<ExecutionSpawnResult, error::Error> {
++    execute_external_command(context, executable_path, None, argv0_override, args)
++}
++
+ #[allow(clippy::too_many_lines, reason = "one linear spawn sequence")]
+ pub(crate) fn execute_external_command(
+     context: ExecutionContext<'_, impl extensions::ShellExtensions>,
+@@ -869,7 +943,52 @@ pub(crate) async fn invoke_command_in_subshell_and_get_output(
+ 
+     let mut async_reader = sys::async_pipe::AsyncPipeReader::new(reader)?;
+ 
+-    let cmd_join_handle = tokio::spawn(run_substitution_command(subshell, params, s));
++    // A substitution that asks for its own `$BASHPID` runs in a real process, as in
++    // Bash. Others stay in-process: they cannot observe the difference and are far
++    // cheaper.
++    #[cfg(unix)]
++    if s.contains("BASHPID") {
++        let mut child_params = params.clone();
++        child_params.process_group_policy = ProcessGroupPolicy::SameProcessGroup;
++        let command = s.clone();
++        let mut child_shell = subshell.clone();
++        child_shell.set_depth(subshell.depth());
++        let forked = interp::fork_child(
++            child_shell,
++            child_params,
++            crate::subshell::ChildGroup::Inherit,
++            false,
++            Box::new(move |shell, params| {
++                Box::pin(async move {
++                    match run_substitution_command(shell, params.clone(), command).await {
++                        Ok(result) => result,
++                        Err(error) => {
++                            let _ = shell.display_error(&mut params.stderr(shell), &error);
++                            error.into_result(shell)
++                        }
++                    }
++                })
++            }),
++        )?;
++        if let Some(child) = forked {
++            drop(params);
++            drop(subshell);
++            let output_str = async_reader.read_to_string().await?;
++            let status = match child.pid() {
++                Some(pid) => {
++                    crate::results::ExecutionResult::from(crate::subshell::wait_for_pid(pid).await?)
++                }
++                None => crate::results::ExecutionResult::general_error(),
++            };
++            shell.set_last_exit_status(status.exit_code.into());
++            return Ok(output_str);
++        }
++    }
++
++    let cmd_join_handle = tokio::spawn(async move {
++        let mut subshell = subshell;
++        run_substitution_command(&mut subshell, params, s).await
++    });
+ 
+     let output_str = async_reader.read_to_string().await?;
+ 
+@@ -887,7 +1006,7 @@ pub(crate) async fn invoke_command_in_subshell_and_get_output(
+ }
+ 
+ async fn run_substitution_command(
+-    mut shell: Shell<impl extensions::ShellExtensions>,
++    shell: &mut Shell<impl extensions::ShellExtensions>,
+     mut params: ExecutionParameters,
+     command: String,
+ ) -> Result<ExecutionResult, error::Error> {
+@@ -899,8 +1018,8 @@ async fn run_substitution_command(
+     // If we failed to parse, then we'll fall below and handle it there.
+     if let Ok(program) = &parse_result {
+         if let Some(redir) = try_unwrap_bare_input_redir_program(program) {
+-            interp::setup_redirect(&mut shell, &mut params, redir).await?;
+-            std::io::copy(&mut params.stdin(&shell), &mut params.stdout(&shell))?;
++            interp::setup_redirect(shell, &mut params, redir).await?;
++            std::io::copy(&mut params.stdin(shell), &mut params.stdout(shell))?;
+             return Ok(ExecutionResult::new(0));
+         }
+     }
+diff --git a/brush-core/src/expansion.rs b/brush-core/src/expansion.rs
+index 2d0ae02..34e7a6e 100644
+--- a/brush-core/src/expansion.rs
++++ b/brush-core/src/expansion.rs
+@@ -2046,7 +2046,7 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                 Expansion::from(self.shell.options().option_flags())
+             }
+             brush_parser::word::SpecialParameter::ProcessId => {
+-                Expansion::from(std::process::id().to_string())
++                Expansion::from(crate::subshell::shell_pid().to_string())
+             }
+             brush_parser::word::SpecialParameter::LastBackgroundProcessId => {
+                 if let Some(pid) = self.shell.jobs().last_background_pid() {
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 5ea5c16..3a84b23 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -19,7 +19,8 @@ use crate::variables::{
+     ArrayLiteral, ShellValue, ShellValueLiteral, ShellValueUnsetType, ShellVariable,
+ };
+ use crate::{
+-    ShellFd, error, expansion, extendedtests, extensions, ioutils, jobs, openfiles, sys, timing,
++    ShellFd, error, expansion, extendedtests, extensions, ioutils, jobs, openfiles, processes, sys,
++    timing,
+ };
+ 
+ /// Encapsulates the context of execution in a command pipeline.
+@@ -309,7 +310,7 @@ async fn spawn_async_ao_list<'a, SE: extensions::ShellExtensions>(
+         }
+ 
+         let spawned =
+-            spawn_pipeline_processes(&ao_list.first, &mut child_shell, &child_params).await?;
++            spawn_pipeline_processes(&ao_list.first, &mut child_shell, &child_params, true).await?;
+         let tasks = spawned.into_iter().map(|spawn_result| match spawn_result {
+             ExecutionSpawnResult::StartedProcess(process) => jobs::JobTask::External(process),
+             ExecutionSpawnResult::StartedTask(task) => jobs::JobTask::Internal(task),
+@@ -339,6 +340,42 @@ async fn spawn_async_ao_list<'a, SE: extensions::ShellExtensions>(
+         cloned_params.set_fd(openfiles::OpenFiles::STDIN_FD, null);
+     }
+ 
++    // Like Bash, run the list in its own process.
++    #[cfg(unix)]
++    {
++        let mut child_params = cloned_params.clone();
++        child_params.process_group_policy = ProcessGroupPolicy::SameProcessGroup;
++        let ignore_interrupts = !shell.options().enable_job_control;
++        let list = ao_list.clone();
++        let mut child_shell = cloned_shell.clone();
++        child_shell.set_depth(cloned_shell.depth());
++        if let Some(child) = fork_child(
++            child_shell,
++            child_params,
++            crate::subshell::ChildGroup::New { foreground: false },
++            ignore_interrupts,
++            Box::new(move |shell, params| {
++                Box::pin(async move {
++                    match list.execute(shell, &params).await {
++                        Ok(result) => result,
++                        Err(error) => {
++                            let _ = shell.display_error(&mut params.stderr(shell), &error);
++                            error.into_result(shell)
++                        }
++                    }
++                })
++            }),
++        )? {
++            let pipefail = shell.options().return_last_failure_from_pipeline;
++            return Ok(shell.jobs_mut().add_as_background(jobs::Job::new(
++                [jobs::JobTask::External(child)],
++                ao_list.to_string(),
++                jobs::JobState::Running,
++                pipefail,
++            )));
++        }
++    }
++
+     let join_handle = tokio::spawn(async move {
+         cloned_ao_list
+             .execute(&mut cloned_shell, &cloned_params)
+@@ -403,6 +440,184 @@ fn apply_background_environment<SE: extensions::ShellExtensions>(
+     Ok(())
+ }
+ 
++/// The body a forked child runs on its own runtime.
++#[cfg(unix)]
++pub(crate) type ForkedBody<SE> = Box<
++    dyn for<'a> FnOnce(
++            &'a mut Shell<SE>,
++            ExecutionParameters,
++        )
++            -> std::pin::Pin<Box<dyn std::future::Future<Output = ExecutionResult> + 'a>>
++        + Send,
++>;
++
++/// Forks `child_shell` into a real process that runs `run`, then exits with
++/// its status (after any `EXIT` trap the child itself set). Returns `None`
++/// when real-process subshells are unavailable.
++#[cfg(unix)]
++pub(crate) fn fork_child<SE: extensions::ShellExtensions>(
++    mut child_shell: Shell<SE>,
++    child_params: ExecutionParameters,
++    group: crate::subshell::ChildGroup,
++    ignore_interrupts: bool,
++    run: ForkedBody<SE>,
++) -> Result<Option<processes::ChildProcess>, error::Error> {
++    if !crate::subshell::available() {
++        return Ok(None);
++    }
++    let term_trapped = child_shell
++        .traps()
++        .handles(crate::traps::TrapSignal::Signal(
++            sys::signal::Signal::SIGTERM,
++        ));
++    let signals = crate::subshell::ChildSignals {
++        ignore_interrupts,
++        default_stop_signals: child_shell.options().enable_job_control,
++        ignored: child_shell
++            .traps()
++            .iter_handlers()
++            .filter_map(|(signal, handler)| match signal {
++                crate::traps::TrapSignal::Signal(signal) if handler.command.is_empty() => {
++                    Some(signal as i32)
++                }
++                _ => None,
++            })
++            .collect(),
++    };
++    let keep = child_params
++        .iter_fds(&child_shell)
++        .chain(
++            child_shell
++                .persistent_open_files()
++                .iter_fds()
++                .map(|(fd, file)| (fd, file.clone())),
++        )
++        .filter_map(|(_, file)| {
++            use std::os::fd::AsRawFd as _;
++            file.try_borrow_as_fd().ok().map(|fd| fd.as_raw_fd())
++        })
++        .collect();
++    child_shell.set_owns_process();
++    let forked = crate::subshell::fork(group, &signals, keep, move || async move {
++        let mut shell = child_shell;
++        let generation = shell.traps().generation();
++        let result = run(&mut shell, child_params).await;
++        shell.set_last_exit_status(result.exit_code.into());
++        if shell.traps().generation() != generation
++            && shell.traps().handles(crate::traps::TrapSignal::Exit)
++        {
++            let _ = shell.on_exit().await;
++        }
++        i32::from(u8::from(result.exit_code))
++    })?;
++    Ok(forked.map(|forked| processes::ChildProcess::from_forked(forked, term_trapped)))
++}
++
++/// Runs a list in the current (forked) shell, reporting errors as Bash would.
++#[cfg(unix)]
++async fn run_list_reporting_errors<SE: extensions::ShellExtensions>(
++    list: &ast::CompoundList,
++    shell: &mut Shell<SE>,
++    params: &ExecutionParameters,
++) -> ExecutionResult {
++    match list.execute(shell, params).await {
++        Ok(result) => result,
++        Err(error) => {
++            let _ = shell.display_error(&mut params.stderr(shell), &error);
++            error.into_result(shell)
++        }
++    }
++}
++
++/// Whether `list` is exactly one simple command, which a forked child may `exec`.
++fn is_single_simple_command(list: &ast::CompoundList) -> bool {
++    matches!(
++        list.0.as_slice(),
++        [ast::CompoundListItem(ao, ast::SeparatorOperator::Sequence)]
++            if ao.additional.is_empty()
++                && !ao.first.bang
++                && ao.first.timed.is_none()
++                && matches!(ao.first.seq.as_slice(), [ast::Command::Simple(_)])
++    )
++}
++
++/// Forks a `( ... )` subshell running `list`.
++#[cfg(unix)]
++fn fork_subshell_list<SE: extensions::ShellExtensions>(
++    shell: &Shell<SE>,
++    params: &ExecutionParameters,
++    list: &ast::CompoundList,
++    process_group_id: Option<i32>,
++) -> Result<Option<processes::ChildProcess>, error::Error> {
++    if !crate::subshell::available() {
++        return Ok(None);
++    }
++    let mut subshell = shell.clone();
++    subshell.jobs_mut().clear_inherited();
++    subshell.set_exec_in_place(is_single_simple_command(list));
++    let stdin_is_terminal = params
++        .try_fd(shell, OpenFiles::STDIN_FD)
++        .is_some_and(|file| file.is_terminal());
++    let group = crate::subshell::ChildGroup::for_policy(
++        &params.process_group_policy,
++        process_group_id,
++        stdin_is_terminal,
++    );
++    let mut child_params = params.clone();
++    child_params.process_group_policy = ProcessGroupPolicy::SameProcessGroup;
++    let list = list.clone();
++    fork_child(
++        subshell,
++        child_params,
++        group,
++        false,
++        Box::new(move |shell, params| {
++            Box::pin(async move { run_list_reporting_errors(&list, shell, &params).await })
++        }),
++    )
++}
++
++/// Runs one pipeline stage inside its forked child.
++#[cfg(unix)]
++async fn run_forked_stage<SE: extensions::ShellExtensions>(
++    command: &ast::Command,
++    shell: &mut Shell<SE>,
++    mut params: ExecutionParameters,
++) -> ExecutionResult {
++    if let ast::Command::Compound(ast::CompoundCommand::Subshell(subshell), redirects) = command {
++        // The stage process is already the subshell; Bash does not fork again.
++        shell.set_depth(shell.depth() + 1);
++        shell.jobs_mut().clear_inherited();
++        shell.set_exec_in_place(is_single_simple_command(&subshell.list));
++        if let Some(redirects) = redirects {
++            for redirect in &redirects.0 {
++                if let Err(error) = setup_redirect(shell, &mut params, redirect).await {
++                    let _ = shell.display_error(&mut params.stderr(shell), &error);
++                    return error.into_result(shell);
++                }
++            }
++        }
++        return run_list_reporting_errors(&subshell.list, shell, &params).await;
++    }
++    let context = PipelineExecutionContext {
++        shell: commands::ShellForCommand::ParentShell(shell),
++        process_group_id: None,
++    };
++    let spawned = command.execute_in_pipeline(context, params.clone()).await;
++    let waited = match spawned {
++        Ok(spawned) => spawned.wait().await,
++        Err(error) => Err(error),
++    };
++    match waited {
++        Ok(ExecutionWaitResult::Completed { result, .. }) => result,
++        Ok(ExecutionWaitResult::Stopped(_)) => ExecutionResult::stopped(),
++        Err(error) => {
++            let _ = shell.display_error(&mut params.stderr(shell), &error);
++            error.into_result(shell)
++        }
++    }
++}
++
+ #[async_trait::async_trait]
+ impl Execute for ast::AndOrList {
+     async fn execute(
+@@ -514,7 +729,7 @@ impl Execute for ast::Pipeline {
+ 
+         // Spawn all the processes required for the pipeline, connecting outputs/inputs with pipes
+         // as needed.
+-        let spawn_results = spawn_pipeline_processes(self, shell, &params).await?;
++        let spawn_results = spawn_pipeline_processes(self, shell, &params, false).await?;
+ 
+         // Wait for the processes. This also has a side effect of updating pipeline status.
+         let mut result =
+@@ -989,7 +1204,7 @@ async fn execute_composition_segment<SE: extensions::ShellExtensions>(
+         bang: false,
+         seq: commands.to_vec(),
+     };
+-    let spawned = spawn_pipeline_processes(&segment, shell, params).await?;
++    let spawned = spawn_pipeline_processes(&segment, shell, params, false).await?;
+     wait_for_pipeline_processes_and_update_status(&segment, spawned, shell, params).await
+ }
+ 
+@@ -1164,10 +1379,11 @@ fn json_escape(value: &str) -> String {
+     escaped
+ }
+ 
+-async fn spawn_pipeline_processes(
++async fn spawn_pipeline_processes<SE: extensions::ShellExtensions>(
+     pipeline: &ast::Pipeline,
+-    shell: &mut Shell<impl extensions::ShellExtensions>,
++    shell: &mut Shell<SE>,
+     params: &ExecutionParameters,
++    background: bool,
+ ) -> Result<VecDeque<ExecutionSpawnResult>, error::Error> {
+     let pipeline_len = pipeline.seq.len();
+     let mut pipe_readers = vec![];
+@@ -1216,6 +1432,48 @@ async fn spawn_pipeline_processes(
+             cmd_params.open_files.set_fd(OpenFiles::STDOUT_FD, writer);
+         }
+ 
++        // Like Bash, run each stage of a multi-command (or background) pipeline in its own
++        // process. The stage keeps its parent's `$BASH_SUBSHELL`.
++        #[cfg(unix)]
++        if (!run_in_current_shell || background)
++            && !matches!(command, ast::Command::Fanout(_) | ast::Command::Collect(_))
++        {
++            if !run_in_current_shell && current_pipeline_index > 0 {
++                cmd_params.process_group_policy = ProcessGroupPolicy::SameProcessGroup;
++            }
++            let mut stage_shell = shell.clone();
++            stage_shell.set_depth(shell.depth());
++            stage_shell.set_exec_in_place(matches!(command, ast::Command::Simple(_)));
++            let stdin_is_terminal = !background
++                && cmd_params
++                    .try_fd(shell, OpenFiles::STDIN_FD)
++                    .is_some_and(|file| file.is_terminal());
++            let group = crate::subshell::ChildGroup::for_policy(
++                &cmd_params.process_group_policy,
++                process_group_id,
++                stdin_is_terminal,
++            );
++            let mut child_params = cmd_params.clone();
++            child_params.process_group_policy = ProcessGroupPolicy::SameProcessGroup;
++            let stage = command.clone();
++            let ignore_interrupts = background && !shell.options().enable_job_control;
++            if let Some(child) = fork_child(
++                stage_shell,
++                child_params,
++                group,
++                ignore_interrupts,
++                Box::new(move |shell, params| {
++                    Box::pin(async move { run_forked_stage(&stage, shell, params).await })
++                }),
++            )? {
++                if process_group_id.is_none() {
++                    process_group_id = child.pgid();
++                }
++                spawn_results.push_back(ExecutionSpawnResult::StartedProcess(child));
++                continue;
++            }
++        }
++
+         let pipeline_context = if !run_in_current_shell {
+             // Make sure that all commands in the pipeline are in the same process group.
+             if current_pipeline_index > 0 {
+@@ -1395,6 +1653,19 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::Command {
+                     }
+                 }
+ 
++                // A `( ... )` subshell is a process the pipeline waits for like any other.
++                #[cfg(unix)]
++                if let ast::CompoundCommand::Subshell(subshell) = compound
++                    && let Some(child) = fork_subshell_list(
++                        &pipeline_context.shell,
++                        &params,
++                        &subshell.list,
++                        pipeline_context.process_group_id,
++                    )?
++                {
++                    return Ok(ExecutionSpawnResult::StartedProcess(child));
++                }
++
+                 Ok(compound
+                     .execute(&mut pipeline_context.shell, &params)
+                     .await?
+@@ -1425,6 +1696,21 @@ impl Execute for ast::CompoundCommand {
+                 list.execute(shell, params).await
+             }
+             Self::Subshell(ast::SubshellCommand { list, .. }) => {
++                // Like Bash, run the subshell in its own process.
++                #[cfg(unix)]
++                if let Some(mut child) = fork_subshell_list(shell, params, list, None)? {
++                    let result = match child.wait().await? {
++                        processes::ProcessWaitResult::Completed { output, .. } => {
++                            ExecutionResult::from(output)
++                        }
++                        processes::ProcessWaitResult::Stopped => ExecutionResult::stopped(),
++                    };
++                    if shell.options().interactive {
++                        sys::terminal::move_self_to_foreground()?;
++                    }
++                    return Ok(ExecutionResult::from(result.exit_code));
++                }
++
+                 // Clone off a new subshell, and run the body of the subshell there.
+                 // TODO(source-info): Do we need to reset the line number?
+                 let mut subshell = shell.clone();
+@@ -1497,6 +1783,59 @@ impl Execute for ast::CoprocessCommand {
+         // Set up the pipes that we'll use to communicate with the coprocess.
+         let (stdin_reader, stdin_writer) = std::io::pipe()?;
+         let (stdout_reader, stdout_writer) = std::io::pipe()?;
++        let (stdin_reader, stdout_writer): (OpenFile, OpenFile) =
++            (stdin_reader.into(), stdout_writer.into());
++
++        // Like Bash, run the coprocess in its own process. Its shell is cloned
++        // before the parent's ends are installed, so the child closes them.
++        #[cfg(unix)]
++        if crate::subshell::available() {
++            let mut child_shell = shell.clone();
++            child_shell.options_mut().interactive = false;
++            let mut child_params = params.clone();
++            child_params
++                .open_files
++                .set_fd(OpenFiles::STDIN_FD, stdin_reader.clone());
++            child_params
++                .open_files
++                .set_fd(OpenFiles::STDOUT_FD, stdout_writer.clone());
++            child_params.process_group_policy = ProcessGroupPolicy::SameProcessGroup;
++            let job_control = shell.options().enable_job_control;
++            let group = if job_control {
++                crate::subshell::ChildGroup::New { foreground: false }
++            } else {
++                crate::subshell::ChildGroup::Inherit
++            };
++            let body = self.body.clone();
++            let child = fork_child(
++                child_shell,
++                child_params,
++                group,
++                !job_control,
++                Box::new(move |shell, params| {
++                    Box::pin(async move { run_forked_stage(&body, shell, params).await })
++                }),
++            )?;
++            if let Some(child) = child {
++                let pid = child.pid().unwrap_or_default();
++                let stdout_fd = shell.open_files_mut().add(stdout_reader.into())?;
++                let stdin_fd = shell.open_files_mut().add(stdin_writer.into())?;
++                shell.jobs_mut().add_as_current(jobs::Job::new(
++                    [jobs::JobTask::External(child)],
++                    format!("coproc {name}"),
++                    jobs::JobState::Running,
++                    false,
++                ));
++                let arr_value = ShellValue::from(vec![stdout_fd.to_string(), stdin_fd.to_string()]);
++                shell
++                    .env_mut()
++                    .set_global(name.clone(), ShellVariable::new(arr_value))?;
++                shell
++                    .env_mut()
++                    .set_global(format!("{name}_PID"), ShellVariable::new(pid.to_string()))?;
++                return Ok(ExecutionResult::success());
++            }
++        }
+ 
+         // Allocate new fds in the (parent) shell for the read end of the coprocess's stdout
+         // and the write end of the coprocess's stdin.
+@@ -1511,10 +1850,10 @@ impl Execute for ast::CoprocessCommand {
+         let mut child_params = params.clone();
+         child_params
+             .open_files
+-            .set_fd(OpenFiles::STDIN_FD, stdin_reader.into());
++            .set_fd(OpenFiles::STDIN_FD, stdin_reader);
+         child_params
+             .open_files
+-            .set_fd(OpenFiles::STDOUT_FD, stdout_writer.into());
++            .set_fd(OpenFiles::STDOUT_FD, stdout_writer);
+ 
+         let body = self.body.clone();
+         let join_handle = tokio::spawn(async move {
+@@ -1911,6 +2250,8 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
+         mut context: PipelineExecutionContext<'_, SE>,
+         mut params: ExecutionParameters,
+     ) -> Result<ExecutionSpawnResult, error::Error> {
++        // Only this command (not one it runs) may replace a forked child's process.
++        let exec_in_place = context.shell.take_exec_in_place();
+         let prefix_iter = self.prefix.as_ref().map(|s| s.0.iter()).unwrap_or_default();
+         let suffix_iter = self.suffix.as_ref().map(|s| s.0.iter()).unwrap_or_default();
+         let cmd_name_items = self
+@@ -2029,7 +2370,16 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
+                 process_group_id: context.process_group_id,
+             };
+ 
+-            match execute_command(context, params, cmd_name, &assignments, &args).await {
++            match execute_command(
++                context,
++                params,
++                cmd_name,
++                &assignments,
++                &args,
++                exec_in_place,
++            )
++            .await
++            {
+                 Ok(result) => Ok(result),
+                 Err(err) => {
+                     let _ = parent_shell.display_error(&mut stderr, &err);
+@@ -2081,6 +2431,7 @@ async fn execute_command<T: Into<String>>(
+     cmd_name: T,
+     assignments: &[&ast::Assignment],
+     args: &[CommandArg],
++    exec_in_place: bool,
+ ) -> Result<ExecutionSpawnResult, error::Error> {
+     // Push a new ephemeral environment scope for the duration of the command. We'll
+     // set command-scoped variable assignments after doing so, and revert them before
+@@ -2117,6 +2468,7 @@ async fn execute_command<T: Into<String>>(
+     let mut cmd =
+         commands::SimpleCommand::new(context.shell, params, cmd_name.into(), args.iter().cloned());
+     cmd.process_group_id = context.process_group_id;
++    cmd.exec_in_place = exec_in_place;
+ 
+     // Arrange to pop off that ephemeral environment scope.
+     cmd.post_execute = Some(|shell| shell.env_mut().pop_scope(EnvironmentScope::Command));
+@@ -2665,6 +3017,7 @@ fn setup_process_substitution(
+ ) -> Result<(ShellFd, OpenFile), error::Error> {
+     // TODO(execute): Don't execute synchronously!
+     // Execute in a subshell.
++    #[allow(unused_mut, reason = "rebound mutably on unix")]
+     let mut subshell = shell.clone();
+ 
+     // Set up execution parameters for the child execution.
+@@ -2686,6 +3039,36 @@ fn setup_process_substitution(
+         }
+     };
+ 
++    // Like Bash, run the substitution in its own process, reaped in the background.
++    #[cfg(unix)]
++    let (mut subshell, child_params) = {
++        let list = subshell_cmd.list.clone();
++        let mut forked_params = child_params.clone();
++        forked_params.process_group_policy = ProcessGroupPolicy::SameProcessGroup;
++        let mut child_shell = subshell.clone();
++        child_shell.set_depth(subshell.depth());
++        match fork_child(
++            child_shell,
++            forked_params,
++            crate::subshell::ChildGroup::Inherit,
++            false,
++            Box::new(move |shell, params| {
++                Box::pin(async move { run_list_reporting_errors(&list, shell, &params).await })
++            }),
++        )? {
++            Some(child) => {
++                if let Some(pid) = child.pid() {
++                    tokio::spawn(crate::subshell::wait_for_pid(pid));
++                }
++                drop(child);
++                drop(child_params);
++                drop(subshell);
++                return Ok((free_substitution_fd(params)?, target_file));
++            }
++            None => (subshell, child_params),
++        }
++    };
++
+     // Asynchronously spawn off the subshell; we intentionally don't block on its
+     // completion.
+     let subshell_cmd = subshell_cmd.to_owned();
+@@ -2697,8 +3080,11 @@ fn setup_process_substitution(
+             .await;
+     });
+ 
+-    // Starting at 63 (a.k.a. 64-1)--and decrementing--look for an
+-    // available fd.
++    Ok((free_substitution_fd(params)?, target_file))
++}
++
++/// Starting at 63 (a.k.a. 64-1)--and decrementing--looks for an available fd.
++fn free_substitution_fd(params: &ExecutionParameters) -> Result<ShellFd, error::Error> {
+     let mut candidate_fd_num = 63;
+     while params.open_files.contains_fd(candidate_fd_num) {
+         candidate_fd_num -= 1;
+@@ -2706,8 +3092,7 @@ fn setup_process_substitution(
+             return error::unimp("no available file descriptors");
+         }
+     }
+-
+-    Ok((candidate_fd_num, target_file))
++    Ok(candidate_fd_num)
+ }
+ 
+ fn setup_open_file_with_contents(contents: &str) -> Result<OpenFile, error::Error> {
+diff --git a/brush-core/src/lib.rs b/brush-core/src/lib.rs
+index 8f1b30c..130fcf6 100644
+--- a/brush-core/src/lib.rs
++++ b/brush-core/src/lib.rs
+@@ -33,6 +33,7 @@ mod regex;
+ pub mod results;
+ mod shell;
+ pub mod sourceinfo;
++pub mod subshell;
+ pub mod sys;
+ pub mod terminal;
+ pub mod tests;
+diff --git a/brush-core/src/openfiles.rs b/brush-core/src/openfiles.rs
+index a1bc450..adfb70d 100644
+--- a/brush-core/src/openfiles.rs
++++ b/brush-core/src/openfiles.rs
+@@ -353,11 +353,18 @@ impl OpenFiles {
+     /// Creates a new `OpenFiles` instance populated with stdin, stdout, and stderr
+     /// from the host environment.
+     pub(crate) fn new() -> Self {
++        // A standard descriptor closed when the shell started stays closed.
++        let open = |fd, file: OpenFile| {
++            (
++                fd,
++                (!crate::subshell::standard_descriptor_closed_at_startup(fd)).then_some(file),
++            )
++        };
+         Self {
+             files: HashMap::from([
+-                (Self::STDIN_FD, Some(std::io::stdin().into())),
+-                (Self::STDOUT_FD, Some(std::io::stdout().into())),
+-                (Self::STDERR_FD, Some(std::io::stderr().into())),
++                open(Self::STDIN_FD, std::io::stdin().into()),
++                open(Self::STDOUT_FD, std::io::stdout().into()),
++                open(Self::STDERR_FD, std::io::stderr().into()),
+             ]),
+         }
+     }
+diff --git a/brush-core/src/processes.rs b/brush-core/src/processes.rs
+index c069d1b..990dc88 100644
+--- a/brush-core/src/processes.rs
++++ b/brush-core/src/processes.rs
+@@ -40,6 +40,19 @@ impl ChildProcess {
+         }
+     }
+ 
++    /// Wraps a forked shell child (a real-process subshell).
++    #[cfg(unix)]
++    pub(crate) fn from_forked(forked: crate::subshell::Forked, term_trapped: bool) -> Self {
++        Self {
++            exec_future: Box::pin(crate::subshell::wait_for_pid(forked.pid)),
++            pid: Some(forked.pid),
++            pgid: forked.pgid,
++            interrupted: false,
++            term_trapped,
++            terminated: false,
++        }
++    }
++
+     /// Returns the process's ID.
+     pub const fn pid(&self) -> Option<sys::process::ProcessId> {
+         self.pid
+diff --git a/brush-core/src/shell.rs b/brush-core/src/shell.rs
+index 472c2f1..294bb70 100644
+--- a/brush-core/src/shell.rs
++++ b/brush-core/src/shell.rs
+@@ -105,6 +105,16 @@ pub struct Shell<SE: extensions::ShellExtensions = extensions::DefaultShellExten
+     /// Clone depth from the original ancestor shell.
+     depth: usize,
+ 
++    /// Whether this shell owns its process (the top-level shell or a forked
++    /// subshell), so `exec` may replace it.
++    #[cfg_attr(feature = "serde", serde(skip))]
++    owns_process: bool,
++
++    /// Whether the next simple command, if external, replaces this process
++    /// (the sole command of a forked child).
++    #[cfg_attr(feature = "serde", serde(skip))]
++    exec_in_place: bool,
++
+     /// Shell name
+     name: Option<String>,
+ 
+@@ -194,11 +204,38 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
+             key_bindings: self.key_bindings.clone(),
+             history: self.history.clone(),
+             depth: self.depth + 1,
++            owns_process: false,
++            exec_in_place: false,
+         }
+     }
+ }
+ 
+ impl<SE: extensions::ShellExtensions> Shell<SE> {
++    /// Sets the subshell depth (`$BASH_SUBSHELL`); a forked pipeline stage keeps its parent's.
++    pub(crate) fn set_depth(&mut self, depth: usize) {
++        self.depth = depth;
++    }
++
++    /// Returns whether this shell owns its process, so `exec` may replace it.
++    pub fn owns_process(&self) -> bool {
++        self.owns_process
++    }
++
++    /// Marks this shell as owning its (forked) process.
++    pub(crate) fn set_owns_process(&mut self) {
++        self.owns_process = true;
++    }
++
++    /// Arranges for the next simple command, if external, to replace this process.
++    pub(crate) fn set_exec_in_place(&mut self, value: bool) {
++        self.exec_in_place = value;
++    }
++
++    /// Takes the pending replace-this-process request.
++    pub(crate) fn take_exec_in_place(&mut self) -> bool {
++        std::mem::replace(&mut self.exec_in_place, false)
++    }
++
+     /// Identifies the alias state that parsing depends on: whether aliases
+     /// expand, and which aliases are defined.
+     pub(crate) fn alias_parse_state(&self) -> Option<u64> {
+diff --git a/brush-core/src/shell/builder.rs b/brush-core/src/shell/builder.rs
+index a2ae197..804e9a2 100644
+--- a/brush-core/src/shell/builder.rs
++++ b/brush-core/src/shell/builder.rs
+@@ -256,6 +256,8 @@ impl<SE: extensions::ShellExtensions> Default for Shell<SE> {
+             last_exit_status_change_count: 0,
+             last_pipeline_statuses: vec![0],
+             depth: 0,
++            owns_process: true,
++            exec_in_place: false,
+             name: None,
+             args: vec![],
+             version: None,
+diff --git a/brush-core/src/sys/unix/commands.rs b/brush-core/src/sys/unix/commands.rs
+index dda8e71..e8605f9 100644
+--- a/brush-core/src/sys/unix/commands.rs
++++ b/brush-core/src/sys/unix/commands.rs
+@@ -108,10 +108,19 @@ pub fn exec_with_script_fallback(
+             })
+         })
+         .collect::<std::io::Result<Vec<_>>>()?;
+-    // The interpreter only uses descriptors it is told about.
++    // The interpreter only uses descriptors it is told about, and keeps closed
++    // standard descriptors closed (the Rust runtime reopens them on /dev/null).
++    let inherited_fds: Vec<_> = inherited_fds.collect();
+     let inherited = inherited_fds
+-        .filter(|fd| *fd > 2)
+-        .map(|fd| CString::new(format!("--inherit-fd={fd}")).map_err(std::io::Error::other))
++        .iter()
++        .filter(|fd| **fd > 2)
++        .map(|fd| format!("--inherit-fd={fd}"))
++        .chain(
++            (0..=2)
++                .filter(|fd| !inherited_fds.contains(fd))
++                .map(|fd| format!("--closed-fd={fd}")),
++        )
++        .map(|arg| CString::new(arg).map_err(std::io::Error::other))
+         .collect::<std::io::Result<Vec<_>>>()?;
+     let argv0 = cstring(argv0)?;
+     let script = cstring(script)?;
+diff --git a/brush-core/src/traps.rs b/brush-core/src/traps.rs
+index b05ef5a..8f3c157 100644
+--- a/brush-core/src/traps.rs
++++ b/brush-core/src/traps.rs
+@@ -193,6 +193,9 @@ pub struct TrapHandler {
+ pub struct TrapHandlerConfig {
+     /// Registered handlers for traps; maps signal type to command.
+     handlers: HashMap<TrapSignal, TrapHandler>,
++    /// Counts handler changes, so a forked subshell can tell whether it set its own traps.
++    #[cfg_attr(feature = "serde", serde(skip))]
++    generation: u64,
+ }
+ 
+ impl TrapHandlerConfig {
+@@ -212,6 +215,11 @@ impl TrapHandlerConfig {
+         self.handlers.get(&signal_type)
+     }
+ 
++    /// Returns a counter that changes whenever a handler is registered or removed.
++    pub const fn generation(&self) -> u64 {
++        self.generation
++    }
++
+     /// Returns whether a handler is registered for the given signal.
+     pub fn handles(&self, signal_type: TrapSignal) -> bool {
+         self.handlers.contains_key(&signal_type)
+@@ -230,6 +238,11 @@ impl TrapHandlerConfig {
+         command: String,
+         source_info: crate::SourceInfo,
+     ) {
++        self.generation += 1;
++        #[cfg(unix)]
++        if let TrapSignal::Signal(signal) = signal_type {
++            crate::subshell::restore_trapped_signal(signal as i32);
++        }
+         let _ = self.handlers.insert(
+             signal_type,
+             TrapHandler {
+@@ -245,6 +258,7 @@ impl TrapHandlerConfig {
+     ///
+     /// * `signal_type` - The type of signal to remove handlers for.
+     pub fn remove_handlers(&mut self, signal_type: TrapSignal) {
++        self.generation += 1;
+         self.handlers.remove(&signal_type);
+     }
+ }
+diff --git a/brush-core/src/wellknownvars.rs b/brush-core/src/wellknownvars.rs
+index cb347ba..1a47df6 100644
+--- a/brush-core/src/wellknownvars.rs
++++ b/brush-core/src/wellknownvars.rs
+@@ -82,8 +82,11 @@ pub(crate) fn init_well_known_vars(
+     // BASHPID
+     #[cfg(not(target_family = "wasm"))]
+     {
+-        let mut bashpid_var =
+-            ShellVariable::new(ShellValue::String(std::process::id().to_string()));
++        let _ = crate::subshell::shell_pid();
++        let mut bashpid_var = ShellVariable::new(ShellValue::Dynamic {
++            getter: |_| std::process::id().to_string().into(),
++            setter: |_| (),
++        });
+         bashpid_var.treat_as_integer();
+         shell.env_mut().set_global("BASHPID", bashpid_var)?;
+     }
+diff --git a/brush-shell/src/args.rs b/brush-shell/src/args.rs
+index f5c2342..9c412fb 100644
+--- a/brush-shell/src/args.rs
++++ b/brush-shell/src/args.rs
+@@ -96,6 +96,10 @@ pub struct CommandLineArgs {
+     #[clap(long = "inherit-fd", value_name = "FD", help_heading = HEADING_STANDARD_OPTIONS)]
+     pub inherited_fds: Vec<i32>,
+ 
++    /// Standard descriptors (0-2) the parent process had closed.
++    #[clap(long = "closed-fd", value_name = "FD", hide = true)]
++    pub closed_fds: Vec<i32>,
++
+     /// Make shell act as if it had been invoked as a login shell.
+     #[clap(short = 'l', long = "login", help_heading = HEADING_STANDARD_OPTIONS)]
+     pub login: bool,
+diff --git a/brush-shell/src/entry.rs b/brush-shell/src/entry.rs
+index b46f7f4..1b0fdce 100644
+--- a/brush-shell/src/entry.rs
++++ b/brush-shell/src/entry.rs
+@@ -50,6 +50,7 @@ fn qualify_plus_options(args: &mut [String]) {
+         "-O",
+         "--config",
+         "--inherit-fd",
++        "--closed-fd",
+         "--rcfile",
+         "--init-file",
+         "--xtrace-file",
+@@ -245,10 +246,13 @@ pub fn run_from(mut args: Vec<String>) -> i32 {
+     #[cfg(not(any(unix, windows)))]
+     let mut builder = tokio::runtime::Builder::new_current_thread();
+ 
++    // Real-process subshells need to know which descriptors the runtime opens.
++    brush_core::subshell::note_descriptors_before_runtime();
+     let Ok(runtime) = builder.enable_all().build() else {
+         tracing::error!("error: failed to create Tokio runtime");
+         return 1;
+     };
++    brush_core::subshell::note_descriptors_after_runtime();
+ 
+     let result = runtime.block_on(run_async(&args, parsed_args));
+     // A canceled asynchronous stdin read may still have a blocking read in
+@@ -591,6 +595,11 @@ async fn instantiate_shell_from_args(
+         brush_builtins::BuiltinSet::BashMode
+     };
+ 
++    // Standard descriptors the parent closed stay closed.
++    for fd in &args.closed_fds {
++        brush_core::subshell::mark_standard_descriptor_closed(*fd);
++    }
++
+     // Identify the file descriptors to inherit.
+     let fds = args
+         .inherited_fds
+diff --git a/brush-core/src/subshell.rs b/brush-core/src/subshell.rs
+new file mode 100644
+index 0000000..17776d3
+--- /dev/null
++++ b/brush-core/src/subshell.rs
+@@ -0,0 +1,453 @@
++//! Real-process subshells.
++//!
++//! Bash runs `( ... )`, background lists, pipeline stages, coprocesses, and
++//! process substitutions in forked children, so `$BASHPID`, `exit`, signal
++//! delivery, and `wait PID` all observe a real process. The shell runs on a
++//! multi-threaded Tokio runtime, so a forked child must not touch the parent's
++//! runtime: it starts a fresh runtime on a new thread, runs the already-parsed
++//! command there, and leaves with `_exit`.
++//!
++//! Tokio routes every signal through one process-global socket pair. A child
++//! that kept sharing it with the parent could consume the parent's wakeups (or
++//! lose its own), so the child replaces both ends with a fresh pair before it
++//! builds its runtime. The embedding entry point records which descriptors
++//! hold that pair; without the record forking is unavailable and callers keep
++//! the in-process behavior.
++
++/// How a forked child joins process groups.
++#[derive(Clone, Copy, Debug)]
++pub(crate) enum ChildGroup {
++    /// Stay in the parent's process group.
++    Inherit,
++    /// Lead a new process group, optionally taking the terminal.
++    New {
++        /// Whether the new group takes the terminal foreground.
++        foreground: bool,
++    },
++    /// Join an existing process group.
++    Join(i32),
++}
++
++impl ChildGroup {
++    /// Chooses the group a forked child takes for `policy`, mirroring external commands.
++    pub(crate) fn for_policy(
++        policy: &crate::ProcessGroupPolicy,
++        existing: Option<i32>,
++        stdin_is_terminal: bool,
++    ) -> Self {
++        match policy {
++            crate::ProcessGroupPolicy::NewProcessGroup => Self::New {
++                foreground: stdin_is_terminal,
++            },
++            crate::ProcessGroupPolicy::SameProcessGroup => {
++                existing.map_or(Self::Inherit, Self::Join)
++            }
++        }
++    }
++}
++
++/// Signal setup for a forked child.
++#[derive(Clone, Debug, Default)]
++pub(crate) struct ChildSignals {
++    /// Ignore SIGINT and SIGQUIT (an asynchronous list without job control).
++    pub ignore_interrupts: bool,
++    /// Restore default job-control stop signals (the parent is interactive).
++    pub default_stop_signals: bool,
++    /// Signals the shell ignores with `trap ''`; they stay ignored.
++    pub ignored: Vec<i32>,
++}
++
++/// A forked child as seen by the parent.
++#[derive(Clone, Copy, Debug)]
++pub(crate) struct Forked {
++    /// The child's process ID.
++    pub pid: i32,
++    /// The child's process group, when the parent knows it.
++    pub pgid: Option<i32>,
++}
++
++#[cfg(unix)]
++pub(crate) use imp::standard_descriptor_closed_at_startup;
++#[cfg(unix)]
++pub(crate) use imp::{available, fork, restore_trapped_signal, shell_pid, wait_for_pid};
++#[cfg(unix)]
++pub use imp::{
++    mark_standard_descriptor_closed, note_descriptors_after_runtime,
++    note_descriptors_before_runtime,
++};
++
++#[cfg(not(unix))]
++/// Records descriptors before the runtime is built (no-op on this platform).
++pub fn note_descriptors_before_runtime() {}
++#[cfg(not(unix))]
++/// Records descriptors after the runtime is built (no-op on this platform).
++pub fn note_descriptors_after_runtime() {}
++
++#[cfg(not(unix))]
++/// Marks a standard descriptor as closed at startup (no-op on this platform).
++pub fn mark_standard_descriptor_closed(_fd: i32) {}
++
++#[cfg(not(unix))]
++pub(crate) const fn standard_descriptor_closed_at_startup(_fd: i32) -> bool {
++    false
++}
++
++#[cfg(not(unix))]
++pub(crate) fn shell_pid() -> u32 {
++    std::process::id()
++}
++
++#[cfg(not(unix))]
++pub(crate) const fn available() -> bool {
++    false
++}
++
++#[cfg(not(unix))]
++pub(crate) fn restore_trapped_signal(_signal: i32) {}
++
++#[cfg(unix)]
++mod imp {
++    use super::{ChildGroup, ChildSignals, Forked};
++    use std::collections::HashSet;
++    use std::io::Write as _;
++    use std::os::fd::RawFd;
++    use std::sync::atomic::{AtomicU32, Ordering};
++    use std::sync::{Mutex, OnceLock};
++
++    static SHELL_PID: AtomicU32 = AtomicU32::new(0);
++    static DESCRIPTORS_BEFORE_RUNTIME: Mutex<Option<HashSet<RawFd>>> = Mutex::new(None);
++    /// The runtime signal socket pair, grouped by socket (each end may have duplicates).
++    static SIGNAL_SOCKETS: OnceLock<Option<[Vec<RawFd>; 2]>> = OnceLock::new();
++    /// Dispositions a forked child replaced, restored if it traps the signal.
++    static SAVED_ACTIONS: Mutex<Vec<(i32, libc::sigaction)>> = Mutex::new(Vec::new());
++
++    static CLOSED_AT_STARTUP: [std::sync::atomic::AtomicBool; 3] = [
++        std::sync::atomic::AtomicBool::new(false),
++        std::sync::atomic::AtomicBool::new(false),
++        std::sync::atomic::AtomicBool::new(false),
++    ];
++
++    /// Records that standard descriptor `fd` was closed when this shell was
++    /// started (the Rust runtime then opened `/dev/null` there). The shell keeps
++    /// treating it as closed, and the placeholder no longer leaks to children.
++    /// Call before the shell is built.
++    pub fn mark_standard_descriptor_closed(fd: i32) {
++        let Some(closed) = usize::try_from(fd)
++            .ok()
++            .and_then(|i| CLOSED_AT_STARTUP.get(i))
++        else {
++            return;
++        };
++        // SAFETY: only sets the close-on-exec flag of this descriptor number.
++        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
++        closed.store(true, Ordering::SeqCst);
++    }
++
++    /// Whether standard descriptor `fd` was closed when the shell started.
++    pub(crate) fn standard_descriptor_closed_at_startup(fd: i32) -> bool {
++        usize::try_from(fd)
++            .ok()
++            .and_then(|fd| CLOSED_AT_STARTUP.get(fd))
++            .is_some_and(|closed| closed.load(Ordering::SeqCst))
++    }
++
++    /// Returns the PID that `$$` reports: the top-level shell's, even in a subshell.
++    pub(crate) fn shell_pid() -> u32 {
++        let _ =
++            SHELL_PID.compare_exchange(0, std::process::id(), Ordering::SeqCst, Ordering::SeqCst);
++        SHELL_PID.load(Ordering::SeqCst)
++    }
++
++    fn open_descriptors() -> Vec<RawFd> {
++        let directory = if cfg!(target_os = "linux") {
++            "/proc/self/fd"
++        } else {
++            "/dev/fd"
++        };
++        let Ok(entries) = std::fs::read_dir(directory) else {
++            return Vec::new();
++        };
++        entries
++            .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse().ok())
++            // SAFETY: F_GETFD only inspects the descriptor; it drops the directory's own fd.
++            .filter(|fd| unsafe { libc::fcntl(*fd, libc::F_GETFD) } != -1)
++            .collect()
++    }
++
++    fn unnamed_stream_socket(fd: RawFd) -> Option<u64> {
++        // SAFETY: zeroed stat is a valid out-parameter.
++        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
++        // SAFETY: fstat writes only into `stat`.
++        if unsafe { libc::fstat(fd, &raw mut stat) } != 0
++            || (stat.st_mode & libc::S_IFMT) != libc::S_IFSOCK
++        {
++            return None;
++        }
++        // SAFETY: zeroed sockaddr_storage is a valid out-parameter.
++        let mut address: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
++        #[allow(clippy::cast_possible_truncation)]
++        let mut length = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
++        // SAFETY: getsockname writes at most `length` bytes into `address`.
++        if unsafe { libc::getsockname(fd, (&raw mut address).cast(), &raw mut length) } != 0
++            || i32::from(address.ss_family) != libc::AF_UNIX
++        {
++            return None;
++        }
++        #[allow(clippy::useless_conversion)]
++        Some(u64::from(stat.st_ino))
++    }
++
++    /// Records the descriptors open before the embedding builds its Tokio runtime.
++    pub fn note_descriptors_before_runtime() {
++        let _ = shell_pid();
++        if let Ok(mut before) = DESCRIPTORS_BEFORE_RUNTIME.lock() {
++            *before = Some(open_descriptors().into_iter().collect());
++        }
++    }
++
++    /// Identifies the runtime's signal socket pair among descriptors opened since
++    /// [`note_descriptors_before_runtime`]. Enables real-process subshells.
++    pub fn note_descriptors_after_runtime() {
++        let Some(before) = DESCRIPTORS_BEFORE_RUNTIME
++            .lock()
++            .ok()
++            .and_then(|mut b| b.take())
++        else {
++            return;
++        };
++        let mut groups: Vec<(u64, Vec<RawFd>)> = Vec::new();
++        for fd in open_descriptors() {
++            if before.contains(&fd) {
++                continue;
++            }
++            if let Some(inode) = unnamed_stream_socket(fd) {
++                match groups.iter_mut().find(|(i, _)| *i == inode) {
++                    Some((_, fds)) => fds.push(fd),
++                    None => groups.push((inode, vec![fd])),
++                }
++            }
++        }
++        let pair = match <[(u64, Vec<RawFd>); 2]>::try_from(groups) {
++            Ok([(_, first), (_, second)]) => Some([first, second]),
++            Err(_) => None,
++        };
++        let _ = SIGNAL_SOCKETS.set(pair);
++    }
++
++    /// Whether real-process subshells are available.
++    pub(crate) fn available() -> bool {
++        matches!(SIGNAL_SOCKETS.get(), Some(Some(_)))
++    }
++
++    /// Reinstalls the runtime's handler for `signal` after a forked child that
++    /// had reset it to the default disposition registers a trap for it.
++    pub(crate) fn restore_trapped_signal(signal: i32) {
++        let Ok(mut saved) = SAVED_ACTIONS.lock() else {
++            return;
++        };
++        if let Some(index) = saved.iter().position(|(s, _)| *s == signal) {
++            let (_, action) = saved.swap_remove(index);
++            // SAFETY: reinstalls an action previously returned by sigaction.
++            unsafe { libc::sigaction(signal, &raw const action, std::ptr::null_mut()) };
++        }
++    }
++
++    fn set_disposition(signal: i32, handler: libc::sighandler_t, save: bool) {
++        // SAFETY: zeroed sigaction with an empty mask is valid.
++        let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
++        action.sa_sigaction = handler;
++        // SAFETY: zeroed old-action out-parameter.
++        let mut old: libc::sigaction = unsafe { std::mem::zeroed() };
++        // SAFETY: installs SIG_DFL/SIG_IGN, which run no code in this process.
++        if unsafe { libc::sigaction(signal, &raw const action, &raw mut old) } == 0
++            && save
++            && old.sa_sigaction != libc::SIG_DFL
++            && old.sa_sigaction != libc::SIG_IGN
++            && let Ok(mut saved) = SAVED_ACTIONS.lock()
++        {
++            saved.push((signal, old));
++        }
++    }
++
++    fn replace_signal_sockets() -> bool {
++        let Some(Some(groups)) = SIGNAL_SOCKETS.get() else {
++            return false;
++        };
++        let mut pair = [0; 2];
++        // SAFETY: socketpair writes two descriptors into `pair`.
++        if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, pair.as_mut_ptr()) } != 0
++        {
++            return false;
++        }
++        for (fresh, fds) in pair.iter().zip(groups) {
++            for fd in fds {
++                // SAFETY: replaces the runtime's descriptor number with the fresh socket.
++                unsafe {
++                    libc::dup2(*fresh, *fd);
++                    libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC);
++                    let flags = libc::fcntl(*fd, libc::F_GETFL);
++                    libc::fcntl(*fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
++                }
++            }
++            // SAFETY: the fresh descriptor is now duplicated where it is needed.
++            unsafe { libc::close(*fresh) };
++        }
++        true
++    }
++
++    /// Closes inherited close-on-exec pipes the child does not use, so pipeline
++    /// peers see end-of-file and `SIGPIPE` as they would with Bash.
++    fn close_foreign_pipes(keep: &HashSet<RawFd>) {
++        for fd in open_descriptors() {
++            if fd <= 2 || keep.contains(&fd) {
++                continue;
++            }
++            // SAFETY: inspects descriptor flags and type only.
++            let cloexec = unsafe { libc::fcntl(fd, libc::F_GETFD) };
++            if cloexec == -1 || cloexec & libc::FD_CLOEXEC == 0 {
++                continue;
++            }
++            // SAFETY: zeroed stat is a valid out-parameter.
++            let mut stat: libc::stat = unsafe { std::mem::zeroed() };
++            // SAFETY: fstat writes only into `stat`.
++            if unsafe { libc::fstat(fd, &raw mut stat) } == 0
++                && (stat.st_mode & libc::S_IFMT) == libc::S_IFIFO
++            {
++                // SAFETY: the child holds no live object for this inherited pipe.
++                unsafe { libc::close(fd) };
++            }
++        }
++    }
++
++    fn exit_child(code: i32) -> ! {
++        let _ = std::io::stdout().flush();
++        let _ = std::io::stderr().flush();
++        // SAFETY: leaves without running the parent's destructors or atexit handlers.
++        unsafe { libc::_exit(code) }
++    }
++
++    /// Forks a child that runs `body` on a fresh runtime and exits with its status.
++    ///
++    /// Returns `Ok(None)` when forking is unavailable. `keep` lists the
++    /// descriptors the child's shell references; other inherited close-on-exec
++    /// pipes are closed in the child.
++    pub(crate) fn fork<F, Fut>(
++        group: ChildGroup,
++        signals: &ChildSignals,
++        keep: HashSet<RawFd>,
++        body: F,
++    ) -> Result<Option<Forked>, crate::error::Error>
++    where
++        F: FnOnce() -> Fut + Send + 'static,
++        Fut: std::future::Future<Output = i32>,
++    {
++        if !available() {
++            return Ok(None);
++        }
++        let _ = std::io::stdout().flush();
++        let _ = std::io::stderr().flush();
++        // SAFETY: the child only uses fork-safe state: it replaces the runtime's
++        // signal sockets, never touches the parent's runtime, and leaves with _exit.
++        let pid = unsafe { libc::fork() };
++        if pid < 0 {
++            return Err(std::io::Error::last_os_error().into());
++        }
++        if pid == 0 {
++            if !replace_signal_sockets() {
++                exit_child(126);
++            }
++            match group {
++                ChildGroup::Inherit => {}
++                ChildGroup::New { foreground } => {
++                    // SAFETY: changes only this process's group.
++                    unsafe { libc::setpgid(0, 0) };
++                    if foreground {
++                        let _ = crate::sys::terminal::move_self_to_foreground();
++                    }
++                }
++                ChildGroup::Join(pgid) => {
++                    // SAFETY: changes only this process's group.
++                    unsafe { libc::setpgid(0, pgid) };
++                }
++            }
++            let interrupt = if signals.ignore_interrupts {
++                libc::SIG_IGN
++            } else {
++                libc::SIG_DFL
++            };
++            for (signal, handler) in [
++                (libc::SIGINT, interrupt),
++                (libc::SIGQUIT, interrupt),
++                (libc::SIGTERM, libc::SIG_DFL),
++                (libc::SIGPIPE, libc::SIG_DFL),
++            ] {
++                let handler = if signals.ignored.contains(&signal) {
++                    libc::SIG_IGN
++                } else {
++                    handler
++                };
++                set_disposition(signal, handler, true);
++            }
++            if signals.default_stop_signals {
++                for signal in [libc::SIGTSTP, libc::SIGTTIN, libc::SIGTTOU] {
++                    if !signals.ignored.contains(&signal) {
++                        set_disposition(signal, libc::SIG_DFL, true);
++                    }
++                }
++            }
++            close_foreign_pipes(&keep);
++            let thread = std::thread::Builder::new().spawn(move || {
++                let runtime = tokio::runtime::Builder::new_multi_thread()
++                    .worker_threads(2)
++                    .enable_all()
++                    .build();
++                let code = match runtime {
++                    Ok(runtime) => runtime.block_on(body()),
++                    Err(_) => 126,
++                };
++                exit_child(code)
++            });
++            if let Ok(thread) = thread {
++                let _ = thread.join();
++            }
++            exit_child(126);
++        }
++        let pgid = match group {
++            ChildGroup::Inherit => None,
++            ChildGroup::New { .. } => Some(pid),
++            ChildGroup::Join(pgid) => Some(pgid),
++        };
++        if let Some(pgid) = pgid {
++            // SAFETY: mirrors the child's own setpgid so either order wins the race.
++            unsafe { libc::setpgid(pid, pgid) };
++        }
++        drop(body);
++        Ok(Some(Forked { pid, pgid }))
++    }
++
++    /// Waits for a forked child to exit, returning its status as process output.
++    pub(crate) async fn wait_for_pid(pid: i32) -> std::io::Result<std::process::Output> {
++        use std::os::unix::process::ExitStatusExt as _;
++        let mut sigchld = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::child())?;
++        loop {
++            let mut status = 0;
++            // SAFETY: waits only for this specific child.
++            let result = unsafe { libc::waitpid(pid, &raw mut status, libc::WNOHANG) };
++            if result == pid {
++                return Ok(std::process::Output {
++                    status: std::process::ExitStatus::from_raw(status),
++                    stdout: Vec::new(),
++                    stderr: Vec::new(),
++                });
++            }
++            if result == -1 {
++                let error = std::io::Error::last_os_error();
++                if error.kind() != std::io::ErrorKind::Interrupted {
++                    return Err(error);
++                }
++                continue;
++            }
++            let _ = sigchld.recv().await;
++        }
++    }
++}

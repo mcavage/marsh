@@ -1,0 +1,116 @@
+diff --git a/brush-core/src/expansion.rs b/brush-core/src/expansion.rs
+index 34e7a6e..05e8648 100644
+--- a/brush-core/src/expansion.rs
++++ b/brush-core/src/expansion.rs
+@@ -959,6 +959,7 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+ 
+         let options = patterns::FilenameExpansionOptions {
+             require_dot_in_pattern_to_match_dot_files: !self.shell.options().glob_matches_dotfiles,
++            globstar: self.shell.options().enable_star_star_glob,
+         };
+ 
+         // On error (e.g. malformed pattern), default to NoGlob so the field
+diff --git a/brush-core/src/patterns.rs b/brush-core/src/patterns.rs
+index 2564c6d..a9d330c 100644
+--- a/brush-core/src/patterns.rs
++++ b/brush-core/src/patterns.rs
+@@ -27,6 +27,36 @@ type PatternWord = Vec<PatternPiece>;
+ #[derive(Clone, Debug, Default)]
+ pub(crate) struct FilenameExpansionOptions {
+     pub require_dot_in_pattern_to_match_dot_files: bool,
++    /// `globstar`: a `**` path component matches any number of directories.
++    pub globstar: bool,
++}
++
++/// Appends `dir`'s descendants (directories only, or every entry) in sorted
++/// pre-order, skipping dot entries unless allowed. Like Bash, `**` does not
++/// descend through symbolic links to directories.
++fn push_descendants(
++    dir: &Path,
++    directories_only: bool,
++    allow_dot_files: bool,
++    out: &mut Vec<std::path::PathBuf>,
++) {
++    let Ok(entries) = dir.read_dir() else {
++        return;
++    };
++    let mut entries: Vec<_> = entries
++        .filter_map(Result::ok)
++        .filter(|entry| allow_dot_files || !entry.file_name().to_string_lossy().starts_with('.'))
++        .collect();
++    entries.sort_by_key(std::fs::DirEntry::file_name);
++    for entry in entries {
++        let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
++        if is_dir || !directories_only {
++            out.push(entry.path());
++        }
++        if is_dir {
++            push_descendants(&entry.path(), directories_only, allow_dot_files, out);
++        }
++    }
+ }
+ 
+ /// Result of a pattern expansion, distinguishing "no glob metacharacters" from
+@@ -256,7 +286,40 @@ impl Pattern {
+             vec![working_dir.to_path_buf()]
+         };
+ 
+-        for component in components {
++        let component_count = components.len();
++        let trailing_slash = components
++            .last()
++            .is_some_and(|c| c.iter().all(|p| p.as_str().is_empty()));
++        let mut used_globstar = false;
++        for (component_index, component) in components.into_iter().enumerate() {
++            if options.globstar
++                && matches!(component.as_slice(), [PatternPiece::Pattern(p)] if p == "**")
++            {
++                used_globstar = true;
++                let last = component_index + 1 == component_count;
++                let allow_dot_files = !options.require_dot_in_pattern_to_match_dot_files;
++                let current_paths = std::mem::take(&mut paths_so_far);
++                for current_path in current_paths {
++                    if last {
++                        // A final `**` names the directory itself (as `dir/`) unless it is
++                        // the implicit working directory, and everything below it.
++                        if component_index > 0 {
++                            paths_so_far.push(current_path.join(""));
++                        }
++                        push_descendants(&current_path, false, allow_dot_files, &mut paths_so_far);
++                    } else {
++                        // `**/` alone lists directories below, not the working directory.
++                        let only_dirs_follow =
++                            trailing_slash && component_index + 2 == component_count;
++                        if component_index > 0 || !only_dirs_follow {
++                            paths_so_far.push(current_path.clone());
++                        }
++                        push_descendants(&current_path, true, allow_dot_files, &mut paths_so_far);
++                    }
++                }
++                continue;
++            }
++
+             if !component.iter().any(|piece| {
+                 matches!(piece, PatternPiece::Pattern(_))
+                     && requires_expansion(piece.as_str(), self.enable_extended_globbing)
+@@ -321,7 +384,7 @@ impl Pattern {
+             }
+         }
+ 
+-        let results: Vec<_> = paths_so_far
++        let mut results: Vec<_> = paths_so_far
+             .into_iter()
+             .filter_map(|path| {
+                 if let Some(filter) = path_filter
+@@ -348,6 +411,11 @@ impl Pattern {
+             })
+             .collect();
+ 
++        if used_globstar {
++            results.sort();
++            results.dedup();
++        }
++
+         tracing::debug!(target: trace_categories::PATTERN, "  => results: {results:?}");
+ 
+         Ok(PatternExpansionResult::Expanded(results))

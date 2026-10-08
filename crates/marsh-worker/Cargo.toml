@@ -1,0 +1,22 @@
+[package]
+name = "marsh-worker"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+marsh-contracts = { path = "../marsh-contracts" }
+marsh-runtime = { path = "../marsh-runtime" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+rustix = { version = "1.1", features = ["fs", "process"] }
+
+[[bin]]
+name = "marsh-worker"
+path = "src/main.rs"

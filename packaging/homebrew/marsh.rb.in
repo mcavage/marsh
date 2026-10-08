@@ -1,0 +1,40 @@
+# Homebrew formula for marsh. Rendered by scripts/render-formula.py at release
+# time and pushed to the tap (github.com/mcavage/homebrew-tap, Formula/marsh.rb).
+# Do not edit the rendered copy; edit this template.
+class Marsh < Formula
+  desc "Bash-compatible shell whose agents and tools run in sandboxed containers"
+  homepage "https://runmar.sh"
+  url "https://github.com/@REPOSITORY@/releases/download/v@VERSION@/marsh-@VERSION@-darwin-arm64.tar.gz"
+  sha256 "@SHA256@"
+  license "Apache-2.0"
+
+  depends_on arch: :arm64
+  depends_on :macos
+
+  def install
+    # marsh and marshd resolve their own symlinks to find the release tree
+    # (bin/marshd and libexec/marsh), so plain links on PATH work.
+    libexec.install "bin", "libexec", "share"
+    %w[marsh msh marshd marsh-mcp].each do |name|
+      bin.install_symlink libexec/"bin"/name
+    end
+    man1.install Dir[libexec/"share/man/man1/*.1"]
+    prefix.install "LICENSE", "NOTICE"
+  end
+
+  # A formula cannot depend on a cask, and stock sbx ships only as the
+  # docker/tap/sbx cask. The caveat below and marsh's own startup error (no
+  # sbx on PATH) print the same command; keep them in step with
+  # SBX_INSTALL_HINT in crates/marsh/src/client.rs.
+  def caveats
+    <<~EOS
+      marsh needs Docker Sandboxes: brew install docker/tap/sbx; then `sbx login`
+      (sbx 0.45.0 or newer). Then open a shell in a project:
+        cd ~/your/project && marsh
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/marsh --version")
+  end
+end

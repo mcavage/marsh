@@ -1,0 +1,7 @@
+{
+  "url": "https://api.github.com/repos/denoland/rusty_v8/git/trees/5c15a6995c9bb4bacd3e341b59fff32c909c80bf?recursive=1",
+  "sha256": "77a8b27127659d526949671961ceabcd18f1b0f24683fd33d98ce36d0e53b5c7",
+  "size": 44696,
+  "integrity": null,
+  "signature_verified": false
+}

@@ -1,0 +1,161 @@
+diff --git a/brush-core/src/builtins.rs b/brush-core/src/builtins.rs
+index 66692b9..e0b2687 100644
+--- a/brush-core/src/builtins.rs
++++ b/brush-core/src/builtins.rs
+@@ -3,6 +3,7 @@
+ use clap::builder::styling;
+ pub use futures::future::BoxFuture;
+ use std::io::Write;
++use std::path::PathBuf;
+ 
+ use crate::{BuiltinError, CommandArg, commands, error, extensions, results};
+ 
+@@ -29,6 +30,17 @@ pub type CommandExecuteFunc<SE: extensions::ShellExtensions> =
+ pub type CommandContentFunc =
+     fn(&str, ContentType, &ContentOptions) -> Result<String, error::Error>;
+ 
++/// A builtin name whose implementation is an ordinary child process.
++#[derive(Clone)]
++pub struct ProcessShim {
++    /// Executable launched for the registered name.
++    pub executable: PathBuf,
++    /// Arguments inserted before the arguments supplied by the user.
++    pub prefix_args: Vec<String>,
++    /// Optional `argv[0]` presented to the child.
++    pub argv0: Option<String>,
++}
++
+ /// Trait implemented by built-in shell commands.
+ pub trait Command: clap::Parser {
+     /// The error type returned by the command.
+@@ -164,12 +176,15 @@ pub struct Registration<SE: extensions::ShellExtensions> {
+ 
+     /// Is this builtin one that takes specially handled declarations?
+     pub declaration_builtin: bool,
++
++    /// Launch this registration with the external process machinery.
++    pub process_shim: Option<ProcessShim>,
+ }
+ 
+ impl<SE: extensions::ShellExtensions> Registration<SE> {
+     /// Updates the given registration to mark it for a special builtin.
+     #[must_use]
+-    pub const fn special(self) -> Self {
++    pub fn special(self) -> Self {
+         Self {
+             special_builtin: true,
+             ..self
+@@ -382,6 +397,7 @@ pub fn simple_builtin<B: SimpleCommand + Send + Sync, SE: extensions::ShellExten
+         disabled: false,
+         special_builtin: false,
+         declaration_builtin: false,
++        process_shim: None,
+     }
+ }
+ 
+@@ -394,6 +410,7 @@ pub fn builtin<B: Command + Send + Sync, SE: extensions::ShellExtensions>() -> R
+         disabled: false,
+         special_builtin: false,
+         declaration_builtin: false,
++        process_shim: None,
+     }
+ }
+ 
+@@ -408,6 +425,7 @@ pub fn decl_builtin<B: DeclarationCommand + Send + Sync, SE: extensions::ShellEx
+         disabled: false,
+         special_builtin: false,
+         declaration_builtin: true,
++        process_shim: None,
+     }
+ }
+ 
+@@ -428,6 +446,7 @@ pub fn raw_arg_builtin<
+         disabled: false,
+         special_builtin: false,
+         declaration_builtin: true,
++        process_shim: None,
+     }
+ }
+ 
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index 6fc537e..a70fdf9 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -385,6 +385,9 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
+         // then invoke it.
+         if let Some(builtin) = builtin {
+             if !builtin.disabled {
++                if let Some(shim) = builtin.process_shim.clone() {
++                    return self.execute_via_process_shim(shim);
++                }
+                 return self.execute_via_builtin(builtin).await;
+             }
+         }
+@@ -557,6 +560,19 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
+ 
+         result
+     }
++
++    fn execute_via_process_shim(
++        mut self,
++        shim: builtins::ProcessShim,
++    ) -> Result<ExecutionSpawnResult, error::Error> {
++        let mut args = Vec::with_capacity(self.args.len() + shim.prefix_args.len());
++        args.push(CommandArg::String(String::new()));
++        args.extend(shim.prefix_args.into_iter().map(CommandArg::String));
++        args.extend(self.args.into_iter().skip(1));
++        self.args = args;
++        self.argv0 = shim.argv0;
++        self.execute_via_external(&shim.executable)
++    }
+ }
+ 
+ pub(crate) fn execute_external_command(
+diff --git a/brush-shell/src/bundled.rs b/brush-shell/src/bundled.rs
+index d410bd2..c5063ed 100644
+--- a/brush-shell/src/bundled.rs
++++ b/brush-shell/src/bundled.rs
+@@ -33,7 +33,7 @@ use std::path::PathBuf;
+ use std::sync::OnceLock;
+ 
+ use brush_core::ExecutionExitCode;
+-use brush_core::builtins::{BoxFuture, ContentOptions, ContentType, Registration};
++use brush_core::builtins::{BoxFuture, ContentOptions, ContentType, ProcessShim, Registration};
+ use brush_core::commands::{self, CommandArg, ExecutionContext};
+ use brush_core::extensions::ShellExtensions;
+ 
+@@ -264,13 +264,18 @@ fn shim_execute<SE: ShellExtensions>(
+ /// Constructs a [`Registration`] for the bundled-shim builtin. The same
+ /// registration value can be reused for every bundled name; per-name
+ /// dispatch happens via `context.command_name` at execution time.
+-fn shim_registration<SE: ShellExtensions>() -> Registration<SE> {
++fn shim_registration<SE: ShellExtensions>(name: &str, executable: PathBuf) -> Registration<SE> {
+     Registration {
+         execute_func: shim_execute::<SE>,
+         content_func: shim_content,
+         disabled: false,
+         special_builtin: false,
+         declaration_builtin: false,
++        process_shim: Some(ProcessShim {
++            executable,
++            prefix_args: vec![DISPATCH_FLAG.into(), name.into()],
++            argv0: Some(name.into()),
++        }),
+     }
+ }
+ 
+@@ -283,7 +288,13 @@ pub fn register_shims<SE: ShellExtensions>(shell: &mut brush_core::Shell<SE>) {
+     let Some(registry) = REGISTRY.get() else {
+         return;
+     };
++    let Some(executable) = self_exe().cloned() else {
++        return;
++    };
+     for name in registry.keys() {
+-        shell.register_builtin_if_unset(name.clone(), shim_registration::<SE>());
++        shell.register_builtin_if_unset(
++            name.clone(),
++            shim_registration::<SE>(name, executable.clone()),
++        );
+     }
+ }

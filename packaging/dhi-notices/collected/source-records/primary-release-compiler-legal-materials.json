@@ -1,0 +1,50 @@
+[
+  {
+    "member": "rustc-1.95.0-x86_64-unknown-linux-gnu/LICENSE-APACHE",
+    "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+    "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+    "archive": {
+      "url": "https://static.rust-lang.org/dist/2026-04-16/rustc-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+      "sha256": "8426a3d170a5879f5682f5fbdd024a1779b3951e7baba685af2d6dc32a6dfc15",
+      "size": 80351960,
+      "integrity": null,
+      "signature_verified": false
+    }
+  },
+  {
+    "member": "rustc-1.95.0-x86_64-unknown-linux-gnu/COPYRIGHT",
+    "file": "texts/172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af.txt",
+    "sha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af",
+    "archive": {
+      "url": "https://static.rust-lang.org/dist/2026-04-16/rustc-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+      "sha256": "8426a3d170a5879f5682f5fbdd024a1779b3951e7baba685af2d6dc32a6dfc15",
+      "size": 80351960,
+      "integrity": null,
+      "signature_verified": false
+    }
+  },
+  {
+    "member": "rustc-1.95.0-x86_64-unknown-linux-gnu/LICENSE-MIT",
+    "file": "texts/b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1.txt",
+    "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1",
+    "archive": {
+      "url": "https://static.rust-lang.org/dist/2026-04-16/rustc-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+      "sha256": "8426a3d170a5879f5682f5fbdd024a1779b3951e7baba685af2d6dc32a6dfc15",
+      "size": 80351960,
+      "integrity": null,
+      "signature_verified": false
+    }
+  },
+  {
+    "member": "rustc-1.95.0-x86_64-unknown-linux-gnu/rustc/share/doc/rust/COPYRIGHT.html",
+    "file": "texts/9bd02a099a3f9fdf977f9dd6ea3dc664723e992a267d86f447ea9e7d068824ac.txt",
+    "sha256": "9bd02a099a3f9fdf977f9dd6ea3dc664723e992a267d86f447ea9e7d068824ac",
+    "archive": {
+      "url": "https://static.rust-lang.org/dist/2026-04-16/rustc-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+      "sha256": "8426a3d170a5879f5682f5fbdd024a1779b3951e7baba685af2d6dc32a6dfc15",
+      "size": 80351960,
+      "integrity": null,
+      "signature_verified": false
+    }
+  }
+]

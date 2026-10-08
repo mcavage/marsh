@@ -1,0 +1,161 @@
+diff --git a/brush-builtins/src/jobs.rs b/brush-builtins/src/jobs.rs
+index 409c5f7..b194973 100644
+--- a/brush-builtins/src/jobs.rs
++++ b/brush-builtins/src/jobs.rs
+@@ -68,7 +68,7 @@ impl JobsCommand {
+         }
+ 
+         if self.show_pids_only {
+-            if let Some(pid) = job.process_group_id() {
++            if let Some(pid) = job.process_group_id().or_else(|| job.representative_pid()) {
+                 writeln!(context.stdout(), "{pid}")?;
+             }
+         } else if self.also_show_pids {
+diff --git a/brush-builtins/src/wait.rs b/brush-builtins/src/wait.rs
+index ff59c71..29ca77f 100644
+--- a/brush-builtins/src/wait.rs
++++ b/brush-builtins/src/wait.rs
+@@ -168,7 +168,12 @@ impl WaitCommand {
+                                 pid.map_or_else(|| format!("%{job_id}"), |pid| pid.to_string()),
+                             );
+                         } else {
+-                            result = ExecutionExitCode::GeneralError.into();
++                            writeln!(
++                                context.stderr(),
++                                "{}: {id}: no such job",
++                                context.command_name
++                            )?;
++                            result = ExecutionResult::new(127);
+                         }
+                     } else {
+                         writeln!(
+@@ -178,7 +183,7 @@ impl WaitCommand {
+                             id
+                         )?;
+ 
+-                        result = ExecutionExitCode::GeneralError.into();
++                        result = ExecutionResult::new(127);
+                     }
+                 } else {
+                     // It's a process ID.
+@@ -199,18 +204,24 @@ impl WaitCommand {
+                         };
+                         waited_for_pid = true;
+                         last_waited_id = Some(pid.to_string());
++                        context.shell.jobs_mut().remember_reaped(pid, &result);
+                     } else if let Some(completed) =
+                         context.shell.jobs_mut().take_completed_for_pid(pid)
+                     {
+                         result = completed;
+                         last_waited_id = Some(pid.to_string());
++                        context.shell.jobs_mut().remember_reaped(pid, &result);
++                    } else if let Some(saved) = context.shell.jobs().reaped_status(pid) {
++                        // Bash keeps reaped background statuses for later `wait PID`.
++                        result = saved;
++                        last_waited_id = Some(pid.to_string());
+                     } else {
+                         writeln!(
+                             context.stderr(),
+                             "{}: pid {pid} is not a child of this shell",
+                             context.command_name
+                         )?;
+-                        result = ExecutionExitCode::GeneralError.into();
++                        result = ExecutionResult::new(127);
+                     }
+                 }
+             }
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+index d351ed4..f3836b5 100644
+--- a/brush-core/src/jobs.rs
++++ b/brush-core/src/jobs.rs
+@@ -9,6 +9,7 @@ use futures::FutureExt;
+ use crate::ExecutionResult;
+ use crate::error;
+ use crate::processes;
++use crate::results::ExecutionExitCode;
+ use crate::sys;
+ use crate::trace_categories;
+ use crate::traps;
+@@ -16,6 +17,9 @@ use crate::traps;
+ pub(crate) type JobJoinHandle = tokio::task::JoinHandle<Result<ExecutionResult, error::Error>>;
+ pub(crate) type JobResult = (Job, Result<ExecutionResult, error::Error>);
+ 
++/// Linux `PID_MAX_LIMIT`; synthetic in-process job identities start here.
++const SYNTHETIC_PID_BASE: sys::process::ProcessId = 1 << 22;
++
+ /// Manages the jobs that are currently managed by the shell.
+ #[derive(Default)]
+ pub struct JobManager {
+@@ -25,6 +29,8 @@ pub struct JobManager {
+     completed: VecDeque<CompletedJob>,
+     /// Bash retains `$!` after the job finishes or another job becomes current.
+     last_background_pid: Option<sys::process::ProcessId>,
++    /// Exit statuses of PIDs already collected by `wait`, as Bash's `bgpids`.
++    reaped: VecDeque<(sys::process::ProcessId, ExecutionExitCode)>,
+     next_id: usize,
+ }
+ 
+@@ -125,7 +131,16 @@ impl JobManager {
+     }
+ 
+     /// Adds a background job and remembers its last pipeline process for `$!`.
+-    pub fn add_as_background(&mut self, job: Job) -> &Job {
++    pub fn add_as_background(&mut self, mut job: Job) -> &Job {
++        if job.representative_pid.is_none() {
++            // An in-process background list has no OS process. Give it a
++            // waitable identity above every platform PID limit so `$!`,
++            // `jobs -p`, and `wait PID` work; it is never signaled as a PID.
++            static NEXT_SYNTHETIC_PID: std::sync::atomic::AtomicI32 =
++                std::sync::atomic::AtomicI32::new(SYNTHETIC_PID_BASE);
++            job.representative_pid =
++                Some(NEXT_SYNTHETIC_PID.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
++        }
+         self.last_background_pid = job.representative_pid();
+         self.add_as_current(job)
+     }
+@@ -249,6 +264,25 @@ impl JobManager {
+             .find(|job| job.representative_pid() == Some(pid))
+     }
+ 
++    /// Remembers the status of a PID collected by `wait`.
++    pub fn remember_reaped(&mut self, pid: sys::process::ProcessId, result: &ExecutionResult) {
++        const MAX_REAPED: usize = 1024;
++        self.reaped.retain(|(reaped, _)| *reaped != pid);
++        if self.reaped.len() == MAX_REAPED {
++            self.reaped.pop_front();
++        }
++        self.reaped.push_back((pid, result.exit_code));
++    }
++
++    /// Returns the status of a PID previously collected by `wait`.
++    pub fn reaped_status(&self, pid: sys::process::ProcessId) -> Option<ExecutionResult> {
++        self.reaped
++            .iter()
++            .rev()
++            .find(|(reaped, _)| *reaped == pid)
++            .map(|(_, code)| ExecutionResult::from(*code))
++    }
++
+     /// Takes an already reported child status by PID.
+     pub fn take_completed_for_pid(
+         &mut self,
+@@ -513,6 +547,8 @@ impl Job {
+     // Polling consumes stages from the front; waits consume them from the back and may be
+     // canceled. Select by original stage index, never by completion or observation order.
+     fn record_task_result(&mut self, index: usize, result: ExecutionResult) {
++        // A background list's `exit`/`return` ends only that list, never the waiter.
++        let result = ExecutionResult::from(result.exit_code);
+         let replace = self.wait_result.is_none_or(|(previous_index, previous)| {
+             if self.pipefail && previous.is_success() != result.is_success() {
+                 !result.is_success()
+@@ -645,6 +681,9 @@ impl Job {
+     /// Tries to retrieve the process group ID (PGID) of the job.
+     pub fn process_group_id(&self) -> Option<sys::process::ProcessId> {
+         // TODO(jobs): Don't assume that the first PID is the PGID.
+-        self.pgid.or_else(|| self.representative_pid())
++        self.pgid.or_else(|| {
++            self.representative_pid()
++                .filter(|pid| *pid < SYNTHETIC_PID_BASE)
++        })
+     }
+ }

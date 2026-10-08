@@ -1,0 +1,284 @@
+{
+  "claude-kit": {
+    "2.1.278": {
+      "arm64": {
+        "base_agent": "claude",
+        "required_notices": [
+          {
+            "file": "provider-notices/claude-2.1.278-package-LICENSE.md",
+            "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a"
+          },
+          {
+            "file": "provider-notices/claude-2.1.278-package-README.md",
+            "sha256": "da7cf15ce4e35bad6a107acd6a36b4fe052083068bb9e564b1aa3f2078b5d0ce"
+          }
+        ],
+        "replacements": {
+          "/home/agent/.local/bin/claude": {
+            "path": "/home/agent/.local/bin/claude",
+            "type": "symlink",
+            "mode": 511,
+            "uid": 1000,
+            "gid": 1000,
+            "target": "/home/agent/.local/share/claude/versions/2.1.278"
+          }
+        },
+        "additions": [
+          {
+            "path": "/home/agent/.local/share/claude/versions/2.1.278",
+            "type": "file",
+            "mode": 493,
+            "uid": 1000,
+            "gid": 1000,
+            "sha256": "7de6cab134e48321148e30182c98614118e8f4666819412bead45865190b34ed",
+            "size": 234021104
+          }
+        ],
+        "exact_trees": [
+          {
+            "path": "/home/agent/.local/share/claude/versions",
+            "entries": [
+              "/home/agent/.local/share/claude/versions/2.1.278",
+              "/home/agent/.local/share/claude/versions/2.1.285"
+            ]
+          }
+        ]
+      },
+      "amd64": {
+        "base_agent": "claude",
+        "required_notices": [
+          {
+            "file": "provider-notices/claude-2.1.278-package-LICENSE.md",
+            "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a"
+          },
+          {
+            "file": "provider-notices/claude-2.1.278-package-README.md",
+            "sha256": "da7cf15ce4e35bad6a107acd6a36b4fe052083068bb9e564b1aa3f2078b5d0ce"
+          }
+        ],
+        "replacements": {
+          "/home/agent/.local/bin/claude": {
+            "path": "/home/agent/.local/bin/claude",
+            "type": "symlink",
+            "mode": 511,
+            "uid": 1000,
+            "gid": 1000,
+            "target": "/home/agent/.local/share/claude/versions/2.1.278"
+          }
+        },
+        "additions": [
+          {
+            "path": "/home/agent/.local/share/claude/versions/2.1.278",
+            "type": "file",
+            "mode": 493,
+            "uid": 1000,
+            "gid": 1000,
+            "sha256": "5c4735937844e84f8a93306e841a5b0e12252909b07870f789b190468da147ab",
+            "size": 234119480
+          }
+        ],
+        "exact_trees": [
+          {
+            "path": "/home/agent/.local/share/claude/versions",
+            "entries": [
+              "/home/agent/.local/share/claude/versions/2.1.278",
+              "/home/agent/.local/share/claude/versions/2.1.285"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "codex-kit": {
+    "0.155.1": {
+      "arm64": {
+        "base_agent": "codex",
+        "required_notices": [
+          {
+            "file": "provider-notices/codex-0.155.1-LICENSE",
+            "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-NOTICE",
+            "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-vendor-bubblewrap-COPYING",
+            "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-vendor-bubblewrap-LICENSE",
+            "sha256": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-NOTICE.md",
+            "sha256": "edadf0a401a293778fdb7416707b1ac55df26a686388d3b2db72cd2043763c16"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-LGPL-2.1.txt",
+            "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-Opus.txt",
+            "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-PCRE2.md",
+            "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-libffi.txt",
+            "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-proxy-libintl.txt",
+            "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-sljit.txt",
+            "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-zlib.txt",
+            "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-wezterm-LICENSE",
+            "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+            "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+            "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+          }
+        ],
+        "replacements": {},
+        "additions": [
+          {
+            "path": "/usr/local/bin/codex",
+            "type": "file",
+            "mode": 493,
+            "uid": 0,
+            "gid": 0,
+            "sha256": "298d3d73d0bbc1367e58a370df5b6216fe30ce0a92e8b6b0afb0377a958dc335",
+            "size": 232726912
+          },
+          {
+            "path": "/usr/local/bin/codex-code-mode-host",
+            "type": "file",
+            "mode": 493,
+            "uid": 0,
+            "gid": 0,
+            "sha256": "7348d1c1cee36270b5599da24ed431e1ac6372666a94bb09e09ef87d1bc9e3b8",
+            "size": 63381656
+          }
+        ]
+      },
+      "amd64": {
+        "base_agent": "codex",
+        "required_notices": [
+          {
+            "file": "provider-notices/codex-0.155.1-LICENSE",
+            "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-NOTICE",
+            "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-vendor-bubblewrap-COPYING",
+            "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-vendor-bubblewrap-LICENSE",
+            "sha256": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-NOTICE.md",
+            "sha256": "edadf0a401a293778fdb7416707b1ac55df26a686388d3b2db72cd2043763c16"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-LGPL-2.1.txt",
+            "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-Opus.txt",
+            "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-PCRE2.md",
+            "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-libffi.txt",
+            "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-proxy-libintl.txt",
+            "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-sljit.txt",
+            "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-voice-licenses-zlib.txt",
+            "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-third_party-wezterm-LICENSE",
+            "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+            "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+            "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+          },
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+          }
+        ],
+        "replacements": {},
+        "additions": [
+          {
+            "path": "/usr/local/bin/codex",
+            "type": "file",
+            "mode": 493,
+            "uid": 0,
+            "gid": 0,
+            "sha256": "0753dfe1d8b87a52436deb13eb1c549661ef4c84fee2c5aa688385eebeccb761",
+            "size": 269273536
+          },
+          {
+            "path": "/usr/local/bin/codex-code-mode-host",
+            "type": "file",
+            "mode": 493,
+            "uid": 0,
+            "gid": 0,
+            "sha256": "210ab8ebaebf4bc1421d9e30339c858354ca35fa91e2f87f4c6204e5382f8a63",
+            "size": 69423168
+          }
+        ]
+      }
+    }
+  }
+}

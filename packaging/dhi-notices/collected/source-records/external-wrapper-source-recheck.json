@@ -1,0 +1,99 @@
+{
+  "schema": "marsh.primary-wrapper-source-recheck/v1",
+  "sources": [
+    {
+      "repository": "Marwes/debugserver-types",
+      "commit": "d444f163123af5b4fbce7375d1afead7e9b8a224",
+      "acquisition": {
+        "url": "https://codeload.github.com/Marwes/debugserver-types/tar.gz/d444f163123af5b4fbce7375d1afead7e9b8a224",
+        "sha256": "3813fb8402616d4fb229a305c047850874742fe63bc10147bfdea67afb146799",
+        "size": 17839,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "members": [
+        {
+          "name": "debugserver-types-d444f163123af5b4fbce7375d1afead7e9b8a224/.gitignore",
+          "sha256": "f9b1ca6ae27d1c18215265024629a8960c31379f206d9ed20f64e0b2dcf79805",
+          "size": 18
+        },
+        {
+          "name": "debugserver-types-d444f163123af5b4fbce7375d1afead7e9b8a224/.travis.yml",
+          "sha256": "253d0518c0e7afbb1af6fec1fff23a8c9aa872b0e96b9657febf7a09a858a5b6",
+          "size": 144
+        },
+        {
+          "name": "debugserver-types-d444f163123af5b4fbce7375d1afead7e9b8a224/Cargo.toml",
+          "sha256": "4411fbf0de2c84a137d47de1c127f418f07ed41a361ae89f4f28bcfdabe304ce",
+          "size": 473
+        },
+        {
+          "name": "debugserver-types-d444f163123af5b4fbce7375d1afead7e9b8a224/README.md",
+          "sha256": "4604a717a7e8728c09d6b556327f17932f41464682eb4fb66f132edb980a5b9c",
+          "size": 413
+        },
+        {
+          "name": "debugserver-types-d444f163123af5b4fbce7375d1afead7e9b8a224/src/lib.rs",
+          "sha256": "9510ffec1627b43b09261b0ceb5f49595dd5d0bd5db757e7ce62555c955cd761",
+          "size": 78
+        },
+        {
+          "name": "debugserver-types-d444f163123af5b4fbce7375d1afead7e9b8a224/src/schema.json",
+          "sha256": "60b8cb58487d1198e70c2bda40f191ae4eebb812925c0f4270d1df01c2818ab9",
+          "size": 108673
+        },
+        {
+          "name": "debugserver-types-d444f163123af5b4fbce7375d1afead7e9b8a224/tests/test.rs",
+          "sha256": "8f97c7dd3292004382e3f2c87709b66a7a3eb7f8034b3658227c451c3bd91b93",
+          "size": 225
+        }
+      ]
+    },
+    {
+      "repository": "denoland/deno_core_icudata",
+      "commit": "83537ba16a4bf1645fc8322e81f7aaf0149a8922",
+      "acquisition": {
+        "url": "https://codeload.github.com/denoland/deno_core_icudata/tar.gz/83537ba16a4bf1645fc8322e81f7aaf0149a8922",
+        "sha256": "8cc3ca087fd8d721fcc88f8809c90d3aa716e5934855974c04bf6a6701b1997e",
+        "size": 4621686,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "members": [
+        {
+          "name": "deno_core_icudata-83537ba16a4bf1645fc8322e81f7aaf0149a8922/.gitignore",
+          "sha256": "a8819913dfe0897cd598056a7ed5102bd5d59eb469da79cc757247cc998bd01e",
+          "size": 164
+        },
+        {
+          "name": "deno_core_icudata-83537ba16a4bf1645fc8322e81f7aaf0149a8922/Cargo.lock",
+          "sha256": "ebeec748b8c76f02b5b51e21e8c9330f5c5cc59b0cce8f950d4d648183da7558",
+          "size": 162
+        },
+        {
+          "name": "deno_core_icudata-83537ba16a4bf1645fc8322e81f7aaf0149a8922/Cargo.toml",
+          "sha256": "424ad83d0fb170939e3be8d84ff3b3c46c8bbd860a85e82998427ca9dbb70db3",
+          "size": 234
+        },
+        {
+          "name": "deno_core_icudata-83537ba16a4bf1645fc8322e81f7aaf0149a8922/README.md",
+          "sha256": "3227421e62451436a2da8d5a35e0681b2b5eececb9be02fa8c59c9f77231a324",
+          "size": 105
+        },
+        {
+          "name": "deno_core_icudata-83537ba16a4bf1645fc8322e81f7aaf0149a8922/src/icudtl.dat",
+          "sha256": "1cf67874b5a87a8363a86fb3f81e3cbbed54d389062dab8fb52308d5cf8c8612",
+          "size": 10822192
+        },
+        {
+          "name": "deno_core_icudata-83537ba16a4bf1645fc8322e81f7aaf0149a8922/src/lib.rs",
+          "sha256": "3f4f335a36a7ec1101256ad5c7ace9e23e4049f8fc4066d16961384ff03db258",
+          "size": 205
+        }
+      ]
+    }
+  ],
+  "result": "No LICENSE/COPYING full-text file exists in either exact release VCS tree. Crate manifest MIT declarations are retained unchanged. deno_core_icudata wrapper embeds ICU77 data whose independent Unicode/ICU text is retained.",
+  "product_disposition": "Current recorded normal Linux source dependency graph reaches both packages in selected Codex releases. Removing a separately installed unused payload cannot remove statically compiled inputs. No exclusion, altered upstream binary, fabricated author/year or resolved grant is claimed; original full-text/rights disposition remains external.",
+  "evidence_scope": "Fresh public immutable source archive acquisition and complete bounded member manifest; no compiled-link or rights approval."
+}

@@ -1,0 +1,9 @@
+# syntax=docker/sandbox-kit:3@sha256:11bb68806aef6a68d45c10c0c3b3dc86c2f794a296b5a933661d9dadf760b753
+schemaVersion: "3"
+displayName: marsh ACP acceptance fixture
+description: Credential-free ACP agent for stock-SBX acceptance
+kind: workload
+provides: ["marsh-acp-fixture@1.0.0"]
+dockerfile: ./acp-fixture.dockerfile
+capabilities:
+  - type: com.docker.sandbox/sbx@1

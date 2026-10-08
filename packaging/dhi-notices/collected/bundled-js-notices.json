@@ -1,0 +1,10 @@
+[
+  {
+    "path": "/usr/lib/nodejs/corepack/dist/lib/corepack.cjs",
+    "source_sha256": "abd6f0e7b4e2af310243e202fd908ea64cda545786222f0a3d3f62426e8ad66e",
+    "scope": "Verbatim bundled legal comment from the installed Corepack distribution; supplements its exact upstream license",
+    "sha256": "869b1547e92624704d9150ad088d50e55c42d10ef61473d7e996801785366749",
+    "file": "texts/869b1547e92624704d9150ad088d50e55c42d10ef61473d7e996801785366749.txt",
+    "material_type": "embedded-license-comment"
+  }
+]

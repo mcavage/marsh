@@ -1,0 +1,29 @@
+{
+  "schema": "marsh.primary-native-notices/v1",
+  "plan_sha256": "645a793d8ae55a4701f3b46008f7f7798ae43acba2251b79325a7fd06090885c",
+  "archives": [
+    {
+      "name": "V8-producer-musl",
+      "version": "1.2.6",
+      "url": "https://musl.libc.org/releases/musl-1.2.6.tar.gz",
+      "sha256": "d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a",
+      "role": "V8 producer hermetic-llvm0.8.11 runtime, NOT an assertion about release runner apt musl-gcc",
+      "acquisition": {
+        "url": "https://musl.libc.org/releases/musl-1.2.6.tar.gz",
+        "sha256": "d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a",
+        "size": 1082499,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b.txt",
+          "sha256": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b",
+          "member": "musl-1.2.6/COPYRIGHT"
+        }
+      ]
+    }
+  ],
+  "scope": "Conservative legal-document superset of exact public source archives from recorded build pins; not execution, enabled-feature proof, signature validation or a reproducible build.",
+  "failures": []
+}

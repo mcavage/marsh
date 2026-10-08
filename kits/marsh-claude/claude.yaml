@@ -1,0 +1,165 @@
+# syntax=docker/sandbox-kit:3@sha256:11bb68806aef6a68d45c10c0c3b3dc86c2f794a296b5a933661d9dadf760b753
+# Migration of the built-in v2 claude kit (sandboxes:
+# sandboxlib/agentkits/agents/claude/spec.yaml). Every v2 stanza lands
+# somewhere deliberate; the deltas are marked MIGRATION NOTE inline.
+schemaVersion: "3"
+displayName: Claude Code
+description: Anthropic's Claude Code agent, with ACP mode through the official adapter
+sourceUrl: https://github.com/anthropics/claude-code
+licenses: [SEE LICENSE IN https://github.com/anthropics/claude-code/blob/main/LICENSE.md, Apache-2.0]
+
+kind: workload
+
+# The version is declared once: validated here, handed to the dockerfile
+# as the installer pin, expanded into the provide.
+args:
+  version:
+    default: "2.1.278"
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    description: Claude Code release to install
+    buildArg: CLAUDE_VERSION
+
+# ACP mode (`claude --acp`) ships the pinned official adapter (package.json).
+provides: ["claude@${{ kit.args.version }}", "claude-acp@0.79.0"]
+
+dockerfile: ./claude.dockerfile
+
+capabilities:
+  # This workload is an agent sandbox: the host launches the agent rather
+  # than running the image's entrypoint as PID 1, and honors the identity
+  # the image config declares instead of assuming one.
+  - type: com.docker.sandbox/sbx@1
+
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - api.anthropic.com:443
+          - platform.claude.com:443
+          - downloads.claude.ai:443
+          - claude.com:443
+          - mcp-proxy.anthropic.com:443
+          # /remote-control and /teleport relay: the daemon keeps a
+          # WebSocket open here so claude.ai and the mobile app can
+          # drive this session.
+          - bridge.claudeusercontent.com:443
+
+  # Declaring both apiKey and oauth means "whichever the host has bound":
+  # the engine derives the mode from host credential state and the
+  # settings.json install hook below reads it. MIGRATION NOTE: this
+  # subsumes v2's oauth.skipIfEnv — the mode decision belongs to the
+  # host's binding, not to an env-var probe inside the descriptor.
+  - type: com.docker.sandbox/credential@1
+    # optional, faithfully: v2 credentials default to not-required and the
+    # v3 default inverts (an entry is required unless it opts out). A
+    # required credential warns at create when the CLI has no literal
+    # value to ship — which an OAuth record never is; OAuth lives with the
+    # daemon's token manager and the proxy, not the wire payload. Claude
+    # runs without any binding at all (it falls back to /login), so
+    # required would warn spuriously on exactly the healthy OAuth setup.
+    optional: true
+    description: Anthropic API access (API key or claude.ai OAuth)
+    config:
+      service: anthropic
+      phase: runtime
+      # No proxyManaged here, faithfully: that flag unconditionally
+      # plants the env var as an in-container sentinel whether or not a
+      # host credential is bound — for agents that refuse API-key mode
+      # without the variable present. Claude Code instead derives its
+      # mode from the surfaced credential state (the settings.json hook
+      # below), so a phantom ANTHROPIC_API_KEY would falsely signal key
+      # auth on hosts with no credential at all.
+      apiKey:
+        name: ANTHROPIC_API_KEY
+        # MIGRATION NOTE: v2 also carried inject rules for
+        # console.anthropic.com and claude.ai — domains its own allowlist
+        # never admitted, so the proxy could never fire them. v3's
+        # inject-within-allow validation surfaces exactly that dead
+        # config; the rules are dropped rather than the allowlist
+        # widened, preserving observable behavior.
+        inject:
+          - {domain: api.anthropic.com, header: x-api-key, format: "%s"}
+          - {domain: mcp-proxy.anthropic.com, header: x-api-key, format: "%s"}
+      oauth:
+        tokenEndpoint: {host: platform.claude.com, path: /v1/oauth/token}
+        sentinels:
+          accessToken: sk-ant-oat01-proxy-managed
+          refreshToken: sk-ant-ort01-proxy-managed
+        # Full fidelity with v2's credentialFile.template for an ordinary
+        # stock-SBX workload, declaratively:
+        # expiresAt renders as a JSON number, scopes as a JSON array, and
+        # primaryApiKey — the declarative counterpart of the template's
+        # {{if .PrimaryApiKey}} — omits its key when no key is captured.
+        # The structure is JSON-encoded after substitution, so the output
+        # is well-formed no matter what the values contain.
+        credentialFile:
+          # v3 credentialFile paths resolve against the workload image's
+          # declared home and cannot interpolate MARSH_SELECTED_HOME. The
+          # marsh entrypoint never copies raw credentials; selected-home jobs
+          # use proxy sentinels surfaced by the adapter instead.
+          path: ~/.claude/.credentials.json
+          structure:
+            claudeAiOauth:
+              accessToken: "{{.AccessToken}}"
+              refreshToken: "{{.RefreshToken}}"
+              expiresAt: "{{.ExpiresAt}}"
+              scopes: "{{.Scopes}}"
+            primaryApiKey: "{{.PrimaryApiKey}}"
+
+  # The session control surface: how a harness drives claude without a
+  # human at the terminal. Argv tails append to the entrypoint the way
+  # user args do; the host substitutes the placeholders. Session state lives
+  # in the selected home supplied by marsh rather than outer-only kit volumes.
+  - type: com.docker.sandbox/agent-sessions@1
+    description: Drive claude sessions programmatically
+    config:
+      prompt: ["-p", "{{.Prompt}}"]
+      continue: ["--continue"]
+      resume: ["--resume", "{{.SessionID}}"]
+      list: ["claude", "agents", "--json", "--all"]
+
+  - type: com.docker.sandbox/lifecycle@1
+    config:
+      install:
+        # ~/.claude/settings.json is merged by the image entrypoint after the
+        # selected home and SBX credential mode are present. Keeping that
+        # atomic merge in one place avoids an install-hook/entrypoint race.
+        # ~/.claude.json carries credential-independent onboarding/trust flags.
+        # Create it only when absent; a selected home is user state and the Kit
+        # must not replace it or change its host ownership.
+        - command: |
+            set -e
+            home="${MARSH_SELECTED_HOME:-/home/agent}"
+            mkdir -p "$home"
+            ws="${WORKSPACE_DIR:-/}"
+            esc=$(printf '%s' "$ws" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/\r/\\r/g')
+            projects="\"/\": { \"hasTrustDialogAccepted\": true }"
+            [ "$ws" = "/" ] || projects="$projects, \"$esc\": { \"hasTrustDialogAccepted\": true }"
+            if [ ! -e "$home/.claude.json" ] && [ ! -L "$home/.claude.json" ]; then
+              printf '%s\n' "{
+              \"bypassPermissionsModeAccepted\": true,
+              \"hasCompletedOnboarding\": true,
+              \"projects\": { $projects }
+              }" > "$home/.claude.json"
+            fi
+          user: agent
+          env: [WORKSPACE_DIR, MARSH_SELECTED_HOME]
+          description: Seed missing Claude bypass/trust flags in selected home
+
+      startup:
+        - command: [sh, -c, "command -v apt-get > /dev/null 2>&1 && (apt-get update -qq -y > /dev/null 2>&1 || true)"]
+          user: "0"
+          background: true
+          description: Update apt package cache in background
+
+  # Where a normal stock-SBX workload reads shared skills. marsh selected-home
+  # jobs instead receive their user-owned skills through the mounted home.
+  - type: com.docker.sandbox/agent-skills@1
+    optional: true
+    config:
+      path: /home/agent/.claude/skills
+
+  - type: com.docker.sandbox/agent-context@1
+    config:
+      filename: CLAUDE.md
+      contentFile: ./claude-context.md

@@ -1,0 +1,75 @@
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -1220,8 +1220,6 @@
+         .iter()
+         .find(|result| result.status != 0)
+         .map_or(0, |result| result.status);
+-    render_collected_stderr(&mut collect_params.stderr(shell), &branch_results)?;
+-
+     let mut output: Box<dyn Write + Send> = Box::new(collect_params.stdout(shell));
+     render_collected(&mut output, &branch_results, started.elapsed(), options)?;
+     drop(output);
+@@ -1338,6 +1336,9 @@
+     pub timing: bool,
+     /// `--json`: emit one JSON document.
+     pub json: bool,
++    /// `--stderr`: show stderr of successful branches too (failed branches'
++    /// stderr is always shown, as `join` does).
++    pub stderr: bool,
+     /// `--help`.
+     pub help: bool,
+     /// An unknown option was given.
+@@ -1357,6 +1358,7 @@
+         {
+             "--timing" => options.timing = true,
+             "--json" => options.json = true,
++            "--stderr" => options.stderr = true,
+             "-h" | "--help" => options.help = true,
+             unknown => {
+                 writeln!(params.stderr(shell), "collect: unknown option: {unknown}")?;
+@@ -1367,20 +1369,27 @@
+     Ok(options)
+ }
+ 
+-const COLLECT_HELP: &str = "collect - render fanout results\n\nUsage: fanout { ... } | collect [--timing] [--json]\n\n  --timing  append per-branch and total wall time\n  --json    emit one JSON document\n\nLimits:\n  input     64 MiB completed stdin\n  output    16 MiB combined branch stdout and stderr\n";
++const COLLECT_HELP: &str = "collect - render fanout results\n\nUsage: fanout { ... } | collect [--timing] [--json] [--stderr]\n\nPer branch, in order: `== LABEL (state) ==`, its stdout, then (failed\nbranches, or every branch with --stderr) its stderr under `== LABEL stderr ==`.\n\n  --timing  append per-branch and total wall time\n  --json    emit one JSON document\n  --stderr  also show stderr of successful branches\n\nLimits:\n  input     64 MiB completed stdin\n  output    16 MiB combined branch stdout and stderr\n";
+ 
+-/// Writes each branch's nonempty stderr under a `== LABEL stderr ==` line.
++/// Retained for embedders: writes each branch's nonempty stderr under a
++/// `== LABEL stderr ==` line. `collect` itself renders stderr inline in
++/// [`render_collected`].
+ pub fn render_collected_stderr(
+     output: &mut dyn Write,
+     branches: &[BranchResult],
+ ) -> std::io::Result<()> {
+     for branch in branches {
+-        if !branch.stderr.is_empty() {
+-            writeln!(output, "== {} stderr ==", branch.label)?;
+-            output.write_all(&branch.stderr)?;
+-            if !branch.stderr.ends_with(b"\n") {
+-                writeln!(output)?;
+-            }
++        write_branch_stderr(output, branch)?;
++    }
++    Ok(())
++}
++
++fn write_branch_stderr(output: &mut dyn Write, branch: &BranchResult) -> std::io::Result<()> {
++    if !branch.stderr.is_empty() {
++        writeln!(output, "== {} stderr ==", branch.label)?;
++        output.write_all(&branch.stderr)?;
++        if !branch.stderr.ends_with(b"\n") {
++            writeln!(output)?;
+         }
+     }
+     Ok(())
+@@ -1433,6 +1442,9 @@
+         if !branch.stdout.ends_with(b"\n") {
+             writeln!(output)?;
+         }
++        if branch.status != 0 || options.stderr {
++            write_branch_stderr(output, branch)?;
++        }
+         writeln!(output)?;
+     }
+     if options.timing {

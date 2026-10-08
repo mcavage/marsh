@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}} — marsh</title>
+<meta name="description" content="{{description}}">
+<link rel="canonical" href="{{canonical}}">
+<link rel="alternate" type="text/markdown" href="{{md}}">
+<meta name="theme-color" content="#0a0c0b">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="marsh">
+<meta property="og:title" content="{{title}} — marsh">
+<meta property="og:description" content="{{description}}">
+<meta property="og:url" content="{{canonical}}">
+<meta property="og:image" content="{{base}}/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="{{base}}/og.png">
+<link rel="icon" href="{{root}}favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="{{root}}apple-touch-icon.png">
+<link rel="stylesheet" href="{{root}}style.css">
+<script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<script src="{{root}}site.js" defer></script>
+</head>
+<body class="doc">
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="{{root}}index.html"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#0b0d0c"/><path d="M7.5 16H13c3.2 0 3.8-7 7.5-7H23M13 16h10M13 16c3.2 0 3.8 7 7.5 7H23" fill="none" stroke="#c5f467" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="25" cy="9" r="2.1" fill="#c5f467"/><circle cx="25" cy="16" r="2.1" fill="#5ee6d0"/><circle cx="25" cy="23" r="2.1" fill="#c5f467"/></svg>marsh</a>
+    <nav aria-label="Site">
+      <a href="{{root}}docs/index.html" aria-current="true">Docs</a>
+      <a href="{{root}}community.html">Community</a>
+      <a class="gh" href="https://github.com/mcavage/marsh"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span>GitHub</span></a>
+      <button class="theme" type="button" aria-label="Toggle light and dark theme"><svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.5 14.6A8.5 8.5 0 019.4 3.5a8.5 8.5 0 1011.1 11.1z"/></svg><svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </nav>
+  </div>
+</header>
+<div class="layout">
+  <nav class="side" aria-label="Manual">
+    <input type="checkbox" id="nav-t" class="sr">
+    <label class="navbtn" for="nav-t">Manual</label>
+    <div class="navlist">
+{{nav}}
+    </div>
+  </nav>
+  <main id="content">
+    <article class="prose">
+{{content}}
+    </article>
+{{pager}}
+    <p class="edit"><a href="{{source}}">Edit this page on GitHub</a></p>
+  </main>
+{{toc}}
+</div>
+<footer class="foot">
+  <div class="foot-in">
+    <div>
+      <p class="by">By Mark Cavage · <a href="https://github.com/mcavage">GitHub</a> · <a href="https://www.linkedin.com/in/mcavage">LinkedIn</a></p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="{{root}}index.html">Home</a>
+      <a href="{{root}}docs/index.html">Docs</a>
+      <a href="{{root}}community.html">Community</a>
+      <a href="https://github.com/mcavage/marsh">GitHub</a>
+      <a href="https://github.com/mcavage/marsh/blob/main/LICENSE">Apache-2.0</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

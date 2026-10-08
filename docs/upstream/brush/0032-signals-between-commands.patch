@@ -1,0 +1,297 @@
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 76292cc..88a4c86 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -529,6 +529,40 @@ async fn run_list_reporting_errors<SE: extensions::ShellExtensions>(
+     }
+ }
+ 
++/// Runs traps for caught signals that no wait delivered; an untrapped one ends
++/// a noninteractive shell (after its `EXIT` trap) as its default action would.
++#[cfg(unix)]
++async fn deliver_pending_signals<SE: extensions::ShellExtensions>(
++    shell: &mut Shell<SE>,
++    params: &ExecutionParameters,
++) -> Result<Option<ExecutionResult>, error::Error> {
++    for signal in crate::signals::take_pending() {
++        let Ok(caught) = sys::signal::Signal::try_from(signal) else {
++            continue;
++        };
++        let trap = crate::traps::TrapSignal::Signal(caught);
++        match shell
++            .traps()
++            .get_handler(trap)
++            .map(|h| h.command.is_empty())
++        {
++            Some(true) => {}
++            Some(false) => {
++                let result = shell.invoke_trap_handler(trap, params).await?;
++                if !result.is_normal_flow() {
++                    return Ok(Some(result));
++                }
++            }
++            None if !shell.options().interactive => {
++                let _ = shell.on_exit().await;
++                crate::subshell::die_by_signal(signal);
++            }
++            None => {}
++        }
++    }
++    Ok(None)
++}
++
+ /// Whether `list` is exactly one simple command, which a forked child may `exec`.
+ fn is_single_simple_command(list: &ast::CompoundList) -> bool {
+     matches!(
+@@ -761,6 +795,12 @@ impl Execute for ast::Pipeline {
+             shell.apply_errexit_if_enabled(&mut result);
+         }
+ 
++        // Deliver signals that arrived while no wait was observing them.
++        #[cfg(unix)]
++        if let Some(trap_result) = deliver_pending_signals(shell, &params).await? {
++            return Ok(trap_result);
++        }
++
+         // If requested, report timing.
+         if let (Some(timed), Some(stopwatch)) = (&self.timed, &stopwatch)
+             && let Some(mut stderr) = params.try_fd(shell, openfiles::OpenFiles::STDERR_FD)
+@@ -1564,6 +1604,17 @@ async fn wait_for_pipeline_processes_and_update_status(
+         }
+     }
+ 
++    // Like Bash, an untrapped INT during a wait matters only if the job died of it.
++    #[cfg(unix)]
++    if interrupted
++        && !shell.traps().handles(crate::traps::TrapSignal::Signal(
++            sys::signal::Signal::SIGINT,
++        ))
++        && u8::from(result.exit_code) != 130
++    {
++        crate::signals::discard(libc::SIGINT);
++    }
++
+     #[cfg(unix)]
+     if interrupted {
+         let signal = crate::traps::TrapSignal::Signal(sys::signal::Signal::SIGINT);
+diff --git a/brush-core/src/lib.rs b/brush-core/src/lib.rs
+index 130fcf6..446abbc 100644
+--- a/brush-core/src/lib.rs
++++ b/brush-core/src/lib.rs
+@@ -32,6 +32,7 @@ mod prompt;
+ mod regex;
+ pub mod results;
+ mod shell;
++mod signals;
+ pub mod sourceinfo;
+ pub mod subshell;
+ pub mod sys;
+diff --git a/brush-core/src/shell/traps.rs b/brush-core/src/shell/traps.rs
+index bc39253..6fb9cf0 100644
+--- a/brush-core/src/shell/traps.rs
++++ b/brush-core/src/shell/traps.rs
+@@ -39,6 +39,12 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         signal: TrapSignal,
+         params: &ExecutionParameters,
+     ) -> Result<ExecutionResult, error::Error> {
++        // Whichever path delivers a signal's trap consumes its pending arrival.
++        #[cfg(unix)]
++        if let TrapSignal::Signal(delivered) = signal {
++            crate::signals::discard(delivered as i32);
++        }
++
+         // Per-signal self-recursion guard: don't re-enter a trap that is
+         // already being handled. Different traps *can* fire from each
+         // other's handlers (e.g. ERR inside EXIT, EXIT inside ERR).
+diff --git a/brush-core/src/subshell.rs b/brush-core/src/subshell.rs
+index 17776d3..0ae43bc 100644
+--- a/brush-core/src/subshell.rs
++++ b/brush-core/src/subshell.rs
+@@ -69,7 +69,9 @@ pub(crate) struct Forked {
+ #[cfg(unix)]
+ pub(crate) use imp::standard_descriptor_closed_at_startup;
+ #[cfg(unix)]
+-pub(crate) use imp::{available, fork, restore_trapped_signal, shell_pid, wait_for_pid};
++pub(crate) use imp::{
++    available, die_by_signal, fork, restore_trapped_signal, shell_pid, wait_for_pid,
++};
+ #[cfg(unix)]
+ pub use imp::{
+     mark_standard_descriptor_closed, note_descriptors_after_runtime,
+@@ -356,6 +358,7 @@ mod imp {
+             if !replace_signal_sockets() {
+                 exit_child(126);
+             }
++            crate::signals::forget_after_fork();
+             match group {
+                 ChildGroup::Inherit => {}
+                 ChildGroup::New { foreground } => {
+@@ -425,6 +428,23 @@ mod imp {
+         Ok(Some(Forked { pid, pgid }))
+     }
+ 
++    /// Ends this process by `signal` with its default action, as an untrapped
++    /// fatal signal would have (falling back to exit status 128+N).
++    pub(crate) fn die_by_signal(signal: i32) -> ! {
++        let _ = std::io::stdout().flush();
++        let _ = std::io::stderr().flush();
++        // SAFETY: restores the default action, unblocks the signal, and raises it.
++        unsafe {
++            libc::signal(signal, libc::SIG_DFL);
++            let mut set: libc::sigset_t = std::mem::zeroed();
++            libc::sigemptyset(&raw mut set);
++            libc::sigaddset(&raw mut set, signal);
++            libc::pthread_sigmask(libc::SIG_UNBLOCK, &raw const set, std::ptr::null_mut());
++            libc::raise(signal);
++            libc::_exit(128 + signal)
++        }
++    }
++
+     /// Waits for a forked child to exit, returning its status as process output.
+     pub(crate) async fn wait_for_pid(pid: i32) -> std::io::Result<std::process::Output> {
+         use std::os::unix::process::ExitStatusExt as _;
+diff --git a/brush-core/src/sys/unix/signal.rs b/brush-core/src/sys/unix/signal.rs
+index 4505836..ccc5cbd 100644
+--- a/brush-core/src/sys/unix/signal.rs
++++ b/brush-core/src/sys/unix/signal.rs
+@@ -57,9 +57,15 @@ pub(crate) fn chld_signal_listener() -> Result<tokio::signal::unix::Signal, erro
+     Ok(signal)
+ }
+ 
+-pub(crate) use tokio::signal::ctrl_c as await_ctrl_c;
++pub(crate) async fn await_ctrl_c() -> std::io::Result<()> {
++    // Waiting for INT installs the runtime's handler; keep observing INT between
++    // commands from now on.
++    crate::signals::listen(libc::SIGINT);
++    tokio::signal::ctrl_c().await
++}
+ 
+ pub(crate) async fn await_term() -> Result<(), error::Error> {
++    crate::signals::listen(libc::SIGTERM);
+     let mut listener = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+     let _ = listener.recv().await;
+     Ok(())
+diff --git a/brush-core/src/traps.rs b/brush-core/src/traps.rs
+index 8f3c157..5a78286 100644
+--- a/brush-core/src/traps.rs
++++ b/brush-core/src/traps.rs
+@@ -240,8 +240,18 @@ impl TrapHandlerConfig {
+     ) {
+         self.generation += 1;
+         #[cfg(unix)]
+-        if let TrapSignal::Signal(signal) = signal_type {
+-            crate::subshell::restore_trapped_signal(signal as i32);
++        match signal_type {
++            TrapSignal::Signal(signal) => {
++                crate::subshell::restore_trapped_signal(signal as i32);
++                // Catch the signal from now on, so the trap also runs between commands.
++                if matches!(
++                    signal,
++                    crate::sys::signal::Signal::SIGINT | crate::sys::signal::Signal::SIGTERM
++                ) {
++                    crate::signals::listen(signal as i32);
++                }
++            }
++            _ => {}
+         }
+         let _ = self.handlers.insert(
+             signal_type,
+diff --git a/brush-core/src/signals.rs b/brush-core/src/signals.rs
+new file mode 100644
+index 0000000..9253427
+--- /dev/null
++++ b/brush-core/src/signals.rs
+@@ -0,0 +1,93 @@
++//! Delivery of signals that arrive while the shell runs builtins.
++//!
++//! Once the runtime has installed a handler for `INT` or `TERM` (every child
++//! wait listens for `INT`; a `TERM` trap listens for `TERM`), the signal no
++//! longer has its default effect, and waits only observe it while they run.
++//! Like Bash, the shell checks for such signals after each pipeline: a trapped
++//! signal runs its trap; an untrapped one makes a noninteractive shell run its
++//! `EXIT` trap and die by the signal.
++
++#[cfg(unix)]
++pub(crate) use imp::{discard, forget_after_fork, listen, take_pending};
++
++#[cfg(not(unix))]
++pub(crate) fn take_pending() -> Vec<i32> {
++    Vec::new()
++}
++
++#[cfg(not(unix))]
++pub(crate) fn discard(_signal: i32) {}
++
++#[cfg(unix)]
++mod imp {
++    use futures::FutureExt as _;
++    use std::sync::Mutex;
++    use std::sync::atomic::{AtomicBool, Ordering};
++
++    static LISTENING: AtomicBool = AtomicBool::new(false);
++    static LISTENERS: Mutex<Vec<(i32, tokio::signal::unix::Signal)>> = Mutex::new(Vec::new());
++
++    /// Starts recording `signal` for delivery between commands. This installs
++    /// the runtime's handler for it, so call it only where that handler is (or
++    /// is about to be) installed anyway. Requires a runtime.
++    pub(crate) fn listen(signal: i32) {
++        if tokio::runtime::Handle::try_current().is_err() {
++            return;
++        }
++        let Ok(mut listeners) = LISTENERS.lock() else {
++            return;
++        };
++        if listeners.iter().any(|(s, _)| *s == signal) {
++            return;
++        }
++        if let Ok(stream) =
++            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::from_raw(signal))
++        {
++            listeners.push((signal, stream));
++            LISTENING.store(true, Ordering::Release);
++        }
++    }
++
++    /// Returns (and consumes) the recorded signals that arrived since the last call.
++    pub(crate) fn take_pending() -> Vec<i32> {
++        if !LISTENING.load(Ordering::Acquire) {
++            return Vec::new();
++        }
++        let Ok(mut listeners) = LISTENERS.lock() else {
++            return Vec::new();
++        };
++        let mut pending = Vec::new();
++        for (signal, stream) in listeners.iter_mut() {
++            let mut arrived = false;
++            while let Some(Some(())) = stream.recv().now_or_never() {
++                arrived = true;
++            }
++            if arrived {
++                pending.push(*signal);
++            }
++        }
++        pending
++    }
++
++    /// Forgets recorded arrivals of `signal`; a wait already delivered it.
++    pub(crate) fn discard(signal: i32) {
++        if !LISTENING.load(Ordering::Acquire) {
++            return;
++        }
++        let Ok(mut listeners) = LISTENERS.lock() else {
++            return;
++        };
++        for (_, stream) in listeners.iter_mut().filter(|(s, _)| *s == signal) {
++            while let Some(Some(())) = stream.recv().now_or_never() {}
++        }
++    }
++
++    /// Drops (without running destructors) the parent's listeners in a forked
++    /// child, whose runtime they do not belong to.
++    pub(crate) fn forget_after_fork() {
++        LISTENING.store(false, Ordering::Release);
++        if let Ok(mut listeners) = LISTENERS.try_lock() {
++            std::mem::forget(std::mem::take(&mut *listeners));
++        }
++    }
++}

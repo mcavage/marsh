@@ -1,0 +1,37 @@
+--- a/brush-core/src/shell/initscripts.rs
++++ b/brush-core/src/shell/initscripts.rs
+@@ -2,7 +2,7 @@
+
+ use std::path::PathBuf;
+
+-use crate::{Shell, error, extensions, interp};
++use crate::{Shell, error, expansion, extensions, interp};
+
+ /// Behavior for loading profile files.
+ #[derive(Default)]
+@@ -150,14 +150,17 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
+                     "BASH_ENV"
+                 };
+
+-                if self.env.is_set(env_var_name) {
+-                    //
+-                    // TODO(well-known-vars): look at $ENV/BASH_ENV; source its expansion if that
+-                    // file exists
+-                    //
+-                    return error::unimp(
+-                        "load config from $ENV/BASH_ENV for non-interactive, non-login shell",
+-                    );
++                let startup_file = self
++                    .env_str(env_var_name)
++                    .map(|value| value.into_owned())
++                    .unwrap_or_default();
++                if !startup_file.is_empty() {
++                    let expanded =
++                        expansion::basic_expand_word(self, &params, startup_file).await?;
++                    if !expanded.is_empty() {
++                        self.source_if_exists(PathBuf::from(expanded), &params)
++                            .await?;
++                    }
+                 }
+             }
+         }

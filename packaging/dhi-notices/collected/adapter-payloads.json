@@ -1,0 +1,2164 @@
+{
+  "schema": "marsh.adapter-notice-payloads/v1",
+  "adapters": {
+    "codex-acp": {
+      "base_agent": "codex",
+      "root": "/opt/marsh/codex-acp",
+      "lock_sha256": "dbe12d298c40d65baba3b9415cadbbd7b2244eabe0ab4643692bc19b3d8111d2",
+      "notice_root": "/usr/local/share/licenses/marsh-codex-acp",
+      "selected_version": "0.156.1",
+      "architectures": {
+        "arm64": {
+          "packages": [
+            {
+              "alias": "@openai/codex",
+              "root": "/opt/marsh/codex-acp/node_modules/@openai/codex",
+              "package": "@openai/codex",
+              "version": "0.156.1",
+              "acquisition": {
+                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1.tgz",
+                "sha256": "08f128dd29bc659a62c16110dc4e8acad6858ba884a9b420631fbfa270b941d1",
+                "size": 4904,
+                "integrity": "sha512-nI1iVl/n2SO2lSvlwEsJx63zdSI4C4Me2gR7AG0OWMJiGSakz2tY2hx43E39Zq5aEoeB5bZjJXzp5Sqhog6vyA==",
+                "signature_verified": false
+              },
+              "payload_entries": [
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex/README.md",
+                  "type": "file",
+                  "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
+                  "size": 3334,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/README.md"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex/bin",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex/bin/codex.js",
+                  "type": "file",
+                  "sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+                  "size": 8790,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/bin/codex.js"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex/package.json",
+                  "type": "file",
+                  "sha256": "c3f16464dca0fe1269b17d02fe0997d1ca3a241c3a61da3d89ec13def0a66c6e",
+                  "size": 1082,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/package.json"
+                }
+              ],
+              "notices": []
+            },
+            {
+              "alias": "@openai/codex-linux-arm64",
+              "root": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64",
+              "package": "@openai/codex",
+              "version": "0.156.1-linux-arm64",
+              "acquisition": {
+                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
+                "sha256": "3ca3c3a85e184594d0b665ea9028bc38c4ae89691e86edbeefd2c6f58979fcb4",
+                "size": 141660337,
+                "integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                "signature_verified": false
+              },
+              "payload_entries": [
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/README.md",
+                  "type": "file",
+                  "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
+                  "size": 3334,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/README.md"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/package.json",
+                  "type": "file",
+                  "sha256": "47414850442c39d9c72b3dbf60e36a265e3a64703d703db63e158b5250878ded",
+                  "size": 515,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/package.json"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex",
+                  "type": "file",
+                  "sha256": "876fe6bb5f7af7d1e4eda629be0d8ba042f6f24a7bb07475f6a995849f50c068",
+                  "size": 246724904,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/bin/codex"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex-code-mode-host",
+                  "type": "file",
+                  "sha256": "b22553f5085d1b2ad5b1d5e935bb8974e2e76d925df1fc30fa83f67bfe216623",
+                  "size": 64562168,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/bin/codex-code-mode-host"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-package.json",
+                  "type": "file",
+                  "sha256": "fdf4bc3a553ea43ce7139c58b47eca383e4a7e42d2da341a366bd81f46312252",
+                  "size": 206,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-package.json"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-path",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-path/rg",
+                  "type": "file",
+                  "sha256": "e36d0eb52e70696bdf1781392722e05a21bb91d3b7b762ef5ec20e5df2ec687b",
+                  "size": 4506992,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-path/rg"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/bwrap",
+                  "type": "file",
+                  "sha256": "c6949b5053988498976467bd9972c5d3695ecaac64a5f2de09af20f579fb7e31",
+                  "size": 529168,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/bwrap"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/NOTICE.md",
+                  "type": "file",
+                  "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48",
+                  "size": 2403,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/NOTICE.md"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/bin",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
+                  "type": "file",
+                  "sha256": "4b8199013c7026d89a261d88df148d152e1372541a59431f4a5155c71030ee51",
+                  "size": 12720272,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
+                  "type": "file",
+                  "sha256": "763f99404b0adde9dd07ae9b3db3640ce70e090384f877ab44c08f596e9ee5b2",
+                  "size": 7264,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
+                  "type": "file",
+                  "sha256": "438570eed71d9496c2be4000f7a8ed0472f606279459dd9f19cc737b2e1ad544",
+                  "size": 42600,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
+                  "type": "file",
+                  "sha256": "dabf9976f2c14b0e2848dfad9ff99eb8a291cea264d3e2743128f17a7d7abd75",
+                  "size": 36136,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
+                  "type": "file",
+                  "sha256": "9b22e8b3438ed68717800bd456f60ea61b53a652854c3eafc03e7e053e6e73e9",
+                  "size": 477024,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
+                  "type": "file",
+                  "sha256": "e67ee37ca228912a99cdffb050e0d917a928b31d9ca7e0b01ba1e182e09641fe",
+                  "size": 72120,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
+                  "type": "file",
+                  "sha256": "ecabf86cf61c8237e72da54052b311ba89d508051b1d4d3662338e843868f13f",
+                  "size": 771240,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
+                  "type": "file",
+                  "sha256": "046061a30694971ffefca9bd36dc9924c691326862121959f40545c98836932e",
+                  "size": 571648,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libffi.so.8",
+                  "type": "file",
+                  "sha256": "51cb79b1866970f577b87dca19bf8e77bb28d3dd3bed27b7ace57780cb86ef49",
+                  "size": 97368,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libffi.so.8"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
+                  "type": "file",
+                  "sha256": "dedccb01d00f16c0afb5b72983f817fc4b4050501ee81c393a71ae68f0447d44",
+                  "size": 2590176,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
+                  "type": "file",
+                  "sha256": "8f27f73a124f9a30cd9056c76ddedee6e29b3bd979e413e4152484e6de5132dd",
+                  "size": 1565504,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
+                  "type": "file",
+                  "sha256": "28b7d1b1056244487c88017e36aeca003197592decd2ab8ef26f9c9e891105f6",
+                  "size": 16584,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
+                  "type": "file",
+                  "sha256": "9d93a54989a5635474b73c17260359ac862bf68155899e2008c2c380d0366f62",
+                  "size": 492608,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
+                  "type": "file",
+                  "sha256": "7e1be9313180eafaa5d821a0c24df43aeae87ede23a112b06522f6616a7f19da",
+                  "size": 33520,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
+                  "type": "file",
+                  "sha256": "aa78a53fa6c6708a963ea41ad2df2a78ca4c682ffa14a57e74954ca4586ec30c",
+                  "size": 111856,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
+                  "type": "file",
+                  "sha256": "dca8348dcae61c2058d33ab5404ba3bf42aed4f298d02365cd955f4b5b922f29",
+                  "size": 594072,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
+                  "type": "file",
+                  "sha256": "8acac0c7627bde2263a2dcf34cccd430329b367a98064b31430f24683fe3d08a",
+                  "size": 570192,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
+                  "type": "file",
+                  "sha256": "0ec79e1157df6b24e5499926d66684edd02c32a658ca8417ed2fee350c1e7c36",
+                  "size": 78152,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
+                  "type": "file",
+                  "sha256": "a947442f2dc946b80ecdf3564ddebf380e60ff85a3f263e7d086e148a318be2f",
+                  "size": 341720,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
+                  "type": "file",
+                  "sha256": "e162c52bed76624b24329b97da60b33652adeb941131e4c1ebc4adfbb59e7a75",
+                  "size": 1682744,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
+                  "type": "file",
+                  "sha256": "50f0870cd4b2fc02634ebba963f68bfc22fd5213f045ad21fd567581fe776463",
+                  "size": 222344,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
+                  "type": "file",
+                  "sha256": "e1dd6bea50363a77ce9c93cffa5baa0e247f1848ebcf57d85ad944f5c9adaef6",
+                  "size": 274480,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
+                  "type": "file",
+                  "sha256": "bc39c4a26fd2da51c2a28e8867f94b595d751bfd1c6e22d9d5492de093ab99fe",
+                  "size": 1049992,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libintl.so.8",
+                  "type": "file",
+                  "sha256": "b5c96edabcd6f9a9e444c325b0fd191ad480555cea7cc799970507303d413fa6",
+                  "size": 6904,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libintl.so.8"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
+                  "type": "file",
+                  "sha256": "6ce0e40fffa257dca2034546744a75bfcd5b5ae1d79693b1a9d9a6e2a974644a",
+                  "size": 499096,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libpcre2-8.so.0",
+                  "type": "file",
+                  "sha256": "ed12ebb1003748d284f98c4f90f060a80e25f085b0251c8d8ebcc7fa8ba58f35",
+                  "size": 412576,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libpcre2-8.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libz.so.1",
+                  "type": "file",
+                  "sha256": "284a7e1475cccabdda7fb91d9917a95a1abfbe73688033acc7ac27241d97ceca",
+                  "size": 112752,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libz.so.1"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt",
+                  "type": "file",
+                  "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+                  "size": 26431,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt",
+                  "type": "file",
+                  "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+                  "size": 1945,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md",
+                  "type": "file",
+                  "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
+                  "size": 4011,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt",
+                  "type": "file",
+                  "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
+                  "size": 1132,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt",
+                  "type": "file",
+                  "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+                  "size": 25292,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt",
+                  "type": "file",
+                  "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+                  "size": 1444,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt",
+                  "type": "file",
+                  "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+                  "size": 1002,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/manifest.json",
+                  "type": "file",
+                  "sha256": "c2a1506c00ee0a0c5e73925ed04c8339d77fe6165f1c9c206a7a0895c30a7d11",
+                  "size": 4770,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/manifest.json"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/runtime.json",
+                  "type": "file",
+                  "sha256": "302f3763713831a52759afe095c0c3217cc737edf297fb0d08457d40bbea3e77",
+                  "size": 14536,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/runtime.json"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/sources.json",
+                  "type": "file",
+                  "sha256": "e2f6b124f6277e7c3c4f5c7cc8830c66190f671ad65e972bb2cc9507dbfcb937",
+                  "size": 4911,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/sources.json"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/zsh",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/zsh/bin",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
+                  "type": "file",
+                  "sha256": "7feeacd883e1dc749847936948c378653c80a69ec4a9542f0f126b411882c179",
+                  "size": 878056,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/zsh/bin/zsh"
+                }
+              ],
+              "notices": [
+                {
+                  "file": "texts/40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48.txt",
+                  "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/NOTICE.md"
+                },
+                {
+                  "file": "texts/197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811.txt",
+                  "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md"
+                },
+                {
+                  "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+                  "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt"
+                },
+                {
+                  "file": "texts/17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c.txt",
+                  "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt"
+                },
+                {
+                  "file": "texts/01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt",
+                  "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt"
+                },
+                {
+                  "file": "texts/d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5.txt",
+                  "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt"
+                },
+                {
+                  "file": "texts/5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb.txt",
+                  "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt"
+                },
+                {
+                  "file": "texts/e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2.txt",
+                  "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt"
+                }
+              ]
+            }
+          ],
+          "links": [
+            {
+              "path": "/opt/marsh/codex-acp/node_modules/.bin/codex",
+              "type": "symlink",
+              "mode": 511,
+              "uid": 0,
+              "gid": 0,
+              "target": "../@openai/codex/bin/codex.js"
+            }
+          ],
+          "required_notices": [
+            {
+              "file": "provider-notices/codex-0.156.1-LICENSE",
+              "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-NOTICE",
+              "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-third_party-wezterm-LICENSE",
+              "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+            },
+            {
+              "file": "texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt",
+              "sha256": "d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5"
+            },
+            {
+              "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt",
+              "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"
+            },
+            {
+              "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt",
+              "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"
+            },
+            {
+              "file": "provider-notices/codex-0.155.1-codex-rs-vendor-bubblewrap-COPYING",
+              "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+            },
+            {
+              "file": "texts/40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48.txt",
+              "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+            },
+            {
+              "file": "texts/197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811.txt",
+              "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+            },
+            {
+              "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+              "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+            },
+            {
+              "file": "texts/17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c.txt",
+              "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+            },
+            {
+              "file": "texts/01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt",
+              "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+            },
+            {
+              "file": "texts/d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5.txt",
+              "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+            },
+            {
+              "file": "texts/5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb.txt",
+              "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+            },
+            {
+              "file": "texts/e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2.txt",
+              "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+            }
+          ]
+        },
+        "amd64": {
+          "packages": [
+            {
+              "alias": "@openai/codex",
+              "root": "/opt/marsh/codex-acp/node_modules/@openai/codex",
+              "package": "@openai/codex",
+              "version": "0.156.1",
+              "acquisition": {
+                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1.tgz",
+                "sha256": "08f128dd29bc659a62c16110dc4e8acad6858ba884a9b420631fbfa270b941d1",
+                "size": 4904,
+                "integrity": "sha512-nI1iVl/n2SO2lSvlwEsJx63zdSI4C4Me2gR7AG0OWMJiGSakz2tY2hx43E39Zq5aEoeB5bZjJXzp5Sqhog6vyA==",
+                "signature_verified": false
+              },
+              "payload_entries": [
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex/README.md",
+                  "type": "file",
+                  "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
+                  "size": 3334,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/README.md"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex/bin",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex/bin/codex.js",
+                  "type": "file",
+                  "sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+                  "size": 8790,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/bin/codex.js"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex/package.json",
+                  "type": "file",
+                  "sha256": "c3f16464dca0fe1269b17d02fe0997d1ca3a241c3a61da3d89ec13def0a66c6e",
+                  "size": 1082,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/package.json"
+                }
+              ],
+              "notices": []
+            },
+            {
+              "alias": "@openai/codex-linux-x64",
+              "root": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64",
+              "package": "@openai/codex",
+              "version": "0.156.1-linux-x64",
+              "acquisition": {
+                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
+                "sha256": "ded9840babeb511e79738ae708044ae489fbce50db7002b943b3195cf5ae6a25",
+                "size": 148522874,
+                "integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                "signature_verified": false
+              },
+              "payload_entries": [
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/README.md",
+                  "type": "file",
+                  "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
+                  "size": 3334,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/README.md"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/package.json",
+                  "type": "file",
+                  "sha256": "482b103b451bf5c475f580638fca3cba1c33304b94013a8f16bf0a63ae294326",
+                  "size": 511,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/package.json"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
+                  "type": "file",
+                  "sha256": "0b2e9301d6100dddda3b9d5c80ebaeaa3a2f1962388f2f36f6b96a9f08b1f33f",
+                  "size": 284479848,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/bin/codex"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
+                  "type": "file",
+                  "sha256": "45ba654b0e145406f3316be4729b886980ce811aa2e3b6ed4e033dd41ab524f1",
+                  "size": 70603664,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-package.json",
+                  "type": "file",
+                  "sha256": "6cf97f0c8999775e81c038429a31f28c406e077ecdbece52a9700e244bd2458f",
+                  "size": 205,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-package.json"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path/rg",
+                  "type": "file",
+                  "sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+                  "size": 5408904,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-path/rg"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
+                  "type": "file",
+                  "sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+                  "size": 529776,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/NOTICE.md",
+                  "type": "file",
+                  "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48",
+                  "size": 2403,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/NOTICE.md"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/bin",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
+                  "type": "file",
+                  "sha256": "30effeb02ea225194b537ea68baaa431562ed32322d921cd7010f48ddae4fcaf",
+                  "size": 12844040,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
+                  "type": "file",
+                  "sha256": "cfe93cd0a751fb9e93987c43bd876399b8ff9cd5e6cd39573b61a80cb7788047",
+                  "size": 6488,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
+                  "type": "file",
+                  "sha256": "8c3db0d3971e02cf0ef326ed321e9aa0d0e3d37d7de62b9fc750361e4c1e0752",
+                  "size": 40928,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
+                  "type": "file",
+                  "sha256": "53b40a0f5a9e5d6045f7b88b14c39466e3b5fd36096179c0b89b0fb3a3d8e1f2",
+                  "size": 35120,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
+                  "type": "file",
+                  "sha256": "ff7b74ba854c321eb1064ea3eda8c9fce43d90363056db30306a0eeb855ec41b",
+                  "size": 473176,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
+                  "type": "file",
+                  "sha256": "30042da9945f3fe5ad6484a5ef3191ba27490fe4ba15d02adcdbc499e7261ae5",
+                  "size": 71992,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
+                  "type": "file",
+                  "sha256": "61a414f521c80ce75bbe3ee3dbcf9779292f8b873a5e5bebaedd808936e0ce32",
+                  "size": 739744,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
+                  "type": "file",
+                  "sha256": "855bb5f3c015d3e441e5532591e174090e82dd5718a52aa06d7610fd716dc8a3",
+                  "size": 558104,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libffi.so.8",
+                  "type": "file",
+                  "sha256": "6ef5db59b2e4b1eb63032fa6c8afb1669bc09b073789233c379efda85b1353db",
+                  "size": 63112,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libffi.so.8"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
+                  "type": "file",
+                  "sha256": "c83568024e6047e78a481ab466bccbe80a10371331b77e9653c44c5cc1f29b94",
+                  "size": 2307904,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
+                  "type": "file",
+                  "sha256": "895a92f9216def15210e4fdcaa2c86e64c0c86218dbd4e4348613fd97bf12225",
+                  "size": 1480224,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
+                  "type": "file",
+                  "sha256": "4df433663106bb5f0f05c85e60b1ae0bb9f2bef257108d8f25c88da73ac5e140",
+                  "size": 15656,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
+                  "type": "file",
+                  "sha256": "f7b512eb4488fa6545bcc5d7720f473e62a2b0d4a64a2cbdd5c35c76308c8521",
+                  "size": 449600,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
+                  "type": "file",
+                  "sha256": "6311fba78e2d78e7de8a6193868ebfaca6cf4569d6ada170e43d3746e8ba5091",
+                  "size": 30128,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
+                  "type": "file",
+                  "sha256": "0a48918115a0ec9e15bec444655628255b770ae3d36a65af85d8ae57628dd8c9",
+                  "size": 105200,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
+                  "type": "file",
+                  "sha256": "c82d018a23135c4a6286ef9e73caae2c7d80ec0bb44c8af7ce40ee0a012cbaa1",
+                  "size": 597832,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
+                  "type": "file",
+                  "sha256": "c8a8476ae9bce3a5c6028713b8e4ead30e3031fe1a9998c1e8c6ab27c2433403",
+                  "size": 564592,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
+                  "type": "file",
+                  "sha256": "9de4c50dc21e2ca71e9766f5f3fe1d0a630ffe11e49682db01569461a1bd2907",
+                  "size": 73856,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
+                  "type": "file",
+                  "sha256": "5dda3dbd7054678efdae39098d6b983588a4632a417a714dd409589931c22be2",
+                  "size": 316576,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
+                  "type": "file",
+                  "sha256": "cee35177c67614e9fd186de09e02a3c445820a2db273a3ad89bef0fd3adeb6f2",
+                  "size": 1548568,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
+                  "type": "file",
+                  "sha256": "271c63e618833b535c48e204526348d94171ba8d52c49f95fed1288705aa11b1",
+                  "size": 209200,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
+                  "type": "file",
+                  "sha256": "8cf3dbbdb2ee4cf5b624bead25a443ad77ab88d6ab8578730fa8377a7fe83686",
+                  "size": 268280,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
+                  "type": "file",
+                  "sha256": "e089afc6dadf4a655fe3831657d7a1c885b977b4d0fa6b172f3ca820171e8586",
+                  "size": 975136,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libintl.so.8",
+                  "type": "file",
+                  "sha256": "f50f3ab34be7b3392f2db82bd67d50e133b35fa41d352dc3b3a97b70b0ffd960",
+                  "size": 6288,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libintl.so.8"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
+                  "type": "file",
+                  "sha256": "a6e3298c8af70ac76c0784d3ae8bbbbf7aad21b0e488315e61c379501d9b066d",
+                  "size": 565744,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libpcre2-8.so.0",
+                  "type": "file",
+                  "sha256": "e39519b242f40686734ed8d0218f68cac24f0e956ec64c8c1b49b9da5cc9788b",
+                  "size": 442424,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libpcre2-8.so.0"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libz.so.1",
+                  "type": "file",
+                  "sha256": "6c5d765f42d9368cc4bdbd11f725c1bcf6b14b78322033d3c94f787fc6261f5e",
+                  "size": 109296,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libz.so.1"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt",
+                  "type": "file",
+                  "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+                  "size": 26431,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt",
+                  "type": "file",
+                  "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+                  "size": 1945,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md",
+                  "type": "file",
+                  "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
+                  "size": 4011,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt",
+                  "type": "file",
+                  "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
+                  "size": 1132,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt",
+                  "type": "file",
+                  "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+                  "size": 25292,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt",
+                  "type": "file",
+                  "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+                  "size": 1444,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt",
+                  "type": "file",
+                  "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+                  "size": 1002,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/manifest.json",
+                  "type": "file",
+                  "sha256": "e2df3a04efd5756a035b5792d35ca0da1049205c05b914c1992a4c97364f5782",
+                  "size": 4768,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/manifest.json"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/runtime.json",
+                  "type": "file",
+                  "sha256": "757c3211d6e11d402490d6434e9fd1c21256a2a6364f218753dca0c0bad506a8",
+                  "size": 13941,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/runtime.json"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/sources.json",
+                  "type": "file",
+                  "sha256": "e2f6b124f6277e7c3c4f5c7cc8830c66190f671ad65e972bb2cc9507dbfcb937",
+                  "size": 4911,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/sources.json"
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/zsh",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/zsh/bin",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
+                  "type": "file",
+                  "sha256": "67faaaa89242c4a332e16e508a1977cffc24bf7fca31d4411cdfd101f3831ef3",
+                  "size": 898480,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/zsh/bin/zsh"
+                }
+              ],
+              "notices": [
+                {
+                  "file": "texts/40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48.txt",
+                  "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
+                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/NOTICE.md"
+                },
+                {
+                  "file": "texts/197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811.txt",
+                  "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
+                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md"
+                },
+                {
+                  "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+                  "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
+                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt"
+                },
+                {
+                  "file": "texts/17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c.txt",
+                  "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
+                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt"
+                },
+                {
+                  "file": "texts/01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt",
+                  "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
+                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt"
+                },
+                {
+                  "file": "texts/d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5.txt",
+                  "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
+                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt"
+                },
+                {
+                  "file": "texts/5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb.txt",
+                  "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
+                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt"
+                },
+                {
+                  "file": "texts/e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2.txt",
+                  "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
+                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt"
+                }
+              ]
+            }
+          ],
+          "links": [
+            {
+              "path": "/opt/marsh/codex-acp/node_modules/.bin/codex",
+              "type": "symlink",
+              "mode": 511,
+              "uid": 0,
+              "gid": 0,
+              "target": "../@openai/codex/bin/codex.js"
+            }
+          ],
+          "required_notices": [
+            {
+              "file": "provider-notices/codex-0.156.1-LICENSE",
+              "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-NOTICE",
+              "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-third_party-wezterm-LICENSE",
+              "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+            },
+            {
+              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+            },
+            {
+              "file": "texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt",
+              "sha256": "d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5"
+            },
+            {
+              "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt",
+              "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"
+            },
+            {
+              "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt",
+              "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"
+            },
+            {
+              "file": "provider-notices/codex-0.155.1-codex-rs-vendor-bubblewrap-COPYING",
+              "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+            },
+            {
+              "file": "texts/40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48.txt",
+              "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+            },
+            {
+              "file": "texts/197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811.txt",
+              "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+            },
+            {
+              "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+              "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+            },
+            {
+              "file": "texts/17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c.txt",
+              "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+            },
+            {
+              "file": "texts/01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt",
+              "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+            },
+            {
+              "file": "texts/d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5.txt",
+              "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+            },
+            {
+              "file": "texts/5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb.txt",
+              "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+            },
+            {
+              "file": "texts/e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2.txt",
+              "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+            }
+          ]
+        }
+      }
+    },
+    "claude-acp": {
+      "base_agent": "claude",
+      "root": "/opt/marsh/claude-acp",
+      "lock_sha256": "adff4eac07315f8f76e8184af8f4f5bd77cc43813c808f3129694a0430e4c14e",
+      "notice_root": "/usr/local/share/licenses/marsh-claude-acp",
+      "selected_version": "0.3.274",
+      "architectures": {
+        "arm64": {
+          "packages": [
+            {
+              "alias": "@anthropic-ai/claude-agent-sdk",
+              "root": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk",
+              "package": "@anthropic-ai/claude-agent-sdk",
+              "version": "0.3.274",
+              "acquisition": {
+                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.274.tgz",
+                "sha256": "6fed71c4b6d4ad542fdd14f9989dc0dbdaef9b28bc7f62e629972605d9d287ca",
+                "size": 1445031,
+                "integrity": "sha512-kFmWMsh/BEd4jKkOxUeihr0xMkaMdOxONhNNkZ2pGmP0ElHkArvFvuZxqJTPvREnhCsPZByv5f0EzyAb/hkRZw==",
+                "signature_verified": false
+              },
+              "payload_entries": [
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/LICENSE.md",
+                  "type": "file",
+                  "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
+                  "size": 147,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/LICENSE.md"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/README.md",
+                  "type": "file",
+                  "sha256": "a923405f92c474ca40c62d0b5ffb2897aba56f779a7ea36807555b1553d0cdab",
+                  "size": 3173,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/README.md"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/agentSdkTypes.d.ts",
+                  "type": "file",
+                  "sha256": "1005d810b1bec12c856632bb7d54087af7c516251a4b557eb05ae8d474fc5a93",
+                  "size": 25,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/agentSdkTypes.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/bridge.d.ts",
+                  "type": "file",
+                  "sha256": "3aa177a4c5859dbacd768cead5e660b148e854b834d5bf430e0c489339785295",
+                  "size": 17300,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/bridge.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/bridge.mjs",
+                  "type": "file",
+                  "sha256": "ff16ab1ac7d09052e9768d2565e1ecb592bbbda1cb82ef5cd0ac0e019d6acc07",
+                  "size": 1490248,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/bridge.mjs"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/browser-sdk.d.ts",
+                  "type": "file",
+                  "sha256": "d98512eb8c7d656f5f8698ad712be2f501d4f570470391af1069b17eeb8992d9",
+                  "size": 8628,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/browser-sdk.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/browser-sdk.js",
+                  "type": "file",
+                  "sha256": "5c9decfc1a3cc9ed1ec7dcd979b68ccde56ebc8cc132d10048eef14c258b16a4",
+                  "size": 1430929,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/browser-sdk.js"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/extractFromBunfs.d.ts",
+                  "type": "file",
+                  "sha256": "eedc9d6a3adb2e0f12984ddf3d2cc3a72f56906b4a4069660bd08fd36c3d2984",
+                  "size": 63,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/extractFromBunfs.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/extractFromBunfs.js",
+                  "type": "file",
+                  "sha256": "1286171f98b1147a4ed46d48296a1ab8ee4f79cee2d893ace5210ebe361d8c27",
+                  "size": 6606,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/extractFromBunfs.js"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/manifest.json",
+                  "type": "file",
+                  "sha256": "5d6fb056dfa62483d690629a59057469ebc3f659f4948d48329358c31b823da5",
+                  "size": 2161,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/manifest.json"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/manifest.zst.json",
+                  "type": "file",
+                  "sha256": "de2405a4413654a49678f5c5bf725cfd6f6c8e0cac3651a79a91af34ee0efd7a",
+                  "size": 2465,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/manifest.zst.json"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/package.json",
+                  "type": "file",
+                  "sha256": "93070f663fa27fb2e4be37db463b9e410c3fcc02fea85ec2d2ed13e5cfd3f56b",
+                  "size": 2380,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/package.json"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts",
+                  "type": "file",
+                  "sha256": "715f31952cf047959dcd695c5471c7bb36759a6a50dfe74df1deb374c5698745",
+                  "size": 168249,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/sdk-tools.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts",
+                  "type": "file",
+                  "sha256": "c653c4e4d359214a8eeedbbab71a990f24482bbe205cca5ea1024a780a093594",
+                  "size": 472671,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/sdk.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs",
+                  "type": "file",
+                  "sha256": "935ceae86435a65a686da3b85a24e6bd5b97c61b386a97a5db7927e4dbc5fb9d",
+                  "size": 1564964,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/sdk.mjs"
+                }
+              ],
+              "notices": [
+                {
+                  "file": "texts/8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a.txt",
+                  "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.274.tgz",
+                  "package_integrity": "sha512-kFmWMsh/BEd4jKkOxUeihr0xMkaMdOxONhNNkZ2pGmP0ElHkArvFvuZxqJTPvREnhCsPZByv5f0EzyAb/hkRZw==",
+                  "member": "package/LICENSE.md"
+                },
+                {
+                  "file": "texts/a923405f92c474ca40c62d0b5ffb2897aba56f779a7ea36807555b1553d0cdab.txt",
+                  "sha256": "a923405f92c474ca40c62d0b5ffb2897aba56f779a7ea36807555b1553d0cdab",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.274.tgz",
+                  "package_integrity": "sha512-kFmWMsh/BEd4jKkOxUeihr0xMkaMdOxONhNNkZ2pGmP0ElHkArvFvuZxqJTPvREnhCsPZByv5f0EzyAb/hkRZw==",
+                  "member": "package/README.md"
+                }
+              ]
+            },
+            {
+              "alias": "@anthropic-ai/claude-agent-sdk-linux-arm64",
+              "root": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64",
+              "package": "@anthropic-ai/claude-agent-sdk-linux-arm64",
+              "version": "0.3.274",
+              "acquisition": {
+                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.274.tgz",
+                "sha256": "6c689eaf9feb9a8d1e8965c0b1fc6b4626d6c4d8267fcef2651219a23028de05",
+                "size": 103061821,
+                "integrity": "sha512-kYsmSN6zieDwVS3QZBBay9fxNp+h4t4OXleuk6xWhrUDEQRfRQEFlD7JVWWWjJIiHILnniycOxarwo4VpqTf1Q==",
+                "signature_verified": false
+              },
+              "payload_entries": [
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/LICENSE.md",
+                  "type": "file",
+                  "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
+                  "size": 147,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/LICENSE.md"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/README.md",
+                  "type": "file",
+                  "sha256": "52ff43c0a87bc38e1108533895cc91d5b9645e35ebc90e8cc3933515cfcb043d",
+                  "size": 162,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/README.md"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/claude",
+                  "type": "file",
+                  "sha256": "2db904daea17addff9de557ba26a725916888aa7b546e2c5dd989c20d9d49ab3",
+                  "size": 230482160,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/claude"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/package.json",
+                  "type": "file",
+                  "sha256": "745eeb6f340a3abe74f65f91b60736d970cd629805094c0d9579a00766670253",
+                  "size": 288,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/package.json"
+                }
+              ],
+              "notices": [
+                {
+                  "file": "texts/8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a.txt",
+                  "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.274.tgz",
+                  "package_integrity": "sha512-kYsmSN6zieDwVS3QZBBay9fxNp+h4t4OXleuk6xWhrUDEQRfRQEFlD7JVWWWjJIiHILnniycOxarwo4VpqTf1Q==",
+                  "member": "package/LICENSE.md"
+                },
+                {
+                  "file": "texts/52ff43c0a87bc38e1108533895cc91d5b9645e35ebc90e8cc3933515cfcb043d.txt",
+                  "sha256": "52ff43c0a87bc38e1108533895cc91d5b9645e35ebc90e8cc3933515cfcb043d",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.274.tgz",
+                  "package_integrity": "sha512-kYsmSN6zieDwVS3QZBBay9fxNp+h4t4OXleuk6xWhrUDEQRfRQEFlD7JVWWWjJIiHILnniycOxarwo4VpqTf1Q==",
+                  "member": "package/README.md"
+                }
+              ]
+            }
+          ],
+          "links": [],
+          "required_notices": [
+            {
+              "file": "texts/8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a.txt",
+              "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a"
+            },
+            {
+              "file": "texts/a923405f92c474ca40c62d0b5ffb2897aba56f779a7ea36807555b1553d0cdab.txt",
+              "sha256": "a923405f92c474ca40c62d0b5ffb2897aba56f779a7ea36807555b1553d0cdab"
+            },
+            {
+              "file": "texts/52ff43c0a87bc38e1108533895cc91d5b9645e35ebc90e8cc3933515cfcb043d.txt",
+              "sha256": "52ff43c0a87bc38e1108533895cc91d5b9645e35ebc90e8cc3933515cfcb043d"
+            }
+          ]
+        },
+        "amd64": {
+          "packages": [
+            {
+              "alias": "@anthropic-ai/claude-agent-sdk",
+              "root": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk",
+              "package": "@anthropic-ai/claude-agent-sdk",
+              "version": "0.3.274",
+              "acquisition": {
+                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.274.tgz",
+                "sha256": "6fed71c4b6d4ad542fdd14f9989dc0dbdaef9b28bc7f62e629972605d9d287ca",
+                "size": 1445031,
+                "integrity": "sha512-kFmWMsh/BEd4jKkOxUeihr0xMkaMdOxONhNNkZ2pGmP0ElHkArvFvuZxqJTPvREnhCsPZByv5f0EzyAb/hkRZw==",
+                "signature_verified": false
+              },
+              "payload_entries": [
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/LICENSE.md",
+                  "type": "file",
+                  "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
+                  "size": 147,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/LICENSE.md"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/README.md",
+                  "type": "file",
+                  "sha256": "a923405f92c474ca40c62d0b5ffb2897aba56f779a7ea36807555b1553d0cdab",
+                  "size": 3173,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/README.md"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/agentSdkTypes.d.ts",
+                  "type": "file",
+                  "sha256": "1005d810b1bec12c856632bb7d54087af7c516251a4b557eb05ae8d474fc5a93",
+                  "size": 25,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/agentSdkTypes.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/bridge.d.ts",
+                  "type": "file",
+                  "sha256": "3aa177a4c5859dbacd768cead5e660b148e854b834d5bf430e0c489339785295",
+                  "size": 17300,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/bridge.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/bridge.mjs",
+                  "type": "file",
+                  "sha256": "ff16ab1ac7d09052e9768d2565e1ecb592bbbda1cb82ef5cd0ac0e019d6acc07",
+                  "size": 1490248,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/bridge.mjs"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/browser-sdk.d.ts",
+                  "type": "file",
+                  "sha256": "d98512eb8c7d656f5f8698ad712be2f501d4f570470391af1069b17eeb8992d9",
+                  "size": 8628,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/browser-sdk.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/browser-sdk.js",
+                  "type": "file",
+                  "sha256": "5c9decfc1a3cc9ed1ec7dcd979b68ccde56ebc8cc132d10048eef14c258b16a4",
+                  "size": 1430929,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/browser-sdk.js"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/extractFromBunfs.d.ts",
+                  "type": "file",
+                  "sha256": "eedc9d6a3adb2e0f12984ddf3d2cc3a72f56906b4a4069660bd08fd36c3d2984",
+                  "size": 63,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/extractFromBunfs.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/extractFromBunfs.js",
+                  "type": "file",
+                  "sha256": "1286171f98b1147a4ed46d48296a1ab8ee4f79cee2d893ace5210ebe361d8c27",
+                  "size": 6606,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/extractFromBunfs.js"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/manifest.json",
+                  "type": "file",
+                  "sha256": "5d6fb056dfa62483d690629a59057469ebc3f659f4948d48329358c31b823da5",
+                  "size": 2161,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/manifest.json"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/manifest.zst.json",
+                  "type": "file",
+                  "sha256": "de2405a4413654a49678f5c5bf725cfd6f6c8e0cac3651a79a91af34ee0efd7a",
+                  "size": 2465,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/manifest.zst.json"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/package.json",
+                  "type": "file",
+                  "sha256": "93070f663fa27fb2e4be37db463b9e410c3fcc02fea85ec2d2ed13e5cfd3f56b",
+                  "size": 2380,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/package.json"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts",
+                  "type": "file",
+                  "sha256": "715f31952cf047959dcd695c5471c7bb36759a6a50dfe74df1deb374c5698745",
+                  "size": 168249,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/sdk-tools.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts",
+                  "type": "file",
+                  "sha256": "c653c4e4d359214a8eeedbbab71a990f24482bbe205cca5ea1024a780a093594",
+                  "size": 472671,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/sdk.d.ts"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs",
+                  "type": "file",
+                  "sha256": "935ceae86435a65a686da3b85a24e6bd5b97c61b386a97a5db7927e4dbc5fb9d",
+                  "size": 1564964,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/sdk.mjs"
+                }
+              ],
+              "notices": [
+                {
+                  "file": "texts/8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a.txt",
+                  "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.274.tgz",
+                  "package_integrity": "sha512-kFmWMsh/BEd4jKkOxUeihr0xMkaMdOxONhNNkZ2pGmP0ElHkArvFvuZxqJTPvREnhCsPZByv5f0EzyAb/hkRZw==",
+                  "member": "package/LICENSE.md"
+                },
+                {
+                  "file": "texts/a923405f92c474ca40c62d0b5ffb2897aba56f779a7ea36807555b1553d0cdab.txt",
+                  "sha256": "a923405f92c474ca40c62d0b5ffb2897aba56f779a7ea36807555b1553d0cdab",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.274.tgz",
+                  "package_integrity": "sha512-kFmWMsh/BEd4jKkOxUeihr0xMkaMdOxONhNNkZ2pGmP0ElHkArvFvuZxqJTPvREnhCsPZByv5f0EzyAb/hkRZw==",
+                  "member": "package/README.md"
+                }
+              ]
+            },
+            {
+              "alias": "@anthropic-ai/claude-agent-sdk-linux-x64",
+              "root": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64",
+              "package": "@anthropic-ai/claude-agent-sdk-linux-x64",
+              "version": "0.3.274",
+              "acquisition": {
+                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.274.tgz",
+                "sha256": "0e227a0f07f8af6c1831d6c1c7e5425030999329b3b04cd89edea901704451f8",
+                "size": 102593180,
+                "integrity": "sha512-QLeK9LzTtTdCjCDRYUVRHj1I3U6AfMvpXYI4Ur1s+vrUcad/C20kShS5/kgug+rERU5CNxNA9v0A052rt47ZXQ==",
+                "signature_verified": false
+              },
+              "payload_entries": [
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64",
+                  "type": "directory",
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/LICENSE.md",
+                  "type": "file",
+                  "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
+                  "size": 147,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/LICENSE.md"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/README.md",
+                  "type": "file",
+                  "sha256": "310346d4c8006eef72f488dcc348bd2803a83a93111de5211954c8cae1f9d0fe",
+                  "size": 160,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/README.md"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude",
+                  "type": "file",
+                  "sha256": "15e2d05148f801b5774032faad87e624ecd172e9903288bda448b892eb58fa07",
+                  "size": 230580536,
+                  "mode": 493,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/claude"
+                },
+                {
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/package.json",
+                  "type": "file",
+                  "sha256": "b7cc0f11c9308731f79826dd1a332af1730e0337ba993c69339e84961bc38482",
+                  "size": 282,
+                  "mode": 420,
+                  "uid": 0,
+                  "gid": 0,
+                  "npm_member": "package/package.json"
+                }
+              ],
+              "notices": [
+                {
+                  "file": "texts/8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a.txt",
+                  "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.274.tgz",
+                  "package_integrity": "sha512-QLeK9LzTtTdCjCDRYUVRHj1I3U6AfMvpXYI4Ur1s+vrUcad/C20kShS5/kgug+rERU5CNxNA9v0A052rt47ZXQ==",
+                  "member": "package/LICENSE.md"
+                },
+                {
+                  "file": "texts/310346d4c8006eef72f488dcc348bd2803a83a93111de5211954c8cae1f9d0fe.txt",
+                  "sha256": "310346d4c8006eef72f488dcc348bd2803a83a93111de5211954c8cae1f9d0fe",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.274.tgz",
+                  "package_integrity": "sha512-QLeK9LzTtTdCjCDRYUVRHj1I3U6AfMvpXYI4Ur1s+vrUcad/C20kShS5/kgug+rERU5CNxNA9v0A052rt47ZXQ==",
+                  "member": "package/README.md"
+                }
+              ]
+            }
+          ],
+          "links": [],
+          "required_notices": [
+            {
+              "file": "texts/8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a.txt",
+              "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a"
+            },
+            {
+              "file": "texts/a923405f92c474ca40c62d0b5ffb2897aba56f779a7ea36807555b1553d0cdab.txt",
+              "sha256": "a923405f92c474ca40c62d0b5ffb2897aba56f779a7ea36807555b1553d0cdab"
+            },
+            {
+              "file": "texts/310346d4c8006eef72f488dcc348bd2803a83a93111de5211954c8cae1f9d0fe.txt",
+              "sha256": "310346d4c8006eef72f488dcc348bd2803a83a93111de5211954c8cae1f9d0fe"
+            }
+          ]
+        }
+      }
+    },
+    "pi": {
+      "root": "/opt/marsh/pi-gateway",
+      "base_agent": "claude",
+      "lock_sha256": "17c1695b9f45cc21aa7997f00fbb04dcd80c4e8fa885679b6da01ed4da1a5dcd",
+      "notice_root": "/usr/local/share/licenses/marsh-pi",
+      "architectures": {
+        "arm64": {
+          "packages": [],
+          "links": [],
+          "required_notices": []
+        },
+        "amd64": {
+          "packages": [],
+          "links": [],
+          "required_notices": []
+        }
+      }
+    }
+  },
+  "scope": "Exact locked public npm members for selected ACP native payloads; other installed npm packages are metadata/notice checked, not full-code or link/rights approval. No package scripts/agents executed."
+}

@@ -1,0 +1,6 @@
+{
+  "claude": "kits/marsh-claude",
+  "codex": "kits/marsh-codex",
+  "pi": "kits/marsh-pi",
+  "shell": "kits/marsh-shell"
+}

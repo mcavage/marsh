@@ -1,0 +1,42 @@
+{
+  "$canonical_notice_files": {
+    "codex-0.156.1-LICENSE": "provider-notices/codex-0.156.1-LICENSE",
+    "codex-0.156.1-NOTICE": "provider-notices/codex-0.156.1-NOTICE"
+  },
+  "@openai/codex@0.156.1": [
+    {
+      "file": "codex-0.156.1-LICENSE",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+      "url": "https://raw.githubusercontent.com/openai/codex/b412ff32c417f855c2b2d1581b77058eed87c84b/LICENSE"
+    },
+    {
+      "file": "codex-0.156.1-NOTICE",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+      "url": "https://raw.githubusercontent.com/openai/codex/b412ff32c417f855c2b2d1581b77058eed87c84b/NOTICE"
+    }
+  ],
+  "@openai/codex@0.156.1-linux-arm64": [
+    {
+      "file": "codex-0.156.1-LICENSE",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+      "url": "https://raw.githubusercontent.com/openai/codex/b412ff32c417f855c2b2d1581b77058eed87c84b/LICENSE"
+    },
+    {
+      "file": "codex-0.156.1-NOTICE",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+      "url": "https://raw.githubusercontent.com/openai/codex/b412ff32c417f855c2b2d1581b77058eed87c84b/NOTICE"
+    }
+  ],
+  "@openai/codex@0.156.1-linux-x64": [
+    {
+      "file": "codex-0.156.1-LICENSE",
+      "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+      "url": "https://raw.githubusercontent.com/openai/codex/b412ff32c417f855c2b2d1581b77058eed87c84b/LICENSE"
+    },
+    {
+      "file": "codex-0.156.1-NOTICE",
+      "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+      "url": "https://raw.githubusercontent.com/openai/codex/b412ff32c417f855c2b2d1581b77058eed87c84b/NOTICE"
+    }
+  ]
+}

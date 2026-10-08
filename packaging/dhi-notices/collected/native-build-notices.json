@@ -1,0 +1,132 @@
+[
+  {
+    "package": "codex-native-libcap",
+    "version": "2.75",
+    "acquisition": {
+      "url": "https://mirrors.edge.kernel.org/pub/linux/libs/security/linux-privs/libcap2/libcap-2.75.tar.xz",
+      "sha256": "de4e7e064c9ba451d5234dd46e897d7c71c96a9ebf9a0c445bc04f4742d83632",
+      "size": 197868,
+      "integrity": null,
+      "signature_verified": false
+    },
+    "source_commit": "ff6aec96948b70d94983af2641a6b67c94faeff5",
+    "build_script": ".github/scripts/install-musl-build-tools.sh",
+    "notices": [
+      {
+        "file": "texts/18eb30b662ed0abeef6ad6ded90a99b30332418d2f71e63dcb4646bbb23b9acc.txt",
+        "sha256": "18eb30b662ed0abeef6ad6ded90a99b30332418d2f71e63dcb4646bbb23b9acc",
+        "member": "libcap-2.75/cap/License",
+        "url": "https://mirrors.edge.kernel.org/pub/linux/libs/security/linux-privs/libcap2/libcap-2.75.tar.xz",
+        "archive_sha256": "de4e7e064c9ba451d5234dd46e897d7c71c96a9ebf9a0c445bc04f4742d83632"
+      },
+      {
+        "file": "texts/68467e731f4744bd6e0bb69e8df9c3a994e09cd6b203d0c41327ac6d079c581d.txt",
+        "sha256": "68467e731f4744bd6e0bb69e8df9c3a994e09cd6b203d0c41327ac6d079c581d",
+        "member": "libcap-2.75/License",
+        "url": "https://mirrors.edge.kernel.org/pub/linux/libs/security/linux-privs/libcap2/libcap-2.75.tar.xz",
+        "archive_sha256": "de4e7e064c9ba451d5234dd46e897d7c71c96a9ebf9a0c445bc04f4742d83632"
+      },
+      {
+        "file": "texts/018163f725c6a553035d5e475fe2449966a94413b57ce6c1dceec0c8d3ab2bc3.txt",
+        "sha256": "018163f725c6a553035d5e475fe2449966a94413b57ce6c1dceec0c8d3ab2bc3",
+        "member": "libcap-2.75/pam_cap/License",
+        "url": "https://mirrors.edge.kernel.org/pub/linux/libs/security/linux-privs/libcap2/libcap-2.75.tar.xz",
+        "archive_sha256": "de4e7e064c9ba451d5234dd46e897d7c71c96a9ebf9a0c445bc04f4742d83632"
+      },
+      {
+        "file": "texts/279fa656c62857d42952b86a0789b98669ca1cb4b324a8d9e91397c174af4c14.txt",
+        "sha256": "279fa656c62857d42952b86a0789b98669ca1cb4b324a8d9e91397c174af4c14",
+        "member": "libcap-2.75/psx/License",
+        "url": "https://mirrors.edge.kernel.org/pub/linux/libs/security/linux-privs/libcap2/libcap-2.75.tar.xz",
+        "archive_sha256": "de4e7e064c9ba451d5234dd46e897d7c71c96a9ebf9a0c445bc04f4742d83632"
+      }
+    ],
+    "required_notices": [
+      {
+        "file": "texts/18eb30b662ed0abeef6ad6ded90a99b30332418d2f71e63dcb4646bbb23b9acc.txt",
+        "sha256": "18eb30b662ed0abeef6ad6ded90a99b30332418d2f71e63dcb4646bbb23b9acc"
+      },
+      {
+        "file": "texts/68467e731f4744bd6e0bb69e8df9c3a994e09cd6b203d0c41327ac6d079c581d.txt",
+        "sha256": "68467e731f4744bd6e0bb69e8df9c3a994e09cd6b203d0c41327ac6d079c581d"
+      },
+      {
+        "file": "texts/018163f725c6a553035d5e475fe2449966a94413b57ce6c1dceec0c8d3ab2bc3.txt",
+        "sha256": "018163f725c6a553035d5e475fe2449966a94413b57ce6c1dceec0c8d3ab2bc3"
+      },
+      {
+        "file": "texts/279fa656c62857d42952b86a0789b98669ca1cb4b324a8d9e91397c174af4c14.txt",
+        "sha256": "279fa656c62857d42952b86a0789b98669ca1cb4b324a8d9e91397c174af4c14"
+      }
+    ],
+    "scope": "Exact release workflow helper pins this native source/archive hash; retained legal texts are a conservative archive superset. The vendor build has not been reproduced or its SLSA signature verified."
+  },
+  {
+    "package": "codex-native-openssl",
+    "version": "3.6.4",
+    "acquisition": {
+      "url": "https://github.com/openssl/openssl/releases/download/openssl-3.6.4/openssl-3.6.4.tar.gz",
+      "sha256": "9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef",
+      "size": 55003802,
+      "integrity": null,
+      "signature_verified": false
+    },
+    "source_commit": "ff6aec96948b70d94983af2641a6b67c94faeff5",
+    "build_script": ".github/scripts/install-musl-openssl.sh",
+    "notices": [
+      {
+        "file": "texts/b9f638dfc06b59c2d3b808186c3b30f713805a5db390f5b77b1703ac58acb83e.txt",
+        "sha256": "b9f638dfc06b59c2d3b808186c3b30f713805a5db390f5b77b1703ac58acb83e",
+        "member": "openssl-3.6.4/AUTHORS.md",
+        "url": "https://github.com/openssl/openssl/releases/download/openssl-3.6.4/openssl-3.6.4.tar.gz",
+        "archive_sha256": "9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef"
+      },
+      {
+        "file": "texts/7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a.txt",
+        "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+        "member": "openssl-3.6.4/LICENSE.txt",
+        "url": "https://github.com/openssl/openssl/releases/download/openssl-3.6.4/openssl-3.6.4.tar.gz",
+        "archive_sha256": "9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef"
+      },
+      {
+        "file": "texts/9837f05336ef3cbacb6a96e1672a0426d81ad01191f214b8d48e22ca62338181.txt",
+        "sha256": "9837f05336ef3cbacb6a96e1672a0426d81ad01191f214b8d48e22ca62338181",
+        "member": "openssl-3.6.4/external/perl/Text-Template-1.56/LICENSE",
+        "url": "https://github.com/openssl/openssl/releases/download/openssl-3.6.4/openssl-3.6.4.tar.gz",
+        "archive_sha256": "9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef"
+      },
+      {
+        "file": "texts/ef790eaf397afaaa80b1405c9e65947615f1193cf258c510c90c48f8f4a9a264.txt",
+        "sha256": "ef790eaf397afaaa80b1405c9e65947615f1193cf258c510c90c48f8f4a9a264",
+        "member": "openssl-3.6.4/util/perl/OpenSSL/copyright.pm",
+        "material_type": "source-notice-excerpt",
+        "source_file_sha256": "04213b69dbebc8ba0dd8a6216af1d9422f9b63619c1cf2f1d8aa107b83bbb608",
+        "byte_range": [
+          0,
+          345
+        ],
+        "url": "https://github.com/openssl/openssl/releases/download/openssl-3.6.4/openssl-3.6.4.tar.gz",
+        "archive_sha256": "9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef"
+      }
+    ],
+    "required_notices": [
+      {
+        "file": "texts/b9f638dfc06b59c2d3b808186c3b30f713805a5db390f5b77b1703ac58acb83e.txt",
+        "sha256": "b9f638dfc06b59c2d3b808186c3b30f713805a5db390f5b77b1703ac58acb83e"
+      },
+      {
+        "file": "texts/7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a.txt",
+        "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+      },
+      {
+        "file": "texts/9837f05336ef3cbacb6a96e1672a0426d81ad01191f214b8d48e22ca62338181.txt",
+        "sha256": "9837f05336ef3cbacb6a96e1672a0426d81ad01191f214b8d48e22ca62338181"
+      },
+      {
+        "file": "texts/ef790eaf397afaaa80b1405c9e65947615f1193cf258c510c90c48f8f4a9a264.txt",
+        "sha256": "ef790eaf397afaaa80b1405c9e65947615f1193cf258c510c90c48f8f4a9a264"
+      }
+    ],
+    "scope": "Exact release workflow helper pins this native source/archive hash; retained legal texts are a conservative archive superset. The vendor build has not been reproduced or its SLSA signature verified."
+  }
+]

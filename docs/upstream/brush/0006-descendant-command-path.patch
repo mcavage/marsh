@@ -1,0 +1,72 @@
+diff --git a/brush-shell/src/entry.rs b/brush-shell/src/entry.rs
+index 52ab1f3..6eebde8 100644
+--- a/brush-shell/src/entry.rs
++++ b/brush-shell/src/entry.rs
+@@ -6,12 +6,19 @@ use crate::brushctl::ShellBuilderBrushBuiltinExt as _;
+ use crate::bundled;
+ 
+ static MARSH_EXTENSIONS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++static MARSH_EXTERNAL_COMMANDS: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
+ 
+ /// Enables the marsh parser and evaluator additions for subsequently created shells.
+ /// Embedders must opt in explicitly; ordinary Brush behavior is unchanged.
+ pub fn enable_marsh_extensions() {
+     MARSH_EXTENSIONS.store(true, std::sync::atomic::Ordering::Release);
+ }
++
++/// Export a session's command directory and authority context to descendants.
++/// The directory is also restored after startup files have run.
++pub fn install_marsh_external_commands(path: String, session: String) {
++    let _ = MARSH_EXTERNAL_COMMANDS.set((path, session));
++}
+ use crate::config;
+ use crate::error_formatter;
+ use crate::events;
+@@ -409,6 +416,14 @@ async fn initialize_shell(
+     };
+ 
+     shell_ref.lock().await.load_config(&profile, &rc).await?;
++    if let Some((path, _)) = MARSH_EXTERNAL_COMMANDS.get() {
++        let mut shell = shell_ref.lock().await;
++        let current = shell.env_str("PATH").map(|value| value.into_owned());
++        let value = prepend_external_path(path, current.as_deref());
++        let mut variable = brush_core::ShellVariable::new(value);
++        variable.export();
++        shell.set_env_global("PATH", variable)?;
++    }
+ 
+     Ok(())
+ }
+@@ -580,6 +595,17 @@ async fn instantiate_shell_from_args(
+     // Build the shell.
+     let mut shell = shell.build().await?;
+ 
++    if let Some((path, session)) = MARSH_EXTERNAL_COMMANDS.get() {
++        let current = shell.env_str("PATH").map(|value| value.into_owned());
++        let value = prepend_external_path(path, current.as_deref());
++        let mut variable = brush_core::ShellVariable::new(value);
++        variable.export();
++        shell.set_env_global("PATH", variable)?;
++        let mut variable = brush_core::ShellVariable::new(session.clone());
++        variable.export();
++        shell.set_env_global("MARSH_EXTERNAL_SESSION", variable)?;
++    }
++
+     // Make adjustments.
+     if let Some(xtrace_file_path) = &args.xtrace_file_path {
+         enable_xtrace_to_file(&mut shell, xtrace_file_path)?;
+@@ -588,6 +614,14 @@ async fn instantiate_shell_from_args(
+     Ok(shell)
+ }
+ 
++fn prepend_external_path(directory: &str, current: Option<&str>) -> String {
++    let mut entries = vec![directory];
++    if let Some(current) = current {
++        entries.extend(current.split(':').filter(|entry| *entry != directory));
++    }
++    entries.join(":")
++}
++
+ fn enable_xtrace_to_file(
+     shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
+     file_path: &Path,

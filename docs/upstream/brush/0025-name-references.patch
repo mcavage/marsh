@@ -1,0 +1,273 @@
+diff --git a/brush-builtins/src/declare.rs b/brush-builtins/src/declare.rs
+index ed47caf..352c217 100644
+--- a/brush-builtins/src/declare.rs
++++ b/brush-builtins/src/declare.rs
+@@ -206,7 +206,7 @@ impl DeclareCommand {
+                 // For some reason, bash does not print an error message in this case.
+                 Ok(false)
+             }
+-        } else if let Some(variable) = context.shell.env().get_using_policy(name, lookup) {
++        } else if let Some(variable) = context.shell.env().get_raw_using_policy(name, lookup) {
+             let mut cs = variable.attribute_flags(context.shell);
+             if cs.is_empty() {
+                 cs.push('-');
+@@ -309,6 +309,24 @@ impl DeclareCommand {
+             EnvironmentLookup::Anywhere
+         };
+ 
++        // Without `-n`/`+n`, a declaration of an existing name reference acts on
++        // the variable it names.
++        let name = if self.make_nameref.to_bool().is_none()
++            && context
++                .shell
++                .env()
++                .get_raw_using_policy(name.as_str(), lookup)
++                .is_some_and(|var| var.is_treated_as_nameref())
++        {
++            context
++                .shell
++                .env()
++                .resolve_nameref(name.as_str())
++                .into_owned()
++        } else {
++            name
++        };
++
+         // `local -I x[=v]` / `declare -I` (bash 5.0+): the new local inherits
+         // value and attributes from the nearest same-name variable in an
+         // enclosing scope instead of starting unset; `+=` appends to the
+@@ -344,12 +362,20 @@ impl DeclareCommand {
+             }
+         }
+ 
+-        // Look up the variable.
+-        if let Some(var) = context
+-            .shell
+-            .env_mut()
+-            .get_mut_using_policy(name.as_str(), lookup)
+-        {
++        // Look up the variable. `-n`/`+n` act on a name reference itself; other
++        // declarations act on the variable it refers to.
++        let existing = if self.make_nameref.to_bool().is_some() {
++            context
++                .shell
++                .env_mut()
++                .get_mut_raw_using_policy(name.as_str(), lookup)
++        } else {
++            context
++                .shell
++                .env_mut()
++                .get_mut_using_policy(name.as_str(), lookup)
++        };
++        if let Some(var) = existing {
+             if self.make_associative_array.is_some() {
+                 var.convert_to_associative_array()?;
+             }
+diff --git a/brush-builtins/src/unset.rs b/brush-builtins/src/unset.rs
+index d07759a..6ca6928 100644
+--- a/brush-builtins/src/unset.rs
++++ b/brush-builtins/src/unset.rs
+@@ -43,11 +43,12 @@ impl builtins::Command for UnsetCommand {
+         &self,
+         context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+-        //
+-        // TODO(nameref): implement nameref
+-        //
++        // `unset -n` removes name references themselves.
+         if self.name_interpretation.name_references {
+-            return brush_core::error::unimp("unset: name references are not yet implemented");
++            for name in &self.names {
++                context.shell.env_mut().unset_raw(name.as_str())?;
++            }
++            return Ok(brush_core::ExecutionResult::success());
+         }
+ 
+         let unspecified = self.name_interpretation.unspecified();
+diff --git a/brush-core/src/env.rs b/brush-core/src/env.rs
+index dffe15a..c0b95c7 100644
+--- a/brush-core/src/env.rs
++++ b/brush-core/src/env.rs
+@@ -233,6 +233,13 @@ impl ShellEnvironment {
+     ///
+     /// * `name` - The name of the variable to retrieve.
+     pub fn get<S: AsRef<str>>(&self, name: S) -> Option<(EnvironmentScope, &ShellVariable)> {
++        let name = self.resolve_nameref(name.as_ref());
++        self.get_raw(name.as_ref())
++    }
++
++    /// Like [`Self::get`], but returns a name reference (`declare -n`) itself
++    /// rather than the variable it names.
++    pub fn get_raw<S: AsRef<str>>(&self, name: S) -> Option<(EnvironmentScope, &ShellVariable)> {
+         // Look through scopes, from the top of the stack on down.
+         for (scope_type, map) in self.scopes.iter().rev() {
+             if let Some(var) = map.get(name.as_ref()) {
+@@ -243,6 +250,36 @@ impl ShellEnvironment {
+         None
+     }
+ 
++    /// Follows name references (`declare -n`) from `name` to the variable name
++    /// they finally refer to. A name that is not a reference resolves to itself;
++    /// an empty or circular reference stops at the last name reached.
++    pub fn resolve_nameref<'a>(&self, name: &'a str) -> Cow<'a, str> {
++        let mut resolved = Cow::Borrowed(name);
++        // Bash also bounds the chain; a longer chain is treated as circular.
++        for _ in 0..8 {
++            let Some((_, var)) = self.get_raw(resolved.as_ref()) else {
++                break;
++            };
++            match Self::nameref_target(var) {
++                Some(target) if target != resolved.as_ref() => {
++                    resolved = Cow::Owned(target.to_owned());
++                }
++                _ => break,
++            }
++        }
++        resolved
++    }
++
++    fn nameref_target(var: &ShellVariable) -> Option<&str> {
++        if !var.is_treated_as_nameref() {
++            return None;
++        }
++        match var.value() {
++            ShellValue::String(target) if valid_variable_name(target) => Some(target.as_str()),
++            _ => None,
++        }
++    }
++
+     /// Tries to retrieve a mutable reference to the variable with the given name
+     /// in the environment.
+     ///
+@@ -253,9 +290,10 @@ impl ShellEnvironment {
+         &mut self,
+         name: S,
+     ) -> Option<(EnvironmentScope, &mut ShellVariable)> {
++        let name = self.resolve_nameref(name.as_ref()).into_owned();
+         // Look through scopes, from the top of the stack on down.
+         for (scope_type, map) in self.scopes.iter_mut().rev() {
+-            if let Some(var) = map.get_mut(name.as_ref()) {
++            if let Some(var) = map.get_mut(name.as_str()) {
+                 return Some((*scope_type, var));
+             }
+         }
+@@ -303,6 +341,12 @@ impl ShellEnvironment {
+     ///
+     /// * `name` - The name of the variable to unset.
+     pub fn unset(&mut self, name: &str) -> Result<Option<ShellVariable>, error::Error> {
++        let name = self.resolve_nameref(name).into_owned();
++        self.unset_raw(name.as_str())
++    }
++
++    /// Like [`Self::unset`], but unsets a name reference itself (`unset -n`).
++    pub fn unset_raw(&mut self, name: &str) -> Result<Option<ShellVariable>, error::Error> {
+         let mut local_count = 0;
+         for (scope_type, map) in self.scopes.iter_mut().rev() {
+             if matches!(scope_type, EnvironmentScope::Local) {
+@@ -368,6 +412,19 @@ impl ShellEnvironment {
+         &self,
+         name: N,
+         lookup_policy: EnvironmentLookup,
++    ) -> Option<&ShellVariable> {
++        let var = self.get_raw_using_policy(name, lookup_policy)?;
++        match Self::nameref_target(var) {
++            Some(target) => self.get(target).map(|(_, var)| var),
++            None => Some(var),
++        }
++    }
++
++    /// Like [`Self::get_using_policy`], but returns a name reference itself.
++    pub fn get_raw_using_policy<N: AsRef<str>>(
++        &self,
++        name: N,
++        lookup_policy: EnvironmentLookup,
+     ) -> Option<&ShellVariable> {
+         let mut local_count = 0;
+         for (scope_type, var_map) in self.scopes.iter().rev() {
+@@ -419,6 +476,22 @@ impl ShellEnvironment {
+         &mut self,
+         name: N,
+         lookup_policy: EnvironmentLookup,
++    ) -> Option<&mut ShellVariable> {
++        let target = self
++            .get_raw_using_policy(name.as_ref(), lookup_policy)
++            .and_then(Self::nameref_target)
++            .map(|target| self.resolve_nameref(target).into_owned());
++        match target {
++            Some(target) => self.get_mut(target).map(|(_, var)| var),
++            None => self.get_mut_raw_using_policy(name, lookup_policy),
++        }
++    }
++
++    /// Like [`Self::get_mut_using_policy`], but returns a name reference itself.
++    pub fn get_mut_raw_using_policy<N: AsRef<str>>(
++        &mut self,
++        name: N,
++        lookup_policy: EnvironmentLookup,
+     ) -> Option<&mut ShellVariable> {
+         let mut local_count = 0;
+         for (scope_type, var_map) in self.scopes.iter_mut().rev() {
+@@ -476,7 +549,15 @@ impl ShellEnvironment {
+         lookup_policy: EnvironmentLookup,
+         scope_if_creating: EnvironmentScope,
+     ) -> Result<(), error::Error> {
+-        let name = name.into();
++        let mut name = name.into();
++        let mut lookup_policy = lookup_policy;
++        if let Some(target) = self
++            .get_raw_using_policy(&name, lookup_policy)
++            .and_then(Self::nameref_target)
++        {
++            name = self.resolve_nameref(target).into_owned();
++            lookup_policy = EnvironmentLookup::Anywhere;
++        }
+ 
+         let auto_export = self.export_variables_on_modification;
+         if let Some(var) = self.get_mut_using_policy(&name, lookup_policy) {
+@@ -516,7 +597,15 @@ impl ShellEnvironment {
+         lookup_policy: EnvironmentLookup,
+         scope_if_creating: EnvironmentScope,
+     ) -> Result<(), error::Error> {
+-        let name = name.into();
++        let mut name = name.into();
++        let mut lookup_policy = lookup_policy;
++        if let Some(target) = self
++            .get_raw_using_policy(&name, lookup_policy)
++            .and_then(Self::nameref_target)
++        {
++            name = self.resolve_nameref(target).into_owned();
++            lookup_policy = EnvironmentLookup::Anywhere;
++        }
+ 
+         if let Some(var) = self.get_mut_using_policy(&name, lookup_policy) {
+             var.assign_at_index(index, value, false)?;
+diff --git a/brush-core/src/extendedtests.rs b/brush-core/src/extendedtests.rs
+index 3da833e..1b58fcf 100644
+--- a/brush-core/src/extendedtests.rs
++++ b/brush-core/src/extendedtests.rs
+@@ -185,7 +185,7 @@ pub(crate) fn apply_unary_predicate_to_str(
+             }
+         }
+         ast::UnaryPredicate::ShellVariableIsSetAndAssigned => Ok(shell.env().is_set(operand)),
+-        ast::UnaryPredicate::ShellVariableIsSetAndNameRef => match shell.env().get(operand) {
++        ast::UnaryPredicate::ShellVariableIsSetAndNameRef => match shell.env().get_raw(operand) {
+             Some((_, reffed)) => Ok(reffed.value().is_set() && reffed.is_treated_as_nameref()),
+             None => Ok(false),
+         },
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 3a84b23..b48e0e4 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -2666,6 +2666,12 @@ async fn apply_assignment(
+     // Read option before taking mutable borrow on env.
+     let export_variables_on_modification = shell.options().export_variables_on_modification;
+ 
++    // Assign through a name reference (`declare -n`) to the variable it names.
++    let variable_name = shell
++        .env()
++        .resolve_nameref(variable_name.as_str())
++        .into_owned();
++
+     // See if we can find an existing value associated with the variable.
+     if let Some((existing_value_scope, existing_value)) =
+         shell.env_mut().get_mut(variable_name.as_str())

@@ -1,0 +1,97 @@
+{
+  "provenance": {
+    "description": "Observed (review finding N7) real GNU width1040000 regression plus byte/sign/prefix/precision/alignment/NaN/Inf/-v/time controls; raw output retained, not normalized"
+  },
+  "cases": [
+    {
+      "group": "printf-wide",
+      "index": 0,
+      "stdin": "printf '%1040000s' x\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 1,
+      "stdin": "printf '%*s' 1040000 x\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 2,
+      "stdin": "printf '%*s' -1040000 x\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 3,
+      "stdin": "printf '%01040000d' -7\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 4,
+      "stdin": "printf '%+01040000d' 7\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 5,
+      "stdin": "printf '%#01040000x' 15\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 6,
+      "stdin": "printf '%01040000.5d' 3\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 7,
+      "stdin": "printf '%-01040000d' -3\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 8,
+      "stdin": "printf '%#01040000.0o' 0\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 9,
+      "stdin": "printf '%01040000.3f' -2.5\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 10,
+      "stdin": "printf '%01040000a' 1.5\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 11,
+      "stdin": "printf '%01040000f' inf\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 12,
+      "stdin": "printf '%01040000F' nan\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 13,
+      "stdin": "printf '%1040000c' $'\\xff'\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 14,
+      "stdin": "printf '%1040000b' $'\\xff'\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 15,
+      "stdin": "printf '%1040000q' $'\\xff'\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 16,
+      "stdin": "printf '%1040000(%Y)T' 0\n"
+    },
+    {
+      "group": "printf-wide",
+      "index": 17,
+      "stdin": "printf -v value '%1040000s' x; printf 'length:%s\\n' \"${#value}\"\n"
+    }
+  ]
+}

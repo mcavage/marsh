@@ -1,0 +1,49 @@
+{
+  "schema": "marsh.notice-vocabulary/v1",
+  "name_pattern": "^(licen[cs]es?|copying|copyright|notices?|third[-_]party|unlicense|patents|authors)(?:$|[._-])",
+  "notice_directories": [
+    "licenses",
+    "licences"
+  ],
+  "code_suffixes": [
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".proto",
+    ".h",
+    ".hpp",
+    ".rs",
+    ".go",
+    ".js",
+    ".mjs",
+    ".cjs",
+    ".ts",
+    ".tsx",
+    ".py",
+    ".sh",
+    ".bzl",
+    ".cmake",
+    ".pm",
+    ".pl",
+    ".star",
+    ".prototext",
+    ".textproto"
+  ],
+  "source_notice_policy": "A whole source file is not a legal document by filename. Preserve an actual leading legal comment as an exact byte-range excerpt, with original file hash, when present; never synthesize attribution or turn a string literal/test fixture into a grant.",
+  "permission_text_policy": "Standard permission text can accompany a publisher declaration as informational conditions. It is not an independently acquired upstream grant or copyright notice and never closes an absent-original-text/rights guarantee by itself. This applies equally to npm and Rust.",
+  "data_suffixes": [
+    ".dict",
+    ".dat"
+  ],
+  "fixture_directories": [
+    "testdata",
+    "testcases"
+  ],
+  "fixture_path_components": [
+    [
+      "tests",
+      "files"
+    ]
+  ]
+}

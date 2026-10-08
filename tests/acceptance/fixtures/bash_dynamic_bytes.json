@@ -1,0 +1,165 @@
+{
+  "provenance": {
+    "description": "Additional real GNU controls for dynamic variables, directory state and descriptor-bound arithmetic warnings; no output waivers"
+  },
+  "cases": [
+    {
+      "group": "dirstack-core",
+      "index": 0,
+      "stdin": "root=$PWD; mkdir a b; pushd \"$root/a\" >/dev/null; pushd \"$root/b\" >/dev/null\nDIRSTACK[0]=/tmp; DIRSTACK[1]=/var; DIRSTACK[7]=/dev\ndirs -l; declare -p DIRSTACK\n"
+    },
+    {
+      "group": "dirstack-core",
+      "index": 1,
+      "stdin": "root=$PWD; mkdir a b; pushd \"$root/a\" >/dev/null; pushd \"$root/b\" >/dev/null\nDIRSTACK=(a b c d)\ndirs -l; declare -p DIRSTACK\n"
+    },
+    {
+      "group": "dirstack-core",
+      "index": 2,
+      "stdin": "root=$PWD; mkdir a b; pushd \"$root/a\" >/dev/null; pushd \"$root/b\" >/dev/null\nDIRSTACK=()\ndirs -l; declare -p DIRSTACK\n"
+    },
+    {
+      "group": "dirstack-core",
+      "index": 3,
+      "stdin": "root=$PWD; mkdir a b; pushd \"$root/a\" >/dev/null; pushd \"$root/b\" >/dev/null\nunset \"DIRSTACK[1]\"\ndirs -l; declare -p DIRSTACK\n"
+    },
+    {
+      "group": "dirstack-core",
+      "index": 4,
+      "stdin": "root=$PWD; mkdir a b; pushd \"$root/a\" >/dev/null; pushd \"$root/b\" >/dev/null\nunset DIRSTACK; DIRSTACK=(first second)\ndirs -l; declare -p DIRSTACK\n"
+    },
+    {
+      "group": "dirstack-core",
+      "index": 5,
+      "stdin": "root=$PWD; mkdir a b; pushd \"$root/a\" >/dev/null; pushd \"$root/b\" >/dev/null\ndeclare -a DIRSTACK=([1]=x [0]=no [9]=ignored [2]=y)\ndirs -l; declare -p DIRSTACK\n"
+    },
+    {
+      "group": "dirstack-core",
+      "index": 6,
+      "stdin": "root=$PWD; mkdir a b; pushd \"$root/a\" >/dev/null; pushd \"$root/b\" >/dev/null\ndeclare -n r=DIRSTACK; r[1]=viaref\ndirs -l; declare -p DIRSTACK\n"
+    },
+    {
+      "group": "dirstack-core",
+      "index": 7,
+      "stdin": "root=$PWD; mkdir a b; pushd \"$root/a\" >/dev/null; pushd \"$root/b\" >/dev/null\nDIRSTACK[-1]=$'dir\\xff'\ndirs -l; declare -p DIRSTACK\n"
+    },
+    {
+      "group": "dirstack-core",
+      "index": 8,
+      "stdin": "root=$PWD; mkdir a b; pushd \"$root/a\" >/dev/null; pushd \"$root/b\" >/dev/null\nDIRSTACK[1]+=suffix\ndirs -l; declare -p DIRSTACK\n"
+    },
+    {
+      "group": "dirstack-core",
+      "index": 9,
+      "stdin": "root=$PWD; mkdir a b; pushd \"$root/a\" >/dev/null; pushd \"$root/b\" >/dev/null\nf() { local DIRSTACK=(local private); declare -p DIRSTACK; }; f\ndirs -l; declare -p DIRSTACK\n"
+    },
+    {
+      "group": "dirstack-core",
+      "index": 10,
+      "stdin": "root=$PWD; mkdir a b; pushd \"$root/a\" >/dev/null; pushd \"$root/b\" >/dev/null\n(DIRSTACK[1]=child; dirs -l)\ndirs -l; declare -p DIRSTACK\n"
+    },
+    {
+      "stdin": "mkdir gone; cd gone; rmdir ../gone; pwd -P >/dev/null 2>&1; printf \"<%s>\\n\" \"${DIRSTACK[@]}\"\n",
+      "group": "dirstack-cwd",
+      "index": 0
+    },
+    {
+      "stdin": "mkdir gone; cd gone; rmdir ../gone; pwd -P >/dev/null 2>&1; printf \"<%s>\\n\" \"$DIRSTACK\"\n",
+      "group": "dirstack-cwd",
+      "index": 1
+    },
+    {
+      "stdin": "mkdir gone; cd gone; rmdir ../gone; pwd -P >/dev/null 2>&1; printf \"<%s>\\n\" \"${DIRSTACK[0]}\"\n",
+      "group": "dirstack-cwd",
+      "index": 2
+    },
+    {
+      "stdin": "mkdir gone; cd gone; rmdir ../gone; pwd -P >/dev/null 2>&1; declare -p DIRSTACK\n",
+      "group": "dirstack-cwd",
+      "index": 3
+    },
+    {
+      "stdin": "mkdir gone; cd gone; rmdir ../gone; pwd -P >/dev/null 2>&1; printf \"<%s>\\n\" \"${!DIRSTACK[@]}\"\n",
+      "group": "dirstack-cwd",
+      "index": 4
+    },
+    {
+      "stdin": "BASH_XTRACEFD=foo; echo status:$? value:$BASH_XTRACEFD\n",
+      "group": "xtracefd-core",
+      "index": 0
+    },
+    {
+      "stdin": "BASH_XTRACEFD=9; echo status:$? value:$BASH_XTRACEFD\n",
+      "group": "xtracefd-core",
+      "index": 1
+    },
+    {
+      "stdin": "exec 3>trace; BASH_XTRACEFD=3; set -x; : before; BASH_XTRACEFD=9; : after; set +x; /usr/bin/cat trace\n",
+      "group": "xtracefd-core",
+      "index": 2
+    },
+    {
+      "stdin": "exec 3>trace; BASH_XTRACEFD=3; unset BASH_XTRACEFD; printf z >&3; echo status:$?\n",
+      "group": "xtracefd-core",
+      "index": 3
+    },
+    {
+      "stdin": "((BASH_XTRACEFD=9)) 2>diagnostic; printf 'status:%s\\n' \"$?\"; cat diagnostic\n",
+      "group": "dynamic-context",
+      "index": 0
+    },
+    {
+      "stdin": "BASH_XTRACEFD=9 2>diagnostic; printf 'status:%s\\n' \"$?\"; cat diagnostic\n",
+      "group": "dynamic-context",
+      "index": 1
+    },
+    {
+      "stdin": "declare -i n='BASH_XTRACEFD=9' 2>diagnostic; printf 'status:%s\\n' \"$?\"; cat diagnostic\n",
+      "group": "dynamic-context",
+      "index": 2
+    },
+    {
+      "stdin": "BASH_XTRACEFD=foo 2>&-; printf 'status:%s\\n' \"$?\"\n",
+      "group": "dynamic-context",
+      "index": 3
+    },
+    {
+      "stdin": "root=$PWD; pushd / >/dev/null; ((DIRSTACK[1]=7)); dirs -l; declare -p DIRSTACK\n",
+      "group": "dynamic-context",
+      "index": 4
+    },
+    {
+      "stdin": "alias rawname='printf rawvalue'; printf '<%s>\\n' \"${BASH_ALIASES[rawname]}\"\n",
+      "group": "dynamic-context",
+      "index": 5
+    },
+    {
+      "stdin": "BASH_XTRACEFD=9 : 2>diagnostic; cat diagnostic\n",
+      "group": "dynamic-context", "index": 6
+    },
+    {
+      "stdin": "BASH_XTRACEFD=9 /bin/true 2>diagnostic; cat diagnostic\n",
+      "group": "dynamic-context", "index": 7
+    },
+    {
+      "stdin": "f() { :; }; BASH_XTRACEFD=9 f 2>diagnostic; cat diagnostic\n",
+      "group": "dynamic-context", "index": 8
+    },
+    {
+      "stdin": "exec 3>trace; BASH_XTRACEFD=3; f() { local BASH_XTRACEFD; :; }; f; printf z >&3; echo s:$?; cat trace\n",
+      "group": "dynamic-context", "index": 9
+    },
+    {
+      "stdin": "exec 3>trace; BASH_XTRACEFD=3; f() { local -I BASH_XTRACEFD; :; }; f; printf z >&3; echo s:$?; cat trace\n",
+      "group": "dynamic-context", "index": 10
+    },
+    {
+      "stdin": "root=$PWD; mkdir gone; cd gone; rmdir ../gone; pwd -P >/dev/null 2>&1; f() { printf '<%s>\\n' \"${DIRSTACK[@]}\"; }; f 2>\"$root/diagnostic\"; cat \"$root/diagnostic\"\n",
+      "group": "dynamic-context", "index": 11
+    },
+    {
+      "stdin": "root=$PWD; mkdir gone; cd gone; rmdir ../gone; pwd -P >/dev/null 2>&1; declare -p DIRSTACK 2>\"$root/diagnostic\"; cat \"$root/diagnostic\"\n",
+      "group": "dynamic-context", "index": 12
+    }
+  ]
+}

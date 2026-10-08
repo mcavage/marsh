@@ -1,0 +1,448 @@
+diff --git a/MARSH-VENDORING.md b/MARSH-VENDORING.md
+index 40a72a4..a9cd91b 100644
+--- a/MARSH-VENDORING.md
++++ b/MARSH-VENDORING.md
+@@ -4,7 +4,7 @@ This source tree is pinned from `reubeno/brush` commit
+ `1389a8e8af6bec56fdfb9ab60a8c898bc14aa961`. It is checked in so a normal
+ `make build` does not depend on an unpublished fork.
+ 
+-The marsh source deltas are the seven ordered patches in
++The marsh source deltas are the eight ordered patches in
+ `../../docs/upstream/brush/`. The first two make registered commands ordinary
+ processes and complete the bounded background-job behavior. The third lets an
+ embedding binary pass Brush an explicit argument vector after consuming its
+@@ -15,6 +15,8 @@ command directory and session context at the Brush entry point. The seventh
+ repairs generic trapped `TERM` and `wait -n -p` behavior, with a small
+ marsh-specific `fanout` TERM path. Generic portions can be proposed upstream
+ independently; product routing and composition remain local.
++The eighth adds `wait -f`, standalone `wait -p`, and idle-input `TERM` trap
++delivery. The compound background-list PID gap remains open.
+ 
+ This directory contains only the runtime crate source, manifests, licenses,
+ and build metadata needed by marsh. Upstream integration tests, snapshots,
+@@ -24,6 +26,6 @@ patch series was also checked against the full upstream compatibility suite
+ before this source-only vendor snapshot was produced.
+ 
+ To verify or refresh the pin, check out the exact upstream revision, apply the
+-seven patches in order, and compare the resulting tracked files with this
++eight patches in order, and compare the resulting tracked files with this
+ directory. Do not carry product scheduling, daemon, or sandbox code into
+ Brush.
+diff --git a/brush-builtins/src/wait.rs b/brush-builtins/src/wait.rs
+index 5400ba8..ff59c71 100644
+--- a/brush-builtins/src/wait.rs
++++ b/brush-builtins/src/wait.rs
+@@ -1,7 +1,7 @@
+ use clap::Parser;
+ use std::io::Write;
+ 
+-use brush_core::{ExecutionExitCode, ExecutionResult, builtins, env, error, variables};
++use brush_core::{ExecutionExitCode, ExecutionResult, builtins, env, variables};
+ 
+ /// Wait for jobs to terminate.
+ #[derive(Parser)]
+@@ -30,9 +30,6 @@ impl builtins::Command for WaitCommand {
+         &self,
+         mut context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<ExecutionResult, Self::Error> {
+-        if self.wait_for_terminate {
+-            return error::unimp("wait -f");
+-        }
+         if let Some(name) = &self.variable_to_receive_id {
+             if !env::valid_variable_name(name) {
+                 writeln!(
+@@ -73,7 +70,7 @@ impl builtins::Command for WaitCommand {
+                 let term_signal: brush_core::traps::TrapSignal = "TERM".parse()?;
+                 if context.shell.traps().handles(term_signal) {
+                     tokio::select! {
+-                        result = context.shell.jobs_mut().wait_first(&eligible_ids) => result?,
++                        result = context.shell.jobs_mut().wait_first(&eligible_ids, self.wait_for_terminate) => result?,
+                         result = brush_core::traps::await_term() => {
+                             result?;
+                             context.shell.set_last_exit_status(143);
+@@ -82,11 +79,19 @@ impl builtins::Command for WaitCommand {
+                         }
+                     }
+                 } else {
+-                    context.shell.jobs_mut().wait_first(&eligible_ids).await?
++                    context
++                        .shell
++                        .jobs_mut()
++                        .wait_first(&eligible_ids, self.wait_for_terminate)
++                        .await?
+                 }
+             };
+             #[cfg(not(unix))]
+-            let waited = context.shell.jobs_mut().wait_first(&eligible_ids).await?;
++            let waited = context
++                .shell
++                .jobs_mut()
++                .wait_first(&eligible_ids, self.wait_for_terminate)
++                .await?;
+             let Some((job_id, pid, result)) = waited else {
+                 return Ok(ExecutionResult::new(127));
+             };
+@@ -102,10 +107,6 @@ impl builtins::Command for WaitCommand {
+             }
+             return Ok(result);
+         }
+-        if self.variable_to_receive_id.is_some() {
+-            return error::unimp("wait -p without -n");
+-        }
+-
+         #[cfg(unix)]
+         {
+             let term_signal: brush_core::traps::TrapSignal = "TERM".parse()?;
+@@ -141,19 +142,31 @@ impl WaitCommand {
+     ) -> Result<ExecutionResult, brush_core::Error> {
+         let mut result = ExecutionResult::success();
+         let mut waited_for_pid = false;
++        let mut last_waited_id = None;
+ 
+         if !self.ids.is_empty() {
+             for id in &self.ids {
+                 if id.starts_with('%') {
+                     // It's a job spec.
+                     if let Some(job) = context.shell.jobs_mut().resolve_job_spec(id) {
+-                        result = job.wait().await?;
++                        let pid = job.representative_pid();
++                        let job_id = job.id;
++                        result = if self.wait_for_terminate {
++                            job.wait_for_termination().await?
++                        } else {
++                            job.wait().await?
++                        };
++                        last_waited_id =
++                            Some(pid.map_or_else(|| format!("%{job_id}"), |pid| pid.to_string()));
+                     } else if let Some(job_id) = id.strip_prefix('%').and_then(|id| id.parse().ok())
+                     {
+-                        if let Some(completed) =
++                        if let Some((pid, completed)) =
+                             context.shell.jobs_mut().take_completed_for_id(job_id)
+                         {
+                             result = completed;
++                            last_waited_id = Some(
++                                pid.map_or_else(|| format!("%{job_id}"), |pid| pid.to_string()),
++                            );
+                         } else {
+                             result = ExecutionExitCode::GeneralError.into();
+                         }
+@@ -179,12 +192,18 @@ impl WaitCommand {
+                         continue;
+                     };
+                     if let Some(job) = context.shell.jobs_mut().job_for_pid_mut(pid) {
+-                        result = job.wait().await?;
++                        result = if self.wait_for_terminate {
++                            job.wait_for_termination().await?
++                        } else {
++                            job.wait().await?
++                        };
+                         waited_for_pid = true;
++                        last_waited_id = Some(pid.to_string());
+                     } else if let Some(completed) =
+                         context.shell.jobs_mut().take_completed_for_pid(pid)
+                     {
+                         result = completed;
++                        last_waited_id = Some(pid.to_string());
+                     } else {
+                         writeln!(
+                             context.stderr(),
+@@ -200,7 +219,11 @@ impl WaitCommand {
+             }
+         } else {
+             // Wait for all jobs.
+-            let jobs = context.shell.jobs_mut().wait_all().await?;
++            let jobs = context
++                .shell
++                .jobs_mut()
++                .wait_all(self.wait_for_terminate)
++                .await?;
+ 
+             if context.shell.options().enable_job_control {
+                 for job in jobs {
+@@ -209,6 +232,16 @@ impl WaitCommand {
+             }
+         }
+ 
++        if let (Some(name), Some(value)) = (&self.variable_to_receive_id, last_waited_id) {
++            context.shell.env_mut().update_or_add(
++                name,
++                variables::ShellValueLiteral::Scalar(value),
++                |_| Ok(()),
++                env::EnvironmentLookup::Anywhere,
++                env::EnvironmentScope::Global,
++            )?;
++        }
++
+         Ok(result)
+     }
+ }
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+index fa2ab69..de7b6f1 100644
+--- a/brush-core/src/jobs.rs
++++ b/brush-core/src/jobs.rs
+@@ -173,9 +173,13 @@ impl JobManager {
+     }
+ 
+     /// Waits for all managed jobs to complete.
+-    pub async fn wait_all(&mut self) -> Result<Vec<Job>, error::Error> {
++    pub async fn wait_all(&mut self, terminate_only: bool) -> Result<Vec<Job>, error::Error> {
+         for job in &mut self.jobs {
+-            job.wait().await?;
++            if terminate_only {
++                job.wait_for_termination().await?;
++            } else {
++                job.wait().await?;
++            }
+         }
+ 
+         self.completed.clear();
+@@ -187,6 +191,7 @@ impl JobManager {
+     pub async fn wait_first(
+         &mut self,
+         eligible_ids: &[usize],
++        terminate_only: bool,
+     ) -> Result<Option<(usize, Option<sys::process::ProcessId>, ExecutionResult)>, error::Error>
+     {
+         if let Some(index) = self
+@@ -205,7 +210,14 @@ impl JobManager {
+             .map(|job| {
+                 let id = job.id;
+                 let pid = job.representative_pid();
+-                Box::pin(async move { (id, pid, job.wait().await) })
++                Box::pin(async move {
++                    let result = if terminate_only {
++                        job.wait_for_termination().await
++                    } else {
++                        job.wait().await
++                    };
++                    (id, pid, result)
++                })
+             })
+             .collect::<Vec<_>>();
+         if waits.is_empty() {
+@@ -234,9 +246,14 @@ impl JobManager {
+     }
+ 
+     /// Takes an already reported child status by job ID.
+-    pub fn take_completed_for_id(&mut self, id: usize) -> Option<ExecutionResult> {
++    pub fn take_completed_for_id(
++        &mut self,
++        id: usize,
++    ) -> Option<(Option<sys::process::ProcessId>, ExecutionResult)> {
+         let index = self.completed.iter().position(|job| job.id == id)?;
+-        self.completed.remove(index).map(|job| job.result)
++        self.completed
++            .remove(index)
++            .map(|job| (job.pid, job.result))
+     }
+ 
+     /// IDs that remain eligible for wait.
+@@ -520,6 +537,16 @@ impl Job {
+         Ok(self.wait_result.unwrap_or_else(ExecutionResult::success))
+     }
+ 
++    /// Waits until this job terminates, ignoring intermediate stopped states.
++    pub async fn wait_for_termination(&mut self) -> Result<ExecutionResult, error::Error> {
++        loop {
++            let result = self.wait().await?;
++            if !matches!(self.state, JobState::Stopped) {
++                return Ok(result);
++            }
++        }
++    }
++
+     /// Moves the job to execute in the background.
+     pub fn move_to_background(&mut self) -> Result<(), error::Error> {
+         if matches!(self.state, JobState::Stopped) {
+diff --git a/brush-interactive/Cargo.toml b/brush-interactive/Cargo.toml
+index 6799d47..146b348 100644
+--- a/brush-interactive/Cargo.toml
++++ b/brush-interactive/Cargo.toml
+@@ -36,5 +36,5 @@ nu-ansi-term = { version = "0.50.3", optional = true }
+ radix_trie = "0.3.0"
+ reedline = { version = "0.51.0", optional = true }
+ thiserror = "2.0.18"
+-tokio = { version = "1.52.3", features = ["rt", "sync"] }
++tokio = { version = "1.52.3", features = ["io-std", "io-util", "rt", "sync"] }
+ tracing = "0.1.44"
+diff --git a/brush-interactive/src/input_backend.rs b/brush-interactive/src/input_backend.rs
+index 328dd09..c881608 100644
+--- a/brush-interactive/src/input_backend.rs
++++ b/brush-interactive/src/input_backend.rs
+@@ -14,6 +14,19 @@ pub trait InputBackend: Send {
+         prompt: InteractivePrompt,
+     ) -> Result<ReadResult, ShellError>;
+ 
++    /// Reads input without blocking signal delivery when the backend supports it.
++    #[allow(
++        async_fn_in_trait,
++        reason = "input backends are used through static dispatch"
++    )]
++    async fn read_line_async(
++        &mut self,
++        shell: &crate::ShellRef<impl brush_core::ShellExtensions>,
++        prompt: InteractivePrompt,
++    ) -> Result<ReadResult, ShellError> {
++        self.read_line(shell, prompt)
++    }
++
+     /// Returns the current contents of the read buffer and the current cursor
+     /// position within the buffer; None is returned if the read buffer is
+     /// empty or cannot be read by this implementation.
+diff --git a/brush-interactive/src/interactive_shell.rs b/brush-interactive/src/interactive_shell.rs
+index e8d5b9c..c1399b7 100644
+--- a/brush-interactive/src/interactive_shell.rs
++++ b/brush-interactive/src/interactive_shell.rs
+@@ -205,8 +205,40 @@ impl<'a, IB: InputBackend, SE: brush_core::ShellExtensions> InteractiveShell<'a,
+ 
+         drop(shell);
+ 
+-        // Read input.
+-        match self.input.read_line(&self.shell, prompt)? {
++        // The minimal input backend can await stdin without occupying the runtime
++        // thread. Keep a TERM receiver active while input is idle so a registered
++        // cleanup trap runs even when no further line arrives.
++        #[cfg(unix)]
++        let read_result = {
++            let term_signal: brush_core::traps::TrapSignal = "TERM".parse()?;
++            let term_trapped = self.shell.lock().await.traps().handles(term_signal);
++            if term_trapped {
++                tokio::select! {
++                    biased;
++                    result = brush_core::traps::await_term() => {
++                        result?;
++                        let mut shell = self.shell.lock().await;
++                        shell.set_last_exit_status(143);
++                        let params = shell.default_exec_params();
++                        let trap_result = shell.invoke_trap_handler(term_signal, &params).await?;
++                        let result = if trap_result.is_normal_flow() {
++                            brush_core::ExecutionResult::new(143)
++                        } else {
++                            trap_result
++                        };
++                        shell.set_last_exit_status(result.exit_code.into());
++                        return Ok(InteractiveExecutionResult::Executed(result));
++                    },
++                    result = self.input.read_line_async(&self.shell, prompt) => result?,
++                }
++            } else {
++                self.input.read_line_async(&self.shell, prompt).await?
++            }
++        };
++        #[cfg(not(unix))]
++        let read_result = self.input.read_line_async(&self.shell, prompt).await?;
++
++        match read_result {
+             ReadResult::Input(read_result) => {
+                 // We got a line of input -- execute it.
+                 self.execute_line(read_result, true /* user input */).await
+diff --git a/brush-interactive/src/minimal/input_backend.rs b/brush-interactive/src/minimal/input_backend.rs
+index f2af75a..612d7fa 100644
+--- a/brush-interactive/src/minimal/input_backend.rs
++++ b/brush-interactive/src/minimal/input_backend.rs
+@@ -1,4 +1,5 @@
+ use std::io::{BufRead, IsTerminal, Write};
++use tokio::io::AsyncBufReadExt;
+ 
+ use crate::{
+     InputBackend, ShellError,
+@@ -7,7 +8,11 @@ use crate::{
+ 
+ /// Represents a minimal shell input backend, capable of taking commands from standard input.
+ #[derive(Default)]
+-pub struct MinimalInputBackend;
++pub struct MinimalInputBackend {
++    async_stdin: Option<tokio::io::BufReader<tokio::io::Stdin>>,
++    pending_line: Vec<u8>,
++    pending_program: String,
++}
+ 
+ impl InputBackend for MinimalInputBackend {
+     fn read_line(
+@@ -20,6 +25,61 @@ impl InputBackend for MinimalInputBackend {
+ 
+         Self::read_program_from(shell_ref, prompt, &mut stdin.lock(), &mut std::io::stderr())
+     }
++
++    async fn read_line_async(
++        &mut self,
++        shell_ref: &crate::ShellRef<impl brush_core::ShellExtensions>,
++        prompt: InteractivePrompt,
++    ) -> Result<ReadResult, ShellError> {
++        let display_prompt = std::io::stdin().is_terminal();
++        let reader = self
++            .async_stdin
++            .get_or_insert_with(|| tokio::io::BufReader::new(tokio::io::stdin()));
++        loop {
++            if display_prompt && self.pending_line.is_empty() {
++                let to_display = if self.pending_program.is_empty() {
++                    &prompt.prompt
++                } else {
++                    &prompt.continuation_prompt
++                };
++                write!(std::io::stderr(), "{to_display}")?;
++                std::io::stderr().flush()?;
++            }
++            // `read_line` is not cancellation safe: a TERM trap could discard
++            // bytes already consumed into its local String. Keep each partial
++            // line in the backend before consuming stdin instead.
++            let available = reader.fill_buf().await?;
++            if available.is_empty() {
++                break;
++            }
++            let count = available
++                .iter()
++                .position(|byte| *byte == b'\n')
++                .map_or(available.len(), |index| index + 1);
++            let line_complete = available[count - 1] == b'\n';
++            self.pending_line.extend_from_slice(&available[..count]);
++            reader.consume(count);
++            if !line_complete {
++                continue;
++            }
++            let line = String::from_utf8(std::mem::take(&mut self.pending_line))
++                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
++            self.pending_program.push_str(&line);
++            if !crate::completeness::needs_more_input(shell_ref, &self.pending_program) {
++                break;
++            }
++        }
++        if !self.pending_line.is_empty() {
++            let line = String::from_utf8(std::mem::take(&mut self.pending_line))
++                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
++            self.pending_program.push_str(&line);
++        }
++        if self.pending_program.is_empty() {
++            Ok(ReadResult::Eof)
++        } else {
++            Ok(ReadResult::Input(std::mem::take(&mut self.pending_program)))
++        }
++    }
+ }
+ 
+ impl MinimalInputBackend {
+diff --git a/brush-shell/src/entry.rs b/brush-shell/src/entry.rs
+index 6eebde8..18c212a 100644
+--- a/brush-shell/src/entry.rs
++++ b/brush-shell/src/entry.rs
+@@ -207,6 +207,10 @@ pub fn run_from(mut args: Vec<String>) -> i32 {
+     };
+ 
+     let result = runtime.block_on(run_async(&args, parsed_args));
++    // A canceled asynchronous stdin read may still have a blocking read in
++    // Tokio's stdin worker. The shell has finished; do not wait for another
++    // input line during runtime shutdown (notably after an idle TERM trap).
++    runtime.shutdown_background();
+ 
+     let exit_code = match result {
+         Ok(code) => code,
+@@ -313,7 +317,7 @@ async fn run_async(
+ 
+         #[cfg(feature = "minimal")]
+         InputBackendType::Minimal => {
+-            let mut input_backend = brush_interactive::MinimalInputBackend;
++            let mut input_backend = brush_interactive::MinimalInputBackend::default();
+             run_in_shell(&shell, args, &mut input_backend, &ui_options).await
+         }
+         #[cfg(not(feature = "minimal"))]

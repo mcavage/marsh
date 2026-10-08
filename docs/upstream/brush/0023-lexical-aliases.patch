@@ -1,0 +1,628 @@
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 9528bc8..5ea5c16 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -213,20 +213,7 @@ impl Execute for ast::Program {
+         let mut result = ExecutionResult::success();
+ 
+         for command in &self.complete_commands {
+-            // Execute the command and handle any errors without immediately propagating them.
+-            // This allows interactive shells to continue executing subsequent commands even after
+-            // errors.
+-            match command.execute(shell, params).await {
+-                Ok(exec_result) => result = exec_result,
+-                Err(err) => {
+-                    // Display the error and convert to an execution result.
+-                    let _ = shell.display_error(&mut params.stderr(shell), &err);
+-                    result = err.into_result(shell);
+-                }
+-            }
+-
+-            // Update status
+-            shell.set_last_exit_status(result.exit_code.into());
++            result = execute_complete_command(shell, command, params).await;
+ 
+             // Check if we should stop executing subsequent commands
+             if !result.is_normal_flow() {
+@@ -238,6 +225,29 @@ impl Execute for ast::Program {
+     }
+ }
+ 
++/// Executes one complete command of a program, reporting any error.
++pub(crate) async fn execute_complete_command(
++    shell: &mut Shell<impl extensions::ShellExtensions>,
++    command: &ast::CompleteCommand,
++    params: &ExecutionParameters,
++) -> ExecutionResult {
++    // Execute the command and handle any errors without immediately propagating them.
++    // This allows interactive shells to continue executing subsequent commands even after
++    // errors.
++    let result = match command.execute(shell, params).await {
++        Ok(exec_result) => exec_result,
++        Err(err) => {
++            // Display the error and convert to an execution result.
++            let _ = shell.display_error(&mut params.stderr(shell), &err);
++            err.into_result(shell)
++        }
++    };
++
++    // Update status
++    shell.set_last_exit_status(result.exit_code.into());
++    result
++}
++
+ #[async_trait::async_trait]
+ impl Execute for ast::CompoundList {
+     async fn execute(
+@@ -1972,47 +1982,22 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
+                     }
+                 }
+                 CommandPrefixOrSuffixItem::Word(arg) => {
+-                    let mut next_args =
++                    let next_args =
+                         expansion::full_expand_and_split_word(&mut context.shell, &params, arg)
+                             .await?;
+ 
+-                    if args.is_empty() {
+-                        if let Some(cmd_name) = next_args.first() {
+-                            // Aliases are only expanded when `expand_aliases` is enabled; it's
+-                            // enabled by default for interactive shells.
+-                            if context.shell.options().expand_aliases
+-                                && let Some(alias_value) =
+-                                    context.shell.aliases().get(cmd_name.as_str())
+-                            {
+-                                //
+-                                // TODO(#57): This is a total hack; aliases are supposed to be
+-                                // handled much earlier in the process.
+-                                //
+-                                // N.B. Tokenizing first releases our borrow of the shell's aliases,
+-                                // so we can take a mutable borrow of the shell to expand the words.
+-                                let alias_words = tokenize_alias_body(&context.shell, alias_value);
+-                                let mut alias_pieces =
+-                                    expand_words(&mut context.shell, &params, alias_words).await?;
+-
+-                                next_args.remove(0);
+-                                alias_pieces.append(&mut next_args);
+-
+-                                next_args = alias_pieces;
+-                            }
+-
+-                            // Check if we're going to be invoking a special declaration builtin.
+-                            // That will change how we parse and process args. (An alias with an
+-                            // empty body leaves us with no words at all.)
+-                            if let Some(first_arg) = next_args.first()
+-                                && context
+-                                    .shell
+-                                    .builtins()
+-                                    .get(first_arg.as_str())
+-                                    .is_some_and(|r| !r.disabled && r.declaration_builtin)
+-                            {
+-                                command_takes_assignments = true;
+-                            }
+-                        }
++                    // Check if we're going to be invoking a special declaration builtin.
++                    // That will change how we parse and process args. (Aliases were
++                    // already expanded when the command was read.)
++                    if args.is_empty()
++                        && let Some(first_arg) = next_args.first()
++                        && context
++                            .shell
++                            .builtins()
++                            .get(first_arg.as_str())
++                            .is_some_and(|r| !r.disabled && r.declaration_builtin)
++                    {
++                        command_takes_assignments = true;
+                     }
+ 
+                     let mut next_args = next_args.into_iter().map(CommandArg::String).collect();
+@@ -2144,31 +2129,6 @@ async fn execute_command<T: Into<String>>(
+     cmd.execute().await
+ }
+ 
+-/// Tokenizes the body of an alias into the unexpanded words that should replace the aliased command
+-/// name.
+-///
+-/// This only handles alias bodies that amount to a simple sequence of words; bodies containing
+-/// operators (pipes, redirections, `&&`, ...) and recursive expansion of chained aliases require
+-/// alias substitution to happen in the tokenizer instead (see issue #57).
+-fn tokenize_alias_body(
+-    shell: &Shell<impl extensions::ShellExtensions>,
+-    alias_value: &str,
+-) -> Vec<String> {
+-    // Tokenize the body the same way the shell would tokenize any other input it's given.
+-    let options = shell.parser_options().tokenizer_options();
+-
+-    // If we can't tokenize the body, fall back to naively splitting it on whitespace.
+-    brush_parser::tokenize_str_with_options(alias_value, &options).map_or_else(
+-        |_| {
+-            alias_value
+-                .split_ascii_whitespace()
+-                .map(str::to_owned)
+-                .collect()
+-        },
+-        |tokens| tokens.iter().map(|t| t.to_str().to_owned()).collect(),
+-    )
+-}
+-
+ /// Expands the given words, with splitting enabled, yielding the fields they expand to.
+ async fn expand_words(
+     shell: &mut Shell<impl extensions::ShellExtensions>,
+diff --git a/brush-core/src/shell/builder.rs b/brush-core/src/shell/builder.rs
+index d023035..a2ae197 100644
+--- a/brush-core/src/shell/builder.rs
++++ b/brush-core/src/shell/builder.rs
+@@ -251,6 +251,7 @@ impl<SE: extensions::ShellExtensions> Default for Shell<SE> {
+             options: options::RuntimeOptions::default(),
+             jobs: jobs::JobManager::default(),
+             aliases: HashMap::default(),
++            alias_generation: 0,
+             last_exit_status: 0,
+             last_exit_status_change_count: 0,
+             last_pipeline_statuses: vec![0],
+diff --git a/brush-core/src/shell/execution.rs b/brush-core/src/shell/execution.rs
+index 5cad1e9..d57ec8b 100644
+--- a/brush-core/src/shell/execution.rs
++++ b/brush-core/src/shell/execution.rs
+@@ -155,8 +155,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         file.read_to_end(&mut bytes)?;
+ 
+         tracing::debug!(target: trace_categories::PARSE, "Parsing sourced file: {}", source_info.source);
+-        let parse_result =
+-            super::parsing::create_parser(bytes.as_slice(), &self.parser_options()).parse_program();
++        let parse_result = self.parse(bytes.as_slice());
+ 
+         let script_positional_args = args.map(Into::into);
+ 
+@@ -209,8 +208,10 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         source_info: &crate::SourceInfo,
+         params: &ExecutionParameters,
+     ) -> Result<ExecutionResult, error::Error> {
+-        if parsed.is_ok() {
+-            return self.run_parsed_result(parsed, source_info, params).await;
++        if let Ok(program) = parsed {
++            return self
++                .run_program_reading_aliases(text, program, source_info, params)
++                .await;
+         }
+ 
+         let mut result = ExecutionResult::success();
+@@ -222,8 +223,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+                 unit = "\n".repeat(line_index);
+             }
+             unit.push_str(line);
+-            let parsed = super::parsing::create_parser(unit.as_bytes(), &self.parser_options())
+-                .parse_program();
++            let parsed = self.parse(unit.as_bytes());
+             if lines.peek().is_some() && !is_complete_read_unit(&unit, &parsed) {
+                 continue;
+             }
+@@ -327,6 +327,45 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         }
+     }
+ 
++    /// Runs a program parsed from `text` one complete command at a time. If a
++    /// command changes the aliases that parsing depends on, the commands on
++    /// later lines are parsed again, as Bash would only read them now.
++    async fn run_program_reading_aliases(
++        &mut self,
++        text: &str,
++        program: brush_parser::ast::Program,
++        source_info: &crate::SourceInfo,
++        params: &ExecutionParameters,
++    ) -> Result<ExecutionResult, error::Error> {
++        use brush_parser::ast::SourceLocation as _;
++
++        let alias_state = self.alias_parse_state();
++        let mut result = ExecutionResult::success();
++        let mut commands = program.complete_commands.iter().peekable();
++        while let Some(command) = commands.next() {
++            result = crate::interp::execute_complete_command(self, command, params).await;
++            if !result.is_normal_flow() {
++                break;
++            }
++            if self.alias_parse_state() == alias_state {
++                continue;
++            }
++            let Some(next_line) = commands
++                .peek()
++                .and_then(|next| next.location())
++                .map(|location| location.start.line)
++            else {
++                continue;
++            };
++            // Leading newlines keep reported line numbers relative to `text`.
++            let mut rest = "\n".repeat(next_line.saturating_sub(1));
++            rest.extend(text.split_inclusive('\n').skip(next_line.saturating_sub(1)));
++            let parsed = self.parse(rest.as_bytes());
++            return Box::pin(self.run_source_text(&rest, parsed, source_info, params)).await;
++        }
++        Ok(result)
++    }
++
+     /// Executes the given parsed shell program, returning the resulting exit status.
+     ///
+     /// # Arguments
+diff --git a/brush-core/src/shell/parsing.rs b/brush-core/src/shell/parsing.rs
+index b6d69d3..cd73f9f 100644
+--- a/brush-core/src/shell/parsing.rs
++++ b/brush-core/src/shell/parsing.rs
+@@ -14,7 +14,11 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
+         let mut parser = create_parser(reader, &self.parser_options());
+ 
+         tracing::debug!(target: trace_categories::PARSE, "Parsing reader as program...");
+-        parser.parse_program()
++        if self.alias_parse_state().is_some() {
++            parser.parse_program_with_aliases(&self.aliases)
++        } else {
++            parser.parse_program()
++        }
+     }
+ 
+     /// Parses the given string as a shell program, returning the resulting Abstract Syntax Tree
+@@ -28,6 +32,10 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
+         s: S,
+     ) -> Result<brush_parser::ast::Program, brush_parser::ParseError> {
+         let s: String = s.into();
++        // Aliases expand lexically while reading, so such parses are not cached.
++        if self.alias_parse_state().is_some() {
++            return self.parse(s.as_bytes());
++        }
+         parse_string_impl(&s, &self.parser_options())
+     }
+ 
+diff --git a/brush-core/src/shell.rs b/brush-core/src/shell.rs
+index cbed476..472c2f1 100644
+--- a/brush-core/src/shell.rs
++++ b/brush-core/src/shell.rs
+@@ -87,6 +87,10 @@ pub struct Shell<SE: extensions::ShellExtensions = extensions::DefaultShellExten
+     /// Shell aliases.
+     aliases: HashMap<String, String>,
+ 
++    /// Incremented whenever the aliases may have changed.
++    #[cfg_attr(feature = "serde", serde(skip))]
++    alias_generation: u64,
++
+     /// The status of the last completed command.
+     last_exit_status: u8,
+ 
+@@ -163,6 +167,7 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
+             options: self.options.clone(),
+             jobs: self.jobs.subshell_view(),
+             aliases: self.aliases.clone(),
++            alias_generation: self.alias_generation,
+             last_exit_status: self.last_exit_status,
+             last_exit_status_change_count: self.last_exit_status_change_count,
+             last_pipeline_statuses: self.last_pipeline_statuses.clone(),
+@@ -193,6 +198,14 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
+     }
+ }
+ 
++impl<SE: extensions::ShellExtensions> Shell<SE> {
++    /// Identifies the alias state that parsing depends on: whether aliases
++    /// expand, and which aliases are defined.
++    pub(crate) fn alias_parse_state(&self) -> Option<u64> {
++        (self.options.expand_aliases && !self.aliases.is_empty()).then_some(self.alias_generation)
++    }
++}
++
+ impl<SE: extensions::ShellExtensions> AsRef<Self> for Shell<SE> {
+     fn as_ref(&self) -> &Self {
+         self
+@@ -444,6 +457,7 @@ impl<SE: extensions::ShellExtensions> ShellState for Shell<SE> {
+ 
+     /// Returns a mutable reference to the shell's aliases.
+     pub fn aliases_mut(&mut self) -> &mut HashMap<String, String> {
++        self.alias_generation += 1;
+         &mut self.aliases
+     }
+ 
+diff --git a/brush-parser/src/parser/aliases.rs b/brush-parser/src/parser/aliases.rs
+new file mode 100644
+index 0000000..ec182a7
+--- /dev/null
++++ b/brush-parser/src/parser/aliases.rs
+@@ -0,0 +1,270 @@
++//! Lexical alias expansion over a token stream, as Bash performs it while
++//! reading input: an unquoted word in command position whose text names an
++//! alias is replaced by the tokens of the alias value before parsing.
++
++use std::collections::HashMap;
++
++use crate::tokenizer::{Token, TokenizerOptions, tokenize_str_with_options};
++
++/// Expands aliases in `tokens`. A word is eligible when it is in command
++/// position (after a control operator, a reserved word that begins a command
++/// list, or assignment words), or follows an alias whose value ends in a
++/// blank. An alias is not expanded again within its own expansion.
++pub(super) fn expand_aliases(
++    tokens: Vec<Token>,
++    aliases: &HashMap<String, String>,
++    options: &TokenizerOptions,
++) -> Vec<Token> {
++    let mut expander = Expander {
++        aliases,
++        options,
++        output: Vec::with_capacity(tokens.len()),
++        active: Vec::new(),
++        state: CommandState {
++            command: true,
++            ..CommandState::default()
++        },
++    };
++    expander.process(tokens);
++    expander.output
++}
++
++#[derive(Default)]
++struct CommandState {
++    /// The next word is in command position.
++    command: bool,
++    /// The next word may expand because the previous alias value ended in a blank.
++    after_blank_alias: bool,
++    /// The next word is a redirection target.
++    redirect_target: bool,
++    /// Here-document tokens (tag, body, end tag) still to pass through.
++    here_doc_tokens: usize,
++    /// Parenthesis depth inside an arithmetic `(( ... ))` command.
++    arithmetic: usize,
++    /// Inside a `[[ ... ]]` conditional.
++    conditional: bool,
++    /// The next word names a function (`function NAME`).
++    function_name: bool,
++    /// Enclosing `case` commands.
++    cases: Vec<CaseState>,
++    /// The previous token was an opening parenthesis operator.
++    after_open_paren: bool,
++}
++
++#[derive(Clone, Copy, PartialEq, Eq)]
++enum CaseState {
++    /// Between `case` and `in`.
++    Subject,
++    /// Reading a pattern list.
++    Pattern,
++    /// Reading a clause body.
++    Body,
++}
++
++struct Expander<'a> {
++    aliases: &'a HashMap<String, String>,
++    options: &'a TokenizerOptions,
++    output: Vec<Token>,
++    active: Vec<String>,
++    state: CommandState,
++}
++
++impl Expander<'_> {
++    fn process(&mut self, tokens: Vec<Token>) {
++        let mut tokens = tokens.into_iter().peekable();
++        while let Some(token) = tokens.next() {
++            let next_is_open_paren =
++                matches!(tokens.peek(), Some(Token::Operator(op, _)) if op == "(");
++            match token {
++                Token::Operator(op, location) => {
++                    self.operator(&op, next_is_open_paren);
++                    self.output.push(Token::Operator(op, location));
++                }
++                Token::Word(word, location) => {
++                    if self.word_may_expand() {
++                        if let Some(value) = self.lookup(&word) {
++                            self.expand(&word, &value, &location);
++                            continue;
++                        }
++                    }
++                    self.word(&word);
++                    self.output.push(Token::Word(word, location));
++                }
++            }
++        }
++    }
++
++    fn word_may_expand(&mut self) -> bool {
++        let state = &mut self.state;
++        let eligible = std::mem::take(&mut state.after_blank_alias)
++            || (state.command
++                && !matches!(
++                    state.cases.last(),
++                    Some(CaseState::Subject | CaseState::Pattern)
++                ));
++        eligible
++            && state.here_doc_tokens == 0
++            && state.arithmetic == 0
++            && !state.conditional
++            && !state.redirect_target
++            && !state.function_name
++    }
++
++    fn lookup(&self, word: &str) -> Option<String> {
++        if self.active.iter().any(|active| active == word) {
++            return None;
++        }
++        // Quoted or escaped words never match: alias names cannot contain quotes.
++        self.aliases.get(word).cloned()
++    }
++
++    fn expand(&mut self, name: &str, value: &str, location: &crate::SourceSpan) {
++        let Ok(tokens) = tokenize_str_with_options(value, self.options) else {
++            // An alias value that cannot be tokenized stands as a single word.
++            self.word(value);
++            self.output
++                .push(Token::Word(value.to_owned(), location.clone()));
++            return;
++        };
++        let tokens = tokens
++            .into_iter()
++            .map(|token| match token {
++                Token::Operator(op, _) => Token::Operator(op, location.clone()),
++                Token::Word(word, _) => Token::Word(word, location.clone()),
++            })
++            .collect();
++        self.active.push(name.to_owned());
++        self.process(tokens);
++        self.active.pop();
++        if value.ends_with([' ', '\t']) {
++            self.state.after_blank_alias = true;
++        }
++    }
++
++    fn operator(&mut self, op: &str, next_is_open_paren: bool) {
++        let state = &mut self.state;
++        let after_open_paren = std::mem::take(&mut state.after_open_paren);
++        if state.here_doc_tokens > 0 {
++            return;
++        }
++        if state.arithmetic > 0 {
++            match op {
++                "(" => state.arithmetic += 1,
++                ")" => {
++                    state.arithmetic -= 1;
++                    state.command = false;
++                }
++                _ => {}
++            }
++            return;
++        }
++        if state.conditional {
++            return;
++        }
++        match op {
++            "<<" | "<<-" => state.here_doc_tokens = 3,
++            "<" | ">" | ">>" | ">|" | "<>" | "<&" | ">&" | "&>" | "&>>" | "<<<" => {
++                state.redirect_target = true;
++            }
++            "(" if state.command && next_is_open_paren => state.arithmetic = 1,
++            "(" => {
++                state.after_open_paren = true;
++                if !matches!(state.cases.last(), Some(CaseState::Pattern)) {
++                    state.command = true;
++                }
++            }
++            ")" if matches!(state.cases.last(), Some(CaseState::Pattern)) => {
++                set_case(state, CaseState::Body);
++                state.command = true;
++            }
++            // `NAME ()` is followed by a function body.
++            ")" => state.command = after_open_paren,
++            ";;" | ";&" | ";;&" => {
++                set_case(state, CaseState::Pattern);
++                state.command = false;
++            }
++            "\n" if matches!(state.cases.last(), Some(CaseState::Pattern)) => {}
++            "|" if matches!(state.cases.last(), Some(CaseState::Pattern)) => {}
++            "\n" | ";" | "&" | "&&" | "||" | "|" | "|&" => state.command = true,
++            _ => {}
++        }
++    }
++
++    fn word(&mut self, word: &str) {
++        let state = &mut self.state;
++        state.after_open_paren = false;
++        if state.here_doc_tokens > 0 {
++            state.here_doc_tokens -= 1;
++            return;
++        }
++        if std::mem::take(&mut state.redirect_target) || state.arithmetic > 0 {
++            return;
++        }
++        if state.conditional {
++            if word == "]]" {
++                state.conditional = false;
++                state.command = false;
++            }
++            return;
++        }
++        if std::mem::take(&mut state.function_name) {
++            state.command = true;
++            return;
++        }
++        match state.cases.last() {
++            Some(CaseState::Subject) => {
++                if word == "in" {
++                    set_case(state, CaseState::Pattern);
++                }
++                return;
++            }
++            Some(CaseState::Pattern) => {
++                if word == "esac" {
++                    state.cases.pop();
++                    state.command = false;
++                }
++                return;
++            }
++            Some(CaseState::Body) if state.command && word == "esac" => {
++                state.cases.pop();
++                state.command = false;
++                return;
++            }
++            _ => {}
++        }
++        if !state.command {
++            return;
++        }
++        match word {
++            "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "{" | "time"
++            | "coproc" => {}
++            "case" => {
++                state.cases.push(CaseState::Subject);
++                state.command = false;
++            }
++            "function" => {
++                state.function_name = true;
++                state.command = false;
++            }
++            "[[" => state.conditional = true,
++            _ if is_assignment(word) => {}
++            _ => state.command = false,
++        }
++    }
++}
++
++fn set_case(state: &mut CommandState, case: CaseState) {
++    if let Some(top) = state.cases.last_mut() {
++        *top = case;
++    }
++}
++
++fn is_assignment(word: &str) -> bool {
++    let Some((name, _)) = word.split_once('=') else {
++        return false;
++    };
++    let name = name.strip_suffix('+').unwrap_or(name);
++    let name = name.split_once('[').map_or(name, |(name, _)| name);
++    name.starts_with(|c: char| c == '_' || c.is_ascii_alphabetic())
++        && name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
++}
+diff --git a/brush-parser/src/parser/mod.rs b/brush-parser/src/parser/mod.rs
+index fba5a96..de59836 100644
+--- a/brush-parser/src/parser/mod.rs
++++ b/brush-parser/src/parser/mod.rs
+@@ -5,6 +5,7 @@ use bon::bon;
+ use crate::ast;
+ use crate::tokenizer::{Token, TokenEndReason, Tokenizer, TokenizerOptions, Tokens};
+ 
++mod aliases;
+ pub mod peg;
+ #[cfg(feature = "winnow-parser")]
+ pub mod winnow_str;
+@@ -185,6 +186,21 @@ impl<R: std::io::BufRead> Parser<R> {
+         }
+     }
+ 
++    /// Parses the input like [`Self::parse_program`], first expanding `aliases`
++    /// lexically as Bash does while reading input (PEG parser only).
++    pub fn parse_program_with_aliases(
++        &mut self,
++        aliases: &std::collections::HashMap<String, String>,
++    ) -> Result<ast::Program, crate::error::ParseError> {
++        let tokens = self.tokenize()?;
++        let mut tokens =
++            aliases::expand_aliases(tokens, aliases, &self.options.tokenizer_options());
++        if self.options.marsh_extensions {
++            normalize_marsh_fanout_tokens(&mut tokens);
++        }
++        parse_tokens(&tokens, &self.options)
++    }
++
+     /// Parses a function definition body from the input. The body is expected to be
+     /// preceded by "()", but no function name.
+     pub fn parse_function_parens_and_body(

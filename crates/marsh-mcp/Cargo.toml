@@ -1,0 +1,33 @@
+[package]
+name = "marsh-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "marsh-mcp"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+futures = "0.3"
+nix = { version = "0.31", features = ["signal", "user"] }
+rmcp = { version = "3.4", default-features = false, features = ["server", "macros", "schemars", "transport-io", "transport-async-rw"] }
+rustix = { version = "1.1", features = ["fs", "process"] }
+schemars = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+tokio = { version = "1.48", features = ["io-std", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+uuid = { version = "1.18", features = ["v4"] }
+marsh-daemon = { path = "../marsh-daemon" }
+
+[dev-dependencies]
+rmcp = { version = "3.4", default-features = false, features = ["client", "server", "macros", "schemars", "transport-io"] }
+tempfile = "3.23"

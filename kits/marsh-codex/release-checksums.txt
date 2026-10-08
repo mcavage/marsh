@@ -1,0 +1,5 @@
+# Publisher metadata: https://api.github.com/repos/openai/codex/releases/tags/rust-v0.155.1
+d6c7e62fbd688d52ee04f3929d0613705d32a920a42db7a139e366eaf1f4a2d7  0.155.1/codex-aarch64-unknown-linux-musl.tar.gz
+a0ef8b2debc3bf747e07b1a039354de31300ac0dcc2276498ba281470b5d9115  0.155.1/codex-x86_64-unknown-linux-musl.tar.gz
+516f2ed76d4ae96c2074d3c08f4576ed1bdc5c3a97e26734d7319de8b6861683  0.155.1/codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz
+9fd083743af55be818aceb351d371fb5136f5b6aa3938f167087373d27067b2d  0.155.1/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz

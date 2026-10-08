@@ -1,0 +1,484 @@
+{
+  "provenance": {
+    "description": "All 46 assigned Linux60 raw diagnostic differences plus independently observed byte/numeric/continuation controls; no ignore flags applied"
+  },
+  "cases": [
+    {
+      "name": "Declare readonly variable",
+      "ignore_stderr": true,
+      "stdin": "declare -r var=\"readonly\"\ndeclare -p var\n\necho $var\n\nvar=\"change\"\necho \"change result: $?\"\necho \"var: ${var}\"\n\ndeclare +r var\necho \"+r result: $?\"\ndeclare -p var\n",
+      "group": "builtins/declare.yaml",
+      "index": 12,
+      "test_files": [
+        {
+          "path": "helpers.sh",
+          "contents": "stable_print_assoc_array() {\n    # TODO(nameref): enable use of nameref when implemented; for now\n    # we assume the name of the array is assoc_array\n    # local -n assoc_array=$1\n    local key\n\n    for key in $(printf \"%s\\n\" \"${!assoc_array[@]}\" | sort -n); do\n        echo \"\\\"${key}\\\" => ${assoc_array[${key}]}\"\n    done\n}\n"
+        }
+      ]
+    },
+    {
+      "name": "Bad conversions",
+      "ignore_stderr": true,
+      "stdin": "declare -a arr1=(a b c)\ndeclare -A arr1\necho \"Conversion result: $?\"\ndeclare -p arr1\n\ndeclare -A arr2=([\"x1\"]=1 [\"x2\"]=2)\ndeclare -a arr2\necho \"Conversion result: $?\"\ndeclare -p arr2\n",
+      "group": "builtins/declare.yaml",
+      "index": 33,
+      "test_files": [
+        {
+          "path": "helpers.sh",
+          "contents": "stable_print_assoc_array() {\n    # TODO(nameref): enable use of nameref when implemented; for now\n    # we assume the name of the array is assoc_array\n    # local -n assoc_array=$1\n    local key\n\n    for key in $(printf \"%s\\n\" \"${!assoc_array[@]}\" | sort -n); do\n        echo \"\\\"${key}\\\" => ${assoc_array[${key}]}\"\n    done\n}\n"
+        }
+      ]
+    },
+    {
+      "name": "Unset variable in a local operand is fatal under set -u",
+      "ignore_stderr": true,
+      "stdin": "f() { local x=$undefined; echo \"NOT REACHED\"; }\n( set -u; f; echo \"NOT REACHED EITHER\" )\necho \"status: $?\"\n",
+      "group": "builtins/declare.yaml",
+      "index": 100,
+      "test_files": [
+        {
+          "path": "helpers.sh",
+          "contents": "stable_print_assoc_array() {\n    # TODO(nameref): enable use of nameref when implemented; for now\n    # we assume the name of the array is assoc_array\n    # local -n assoc_array=$1\n    local key\n\n    for key in $(printf \"%s\\n\" \"${!assoc_array[@]}\" | sort -n); do\n        echo \"\\\"${key}\\\" => ${assoc_array[${key}]}\"\n    done\n}\n"
+        }
+      ]
+    },
+    {
+      "name": "getopts: OPTERR non-numeric treated as enabled",
+      "ignore_stderr": true,
+      "stdin": "OPTERR=abc\ngetopts \"a:\" myvar -x\necho \"Result: $?\"\necho \"myvar: ${myvar}\"\necho \"OPTARG: ${OPTARG-UNSET}\"\necho \"OPTIND: ${OPTIND}\"\n",
+      "group": "builtins/getopts.yaml",
+      "index": 36,
+      "test_files": []
+    },
+    {
+      "name": "printf with hyphen-prefixed format string (invalid option)",
+      "ignore_stderr": true,
+      "stdin": "printf -x\necho \"Result: $?\"\n",
+      "group": "builtins/printf.yaml",
+      "index": 12,
+      "test_files": []
+    },
+    {
+      "name": "printf with no arguments",
+      "ignore_stderr": true,
+      "stdin": "printf\necho \"Result: $?\"\n",
+      "group": "builtins/printf.yaml",
+      "index": 59,
+      "test_files": []
+    },
+    {
+      "name": "readonly on nameref makes nameref readonly",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "target=\"value\"\ndeclare -n ref=target\nreadonly ref\ndeclare -p ref\ndeclare -p target\n# Changing what ref points to should fail\ndeclare -n ref=other 2>/dev/null\necho \"exit: $?\"\n# But target should still be writable\ntarget=\"new_value\"\necho \"target: $target\"\n",
+      "group": "builtins/readonly.yaml",
+      "index": 4,
+      "test_files": []
+    },
+    {
+      "name": "readonly target through nameref assignment",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "target=\"value\"\nreadonly target\ndeclare -n ref=target\nref=\"new_value\" 2>/dev/null\necho \"exit: $?\"\necho \"target: $target\"\n",
+      "group": "builtins/readonly.yaml",
+      "index": 5,
+      "test_files": []
+    },
+    {
+      "name": "test: invalid operators",
+      "ignore_stderr": true,
+      "stdin": "test - -\necho \"Result: $?\"\n",
+      "group": "builtins/test.yaml",
+      "index": 7,
+      "test_files": []
+    },
+    {
+      "name": "Unset array element with negative index out of bounds",
+      "ignore_stderr": true,
+      "stdin": "declare -a myarray=(a b c)\n\necho \"Initial array:\"\ndeclare -p myarray\necho\n\nunset \"myarray[-4]\"\necho \"After attempting to remove with index -4 (out of bounds):\"\ndeclare -p myarray\necho \"Return code: $?\"\n",
+      "group": "builtins/unset.yaml",
+      "index": 8,
+      "test_files": []
+    },
+    {
+      "name": "Nameref circular reference",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n a=b\ndeclare -n b=a\necho \"a: '${a}'\"\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 6,
+      "test_files": []
+    },
+    {
+      "name": "Nameref with set -u and unset target",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "set -u\ndeclare -n ref=unset_target\necho \"$ref\"\necho \"should not print\"\n",
+      "group": "nameref.yaml",
+      "index": 21,
+      "test_files": []
+    },
+    {
+      "name": "Nameref to empty string target name",
+      "ignore_stderr": true,
+      "stdin": "declare -n ref=\"\"\necho \"ref: '${ref}'\"\nref=\"value\" 2>/dev/null\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 22,
+      "test_files": []
+    },
+    {
+      "name": "Circular reference in assignment context",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n a=b\ndeclare -n b=a\na=\"value\" 2>/dev/null\necho \"exit: $?\"\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 24,
+      "test_files": []
+    },
+    {
+      "name": "Nameref with readonly target - write fails",
+      "ignore_stderr": true,
+      "stdin": "target=\"immutable\"\ndeclare -n ref=target\nreadonly ref\nref=\"attempt\" 2>/dev/null\necho \"exit: $?\"\necho \"target: $target\"\n",
+      "group": "nameref.yaml",
+      "index": 64,
+      "test_files": []
+    },
+    {
+      "name": "Nameref circular with 3 nodes",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n c1=c2\ndeclare -n c2=c3\ndeclare -n c3=c1\necho \"c1: '${c1}'\"\necho \"exit: $?\"\n",
+      "group": "nameref.yaml",
+      "index": 70,
+      "test_files": []
+    },
+    {
+      "name": "Nameref to numeric-only target name",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n ref=123\necho \"exit: $?\"\necho \"ref: '${ref}'\"\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 77,
+      "test_files": []
+    },
+    {
+      "name": "Nameref to name with special characters",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n ref=\"a-b\"\necho \"exit1: $?\"\ndeclare -n ref2=\"a.b\"\necho \"exit2: $?\"\ndeclare -n ref3=\"a+b\"\necho \"exit3: $?\"\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 78,
+      "test_files": []
+    },
+    {
+      "name": "Nameref to name with spaces",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n ref=\"a b\"\necho \"exit: $?\"\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 79,
+      "test_files": []
+    },
+    {
+      "name": "Nameref to positional parameter name",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n ref=1\necho \"exit: $?\"\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 80,
+      "test_files": []
+    },
+    {
+      "name": "Nameref to @ or *",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n ref1=\"@\"\necho \"exit1: $?\"\ndeclare -n ref2=\"*\"\necho \"exit2: $?\"\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 81,
+      "test_files": []
+    },
+    {
+      "name": "Make target readonly through nameref",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "target=\"value\"\ndeclare -n ref=target\nreadonly ref\ndeclare -p target\ntarget=\"new\" 2>/dev/null\necho \"target write exit: $?\"\n",
+      "group": "nameref.yaml",
+      "index": 96,
+      "test_files": []
+    },
+    {
+      "name": "Circular nameref - 4 node cycle",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n a=b\ndeclare -n b=c\ndeclare -n c=d\ndeclare -n d=a\necho \"a: '${a}'\"\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 129,
+      "test_files": []
+    },
+    {
+      "name": "Circular nameref - write attempt",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n x=y\ndeclare -n y=x\nx=\"value\" 2>/dev/null\necho \"write exit: $?\"\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 134,
+      "test_files": []
+    },
+    {
+      "name": "Nameref to arr[@] - write attempt",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "arr=(a b c)\ndeclare -n ref='arr[@]'\nref=\"new\" 2>/dev/null\necho \"exit: $?\"\ndeclare -p arr\n",
+      "group": "nameref.yaml",
+      "index": 157,
+      "test_files": []
+    },
+    {
+      "name": "Circular via retarget",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n a=b\ndeclare -n b=c\nc=\"value\"\necho \"a: $a\"\n# Now make it circular\ndeclare -n c=a\necho \"a after: '${a}'\"\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 197,
+      "test_files": []
+    },
+    {
+      "name": "Self-reference by adding -n to existing var",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "x=x\ndeclare -n x\necho \"exit: $?\"\ndeclare -p x\necho \"val: '${x}'\"\n",
+      "group": "nameref.yaml",
+      "index": 198,
+      "test_files": []
+    },
+    {
+      "name": "Array assignment through nameref-to-subscript errors",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "arr=(1 2 3)\ndeclare -n ref='arr[2]'\nref=(a b c) 2>/dev/null\necho \"exit: $?\"\ndeclare -p arr\n",
+      "group": "nameref.yaml",
+      "index": 199,
+      "test_files": []
+    },
+    {
+      "name": "Compound array append through subscripted nameref errors",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "arr=(a b c)\ndeclare -n ref='arr[0]'\nref+=(x y z) 2>/dev/null\necho \"exit: $?\"\necho \"arr: ${arr[@]}\"\n",
+      "group": "nameref.yaml",
+      "index": 204,
+      "test_files": []
+    },
+    {
+      "name": "Readonly propagates through 2-level nameref chain",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "target=\"original\"\ndeclare -n middle=target\ndeclare -n top=middle\nreadonly top\ndeclare -p target\ntop=\"new\" 2>/dev/null\necho \"exit: $?\"\nmiddle=\"new\" 2>/dev/null\necho \"exit: $?\"\ntarget=\"new\" 2>/dev/null\necho \"exit: $?\"\necho \"target: $target\"\n",
+      "group": "nameref.yaml",
+      "index": 205,
+      "test_files": []
+    },
+    {
+      "name": "Nameref chain exceeds max depth",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "final_target=\"deep_value\"\ndeclare -n c9=final_target\ndeclare -n c8=c9\ndeclare -n c7=c8\ndeclare -n c6=c7\ndeclare -n c5=c6\ndeclare -n c4=c5\ndeclare -n c3=c4\ndeclare -n c2=c3\ndeclare -n c1=c2\necho \"c1: '$c1'\"\necho \"done\"\n",
+      "group": "nameref.yaml",
+      "index": 217,
+      "test_files": []
+    },
+    {
+      "name": "Subscripted nameref with set -u when element is unset",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "set -u\narr=(a b c)\ndeclare -n ref='arr[5]'\necho \"$ref\"\necho \"should not print\"\n",
+      "group": "nameref.yaml",
+      "index": 221,
+      "test_files": []
+    },
+    {
+      "name": "Circular nameref with set -e does not abort script",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "set -e\ndeclare -n a=b\ndeclare -n b=a\necho \"val: '${a}'\"\necho \"script continues\"\n",
+      "group": "nameref.yaml",
+      "index": 225,
+      "test_files": []
+    },
+    {
+      "name": "Nameref to unset variable with set -eu errors and exits",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "set -eu\ndeclare -n ref=nonexistent\necho \"$ref\"\necho \"should not print\"\n",
+      "group": "nameref.yaml",
+      "index": 226,
+      "test_files": []
+    },
+    {
+      "name": "failglob errors on unmatched glob",
+      "ignore_stderr": true,
+      "stdin": "shopt -s failglob\necho non-existent-*.txt 2>/dev/null\necho \"exit=$?\"\n",
+      "group": "options/shopt-failglob.yaml",
+      "index": 0,
+      "test_files": []
+    },
+    {
+      "name": "failglob with negation",
+      "ignore_stderr": true,
+      "stdin": "shopt -s failglob\n! echo non-existent-*.txt 2>/dev/null\necho \"exit=$?\"\n",
+      "group": "options/shopt-failglob.yaml",
+      "index": 3,
+      "test_files": []
+    },
+    {
+      "name": "failglob in subshell",
+      "ignore_stderr": true,
+      "stdin": "shopt -s failglob\n(echo non-existent-*.txt; echo \"inner=$?\")\necho \"outer=$?\"\n",
+      "group": "options/shopt-failglob.yaml",
+      "index": 4,
+      "test_files": []
+    },
+    {
+      "name": "failglob aborts compound list",
+      "ignore_stderr": true,
+      "stdin": "shopt -s failglob\necho *.nomatch; echo \"after\"\n",
+      "group": "options/shopt-failglob.yaml",
+      "index": 7,
+      "test_files": []
+    },
+    {
+      "name": "failglob in multi-member pipeline",
+      "ignore_stderr": true,
+      "stdin": "shopt -s failglob\necho *.nomatch | cat\necho \"after\"\n",
+      "group": "options/shopt-failglob.yaml",
+      "index": 8,
+      "test_files": []
+    },
+    {
+      "name": "failglob extglob pattern",
+      "ignore_stderr": true,
+      "stdin": "shopt -s failglob\nshopt -s extglob\necho @(nomatch_pattern_xyz)\necho \"after\"\n",
+      "group": "options/shopt-failglob.yaml",
+      "index": 9,
+      "test_files": []
+    },
+    {
+      "name": "failglob takes precedence over nullglob",
+      "ignore_stderr": true,
+      "stdin": "shopt -s failglob nullglob\necho non-existent-*.txt 2>/dev/null\necho \"exit=$?\"\n",
+      "group": "options/shopt-failglob.yaml",
+      "index": 10,
+      "test_files": []
+    },
+    {
+      "name": "failglob on unquoted variable with glob chars",
+      "ignore_stderr": true,
+      "stdin": "shopt -s failglob\nx='*.nomatch_xyz'\necho $x 2>/dev/null\necho \"exit=$?\"\n",
+      "group": "options/shopt-failglob.yaml",
+      "index": 11,
+      "test_files": []
+    },
+    {
+      "name": "Substring with a negative length reaching past the offset",
+      "ignore_stderr": true,
+      "stdin": "var=\"abcdefgh\"\n( echo \"[${var:0:-9}]\" ); echo \"rc=$?\"\n( echo \"[${var:2:-7}]\" ); echo \"rc=$?\"\n( echo \"[${var:8:-1}]\" ); echo \"rc=$?\"\nempty=\n( echo \"[${empty:0:-1}]\" ); echo \"rc=$?\"\n",
+      "group": "word_expansion/params.yaml",
+      "index": 33,
+      "test_files": []
+    },
+    {
+      "name": "Substring with negative length on arrays",
+      "ignore_stderr": true,
+      "stdin": "arr=(a b c)\n( echo \"[${arr[@]:0:-1}]\" ); echo \"rc=$?\"\n( echo \"[${arr[@]:2:-1}]\" ); echo \"rc=$?\"\n( echo \"[${arr[@]:3:-1}]\" ); echo \"rc=$?\"\n( echo \"[${arr[*]:0:-1}]\" ); echo \"rc=$?\"\n( echo \"[${arr[@]: -1:-1}]\" ); echo \"rc=$?\"\nset -- p q r\n( echo \"[${@:1:-1}]\" ); echo \"rc=$?\"\n( echo \"[${@:4:-1}]\" ); echo \"rc=$?\"\n( echo \"[${@:5:-1}]\" ); echo \"rc=$?\"\n( echo \"[${*:3:-1}]\" ); echo \"rc=$?\"\ndeclare -A assoc=([x]=1)\n( echo \"[${assoc[@]:0:-1}]\" ); echo \"rc=$?\"\n( echo \"[${assoc[@]:1:-1}]\" ); echo \"rc=$?\"\n( echo \"[${assoc[@]:2:-1}]\" ); echo \"rc=$?\"\n",
+      "group": "word_expansion/params.yaml",
+      "index": 35,
+      "test_files": []
+    },
+    {
+      "name": "Substring operator on a scalar referenced as an array",
+      "ignore_stderr": true,
+      "stdin": "s=hello\necho \"\\${s[@]:0:2}:  ${s[@]:0:2}\"\necho \"\\${s[@]:1:2}:  ${s[@]:1:2}\"\necho \"\\${s[@]:1}:    ${s[@]:1}\"\necho \"\\${s[@]:0:-1}: ${s[@]:0:-1}\"\necho \"\\${s[*]:1:-1}: ${s[*]:1:-1}\"\necho \"\\${#s[@]}:     ${#s[@]}\"\n( echo \"[${s[@]:2:-9}]\" ); echo \"rc=$?\"\n",
+      "group": "word_expansion/params.yaml",
+      "index": 37,
+      "test_files": []
+    },
+    {
+      "name": "Substring with negative length on a sparse indexed array",
+      "ignore_stderr": true,
+      "stdin": "sparse=([1]=one [5]=five [9]=nine)\n( echo \"[${sparse[@]:0:-1}]\" ); echo \"rc=$?\"\n( echo \"[${sparse[@]:5:-1}]\" ); echo \"rc=$?\"\n( echo \"[${sparse[@]:9:-1}]\" ); echo \"rc=$?\"\n( echo \"[${sparse[@]:10:-1}]\" ); echo \"rc=$?\"\n( echo \"[${sparse[@]:11:-1}]\" ); echo \"rc=$?\"\n",
+      "group": "word_expansion/params.yaml",
+      "index": 46,
+      "test_files": []
+    },
+    {
+      "stdin": "unset OPTERR; getopts a opt -x; printf \"status:%s\\n\" \"$?\"\n",
+      "group": "diagnostic-controls",
+      "index": 0
+    },
+    {
+      "stdin": "OPTERR=abc; getopts a opt -x; printf \"status:%s\\n\" \"$?\"\n",
+      "group": "diagnostic-controls",
+      "index": 1
+    },
+    {
+      "stdin": "OPTERR=; getopts a opt -x; printf \"status:%s\\n\" \"$?\"\n",
+      "group": "diagnostic-controls",
+      "index": 2
+    },
+    {
+      "stdin": "OPTERR=1x; getopts a opt -x; printf \"status:%s\\n\" \"$?\"\n",
+      "group": "diagnostic-controls",
+      "index": 3
+    },
+    {
+      "stdin": "OPTERR=\"  -2x\"; getopts a opt -x; printf \"status:%s\\n\" \"$?\"\n",
+      "group": "diagnostic-controls",
+      "index": 4
+    },
+    {
+      "stdin": "OPTERR=000; getopts a opt -x; printf \"status:%s\\n\" \"$?\"\n",
+      "group": "diagnostic-controls",
+      "index": 5
+    },
+    {
+      "stdin": "OPTERR=0x1; getopts a opt -x; printf \"status:%s\\n\" \"$?\"\n",
+      "group": "diagnostic-controls",
+      "index": 6
+    },
+    {
+      "stdin": "a=(a b c); unset 'a[-4]'; echo rc:$?; z=yes; unset 'a[-4]' z; echo multi:$? z:${z-unset}\n",
+      "group": "diagnostic-controls",
+      "index": 7
+    },
+    {
+      "group": "diagnostic-controls",
+      "index": 8,
+      "stdin": "printf -v out '%s' -x; printf '<%s>\\n' \"$out\"; printf -- '-x\\n'\n"
+    },
+    {
+      "group": "diagnostic-controls",
+      "index": 9,
+      "stdin": "printf -vone -vtwo '%s' value; printf '<%s>\\n' \"${one-unset}\" \"$two\"\n"
+    },
+    {
+      "group": "diagnostic-controls",
+      "index": 10,
+      "stdin": "printf -v; echo status:$?\n"
+    },
+    {
+      "group": "diagnostic-controls",
+      "index": 11,
+      "stdin": "test $'\\xff' -; echo status:$?\n"
+    },
+    {
+      "group": "diagnostic-controls",
+      "index": 12,
+      "stdin": "declare -n ref=$'\\xff'; echo status:$?\n"
+    },
+    {
+      "group": "diagnostic-controls",
+      "index": 13,
+      "stdin": "shopt -s failglob; x=$'\\xff*.nomatch'; echo $x\necho status:$?\n\n"
+    }
+  ]
+}

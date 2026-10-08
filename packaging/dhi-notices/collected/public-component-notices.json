@@ -1,0 +1,114 @@
+[
+  {
+    "package": "codex-patched-zsh",
+    "version": "codex-zsh-v0.1.0",
+    "release_tag_object": "b473c5080af56ff0596cfc78d509d884106bfadc",
+    "release_commit": "891f1f4c8584a082fc4658cabd48f1a8b01354e0",
+    "zsh_source_commit": "77045ef899e53b9598bebc5a41db93a548a40ca6",
+    "upstream_source": "https://git.code.sf.net/p/zsh/code",
+    "license_source_mirror": {
+      "url": "https://raw.githubusercontent.com/zsh-users/zsh/77045ef899e53b9598bebc5a41db93a548a40ca6/LICENCE",
+      "sha256": "d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5",
+      "size": 1963,
+      "integrity": null,
+      "signature_verified": false
+    },
+    "workflow": {
+      "url": "https://raw.githubusercontent.com/openai/codex/891f1f4c8584a082fc4658cabd48f1a8b01354e0/.github/workflows/rust-release-zsh.yml",
+      "sha256": "fe7f6fe367d05899734b2ad40c9cdfebce7a3958d6f90ea44941aa09845b6335",
+      "size": 5572,
+      "integrity": null,
+      "signature_verified": false
+    },
+    "patch": {
+      "url": "https://raw.githubusercontent.com/openai/codex/891f1f4c8584a082fc4658cabd48f1a8b01354e0/codex-rs/shell-escalation/patches/zsh-exec-wrapper.patch",
+      "sha256": "696b7d923b8071554d00e811afb9a08fcad4baada796f7314d12ecd72d06152c",
+      "size": 998,
+      "integrity": null,
+      "signature_verified": false
+    },
+    "build_script": {
+      "url": "https://raw.githubusercontent.com/openai/codex/891f1f4c8584a082fc4658cabd48f1a8b01354e0/.github/scripts/build-zsh-release-artifact.sh",
+      "sha256": "1a087f7201639bd093a5b7dad3b4561a376fc4bef3f12d6ee0d7a8cf7e5cde1f",
+      "size": 1629,
+      "integrity": null,
+      "signature_verified": false
+    },
+    "manifest": {
+      "url": "https://github.com/openai/codex/releases/download/codex-zsh-v0.1.0/codex-zsh",
+      "sha256": "c534eab89dcea7e3d8a5e5b3f49c025c7c64cd4e4d9814ee24871de58a9359a1"
+    },
+    "artifacts": [
+      {
+        "url": "https://github.com/openai/codex/releases/download/codex-zsh-v0.1.0/codex-zsh-aarch64-unknown-linux-musl.tar.gz",
+        "sha256": "2968a278581e4e7937212c9b14d634e318c7bd13d17c20c549a1ecbae673a121",
+        "size": 411652,
+        "integrity": null,
+        "signature_verified": false,
+        "architecture": "arm64",
+        "member": "codex-zsh/bin/zsh",
+        "binary_sha256": "7feeacd883e1dc749847936948c378653c80a69ec4a9542f0f126b411882c179",
+        "binary_path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/zsh/bin/zsh"
+      },
+      {
+        "url": "https://github.com/openai/codex/releases/download/codex-zsh-v0.1.0/codex-zsh-x86_64-unknown-linux-musl.tar.gz",
+        "sha256": "cb6ea328232cabd80f59141471a1362eb39b146a4d5e8a654d9b80cf9b7ec83c",
+        "size": 433407,
+        "integrity": null,
+        "signature_verified": false,
+        "architecture": "amd64",
+        "member": "codex-zsh/bin/zsh",
+        "binary_sha256": "67faaaa89242c4a332e16e508a1977cffc24bf7fca31d4411cdfd101f3831ef3",
+        "binary_path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/zsh/bin/zsh"
+      }
+    ],
+    "notices": [
+      {
+        "url": "https://raw.githubusercontent.com/zsh-users/zsh/77045ef899e53b9598bebc5a41db93a548a40ca6/LICENCE",
+        "sha256": "d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5",
+        "size": 1963,
+        "integrity": null,
+        "signature_verified": false,
+        "file": "texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt"
+      }
+    ],
+    "required_notices": [
+      {
+        "file": "texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt",
+        "sha256": "d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5"
+      }
+    ],
+    "source_boundary": "Modified upstream source: apply the exact recorded patch to ZSH_COMMIT. Build script runs default configure/make on Ubuntu with ncurses. Archives contain only bin/zsh, no shell functions. Binary-source reproducibility, build environment and other dynamic/native dependencies are not proven by the archive match."
+  },
+  {
+    "package": "ripgrep-embedded-pcre2",
+    "version": "10.46",
+    "notices": [
+      {
+        "url": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.46/pcre2-10.46.tar.gz",
+        "archive_sha256": "8d28d7f2c3b970c3a4bf3776bcbb5adfc923183ce74bc8df1ebaad8c1985bd07",
+        "member": "pcre2-10.46/LICENCE.md",
+        "sha256": "9cf7ac6976099a1d856826d3ef1b093bd6b84489dc6100628ac79e740cf9885a",
+        "file": "texts/9cf7ac6976099a1d856826d3ef1b093bd6b84489dc6100628ac79e740cf9885a.txt"
+      },
+      {
+        "url": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.46/pcre2-10.46.tar.gz",
+        "archive_sha256": "8d28d7f2c3b970c3a4bf3776bcbb5adfc923183ce74bc8df1ebaad8c1985bd07",
+        "member": "pcre2-10.46/COPYING",
+        "sha256": "99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507",
+        "file": "texts/99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507.txt"
+      }
+    ],
+    "required_notices": [
+      {
+        "file": "texts/9cf7ac6976099a1d856826d3ef1b093bd6b84489dc6100628ac79e740cf9885a.txt",
+        "sha256": "9cf7ac6976099a1d856826d3ef1b093bd6b84489dc6100628ac79e740cf9885a"
+      },
+      {
+        "file": "texts/99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507.txt",
+        "sha256": "99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507"
+      }
+    ],
+    "scope": "Upstream primary source licence, including JIT copyright and BSD-3-Clause WITH PCRE2-exception. A distributor of package A containing PCRE2 must respect the notice condition; package B including A is exempt unless it uses PCRE2 independently. We retain full text rather than rely solely on exemption. Exact vendor build flags/native linkage remain externally unproven."
+  }
+]

@@ -1,0 +1,153 @@
+diff --git a/brush-builtins/src/wait.rs b/brush-builtins/src/wait.rs
+index 29ca77f..1e83f2e 100644
+--- a/brush-builtins/src/wait.rs
++++ b/brush-builtins/src/wait.rs
+@@ -1,7 +1,7 @@
+ use clap::Parser;
+ use std::io::Write;
+ 
+-use brush_core::{ExecutionExitCode, ExecutionResult, builtins, env, variables};
++use brush_core::{ExecutionExitCode, ExecutionResult, builtins, env, traps::TrapSignal, variables};
+ 
+ /// Wait for jobs to terminate.
+ #[derive(Parser)]
+@@ -67,23 +67,10 @@ impl builtins::Command for WaitCommand {
+             };
+             #[cfg(unix)]
+             let waited = {
+-                let term_signal: brush_core::traps::TrapSignal = "TERM".parse()?;
+-                if context.shell.traps().handles(term_signal) {
+-                    tokio::select! {
+-                        result = context.shell.jobs_mut().wait_first(&eligible_ids, self.wait_for_terminate) => result?,
+-                        result = brush_core::traps::await_term() => {
+-                            result?;
+-                            context.shell.set_last_exit_status(143);
+-                            let trap_result = context.shell.invoke_trap_handler(term_signal, &context.params).await?;
+-                            return Ok(if trap_result.is_normal_flow() { ExecutionResult::new(143) } else { trap_result });
+-                        }
+-                    }
+-                } else {
+-                    context
+-                        .shell
+-                        .jobs_mut()
+-                        .wait_first(&eligible_ids, self.wait_for_terminate)
+-                        .await?
++                let trapped = TrappedSignals::of(context.shell);
++                tokio::select! {
++                    result = context.shell.jobs_mut().wait_first(&eligible_ids, self.wait_for_terminate) => result?,
++                    signal = trapped.recv() => return run_trap(&mut context, signal?).await,
+                 }
+             };
+             #[cfg(not(unix))]
+@@ -109,28 +96,15 @@ impl builtins::Command for WaitCommand {
+         }
+         #[cfg(unix)]
+         {
+-            let term_signal: brush_core::traps::TrapSignal = "TERM".parse()?;
+-            if context.shell.traps().handles(term_signal) {
+-                let completed = tokio::select! {
+-                    result = self.wait_without_next(&mut context) => Some(result),
+-                    result = brush_core::traps::await_term() => { result?; None },
+-                };
+-                if let Some(result) = completed {
+-                    return result;
+-                }
+-                context.shell.set_last_exit_status(143);
+-                let trap_result = context
+-                    .shell
+-                    .invoke_trap_handler(term_signal, &context.params)
+-                    .await?;
+-                return Ok(if trap_result.is_normal_flow() {
+-                    ExecutionResult::new(143)
+-                } else {
+-                    trap_result
+-                });
+-            }
++            let trapped = TrappedSignals::of(context.shell);
++            let signal = tokio::select! {
++                result = self.wait_without_next(&mut context) => return result,
++                signal = trapped.recv() => signal?,
++            };
++            return run_trap(&mut context, signal).await;
+         }
+ 
++        #[cfg(not(unix))]
+         self.wait_without_next(&mut context).await
+     }
+ }
+@@ -256,3 +230,56 @@ impl WaitCommand {
+         Ok(result)
+     }
+ }
++
++/// Trapped signals that interrupt `wait`, as in Bash: the wait returns
++/// 128+signal and the trap runs, while the awaited children keep running.
++#[cfg(unix)]
++struct TrappedSignals {
++    term: Option<TrapSignal>,
++    int: Option<TrapSignal>,
++}
++
++#[cfg(unix)]
++impl TrappedSignals {
++    fn of<SE: brush_core::ShellExtensions>(shell: &brush_core::Shell<SE>) -> Self {
++        let trapped = |name: &str| {
++            name.parse()
++                .ok()
++                .filter(|signal| shell.traps().handles(*signal))
++        };
++        Self {
++            term: trapped("TERM"),
++            int: trapped("INT"),
++        }
++    }
++
++    /// Resolves with the trapped signal and its 128+N status.
++    async fn recv(&self) -> Result<(TrapSignal, u8), brush_core::Error> {
++        tokio::select! {
++            result = brush_core::traps::await_term(), if self.term.is_some() => {
++                result.map(|()| (self.term.unwrap_or(TrapSignal::Exit), 143))
++            }
++            result = brush_core::traps::await_int(), if self.int.is_some() => {
++                result.map(|()| (self.int.unwrap_or(TrapSignal::Exit), 130))
++            }
++            else => std::future::pending().await,
++        }
++    }
++}
++
++#[cfg(unix)]
++async fn run_trap<SE: brush_core::ShellExtensions>(
++    context: &mut brush_core::ExecutionContext<'_, SE>,
++    (signal, status): (TrapSignal, u8),
++) -> Result<ExecutionResult, brush_core::Error> {
++    context.shell.set_last_exit_status(status);
++    let trap_result = context
++        .shell
++        .invoke_trap_handler(signal, &context.params)
++        .await?;
++    Ok(if trap_result.is_normal_flow() {
++        ExecutionResult::new(status)
++    } else {
++        trap_result
++    })
++}
+diff --git a/brush-core/src/traps.rs b/brush-core/src/traps.rs
+index 963ba3c..b05ef5a 100644
+--- a/brush-core/src/traps.rs
++++ b/brush-core/src/traps.rs
+@@ -7,6 +7,14 @@ pub async fn await_term() -> Result<(), crate::error::Error> {
+     crate::sys::signal::await_term().await
+ }
+ 
++/// Wait for SIGINT without executing shell code in the OS signal handler.
++/// Embedding builtins use this to interrupt an asynchronous wait.
++#[cfg(unix)]
++pub async fn await_int() -> Result<(), crate::error::Error> {
++    crate::sys::signal::await_ctrl_c().await?;
++    Ok(())
++}
++
+ use std::str::FromStr;
+ use std::{collections::HashMap, fmt::Display};
+ 

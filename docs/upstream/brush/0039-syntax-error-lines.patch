@@ -1,0 +1,116 @@
+diff --git a/brush-core/src/shell/execution.rs b/brush-core/src/shell/execution.rs
+index d57ec8b..0e2db6d 100644
+--- a/brush-core/src/shell/execution.rs
++++ b/brush-core/src/shell/execution.rs
+@@ -401,7 +401,7 @@ fn is_complete_read_unit(
+             (line.len() - line.trim_end_matches('\\').len()).is_multiple_of(2)
+         }
+         Err(brush_parser::ParseError::Tokenizing { inner, .. }) => !inner.is_incomplete(),
+-        Err(brush_parser::ParseError::ParsingAtEndOfInput) => false,
+-        Err(brush_parser::ParseError::ParsingNear(_)) => true,
++        Err(brush_parser::ParseError::ParsingAtEndOfInput(_)) => false,
++        Err(brush_parser::ParseError::ParsingNear { .. }) => true,
+     }
+ }
+diff --git a/brush-interactive/src/completeness.rs b/brush-interactive/src/completeness.rs
+index a5ac2b7..a5cb040 100644
+--- a/brush-interactive/src/completeness.rs
++++ b/brush-interactive/src/completeness.rs
+@@ -40,7 +40,7 @@ fn needs_more_input_locked(shell: &Shell<impl brush_core::ShellExtensions>, inpu
+             true
+         }
+         // Ran out of tokens partway through a construct; more input may complete it.
+-        Err(brush_parser::ParseError::ParsingAtEndOfInput) => true,
++        Err(brush_parser::ParseError::ParsingAtEndOfInput(_)) => true,
+         // A bad token at a specific position stays bad no matter what follows it.
+         Err(_) => false,
+         // Parsed cleanly. One catch: a trailing backslash-newline is a line
+diff --git a/brush-parser/src/error.rs b/brush-parser/src/error.rs
+index 111809b..c213f11 100644
+--- a/brush-parser/src/error.rs
++++ b/brush-parser/src/error.rs
+@@ -3,13 +3,19 @@ use crate::tokenizer;
+ /// Represents an error that occurred while parsing tokens.
+ #[derive(thiserror::Error, Debug)]
+ pub enum ParseError {
+-    /// A parsing error occurred near the given position.
+-    #[error("syntax error at line {} col {}", .0.line, .0.column)]
+-    ParsingNear(crate::SourcePosition),
++    /// A parsing error occurred at the given token, reported as Bash does.
++    #[error("line {}: syntax error near unexpected token `{}' (col {})", .position.line, .token, .position.column)]
++    ParsingNear {
++        /// Where the unexpected token starts.
++        position: crate::SourcePosition,
++        /// The unexpected token's text.
++        token: String,
++    },
+ 
+-    /// A parsing error occurred at the end of the input.
+-    #[error("syntax error at end of input")]
+-    ParsingAtEndOfInput,
++    /// A parsing error occurred at the end of the input; the position, when
++    /// known, is where the input ended.
++    #[error("{}syntax error: unexpected end of file", .0.as_ref().map_or_else(String::new, |p| std::format!("line {}: ", p.line)))]
++    ParsingAtEndOfInput(Option<crate::SourcePosition>),
+ 
+     /// An error occurred while tokenizing the input stream.
+     #[error("{} (detected near {})", .inner, .position.as_ref().map_or_else(|| String::from("<unknown position>"), |p| std::format!("line {} col {}", p.line, p.column)))]
+@@ -33,13 +39,13 @@ pub mod miette {
+         pub fn to_pretty_error(self, input: impl Into<String>) -> PrettyError {
+             let input = input.into();
+             let location = match self {
+-                Self::ParsingNear(ref pos) => {
+-                    Some(SourceOffset::from_location(&input, pos.line, pos.column))
+-                }
++                Self::ParsingNear {
++                    position: ref pos, ..
++                } => Some(SourceOffset::from_location(&input, pos.line, pos.column)),
+                 Self::Tokenizing { ref position, .. } => position
+                     .as_ref()
+                     .map(|p| SourceOffset::from_location(&input, p.line, p.column)),
+-                Self::ParsingAtEndOfInput => {
++                Self::ParsingAtEndOfInput(_) => {
+                     Some(SourceOffset::from_location(&input, usize::MAX, usize::MAX))
+                 }
+             };
+@@ -125,8 +131,25 @@ pub(crate) fn convert_peg_parse_error(
+ 
+     if approx_token_index < tokens.len() {
+         let token = &tokens[approx_token_index];
+-        ParseError::ParsingNear((*token.location().start).clone())
++        // Bash names a newline token `newline'.
++        let text = match token.to_str() {
++            "\n" => "newline",
++            text => text,
++        };
++        ParseError::ParsingNear {
++            position: (*token.location().start).clone(),
++            token: text.to_owned(),
++        }
+     } else {
+-        ParseError::ParsingAtEndOfInput
++        // Like Bash, the end of file is on the line after the last one read;
++        // input without a final newline still ends with one.
++        ParseError::ParsingAtEndOfInput(tokens.last().map(|token| {
++            let mut end = (*token.location().end).clone();
++            if token.to_str() != "\n" {
++                end.line += 1;
++                end.column = 1;
++            }
++            end
++        }))
+     }
+ }
+diff --git a/brush-parser/src/parser/mod.rs b/brush-parser/src/parser/mod.rs
+index 6d887b9..2d2f899 100644
+--- a/brush-parser/src/parser/mod.rs
++++ b/brush-parser/src/parser/mod.rs
+@@ -180,7 +180,7 @@ impl<R: std::io::BufRead> Parser<R> {
+                     .map_err(|_e| {
+                         // Convert winnow error to ParseError
+                         // TODO: Extract position information from winnow error
+-                        crate::error::ParseError::ParsingAtEndOfInput
++                        crate::error::ParseError::ParsingAtEndOfInput(None)
+                     })
+             }
+         }

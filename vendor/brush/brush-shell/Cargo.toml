@@ -1,0 +1,88 @@
+[package]
+name = "brush-shell"
+description = "Rust-implemented shell focused on POSIX and bash compatibility"
+version = "0.4.0"
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+# Application tier; see docs/reference/msrv-policy.md.
+rust-version = "1.95.0"
+autobins = false
+autoexamples = false
+autobenches = false
+autotests = false
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/{ name }-v{ version }/brush-{ target }{ archive-suffix }"
+
+[lib]
+bench = false
+
+[features]
+default = ["basic", "reedline", "minimal"]
+basic = ["brush-interactive/basic"]
+minimal = ["brush-interactive/minimal"]
+reedline = ["brush-interactive/reedline"]
+experimental = [
+    "experimental-builtins",
+    "experimental-bundled-coreutils",
+    "experimental-load",
+    "experimental-parser",
+]
+experimental-builtins = ["dep:brush-experimental-builtins"]
+experimental-bundled-coreutils = [
+    "dep:brush-coreutils-builtins",
+    "brush-coreutils-builtins/coreutils.all",
+]
+experimental-load = ["dep:serde_json", "brush-core/serde"]
+experimental-parser = [
+    "dep:brush-parser",
+    "brush-core/experimental-parser",
+    "brush-parser/winnow-parser",
+]
+schema = ["dep:schemars"]
+
+[lints]
+workspace = true
+
+[dependencies]
+brush-core = { version = "^0.5.0", path = "../brush-core" }
+brush-builtins = { version = "^0.2.0", path = "../brush-builtins" }
+brush-coreutils-builtins = { version = "^0.1.0", path = "../brush-coreutils-builtins", optional = true }
+brush-experimental-builtins = { version = "^0.1.0", path = "../brush-experimental-builtins", optional = true }
+brush-parser = { version = "^0.4.0", path = "../brush-parser", optional = true }
+clap = { version = "4.6.0", features = ["derive", "env"] }
+color-print = "0.3.7"
+etcetera = "0.11.0"
+schemars = { version = "1.2.1", optional = true }
+serde = { version = "1.0", features = ["derive"] }
+toml = "1.1.0"
+const_format = "0.2.36"
+git-version = "0.3.9"
+serde_json = { version = "1.0.149", optional = true }
+thiserror = "2.0.18"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+human-panic = "2.0.6"
+
+[target.'cfg(not(any(unix, windows)))'.dependencies]
+brush-interactive = { version = "^0.4.0", path = "../brush-interactive", features = [
+    "minimal",
+] }
+tokio = { version = "1.52.3", features = ["rt", "sync"] }
+
+[target.'cfg(any(unix, windows))'.dependencies]
+brush-interactive = { version = "^0.4.0", path = "../brush-interactive", features = [
+    "basic",
+    "reedline",
+] }
+crossterm = "0.29.0"
+tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "sync"] }
+
+[target.wasm32-unknown-unknown.dependencies]
+getrandom = { version = "0.4.2", features = ["wasm_js"] }
+uuid = { version = "1.23.1", features = ["js"] }

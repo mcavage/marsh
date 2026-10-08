@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "platform": "linux/arm64",
+  "signing_key_url": "https://registry.scout.docker.com/keyring/dhi/latest.pub",
+  "signing_key_sha256": "1d02bbccf149283ae6288d96264dcad3fb23ee1911d90324a48eab28e4cb8a5f",
+  "verification_policy": "Docker signing key; transparency-log inclusion not asserted",
+  "images": [
+    {
+      "name": "shell",
+      "previous_index": "sha256:4fd0061fba3decdb0f238ef5924717ff357c922a4c63666a90897a888dc4d310",
+      "index": "dhi.io/sbx-templates@sha256:36fd3782db091cec28ddfcb28458fbc96ed540435b91d910c1a00b07ec50d5a2",
+      "platform_manifest": "sha256:b8ac98c0aa6e50044f9eb3d29e2bb60caaead4b83ab61f99533edd6924ce472f",
+      "source_image": "dhi.io/sbx-templates@sha256:377803715e8c1d90f520c59c52bc815f3f31e0c844d40e8dc85d8e2e64160e8e",
+      "source_attestation_sha256": "16d963b777b0433c7bc0665543adadd7da7f40e27518e9b7c9d64ef16fa50963"
+    },
+    {
+      "name": "claude",
+      "previous_index": "sha256:492664da2ac39b2796802b2dbe2472b16e7e5c21781744f457af6d79f2a85d80",
+      "index": "dhi.io/sbx-templates@sha256:13d7dbd08041284dbe5df67ec730a26f7b03dbd6fa994e143672979440426010",
+      "platform_manifest": "sha256:eab35f07f5cf56d4411305fb71cb53d010aaa2cf4b16de0d244e819c6e0262e7",
+      "source_image": "dhi.io/sbx-templates@sha256:11d3d3ae0029980b6a4419536a2ab8bdbd57343c426294eb3a19a8f7876dc153",
+      "source_attestation_sha256": "28ad3edee84d31dd7638ced5002788fa7b23ebcd48504132f3070df459e649ed"
+    },
+    {
+      "name": "codex",
+      "previous_index": "sha256:439d5acdf4fcf22d4e94c916a132d3b629e8e803debded83993e68fdcfc1c578",
+      "index": "dhi.io/sbx-templates@sha256:0529fcace182dc3de0967bdb235ed3f8ca715f8eafc9f987a53a258ae3bf83f3",
+      "platform_manifest": "sha256:d1f3f25bbd128d4e2f81d721f2b7a680efb2b2b8c48187d0473948efa81bb64a",
+      "source_image": "dhi.io/sbx-templates@sha256:adb978133c6bf196d2e9b63204a856ddffd44b960c0f2ee58eb5905afed63668",
+      "source_attestation_sha256": "1be59a3445399d47a72a1c11381054dba95ea6a43b0f0bb5e7426edf82c15066"
+    }
+  ]
+}

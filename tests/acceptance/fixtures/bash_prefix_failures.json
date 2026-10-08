@@ -1,0 +1,167 @@
+{
+  "provenance": {
+    "description": "Actual binding failure execution effects, modes, typed causes and conditional contexts. Supporting echo/printf writer-vs-closed-reader SIGPIPE observations remain in prefix-pipeline-error-class-oracle.json but are not deterministic reference cases; this fixture uses a no-output lastpipe producer instead."
+  },
+  "cases": [
+    {
+      "stdin": "readonly x; x=7 /bin/true | cat; printf \"statuses:<%s>\\n\" \"${PIPESTATUS[*]}\"\n",
+      "group": "readonly-prefix",
+      "index": 0
+    },
+    {
+      "stdin": "readonly x; x=7 : | cat; printf \"statuses:<%s>\\n\" \"${PIPESTATUS[*]}\"\n",
+      "group": "readonly-prefix",
+      "index": 1
+    },
+    {
+      "stdin": "readonly x; x=7 eval : | cat; printf \"statuses:<%s>\\n\" \"${PIPESTATUS[*]}\"\n",
+      "group": "readonly-prefix",
+      "index": 2
+    },
+    {
+      "stdin": "readonly BASHPID; BASHPID=7 /bin/true | cat; printf \"statuses:<%s>\\n\" \"${PIPESTATUS[*]}\"\n",
+      "group": "readonly-prefix",
+      "index": 3
+    },
+    {
+      "stdin": "readonly BASHPID; BASHPID=7 : | cat; printf \"statuses:<%s>\\n\" \"${PIPESTATUS[*]}\"\n",
+      "group": "readonly-prefix",
+      "index": 4
+    },
+    {
+      "stdin": "readonly BASHPID; BASHPID=7 eval : | cat; printf \"statuses:<%s>\\n\" \"${PIPESTATUS[*]}\"\n",
+      "group": "readonly-prefix",
+      "index": 5
+    },
+    {
+      "stdin": "readonly x; false; x=7 /bin/true | cat; printf \"statuses:<%s>\\n\" \"${PIPESTATUS[*]}\"\n",
+      "group": "readonly-prefix",
+      "index": 6
+    },
+    {
+      "stdin": "readonly x; false; x=7 : | cat; printf \"statuses:<%s>\\n\" \"${PIPESTATUS[*]}\"\n",
+      "group": "readonly-prefix",
+      "index": 7
+    },
+    {
+      "stdin": " readonly x; x=7 /bin/sh -c 'printf ran > marker; exit 7'; echo status:$?; [ ! -e marker ] || cat marker\n",
+      "group": "binding-effects",
+      "index": 0
+    },
+    {
+      "stdin": " readonly x; x=7 eval 'printf ran > marker; false'; echo status:$?; [ ! -e marker ] || cat marker\n",
+      "group": "binding-effects",
+      "index": 1
+    },
+    {
+      "stdin": "set -e; readonly x; x=7 /bin/sh -c 'printf ran > marker; exit 7'; echo status:$?; [ ! -e marker ] || cat marker\n",
+      "group": "binding-effects",
+      "index": 2
+    },
+    {
+      "stdin": "set -e; readonly x; x=7 eval 'printf ran > marker; false'; echo status:$?; [ ! -e marker ] || cat marker\n",
+      "group": "binding-effects",
+      "index": 3
+    },
+    {
+      "stdin": "set -o posix; readonly x; x=7 /bin/sh -c 'printf ran > marker; exit 7'; echo status:$?; [ ! -e marker ] || cat marker\n",
+      "group": "binding-effects",
+      "index": 4
+    },
+    {
+      "stdin": "set -o posix; readonly x; x=7 eval 'printf ran > marker; false'; echo status:$?; [ ! -e marker ] || cat marker\n",
+      "group": "binding-effects",
+      "index": 5
+    },
+    {
+      "stdin": "set -e; readonly x; if x=7 eval 'echo ran'; then echo then; else echo else; fi; echo after\n",
+      "group": "binding-conditions",
+      "index": 0
+    },
+    {
+      "stdin": "set -e; readonly x; x=7 eval 'echo ran' || echo caught; echo after\n",
+      "group": "binding-conditions",
+      "index": 1
+    },
+    {
+      "stdin": "set -o posix; readonly x; x=7 : | cat; echo status:${PIPESTATUS[*]}\n",
+      "group": "binding-conditions",
+      "index": 2
+    },
+    {
+      "stdin": "trap 'echo ERR' ERR; readonly x; x=7 :; echo status:$?\n",
+      "group": "binding-conditions",
+      "index": 3
+    },
+    {
+      "stdin": "readonly x; x=bad y=good eval 'echo y:$y'; echo status:$?\n",
+      "group": "binding-conditions",
+      "index": 4
+    },
+    {
+      "stdin": "readonly x; x=7 /bin/sh -c 'echo ran; exit 7' | cat; echo status:${PIPESTATUS[*]}\n",
+      "group": "binding-conditions",
+      "index": 5
+    },
+    {
+      "stdin": "set -e; f() { readonly x; x=7 eval 'echo ran'; echo inafter; }; f || echo caught; echo after\n",
+      "group": "binding-functions",
+      "index": 0
+    },
+    {
+      "stdin": "set -e; declare -n a=b; declare -n b=a; if a=7 eval 'echo ran'; then echo then; fi; echo after\n",
+      "group": "binding-functions",
+      "index": 1
+    },
+    {
+      "stdin": "set -e; a=(one); if a[-3]=x eval 'echo ran'; then echo then; fi; echo after\n",
+      "group": "binding-functions",
+      "index": 2
+    },
+    {
+      "stdin": "set -o posix; declare -n a=b; declare -n b=a; a=7 eval 'echo ran'; echo after\n",
+      "group": "binding-posix-warnings",
+      "index": 0
+    },
+    {
+      "stdin": "set -o posix; a=(one); a[-3]=x eval 'echo ran'; echo after\n",
+      "group": "binding-posix-warnings",
+      "index": 1
+    },
+    {
+      "stdin": "readonly x; x=7 | cat; echo status:${PIPESTATUS[*]}\n",
+      "group": "binding-error-classes",
+      "index": 0
+    },
+    {
+      "stdin": "readonly x; (x=7 :); echo status:$?\n",
+      "group": "binding-error-classes",
+      "index": 1
+    },
+    {
+      "stdin": "readonly x; x=7 :; echo status:$?\n",
+      "group": "binding-error-classes",
+      "index": 2
+    },
+    {
+      "stdin": "declare -n a=b; declare -n b=a; a=7 : | cat; echo status:${PIPESTATUS[*]}\n",
+      "group": "binding-error-classes",
+      "index": 4
+    },
+    {
+      "stdin": "declare -i n=1; n+='1/0' : | cat; echo status:${PIPESTATUS[*]}\n",
+      "group": "binding-error-classes",
+      "index": 5
+    },
+    {
+      "stdin": "a=(one); a[-3]=x : | cat; echo status:${PIPESTATUS[*]}\n",
+      "group": "binding-error-classes",
+      "index": 6
+    },
+    {
+      "group": "binding-lastpipe",
+      "index": 0,
+      "stdin": "readonly x; shopt -s lastpipe; /bin/true | x=7 :; echo status:${PIPESTATUS[*]}\n"
+    }
+  ]
+}

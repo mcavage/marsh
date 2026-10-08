@@ -1,0 +1,389 @@
+{
+  "provenance": {
+    "dataset": "Brush upstream TCK selection; original group/index and annotations retained",
+    "source_sha256": "0d692dfc7833bcfb0b5ba93337dfa8f0500089e865e437e244b3d952fc8ba40d",
+    "comparison": "All raw stdout/stderr/status/filesystem effects; ignore annotations are NOT waivers"
+  },
+  "cases": [
+    {
+      "name": "builtin does not preserve assignment splitting semantics",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "v=\"x y\"\nbuiltin declare c=$v\ndeclare -p c y\n",
+      "group": "builtins/builtin.yaml",
+      "index": 14,
+      "test_files": []
+    },
+    {
+      "name": "command -V describes aliases, keywords, and functions",
+      "stdin": "shopt -s expand_aliases\nalias al=\"echo hi\"\nf() { :; }\n\ncommand -V al; echo \"rc=$?\"\ncommand -V if; echo \"rc=$?\"\ncommand -V f; echo \"rc=$?\"\ncommand -V echo; echo \"rc=$?\"\n",
+      "group": "builtins/command.yaml",
+      "index": 20,
+      "test_files": []
+    },
+    {
+      "name": "command -v/-V with multiple names",
+      "stdin": "# Normalize away the leading \"shell: line N:\" that the oracle prefixes onto diagnostics.\nstrip() { sed 's/^.*command:/command:/'; }\n\nshopt -s expand_aliases\nalias al=\"echo hi\"\nf() { :; }\n\necho \"[all found]\"\ncommand -v al f if echo; echo \"rc=$?\"\ncommand -V al f if echo; echo \"rc=$?\"\n\necho \"[some found]\"\ncommand -v nonexistent f 2>&1 | strip; echo \"rc=${PIPESTATUS[0]}\"\ncommand -v f nonexistent 2>&1 | strip; echo \"rc=${PIPESTATUS[0]}\"\ncommand -V f nonexistent 2>&1 | strip; echo \"rc=${PIPESTATUS[0]}\"\n\necho \"[none found]\"\ncommand -v nope1 nope2 2>&1 | strip; echo \"rc=${PIPESTATUS[0]}\"\ncommand -V nope1 nope2 2>&1 | strip; echo \"rc=${PIPESTATUS[0]}\"\n",
+      "group": "builtins/command.yaml",
+      "index": 21,
+      "test_files": []
+    },
+    {
+      "name": "Displaying functions",
+      "stdin": "echo \"Dumping functions\"\ndeclare -f\ndeclare -p -f\n\nfunction test {\n  :\n}\n\necho \"Dumping functions again\"\ndeclare -f\ndeclare -p -f\n\necho \"Dumping test\"\ndeclare -f test\ndeclare -p -f test\n",
+      "group": "builtins/declare.yaml",
+      "index": 28,
+      "test_files": [
+        {
+          "path": "helpers.sh",
+          "contents": "stable_print_assoc_array() {\n    # TODO(nameref): enable use of nameref when implemented; for now\n    # we assume the name of the array is assoc_array\n    # local -n assoc_array=$1\n    local key\n\n    for key in $(printf \"%s\\n\" \"${!assoc_array[@]}\" | sort -n); do\n        echo \"\\\"${key}\\\" => ${assoc_array[${key}]}\"\n    done\n}\n"
+        }
+      ]
+    },
+    {
+      "name": "Displaying functions with compound bodies",
+      "stdin": "f() { local x=1; if [ 1 ]; then echo \"a b\"; fi; for i in 1 2; do :; done; }\ndeclare -f f\n\ng() { if [ 1 ]; then echo a; echo b; else echo c; fi; }\ndeclare -f g\n\nh() { while :; do break; done; { echo a; }; case x in a) echo b;; esac; }\ndeclare -f h\n\ni() { until :; do echo x; done; ( echo s; echo t ); }\ndeclare -f i\n",
+      "group": "builtins/declare.yaml",
+      "index": 29,
+      "test_files": [
+        {
+          "path": "helpers.sh",
+          "contents": "stable_print_assoc_array() {\n    # TODO(nameref): enable use of nameref when implemented; for now\n    # we assume the name of the array is assoc_array\n    # local -n assoc_array=$1\n    local key\n\n    for key in $(printf \"%s\\n\" \"${!assoc_array[@]}\" | sort -n); do\n        echo \"\\\"${key}\\\" => ${assoc_array[${key}]}\"\n    done\n}\n"
+        }
+      ]
+    },
+    {
+      "name": "Displaying a function with case patterns",
+      "stdin": "f() {\n  case \"$1\" in\n    a|b|c) echo abc;;\n    (d|e) echo de;;\n    single) echo one;;\n    *) ;;\n  esac\n}\ndeclare -f f\n",
+      "group": "builtins/declare.yaml",
+      "index": 30,
+      "test_files": [
+        {
+          "path": "helpers.sh",
+          "contents": "stable_print_assoc_array() {\n    # TODO(nameref): enable use of nameref when implemented; for now\n    # we assume the name of the array is assoc_array\n    # local -n assoc_array=$1\n    local key\n\n    for key in $(printf \"%s\\n\" \"${!assoc_array[@]}\" | sort -n); do\n        echo \"\\\"${key}\\\" => ${assoc_array[${key}]}\"\n    done\n}\n"
+        }
+      ]
+    },
+    {
+      "name": "Empty subscript is rejected",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare 'b[]'\necho \"status: $?\"\ndeclare -p b 2>&1\n",
+      "group": "builtins/declare.yaml",
+      "index": 117,
+      "test_files": [
+        {
+          "path": "helpers.sh",
+          "contents": "stable_print_assoc_array() {\n    # TODO(nameref): enable use of nameref when implemented; for now\n    # we assume the name of the array is assoc_array\n    # local -n assoc_array=$1\n    local key\n\n    for key in $(printf \"%s\\n\" \"${!assoc_array[@]}\" | sort -n); do\n        echo \"\\\"${key}\\\" => ${assoc_array[${key}]}\"\n    done\n}\n"
+        }
+      ]
+    },
+    {
+      "name": "Combining -a and -A is rejected",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -aA both=(x)\necho \"status: $?\"\ndeclare -p both 2>&1\n",
+      "group": "builtins/declare.yaml",
+      "index": 121,
+      "test_files": [
+        {
+          "path": "helpers.sh",
+          "contents": "stable_print_assoc_array() {\n    # TODO(nameref): enable use of nameref when implemented; for now\n    # we assume the name of the array is assoc_array\n    # local -n assoc_array=$1\n    local key\n\n    for key in $(printf \"%s\\n\" \"${!assoc_array[@]}\" | sort -n); do\n        echo \"\\\"${key}\\\" => ${assoc_array[${key}]}\"\n    done\n}\n"
+        }
+      ]
+    },
+    {
+      "name": "Declaration diagnostics name the builtin and quote the operand",
+      "known_failure": true,
+      "stdin": "strip() { sed -E 's/^[^ ]*: line [0-9]+: //'; }\nlocal x=1 2>&1 | strip\nv=w; declare -p missing=$v 2>&1 | strip\ndeclare -p nosuchvar 2>&1 | strip\ndeclare -a da=(1); declare +a da 2>&1 | strip\ndeclare 'bad-name=1' 2>&1 | strip\nf() { local 'bad-name2=1' 2>&1 | strip; }; f\nreadonly 'bad-name3=1' 2>&1 | strip\nexport -f nosuchfn 2>&1 | strip\nexport 'e[0]=1' 2>&1 | strip\n",
+      "group": "builtins/declare.yaml",
+      "index": 124,
+      "test_files": [
+        {
+          "path": "helpers.sh",
+          "contents": "stable_print_assoc_array() {\n    # TODO(nameref): enable use of nameref when implemented; for now\n    # we assume the name of the array is assoc_array\n    # local -n assoc_array=$1\n    local key\n\n    for key in $(printf \"%s\\n\" \"${!assoc_array[@]}\" | sort -n); do\n        echo \"\\\"${key}\\\" => ${assoc_array[${key}]}\"\n    done\n}\n"
+        }
+      ]
+    },
+    {
+      "name": "Display -l path",
+      "stdin": "hash -p \"/some/spaces path\" somecmd && echo \"1. Result: $?\"\nhash -t somecmd && echo \"2. Result: $?\"\nhash -t -l somecmd && echo \"3. Result: $?\"\n",
+      "group": "builtins/hash.yaml",
+      "index": 6,
+      "test_files": []
+    },
+    {
+      "name": "printf %T (date/time formatting)",
+      "known_failure": true,
+      "stdin": "printf \"%(%Y-%m-%d)T\\n\" 1234567890\n",
+      "group": "builtins/printf.yaml",
+      "index": 34,
+      "test_files": []
+    },
+    {
+      "name": "printf %q with multiple args and mixed specs",
+      "stdin": "printf '%q\\n' 'foo bar'\nprintf '%q ' 'a b' '' \"x'y\" 'a,b' '/tmp/x-[1]/y' $'a\\nb'; echo\nprintf '%s=%q\\n' k 'v w' m 'n$o'\nprintf '~%q\\n' 'a b'\n",
+      "group": "builtins/printf.yaml",
+      "index": 63,
+      "test_files": []
+    },
+    {
+      "name": "readonly -f marks a function readonly rather than displaying it",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "g() { echo original; }\nreadonly -f g\necho \"status: $?\"\ng() { echo redefined; }\ng\nreadonly -f nosuchfn\n",
+      "group": "builtins/readonly.yaml",
+      "index": 6,
+      "test_files": []
+    },
+    {
+      "name": "set output leaves an empty value unquoted",
+      "known_failure": true,
+      "stdin": "q1=\"\"\nset > set-output.txt\ngrep -E '^q[0-9]=' set-output.txt\n\n# Remove set-output.txt to avoid it being byte-for-byte compared.\nrm set-output.txt\n",
+      "group": "builtins/set.yaml",
+      "index": 10,
+      "test_files": []
+    },
+    {
+      "name": "Test type with -a option and a function",
+      "stdin": "function myfunc() { echo \"Hello, world!\"; }\ntype -a myfunc\n",
+      "group": "builtins/type.yaml",
+      "index": 16,
+      "test_files": []
+    },
+    {
+      "name": "Unset odd function names",
+      "stdin": "echo \"[Checking existing]\"\ntype [\n\necho \"[Defining function]\"\nfunction [() {\n  :\n}\n\necho \"[Checking defined]\"\ntype [\n\necho \"[Unsetting function]\"\nunset [\necho \"unset result: $?\"\n\necho \"[Checking after unset]\"\ntype [\n",
+      "group": "builtins/unset.yaml",
+      "index": 15,
+      "test_files": []
+    },
+    {
+      "name": "IFS with parameter expansion default value",
+      "stdin": "IFS=':'\nset -- ${unset:-a:b:c}\necho \"Count: $#\"\necho \"$@\"\n",
+      "group": "ifs.yaml",
+      "index": 34,
+      "test_files": []
+    },
+    {
+      "name": "Nameref with :? error on unset",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "declare -n ref=missing\n( echo \"${ref:?variable is required}\" ) 2>&1 | tail -1\necho \"outer continues\"\n",
+      "group": "nameref.yaml",
+      "index": 100,
+      "test_files": []
+    },
+    {
+      "name": "declare -f - shows trace attribute",
+      "stdin": "myfunc() { echo hi; }\ndeclare -t myfunc\ndeclare -f myfunc | head -1\n",
+      "group": "options/functrace.yaml",
+      "index": 14,
+      "test_files": []
+    },
+    {
+      "name": "set -a",
+      "stdin": "v1=1 v2=2 v3=3 v4=4 v5=(a b c)\ndeclare -p v1 v2 v3 v4\n\nset -a\nv1=reassigned\nv2+=appended\ndeclare -i v3\nv4+=(appended)\nv5[2]=updated\nv6=new\nv7[0]=new\nv8=(new)\ndeclare v9=new\ndeclare -a v10=(new)\n\ndeclare -p v1 v2 v3 v4 v5 v6 v7 v8 v9 v10\n",
+      "group": "options/set-a.yaml",
+      "index": 0,
+      "test_files": []
+    },
+    {
+      "name": "Special parameter $! does not error when no background jobs",
+      "known_failure": true,
+      "ignore_stderr": true,
+      "stdin": "set -u\necho \"last bg: ${!}\" || echo \"ok\"\n",
+      "group": "options/set-u.yaml",
+      "index": 8,
+      "test_files": []
+    },
+    {
+      "name": "Unset variable with default in for loop works",
+      "stdin": "set -u\nfor item in ${unset_var:-a b c}; do\n  echo \"$item\"\ndone\n",
+      "group": "options/set-u.yaml",
+      "index": 50,
+      "test_files": []
+    },
+    {
+      "name": "empty PATH entry is reported as the working directory",
+      "known_failure": true,
+      "stdin": "printf '#!/bin/sh\\necho ran\\n' > prog\nchmod +x prog\nPATH=\":$PATH\"\n\necho \"[type]\"\ntype prog; echo \"rc=$?\"\necho \"[type -p]\"\ntype -p prog; echo \"rc=$?\"\necho \"[type -P]\"\ntype -P prog; echo \"rc=$?\"\necho \"[type -a]\"\ntype -a prog; echo \"rc=$?\"\necho \"[command -v]\"\ncommand -v prog; echo \"rc=$?\"\n",
+      "group": "path_search.yaml",
+      "index": 0,
+      "test_files": []
+    },
+    {
+      "name": "empty PATH entry is reported the same wherever it appears",
+      "known_failure": true,
+      "stdin": "printf '#!/bin/sh\\necho ran\\n' > prog\nchmod +x prog\noriginal=$PATH\n\n# Each of these keeps the rest of PATH reachable, so only the empty entry can\n# account for finding `prog`, which exists solely in the working directory.\necho \"[leading]\"\nPATH=\":$original\"; hash -r\ncommand -v prog; echo \"rc=$?\"\n\necho \"[trailing]\"\nPATH=\"$original:\"; hash -r\ncommand -v prog; echo \"rc=$?\"\n\necho \"[middle]\"\nPATH=\"/nonexistent::$original\"; hash -r\ncommand -v prog; echo \"rc=$?\"\n",
+      "group": "path_search.yaml",
+      "index": 1,
+      "test_files": []
+    },
+    {
+      "name": "empty PATH entry is hashed as the working directory",
+      "known_failure": true,
+      "stdin": "printf '#!/bin/sh\\necho ran\\n' > prog\nchmod +x prog\nPATH=\":$PATH\"\n\nhash -r\nhash prog; echo \"rc=$?\"\nhash -t prog; echo \"rc=$?\"\n",
+      "group": "path_search.yaml",
+      "index": 2,
+      "test_files": []
+    },
+    {
+      "name": "Globstar recursive matching",
+      "known_failure": true,
+      "test_files": [
+        {
+          "path": "a/b/c.txt"
+        },
+        {
+          "path": "a/d.txt"
+        },
+        {
+          "path": "e.txt"
+        }
+      ],
+      "stdin": "shopt -s globstar\necho **/*.txt\n",
+      "group": "patterns/filename_expansion.yaml",
+      "index": 36
+    },
+    {
+      "name": "GLOBIGNORE filters glob results",
+      "known_failure": true,
+      "test_files": [
+        {
+          "path": "a.txt"
+        },
+        {
+          "path": "b.txt"
+        },
+        {
+          "path": "c.txt"
+        }
+      ],
+      "stdin": "GLOBIGNORE=\"b.txt\"\necho *.txt\n",
+      "group": "patterns/filename_expansion.yaml",
+      "index": 37
+    },
+    {
+      "name": "GLOBIGNORE with multiple patterns",
+      "known_failure": true,
+      "test_files": [
+        {
+          "path": "a.txt"
+        },
+        {
+          "path": "b.txt"
+        },
+        {
+          "path": "c.txt"
+        },
+        {
+          "path": "d.log"
+        }
+      ],
+      "stdin": "GLOBIGNORE=\"b.txt:c.txt\"\necho *.txt\necho *.log\n",
+      "group": "patterns/filename_expansion.yaml",
+      "index": 38
+    },
+    {
+      "name": "GLOBIGNORE implicitly enables dotglob",
+      "known_failure": true,
+      "min_oracle_version": 5.2,
+      "test_files": [
+        {
+          "path": "a.txt"
+        },
+        {
+          "path": ".hidden.txt"
+        }
+      ],
+      "stdin": "GLOBIGNORE=\"a.txt\"\necho *.txt\n",
+      "group": "patterns/filename_expansion.yaml",
+      "index": 39
+    },
+    {
+      "name": "Unsetting GLOBIGNORE restores behavior",
+      "known_failure": true,
+      "test_files": [
+        {
+          "path": "a.txt"
+        },
+        {
+          "path": "b.txt"
+        }
+      ],
+      "stdin": "GLOBIGNORE=\"a.txt\"\necho *.txt\nunset GLOBIGNORE\necho *.txt\n",
+      "group": "patterns/filename_expansion.yaml",
+      "index": 40
+    },
+    {
+      "name": "$_ - exec does not override _ in child env",
+      "known_failure": true,
+      "stdin": "# bash does not set _ in the child's env for exec; the child inherits\n# the parent's _ value. brush currently sets _ to the resolved command\n# path (same as a normal external command), which is wrong for exec.\n(exec $(which env)) | grep '^_='\n",
+      "group": "special_parameters.yaml",
+      "index": 32,
+      "test_files": []
+    },
+    {
+      "name": "Parameter quote transformations - K",
+      "known_failure": true,
+      "stdin": "var='\"\"'\necho \"\\${var@K}: ${var@K}\"\n\nvar=\"Hello\"\necho \"\\${var@K}: ${var@K}\"\n\nvar=\"Hello, world!\"\necho \"\\${var@K}: ${var@K}\"\n\nvar=\"a 'b c' d\"\necho \"\\${var@K}: ${var@K}\"\n\ndeclare -a arr1=(a b c)\necho \"\\${arr1@K}: ${arr1@K}\"\necho \"\\${arr1[1]@K}: ${arr1[1]@K}\"\necho \"\\${arr1[@]@K}: ${arr1[@]@K}\"\necho \"\\${arr1[*]@K}: ${arr1[*]@K}\"\n\ndeclare -A arr2=([\"a\"]=1 [\"b\"]=2)\necho \"\\${arr2@K}: ${arr2@K}\"\necho \"\\${arr2[b]@K}: ${arr2[b]@K}\"\necho \"\\${arr2[@]@K}: ${arr2[@]@K}\"\necho \"\\${arr2[*]@K}: ${arr2[*]@K}\"\n",
+      "group": "word_expansion/param_transformation.yaml",
+      "index": 2,
+      "test_files": []
+    },
+    {
+      "name": "Parameter expression: index-listing combined with conditional operator",
+      "known_failure": true,
+      "stdin": "empty=()\necho \"[${!empty[@]+ALT}]\"\necho \"[${!empty[@]-DEF}]\"\necho \"[${!empty[*]+ALT}]\"\necho \"[${!empty[@]:+ALT}]\"\necho \"[${!empty[@]:-DEF}]\"\n",
+      "group": "word_expansion/params.yaml",
+      "index": 9,
+      "test_files": []
+    },
+    {
+      "name": "Invalid subscript diagnostics preserve read versus assignment behavior",
+      "group": "core-byte-controls", "index": 0,
+      "stdin": "a=(a b c)\necho \"read:${a[-4]}\"\na[-4]=x\necho \"write:${a[*]}\"\ndeclare -A b=([0]=zero)\necho \"empty:${b[$missing]}\"\n"
+    },
+    {
+      "name": "BASH executable remains distinct from an unresolved invocation name",
+      "group": "core-byte-controls", "index": 1,
+      "stdin": "[[ $(type -P $0) == $(type -P $BASH) ]] && echo same\n[[ -x $BASH ]] && echo executable\ncase $BASH in /*) echo absolute;; *) echo relative;; esac\n"
+    },
+    {
+      "name": "shopt -o raw layout",
+      "group": "core-byte-controls", "index": 2,
+      "stdin": "shopt -o | sort\n"
+    },
+    {
+      "name": "local - restores function-local set flags",
+      "group": "core-byte-controls", "index": 3,
+      "stdin": "f() { local -; set -x; echo inside; }\necho before\nf\necho after\n"
+    },
+    {
+      "name": "Compound associative replacement retains grown table and child order",
+      "group": "core-byte-controls", "index": 4,
+      "stdin": "declare -A a; for ((i=0;i<2050;i++)); do a[k$i]=$i; done\na=([foo]=0 [bar]=1 [hello]=2 [world]=3 [x]=4 [a]=5 [b]=6 [abc]=7 [samebucket]=8)\nprintf '%s\\n' \"${!a[@]}\"\n(printf 'child:<%s>\\n' \"${!a[@]}\")\n"
+    },
+    {
+      "name": "Mixed help topics succeed without an unknown-topic diagnostic",
+      "group": "core-byte-controls", "index": 5,
+      "stdin": "help echo not-a-real-topic >/dev/null\nprintf 'status:%s\\n' \"$?\"\n"
+    },
+    {
+      "name": "Function definition bytes survive display, source and execution",
+      "group": "core-byte-controls", "index": 6,
+      "stdin_hex": "662829207b207072696e746620276c656674ff0a72696768745c6e273b207d0a6465636c617265202d662066203e20646566696e6974696f6e0a756e736574202d6620660a736f75726365202e2f646566696e6974696f6e0a660a63617420646566696e6974696f6e0a"
+    },
+    {
+      "name": "Globstar does not recursively follow directory symlinks",
+      "group": "core-byte-controls", "index": 7,
+      "stdin": "mkdir -p a/b; touch a/top.txt a/b/deep.txt; ln -s a link\nshopt -s globstar\nprintf '<%s>\\n' **/*.txt\nprintf 'dir:<%s>\\n' **/\nprintf 'explicit:<%s>\\n' link/**\n"
+    },
+    {
+      "name": "Named shopt -o operands use the wider layout",
+      "group": "core-byte-controls", "index": 8,
+      "stdin": "shopt -o -s emacs\nshopt -o emacs\nshopt -o -p emacs\nshopt -o -u emacs\nshopt -o emacs\nshopt -o -p emacs\n"
+    }
+  ]
+}

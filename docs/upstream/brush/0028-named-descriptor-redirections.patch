@@ -1,0 +1,122 @@
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index b48e0e4..76292cc 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -2742,6 +2742,42 @@ pub(crate) async fn setup_redirect(
+     redirect: &ast::IoRedirect,
+ ) -> Result<(), error::Error> {
+     match redirect {
++        ast::IoRedirect::NamedFd(name, inner) => {
++            let ast::IoRedirect::File(_, kind, target) = inner.as_ref() else {
++                return Err(error::ErrorKind::InvalidRedirection.into());
++            };
++            let closing =
++                matches!(target, ast::IoFileRedirectTarget::Duplicate(word) if word.value == "-");
++            // Like Bash, a close uses the descriptor the variable holds; anything
++            // else gets the lowest free descriptor from 10 and stores it there.
++            let fd = if closing {
++                shell
++                    .env()
++                    .get_str(name.as_str(), shell)
++                    .and_then(|value| value.parse::<ShellFd>().ok())
++                    .ok_or(error::ErrorKind::InvalidRedirection)?
++            } else {
++                let mut fd: ShellFd = 10;
++                while params.open_files.contains_fd(fd)
++                    || shell.persistent_open_files().contains_fd(fd)
++                {
++                    fd += 1;
++                }
++                fd
++            };
++            let numbered = ast::IoRedirect::File(Some(fd), kind.clone(), target.clone());
++            Box::pin(setup_redirect(shell, params, &numbered)).await?;
++            if !closing {
++                shell.env_mut().update_or_add(
++                    name.as_str(),
++                    ShellValueLiteral::Scalar(fd.to_string()),
++                    |_| Ok(()),
++                    EnvironmentLookup::Anywhere,
++                    EnvironmentScope::Global,
++                )?;
++            }
++        }
++
+         ast::IoRedirect::OutputAndError(f, append) => {
+             let mut expanded_fields =
+                 expansion::full_expand_and_split_word(shell, params, f).await?;
+diff --git a/brush-parser/src/ast.rs b/brush-parser/src/ast.rs
+index 5c7f653..ef0c706 100644
+--- a/brush-parser/src/ast.rs
++++ b/brush-parser/src/ast.rs
+@@ -1632,6 +1632,10 @@ pub enum IoRedirect {
+     HereString(Option<IoFd>, Word),
+     /// Redirection of both standard output and standard error (with optional append).
+     OutputAndError(Word, bool),
++    /// A redirection whose descriptor is allocated by the shell and stored in the
++    /// named variable (`{name}>file`), or, for a close, read from it (`{name}>&-`).
++    /// The inner redirection has no descriptor number.
++    NamedFd(String, Box<IoRedirect>),
+ }
+ 
+ impl Node for IoRedirect {}
+@@ -1653,6 +1657,9 @@ impl Display for IoRedirect {
+ 
+                 write!(f, "{kind} {target}")?;
+             }
++            Self::NamedFd(name, redirect) => {
++                write!(f, "{{{name}}}{redirect}")?;
++            }
+             Self::OutputAndError(target, append) => {
+                 write!(f, "&>")?;
+                 if *append {
+diff --git a/brush-parser/src/parser/peg.rs b/brush-parser/src/parser/peg.rs
+index b3827b0..85f5427 100644
+--- a/brush-parser/src/parser/peg.rs
++++ b/brush-parser/src/parser/peg.rs
+@@ -596,6 +596,10 @@ peg::parser! {
+ 
+         // N.B. here strings are extensions to the POSIX standard.
+         rule io_redirect() -> ast::IoRedirect =
++            non_posix_extensions_enabled() name:io_variable() f:io_file() {
++                    let (kind, target) = f;
++                    ast::IoRedirect::NamedFd(name, Box::new(ast::IoRedirect::File(None, kind, target)))
++                } /
+             n:io_number()? f:io_file() {
+                     let (kind, target) = f;
+                     ast::IoRedirect::File(n, kind, target)
+@@ -779,6 +783,19 @@ peg::parser! {
+                 w.parse().map_err(|_| "io number out of range")
+             }
+ 
++        // N.B. `{name}` immediately followed by a redirection operator names a
++        // variable that receives (or supplies) the descriptor.
++        rule io_variable() -> String =
++            [Token::Word(w, name_loc) if w.len() > 2
++                && w.starts_with('{')
++                && w.ends_with('}')
++                && valid_io_variable(&w[1..w.len() - 1])]
++            &([Token::Operator(o, redir_loc) if
++                    o.starts_with(['<', '>']) &&
++                    locations_are_contiguous(name_loc, redir_loc)]) {
++                w[1..w.len() - 1].to_owned()
++            }
++
+         //
+         // Helpers
+         //
+@@ -796,6 +813,14 @@ peg::parser! {
+     }
+ }
+ 
++fn valid_io_variable(name: &str) -> bool {
++    let mut chars = name.chars();
++    chars
++        .next()
++        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
++        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
++}
++
+ fn valid_fanout_label(word: &str) -> bool {
+     let Some(label) = word.strip_suffix(':') else {
+         return false;

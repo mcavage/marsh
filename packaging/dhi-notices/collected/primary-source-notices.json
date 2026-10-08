@@ -1,0 +1,2935 @@
+{
+  "schema": "marsh.primary-notice-completions/v1",
+  "collections": [
+    {
+      "name": "native-notices-v2",
+      "source_inventory": "source-records/primary-native-notices-v2.json",
+      "source_inventory_sha256": "2c7e7882b6c2330fdea9da04c423214946a39ea523c73b09b207ae32befc3d98",
+      "notices": [
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "member": "meson-1.12.0/COPYING"
+        },
+        {
+          "file": "texts/e3e8d7b15b2021c994047314ad0ac5e367561f64771a60a85a9c0952d8cd4c3a.txt",
+          "sha256": "e3e8d7b15b2021c994047314ad0ac5e367561f64771a60a85a9c0952d8cd4c3a",
+          "member": "meson-1.12.0/packaging/License.rtf"
+        },
+        {
+          "file": "texts/bca11d525505d21cdfb021e634b0f1d48ece827f9bedcf8cd41356c48a09be24.txt",
+          "sha256": "bca11d525505d21cdfb021e634b0f1d48ece827f9bedcf8cd41356c48a09be24",
+          "member": "meson-1.12.0/packaging/macpages/English.lproj/license.html"
+        },
+        {
+          "file": "texts/eb7e9ab9690124c5c9f42bdc81383d886a3dede26345b6ed15bbad7caf81f7ea.txt",
+          "sha256": "eb7e9ab9690124c5c9f42bdc81383d886a3dede26345b6ed15bbad7caf81f7ea",
+          "member": "ninja-3441b633c2fe2c494e958780ba0f4227b1327634/COPYING"
+        },
+        {
+          "file": "texts/e67978cd18816c0cb7d29aaaacde7b7447402c2fb321a051698890a8eaedda94.txt",
+          "sha256": "e67978cd18816c0cb7d29aaaacde7b7447402c2fb321a051698890a8eaedda94",
+          "member": "libffi-3.8.0/LICENSE-BUILDTOOLS"
+        },
+        {
+          "file": "texts/17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c.txt",
+          "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
+          "member": "libffi-3.8.0/LICENSE"
+        },
+        {
+          "file": "texts/197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811.txt",
+          "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
+          "member": "pcre2-10.47/LICENCE.md"
+        },
+        {
+          "file": "texts/5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb.txt",
+          "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+          "member": "pcre2-10.47/deps/sljit/LICENSE"
+        },
+        {
+          "file": "texts/c666ec2313dba24523ccad88f4c04ea4b24fad6545263a35b1d4ab2b08efe50a.txt",
+          "sha256": "c666ec2313dba24523ccad88f4c04ea4b24fad6545263a35b1d4ab2b08efe50a",
+          "member": "pcre2-10.47/cmake/COPYING-CMAKE-SCRIPTS"
+        },
+        {
+          "file": "texts/99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507.txt",
+          "sha256": "99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507",
+          "member": "pcre2-10.47/COPYING"
+        },
+        {
+          "file": "texts/e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2.txt",
+          "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+          "member": "zlib-1.3.2/LICENSE"
+        },
+        {
+          "file": "texts/36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951.txt",
+          "sha256": "36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951",
+          "member": "zlib-1.3.2/contrib/dotzlib/LICENSE_1_0.txt"
+        },
+        {
+          "file": "texts/fc686023047ce5ce3a18a9b8a777156f0e475929d3de06bac279f3c025d2b2ca.txt",
+          "sha256": "fc686023047ce5ce3a18a9b8a777156f0e475929d3de06bac279f3c025d2b2ca",
+          "member": "zlib-1.3.2/contrib/minizip/LICENSE.Info-Zip"
+        },
+        {
+          "file": "texts/01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt",
+          "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+          "member": "opus-1.6.1/COPYING"
+        },
+        {
+          "file": "texts/7ecc7db84298adb05d2cf10339c63a5315a1c5c270a68d97d7d40a53b508ccde.txt",
+          "sha256": "7ecc7db84298adb05d2cf10339c63a5315a1c5c270a68d97d7d40a53b508ccde",
+          "member": "glib-2.88.3/LICENSES/AFL-2.0.txt"
+        },
+        {
+          "file": "texts/074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+          "member": "glib-2.88.3/LICENSES/Apache-2.0.txt"
+        },
+        {
+          "file": "texts/3f941b3b89cf7b8370ceb83cc76d2120d471b58735d8ca60238a751a48d7f72f.txt",
+          "sha256": "3f941b3b89cf7b8370ceb83cc76d2120d471b58735d8ca60238a751a48d7f72f",
+          "member": "glib-2.88.3/LICENSES/CC-BY-SA-3.0.txt"
+        },
+        {
+          "file": "texts/a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499.txt",
+          "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+          "member": "glib-2.88.3/LICENSES/CC0-1.0.txt"
+        },
+        {
+          "file": "texts/aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3",
+          "member": "glib-2.88.3/LICENSES/GPL-2.0-or-later.txt"
+        },
+        {
+          "file": "texts/fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb.txt",
+          "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+          "member": "glib-2.88.3/LICENSES/LGPL-2.1-only.txt"
+        },
+        {
+          "file": "texts/fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb.txt",
+          "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+          "member": "glib-2.88.3/LICENSES/LGPL-2.1-or-later.txt"
+        },
+        {
+          "file": "texts/e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e.txt",
+          "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e",
+          "member": "glib-2.88.3/LICENSES/LLVM-exception.txt"
+        },
+        {
+          "file": "texts/fb261b2d5dbe76c4850f90da763210bc385e52428df6bbfd7b06295ac8a32914.txt",
+          "sha256": "fb261b2d5dbe76c4850f90da763210bc385e52428df6bbfd7b06295ac8a32914",
+          "member": "glib-2.88.3/LICENSES/LicenseRef-old-glib-tests.txt"
+        },
+        {
+          "file": "texts/b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0.txt",
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+          "member": "glib-2.88.3/LICENSES/MIT.txt"
+        },
+        {
+          "file": "texts/6214f8b1300bb9f37b16ebc146f8f61af0187e0025042ff95c8b3030744a8795.txt",
+          "sha256": "6214f8b1300bb9f37b16ebc146f8f61af0187e0025042ff95c8b3030744a8795",
+          "member": "glib-2.88.3/LICENSES/MPL-1.1.txt"
+        },
+        {
+          "file": "texts/b1ec1d0e5947f81e815d8771f7d4d90671a94bb10a42dc687fb566de461a57aa.txt",
+          "sha256": "b1ec1d0e5947f81e815d8771f7d4d90671a94bb10a42dc687fb566de461a57aa",
+          "member": "glib-2.88.3/docs/reference/COPYING"
+        },
+        {
+          "file": "texts/bdbcdaa7858872393e9d6b216bbdc8a23e99d98dd6cdb7cda19458025b9e19fc.txt",
+          "sha256": "bdbcdaa7858872393e9d6b216bbdc8a23e99d98dd6cdb7cda19458025b9e19fc",
+          "member": "glib-2.88.3/subprojects/gvdb/COPYING"
+        },
+        {
+          "file": "texts/5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2",
+          "member": "glib-2.88.3/subprojects/gvdb/LICENSES/LGPL-2.1-or-later.txt"
+        },
+        {
+          "file": "texts/d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5.txt",
+          "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+          "member": "proxy-libintl-0.5/COPYING"
+        },
+        {
+          "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+          "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+          "member": "gstreamer-1.28.6/COPYING"
+        },
+        {
+          "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+          "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+          "member": "gst-plugins-base-1.28.6/COPYING"
+        },
+        {
+          "file": "texts/0a64edade36fd17b87485bc39ef05439c86b51a13d65d754e9e10f6bb7bd6894.txt",
+          "sha256": "0a64edade36fd17b87485bc39ef05439c86b51a13d65d754e9e10f6bb7bd6894",
+          "member": "gst-plugins-base-1.28.6/gst-libs/gst/tag/licenses.c",
+          "material_type": "source-notice-excerpt",
+          "source_file_sha256": "1f56aeb38bfc982b535d1c6356658e7d18cff845cb2a144d38cf994183c5f7b6",
+          "byte_range": [
+            0,
+            857
+          ]
+        },
+        {
+          "file": "texts/6095e9ffa777dd22839f7801aa845b31c9ed07f3d6bf8a26dc5d2dec8ccc0ef3.txt",
+          "sha256": "6095e9ffa777dd22839f7801aa845b31c9ed07f3d6bf8a26dc5d2dec8ccc0ef3",
+          "member": "gst-plugins-good-1.28.6/COPYING"
+        },
+        {
+          "file": "texts/0efdd7e1522b73c4a206ab2fb1bb8a609157abccf588837bca6eb7c98d5b35c6.txt",
+          "sha256": "0efdd7e1522b73c4a206ab2fb1bb8a609157abccf588837bca6eb7c98d5b35c6",
+          "member": "gst-plugins-good-1.28.6/gst/rtsp/COPYING.MIT"
+        },
+        {
+          "file": "texts/6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509.txt",
+          "sha256": "6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509",
+          "member": "v8-15.0.245.2/LICENSE"
+        },
+        {
+          "file": "texts/e7115e18444dae09d17f361ddc365fb1d342640fe500796209c63f7c80dfae10.txt",
+          "sha256": "e7115e18444dae09d17f361ddc365fb1d342640fe500796209c63f7c80dfae10",
+          "member": "v8-15.0.245.2/LICENSE.fdlibm"
+        },
+        {
+          "file": "texts/6a585a9f466654abc8fc0829d56b1bc987e3a073d31faa03bba37d33640a23cd.txt",
+          "sha256": "6a585a9f466654abc8fc0829d56b1bc987e3a073d31faa03bba37d33640a23cd",
+          "member": "v8-15.0.245.2/LICENSE.strongtalk"
+        },
+        {
+          "file": "texts/4af93c12062c58058378de2397dc1c92bbff9ddfb1d583a01c84127557ce97ca.txt",
+          "sha256": "4af93c12062c58058378de2397dc1c92bbff9ddfb1d583a01c84127557ce97ca",
+          "member": "v8-15.0.245.2/LICENSE.v8"
+        },
+        {
+          "file": "texts/f915aef5cdb93903ae8850c4a1efb638ee1195b1380b6e446a583c1d0eef3ff7.txt",
+          "sha256": "f915aef5cdb93903ae8850c4a1efb638ee1195b1380b6e446a583c1d0eef3ff7",
+          "member": "v8-15.0.245.2/test/js-perf-test/SixSpeed/LICENSE.sixspeed"
+        },
+        {
+          "file": "texts/b5e27ca8c92bf5748046345e3c5621a97542abd931ad5870b2057c4e20e2ece8.txt",
+          "sha256": "b5e27ca8c92bf5748046345e3c5621a97542abd931ad5870b2057c4e20e2ece8",
+          "member": "v8-15.0.245.2/test/mjsunit/third_party/object-keys/LICENSE"
+        },
+        {
+          "file": "texts/f55e9e4ba1ce2ae3b0f21577d9dfd3cea376123cb69e444b891f2f0fc1f9069a.txt",
+          "sha256": "f55e9e4ba1ce2ae3b0f21577d9dfd3cea376123cb69e444b891f2f0fc1f9069a",
+          "member": "v8-15.0.245.2/test/mjsunit/third_party/regexp-pcre/LICENSE"
+        },
+        {
+          "file": "texts/5a7b465d39b5e018bc40cc34162176269f7c476989cb4dbcf0ec0b81701545a7.txt",
+          "sha256": "5a7b465d39b5e018bc40cc34162176269f7c476989cb4dbcf0ec0b81701545a7",
+          "member": "v8-15.0.245.2/test/wasm-js/third_party/LICENSE.testharness"
+        },
+        {
+          "file": "texts/15137d6c822e3ab097093a33c3a39a9df699f373f6438867ad534ff60762a947.txt",
+          "sha256": "15137d6c822e3ab097093a33c3a39a9df699f373f6438867ad534ff60762a947",
+          "member": "v8-15.0.245.2/third_party/colorama/LICENSE"
+        },
+        {
+          "file": "texts/c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d.txt",
+          "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d",
+          "member": "v8-15.0.245.2/third_party/fp16/LICENSE"
+        },
+        {
+          "file": "texts/b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe.txt",
+          "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
+          "member": "v8-15.0.245.2/third_party/glibc/LICENSE"
+        },
+        {
+          "file": "texts/43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1.txt",
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+          "member": "v8-15.0.245.2/third_party/highway/LICENSE"
+        },
+        {
+          "file": "texts/450ebb9e9e50c2809d9ca581931fc8946d8d5aa0c8c35aae9ac471342fe4a88e.txt",
+          "sha256": "450ebb9e9e50c2809d9ca581931fc8946d8d5aa0c8c35aae9ac471342fe4a88e",
+          "member": "v8-15.0.245.2/third_party/inspector_protocol/LICENSE"
+        },
+        {
+          "file": "texts/76c45ece83a26117f86f4e349e7df118708e061e87225328fb478ce1e8b3eb86.txt",
+          "sha256": "76c45ece83a26117f86f4e349e7df118708e061e87225328fb478ce1e8b3eb86",
+          "member": "v8-15.0.245.2/third_party/jsoncpp/LICENSE"
+        },
+        {
+          "file": "texts/db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0.txt",
+          "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0",
+          "member": "v8-15.0.245.2/third_party/rapidhash-v8/LICENSE"
+        },
+        {
+          "file": "texts/6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449.txt",
+          "sha256": "6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449",
+          "member": "v8-15.0.245.2/third_party/re2/LICENSE"
+        },
+        {
+          "file": "texts/36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673.txt",
+          "sha256": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673",
+          "member": "v8-15.0.245.2/third_party/siphash/LICENSE"
+        },
+        {
+          "file": "texts/3f712e5fbdfdbd5ee7d9b8c8152580220df55de47f4eba2f26c95c4de19ad096.txt",
+          "sha256": "3f712e5fbdfdbd5ee7d9b8c8152580220df55de47f4eba2f26c95c4de19ad096",
+          "member": "v8-15.0.245.2/third_party/utf8-decoder/LICENSE"
+        },
+        {
+          "file": "texts/b9a6d9320b8f2693e8d41e496ce56caadacaddcca9be2a64a61749278f425cf2.txt",
+          "sha256": "b9a6d9320b8f2693e8d41e496ce56caadacaddcca9be2a64a61749278f425cf2",
+          "member": "v8-15.0.245.2/third_party/v8/builtins/LICENSE"
+        },
+        {
+          "file": "texts/17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf.txt",
+          "sha256": "17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf",
+          "member": "v8-15.0.245.2/third_party/v8/codegen/LICENSE"
+        },
+        {
+          "file": "texts/ebf25b8ce59c9e8883acd1ca75b6fc121937ca034f666c4077d2be739d2e1622.txt",
+          "sha256": "ebf25b8ce59c9e8883acd1ca75b6fc121937ca034f666c4077d2be739d2e1622",
+          "member": "v8-15.0.245.2/third_party/valgrind/LICENSE"
+        },
+        {
+          "file": "texts/02aea3ade0c02470335987f7d93ffaed877bcefc8414a416e2e548665bb0bfd0.txt",
+          "sha256": "02aea3ade0c02470335987f7d93ffaed877bcefc8414a416e2e548665bb0bfd0",
+          "member": "v8-15.0.245.2/third_party/vtune/LICENSE"
+        },
+        {
+          "file": "texts/c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08.txt",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "member": "v8-15.0.245.2/third_party/wasm-api/LICENSE"
+        }
+      ],
+      "scope": "Conservative legal-document superset of exact public source archives from recorded build pins; not execution, enabled-feature proof, signature validation or a reproducible build."
+    },
+    {
+      "name": "v8-extra-notices-v3",
+      "source_inventory": "source-records/primary-v8-extra-notices-v3.json",
+      "source_inventory_sha256": "058c0e3384faadd372f171da95db09dafaa03082831848428cbeefdcd7fc47cf",
+      "notices": [
+        {
+          "file": "texts/43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1.txt",
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+          "member": "highway-1.2.0/LICENSE"
+        },
+        {
+          "file": "texts/d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2.txt",
+          "sha256": "d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2",
+          "member": "highway-1.2.0/LICENSE-BSD3"
+        },
+        {
+          "file": "texts/6e4ecf1cae052b678ea3178dd4b3652d581ee66a82d58db8800dd7d80dd6de76.txt",
+          "sha256": "6e4ecf1cae052b678ea3178dd4b3652d581ee66a82d58db8800dd7d80dd6de76",
+          "member": "highway-1.2.0/debian/copyright"
+        },
+        {
+          "file": "texts/097a889aa954d04e088b790b10a4014d6189561d0a6013935a73ce3d4ddaaf06.txt",
+          "sha256": "097a889aa954d04e088b790b10a4014d6189561d0a6013935a73ce3d4ddaaf06",
+          "member": "fast_float-8.0.2/LICENSE-APACHE"
+        },
+        {
+          "file": "texts/8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b.txt",
+          "sha256": "8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b",
+          "member": "fast_float-8.0.2/LICENSE-BOOST"
+        },
+        {
+          "file": "texts/e562f3f974ced7e69dd1db77b820b36bcf8f30377f1aa105723fba449c53c4e6.txt",
+          "sha256": "e562f3f974ced7e69dd1db77b820b36bcf8f30377f1aa105723fba449c53c4e6",
+          "member": "fast_float-8.0.2/LICENSE-MIT"
+        },
+        {
+          "file": "texts/3d34610fc6b5e1b0bfe4e2f36171c2d62c28ef05cb8d704f5a0073be41a43b3d.txt",
+          "sha256": "3d34610fc6b5e1b0bfe4e2f36171c2d62c28ef05cb8d704f5a0073be41a43b3d",
+          "member": "simdutf-7.7.0/LICENSE-APACHE"
+        },
+        {
+          "file": "texts/fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f.txt",
+          "sha256": "fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f",
+          "member": "simdutf-7.7.0/LICENSE-MIT"
+        },
+        {
+          "file": "texts/c4021d0a7daf0d4fa79f43b1205e629fe0b6cb31a5998e14efbd700abf65e55f.txt",
+          "sha256": "c4021d0a7daf0d4fa79f43b1205e629fe0b6cb31a5998e14efbd700abf65e55f",
+          "member": "simdutf-7.7.0/benchmarks/competition/u8u16/COPYRIGHT"
+        },
+        {
+          "file": "texts/beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e.txt",
+          "sha256": "beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e",
+          "member": "simdutf-7.7.0/benchmarks/competition/utf8lut/LICENSE"
+        },
+        {
+          "file": "texts/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566.txt",
+          "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+          "member": "simdutf-7.7.0/benchmarks/competition/utfcpp/LICENSE"
+        }
+      ],
+      "scope": "Conservative legal-document superset of exact public source archives from recorded build pins; not execution, enabled-feature proof, signature validation or a reproducible build."
+    },
+    {
+      "name": "bcr-native-notices-v2",
+      "source_inventory": "source-records/primary-bcr-native-notices-v2.json",
+      "source_inventory_sha256": "f69c037e6f74cdcc93d9461bc2ae5f670d675bc0da1a3d3b5ee1261be6f1ea08",
+      "notices": [
+        {
+          "file": "texts/c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747.txt",
+          "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+          "member": "abseil-cpp-20250814.1/LICENSE"
+        },
+        {
+          "file": "texts/dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551.txt",
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+          "member": "hermetic-llvm-0.8.11/3rd_party/libc/glibc/COPYING.LIB"
+        },
+        {
+          "file": "texts/5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177.txt",
+          "sha256": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
+          "member": "hermetic-llvm-0.8.11/3rd_party/libc/glibc/LICENSE"
+        },
+        {
+          "file": "texts/5f07f451f48790a57f5ea014b51a804718a3d65a68d58309af019ef3a4ba06ae.txt",
+          "sha256": "5f07f451f48790a57f5ea014b51a804718a3d65a68d58309af019ef3a4ba06ae",
+          "member": "hermetic-llvm-0.8.11/3rd_party/libc/glibc/NOTICE"
+        },
+        {
+          "file": "texts/4139ed7c5b5a93a163d15f36f1e7aa3bfc7a7b0a541b1756f6090b8fc17147e9.txt",
+          "sha256": "4139ed7c5b5a93a163d15f36f1e7aa3bfc7a7b0a541b1756f6090b8fc17147e9",
+          "member": "hermetic-llvm-0.8.11/LICENSE"
+        }
+      ],
+      "scope": "Conservative legal-document superset of exact public source archives from recorded build pins; not execution, enabled-feature proof, signature validation or a reproducible build."
+    },
+    {
+      "name": "musl-notices",
+      "source_inventory": "source-records/primary-musl-notices.json",
+      "source_inventory_sha256": "007d5cfeb3b24c79ba33e52bd40f0abb75ad823f98777b74c59bf2366034086c",
+      "notices": [
+        {
+          "file": "texts/b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b.txt",
+          "sha256": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b",
+          "member": "musl-1.2.6/COPYRIGHT"
+        }
+      ],
+      "scope": "Conservative legal-document superset of exact public source archives from recorded build pins; not execution, enabled-feature proof, signature validation or a reproducible build."
+    },
+    {
+      "name": "exact-crate-declarations-and-headers",
+      "source_inventory": "source-records/primary-exact-crate-declarations-and-headers.json",
+      "source_inventory_sha256": "2327511ba94faed5e4c3dcb8f06123759181571354d5f38009315d1a42eb574a",
+      "notices": [
+        {
+          "file": "texts/c8ba25556c7941061b26b06aabd736ce81ad8ee0047c2b893e0d3e222ed4670b.txt",
+          "sha256": "c8ba25556c7941061b26b06aabd736ce81ad8ee0047c2b893e0d3e222ed4670b",
+          "source_path": "allocative-0.3.6/Cargo.toml",
+          "source_file_sha256": "c8ba25556c7941061b26b06aabd736ce81ad8ee0047c2b893e0d3e222ed4670b"
+        },
+        {
+          "file": "texts/6649d016c5b1b3a286d6ae243e1dc6a3eb735147dee58c08f171d63edaf87da1.txt",
+          "sha256": "6649d016c5b1b3a286d6ae243e1dc6a3eb735147dee58c08f171d63edaf87da1",
+          "source_path": "allocative-0.3.6/Cargo.toml.orig",
+          "source_file_sha256": "6649d016c5b1b3a286d6ae243e1dc6a3eb735147dee58c08f171d63edaf87da1"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/build.rs",
+          "source_file_sha256": "b6a152c562d31da11fe527ef7b74117f4172cbd2f865cdf5890645e6757e50d3",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/allocative_trait.rs",
+          "source_file_sha256": "9b3b1d758d3fb00e083a8295f066388f4697dff81b91c82e41b872d606e290ba",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/flamegraph.rs",
+          "source_file_sha256": "d4edd4bbdddb481cb9e74c919e8a79f0d7f4061d791a8e7d1bbe81ff6820502d",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/global_root.rs",
+          "source_file_sha256": "74b30271d82ffdc17600e1087a26f819a81edfc46daad11613d3c130f4ed8c9d",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/golden.rs",
+          "source_file_sha256": "f26bf91d2e3ebeb8aa50e7f4e08e3b5f74579db466142ae432798156dead9a44",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/anyhow.rs",
+          "source_file_sha256": "243aca6ca2b6186d504718706f386ca1304fcf7f4afefd04510a5584f4f5b8ad",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/bumpalo.rs",
+          "source_file_sha256": "fb6323d836a46865914b25cbca7685c3bb54b8ab1a02a7e709b864c61e3946de",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/common.rs",
+          "source_file_sha256": "3355a799a9cb972e36b1caafffa59a57f8a7bab42314c1a6d04b77a54e10d57c",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/compact_str.rs",
+          "source_file_sha256": "9314c33a9819aac3162bc3455823f972c735703e3d79a6bc00ba8d97321a1df5",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/dashmap.rs",
+          "source_file_sha256": "e94cf77c77977f8c06c4f4ba0b773f7f7876a7af82620a66ff3b19b375ab4043",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/either.rs",
+          "source_file_sha256": "56a1efdd443f618ccaace269c86b5614ab94bcaf1d3db77b0207ba65c8774be1",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/futures.rs",
+          "source_file_sha256": "6084871f1d62ebd74a3d6e3ef04bba147ea9f86081c8e1c038cc4a957b0ce8a4",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/hashbrown.rs",
+          "source_file_sha256": "9b14ae967b3e856e84e7dcea9a914daff2a784f4441607dc734d76e9e42ac87a",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/hashbrown_util.rs",
+          "source_file_sha256": "20ce7b83ea3b8e3e0d343c02b44b8e46e4a3333943dbf27f203725492184c7c0",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/indexmap.rs",
+          "source_file_sha256": "7602038bd1f335d812b19383330bdfab4432091432bf78f8dc0ef34ba3f705ea",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/lock_api.rs",
+          "source_file_sha256": "0357bbe82eca3fe1a23507e14cf26545b78f83e7f576408b043db32b549ed7bb",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/num_bigint.rs",
+          "source_file_sha256": "22ab273484815ebecc99ccf00dfadb32cd455d1994507cd066d2b19d3b8db3bf",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/once_cell.rs",
+          "source_file_sha256": "4b9da0bb8dc09dc69ea1ad1d26504dda6cc22f988b982a9b78e3c2ee71fb1854",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/parking_lot.rs",
+          "source_file_sha256": "9690e4edf739df015987d17b9ca2ebd7d77cff611dbf14a36056a2b781635a27",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/prost_types.rs",
+          "source_file_sha256": "822fd2a8f9df1523b37ab8f92929427281d4895976c9d5aa8be7d6f63e3d8faf",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/serde_json.rs",
+          "source_file_sha256": "0bbdda78bdc36e8b488059f97dc4a05bb6605098738b4bc88cae4b23466b3298",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/slab.rs",
+          "source_file_sha256": "b4ae03ba747c97ba422f53d9f3a1219456e87675d4d7cb2f83c045455fbaf163",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/smallvec.rs",
+          "source_file_sha256": "c9ccf278c7192aa24d98d53f50413797aa880f40ffb31c5ddcd022236d09bf71",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/sorted_vector_map.rs",
+          "source_file_sha256": "84468af0cb12fa631ec9cf2c560add36a979770e622baee7fd10f3c881a06a69",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/any.rs",
+          "source_file_sha256": "1bd48bd58e6686c6695db5d1980e8346f5e174bf1dd26734e7d0e136d0e8859c",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/cell.rs",
+          "source_file_sha256": "f95c28b45decb0c87183a15882029d7d8d090d7d798cf7bb0ef5131a79d2e495",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/collections.rs",
+          "source_file_sha256": "d2dc469cd775f368540e85fe2613aa941f0599511a02c45fd28228f6b0f97237",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/function.rs",
+          "source_file_sha256": "e6dcc8b487d37ec4e4e67e6998f3f54322575b43c143dca991e342dd674484dd",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/mem.rs",
+          "source_file_sha256": "fdb9af7cf21d553e24c3a5d57cde06392ae5d13afdac34e409ad1848e22e667e",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/net.rs",
+          "source_file_sha256": "d9323bc225e3ff0f5782153927b6646541196e1bcb76e4575f2f68f0cc125812",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/primitive.rs",
+          "source_file_sha256": "76902174c63931357d2ecd050e6c3f19874646c98a4adfa39bc29bdd423522af",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/sync.rs",
+          "source_file_sha256": "e8811e63b777c90177ad057f4b77d66309316b34c93fdf1b041f027bd1c35752",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/thread.rs",
+          "source_file_sha256": "4e4163100066bfc39e1b69cac372d60ac7775b22d3d114d9ab8640bdc5b453cb",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/time.rs",
+          "source_file_sha256": "5028be12ba24d93a204e6e3bc3d0e1cbcbd9100ee4aad63cbd974ff3428d0c03",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/tuple.rs",
+          "source_file_sha256": "3c045988b1cd3fb00014fbb51466dc3fa0fea2bd47b62b38f7667144ced5a49a",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/unsorted.rs",
+          "source_file_sha256": "731215a9194fcf0f1504adcef2672652d96930f883642152a833f2857624764f",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std.rs",
+          "source_file_sha256": "c9259fe0c6b66583eb7d8fda9c8e650f8263b06116052927b3aa014b27659d78",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/tokio.rs",
+          "source_file_sha256": "35a4ca9faed1795328f73b20b8ea4cf573b30de82c0265435d59f1dad7276e53",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/triomphe.rs",
+          "source_file_sha256": "2f0e32cd4a57e3ec7bea532ab917c34fffcb29b6e670954a774c54f94dd72e68",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls.rs",
+          "source_file_sha256": "e164bdfd9be9892b6431b57c482f87122cb31bb11b3ff921966dbc2009d6ac55",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/key.rs",
+          "source_file_sha256": "3c05bff05ebfa5a4930b9a8d26e9f48e87b9a0248ccc28b1ee734ef75112c76e",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/lib.rs",
+          "source_file_sha256": "6c170a02dc0f1c4e12a04437adcd21ae20a57864372a1b77c398f07a8c268058",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/size_of.rs",
+          "source_file_sha256": "09863a0f8d964708c093eb8fc939db8a3db92d48d210bec95cfc121649008b3b",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive/bounds.rs",
+          "source_file_sha256": "c3c30dfe8372ba8cb533b25dc66eb8de01ea498b4d1e79d5d94af4f56d6a4c3a",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive/dst.rs",
+          "source_file_sha256": "90dd5e3b5e0125a630bf9ecb4d1fd25901cbcda76ab88477f9c9109c78ae3823",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive/skip.rs",
+          "source_file_sha256": "8f8e35de2f037b87c2f9df6242a68fa6622423aba50498043e7ea80239c39666",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive/visit.rs",
+          "source_file_sha256": "0820c731ae4dc407d7870b40e5aeae141a6cd76f407eedf1adf6767491bbf7e2",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive/with_flamegraph.rs",
+          "source_file_sha256": "b331a36942c0e6f9d66655546286ebb8f0a112388fdd3ec055b304d9d8209137",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive.rs",
+          "source_file_sha256": "c4c80dba1c1b26961b2048631cdf03a54ae29b14f949b042b198fa16ddfd025c",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/visitor.rs",
+          "source_file_sha256": "a00a31ae3728bc990956f26c8f693ece6bdecca018d20bc63b04dc49afc299c8",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/30b57c6088b5a013431579d588346e5bdc8a19cb9c76bad89f9da4013157fdf7.txt",
+          "sha256": "30b57c6088b5a013431579d588346e5bdc8a19cb9c76bad89f9da4013157fdf7",
+          "source_path": "allocative_derive-0.3.6/Cargo.toml",
+          "source_file_sha256": "30b57c6088b5a013431579d588346e5bdc8a19cb9c76bad89f9da4013157fdf7"
+        },
+        {
+          "file": "texts/bfd1767fe5cfc0caad7c74d31dcf318c6a9f13c69b09986198365e3bbf29026a.txt",
+          "sha256": "bfd1767fe5cfc0caad7c74d31dcf318c6a9f13c69b09986198365e3bbf29026a",
+          "source_path": "allocative_derive-0.3.6/Cargo.toml.orig",
+          "source_file_sha256": "bfd1767fe5cfc0caad7c74d31dcf318c6a9f13c69b09986198365e3bbf29026a"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative_derive-0.3.6/src/derive_allocative.rs",
+          "source_file_sha256": "b8ffab726d363ffab1beebf645a3c6f68c8ab68ea769d0eef49776c30ff2ccfa",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative_derive-0.3.6/src/lib.rs",
+          "source_file_sha256": "369248b0133e83f17685b29786c185a41bc6b93fd4fac6abd6f751436a26e778",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative_derive-0.3.6/src/root.rs",
+          "source_file_sha256": "3074c1355708f45ed82beefbf392b7a3f3d0da0fdc479af20e74c302960f5d28",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/ffe61d0e558aff076c6be396c1a1cd46bcaa9b56a0f0e9d609767fcdc7eb1d6d.txt",
+          "sha256": "ffe61d0e558aff076c6be396c1a1cd46bcaa9b56a0f0e9d609767fcdc7eb1d6d",
+          "source_path": "crc32c-0.6.8/Cargo.toml",
+          "source_file_sha256": "ffe61d0e558aff076c6be396c1a1cd46bcaa9b56a0f0e9d609767fcdc7eb1d6d"
+        },
+        {
+          "file": "texts/cdacc34974a954ea9ddb5da1a2ad19bcefaead7dfa9df6fd9421671ea5d19300.txt",
+          "sha256": "cdacc34974a954ea9ddb5da1a2ad19bcefaead7dfa9df6fd9421671ea5d19300",
+          "source_path": "crc32c-0.6.8/README.md",
+          "source_file_sha256": "cdacc34974a954ea9ddb5da1a2ad19bcefaead7dfa9df6fd9421671ea5d19300"
+        },
+        {
+          "file": "texts/99342c77e539bf3d549262dadd7d7ed646ce309b6dabde67a5a35b7c0faaca31.txt",
+          "sha256": "99342c77e539bf3d549262dadd7d7ed646ce309b6dabde67a5a35b7c0faaca31",
+          "source_path": "crc32c-0.6.8/Cargo.toml.orig",
+          "source_file_sha256": "99342c77e539bf3d549262dadd7d7ed646ce309b6dabde67a5a35b7c0faaca31"
+        },
+        {
+          "file": "texts/c70903f3c3245a6940fbd24cdad748c6ab46c412197116703bdad0c61775e48c.txt",
+          "sha256": "c70903f3c3245a6940fbd24cdad748c6ab46c412197116703bdad0c61775e48c",
+          "source_path": "crc32c-0.6.8/src/combine.rs",
+          "source_file_sha256": "33c2ffe45b8f409f26566bc8fc35a713f5a71279e1ae3b77564b5423fd8d245b",
+          "byte_range": [
+            0,
+            1282
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/f571b778494de4e86f6116d96cbfe222d954e8d1eb2f15f1b565cf34bd436b2d.txt",
+          "sha256": "f571b778494de4e86f6116d96cbfe222d954e8d1eb2f15f1b565cf34bd436b2d",
+          "source_path": "debugserver-types-0.5.0/Cargo.toml",
+          "source_file_sha256": "f571b778494de4e86f6116d96cbfe222d954e8d1eb2f15f1b565cf34bd436b2d"
+        },
+        {
+          "file": "texts/705e49bb282781302ca3b45f594fa5454f2a321581b905dcf4c3f2934e0bc318.txt",
+          "sha256": "705e49bb282781302ca3b45f594fa5454f2a321581b905dcf4c3f2934e0bc318",
+          "source_path": "debugserver-types-0.5.0/Cargo.toml.orig",
+          "source_file_sha256": "705e49bb282781302ca3b45f594fa5454f2a321581b905dcf4c3f2934e0bc318"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; same npm/Rust policy, not an independently acquired upstream grant or copyright"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; not an independently acquired upstream grant, copyright or resolved rights guarantee"
+        },
+        {
+          "file": "texts/dbc33246972b27584b48a4d3d13c8f0a2f9e748619b2a8546774cb5157f732e1.txt",
+          "sha256": "dbc33246972b27584b48a4d3d13c8f0a2f9e748619b2a8546774cb5157f732e1",
+          "source_path": "deno_core_icudata-0.77.0/Cargo.toml",
+          "source_file_sha256": "dbc33246972b27584b48a4d3d13c8f0a2f9e748619b2a8546774cb5157f732e1"
+        },
+        {
+          "file": "texts/424ad83d0fb170939e3be8d84ff3b3c46c8bbd860a85e82998427ca9dbb70db3.txt",
+          "sha256": "424ad83d0fb170939e3be8d84ff3b3c46c8bbd860a85e82998427ca9dbb70db3",
+          "source_path": "deno_core_icudata-0.77.0/Cargo.toml.orig",
+          "source_file_sha256": "424ad83d0fb170939e3be8d84ff3b3c46c8bbd860a85e82998427ca9dbb70db3"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; same npm/Rust policy, not an independently acquired upstream grant or copyright"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; not an independently acquired upstream grant, copyright or resolved rights guarantee"
+        },
+        {
+          "file": "texts/aed0597f7b6014324ef49cb6502e541e45c35335785345d7d7a5cac46cc64c0f.txt",
+          "sha256": "aed0597f7b6014324ef49cb6502e541e45c35335785345d7d7a5cac46cc64c0f",
+          "source_path": "difflib-0.4.0/Cargo.toml",
+          "source_file_sha256": "aed0597f7b6014324ef49cb6502e541e45c35335785345d7d7a5cac46cc64c0f"
+        },
+        {
+          "file": "texts/d541194ec9dbbc63a8e371fcb0a20af128671a73bea0c4734e17e43ed6956e50.txt",
+          "sha256": "d541194ec9dbbc63a8e371fcb0a20af128671a73bea0c4734e17e43ed6956e50",
+          "source_path": "difflib-0.4.0/Cargo.toml.orig",
+          "source_file_sha256": "d541194ec9dbbc63a8e371fcb0a20af128671a73bea0c4734e17e43ed6956e50"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; same npm/Rust policy, not an independently acquired upstream grant or copyright"
+        },
+        {
+          "file": "texts/6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5.txt",
+          "sha256": "6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5",
+          "url": "https://raw.githubusercontent.com/DimaKudosh/difflib/8748d65b8c631a244af70f9d9f0339b6e7e9d29c/LICENSE",
+          "commit": "8748d65b8c631a244af70f9d9f0339b6e7e9d29c"
+        },
+        {
+          "file": "texts/2974bc2f16b5897ef0c0f323a5465b7402295ec573c718d74d5e413f825f3b4a.txt",
+          "sha256": "2974bc2f16b5897ef0c0f323a5465b7402295ec573c718d74d5e413f825f3b4a",
+          "source_path": "display_container-0.9.0/Cargo.toml",
+          "source_file_sha256": "2974bc2f16b5897ef0c0f323a5465b7402295ec573c718d74d5e413f825f3b4a"
+        },
+        {
+          "file": "texts/9eb42b9aa1fa21f8d29340d5a1f299ee4a4490db25f116e9452abe7717afad39.txt",
+          "sha256": "9eb42b9aa1fa21f8d29340d5a1f299ee4a4490db25f116e9452abe7717afad39",
+          "source_path": "display_container-0.9.0/Cargo.toml.orig",
+          "source_file_sha256": "9eb42b9aa1fa21f8d29340d5a1f299ee4a4490db25f116e9452abe7717afad39"
+        },
+        {
+          "file": "texts/3d1742e3af9b9adcc9aa0d1b1c7163b50df41fea184c8f6bbcee48341cffe035.txt",
+          "sha256": "3d1742e3af9b9adcc9aa0d1b1c7163b50df41fea184c8f6bbcee48341cffe035",
+          "source_path": "display_container-0.9.0/src/lib.rs",
+          "source_file_sha256": "13db2d71c93e61a6e9bdf52597a204f1ca6d017f68d0efb15c0598084b96add5",
+          "byte_range": [
+            0,
+            315
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/b3a669f64604f19acae611ec2e7b1abb70560d920d23dab003e5090d023a8d83.txt",
+          "sha256": "b3a669f64604f19acae611ec2e7b1abb70560d920d23dab003e5090d023a8d83",
+          "source_path": "eventsource-stream-0.2.3/Cargo.toml",
+          "source_file_sha256": "b3a669f64604f19acae611ec2e7b1abb70560d920d23dab003e5090d023a8d83"
+        },
+        {
+          "file": "texts/f17f6cc26f19643dbadaaad9901d245d4645ef8fbac8266b33105392dd1f8601.txt",
+          "sha256": "f17f6cc26f19643dbadaaad9901d245d4645ef8fbac8266b33105392dd1f8601",
+          "source_path": "eventsource-stream-0.2.3/README.md",
+          "source_file_sha256": "f17f6cc26f19643dbadaaad9901d245d4645ef8fbac8266b33105392dd1f8601"
+        },
+        {
+          "file": "texts/725711996fb72721abc35595e0703ca2d1b55cb4d98cc5ade959fc0f8c2e86a4.txt",
+          "sha256": "725711996fb72721abc35595e0703ca2d1b55cb4d98cc5ade959fc0f8c2e86a4",
+          "source_path": "eventsource-stream-0.2.3/Cargo.toml.orig",
+          "source_file_sha256": "725711996fb72721abc35595e0703ca2d1b55cb4d98cc5ade959fc0f8c2e86a4"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/0ea204979bda3a271442d39e327b479e65d5998bf9525c3272d5ce60a53a621d.txt",
+          "sha256": "0ea204979bda3a271442d39e327b479e65d5998bf9525c3272d5ce60a53a621d",
+          "source_path": "fax-0.2.6/Cargo.toml",
+          "source_file_sha256": "0ea204979bda3a271442d39e327b479e65d5998bf9525c3272d5ce60a53a621d"
+        },
+        {
+          "file": "texts/e8f20f4f701f02b565ffa289e1007008d07f933fb4f64f1a3879f8438a4a8406.txt",
+          "sha256": "e8f20f4f701f02b565ffa289e1007008d07f933fb4f64f1a3879f8438a4a8406",
+          "source_path": "fax-0.2.6/Cargo.toml.orig",
+          "source_file_sha256": "e8f20f4f701f02b565ffa289e1007008d07f933fb4f64f1a3879f8438a4a8406"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; same npm/Rust policy, not an independently acquired upstream grant or copyright"
+        },
+        {
+          "file": "texts/7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff.txt",
+          "sha256": "7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff",
+          "url": "https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE",
+          "commit": "5d70a161e33b62305f8bce7af3f7fbd011cfaf5d"
+        },
+        {
+          "file": "texts/6cdaeb86f6147dd70051f5e61cc6d1f89b5f4dd1f1d175c7874d4798292b3e2a.txt",
+          "sha256": "6cdaeb86f6147dd70051f5e61cc6d1f89b5f4dd1f1d175c7874d4798292b3e2a",
+          "source_path": "fax_derive-0.2.0/Cargo.toml",
+          "source_file_sha256": "6cdaeb86f6147dd70051f5e61cc6d1f89b5f4dd1f1d175c7874d4798292b3e2a"
+        },
+        {
+          "file": "texts/34da4cab7ff30ef38fd413da49c787c83a32f782db304c93687567f168060725.txt",
+          "sha256": "34da4cab7ff30ef38fd413da49c787c83a32f782db304c93687567f168060725",
+          "source_path": "fax_derive-0.2.0/Cargo.toml.orig",
+          "source_file_sha256": "34da4cab7ff30ef38fd413da49c787c83a32f782db304c93687567f168060725"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; same npm/Rust policy, not an independently acquired upstream grant or copyright"
+        },
+        {
+          "file": "texts/7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff.txt",
+          "sha256": "7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff",
+          "url": "https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE",
+          "commit": "5d70a161e33b62305f8bce7af3f7fbd011cfaf5d"
+        },
+        {
+          "file": "texts/83bb4c3e7fbfb7380c175923ba7dfe150e4e09bd4ebfb45e65e5f8a494d36ab9.txt",
+          "sha256": "83bb4c3e7fbfb7380c175923ba7dfe150e4e09bd4ebfb45e65e5f8a494d36ab9",
+          "source_path": "fxhash-0.2.1/Cargo.toml",
+          "source_file_sha256": "83bb4c3e7fbfb7380c175923ba7dfe150e4e09bd4ebfb45e65e5f8a494d36ab9"
+        },
+        {
+          "file": "texts/42f07fb23f8b37acf45914ccb71df077455a353850e148afeabb5c684f8ebaab.txt",
+          "sha256": "42f07fb23f8b37acf45914ccb71df077455a353850e148afeabb5c684f8ebaab",
+          "source_path": "fxhash-0.2.1/Cargo.toml.orig",
+          "source_file_sha256": "42f07fb23f8b37acf45914ccb71df077455a353850e148afeabb5c684f8ebaab"
+        },
+        {
+          "file": "texts/4b88f68c805a1bb0883f4c202c95083cf9bfc8122a9c57e16a0786bfe4a3b2e0.txt",
+          "sha256": "4b88f68c805a1bb0883f4c202c95083cf9bfc8122a9c57e16a0786bfe4a3b2e0",
+          "source_path": "fxhash-0.2.1/lib.rs",
+          "source_file_sha256": "885b72a1c977dc1c3ff4e0652719e62b6d8c3e713403e571afd581283f72df7b",
+          "byte_range": [
+            0,
+            467
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/361d0548c8284b9d033b3a94e75bd540c382da1fdbf62f1e99c7562a06ece5e1.txt",
+          "sha256": "361d0548c8284b9d033b3a94e75bd540c382da1fdbf62f1e99c7562a06ece5e1",
+          "source_path": "io_tee-0.1.1/Cargo.toml",
+          "source_file_sha256": "361d0548c8284b9d033b3a94e75bd540c382da1fdbf62f1e99c7562a06ece5e1"
+        },
+        {
+          "file": "texts/0ba20a4b5d8188a85014c5f6d52b5407aec2077986c05f6ba686f9899b767b95.txt",
+          "sha256": "0ba20a4b5d8188a85014c5f6d52b5407aec2077986c05f6ba686f9899b767b95",
+          "source_path": "io_tee-0.1.1/README.md",
+          "source_file_sha256": "0ba20a4b5d8188a85014c5f6d52b5407aec2077986c05f6ba686f9899b767b95"
+        },
+        {
+          "file": "texts/9556395f55b7c67a6041f84553c7c27b3ab3fe5505769f4f1003a7b0988f2586.txt",
+          "sha256": "9556395f55b7c67a6041f84553c7c27b3ab3fe5505769f4f1003a7b0988f2586",
+          "source_path": "io_tee-0.1.1/Cargo.toml.orig",
+          "source_file_sha256": "9556395f55b7c67a6041f84553c7c27b3ab3fe5505769f4f1003a7b0988f2586"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/2a112a5832b2046e8d7cdd5da7168c625bd086dae6a94ad459c037f6898288b9.txt",
+          "sha256": "2a112a5832b2046e8d7cdd5da7168c625bd086dae6a94ad459c037f6898288b9",
+          "source_path": "linux-keyutils-0.2.4/Cargo.toml",
+          "source_file_sha256": "2a112a5832b2046e8d7cdd5da7168c625bd086dae6a94ad459c037f6898288b9"
+        },
+        {
+          "file": "texts/60eaaa21859394c2a1679d47763c4d2c31b3fdab7de327ac72f4b4244cac5695.txt",
+          "sha256": "60eaaa21859394c2a1679d47763c4d2c31b3fdab7de327ac72f4b4244cac5695",
+          "source_path": "linux-keyutils-0.2.4/README.md",
+          "source_file_sha256": "60eaaa21859394c2a1679d47763c4d2c31b3fdab7de327ac72f4b4244cac5695"
+        },
+        {
+          "file": "texts/18c658b216c2031f6849f3638cff80f6f42df2280e95ad4d78fbc335d8dc413a.txt",
+          "sha256": "18c658b216c2031f6849f3638cff80f6f42df2280e95ad4d78fbc335d8dc413a",
+          "source_path": "linux-keyutils-0.2.4/Cargo.toml.orig",
+          "source_file_sha256": "18c658b216c2031f6849f3638cff80f6f42df2280e95ad4d78fbc335d8dc413a"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/1cff75df999e28aed7561f5556778fd1e9d1a314fad6d4926540c1f49a69c9a8.txt",
+          "sha256": "1cff75df999e28aed7561f5556778fd1e9d1a314fad6d4926540c1f49a69c9a8",
+          "source_path": "lock_free_hashtable-0.1.4/Cargo.toml",
+          "source_file_sha256": "1cff75df999e28aed7561f5556778fd1e9d1a314fad6d4926540c1f49a69c9a8"
+        },
+        {
+          "file": "texts/94eca265bbc37b34b0c1e6f5ad8992e1c06d47c5cd9402e9824abdcddbb0c70d.txt",
+          "sha256": "94eca265bbc37b34b0c1e6f5ad8992e1c06d47c5cd9402e9824abdcddbb0c70d",
+          "source_path": "lock_free_hashtable-0.1.4/Cargo.toml.orig",
+          "source_file_sha256": "94eca265bbc37b34b0c1e6f5ad8992e1c06d47c5cd9402e9824abdcddbb0c70d"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/examples/stress.rs",
+          "source_file_sha256": "b17d7cc6a889eb11cf263a64250b158698425b5b95cd82cde0828852dd8f2fce",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/src/atomic_value.rs",
+          "source_file_sha256": "54403a2f1cc51036368ffae012b1a6ff6cc21e8cf875a763daebae1a0a0522d3",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/src/fixed_cap.rs",
+          "source_file_sha256": "8b2225ded8534e07ce1f1c694b2b9a81c0db9ad5b2c2f093a69b857c323acc4b",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/src/lib.rs",
+          "source_file_sha256": "fbb09de705f0221006441738152312dc1254b922a087ded4c2f66ba828aedd4a",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/src/raw.rs",
+          "source_file_sha256": "0611935a6364e40dad51b0a2298b42acdcf771fd9db9b42be089fbd9786838ed",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/src/sharded.rs",
+          "source_file_sha256": "e8eb717ab98eaf378eed284098be2f49c8f87d5a455ba24b7264cb52d95b4a49",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/671575298ed67520d6c824e9fa02b9beda81a4714c11610e6b6db1c97bb8ad80.txt",
+          "sha256": "671575298ed67520d6c824e9fa02b9beda81a4714c11610e6b6db1c97bb8ad80",
+          "source_path": "pagable_derive-0.4.1/Cargo.toml",
+          "source_file_sha256": "671575298ed67520d6c824e9fa02b9beda81a4714c11610e6b6db1c97bb8ad80"
+        },
+        {
+          "file": "texts/8f9c90827fe9dbdaefa2ead4b35889c6e9525c2f756f2ea2c33ba47e5745051a.txt",
+          "sha256": "8f9c90827fe9dbdaefa2ead4b35889c6e9525c2f756f2ea2c33ba47e5745051a",
+          "source_path": "pagable_derive-0.4.1/Cargo.toml.orig",
+          "source_file_sha256": "8f9c90827fe9dbdaefa2ead4b35889c6e9525c2f756f2ea2c33ba47e5745051a"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "pagable_derive-0.4.1/src/derive_pagable.rs",
+          "source_file_sha256": "4fa08f2debf74f45409527fc9b27b649a892accda06555c3be80b44ce9859103",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "pagable_derive-0.4.1/src/derive_pagable_panic.rs",
+          "source_file_sha256": "8ff1f9ddb605928d8c67a4a5aa6c1dd61420a857868e21be69939d477b77cd82",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "pagable_derive-0.4.1/src/derive_pagable_tagged.rs",
+          "source_file_sha256": "f06f85a84143e6f14fb107e0cb025f4c0b5cf9e152113a72de0de360e928d8ea",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "pagable_derive-0.4.1/src/lib.rs",
+          "source_file_sha256": "d5a6ac09935f885f642c9d71b6b02a18d8fe4553ec46d322b76ddb3eb29d87b0",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "pagable_derive-0.4.1/src/typetag.rs",
+          "source_file_sha256": "d42f5f55900ab7851c4834feb05f59d1efac05ebe275334733cf741374810392",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/34de6835ef5df615acadc4071bb9d38565b23fbe5a9087a7cf30cc7ccfe02a20.txt",
+          "sha256": "34de6835ef5df615acadc4071bb9d38565b23fbe5a9087a7cf30cc7ccfe02a20",
+          "source_path": "rustls-platform-verifier-android-0.1.1/Cargo.toml",
+          "source_file_sha256": "34de6835ef5df615acadc4071bb9d38565b23fbe5a9087a7cf30cc7ccfe02a20"
+        },
+        {
+          "file": "texts/06142c21559d66a76c8740d8c505a2f7ed9078c45e7baee49dac58a131362640.txt",
+          "sha256": "06142c21559d66a76c8740d8c505a2f7ed9078c45e7baee49dac58a131362640",
+          "source_path": "rustls-platform-verifier-android-0.1.1/Cargo.toml.orig",
+          "source_file_sha256": "06142c21559d66a76c8740d8c505a2f7ed9078c45e7baee49dac58a131362640"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/e484570fd90c2fac292801cfcea36ea608d4ad4c5994d4691c8259d974204ddc.txt",
+          "sha256": "e484570fd90c2fac292801cfcea36ea608d4ad4c5994d4691c8259d974204ddc",
+          "source_path": "static_interner-0.1.2/Cargo.toml",
+          "source_file_sha256": "e484570fd90c2fac292801cfcea36ea608d4ad4c5994d4691c8259d974204ddc"
+        },
+        {
+          "file": "texts/128b24fc8a75912725e46b93446b67283ceae6c8139bc7b7e118591ee6dbde30.txt",
+          "sha256": "128b24fc8a75912725e46b93446b67283ceae6c8139bc7b7e118591ee6dbde30",
+          "source_path": "static_interner-0.1.2/Cargo.toml.orig",
+          "source_file_sha256": "128b24fc8a75912725e46b93446b67283ceae6c8139bc7b7e118591ee6dbde30"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "static_interner-0.1.2/src/lib.rs",
+          "source_file_sha256": "f8859299d67a5478a2038910f446e1104447c47314dc3bb276746e3924df06ac",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/8cbe5aa749bc56554247ea32dc0b5f170d17cdc0413726b91e87af01be0963aa.txt",
+          "sha256": "8cbe5aa749bc56554247ea32dc0b5f170d17cdc0413726b91e87af01be0963aa",
+          "source_path": "strong_hash-0.1.0/Cargo.toml",
+          "source_file_sha256": "8cbe5aa749bc56554247ea32dc0b5f170d17cdc0413726b91e87af01be0963aa"
+        },
+        {
+          "file": "texts/8e4b2ca9d3e354abbedbef94e22e19d8358bf497979bb6ec4c4bde0e1b3b5a23.txt",
+          "sha256": "8e4b2ca9d3e354abbedbef94e22e19d8358bf497979bb6ec4c4bde0e1b3b5a23",
+          "source_path": "strong_hash-0.1.0/Cargo.toml.orig",
+          "source_file_sha256": "8e4b2ca9d3e354abbedbef94e22e19d8358bf497979bb6ec4c4bde0e1b3b5a23"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "strong_hash-0.1.0/src/impls/num_bigint.rs",
+          "source_file_sha256": "11decb596ea5e7268d751a2067b7d9b7b1176fa672f5afb251f33f49b7d5c160",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "strong_hash-0.1.0/src/impls/triomphe.rs",
+          "source_file_sha256": "c5c26079af2237e8b318dcdb1952292fd7895ac266e0f02026aee8b30052ba16",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "strong_hash-0.1.0/src/impls.rs",
+          "source_file_sha256": "8453f587171bb1ba46211263be07ac595ff86284fc2edb1466df641db009c1b1",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "strong_hash-0.1.0/src/lib.rs",
+          "source_file_sha256": "f5fa77466c86ef7b8d7a5af2f034067a543431fd1047d38d9fcf66cb4ede43d7",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/734392bd2b68ddac73fa0149f56d831c91f175f19cd95774be6768f4832abcf6.txt",
+          "sha256": "734392bd2b68ddac73fa0149f56d831c91f175f19cd95774be6768f4832abcf6",
+          "source_path": "strong_hash_derive-0.1.0/Cargo.toml",
+          "source_file_sha256": "734392bd2b68ddac73fa0149f56d831c91f175f19cd95774be6768f4832abcf6"
+        },
+        {
+          "file": "texts/7e4bc1b1fd90dd8ba3591578677b27ada47c5dabab3ad0cc6db5a2599a9a37ec.txt",
+          "sha256": "7e4bc1b1fd90dd8ba3591578677b27ada47c5dabab3ad0cc6db5a2599a9a37ec",
+          "source_path": "strong_hash_derive-0.1.0/Cargo.toml.orig",
+          "source_file_sha256": "7e4bc1b1fd90dd8ba3591578677b27ada47c5dabab3ad0cc6db5a2599a9a37ec"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "strong_hash_derive-0.1.0/src/lib.rs",
+          "source_file_sha256": "391f35b3f1387f7408b135b95458d52eab89713f52f76553254c4dddc54a6185",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/9652222664ffc7e2a26fdcdebdce0917a455b39d8fbcbf451bf0b011a3067bf7.txt",
+          "sha256": "9652222664ffc7e2a26fdcdebdce0917a455b39d8fbcbf451bf0b011a3067bf7",
+          "source_path": "winapi-i686-pc-windows-gnu-0.4.0/Cargo.toml",
+          "source_file_sha256": "9652222664ffc7e2a26fdcdebdce0917a455b39d8fbcbf451bf0b011a3067bf7"
+        },
+        {
+          "file": "texts/5257d6f5283ab052b6af51f578a8c74e14c31deb53a7c6cd9e6fa16135d57eb3.txt",
+          "sha256": "5257d6f5283ab052b6af51f578a8c74e14c31deb53a7c6cd9e6fa16135d57eb3",
+          "source_path": "winapi-i686-pc-windows-gnu-0.4.0/Cargo.toml.orig",
+          "source_file_sha256": "5257d6f5283ab052b6af51f578a8c74e14c31deb53a7c6cd9e6fa16135d57eb3"
+        },
+        {
+          "file": "texts/72f9dd4f441e55dbd746f776e04290d076584f469e9d0c964b152bf909029ad3.txt",
+          "sha256": "72f9dd4f441e55dbd746f776e04290d076584f469e9d0c964b152bf909029ad3",
+          "source_path": "winapi-i686-pc-windows-gnu-0.4.0/build.rs",
+          "source_file_sha256": "4344ce95f51197e1377429cd9ef7a8e3f97d39546776705857991f2f9416f545",
+          "byte_range": [
+            0,
+            383
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/9b0a59b4c5af60f46f79d2adbe433e07189d076972b8d33e9abca077dc10ccf7.txt",
+          "sha256": "9b0a59b4c5af60f46f79d2adbe433e07189d076972b8d33e9abca077dc10ccf7",
+          "source_path": "winapi-i686-pc-windows-gnu-0.4.0/src/lib.rs",
+          "source_file_sha256": "79212a91f610f8a77aa6ed4cc77212c2531eeb35630388bf07323cc328fcca42",
+          "byte_range": [
+            0,
+            378
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/a88605a11db5def9b6cf73398e83b3edb72228cb43ea935729fac5cd33cec22c.txt",
+          "sha256": "a88605a11db5def9b6cf73398e83b3edb72228cb43ea935729fac5cd33cec22c",
+          "source_path": "winapi-x86_64-pc-windows-gnu-0.4.0/Cargo.toml",
+          "source_file_sha256": "a88605a11db5def9b6cf73398e83b3edb72228cb43ea935729fac5cd33cec22c"
+        },
+        {
+          "file": "texts/d158846cdb1259d606bfbeb050e386484cb18f14db41478568114eddb76ec43e.txt",
+          "sha256": "d158846cdb1259d606bfbeb050e386484cb18f14db41478568114eddb76ec43e",
+          "source_path": "winapi-x86_64-pc-windows-gnu-0.4.0/Cargo.toml.orig",
+          "source_file_sha256": "d158846cdb1259d606bfbeb050e386484cb18f14db41478568114eddb76ec43e"
+        },
+        {
+          "file": "texts/72f9dd4f441e55dbd746f776e04290d076584f469e9d0c964b152bf909029ad3.txt",
+          "sha256": "72f9dd4f441e55dbd746f776e04290d076584f469e9d0c964b152bf909029ad3",
+          "source_path": "winapi-x86_64-pc-windows-gnu-0.4.0/build.rs",
+          "source_file_sha256": "b4ab421e1dc98159dd4440813cdaf7d9ea98278324bc6118d0f7cf378933f371",
+          "byte_range": [
+            0,
+            383
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/9b0a59b4c5af60f46f79d2adbe433e07189d076972b8d33e9abca077dc10ccf7.txt",
+          "sha256": "9b0a59b4c5af60f46f79d2adbe433e07189d076972b8d33e9abca077dc10ccf7",
+          "source_path": "winapi-x86_64-pc-windows-gnu-0.4.0/src/lib.rs",
+          "source_file_sha256": "79212a91f610f8a77aa6ed4cc77212c2531eeb35630388bf07323cc328fcca42",
+          "byte_range": [
+            0,
+            378
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/4aef3e030384e8a14f801ee6c8d023ef0a54163bb760f4f07d77ae99ac260f79.txt",
+          "sha256": "4aef3e030384e8a14f801ee6c8d023ef0a54163bb760f4f07d77ae99ac260f79",
+          "source_path": "winsplit-0.1.0/Cargo.toml",
+          "source_file_sha256": "4aef3e030384e8a14f801ee6c8d023ef0a54163bb760f4f07d77ae99ac260f79"
+        },
+        {
+          "file": "texts/39bb1a6d7befd101a9f8228db3b2deab823042b54dc82a410534cb68ba93edbc.txt",
+          "sha256": "39bb1a6d7befd101a9f8228db3b2deab823042b54dc82a410534cb68ba93edbc",
+          "source_path": "winsplit-0.1.0/README.md",
+          "source_file_sha256": "39bb1a6d7befd101a9f8228db3b2deab823042b54dc82a410534cb68ba93edbc"
+        },
+        {
+          "file": "texts/7cc24e9a764e9dec5789436588b54eb8c9e51b188e78de3e6109b6ec8e0adbdb.txt",
+          "sha256": "7cc24e9a764e9dec5789436588b54eb8c9e51b188e78de3e6109b6ec8e0adbdb",
+          "source_path": "winsplit-0.1.0/Cargo.toml.orig",
+          "source_file_sha256": "7cc24e9a764e9dec5789436588b54eb8c9e51b188e78de3e6109b6ec8e0adbdb"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        },
+        {
+          "file": "texts/65d39b608d230ee0a4d39d4de9388d695f2117322aff7005243d5b8e742a6526.txt",
+          "sha256": "65d39b608d230ee0a4d39d4de9388d695f2117322aff7005243d5b8e742a6526",
+          "source_path": "zune-core-0.4.12/Cargo.toml",
+          "source_file_sha256": "65d39b608d230ee0a4d39d4de9388d695f2117322aff7005243d5b8e742a6526"
+        },
+        {
+          "file": "texts/cc3fa616bb3dd673abbdebce2d8b2a1a1ecb6a3dd9654313d6fcc0ab2d3c5f84.txt",
+          "sha256": "cc3fa616bb3dd673abbdebce2d8b2a1a1ecb6a3dd9654313d6fcc0ab2d3c5f84",
+          "source_path": "zune-core-0.4.12/Cargo.toml.orig",
+          "source_file_sha256": "cc3fa616bb3dd673abbdebce2d8b2a1a1ecb6a3dd9654313d6fcc0ab2d3c5f84"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/bit_depth.rs",
+          "source_file_sha256": "879b5b4b3ac99fc567f8d281662dc4125109f835b3944d023d038a084b2c0dd9",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/bytestream/reader.rs",
+          "source_file_sha256": "ca798f96876670bd8bd2a915cafc0eefaef57a09543a2fd310b0b4c3d48ad84a",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/bytestream/traits.rs",
+          "source_file_sha256": "fed12794c3bb7ee0fecc00ca96f96e96a6e3086407efb7b2b2aa10fbf2e01675",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/bytestream/writer.rs",
+          "source_file_sha256": "96227f650b813f68e1fd805ed523bbce7bf97af558bbe02b940e6dc2821eaeab",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/bytestream.rs",
+          "source_file_sha256": "ec12a04b4e1cfe1e592877b5ddc12df1f913677727525b88bfce935fc631519b",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/colorspace.rs",
+          "source_file_sha256": "070830c5f1056d3d0747f6cba1a12159379c192f5044584fb8d20b61abc338e7",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/0c6d164b892a8c1ab08b6338eb9198198dc667286dc919381596f58620ee0115.txt",
+          "sha256": "0c6d164b892a8c1ab08b6338eb9198198dc667286dc919381596f58620ee0115",
+          "source_path": "zune-core-0.4.12/src/lib.rs",
+          "source_file_sha256": "a627136eedec33bdf69996a43f8e8885c065f94d7c450d1503576e5b5922f44c",
+          "byte_range": [
+            0,
+            159
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/log.rs",
+          "source_file_sha256": "1655ea004aee621e4a93e57b6787693348348d8bb23f06feffc1e49537ea7565",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/options/decoder.rs",
+          "source_file_sha256": "f2c419e41c725319ebd777992e74dad19e4454869eed893145c882913ba26baf",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/options/encoder.rs",
+          "source_file_sha256": "22f86e152392a6f1d97832873498c172da34985454a7a0f2d1cb86295c7c58d0",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/result.rs",
+          "source_file_sha256": "92a098ba09ae4e5202da45a2d2165a6df804d3952e8c657950d064e4714afcaa",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/serde.rs",
+          "source_file_sha256": "23fe068415888dadb3daa1795f09214fb0d79e1a775fd7dce066386ee9334d59",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "scope": "Source-grounded alternative election and retained original declarations/headers, not inferred author attribution, enabled-feature proof, or a legal opinion."
+    },
+    {
+      "name": "rusty-v8-gitlink-notices",
+      "source_inventory": "source-records/primary-rusty-v8-gitlink-notices.json",
+      "source_inventory_sha256": "a1edbef92252261c62f7bafd3c9ddaa37fa6b38dd12bfb1748580c3c858d4fd0",
+      "notices": [
+        {
+          "file": "texts/ff11d445fb41a1087c7630e120ab15f1a2cb67c1b707173cb494141805fca35e.txt",
+          "sha256": "ff11d445fb41a1087c7630e120ab15f1a2cb67c1b707173cb494141805fca35e",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/src/buildtools.git/+/17495e454aae81b581e8b3caccbb53054509b280/LICENSE?format=TEXT",
+            "sha256": "b419e435f754c3e74514e6d7f2fdd9096b0b6662f2c3e5b5b944151b1dc2fa5e",
+            "size": 2052,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747.txt",
+          "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git/+/d16e32215c3ab90ba57c2e904a5344d85c7353e4/LICENSE?format=TEXT",
+            "sha256": "cb63961fac969b523344c5c40ec27ef60d7e8c7b34d2ef63548eb19f35a261e4",
+            "size": 15148,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf.txt",
+          "sha256": "17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://raw.githubusercontent.com/Maratyszcza/FP16/3d2de1816307bac63c16a297e8c4dc501b4076df/LICENSE",
+            "sha256": "17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf",
+            "size": 1157,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "identity"
+        },
+        {
+          "file": "texts/e340270d4f64384569a91d546acb5b094d69ce47f0c015db77abb74dc6f815af.txt",
+          "sha256": "e340270d4f64384569a91d546acb5b094d69ce47f0c015db77abb74dc6f815af",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/google/highway.git/+/2607d3b5b0113992fe84d3848859eae13b3b52c1/LICENSE?format=TEXT",
+            "sha256": "df4a26d95470525c7d4bd0740051d584aec59d9d51fc0e6b091b1f1c7827e5d6",
+            "size": 27716,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/451167c55c0fa447cc2d5632714f5e3c567fe4f1e1badefab2c1333852198aca.txt",
+          "sha256": "451167c55c0fa447cc2d5632714f5e3c567fe4f1e1badefab2c1333852198aca",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/ee5f27adc28bd3f15b2c293f726d14d2e336cbd5/LICENSE?format=TEXT",
+            "sha256": "c5a4698576c4195d3b5869d409cb3d4be7fca00201a5f15ecb5b03aae07b2e2e",
+            "size": 35316,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/c62d7697c03979f5056d28b338fafc7a1152820f7b379adf4a9d88cd37160f96.txt",
+          "sha256": "c62d7697c03979f5056d28b338fafc7a1152820f7b379adf4a9d88cd37160f96",
+          "source_path": "license.html",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/ee5f27adc28bd3f15b2c293f726d14d2e336cbd5/license.html?format=TEXT",
+            "sha256": "c6575fd2b6e16a2b10fdd8e7be8e11cc118e7a9a4822fa1e62b497491c78046c",
+            "size": 832,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b.txt",
+          "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+          "source_path": "LICENSE.TXT",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx.git/+/5abc7f839700f0f17338434e1c1c6a8c87c00c11/LICENSE.TXT?format=TEXT",
+            "sha256": "2df883eed85d488ef641ac22f3ce8afb495508b6f87c38847af95ddbf94aea70",
+            "size": 22272,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c.txt",
+          "sha256": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c",
+          "source_path": "LICENSE.TXT",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi.git/+/8f11bb1d4438d0239d0dfc1bd9456a9f31629dda/LICENSE.TXT?format=TEXT",
+            "sha256": "8d3456e92a31955fdaea9c32634e2e2d5abf87e32e862ca28f40b979e68ea612",
+            "size": 22276,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d.txt",
+          "sha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d",
+          "source_path": "LICENSE.TXT",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind.git/+/d6c7a21e978f0adaa43accaad53bc64f0b64f6ec/LICENSE.TXT?format=TEXT",
+            "sha256": "74a62b8fafbbab7567095cdca5e84a9044e31a68a16bb52080f1525643308e2d",
+            "size": 22276,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47.txt",
+          "sha256": "ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47",
+          "source_path": "LICENSE.TXT",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git/+/9309c117ebae84dd2f9df1ef99de4782162527d5/LICENSE.TXT?format=TEXT",
+            "sha256": "0cced642a3b6d411a42ad6e8ebd7942b4768a530c6e063fa41455a3600a82887",
+            "size": 20188,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/0bbe88228fd63d20ec097f64e58d5a0a465123ae139140a18d406c60b48824b5.txt",
+          "sha256": "0bbe88228fd63d20ec097f64e58d5a0a465123ae139140a18d406c60b48824b5",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/src/third_party/markupsafe.git/+/4256084ae14175d38a3ff7d739dca83ae49ccec6/LICENSE?format=TEXT",
+            "sha256": "629efc2bc394ba5878e90c41089117cd4d7545bd3268bf0b06dbf35082970488",
+            "size": 2112,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f.txt",
+          "sha256": "fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/src/third_party/simdutf/+/f7356eed293f8208c40b3c1b344a50bd70971983/LICENSE?format=TEXT",
+            "sha256": "978d0d3cf8b2907e241ef30912ed5b277b4c37aa7d51f35d96485293621723d4",
+            "size": 1412,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509.txt",
+          "sha256": "6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://raw.githubusercontent.com/denoland/v8/ac1e23989121713ca642f6650b34deff7b686896/LICENSE",
+            "sha256": "6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509",
+            "size": 3093,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "identity"
+        }
+      ],
+      "scope": "Exact upstream rusty_v8 Git-submodule legal texts; not all submodules are linked. Actual Codex V8 producer Bazel overrides are separately recorded."
+    },
+    {
+      "name": "v8-bazel-icu-and-runtime-licenses",
+      "source_inventory": "source-records/primary-v8-bazel-icu-and-runtime-licenses.json",
+      "source_inventory_sha256": "8053153932c610351dd8ba47c0fa0317c1b72b6d531f8e2263375ddf068c4ff4",
+      "notices": [
+        {
+          "component": "v8-bazel-icu",
+          "source_file": "LICENSE",
+          "file": "texts/451167c55c0fa447cc2d5632714f5e3c567fe4f1e1badefab2c1333852198aca.txt",
+          "sha256": "451167c55c0fa447cc2d5632714f5e3c567fe4f1e1badefab2c1333852198aca",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/a86a32e67b8d1384b33f8fa48c83a6079b86f8cd/LICENSE?format=TEXT",
+            "sha256": "c5a4698576c4195d3b5869d409cb3d4be7fca00201a5f15ecb5b03aae07b2e2e",
+            "size": 35316,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "source_commit": "a86a32e67b8d1384b33f8fa48c83a6079b86f8cd",
+          "legal_text": true
+        },
+        {
+          "component": "v8-bazel-icu",
+          "source_file": "license.html",
+          "file": "texts/c62d7697c03979f5056d28b338fafc7a1152820f7b379adf4a9d88cd37160f96.txt",
+          "sha256": "c62d7697c03979f5056d28b338fafc7a1152820f7b379adf4a9d88cd37160f96",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/a86a32e67b8d1384b33f8fa48c83a6079b86f8cd/license.html?format=TEXT",
+            "sha256": "c6575fd2b6e16a2b10fdd8e7be8e11cc118e7a9a4822fa1e62b497491c78046c",
+            "size": 832,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "source_commit": "a86a32e67b8d1384b33f8fa48c83a6079b86f8cd",
+          "legal_text": true
+        },
+        {
+          "component": "dragonbox",
+          "source_file": "LICENSE-Apache2-LLVM",
+          "file": "texts/9e45e856bedccee9f67254082ca11851d954de2fed7448c4bed19ad9aab99a91.txt",
+          "sha256": "9e45e856bedccee9f67254082ca11851d954de2fed7448c4bed19ad9aab99a91",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE-Apache2-LLVM?format=TEXT",
+            "sha256": "c71962c081584c01a7c18adb3a19137cb831604941bd829dc78751e85862dc1d",
+            "size": 16352,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "source_commit": "beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44",
+          "legal_text": true
+        },
+        {
+          "component": "dragonbox",
+          "source_file": "LICENSE-Boost",
+          "file": "texts/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566.txt",
+          "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE-Boost?format=TEXT",
+            "sha256": "5624d76e1b4569cebba65ba1f7eda5fbd231bc5ee5e4136211561b2109e0c4f8",
+            "size": 1784,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "source_commit": "beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44",
+          "legal_text": true
+        },
+        {
+          "component": "jinja2",
+          "source_file": "LICENSE.rst",
+          "file": "texts/3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b.txt",
+          "sha256": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git/+/c3027d884967773057bf74b957e3fea87e5df4d7/LICENSE.rst?format=TEXT",
+            "sha256": "9f1ec83a2b3616580c2305e3d168c380700bee92b8b20ce92c16b34bd7dba254",
+            "size": 1968,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "source_commit": "c3027d884967773057bf74b957e3fea87e5df4d7",
+          "legal_text": true
+        }
+      ],
+      "scope": "Actual producer ICU77.1, Dragonbox and Jinja2 grants; not inferred from Rust crate root licence."
+    },
+    {
+      "name": "release-compiler-legal-materials",
+      "source_inventory": "source-records/primary-release-compiler-legal-materials.json",
+      "source_inventory_sha256": "e5dea37ecd8720bf91ddddcfd77a3dd1ad4cf67e4d5129faca9d3fbc4f8b4228",
+      "notices": [
+        {
+          "member": "rustc-1.95.0-x86_64-unknown-linux-gnu/LICENSE-APACHE",
+          "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+          "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+          "archive": {
+            "url": "https://static.rust-lang.org/dist/2026-04-16/rustc-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+            "sha256": "8426a3d170a5879f5682f5fbdd024a1779b3951e7baba685af2d6dc32a6dfc15",
+            "size": 80351960,
+            "integrity": null,
+            "signature_verified": false
+          }
+        },
+        {
+          "member": "rustc-1.95.0-x86_64-unknown-linux-gnu/COPYRIGHT",
+          "file": "texts/172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af.txt",
+          "sha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af",
+          "archive": {
+            "url": "https://static.rust-lang.org/dist/2026-04-16/rustc-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+            "sha256": "8426a3d170a5879f5682f5fbdd024a1779b3951e7baba685af2d6dc32a6dfc15",
+            "size": 80351960,
+            "integrity": null,
+            "signature_verified": false
+          }
+        },
+        {
+          "member": "rustc-1.95.0-x86_64-unknown-linux-gnu/LICENSE-MIT",
+          "file": "texts/b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1.txt",
+          "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1",
+          "archive": {
+            "url": "https://static.rust-lang.org/dist/2026-04-16/rustc-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+            "sha256": "8426a3d170a5879f5682f5fbdd024a1779b3951e7baba685af2d6dc32a6dfc15",
+            "size": 80351960,
+            "integrity": null,
+            "signature_verified": false
+          }
+        },
+        {
+          "member": "rustc-1.95.0-x86_64-unknown-linux-gnu/rustc/share/doc/rust/COPYRIGHT.html",
+          "file": "texts/9bd02a099a3f9fdf977f9dd6ea3dc664723e992a267d86f447ea9e7d068824ac.txt",
+          "sha256": "9bd02a099a3f9fdf977f9dd6ea3dc664723e992a267d86f447ea9e7d068824ac",
+          "archive": {
+            "url": "https://static.rust-lang.org/dist/2026-04-16/rustc-1.95.0-x86_64-unknown-linux-gnu.tar.xz",
+            "sha256": "8426a3d170a5879f5682f5fbdd024a1779b3951e7baba685af2d6dc32a6dfc15",
+            "size": 80351960,
+            "integrity": null,
+            "signature_verified": false
+          }
+        }
+      ],
+      "scope": "Exact official rustc1.95.0 GNU compiler distribution legal corpus, including third-party notices. This is release-compiler material, not an inventory of the Rust toolchain copied into the development shell image."
+    },
+    {
+      "name": "rusty-v8-wrapper",
+      "source_inventory": "source-records/primary-rusty-v8-wrapper.json",
+      "source_inventory_sha256": "13274f11624654fbb23fb11b7b65033312f437b7551cfd605f5ab0cd0f6af03d",
+      "notices": [
+        {
+          "file": "texts/1c6356fb751d45f0c53093ebf8a7f5e580e802f51999178e19d60f3ec39e147d.txt",
+          "sha256": "1c6356fb751d45f0c53093ebf8a7f5e580e802f51999178e19d60f3ec39e147d",
+          "acquisition": {
+            "url": "https://raw.githubusercontent.com/denoland/rusty_v8/5c15a6995c9bb4bacd3e341b59fff32c909c80bf/LICENSE",
+            "sha256": "1c6356fb751d45f0c53093ebf8a7f5e580e802f51999178e19d60f3ec39e147d",
+            "size": 1078,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "scope": "Original rusty_v8 wrapper licence from the exact crate-recorded upstream commit; crate dirty=true remains explicit, not a full clean-source assertion."
+        }
+      ],
+      "scope": "Exact upstream wrapper grant; no invented attribution."
+    },
+    {
+      "name": "exact-source-regeneration-supplements",
+      "source_inventory": "source-records/regenerated-source-gap-supplements.json",
+      "source_inventory_sha256": "1ca17b863a6133e144dfb196a7232a808c99bd83756d91bdcb529d475b8fbb0e",
+      "notices": [
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "size": 1339,
+          "integrity": null,
+          "signature_verified": false,
+          "file": "texts/7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/bytecodealliance/wasm-tools/d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-MIT",
+          "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+          "size": 1023,
+          "integrity": null,
+          "signature_verified": false,
+          "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/bytecodealliance/wasm-tools/d4e317f22c3bace76cb3205003bcc34b4929037d/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "size": 10847,
+          "integrity": null,
+          "signature_verified": false,
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/facebook/starlark-rust/0c8d107ab963362ba47ee3ab9e0173bc39bd101d/LICENSE",
+          "sha256": "50e6751797c50dedd75ef1b8a0d9e42f5f8472e9fbce91f34718e9f97b0c780a",
+          "size": 11324,
+          "integrity": null,
+          "signature_verified": false,
+          "file": "texts/50e6751797c50dedd75ef1b8a0d9e42f5f8472e9fbce91f34718e9f97b0c780a.txt"
+        }
+      ],
+      "scope": "Exact VCS workspace-root legal materials for archives formerly miscounted as code-name notices."
+    }
+  ],
+  "required_runtime_notices": [
+    {
+      "file": "provider-notices/MIT-template.txt",
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
+    },
+    {
+      "file": "texts/01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt",
+      "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+    },
+    {
+      "file": "texts/02aea3ade0c02470335987f7d93ffaed877bcefc8414a416e2e548665bb0bfd0.txt",
+      "sha256": "02aea3ade0c02470335987f7d93ffaed877bcefc8414a416e2e548665bb0bfd0"
+    },
+    {
+      "file": "texts/06142c21559d66a76c8740d8c505a2f7ed9078c45e7baee49dac58a131362640.txt",
+      "sha256": "06142c21559d66a76c8740d8c505a2f7ed9078c45e7baee49dac58a131362640"
+    },
+    {
+      "file": "texts/074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+    },
+    {
+      "file": "texts/097a889aa954d04e088b790b10a4014d6189561d0a6013935a73ce3d4ddaaf06.txt",
+      "sha256": "097a889aa954d04e088b790b10a4014d6189561d0a6013935a73ce3d4ddaaf06"
+    },
+    {
+      "file": "texts/0a64edade36fd17b87485bc39ef05439c86b51a13d65d754e9e10f6bb7bd6894.txt",
+      "sha256": "0a64edade36fd17b87485bc39ef05439c86b51a13d65d754e9e10f6bb7bd6894"
+    },
+    {
+      "file": "texts/0ba20a4b5d8188a85014c5f6d52b5407aec2077986c05f6ba686f9899b767b95.txt",
+      "sha256": "0ba20a4b5d8188a85014c5f6d52b5407aec2077986c05f6ba686f9899b767b95"
+    },
+    {
+      "file": "texts/0bbe88228fd63d20ec097f64e58d5a0a465123ae139140a18d406c60b48824b5.txt",
+      "sha256": "0bbe88228fd63d20ec097f64e58d5a0a465123ae139140a18d406c60b48824b5"
+    },
+    {
+      "file": "texts/0c6d164b892a8c1ab08b6338eb9198198dc667286dc919381596f58620ee0115.txt",
+      "sha256": "0c6d164b892a8c1ab08b6338eb9198198dc667286dc919381596f58620ee0115"
+    },
+    {
+      "file": "texts/0ea204979bda3a271442d39e327b479e65d5998bf9525c3272d5ce60a53a621d.txt",
+      "sha256": "0ea204979bda3a271442d39e327b479e65d5998bf9525c3272d5ce60a53a621d"
+    },
+    {
+      "file": "texts/0efdd7e1522b73c4a206ab2fb1bb8a609157abccf588837bca6eb7c98d5b35c6.txt",
+      "sha256": "0efdd7e1522b73c4a206ab2fb1bb8a609157abccf588837bca6eb7c98d5b35c6"
+    },
+    {
+      "file": "texts/128b24fc8a75912725e46b93446b67283ceae6c8139bc7b7e118591ee6dbde30.txt",
+      "sha256": "128b24fc8a75912725e46b93446b67283ceae6c8139bc7b7e118591ee6dbde30"
+    },
+    {
+      "file": "texts/15137d6c822e3ab097093a33c3a39a9df699f373f6438867ad534ff60762a947.txt",
+      "sha256": "15137d6c822e3ab097093a33c3a39a9df699f373f6438867ad534ff60762a947"
+    },
+    {
+      "file": "texts/172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af.txt",
+      "sha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af"
+    },
+    {
+      "file": "texts/17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c.txt",
+      "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+    },
+    {
+      "file": "texts/17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf.txt",
+      "sha256": "17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf"
+    },
+    {
+      "file": "texts/18c658b216c2031f6849f3638cff80f6f42df2280e95ad4d78fbc335d8dc413a.txt",
+      "sha256": "18c658b216c2031f6849f3638cff80f6f42df2280e95ad4d78fbc335d8dc413a"
+    },
+    {
+      "file": "texts/197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811.txt",
+      "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+    },
+    {
+      "file": "texts/1c6356fb751d45f0c53093ebf8a7f5e580e802f51999178e19d60f3ec39e147d.txt",
+      "sha256": "1c6356fb751d45f0c53093ebf8a7f5e580e802f51999178e19d60f3ec39e147d"
+    },
+    {
+      "file": "texts/1cff75df999e28aed7561f5556778fd1e9d1a314fad6d4926540c1f49a69c9a8.txt",
+      "sha256": "1cff75df999e28aed7561f5556778fd1e9d1a314fad6d4926540c1f49a69c9a8"
+    },
+    {
+      "file": "texts/23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3.txt",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
+    },
+    {
+      "file": "texts/2974bc2f16b5897ef0c0f323a5465b7402295ec573c718d74d5e413f825f3b4a.txt",
+      "sha256": "2974bc2f16b5897ef0c0f323a5465b7402295ec573c718d74d5e413f825f3b4a"
+    },
+    {
+      "file": "texts/2a112a5832b2046e8d7cdd5da7168c625bd086dae6a94ad459c037f6898288b9.txt",
+      "sha256": "2a112a5832b2046e8d7cdd5da7168c625bd086dae6a94ad459c037f6898288b9"
+    },
+    {
+      "file": "texts/30b57c6088b5a013431579d588346e5bdc8a19cb9c76bad89f9da4013157fdf7.txt",
+      "sha256": "30b57c6088b5a013431579d588346e5bdc8a19cb9c76bad89f9da4013157fdf7"
+    },
+    {
+      "file": "texts/34da4cab7ff30ef38fd413da49c787c83a32f782db304c93687567f168060725.txt",
+      "sha256": "34da4cab7ff30ef38fd413da49c787c83a32f782db304c93687567f168060725"
+    },
+    {
+      "file": "texts/34de6835ef5df615acadc4071bb9d38565b23fbe5a9087a7cf30cc7ccfe02a20.txt",
+      "sha256": "34de6835ef5df615acadc4071bb9d38565b23fbe5a9087a7cf30cc7ccfe02a20"
+    },
+    {
+      "file": "texts/361d0548c8284b9d033b3a94e75bd540c382da1fdbf62f1e99c7562a06ece5e1.txt",
+      "sha256": "361d0548c8284b9d033b3a94e75bd540c382da1fdbf62f1e99c7562a06ece5e1"
+    },
+    {
+      "file": "texts/36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951.txt",
+      "sha256": "36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951"
+    },
+    {
+      "file": "texts/36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673.txt",
+      "sha256": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673"
+    },
+    {
+      "file": "texts/39bb1a6d7befd101a9f8228db3b2deab823042b54dc82a410534cb68ba93edbc.txt",
+      "sha256": "39bb1a6d7befd101a9f8228db3b2deab823042b54dc82a410534cb68ba93edbc"
+    },
+    {
+      "file": "texts/3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b.txt",
+      "sha256": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b"
+    },
+    {
+      "file": "texts/3d1742e3af9b9adcc9aa0d1b1c7163b50df41fea184c8f6bbcee48341cffe035.txt",
+      "sha256": "3d1742e3af9b9adcc9aa0d1b1c7163b50df41fea184c8f6bbcee48341cffe035"
+    },
+    {
+      "file": "texts/3d34610fc6b5e1b0bfe4e2f36171c2d62c28ef05cb8d704f5a0073be41a43b3d.txt",
+      "sha256": "3d34610fc6b5e1b0bfe4e2f36171c2d62c28ef05cb8d704f5a0073be41a43b3d"
+    },
+    {
+      "file": "texts/3f712e5fbdfdbd5ee7d9b8c8152580220df55de47f4eba2f26c95c4de19ad096.txt",
+      "sha256": "3f712e5fbdfdbd5ee7d9b8c8152580220df55de47f4eba2f26c95c4de19ad096"
+    },
+    {
+      "file": "texts/3f941b3b89cf7b8370ceb83cc76d2120d471b58735d8ca60238a751a48d7f72f.txt",
+      "sha256": "3f941b3b89cf7b8370ceb83cc76d2120d471b58735d8ca60238a751a48d7f72f"
+    },
+    {
+      "file": "texts/4139ed7c5b5a93a163d15f36f1e7aa3bfc7a7b0a541b1756f6090b8fc17147e9.txt",
+      "sha256": "4139ed7c5b5a93a163d15f36f1e7aa3bfc7a7b0a541b1756f6090b8fc17147e9"
+    },
+    {
+      "file": "texts/424ad83d0fb170939e3be8d84ff3b3c46c8bbd860a85e82998427ca9dbb70db3.txt",
+      "sha256": "424ad83d0fb170939e3be8d84ff3b3c46c8bbd860a85e82998427ca9dbb70db3"
+    },
+    {
+      "file": "texts/42f07fb23f8b37acf45914ccb71df077455a353850e148afeabb5c684f8ebaab.txt",
+      "sha256": "42f07fb23f8b37acf45914ccb71df077455a353850e148afeabb5c684f8ebaab"
+    },
+    {
+      "file": "texts/43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1.txt",
+      "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1"
+    },
+    {
+      "file": "texts/450ebb9e9e50c2809d9ca581931fc8946d8d5aa0c8c35aae9ac471342fe4a88e.txt",
+      "sha256": "450ebb9e9e50c2809d9ca581931fc8946d8d5aa0c8c35aae9ac471342fe4a88e"
+    },
+    {
+      "file": "texts/451167c55c0fa447cc2d5632714f5e3c567fe4f1e1badefab2c1333852198aca.txt",
+      "sha256": "451167c55c0fa447cc2d5632714f5e3c567fe4f1e1badefab2c1333852198aca"
+    },
+    {
+      "file": "texts/4aef3e030384e8a14f801ee6c8d023ef0a54163bb760f4f07d77ae99ac260f79.txt",
+      "sha256": "4aef3e030384e8a14f801ee6c8d023ef0a54163bb760f4f07d77ae99ac260f79"
+    },
+    {
+      "file": "texts/4af93c12062c58058378de2397dc1c92bbff9ddfb1d583a01c84127557ce97ca.txt",
+      "sha256": "4af93c12062c58058378de2397dc1c92bbff9ddfb1d583a01c84127557ce97ca"
+    },
+    {
+      "file": "texts/4b88f68c805a1bb0883f4c202c95083cf9bfc8122a9c57e16a0786bfe4a3b2e0.txt",
+      "sha256": "4b88f68c805a1bb0883f4c202c95083cf9bfc8122a9c57e16a0786bfe4a3b2e0"
+    },
+    {
+      "file": "texts/50e6751797c50dedd75ef1b8a0d9e42f5f8472e9fbce91f34718e9f97b0c780a.txt",
+      "sha256": "50e6751797c50dedd75ef1b8a0d9e42f5f8472e9fbce91f34718e9f97b0c780a"
+    },
+    {
+      "file": "texts/5257d6f5283ab052b6af51f578a8c74e14c31deb53a7c6cd9e6fa16135d57eb3.txt",
+      "sha256": "5257d6f5283ab052b6af51f578a8c74e14c31deb53a7c6cd9e6fa16135d57eb3"
+    },
+    {
+      "file": "texts/539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b.txt",
+      "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b"
+    },
+    {
+      "file": "texts/5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2.txt",
+      "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2"
+    },
+    {
+      "file": "texts/5a7b465d39b5e018bc40cc34162176269f7c476989cb4dbcf0ec0b81701545a7.txt",
+      "sha256": "5a7b465d39b5e018bc40cc34162176269f7c476989cb4dbcf0ec0b81701545a7"
+    },
+    {
+      "file": "texts/5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177.txt",
+      "sha256": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177"
+    },
+    {
+      "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+      "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5"
+    },
+    {
+      "file": "texts/5f07f451f48790a57f5ea014b51a804718a3d65a68d58309af019ef3a4ba06ae.txt",
+      "sha256": "5f07f451f48790a57f5ea014b51a804718a3d65a68d58309af019ef3a4ba06ae"
+    },
+    {
+      "file": "texts/5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb.txt",
+      "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+    },
+    {
+      "file": "texts/6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449.txt",
+      "sha256": "6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449"
+    },
+    {
+      "file": "texts/6095e9ffa777dd22839f7801aa845b31c9ed07f3d6bf8a26dc5d2dec8ccc0ef3.txt",
+      "sha256": "6095e9ffa777dd22839f7801aa845b31c9ed07f3d6bf8a26dc5d2dec8ccc0ef3"
+    },
+    {
+      "file": "texts/60eaaa21859394c2a1679d47763c4d2c31b3fdab7de327ac72f4b4244cac5695.txt",
+      "sha256": "60eaaa21859394c2a1679d47763c4d2c31b3fdab7de327ac72f4b4244cac5695"
+    },
+    {
+      "file": "texts/6214f8b1300bb9f37b16ebc146f8f61af0187e0025042ff95c8b3030744a8795.txt",
+      "sha256": "6214f8b1300bb9f37b16ebc146f8f61af0187e0025042ff95c8b3030744a8795"
+    },
+    {
+      "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+    },
+    {
+      "file": "texts/65d39b608d230ee0a4d39d4de9388d695f2117322aff7005243d5b8e742a6526.txt",
+      "sha256": "65d39b608d230ee0a4d39d4de9388d695f2117322aff7005243d5b8e742a6526"
+    },
+    {
+      "file": "texts/6649d016c5b1b3a286d6ae243e1dc6a3eb735147dee58c08f171d63edaf87da1.txt",
+      "sha256": "6649d016c5b1b3a286d6ae243e1dc6a3eb735147dee58c08f171d63edaf87da1"
+    },
+    {
+      "file": "texts/671575298ed67520d6c824e9fa02b9beda81a4714c11610e6b6db1c97bb8ad80.txt",
+      "sha256": "671575298ed67520d6c824e9fa02b9beda81a4714c11610e6b6db1c97bb8ad80"
+    },
+    {
+      "file": "texts/6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5.txt",
+      "sha256": "6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5"
+    },
+    {
+      "file": "texts/6a585a9f466654abc8fc0829d56b1bc987e3a073d31faa03bba37d33640a23cd.txt",
+      "sha256": "6a585a9f466654abc8fc0829d56b1bc987e3a073d31faa03bba37d33640a23cd"
+    },
+    {
+      "file": "texts/6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509.txt",
+      "sha256": "6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509"
+    },
+    {
+      "file": "texts/6cdaeb86f6147dd70051f5e61cc6d1f89b5f4dd1f1d175c7874d4798292b3e2a.txt",
+      "sha256": "6cdaeb86f6147dd70051f5e61cc6d1f89b5f4dd1f1d175c7874d4798292b3e2a"
+    },
+    {
+      "file": "texts/6e4ecf1cae052b678ea3178dd4b3652d581ee66a82d58db8800dd7d80dd6de76.txt",
+      "sha256": "6e4ecf1cae052b678ea3178dd4b3652d581ee66a82d58db8800dd7d80dd6de76"
+    },
+    {
+      "file": "texts/705e49bb282781302ca3b45f594fa5454f2a321581b905dcf4c3f2934e0bc318.txt",
+      "sha256": "705e49bb282781302ca3b45f594fa5454f2a321581b905dcf4c3f2934e0bc318"
+    },
+    {
+      "file": "texts/7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff.txt",
+      "sha256": "7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff"
+    },
+    {
+      "file": "texts/725711996fb72721abc35595e0703ca2d1b55cb4d98cc5ade959fc0f8c2e86a4.txt",
+      "sha256": "725711996fb72721abc35595e0703ca2d1b55cb4d98cc5ade959fc0f8c2e86a4"
+    },
+    {
+      "file": "texts/72f9dd4f441e55dbd746f776e04290d076584f469e9d0c964b152bf909029ad3.txt",
+      "sha256": "72f9dd4f441e55dbd746f776e04290d076584f469e9d0c964b152bf909029ad3"
+    },
+    {
+      "file": "texts/734392bd2b68ddac73fa0149f56d831c91f175f19cd95774be6768f4832abcf6.txt",
+      "sha256": "734392bd2b68ddac73fa0149f56d831c91f175f19cd95774be6768f4832abcf6"
+    },
+    {
+      "file": "texts/76c45ece83a26117f86f4e349e7df118708e061e87225328fb478ce1e8b3eb86.txt",
+      "sha256": "76c45ece83a26117f86f4e349e7df118708e061e87225328fb478ce1e8b3eb86"
+    },
+    {
+      "file": "texts/7cc24e9a764e9dec5789436588b54eb8c9e51b188e78de3e6109b6ec8e0adbdb.txt",
+      "sha256": "7cc24e9a764e9dec5789436588b54eb8c9e51b188e78de3e6109b6ec8e0adbdb"
+    },
+    {
+      "file": "texts/7e4bc1b1fd90dd8ba3591578677b27ada47c5dabab3ad0cc6db5a2599a9a37ec.txt",
+      "sha256": "7e4bc1b1fd90dd8ba3591578677b27ada47c5dabab3ad0cc6db5a2599a9a37ec"
+    },
+    {
+      "file": "texts/7ecc7db84298adb05d2cf10339c63a5315a1c5c270a68d97d7d40a53b508ccde.txt",
+      "sha256": "7ecc7db84298adb05d2cf10339c63a5315a1c5c270a68d97d7d40a53b508ccde"
+    },
+    {
+      "file": "texts/7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54"
+    },
+    {
+      "file": "texts/83bb4c3e7fbfb7380c175923ba7dfe150e4e09bd4ebfb45e65e5f8a494d36ab9.txt",
+      "sha256": "83bb4c3e7fbfb7380c175923ba7dfe150e4e09bd4ebfb45e65e5f8a494d36ab9"
+    },
+    {
+      "file": "texts/8cbe5aa749bc56554247ea32dc0b5f170d17cdc0413726b91e87af01be0963aa.txt",
+      "sha256": "8cbe5aa749bc56554247ea32dc0b5f170d17cdc0413726b91e87af01be0963aa"
+    },
+    {
+      "file": "texts/8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b.txt",
+      "sha256": "8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b"
+    },
+    {
+      "file": "texts/8e4b2ca9d3e354abbedbef94e22e19d8358bf497979bb6ec4c4bde0e1b3b5a23.txt",
+      "sha256": "8e4b2ca9d3e354abbedbef94e22e19d8358bf497979bb6ec4c4bde0e1b3b5a23"
+    },
+    {
+      "file": "texts/8f9c90827fe9dbdaefa2ead4b35889c6e9525c2f756f2ea2c33ba47e5745051a.txt",
+      "sha256": "8f9c90827fe9dbdaefa2ead4b35889c6e9525c2f756f2ea2c33ba47e5745051a"
+    },
+    {
+      "file": "texts/94eca265bbc37b34b0c1e6f5ad8992e1c06d47c5cd9402e9824abdcddbb0c70d.txt",
+      "sha256": "94eca265bbc37b34b0c1e6f5ad8992e1c06d47c5cd9402e9824abdcddbb0c70d"
+    },
+    {
+      "file": "texts/9556395f55b7c67a6041f84553c7c27b3ab3fe5505769f4f1003a7b0988f2586.txt",
+      "sha256": "9556395f55b7c67a6041f84553c7c27b3ab3fe5505769f4f1003a7b0988f2586"
+    },
+    {
+      "file": "texts/9652222664ffc7e2a26fdcdebdce0917a455b39d8fbcbf451bf0b011a3067bf7.txt",
+      "sha256": "9652222664ffc7e2a26fdcdebdce0917a455b39d8fbcbf451bf0b011a3067bf7"
+    },
+    {
+      "file": "texts/99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507.txt",
+      "sha256": "99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507"
+    },
+    {
+      "file": "texts/99342c77e539bf3d549262dadd7d7ed646ce309b6dabde67a5a35b7c0faaca31.txt",
+      "sha256": "99342c77e539bf3d549262dadd7d7ed646ce309b6dabde67a5a35b7c0faaca31"
+    },
+    {
+      "file": "texts/9b0a59b4c5af60f46f79d2adbe433e07189d076972b8d33e9abca077dc10ccf7.txt",
+      "sha256": "9b0a59b4c5af60f46f79d2adbe433e07189d076972b8d33e9abca077dc10ccf7"
+    },
+    {
+      "file": "texts/9bd02a099a3f9fdf977f9dd6ea3dc664723e992a267d86f447ea9e7d068824ac.txt",
+      "sha256": "9bd02a099a3f9fdf977f9dd6ea3dc664723e992a267d86f447ea9e7d068824ac"
+    },
+    {
+      "file": "texts/9e45e856bedccee9f67254082ca11851d954de2fed7448c4bed19ad9aab99a91.txt",
+      "sha256": "9e45e856bedccee9f67254082ca11851d954de2fed7448c4bed19ad9aab99a91"
+    },
+    {
+      "file": "texts/9eb42b9aa1fa21f8d29340d5a1f299ee4a4490db25f116e9452abe7717afad39.txt",
+      "sha256": "9eb42b9aa1fa21f8d29340d5a1f299ee4a4490db25f116e9452abe7717afad39"
+    },
+    {
+      "file": "texts/a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+    },
+    {
+      "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+    },
+    {
+      "file": "texts/a88605a11db5def9b6cf73398e83b3edb72228cb43ea935729fac5cd33cec22c.txt",
+      "sha256": "a88605a11db5def9b6cf73398e83b3edb72228cb43ea935729fac5cd33cec22c"
+    },
+    {
+      "file": "texts/aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3.txt",
+      "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3"
+    },
+    {
+      "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+      "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+    },
+    {
+      "file": "texts/aed0597f7b6014324ef49cb6502e541e45c35335785345d7d7a5cac46cc64c0f.txt",
+      "sha256": "aed0597f7b6014324ef49cb6502e541e45c35335785345d7d7a5cac46cc64c0f"
+    },
+    {
+      "file": "texts/b1ec1d0e5947f81e815d8771f7d4d90671a94bb10a42dc687fb566de461a57aa.txt",
+      "sha256": "b1ec1d0e5947f81e815d8771f7d4d90671a94bb10a42dc687fb566de461a57aa"
+    },
+    {
+      "file": "texts/b3a669f64604f19acae611ec2e7b1abb70560d920d23dab003e5090d023a8d83.txt",
+      "sha256": "b3a669f64604f19acae611ec2e7b1abb70560d920d23dab003e5090d023a8d83"
+    },
+    {
+      "file": "texts/b5e27ca8c92bf5748046345e3c5621a97542abd931ad5870b2057c4e20e2ece8.txt",
+      "sha256": "b5e27ca8c92bf5748046345e3c5621a97542abd931ad5870b2057c4e20e2ece8"
+    },
+    {
+      "file": "texts/b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d.txt",
+      "sha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d"
+    },
+    {
+      "file": "texts/b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe.txt",
+      "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe"
+    },
+    {
+      "file": "texts/b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1.txt",
+      "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1"
+    },
+    {
+      "file": "texts/b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0.txt",
+      "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0"
+    },
+    {
+      "file": "texts/b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b.txt",
+      "sha256": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b"
+    },
+    {
+      "file": "texts/b9a6d9320b8f2693e8d41e496ce56caadacaddcca9be2a64a61749278f425cf2.txt",
+      "sha256": "b9a6d9320b8f2693e8d41e496ce56caadacaddcca9be2a64a61749278f425cf2"
+    },
+    {
+      "file": "texts/bca11d525505d21cdfb021e634b0f1d48ece827f9bedcf8cd41356c48a09be24.txt",
+      "sha256": "bca11d525505d21cdfb021e634b0f1d48ece827f9bedcf8cd41356c48a09be24"
+    },
+    {
+      "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+      "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d"
+    },
+    {
+      "file": "texts/bdbcdaa7858872393e9d6b216bbdc8a23e99d98dd6cdb7cda19458025b9e19fc.txt",
+      "sha256": "bdbcdaa7858872393e9d6b216bbdc8a23e99d98dd6cdb7cda19458025b9e19fc"
+    },
+    {
+      "file": "texts/beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e.txt",
+      "sha256": "beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e"
+    },
+    {
+      "file": "texts/bfd1767fe5cfc0caad7c74d31dcf318c6a9f13c69b09986198365e3bbf29026a.txt",
+      "sha256": "bfd1767fe5cfc0caad7c74d31dcf318c6a9f13c69b09986198365e3bbf29026a"
+    },
+    {
+      "file": "texts/c4021d0a7daf0d4fa79f43b1205e629fe0b6cb31a5998e14efbd700abf65e55f.txt",
+      "sha256": "c4021d0a7daf0d4fa79f43b1205e629fe0b6cb31a5998e14efbd700abf65e55f"
+    },
+    {
+      "file": "texts/c62d7697c03979f5056d28b338fafc7a1152820f7b379adf4a9d88cd37160f96.txt",
+      "sha256": "c62d7697c03979f5056d28b338fafc7a1152820f7b379adf4a9d88cd37160f96"
+    },
+    {
+      "file": "texts/c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08.txt",
+      "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08"
+    },
+    {
+      "file": "texts/c666ec2313dba24523ccad88f4c04ea4b24fad6545263a35b1d4ab2b08efe50a.txt",
+      "sha256": "c666ec2313dba24523ccad88f4c04ea4b24fad6545263a35b1d4ab2b08efe50a"
+    },
+    {
+      "file": "texts/c70903f3c3245a6940fbd24cdad748c6ab46c412197116703bdad0c61775e48c.txt",
+      "sha256": "c70903f3c3245a6940fbd24cdad748c6ab46c412197116703bdad0c61775e48c"
+    },
+    {
+      "file": "texts/c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747.txt",
+      "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747"
+    },
+    {
+      "file": "texts/c8ba25556c7941061b26b06aabd736ce81ad8ee0047c2b893e0d3e222ed4670b.txt",
+      "sha256": "c8ba25556c7941061b26b06aabd736ce81ad8ee0047c2b893e0d3e222ed4670b"
+    },
+    {
+      "file": "texts/c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d.txt",
+      "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d"
+    },
+    {
+      "file": "texts/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566.txt",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+    },
+    {
+      "file": "texts/cc3fa616bb3dd673abbdebce2d8b2a1a1ecb6a3dd9654313d6fcc0ab2d3c5f84.txt",
+      "sha256": "cc3fa616bb3dd673abbdebce2d8b2a1a1ecb6a3dd9654313d6fcc0ab2d3c5f84"
+    },
+    {
+      "file": "texts/cdacc34974a954ea9ddb5da1a2ad19bcefaead7dfa9df6fd9421671ea5d19300.txt",
+      "sha256": "cdacc34974a954ea9ddb5da1a2ad19bcefaead7dfa9df6fd9421671ea5d19300"
+    },
+    {
+      "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "file": "texts/d158846cdb1259d606bfbeb050e386484cb18f14db41478568114eddb76ec43e.txt",
+      "sha256": "d158846cdb1259d606bfbeb050e386484cb18f14db41478568114eddb76ec43e"
+    },
+    {
+      "file": "texts/d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5.txt",
+      "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+    },
+    {
+      "file": "texts/d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2.txt",
+      "sha256": "d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2"
+    },
+    {
+      "file": "texts/d541194ec9dbbc63a8e371fcb0a20af128671a73bea0c4734e17e43ed6956e50.txt",
+      "sha256": "d541194ec9dbbc63a8e371fcb0a20af128671a73bea0c4734e17e43ed6956e50"
+    },
+    {
+      "file": "texts/db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0.txt",
+      "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0"
+    },
+    {
+      "file": "texts/dbc33246972b27584b48a4d3d13c8f0a2f9e748619b2a8546774cb5157f732e1.txt",
+      "sha256": "dbc33246972b27584b48a4d3d13c8f0a2f9e748619b2a8546774cb5157f732e1"
+    },
+    {
+      "file": "texts/dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551.txt",
+      "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+    },
+    {
+      "file": "texts/e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c.txt",
+      "sha256": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c"
+    },
+    {
+      "file": "texts/e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2.txt",
+      "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+    },
+    {
+      "file": "texts/e340270d4f64384569a91d546acb5b094d69ce47f0c015db77abb74dc6f815af.txt",
+      "sha256": "e340270d4f64384569a91d546acb5b094d69ce47f0c015db77abb74dc6f815af"
+    },
+    {
+      "file": "texts/e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e.txt",
+      "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e"
+    },
+    {
+      "file": "texts/e3e8d7b15b2021c994047314ad0ac5e367561f64771a60a85a9c0952d8cd4c3a.txt",
+      "sha256": "e3e8d7b15b2021c994047314ad0ac5e367561f64771a60a85a9c0952d8cd4c3a"
+    },
+    {
+      "file": "texts/e484570fd90c2fac292801cfcea36ea608d4ad4c5994d4691c8259d974204ddc.txt",
+      "sha256": "e484570fd90c2fac292801cfcea36ea608d4ad4c5994d4691c8259d974204ddc"
+    },
+    {
+      "file": "texts/e562f3f974ced7e69dd1db77b820b36bcf8f30377f1aa105723fba449c53c4e6.txt",
+      "sha256": "e562f3f974ced7e69dd1db77b820b36bcf8f30377f1aa105723fba449c53c4e6"
+    },
+    {
+      "file": "texts/e67978cd18816c0cb7d29aaaacde7b7447402c2fb321a051698890a8eaedda94.txt",
+      "sha256": "e67978cd18816c0cb7d29aaaacde7b7447402c2fb321a051698890a8eaedda94"
+    },
+    {
+      "file": "texts/e7115e18444dae09d17f361ddc365fb1d342640fe500796209c63f7c80dfae10.txt",
+      "sha256": "e7115e18444dae09d17f361ddc365fb1d342640fe500796209c63f7c80dfae10"
+    },
+    {
+      "file": "texts/e8f20f4f701f02b565ffa289e1007008d07f933fb4f64f1a3879f8438a4a8406.txt",
+      "sha256": "e8f20f4f701f02b565ffa289e1007008d07f933fb4f64f1a3879f8438a4a8406"
+    },
+    {
+      "file": "texts/eb7e9ab9690124c5c9f42bdc81383d886a3dede26345b6ed15bbad7caf81f7ea.txt",
+      "sha256": "eb7e9ab9690124c5c9f42bdc81383d886a3dede26345b6ed15bbad7caf81f7ea"
+    },
+    {
+      "file": "texts/ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47.txt",
+      "sha256": "ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47"
+    },
+    {
+      "file": "texts/ebf25b8ce59c9e8883acd1ca75b6fc121937ca034f666c4077d2be739d2e1622.txt",
+      "sha256": "ebf25b8ce59c9e8883acd1ca75b6fc121937ca034f666c4077d2be739d2e1622"
+    },
+    {
+      "file": "texts/f17f6cc26f19643dbadaaad9901d245d4645ef8fbac8266b33105392dd1f8601.txt",
+      "sha256": "f17f6cc26f19643dbadaaad9901d245d4645ef8fbac8266b33105392dd1f8601"
+    },
+    {
+      "file": "texts/f55e9e4ba1ce2ae3b0f21577d9dfd3cea376123cb69e444b891f2f0fc1f9069a.txt",
+      "sha256": "f55e9e4ba1ce2ae3b0f21577d9dfd3cea376123cb69e444b891f2f0fc1f9069a"
+    },
+    {
+      "file": "texts/f571b778494de4e86f6116d96cbfe222d954e8d1eb2f15f1b565cf34bd436b2d.txt",
+      "sha256": "f571b778494de4e86f6116d96cbfe222d954e8d1eb2f15f1b565cf34bd436b2d"
+    },
+    {
+      "file": "texts/f915aef5cdb93903ae8850c4a1efb638ee1195b1380b6e446a583c1d0eef3ff7.txt",
+      "sha256": "f915aef5cdb93903ae8850c4a1efb638ee1195b1380b6e446a583c1d0eef3ff7"
+    },
+    {
+      "file": "texts/fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb.txt",
+      "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb"
+    },
+    {
+      "file": "texts/fb261b2d5dbe76c4850f90da763210bc385e52428df6bbfd7b06295ac8a32914.txt",
+      "sha256": "fb261b2d5dbe76c4850f90da763210bc385e52428df6bbfd7b06295ac8a32914"
+    },
+    {
+      "file": "texts/fc686023047ce5ce3a18a9b8a777156f0e475929d3de06bac279f3c025d2b2ca.txt",
+      "sha256": "fc686023047ce5ce3a18a9b8a777156f0e475929d3de06bac279f3c025d2b2ca"
+    },
+    {
+      "file": "texts/fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f.txt",
+      "sha256": "fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f"
+    },
+    {
+      "file": "texts/ff11d445fb41a1087c7630e120ab15f1a2cb67c1b707173cb494141805fca35e.txt",
+      "sha256": "ff11d445fb41a1087c7630e120ab15f1a2cb67c1b707173cb494141805fca35e"
+    },
+    {
+      "file": "texts/ffe61d0e558aff076c6be396c1a1cd46bcaa9b56a0f0e9d609767fcdc7eb1d6d.txt",
+      "sha256": "ffe61d0e558aff076c6be396c1a1cd46bcaa9b56a0f0e9d609767fcdc7eb1d6d"
+    }
+  ],
+  "image_reconciliation": "source-records/clipboard-spdx-reconciliation.json",
+  "source_configuration": "source-records/source-dependency-scope-current.json",
+  "notice_material_status": {
+    "historical_unique_gap_count": 23,
+    "unresolved_original_MIT_wrapper_texts": [
+      {
+        "name": "debugserver-types",
+        "version": "0.5.0",
+        "crate_url": "https://static.crates.io/crates/debugserver-types/debugserver-types-0.5.0.crate",
+        "reason": "Original declaration/headers retained; no original MIT full licence text located in exact archive/upstream source",
+        "source_default_linux_normal_consumers": {
+          "0.159.2": [
+            "aarch64-unknown-linux-musl",
+            "x86_64-unknown-linux-musl"
+          ],
+          "0.155.1": [
+            "aarch64-unknown-linux-musl",
+            "x86_64-unknown-linux-musl"
+          ],
+          "0.156.1": [
+            "aarch64-unknown-linux-musl",
+            "x86_64-unknown-linux-musl"
+          ]
+        },
+        "scope": "Informational standard MIT conditions accompany the original declaration; original full-text/rights disposition remains unresolved. Exact VCS trees were rechecked; see source-records/external-wrapper-source-recheck.json."
+      },
+      {
+        "name": "deno_core_icudata",
+        "version": "0.77.0",
+        "crate_url": "https://static.crates.io/crates/deno_core_icudata/deno_core_icudata-0.77.0.crate",
+        "reason": "Original declaration/headers retained; no original MIT full licence text located in exact archive/upstream source",
+        "source_default_linux_normal_consumers": {
+          "0.159.2": [
+            "aarch64-unknown-linux-musl",
+            "x86_64-unknown-linux-musl"
+          ],
+          "0.155.1": [
+            "aarch64-unknown-linux-musl",
+            "x86_64-unknown-linux-musl"
+          ],
+          "0.156.1": [
+            "aarch64-unknown-linux-musl",
+            "x86_64-unknown-linux-musl"
+          ]
+        },
+        "scope": "Informational standard MIT conditions accompany the original declaration; original full-text/rights disposition remains unresolved. Exact VCS trees were rechecked; see source-records/external-wrapper-source-recheck.json."
+      }
+    ],
+    "icudata": "Exact package data identifies icudt77l. Actual Codex V8 producer pins ICU77.1 commit a86a32e67b8d1384b33f8fa48c83a6079b86f8cd; full original Unicode/ICU legal text is now retained. The data is NOT generically relicensed MIT. Data byte-for-byte generation and standalone wrapper MIT full-text acquisition are not asserted.",
+    "historical_nonlegal_filename_matches": "All current code-suffix matches are removed or explicit byte-range legal excerpts; see notice-regeneration.json",
+    "correction": "Active Rust collections were regenerated from exact archives with the shared vocabulary. Earlier index bytes are retained outside the shipped tree; acquisition receipts were not rewritten.",
+    "scope": "Exact publisher declarations and retained original headers; alternative elections only where the declaration offers alternatives. Not a legal opinion, inferred copyright, compiled-link attestation or runtime qualification.",
+    "upstream_material_clarifications": {
+      "difflib": {
+        "notices": [
+          {
+            "file": "texts/6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5.txt",
+            "sha256": "6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5",
+            "url": "https://raw.githubusercontent.com/DimaKudosh/difflib/8748d65b8c631a244af70f9d9f0339b6e7e9d29c/LICENSE",
+            "commit": "8748d65b8c631a244af70f9d9f0339b6e7e9d29c"
+          }
+        ],
+        "acquisition": {
+          "url": "https://raw.githubusercontent.com/DimaKudosh/difflib/8748d65b8c631a244af70f9d9f0339b6e7e9d29c/LICENSE",
+          "sha256": "6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5",
+          "size": 1086,
+          "integrity": null,
+          "signature_verified": false
+        },
+        "version_caveat": "Licence introduced with0.3.0 before0.4.0;0.4.0 crate include list omits it and has no VCS record. Preserve upstream copyright Kevin B. Knapp verbatim; no inferred author identity or exact0.4.0 tree guarantee."
+      },
+      "fax": {
+        "notices": [
+          {
+            "file": "texts/7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff.txt",
+            "sha256": "7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff",
+            "url": "https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE",
+            "commit": "5d70a161e33b62305f8bce7af3f7fbd011cfaf5d"
+          }
+        ],
+        "acquisition": {
+          "url": "https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE",
+          "sha256": "7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff",
+          "size": 1075,
+          "integrity": null,
+          "signature_verified": false
+        },
+        "version_caveat": "Successor clarification added2025-09-15 after0.2.6 source40b226eb (2025-08-31). Not claimed present in the old published archive. Preserve Copyright \u00a92021 The pdf-rs contributers verbatim."
+      }
+    },
+    "permission_text_policy": "informational standard conditions only; not an independently acquired upstream grant, copyright or resolved rights guarantee; same policy for npm and Rust, no author/year synthesis",
+    "current_resolution_index": "primary-source-notices.json",
+    "apache_declarations_and_attributions_preserved": 18,
+    "apache_plain_declarations": 3,
+    "apache_alternative_elections": 15
+  }
+}

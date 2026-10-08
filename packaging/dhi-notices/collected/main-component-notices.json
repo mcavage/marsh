@@ -1,0 +1,245 @@
+[
+  {
+    "package": "containerd.io",
+    "repository": "containerd/containerd",
+    "revision": "f2551031d7276a770f65f98c9b52e57e7dad07e8",
+    "required_notices": [{"file":"texts/4bbe3b885e8cd1907ab4cf9a41e862e74e24b5422297a4f2fe524e6a30ada2b4.txt","sha256":"4bbe3b885e8cd1907ab4cf9a41e862e74e24b5422297a4f2fe524e6a30ada2b4"},{"file":"texts/03f0b4bcaecfdb491ef5a7d320e2c2adf886c732d34e3fff87d52dbaec64d8c3.txt","sha256":"03f0b4bcaecfdb491ef5a7d320e2c2adf886c732d34e3fff87d52dbaec64d8c3"}],
+    "notices": [
+      {
+        "url": "https://raw.githubusercontent.com/containerd/containerd/f2551031d7276a770f65f98c9b52e57e7dad07e8/LICENSE",
+        "sha256": "4bbe3b885e8cd1907ab4cf9a41e862e74e24b5422297a4f2fe524e6a30ada2b4",
+        "file": "texts/4bbe3b885e8cd1907ab4cf9a41e862e74e24b5422297a4f2fe524e6a30ada2b4.txt"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/containerd/containerd/f2551031d7276a770f65f98c9b52e57e7dad07e8/NOTICE",
+        "sha256": "03f0b4bcaecfdb491ef5a7d320e2c2adf886c732d34e3fff87d52dbaec64d8c3",
+        "file": "texts/03f0b4bcaecfdb491ef5a7d320e2c2adf886c732d34e3fff87d52dbaec64d8c3.txt"
+      }
+    ]
+  },
+  {
+    "package": "runc",
+    "repository": "opencontainers/runc",
+    "revision": "bb14dabeb7185bb72c8c86735d090dcb20f36587",
+    "required_notices": [{"file":"texts/552a739c3b25792263f731542238b92f6f8d07e9a488eae27e6c4690038a8243.txt","sha256":"552a739c3b25792263f731542238b92f6f8d07e9a488eae27e6c4690038a8243"},{"file":"texts/e94a9789f41c5c3d6f74212571e6f44367de88269f1ce9c32f26c1b67eec6e7f.txt","sha256":"e94a9789f41c5c3d6f74212571e6f44367de88269f1ce9c32f26c1b67eec6e7f"}],
+    "notices": [
+      {
+        "url": "https://raw.githubusercontent.com/opencontainers/runc/bb14dabeb7185bb72c8c86735d090dcb20f36587/LICENSE",
+        "sha256": "552a739c3b25792263f731542238b92f6f8d07e9a488eae27e6c4690038a8243",
+        "file": "texts/552a739c3b25792263f731542238b92f6f8d07e9a488eae27e6c4690038a8243.txt"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/opencontainers/runc/bb14dabeb7185bb72c8c86735d090dcb20f36587/NOTICE",
+        "sha256": "e94a9789f41c5c3d6f74212571e6f44367de88269f1ce9c32f26c1b67eec6e7f",
+        "file": "texts/e94a9789f41c5c3d6f74212571e6f44367de88269f1ce9c32f26c1b67eec6e7f.txt"
+      }
+    ]
+  },
+  {
+    "package": "docker-buildx-plugin",
+    "repository": "docker/buildx",
+    "revision": "0b265a9f62db554fa9aba6dd19e1bd5704bc7d8a",
+    "required_notices": [{"file":"texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt","sha256":"cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"}],
+    "notices": [
+      {
+        "url": "https://raw.githubusercontent.com/docker/buildx/0b265a9f62db554fa9aba6dd19e1bd5704bc7d8a/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+      }
+    ]
+  },
+  {
+    "package": "docker-ce",
+    "repository": "moby/moby",
+    "revision": "464cd50c3d9e92877d56940ea160de6fca7bea23",
+    "required_notices": [{"file":"texts/7c87873291f289713ac5df48b1f2010eb6963752bbd6b530416ab99fc37914a8.txt","sha256":"7c87873291f289713ac5df48b1f2010eb6963752bbd6b530416ab99fc37914a8"},{"file":"texts/a249c4197359eee43031d16cecb172326f92ee7b6701af99dfe5c3e5b3d5eca9.txt","sha256":"a249c4197359eee43031d16cecb172326f92ee7b6701af99dfe5c3e5b3d5eca9"}],
+    "notices": [
+      {
+        "url": "https://raw.githubusercontent.com/moby/moby/464cd50c3d9e92877d56940ea160de6fca7bea23/LICENSE",
+        "sha256": "7c87873291f289713ac5df48b1f2010eb6963752bbd6b530416ab99fc37914a8",
+        "file": "texts/7c87873291f289713ac5df48b1f2010eb6963752bbd6b530416ab99fc37914a8.txt"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/moby/moby/464cd50c3d9e92877d56940ea160de6fca7bea23/NOTICE",
+        "sha256": "a249c4197359eee43031d16cecb172326f92ee7b6701af99dfe5c3e5b3d5eca9",
+        "file": "texts/a249c4197359eee43031d16cecb172326f92ee7b6701af99dfe5c3e5b3d5eca9.txt"
+      }
+    ]
+  },
+  {
+    "package": "docker-ce-cli",
+    "repository": "docker/cli",
+    "revision": "4a63305d74332de5ceba7fcbccbc3cbb7412f5ba",
+    "required_notices": [{"file":"texts/2d81ea060825006fc8f3fe28aa5dc0ffeb80faf325b612c955229157b8c10dc0.txt","sha256":"2d81ea060825006fc8f3fe28aa5dc0ffeb80faf325b612c955229157b8c10dc0"},{"file":"texts/a8c869fbda819afb8d80e0ac19bac52e766bc6c19cb38cf94f52d64c4be2aab6.txt","sha256":"a8c869fbda819afb8d80e0ac19bac52e766bc6c19cb38cf94f52d64c4be2aab6"}],
+    "notices": [
+      {
+        "url": "https://raw.githubusercontent.com/docker/cli/4a63305d74332de5ceba7fcbccbc3cbb7412f5ba/LICENSE",
+        "sha256": "2d81ea060825006fc8f3fe28aa5dc0ffeb80faf325b612c955229157b8c10dc0",
+        "file": "texts/2d81ea060825006fc8f3fe28aa5dc0ffeb80faf325b612c955229157b8c10dc0.txt"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/docker/cli/4a63305d74332de5ceba7fcbccbc3cbb7412f5ba/NOTICE",
+        "sha256": "a8c869fbda819afb8d80e0ac19bac52e766bc6c19cb38cf94f52d64c4be2aab6",
+        "file": "texts/a8c869fbda819afb8d80e0ac19bac52e766bc6c19cb38cf94f52d64c4be2aab6.txt"
+      }
+    ]
+  },
+  {
+    "package": "docker-compose-plugin",
+    "repository": "docker/compose",
+    "revision": "5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de",
+    "required_notices": [{"file":"texts/58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd.txt","sha256":"58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd"},{"file":"texts/b7dca0a6b01fa7365e4892877a6321179ee343d72ee87a96cfc222141b99a1e6.txt","sha256":"b7dca0a6b01fa7365e4892877a6321179ee343d72ee87a96cfc222141b99a1e6"}],
+    "notices": [
+      {
+        "url": "https://raw.githubusercontent.com/docker/compose/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de/LICENSE",
+        "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+        "file": "texts/58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd.txt"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/docker/compose/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de/NOTICE",
+        "sha256": "b7dca0a6b01fa7365e4892877a6321179ee343d72ee87a96cfc222141b99a1e6",
+        "file": "texts/b7dca0a6b01fa7365e4892877a6321179ee343d72ee87a96cfc222141b99a1e6.txt"
+      }
+    ]
+  },
+  {
+    "package": "gh",
+    "repository": "cli/cli",
+    "revision": "0cf1092493af067646fc5f3db9421c6a6ec9c938",
+    "required_notices": [{"file":"texts/6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f.txt","sha256":"6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f"}],
+    "notices": [
+      {
+        "url": "https://raw.githubusercontent.com/cli/cli/0cf1092493af067646fc5f3db9421c6a6ec9c938/LICENSE",
+        "sha256": "6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f",
+        "file": "texts/6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f.txt"
+      }
+    ]
+  },
+  {
+    "package": "nodejs-24",
+    "repository": "nodejs/node",
+    "revision": "955266bfdd854cd280dffd47548673914484e4c0",
+    "required_notices": [{"file":"texts/5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace.txt","sha256":"5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace"}],
+    "notices": [
+      {
+        "url": "https://raw.githubusercontent.com/nodejs/node/955266bfdd854cd280dffd47548673914484e4c0/LICENSE",
+        "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
+        "file": "texts/5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace.txt"
+      }
+    ]
+  },
+  {
+    "package": "node-corepack",
+    "repository": "nodejs/corepack",
+    "revision": "7a4c30b1aecece619a3e01db757f0eb947414b1f",
+    "required_notices": [{"file":"texts/30a7b8ba5c4483d97d6123f5634da2362d578fb81f42ed6e1dfbb84fb1cd8fe4.txt","sha256":"30a7b8ba5c4483d97d6123f5634da2362d578fb81f42ed6e1dfbb84fb1cd8fe4"}],
+    "notices": [
+      {
+        "url": "https://raw.githubusercontent.com/nodejs/corepack/7a4c30b1aecece619a3e01db757f0eb947414b1f/LICENSE.md",
+        "sha256": "30a7b8ba5c4483d97d6123f5634da2362d578fb81f42ed6e1dfbb84fb1cd8fe4",
+        "file": "texts/30a7b8ba5c4483d97d6123f5634da2362d578fb81f42ed6e1dfbb84fb1cd8fe4.txt"
+      }
+    ]
+  },
+  {
+    "package": "golang-1.26",
+    "repository": "golang/go",
+    "revision": "c293dd49cbe25e1fe8d97d94a5cb618e7b6d831e",
+    "required_notices": [{"file":"texts/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt","sha256":"911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"},{"file":"texts/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt","sha256":"96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc"}],
+    "notices": [
+      {
+        "url": "https://raw.githubusercontent.com/golang/go/c293dd49cbe25e1fe8d97d94a5cb618e7b6d831e/LICENSE",
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+        "file": "texts/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/golang/go/c293dd49cbe25e1fe8d97d94a5cb618e7b6d831e/PATENTS",
+        "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc",
+        "file": "texts/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt"
+      }
+    ]
+  },
+  {
+    "package": "codex-bundled-ripgrep",
+    "license_election": "MIT; UNLICENSE alternative is not relied upon. Both-architecture member evidence and PCRE2 10.46 legal text: public-component-notices.json and source-records/public-acquisitions.json. Exact-lock Rust source notices: rust-notices.json; not an enabled-feature/native completeness claim.",
+    "required_notices": [{"file":"texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt","sha256":"0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f"},{"file":"texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt","sha256":"01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"}],
+    "version": "15.2.0",
+    "source_manifest_commit": "ff6aec96948b70d94983af2641a6b67c94faeff5",
+    "artifacts": [
+      {
+        "platform": "linux-aarch64",
+        "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-gnu.tar.gz",
+        "archive_sha256": "a740b91c82eaf9914cfedd353572f2791cbe0162c84101ee0951058f4dcbc90d",
+        "binary_sha256": "e36d0eb52e70696bdf1781392722e05a21bb91d3b7b762ef5ec20e5df2ec687b"
+      },
+      {
+        "platform": "linux-x86_64",
+        "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
+        "archive_sha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+        "binary_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849"
+      }
+    ],
+    "notices": [
+      {
+        "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-gnu.tar.gz",
+        "member": "ripgrep-15.2.0-aarch64-unknown-linux-gnu/LICENSE-MIT",
+        "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+        "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+      },
+      {
+        "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-gnu.tar.gz",
+        "member": "ripgrep-15.2.0-aarch64-unknown-linux-gnu/COPYING",
+        "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+        "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+      }
+    ]
+  },
+  {
+    "package": "dhi-clipboard-bridge",
+    "repository": "github.com/docker/sandboxes",
+    "revision": "54a695035350bab5f126a88c892a9bc3b5ae162a",
+    "source": "LICENSE text of the proprietary clipboard-bridge component, as published by Docker; see source-records/public-acquisitions.json. The THIRD-PARTY-NOTICES file it refers to is not published; the golang.org/x/sys v0.46.0 notice is collected separately. No license grant is asserted.",
+    "required_notices": [{"file":"texts/aedab40ad891a0108bff8780a6127226f2fa4cf9ae606e0177d24673d3f4a9d1.txt","sha256":"aedab40ad891a0108bff8780a6127226f2fa4cf9ae606e0177d24673d3f4a9d1"}],
+    "notices": [
+      {
+        "source_path": "LICENSE",
+        "sha256": "aedab40ad891a0108bff8780a6127226f2fa4cf9ae606e0177d24673d3f4a9d1",
+        "file": "texts/aedab40ad891a0108bff8780a6127226f2fa4cf9ae606e0177d24673d3f4a9d1.txt"
+      }
+    ]
+  },
+  {
+    "package": "codex-patched-zsh",
+    "version": "codex-zsh-v0.1.0",
+    "provenance_index": "public-component-notices.json",
+    "source_commit": "77045ef899e53b9598bebc5a41db93a548a40ca6",
+    "patch_commit": "891f1f4c8584a082fc4658cabd48f1a8b01354e0",
+    "notices": [{"file":"texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt","sha256":"d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5"}],
+    "required_notices": [{"file":"texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt","sha256":"d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5"}]
+  },
+  {
+    "package": "codex-native-and-code-mode-host",
+    "version": "0.159.2",
+    "revision": "ff6aec96948b70d94983af2641a6b67c94faeff5",
+    "provenance_index": "source-records/public-acquisitions.json",
+    "dependency_notice_index": "rust-notices.json",
+    "scope": "Both platform npm SHA512 and all members match independently observed payload hashes. SLSA subject/source commit checked but signatures not cryptographically verified. Exact-lock notice superset is not proof of enabled features or all native V8/voice/libcap/musl build inputs.",
+    "notices": [{"file":"provider-notices/codex-0.159.2-LICENSE","sha256":"d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"},{"file":"provider-notices/codex-0.159.2-NOTICE","sha256":"9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"}],
+    "required_notices": [{"file":"provider-notices/codex-0.159.2-LICENSE","sha256":"d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"},{"file":"provider-notices/codex-0.159.2-NOTICE","sha256":"9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"}]
+  },
+  {
+    "package": "codex-vendored-bubblewrap",
+    "revision": "ff6aec96948b70d94983af2641a6b67c94faeff5",
+    "source": "codex-rs/bwrap/build.rs defaults to codex-rs/vendor/bubblewrap, compiles four C files with a Rust wrapper and links pkg-config libcap. CODEX_BWRAP_SOURCE_DIR is an upstream override. Workflow calls cargo build --bin bwrap; npm member identities are in source-records/public-acquisitions.json. Publication provenance is not an exhaustive compile attestation.",
+    "notices": [{"file":"provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-COPYING","sha256":"b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"}],
+    "required_notices": [{"file":"provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-COPYING","sha256":"b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"}]
+  },
+  {
+    "package": "codex-voice",
+    "revision": "ff6aec96948b70d94983af2641a6b67c94faeff5",
+    "provenance_index": "payload-obligations.json",
+    "scope": "Agent required_notices bind all retained voice dependency notices. The installed voice manifests and files are members of both SHA512-checked npm archives. Original voice manifest correspondence is retained; this does not establish all separately built native source materials.",
+    "notices": [{"file":"provider-notices/codex-0.159.2-third_party-voice-NOTICE.md","sha256":"40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"}],
+    "required_notices": [{"file":"provider-notices/codex-0.159.2-third_party-voice-NOTICE.md","sha256":"40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"}]
+  }
+]

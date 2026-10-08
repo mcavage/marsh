@@ -1,0 +1,300 @@
+diff --git a/brush-core/src/openfiles.rs b/brush-core/src/openfiles.rs
+--- a/brush-core/src/openfiles.rs
++++ b/brush-core/src/openfiles.rs
+@@ -238,7 +238,23 @@
+         // fail (e.g. under descriptor exhaustion), so the conversion is fallible and the error is
+         // surfaced to the caller rather than silently degrading the child's streams.
+         match open_file {
+-            OpenFile::Stdin(_) | OpenFile::Stdout(_) | OpenFile::Stderr(_) => Ok(Self::inherit()),
++            // Preserve the source descriptor, not the child's destination slot. For example,
++            // stdout installed as stderr by `2>&1` must still refer to the original stdout.
++            #[cfg(unix)]
++            OpenFile::Stdin(_) | OpenFile::Stdout(_) | OpenFile::Stderr(_) => {
++                Ok(open_file.try_clone_to_owned()?.into())
++            }
++            #[cfg(windows)]
++            OpenFile::Stdin(f) => {
++                use std::os::windows::io::AsHandle as _;
++                Ok(f.as_handle().try_clone_to_owned()?.into())
++            }
++            #[cfg(not(any(unix, windows)))]
++            OpenFile::Stdin(_) => Ok(Self::inherit()),
++            #[cfg(not(unix))]
++            OpenFile::Stdout(f) => Ok(f.into()),
++            #[cfg(not(unix))]
++            OpenFile::Stderr(f) => Ok(f.into()),
+             OpenFile::File(f) => Ok(f.try_clone()?.into()),
+             OpenFile::PipeReader(r) => Ok(r.try_clone()?.into()),
+             OpenFile::PipeWriter(w) => Ok(w.try_clone()?.into()),
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -243,8 +243,13 @@
+         }
+     }
+ 
++    let stdin = context.try_fd(OpenFiles::STDIN_FD);
++    let stdout = context.try_fd(OpenFiles::STDOUT_FD);
++    let stderr = context.try_fd(OpenFiles::STDERR_FD);
++    let closed_stdio = [stdin.is_none(), stdout.is_none(), stderr.is_none()];
++
+     // Redirect stdin, if applicable.
+-    match context.try_fd(OpenFiles::STDIN_FD) {
++    match stdin {
+         Some(OpenFile::Stdin(_)) | None => (),
+         Some(stdin_file) => {
+             let as_stdio: Stdio = stdin_file.try_into()?;
+@@ -253,7 +258,7 @@
+     }
+ 
+     // Redirect stdout, if applicable.
+-    match context.try_fd(OpenFiles::STDOUT_FD) {
++    match stdout {
+         Some(OpenFile::Stdout(_)) | None => (),
+         Some(stdout_file) => {
+             let as_stdio: Stdio = stdout_file.try_into()?;
+@@ -262,7 +267,7 @@
+     }
+ 
+     // Redirect stderr, if applicable.
+-    match context.try_fd(OpenFiles::STDERR_FD) {
++    match stderr {
+         Some(OpenFile::Stderr(_)) | None => {}
+         Some(stderr_file) => {
+             let as_stdio: Stdio = stderr_file.try_into()?;
+@@ -275,6 +280,28 @@
+         *fd != OpenFiles::STDIN_FD && *fd != OpenFiles::STDOUT_FD && *fd != OpenFiles::STDERR_FD
+     });
+     cmd.inject_fds(other_files)?;
++
++    if closed_stdio.iter().any(|closed| *closed) {
++        #[cfg(unix)]
++        // SAFETY: Only close(2) and errno inspection run after fork. Close after all descriptor
++        // mappings so a saved copy (e.g. `3>&1 1>&-`) remains available to the child.
++        unsafe {
++            cmd.pre_exec(move || {
++                for (fd, closed) in (0..=2).zip(closed_stdio) {
++                    if closed && libc::close(fd) != 0 {
++                        let err = std::io::Error::last_os_error();
++                        if err.raw_os_error() != Some(libc::EBADF) {
++                            return Err(err);
++                        }
++                    }
++                }
++                Ok(())
++            });
++        }
++        // A null stream would incorrectly turn writes to a closed descriptor into success.
++        #[cfg(not(unix))]
++        return error::unimp("closing standard descriptors in external commands");
++    }
+ 
+     Ok(cmd)
+ }
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -288,6 +288,7 @@
+         Vec::new()
+     };
+     if ao_list.additional.is_empty() && composition_shape(&ao_list.first).is_none() {
++        let pipefail = shell.options().return_last_failure_from_pipeline;
+         let mut child_shell = shell.clone();
+         apply_background_environment(&mut child_shell, &prelaunch_environment)?;
+         child_shell.options_mut().interactive = false;
+@@ -310,6 +311,7 @@
+             tasks,
+             ao_list.to_string(),
+             jobs::JobState::Running,
++            pipefail,
+         )));
+     }
+ 
+@@ -337,6 +339,7 @@
+         [jobs::JobTask::Internal(join_handle)],
+         ao_list.to_string(),
+         jobs::JobState::Running,
++        false, // The internal task already computes its pipeline status.
+     )))
+ }
+ 
+@@ -1329,10 +1332,12 @@
+     // If there were stopped jobs, then encapsulate the pipeline as a managed job and hand it
+     // off to the job manager.
+     if !stopped_children.is_empty() {
++        let pipefail = shell.options().return_last_failure_from_pipeline;
+         let job = shell.jobs_mut().add_as_current(jobs::Job::new(
+             stopped_children,
+             pipeline.to_string(),
+             jobs::JobState::Stopped,
++            pipefail,
+         ));
+ 
+         let formatted = job.to_string();
+@@ -1519,6 +1524,7 @@
+             [jobs::JobTask::Internal(join_handle)],
+             format!("coproc {name}"),
+             jobs::JobState::Running,
++            false, // The internal task already computes its pipeline status.
+         ));
+         let job_id = job.id;
+ 
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+--- a/brush-core/src/jobs.rs
++++ b/brush-core/src/jobs.rs
+@@ -389,13 +389,15 @@
+ 
+ /// Encapsulates a set of processes managed by the shell as a single unit.
+ pub struct Job {
+-    /// The tasks that make up the job.
+-    tasks: VecDeque<JobTask>,
++    /// The tasks that make up the job, indexed in pipeline order.
++    tasks: VecDeque<(usize, JobTask)>,
+     /// The original process ID used by `$!` and `wait`, even after polling
+     /// removes a completed stage from a pipeline.
+     representative_pid: Option<sys::process::ProcessId>,
+-    /// The rightmost pipeline status, retained across canceled concurrent waits.
+-    wait_result: Option<ExecutionResult>,
++    /// The selected pipeline stage and status, retained across polls and canceled waits.
++    wait_result: Option<(usize, ExecutionResult)>,
++    /// Whether to select the rightmost failing stage, captured at pipeline launch.
++    pipefail: bool,
+ 
+     /// If available, the process group ID of the job's processes.
+     pgid: Option<sys::process::ProcessId>,
+@@ -431,16 +433,17 @@
+     /// * `children` - The job's known child processes.
+     /// * `command_line` - The command line of the job.
+     /// * `state` - The current operational state of the job.
+-    pub(crate) fn new<I>(tasks: I, command_line: String, state: JobState) -> Self
++    /// * `pipefail` - Whether to select the rightmost failing pipeline stage.
++    pub(crate) fn new<I>(tasks: I, command_line: String, state: JobState, pipefail: bool) -> Self
+     where
+         I: IntoIterator<Item = JobTask>,
+     {
+-        let tasks: VecDeque<_> = tasks.into_iter().collect();
+-        let representative_pid = tasks.iter().rev().find_map(|task| match task {
++        let tasks: VecDeque<_> = tasks.into_iter().enumerate().collect();
++        let representative_pid = tasks.iter().rev().find_map(|(_, task)| match task {
+             JobTask::External(process) => process.pid(),
+             JobTask::Internal(_) => None,
+         });
+-        let pgid = tasks.iter().find_map(|task| match task {
++        let pgid = tasks.iter().find_map(|(_, task)| match task {
+             JobTask::External(process) => process.pgid().or_else(|| process.pid()),
+             JobTask::Internal(_) => None,
+         });
+@@ -449,6 +452,7 @@
+             tasks,
+             representative_pid,
+             wait_result: None,
++            pipefail,
+             pgid,
+             annotation: JobAnnotation::None,
+             command_line,
+@@ -506,6 +510,21 @@
+         matches!(self.annotation, JobAnnotation::Previous)
+     }
+ 
++    // Polling consumes stages from the front; waits consume them from the back and may be
++    // canceled. Select by original stage index, never by completion or observation order.
++    fn record_task_result(&mut self, index: usize, result: ExecutionResult) {
++        let replace = self.wait_result.is_none_or(|(previous_index, previous)| {
++            if self.pipefail && previous.is_success() != result.is_success() {
++                !result.is_success()
++            } else {
++                index > previous_index
++            }
++        });
++        if replace {
++            self.wait_result = Some((index, result));
++        }
++    }
++
+     /// Polls whether the job has completed.
+     pub fn poll_done(
+         &mut self,
+@@ -514,24 +533,15 @@
+ 
+         tracing::debug!(target: trace_categories::JOBS, "Polling job {} for completion...", self.id);
+ 
+-        while !self.tasks.is_empty() {
+-            let task = &mut self.tasks[0];
++        while let Some((index, task)) = self.tasks.front_mut() {
++            let index = *index;
+             match task.poll() {
+                 Some(r) => {
+-                    self.tasks.remove(0);
+-                    if self.tasks.is_empty() {
+-                        if let Ok(completed) = &r {
+-                            // A concurrent wait may already have reaped the
+-                            // rightmost pipeline stage. Keep that status when
+-                            // a later prompt poll reaps the remaining stages.
+-                            let status = *self.wait_result.get_or_insert(*completed);
+-                            result = Some(Ok(status));
+-                        } else {
+-                            result = Some(r);
+-                        }
+-                    } else {
+-                        result = Some(r);
+-                    }
++                    self.tasks.pop_front();
++                    result = Some(r.map(|completed| {
++                        self.record_task_result(index, completed);
++                        self.wait_result.map_or(completed, |(_, selected)| selected)
++                    }));
+                 }
+                 None => {
+                     return Ok(None);
+@@ -548,14 +558,13 @@
+ 
+     /// Waits for the job to complete.
+     pub async fn wait(&mut self) -> Result<ExecutionResult, error::Error> {
+-        // Pipeline tasks are stored in command order. Waiting from the back
+-        // observes the rightmost command first; preserve that status while
+-        // still reaping every earlier stage. Overwriting it with each prior
+-        // stage made `wait $!` report the leftmost command's status.
+-        while let Some(task) = self.tasks.back_mut() {
++        // Reap every stage, preserving the launch-time status policy even if a concurrent
++        // wait is canceled or prompt polling has already consumed part of the pipeline.
++        while let Some((index, task)) = self.tasks.back_mut() {
++            let index = *index;
+             match task.wait().await? {
+                 JobTaskWaitResult::Completed(execution_result) => {
+-                    self.wait_result.get_or_insert(execution_result);
++                    self.record_task_result(index, execution_result);
+                     self.tasks.pop_back();
+                 }
+                 JobTaskWaitResult::Stopped => {
+@@ -567,7 +576,9 @@
+ 
+         self.state = JobState::Done;
+ 
+-        Ok(self.wait_result.unwrap_or_else(ExecutionResult::success))
++        Ok(self
++            .wait_result
++            .map_or_else(ExecutionResult::success, |(_, result)| result))
+     }
+ 
+     /// Waits until this job terminates, ignoring intermediate stopped states.
+diff --git a/brush-builtins/src/jobs.rs b/brush-builtins/src/jobs.rs
+--- a/brush-builtins/src/jobs.rs
++++ b/brush-builtins/src/jobs.rs
+@@ -14,7 +14,7 @@
+     #[arg(short = 'n')]
+     list_changed_only: bool,
+ 
+-    /// Show only process IDs.
++    /// Show only process group IDs.
+     #[arg(short = 'p')]
+     show_pids_only: bool,
+ 
+@@ -68,7 +68,7 @@
+         }
+ 
+         if self.show_pids_only {
+-            if let Some(pid) = job.representative_pid() {
++            if let Some(pid) = job.process_group_id() {
+                 writeln!(context.stdout(), "{pid}")?;
+             }
+         } else if self.also_show_pids {

@@ -1,0 +1,75 @@
+diff --git a/brush-builtins/src/lookup.rs b/brush-builtins/src/lookup.rs
+index 9abd7bf..2c98fab 100644
+--- a/brush-builtins/src/lookup.rs
++++ b/brush-builtins/src/lookup.rs
+@@ -70,16 +70,43 @@ pub(crate) fn resolve<'a, SE: ShellExtensions>(
+             resolved.push(Resolved::Function(registration.definition()));
+         }
+ 
+-        // Check for builtins.
+-        if shell.builtins().get(name).is_some_and(|b| !b.disabled) {
+-            resolved.push(Resolved::Builtin);
++        // Check for builtins. A process-backed registration (an marsh
++        // registered command) runs as a separate process, so it is described
++        // as the file on PATH that reaches it, when there is one.
++        if let Some(builtin) = shell.builtins().get(name).filter(|b| !b.disabled) {
++            match builtin
++                .process_shim
++                .as_ref()
++                .and_then(|shim| shim_path(shell, name, &shim.executable))
++            {
++                Some(path) => resolved.push(Resolved::File {
++                    path,
++                    hashed: false,
++                }),
++                None => resolved.push(Resolved::Builtin),
++            }
+         }
+     }
+ 
+     // Searching the filesystem *does* cost something, so only do it if the results so far
+     // don't already answer the question.
+     if options.all_locations || resolved.is_empty() {
++        let found = resolved.len();
+         resolve_in_filesystem(shell, name, options, &mut resolved);
++        // A registered command's PATH link was already reported above.
++        let earlier: Vec<PathBuf> = resolved[..found]
++            .iter()
++            .filter_map(|resolved| match resolved {
++                Resolved::File { path, .. } => Some(path.clone()),
++                _ => None,
++            })
++            .collect();
++        let mut index = 0;
++        resolved.retain(|resolved| {
++            index += 1;
++            index <= found
++                || !matches!(resolved, Resolved::File { path, .. } if earlier.contains(path))
++        });
+     }
+ 
+     if !options.all_locations {
+@@ -89,6 +116,23 @@ pub(crate) fn resolve<'a, SE: ShellExtensions>(
+     resolved
+ }
+ 
++/// Returns the first executable named `name` on `PATH` that is a link to a
++/// process-backed registration's `executable`, as the marsh session command
++/// directory provides for every registered command.
++fn shim_path<SE: ShellExtensions>(
++    shell: &Shell<SE>,
++    name: &str,
++    executable: &Path,
++) -> Option<PathBuf> {
++    let target = executable.canonicalize().ok()?;
++    shell.find_executables_in_path(name).find(|candidate| {
++        shell
++            .absolute_path(candidate)
++            .canonicalize()
++            .is_ok_and(|resolved| resolved == target)
++    })
++}
++
+ /// Appends the files the given name resolves to.
+ fn resolve_in_filesystem<SE: ShellExtensions>(
+     shell: &Shell<SE>,

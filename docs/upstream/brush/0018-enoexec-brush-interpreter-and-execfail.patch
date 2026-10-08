@@ -1,0 +1,333 @@
+diff --git a/brush-builtins/src/exec.rs b/brush-builtins/src/exec.rs
+index d3ade04..8342094 100644
+--- a/brush-builtins/src/exec.rs
++++ b/brush-builtins/src/exec.rs
+@@ -1,7 +1,7 @@
+ use clap::Parser;
+-use std::{borrow::Cow, os::unix::process::CommandExt};
++use std::{borrow::Cow, io::Write as _, os::unix::process::CommandExt};
+ 
+-use brush_core::{ErrorKind, ExecutionExitCode, ExecutionResult, builtins, commands};
++use brush_core::{ExecutionControlFlow, ExecutionExitCode, ExecutionResult, builtins, commands};
+ 
+ /// Exec the provided command.
+ #[derive(Parser)]
+@@ -64,20 +64,56 @@ impl builtins::Command for ExecCommand {
+             argv0 = Cow::Owned(std::format!("-{argv0}"));
+         }
+ 
+-        let mut cmd = commands::compose_std_command(
+-            &context,
+-            &self.args[0],
+-            argv0.as_str(),
+-            &self.args[1..],
+-            self.empty_environment,
+-        )?;
+-
+-        let exec_error = cmd.exec();
++        // Resolve PATH here so the shell (not the platform launcher) decides
++        // how a found file is run, including ENOEXEC files.
++        let name = &self.args[0];
++        let path = if name.contains('/') {
++            Some(std::path::PathBuf::from(name))
++        } else {
++            context.shell.find_first_executable_in_path(name)
++        };
++
++        let error = if let Some(path) = path {
++            let path = path.to_string_lossy().into_owned();
++            let mut cmd = commands::compose_std_command(
++                &context,
++                &path,
++                argv0.as_str(),
++                &self.args[1..],
++                self.empty_environment,
++            )?;
++            #[cfg(unix)]
++            brush_core::sys::commands::exec_with_script_fallback(
++                &mut cmd,
++                argv0.as_ref().as_ref(),
++                path.as_ref(),
++                context.iter_fds().map(|(fd, _)| fd),
++            )?;
++
++            // A failed exec must leave the shell's own descriptors in place.
++            let backup = brush_core::sys::commands::DescriptorBackup::save(
++                context.iter_fds().map(|(fd, _)| fd),
++            )?;
++            let error = cmd.exec();
++            backup.restore();
++            let missing = error.kind() == std::io::ErrorKind::NotFound
++                && !context.shell.absolute_path(&path).exists();
++            (error.to_string(), missing)
++        } else {
++            ("not found".to_owned(), true)
++        };
+ 
+-        if exec_error.kind() == std::io::ErrorKind::NotFound {
+-            Ok(ExecutionExitCode::NotFound.into())
++        let (message, missing) = error;
++        let _ = writeln!(context.stderr(), "exec: {name}: {message}");
++        let mut result: ExecutionResult = if missing {
++            ExecutionExitCode::NotFound.into()
+         } else {
+-            Err(ErrorKind::from(exec_error).into())
++            ExecutionExitCode::CannotExecute.into()
++        };
++        // Like Bash, a noninteractive shell exits unless `execfail` is set.
++        if !context.shell.options().exit_on_exec_fail && !context.shell.options().interactive {
++            result.next_control_flow = ExecutionControlFlow::ExitShell;
+         }
++        Ok(result)
+     }
+ }
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index 7648b41..5377554 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -631,6 +631,7 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
+     }
+ }
+ 
++#[allow(clippy::too_many_lines, reason = "one linear spawn sequence")]
+ pub(crate) fn execute_external_command(
+     context: ExecutionContext<'_, impl extensions::ShellExtensions>,
+     executable_path: &str,
+@@ -704,6 +705,15 @@ pub(crate) fn execute_external_command(
+             .join(" ")
+     );
+ 
++    // Run ENOEXEC files with this shell rather than the platform's /bin/sh.
++    #[cfg(unix)]
++    sys::commands::exec_with_script_fallback(
++        &mut cmd,
++        OsStr::new(argv0),
++        OsStr::new(executable_path),
++        context.iter_fds().map(|(fd, _)| fd),
++    )?;
++
+     match sys::process::spawn(cmd, context.shell.options().kill_external_commands_on_drop) {
+         Ok(child) => {
+             // Retrieve the pid.
+@@ -741,6 +751,12 @@ pub(crate) fn execute_external_command(
+                         error::ErrorKind::WorkingDirMissing(context.shell.working_dir().to_owned())
+                             .into(),
+                     )
++                } else if context.shell.absolute_path(executable_path).exists() {
++                    // A found file with a missing interpreter cannot be executed (126).
++                    Err(
++                        error::ErrorKind::FailedToExecuteCommand(context.command_name, spawn_err)
++                            .into(),
++                    )
+                 } else {
+                     Err(error::ErrorKind::CommandNotFound(context.command_name).into())
+                 }
+diff --git a/brush-core/src/sys/unix/commands.rs b/brush-core/src/sys/unix/commands.rs
+index b555439..dda8e71 100644
+--- a/brush-core/src/sys/unix/commands.rs
++++ b/brush-core/src/sys/unix/commands.rs
+@@ -44,6 +44,177 @@ impl CommandFdInjectionExt for std::process::Command {
+     }
+ }
+ 
++static SCRIPT_INTERPRETER: std::sync::OnceLock<(std::ffi::CString, Vec<std::ffi::CString>)> =
++    std::sync::OnceLock::new();
++
++/// Selects the shell executable (and leading arguments) for ENOEXEC files.
++///
++/// Bash runs such files with itself. Without an interpreter, the platform
++/// launcher's own fallback (usually `/bin/sh`) applies.
++pub fn set_script_interpreter(
++    path: &std::path::Path,
++    prefix_args: &[std::ffi::OsString],
++) -> std::io::Result<()> {
++    use std::os::unix::ffi::OsStrExt as _;
++    let cstring =
++        |s: &std::ffi::OsStr| std::ffi::CString::new(s.as_bytes()).map_err(std::io::Error::other);
++    let interpreter = (
++        cstring(path.as_os_str())?,
++        prefix_args
++            .iter()
++            .map(|arg| cstring(arg))
++            .collect::<std::io::Result<_>>()?,
++    );
++    let _ = SCRIPT_INTERPRETER.set(interpreter);
++    Ok(())
++}
++
++/// Runs ENOEXEC files with the configured script interpreter.
++///
++/// The final pre-exec step becomes an `execve` of the command's own program,
++/// so ENOEXEC reaches the shell instead of the platform's `/bin/sh` retry. On
++/// ENOEXEC the interpreter is exec'd on `script` with the same arguments,
++/// descriptors, and environment. Returns false (leaving the command
++/// untouched) when no interpreter is configured.
++///
++/// Must be called after every other pre-exec setup and the environment are in
++/// place. The environment is taken from the command's explicit variables, so
++/// it requires the caller to have cleared the inherited environment.
++pub fn exec_with_script_fallback(
++    command: &mut std::process::Command,
++    argv0: &std::ffi::OsStr,
++    script: &std::ffi::OsStr,
++    inherited_fds: impl Iterator<Item = crate::ShellFd>,
++) -> std::io::Result<bool> {
++    use std::ffi::CString;
++    use std::os::unix::ffi::OsStrExt as _;
++    let Some((interpreter, prefix)) = SCRIPT_INTERPRETER.get() else {
++        return Ok(false);
++    };
++    let cstring = |s: &std::ffi::OsStr| CString::new(s.as_bytes()).map_err(std::io::Error::other);
++    let program = cstring(command.get_program())?;
++    let args = command
++        .get_args()
++        .map(cstring)
++        .collect::<std::io::Result<Vec<_>>>()?;
++    let env = command
++        .get_envs()
++        .filter_map(|(key, value)| {
++            value.map(|value| {
++                let mut entry = key.as_bytes().to_vec();
++                entry.push(b'=');
++                entry.extend_from_slice(value.as_bytes());
++                CString::new(entry).map_err(std::io::Error::other)
++            })
++        })
++        .collect::<std::io::Result<Vec<_>>>()?;
++    // The interpreter only uses descriptors it is told about.
++    let inherited = inherited_fds
++        .filter(|fd| *fd > 2)
++        .map(|fd| CString::new(format!("--inherit-fd={fd}")).map_err(std::io::Error::other))
++        .collect::<std::io::Result<Vec<_>>>()?;
++    let argv0 = cstring(argv0)?;
++    let script = cstring(script)?;
++    let pointers = |items: Vec<&CString>| {
++        items
++            .into_iter()
++            // Addresses are stored as integers so the closure is Send + Sync.
++            .map(|item| item.as_ptr() as usize)
++            .chain(std::iter::once(0))
++            .collect::<Vec<_>>()
++    };
++    let argv = pointers(std::iter::once(&argv0).chain(&args).collect());
++    let fallback_argv = pointers(
++        std::iter::once(interpreter)
++            .chain(prefix)
++            .chain(&inherited)
++            .chain(std::iter::once(&script))
++            .chain(&args)
++            .collect(),
++    );
++    let envp = pointers(env.iter().collect());
++    // Everything the child touches is allocated here; the closure only makes
++    // async-signal-safe calls on immutable, null-terminated pointer arrays.
++    let storage = (program, args, env, argv0, script, inherited);
++    let pointers = (argv, fallback_argv, envp);
++    let exec = move || {
++        let (program, ..) = &storage;
++        let (argv, fallback_argv, envp) = &pointers;
++        // SAFETY: see above. The CStrings backing every pointer move into this
++        // closure together with the pointer arrays and live as long as it does.
++        unsafe { libc::execve(program.as_ptr(), argv.as_ptr().cast(), envp.as_ptr().cast()) };
++        let error = std::io::Error::last_os_error();
++        if error.raw_os_error() == Some(libc::ENOEXEC) {
++            // SAFETY: as above; the interpreter path is a static CString.
++            unsafe {
++                libc::execve(
++                    interpreter.as_ptr(),
++                    fallback_argv.as_ptr().cast(),
++                    envp.as_ptr().cast(),
++                )
++            };
++        }
++        Err(error)
++    };
++    // SAFETY: the closure only calls execve and reads errno after fork.
++    unsafe { command.pre_exec(exec) };
++    Ok(true)
++}
++
++/// Saved copies of descriptors that an in-place exec rearranges, so a failed
++/// exec can put the shell's own descriptors back.
++pub struct DescriptorBackup(Vec<(i32, Option<(std::os::fd::OwnedFd, i32)>)>);
++
++impl DescriptorBackup {
++    /// Saves descriptors `targets` (and the standard three) above all of them.
++    pub fn save(targets: impl IntoIterator<Item = i32>) -> std::io::Result<Self> {
++        use std::os::fd::FromRawFd as _;
++        let mut targets: Vec<i32> = (0..=2).chain(targets).collect();
++        targets.sort_unstable();
++        targets.dedup();
++        let above = targets.last().copied().unwrap_or(2) + 1;
++        let mut saved = Vec::with_capacity(targets.len());
++        for target in targets {
++            // SAFETY: fcntl only inspects or duplicates this descriptor number.
++            let flags = unsafe { libc::fcntl(target, libc::F_GETFD) };
++            if flags == -1 {
++                saved.push((target, None));
++                continue;
++            }
++            // SAFETY: as above; a successful F_DUPFD_CLOEXEC returns a new fd we own.
++            let copy = unsafe { libc::fcntl(target, libc::F_DUPFD_CLOEXEC, above) };
++            if copy == -1 {
++                return Err(std::io::Error::last_os_error());
++            }
++            // SAFETY: `copy` is a freshly duplicated descriptor owned by nobody else.
++            saved.push((
++                target,
++                Some((unsafe { std::os::fd::OwnedFd::from_raw_fd(copy) }, flags)),
++            ));
++        }
++        Ok(Self(saved))
++    }
++
++    /// Restores every saved descriptor, closing those that were absent.
++    pub fn restore(self) {
++        use std::os::fd::AsRawFd as _;
++        for (target, saved) in self.0 {
++            match saved {
++                Some((copy, flags)) => {
++                    // SAFETY: restores the recorded descriptor number from our own copy.
++                    unsafe { libc::dup2(copy.as_raw_fd(), target) };
++                    // SAFETY: restores that descriptor's recorded flags.
++                    unsafe { libc::fcntl(target, libc::F_SETFD, flags) };
++                }
++                None => {
++                    // SAFETY: closes a number that was absent before the exec.
++                    unsafe { libc::close(target) };
++                }
++            }
++        }
++    }
++}
++
+ /// Extension trait for arranging for commands to take the foreground.
+ pub trait CommandFgControlExt {
+     /// Arranges for the command to take the foreground when it is executed.
+diff --git a/brush-shell/src/entry.rs b/brush-shell/src/entry.rs
+index b278144..b46f7f4 100644
+--- a/brush-shell/src/entry.rs
++++ b/brush-shell/src/entry.rs
+@@ -168,8 +168,22 @@ impl CommandLineArgs {
+     }
+ }
+ 
++/// Selects the executable (with leading arguments) for ENOEXEC files.
++///
++/// [`run`] selects the running executable; embedders whose executable does
++/// not accept Brush arguments directly install their own.
++pub fn install_script_interpreter(path: &Path, prefix_args: &[std::ffi::OsString]) {
++    #[cfg(unix)]
++    let _ = brush_core::sys::commands::set_script_interpreter(path, prefix_args);
++    #[cfg(not(unix))]
++    let _ = (path, prefix_args);
++}
++
+ /// Main entry point for the `brush` shell.
+ pub fn run() {
++    if let Ok(path) = std::env::current_exe() {
++        install_script_interpreter(&path, &[]);
++    }
+     std::process::exit(run_from(std::env::args().collect()));
+ }
+ 

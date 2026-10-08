@@ -1,0 +1,118 @@
+--- a/brush-shell/src/bundled.rs
++++ b/brush-shell/src/bundled.rs
+@@ -55,6 +55,14 @@
+ /// shim invocation; left as `Err`-equivalent if `current_exe()` fails.
+ static SELF_EXE: OnceLock<Option<PathBuf>> = OnceLock::new();
+
++/// Arguments appended to every process-backed bundled dispatch.
++static PROCESS_SHIM_ARGS: OnceLock<Vec<String>> = OnceLock::new();
++
++/// Installs embedding arguments inherited by each process-backed shim.
++pub fn install_process_shim_args(args: Vec<String>) {
++    let _ = PROCESS_SHIM_ARGS.set(args);
++}
++
+ /// Installs the bundled-command registry. Idempotent: only the first call
+ /// takes effect.
+ #[allow(
+@@ -103,7 +111,15 @@
+ /// are not affected.
+ #[must_use]
+ pub fn maybe_dispatch() -> Option<i32> {
+-    let mut raw = std::env::args_os();
++    maybe_dispatch_from(std::env::args_os())
++}
++
++/// Runs the bundled-command fast path against an explicit argument vector.
++#[must_use]
++pub fn maybe_dispatch_from(
++    arguments: impl IntoIterator<Item = impl Into<OsString>>,
++) -> Option<i32> {
++    let mut raw = arguments.into_iter().map(Into::into);
+     let _argv0 = raw.next();
+     let first = raw.next()?;
+     if first != DISPATCH_FLAG {
+@@ -265,6 +281,10 @@
+ /// registration value can be reused for every bundled name; per-name
+ /// dispatch happens via `context.command_name` at execution time.
+ fn shim_registration<SE: ShellExtensions>(name: &str, executable: PathBuf) -> Registration<SE> {
++    let mut prefix_args = vec![DISPATCH_FLAG.into(), name.into()];
++    if let Some(arguments) = PROCESS_SHIM_ARGS.get() {
++        prefix_args.extend(arguments.iter().cloned());
++    }
+     Registration {
+         execute_func: shim_execute::<SE>,
+         content_func: shim_content,
+@@ -273,7 +293,7 @@
+         declaration_builtin: false,
+         process_shim: Some(ProcessShim {
+             executable,
+-            prefix_args: vec![DISPATCH_FLAG.into(), name.into()],
++            prefix_args,
+             argv0: Some(name.into()),
+         }),
+     }
+--- a/brush-shell/src/entry.rs
++++ b/brush-shell/src/entry.rs
+@@ -121,6 +121,14 @@
+
+ /// Main entry point for the `brush` shell.
+ pub fn run() {
++    std::process::exit(run_from(std::env::args().collect()));
++}
++
++/// Main entry point with an explicitly supplied argument vector.
++///
++/// Embedders use this after consuming their own leading options. The first
++/// element remains the shell's `argv[0]`.
++pub fn run_from(mut args: Vec<String>) -> i32 {
+     //
+     // Install the bundled-command registry so it's available both for
+     // bundled dispatch (handled next) and for builtin shim registration
+@@ -134,8 +142,8 @@
+     // bundled command and exit before doing any shell setup. This is the
+     // hot path for in-binary coreutils invocations.
+     //
+-    if let Some(code) = bundled::maybe_dispatch() {
+-        std::process::exit(code);
++    if let Some(code) = bundled::maybe_dispatch_from(args.iter().cloned()) {
++        return code;
+     }
+
+     //
+@@ -146,8 +154,6 @@
+     //
+     // Parse args.
+     //
+-    let mut args: Vec<_> = std::env::args().collect();
+-
+     // Work around clap's limitations handling +O options.
+     for arg in &mut args {
+         if arg.starts_with("+O") {
+@@ -168,7 +174,7 @@
+                 _ => 2,
+             };
+
+-            std::process::exit(exit_code);
++            return exit_code;
+         }
+     };
+
+@@ -182,7 +188,7 @@
+
+     let Ok(runtime) = builder.enable_all().build() else {
+         tracing::error!("error: failed to create Tokio runtime");
+-        std::process::exit(1);
++        return 1;
+     };
+
+     let result = runtime.block_on(run_async(&args, parsed_args));
+@@ -195,7 +201,7 @@
+         }
+     };
+
+-    std::process::exit(i32::from(exit_code));
++    i32::from(exit_code)
+ }
+
+ /// Installs panic handlers to report our panic and cleanly exit on panic.

@@ -1,0 +1,28 @@
+[package]
+name = "marsh-runtime"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Exercise the Mac host FD fence on owned Linux subprocess callers as well.
+test-support = []
+
+[dependencies]
+marsh-contracts = { path = "../marsh-contracts" }
+thiserror = "2.0"
+serde_json = "1.0"
+signal-hook = { version = "0.3.18", default-features = false }
+nix = { version = "0.31", features = ["poll", "process", "signal", "term"] }
+rustix = { version = "1.1", features = ["termios", "fs", "process", "net"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libproc = "=0.14.11"
+
+[dev-dependencies]
+tempfile = "3.23"

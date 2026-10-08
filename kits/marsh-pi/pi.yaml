@@ -1,0 +1,47 @@
+# syntax=docker/sandbox-kit:3@sha256:11bb68806aef6a68d45c10c0c3b3dc86c2f794a296b5a933661d9dadf760b753
+schemaVersion: "3"
+displayName: Pi
+description: Pi coding agent with Anthropic access, with ACP mode through the community adapter
+sourceUrl: https://github.com/earendil-works/pi
+licenses: [MIT]
+
+kind: workload
+
+args:
+  version:
+    default: "1.0.0"
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+    description: Pi coding agent release to install
+    buildArg: PI_VERSION
+
+# ACP mode (`pi --acp`) ships the pinned community pi-acp adapter (package.json).
+provides: ["pi@${{ kit.args.version }}", "pi-acp@0.0.34"]
+
+dockerfile: ./pi.dockerfile
+
+capabilities:
+  - type: com.docker.sandbox/sbx@1
+
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - api.anthropic.com:443
+          - registry.npmjs.org:443
+
+  - type: com.docker.sandbox/credential@1
+    optional: true
+    description: Anthropic API access
+    config:
+      service: anthropic
+      phase: runtime
+      apiKey:
+        name: ANTHROPIC_API_KEY
+        proxyManaged: true
+        inject:
+          - {domain: api.anthropic.com, header: x-api-key, format: "%s"}
+
+  - type: com.docker.sandbox/agent-context@1
+    config:
+      filename: AGENTS.md
+      contentFile: ./pi-context.md

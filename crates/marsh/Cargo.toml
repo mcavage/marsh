@@ -1,0 +1,53 @@
+[package]
+name = "marsh"
+version = "0.1.0"
+description = "Agent-native shell built on Brush"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "marsh"
+path = "src/main.rs"
+
+[[bin]]
+name = "marsh-brush-test-driver"
+path = "src/bin/brush_test_driver.rs"
+
+[[bin]]
+name = "marsh-local"
+path = "src/bin/marsh_local.rs"
+
+[lib]
+name = "marsh"
+path = "src/lib.rs"
+
+[dependencies]
+marsh-sbx = { path = "../marsh-sbx" }
+brush-shell = { path = "../../vendor/brush/brush-shell" }
+brush-core = { path = "../../vendor/brush/brush-core" }
+marsh-daemon = { path = "../marsh-daemon" }
+marsh-acp = { path = "../marsh-acp" }
+marsh-mcp = { path = "../marsh-mcp" }
+marsh-contracts = { path = "../marsh-contracts" }
+marsh-runtime = { path = "../marsh-runtime" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+base64 = "0.22"
+sha2 = "0.10"
+signal-hook = "0.3"
+strip-ansi-escapes = "0.2"
+chrono = "0.4.44"
+uuid = { version = "1.18", features = ["v4"] }
+tempfile = "3.23"
+nix = { version = "0.31", features = ["fs", "signal", "user", "term", "ioctl", "process"] }
+rustix = { version = "1.1", features = ["process", "event", "termios"] }
+
+[dev-dependencies]
+marsh-sbx = { path = "../marsh-sbx", features = ["test-support"] }
+brush-builtins = { path = "../../vendor/brush/brush-builtins" }
+tokio = { version = "1.48", features = ["macros", "rt"] }

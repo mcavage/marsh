@@ -1,0 +1,111 @@
+{
+  "schema": "marsh.primary-native-notices/v1",
+  "plan_sha256": "e76289943265bf8454aeda79849d24f55672433e5c29ba9f5e4fcb4071348f22",
+  "archives": [
+    {
+      "name": "highway",
+      "url": "https://github.com/google/highway/archive/refs/tags/1.2.0.tar.gz",
+      "sha256": "7e0be78b8318e8bdbf6fa545d2ecb4c90f947df03f7aadc42c1967f019e63343",
+      "role": "V8 Bazel release native dependency",
+      "producer_commit": "12b3e88028b983051913fb6bb95d7a11218bdceb",
+      "acquisition": {
+        "url": "https://github.com/google/highway/archive/refs/tags/1.2.0.tar.gz",
+        "sha256": "7e0be78b8318e8bdbf6fa545d2ecb4c90f947df03f7aadc42c1967f019e63343",
+        "size": 2234665,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1.txt",
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+          "member": "highway-1.2.0/LICENSE"
+        },
+        {
+          "file": "texts/d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2.txt",
+          "sha256": "d25e82e26acd42ca3ccc9993622631163425b869b9e16284226d534cff6470f2",
+          "member": "highway-1.2.0/LICENSE-BSD3"
+        },
+        {
+          "file": "texts/6e4ecf1cae052b678ea3178dd4b3652d581ee66a82d58db8800dd7d80dd6de76.txt",
+          "sha256": "6e4ecf1cae052b678ea3178dd4b3652d581ee66a82d58db8800dd7d80dd6de76",
+          "member": "highway-1.2.0/debian/copyright"
+        }
+      ]
+    },
+    {
+      "name": "fast_float",
+      "url": "https://github.com/fastfloat/fast_float/archive/refs/tags/v8.0.2.tar.gz",
+      "sha256": "e14a33089712b681d74d94e2a11362643bd7d769ae8f7e7caefe955f57f7eacd",
+      "role": "V8 Bazel release native dependency",
+      "producer_commit": "12b3e88028b983051913fb6bb95d7a11218bdceb",
+      "acquisition": {
+        "url": "https://github.com/fastfloat/fast_float/archive/refs/tags/v8.0.2.tar.gz",
+        "sha256": "e14a33089712b681d74d94e2a11362643bd7d769ae8f7e7caefe955f57f7eacd",
+        "size": 121232,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/097a889aa954d04e088b790b10a4014d6189561d0a6013935a73ce3d4ddaaf06.txt",
+          "sha256": "097a889aa954d04e088b790b10a4014d6189561d0a6013935a73ce3d4ddaaf06",
+          "member": "fast_float-8.0.2/LICENSE-APACHE"
+        },
+        {
+          "file": "texts/8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b.txt",
+          "sha256": "8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b",
+          "member": "fast_float-8.0.2/LICENSE-BOOST"
+        },
+        {
+          "file": "texts/e562f3f974ced7e69dd1db77b820b36bcf8f30377f1aa105723fba449c53c4e6.txt",
+          "sha256": "e562f3f974ced7e69dd1db77b820b36bcf8f30377f1aa105723fba449c53c4e6",
+          "member": "fast_float-8.0.2/LICENSE-MIT"
+        }
+      ]
+    },
+    {
+      "name": "simdutf",
+      "url": "https://github.com/simdutf/simdutf/archive/refs/tags/v7.7.0.tar.gz",
+      "sha256": "0180de81a1dd48a87b8c0442ffa81734f3db91a7350914107a449935124e3c6f",
+      "role": "V8 Bazel release native dependency",
+      "producer_commit": "12b3e88028b983051913fb6bb95d7a11218bdceb",
+      "acquisition": {
+        "url": "https://github.com/simdutf/simdutf/archive/refs/tags/v7.7.0.tar.gz",
+        "sha256": "0180de81a1dd48a87b8c0442ffa81734f3db91a7350914107a449935124e3c6f",
+        "size": 2231692,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/3d34610fc6b5e1b0bfe4e2f36171c2d62c28ef05cb8d704f5a0073be41a43b3d.txt",
+          "sha256": "3d34610fc6b5e1b0bfe4e2f36171c2d62c28ef05cb8d704f5a0073be41a43b3d",
+          "member": "simdutf-7.7.0/LICENSE-APACHE"
+        },
+        {
+          "file": "texts/fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f.txt",
+          "sha256": "fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f",
+          "member": "simdutf-7.7.0/LICENSE-MIT"
+        },
+        {
+          "file": "texts/c4021d0a7daf0d4fa79f43b1205e629fe0b6cb31a5998e14efbd700abf65e55f.txt",
+          "sha256": "c4021d0a7daf0d4fa79f43b1205e629fe0b6cb31a5998e14efbd700abf65e55f",
+          "member": "simdutf-7.7.0/benchmarks/competition/u8u16/COPYRIGHT"
+        },
+        {
+          "file": "texts/beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e.txt",
+          "sha256": "beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e",
+          "member": "simdutf-7.7.0/benchmarks/competition/utf8lut/LICENSE"
+        },
+        {
+          "file": "texts/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566.txt",
+          "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+          "member": "simdutf-7.7.0/benchmarks/competition/utfcpp/LICENSE"
+        }
+      ]
+    }
+  ],
+  "scope": "Conservative legal-document superset of exact public source archives from recorded build pins; not execution, enabled-feature proof, signature validation or a reproducible build.",
+  "failures": []
+}

@@ -1,0 +1,126 @@
+{
+  "provenance": {
+    "description": "Original six declaration trace failures plus raw FF/FE, C/installed C.utf8, quote/empty/failure/wrapper/side-effect-once controls; exact complete streams/status/effects"
+  },
+  "cases": [
+    {
+      "name": "declaration assignments show expanded values",
+      "known_failure": true,
+      "stdin": "value=world\nset -x\ndeclare declared=$value\nexport exported=$value\nreadonly fixed=$value\nfunction f() {\n  local local_value=$value\n}\nf\nset +x\n",
+      "group": "options/set-x.yaml",
+      "index": 3,
+      "test_files": []
+    },
+    {
+      "name": "wrappers trace the full invocation for declaration targets",
+      "known_failure": true,
+      "stdin": "value=world\nset -x\ncommand declare a=$value\nbuiltin declare b=$value\ncommand builtin declare c=$value\nbuiltin command declare d=$value\ncommand export e=$value\nset +x\n",
+      "group": "options/set-x.yaml",
+      "index": 10,
+      "test_files": []
+    },
+    {
+      "name": "export and readonly echo assignments but not bare names",
+      "known_failure": true,
+      "stdin": "set -x\nexport a=1 b=2\nreadonly c=3 d\ndeclare e=4\ntypeset t=5\nf() { local g=6 h; }\nf\nset +x\n",
+      "group": "options/set-x.yaml",
+      "index": 11,
+      "test_files": []
+    },
+    {
+      "name": "export and readonly echo assignments recognized from strings",
+      "known_failure": true,
+      "stdin": "set -x\nreadonly 'q=1'\ncommand export 'w=2'\nset +x\n",
+      "group": "options/set-x.yaml",
+      "index": 12,
+      "test_files": []
+    },
+    {
+      "name": "assignment operands are traced as single quoted words",
+      "known_failure": true,
+      "stdin": "v=\"a b\"\nset -x\ndeclare sp=\"$v\"\nexport esp=\"$v\"\nreadonly rsp=\"$v\"\nset +x\n",
+      "group": "options/set-x.yaml",
+      "index": 13,
+      "test_files": []
+    },
+    {
+      "name": "compound assignment operands are traced as two lines",
+      "known_failure": true,
+      "stdin": "set -x\ndeclare -a b=(1 2)\ndeclare -A c=([k]=v)\nexport ea=(1 2)\nreadonly ra=(1 2)\nset +x\n",
+      "group": "options/set-x.yaml",
+      "index": 16,
+      "test_files": []
+    },
+    {
+      "stdin": "set -x; declare -a a=($'\\xff\\xfe' \"a b\" $'a\\'b'); declare -A b=([$'\\xff']=$'\\xfe')\n",
+      "group": "trace-declaration-controls",
+      "index": 0
+    },
+    {
+      "stdin": "set -x; readonly x=old; readonly x=new; export x=new; readonly \"bad-name=value\"; export \"bad-name=value\"; :\n",
+      "group": "trace-declaration-controls",
+      "index": 1
+    },
+    {
+      "stdin": "set -x; export -n x=1; readonly -p x=2; :\n",
+      "group": "trace-declaration-controls",
+      "index": 2
+    },
+    {
+      "stdin": "declare -i n=1; set -x; export n=\"n+1\"; readonly n=\"n+1\"; :\n",
+      "group": "trace-declaration-controls",
+      "index": 3
+    },
+    {
+      "stdin": "set -x; export a+=(1 2); readonly -a b+=(3 4); :\n",
+      "group": "trace-declaration-controls",
+      "index": 4
+    },
+    {
+      "stdin_hex": "736574202d783b207072696e7466202725735c6e27202c20275e2720277e27203d202727202227222024275c7866665c786665272027636166c3a9273b206578706f727420783d24275c7866665c786665273b206578706f727420753d27636166c3a9273b20736574202b780a",
+      "env": {
+        "LC_ALL": "C"
+      },
+      "group": "trace-locale",
+      "index": 0
+    },
+    {
+      "stdin_hex": "736574202d783b207072696e7466202725735c6e27202c20275e2720277e27203d202727202227222024275c7866665c786665272027636166c3a9273b206578706f727420783d24275c7866665c786665273b206578706f727420753d27636166c3a9273b20736574202b780a",
+      "env": {
+        "LC_ALL": "C.utf8"
+      },
+      "group": "trace-locale",
+      "index": 1
+    },
+    {
+      "stdin": "set -x; printf '%s\\n' '#x' 'x#y' '~x' 'x~y' '{a,b}' '[x]' '\\\\'\n",
+      "group": "trace-word-controls",
+      "index": 0
+    },
+    {
+      "stdin": "set -x; export x=; readonly y=; declare z=; v=''; export ev=$v\n",
+      "group": "trace-word-controls",
+      "index": 1
+    },
+    {
+      "group": "trace-sideeffect-controls",
+      "index": 0,
+      "stdin": "set -x\ndeclare value=\"$(printf x >>once; printf 'a b')\"\ndeclare -a arr=($(printf y >>once; printf 'one two'))\nset +x\nprintf '<%s>\\n' \"$value\" \"${arr[@]}\"; cat once\n"
+    },
+    {
+      "group": "trace-sideeffect-controls",
+      "index": 1,
+      "stdin": "i=0; set -x; declare -a a=([i++]=value); export n=$((i++)); readonly r=$((i++)); set +x; printf 'count:%s\\n' \"$i\"\n"
+    },
+    {
+      "group": "trace-sideeffect-controls",
+      "index": 2,
+      "stdin": "set -x; command declare -a a=(one two); command readonly r=one; builtin export b='two words'; set +x\n"
+    },
+    {
+      "group": "trace-sideeffect-controls",
+      "index": 3,
+      "stdin": "set -x; readonly 'bad-name=one' ok=two; export 'bad-name2=three' yes=four; set +x; printf '<%s>\\n' \"$ok\" \"$yes\"\n"
+    }
+  ]
+}

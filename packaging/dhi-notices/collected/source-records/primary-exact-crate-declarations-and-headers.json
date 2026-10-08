@@ -1,0 +1,1743 @@
+{
+  "schema": "marsh.exact-source-notice-completions/v1",
+  "packages": [
+    {
+      "crate_url": "https://static.crates.io/crates/allocative/allocative-0.3.6.crate",
+      "crate_sha256": "d8cf9afc79c83d514444b55df3935d317da54b1ce3b17a133c646889cc260de8",
+      "name": "allocative",
+      "version": "0.3.6",
+      "license_expression": "Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/c8ba25556c7941061b26b06aabd736ce81ad8ee0047c2b893e0d3e222ed4670b.txt",
+          "sha256": "c8ba25556c7941061b26b06aabd736ce81ad8ee0047c2b893e0d3e222ed4670b",
+          "source_path": "allocative-0.3.6/Cargo.toml",
+          "source_file_sha256": "c8ba25556c7941061b26b06aabd736ce81ad8ee0047c2b893e0d3e222ed4670b"
+        },
+        {
+          "file": "texts/6649d016c5b1b3a286d6ae243e1dc6a3eb735147dee58c08f171d63edaf87da1.txt",
+          "sha256": "6649d016c5b1b3a286d6ae243e1dc6a3eb735147dee58c08f171d63edaf87da1",
+          "source_path": "allocative-0.3.6/Cargo.toml.orig",
+          "source_file_sha256": "6649d016c5b1b3a286d6ae243e1dc6a3eb735147dee58c08f171d63edaf87da1"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/build.rs",
+          "source_file_sha256": "b6a152c562d31da11fe527ef7b74117f4172cbd2f865cdf5890645e6757e50d3",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/allocative_trait.rs",
+          "source_file_sha256": "9b3b1d758d3fb00e083a8295f066388f4697dff81b91c82e41b872d606e290ba",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/flamegraph.rs",
+          "source_file_sha256": "d4edd4bbdddb481cb9e74c919e8a79f0d7f4061d791a8e7d1bbe81ff6820502d",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/global_root.rs",
+          "source_file_sha256": "74b30271d82ffdc17600e1087a26f819a81edfc46daad11613d3c130f4ed8c9d",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/golden.rs",
+          "source_file_sha256": "f26bf91d2e3ebeb8aa50e7f4e08e3b5f74579db466142ae432798156dead9a44",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/anyhow.rs",
+          "source_file_sha256": "243aca6ca2b6186d504718706f386ca1304fcf7f4afefd04510a5584f4f5b8ad",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/bumpalo.rs",
+          "source_file_sha256": "fb6323d836a46865914b25cbca7685c3bb54b8ab1a02a7e709b864c61e3946de",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/common.rs",
+          "source_file_sha256": "3355a799a9cb972e36b1caafffa59a57f8a7bab42314c1a6d04b77a54e10d57c",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/compact_str.rs",
+          "source_file_sha256": "9314c33a9819aac3162bc3455823f972c735703e3d79a6bc00ba8d97321a1df5",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/dashmap.rs",
+          "source_file_sha256": "e94cf77c77977f8c06c4f4ba0b773f7f7876a7af82620a66ff3b19b375ab4043",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/either.rs",
+          "source_file_sha256": "56a1efdd443f618ccaace269c86b5614ab94bcaf1d3db77b0207ba65c8774be1",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/futures.rs",
+          "source_file_sha256": "6084871f1d62ebd74a3d6e3ef04bba147ea9f86081c8e1c038cc4a957b0ce8a4",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/hashbrown.rs",
+          "source_file_sha256": "9b14ae967b3e856e84e7dcea9a914daff2a784f4441607dc734d76e9e42ac87a",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/hashbrown_util.rs",
+          "source_file_sha256": "20ce7b83ea3b8e3e0d343c02b44b8e46e4a3333943dbf27f203725492184c7c0",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/indexmap.rs",
+          "source_file_sha256": "7602038bd1f335d812b19383330bdfab4432091432bf78f8dc0ef34ba3f705ea",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/lock_api.rs",
+          "source_file_sha256": "0357bbe82eca3fe1a23507e14cf26545b78f83e7f576408b043db32b549ed7bb",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/num_bigint.rs",
+          "source_file_sha256": "22ab273484815ebecc99ccf00dfadb32cd455d1994507cd066d2b19d3b8db3bf",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/once_cell.rs",
+          "source_file_sha256": "4b9da0bb8dc09dc69ea1ad1d26504dda6cc22f988b982a9b78e3c2ee71fb1854",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/parking_lot.rs",
+          "source_file_sha256": "9690e4edf739df015987d17b9ca2ebd7d77cff611dbf14a36056a2b781635a27",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/prost_types.rs",
+          "source_file_sha256": "822fd2a8f9df1523b37ab8f92929427281d4895976c9d5aa8be7d6f63e3d8faf",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/serde_json.rs",
+          "source_file_sha256": "0bbdda78bdc36e8b488059f97dc4a05bb6605098738b4bc88cae4b23466b3298",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/slab.rs",
+          "source_file_sha256": "b4ae03ba747c97ba422f53d9f3a1219456e87675d4d7cb2f83c045455fbaf163",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/smallvec.rs",
+          "source_file_sha256": "c9ccf278c7192aa24d98d53f50413797aa880f40ffb31c5ddcd022236d09bf71",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/sorted_vector_map.rs",
+          "source_file_sha256": "84468af0cb12fa631ec9cf2c560add36a979770e622baee7fd10f3c881a06a69",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/any.rs",
+          "source_file_sha256": "1bd48bd58e6686c6695db5d1980e8346f5e174bf1dd26734e7d0e136d0e8859c",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/cell.rs",
+          "source_file_sha256": "f95c28b45decb0c87183a15882029d7d8d090d7d798cf7bb0ef5131a79d2e495",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/collections.rs",
+          "source_file_sha256": "d2dc469cd775f368540e85fe2613aa941f0599511a02c45fd28228f6b0f97237",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/function.rs",
+          "source_file_sha256": "e6dcc8b487d37ec4e4e67e6998f3f54322575b43c143dca991e342dd674484dd",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/mem.rs",
+          "source_file_sha256": "fdb9af7cf21d553e24c3a5d57cde06392ae5d13afdac34e409ad1848e22e667e",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/net.rs",
+          "source_file_sha256": "d9323bc225e3ff0f5782153927b6646541196e1bcb76e4575f2f68f0cc125812",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/primitive.rs",
+          "source_file_sha256": "76902174c63931357d2ecd050e6c3f19874646c98a4adfa39bc29bdd423522af",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/sync.rs",
+          "source_file_sha256": "e8811e63b777c90177ad057f4b77d66309316b34c93fdf1b041f027bd1c35752",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/thread.rs",
+          "source_file_sha256": "4e4163100066bfc39e1b69cac372d60ac7775b22d3d114d9ab8640bdc5b453cb",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/time.rs",
+          "source_file_sha256": "5028be12ba24d93a204e6e3bc3d0e1cbcbd9100ee4aad63cbd974ff3428d0c03",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/tuple.rs",
+          "source_file_sha256": "3c045988b1cd3fb00014fbb51466dc3fa0fea2bd47b62b38f7667144ced5a49a",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std/unsorted.rs",
+          "source_file_sha256": "731215a9194fcf0f1504adcef2672652d96930f883642152a833f2857624764f",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/std.rs",
+          "source_file_sha256": "c9259fe0c6b66583eb7d8fda9c8e650f8263b06116052927b3aa014b27659d78",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/tokio.rs",
+          "source_file_sha256": "35a4ca9faed1795328f73b20b8ea4cf573b30de82c0265435d59f1dad7276e53",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls/triomphe.rs",
+          "source_file_sha256": "2f0e32cd4a57e3ec7bea532ab917c34fffcb29b6e670954a774c54f94dd72e68",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/impls.rs",
+          "source_file_sha256": "e164bdfd9be9892b6431b57c482f87122cb31bb11b3ff921966dbc2009d6ac55",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/key.rs",
+          "source_file_sha256": "3c05bff05ebfa5a4930b9a8d26e9f48e87b9a0248ccc28b1ee734ef75112c76e",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/lib.rs",
+          "source_file_sha256": "6c170a02dc0f1c4e12a04437adcd21ae20a57864372a1b77c398f07a8c268058",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/size_of.rs",
+          "source_file_sha256": "09863a0f8d964708c093eb8fc939db8a3db92d48d210bec95cfc121649008b3b",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive/bounds.rs",
+          "source_file_sha256": "c3c30dfe8372ba8cb533b25dc66eb8de01ea498b4d1e79d5d94af4f56d6a4c3a",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive/dst.rs",
+          "source_file_sha256": "90dd5e3b5e0125a630bf9ecb4d1fd25901cbcda76ab88477f9c9109c78ae3823",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive/skip.rs",
+          "source_file_sha256": "8f8e35de2f037b87c2f9df6242a68fa6622423aba50498043e7ea80239c39666",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive/visit.rs",
+          "source_file_sha256": "0820c731ae4dc407d7870b40e5aeae141a6cd76f407eedf1adf6767491bbf7e2",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive/with_flamegraph.rs",
+          "source_file_sha256": "b331a36942c0e6f9d66655546286ebb8f0a112388fdd3ec055b304d9d8209137",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/test_derive.rs",
+          "source_file_sha256": "c4c80dba1c1b26961b2048631cdf03a54ae29b14f949b042b198fa16ddfd025c",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative-0.3.6/src/visitor.rs",
+          "source_file_sha256": "a00a31ae3728bc990956f26c8f693ece6bdecca018d20bc63b04dc49afc299c8",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 50,
+      "resolution": "Apache-2.0 declared by the package (not an alternative election); original source headers and full standard conditions retained",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/allocative_derive/allocative_derive-0.3.6.crate",
+      "crate_sha256": "614043c56c1173b800acb007b81fd0cbc0a0d7d717b71ba705fc2230d0760a23",
+      "name": "allocative_derive",
+      "version": "0.3.6",
+      "license_expression": "Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/30b57c6088b5a013431579d588346e5bdc8a19cb9c76bad89f9da4013157fdf7.txt",
+          "sha256": "30b57c6088b5a013431579d588346e5bdc8a19cb9c76bad89f9da4013157fdf7",
+          "source_path": "allocative_derive-0.3.6/Cargo.toml",
+          "source_file_sha256": "30b57c6088b5a013431579d588346e5bdc8a19cb9c76bad89f9da4013157fdf7"
+        },
+        {
+          "file": "texts/bfd1767fe5cfc0caad7c74d31dcf318c6a9f13c69b09986198365e3bbf29026a.txt",
+          "sha256": "bfd1767fe5cfc0caad7c74d31dcf318c6a9f13c69b09986198365e3bbf29026a",
+          "source_path": "allocative_derive-0.3.6/Cargo.toml.orig",
+          "source_file_sha256": "bfd1767fe5cfc0caad7c74d31dcf318c6a9f13c69b09986198365e3bbf29026a"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative_derive-0.3.6/src/derive_allocative.rs",
+          "source_file_sha256": "b8ffab726d363ffab1beebf645a3c6f68c8ab68ea769d0eef49776c30ff2ccfa",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative_derive-0.3.6/src/lib.rs",
+          "source_file_sha256": "369248b0133e83f17685b29786c185a41bc6b93fd4fac6abd6f751436a26e778",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "allocative_derive-0.3.6/src/root.rs",
+          "source_file_sha256": "3074c1355708f45ed82beefbf392b7a3f3d0da0fdc479af20e74c302960f5d28",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 3,
+      "resolution": "Apache-2.0 declared by the package (not an alternative election); original source headers and full standard conditions retained",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/crc32c/crc32c-0.6.8.crate",
+      "crate_sha256": "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47",
+      "name": "crc32c",
+      "version": "0.6.8",
+      "license_expression": "Apache-2.0/MIT",
+      "notices": [
+        {
+          "file": "texts/ffe61d0e558aff076c6be396c1a1cd46bcaa9b56a0f0e9d609767fcdc7eb1d6d.txt",
+          "sha256": "ffe61d0e558aff076c6be396c1a1cd46bcaa9b56a0f0e9d609767fcdc7eb1d6d",
+          "source_path": "crc32c-0.6.8/Cargo.toml",
+          "source_file_sha256": "ffe61d0e558aff076c6be396c1a1cd46bcaa9b56a0f0e9d609767fcdc7eb1d6d"
+        },
+        {
+          "file": "texts/cdacc34974a954ea9ddb5da1a2ad19bcefaead7dfa9df6fd9421671ea5d19300.txt",
+          "sha256": "cdacc34974a954ea9ddb5da1a2ad19bcefaead7dfa9df6fd9421671ea5d19300",
+          "source_path": "crc32c-0.6.8/README.md",
+          "source_file_sha256": "cdacc34974a954ea9ddb5da1a2ad19bcefaead7dfa9df6fd9421671ea5d19300"
+        },
+        {
+          "file": "texts/99342c77e539bf3d549262dadd7d7ed646ce309b6dabde67a5a35b7c0faaca31.txt",
+          "sha256": "99342c77e539bf3d549262dadd7d7ed646ce309b6dabde67a5a35b7c0faaca31",
+          "source_path": "crc32c-0.6.8/Cargo.toml.orig",
+          "source_file_sha256": "99342c77e539bf3d549262dadd7d7ed646ce309b6dabde67a5a35b7c0faaca31"
+        },
+        {
+          "file": "texts/c70903f3c3245a6940fbd24cdad748c6ab46c412197116703bdad0c61775e48c.txt",
+          "sha256": "c70903f3c3245a6940fbd24cdad748c6ab46c412197116703bdad0c61775e48c",
+          "source_path": "crc32c-0.6.8/src/combine.rs",
+          "source_file_sha256": "33c2ffe45b8f409f26566bc8fc35a713f5a71279e1ae3b77564b5423fd8d245b",
+          "byte_range": [
+            0,
+            1282
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 1,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/debugserver-types/debugserver-types-0.5.0.crate",
+      "crate_sha256": "2bf6834a70ed14e8e4e41882df27190bea150f1f6ecf461f1033f8739cd8af4a",
+      "name": "debugserver-types",
+      "version": "0.5.0",
+      "license_expression": "MIT",
+      "notices": [
+        {
+          "file": "texts/f571b778494de4e86f6116d96cbfe222d954e8d1eb2f15f1b565cf34bd436b2d.txt",
+          "sha256": "f571b778494de4e86f6116d96cbfe222d954e8d1eb2f15f1b565cf34bd436b2d",
+          "source_path": "debugserver-types-0.5.0/Cargo.toml",
+          "source_file_sha256": "f571b778494de4e86f6116d96cbfe222d954e8d1eb2f15f1b565cf34bd436b2d"
+        },
+        {
+          "file": "texts/705e49bb282781302ca3b45f594fa5454f2a321581b905dcf4c3f2934e0bc318.txt",
+          "sha256": "705e49bb282781302ca3b45f594fa5454f2a321581b905dcf4c3f2934e0bc318",
+          "source_path": "debugserver-types-0.5.0/Cargo.toml.orig",
+          "source_file_sha256": "705e49bb282781302ca3b45f594fa5454f2a321581b905dcf4c3f2934e0bc318"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; same npm/Rust policy, not an independently acquired upstream grant or copyright"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; not an independently acquired upstream grant, copyright or resolved rights guarantee"
+        }
+      ],
+      "source_header_count": 0,
+      "resolution": "Original publisher MIT declaration retained with informational standard permission text; no upstream full license text exists",
+      "notice_material_resolved": false,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/deno_core_icudata/deno_core_icudata-0.77.0.crate",
+      "crate_sha256": "a9efff8990a82c1ae664292507e1a5c6749ddd2312898cdf9cd7cb1fd4bc64c6",
+      "name": "deno_core_icudata",
+      "version": "0.77.0",
+      "license_expression": "MIT",
+      "notices": [
+        {
+          "file": "texts/dbc33246972b27584b48a4d3d13c8f0a2f9e748619b2a8546774cb5157f732e1.txt",
+          "sha256": "dbc33246972b27584b48a4d3d13c8f0a2f9e748619b2a8546774cb5157f732e1",
+          "source_path": "deno_core_icudata-0.77.0/Cargo.toml",
+          "source_file_sha256": "dbc33246972b27584b48a4d3d13c8f0a2f9e748619b2a8546774cb5157f732e1"
+        },
+        {
+          "file": "texts/424ad83d0fb170939e3be8d84ff3b3c46c8bbd860a85e82998427ca9dbb70db3.txt",
+          "sha256": "424ad83d0fb170939e3be8d84ff3b3c46c8bbd860a85e82998427ca9dbb70db3",
+          "source_path": "deno_core_icudata-0.77.0/Cargo.toml.orig",
+          "source_file_sha256": "424ad83d0fb170939e3be8d84ff3b3c46c8bbd860a85e82998427ca9dbb70db3"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; same npm/Rust policy, not an independently acquired upstream grant or copyright"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; not an independently acquired upstream grant, copyright or resolved rights guarantee"
+        }
+      ],
+      "source_header_count": 0,
+      "resolution": "Original publisher MIT declaration retained with informational standard permission text; no upstream full license text exists",
+      "notice_material_resolved": false,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/difflib/difflib-0.4.0.crate",
+      "crate_sha256": "6184e33543162437515c2e2b48714794e37845ec9851711914eec9d308f6ebe8",
+      "name": "difflib",
+      "version": "0.4.0",
+      "license_expression": "MIT",
+      "notices": [
+        {
+          "file": "texts/aed0597f7b6014324ef49cb6502e541e45c35335785345d7d7a5cac46cc64c0f.txt",
+          "sha256": "aed0597f7b6014324ef49cb6502e541e45c35335785345d7d7a5cac46cc64c0f",
+          "source_path": "difflib-0.4.0/Cargo.toml",
+          "source_file_sha256": "aed0597f7b6014324ef49cb6502e541e45c35335785345d7d7a5cac46cc64c0f"
+        },
+        {
+          "file": "texts/d541194ec9dbbc63a8e371fcb0a20af128671a73bea0c4734e17e43ed6956e50.txt",
+          "sha256": "d541194ec9dbbc63a8e371fcb0a20af128671a73bea0c4734e17e43ed6956e50",
+          "source_path": "difflib-0.4.0/Cargo.toml.orig",
+          "source_file_sha256": "d541194ec9dbbc63a8e371fcb0a20af128671a73bea0c4734e17e43ed6956e50"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; same npm/Rust policy, not an independently acquired upstream grant or copyright"
+        },
+        {
+          "file": "texts/6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5.txt",
+          "sha256": "6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5",
+          "url": "https://raw.githubusercontent.com/DimaKudosh/difflib/8748d65b8c631a244af70f9d9f0339b6e7e9d29c/LICENSE",
+          "commit": "8748d65b8c631a244af70f9d9f0339b6e7e9d29c"
+        }
+      ],
+      "source_header_count": 0,
+      "resolution": "Primary upstream material supplied with explicit version/attribution caveat",
+      "notice_material_resolved": true,
+      "copyright_added": false,
+      "upstream_caveat": "Licence introduced with0.3.0 before0.4.0;0.4.0 crate include list omits it and has no VCS record. Preserve upstream copyright Kevin B. Knapp verbatim; no inferred author identity or exact0.4.0 tree guarantee.",
+      "rights_guarantee": "not asserted"
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/display_container/display_container-0.9.0.crate",
+      "crate_sha256": "0a110a75c96bedec8e65823dea00a1d710288b7a369d95fd8a0f5127639466fa",
+      "name": "display_container",
+      "version": "0.9.0",
+      "license_expression": "MIT OR Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/2974bc2f16b5897ef0c0f323a5465b7402295ec573c718d74d5e413f825f3b4a.txt",
+          "sha256": "2974bc2f16b5897ef0c0f323a5465b7402295ec573c718d74d5e413f825f3b4a",
+          "source_path": "display_container-0.9.0/Cargo.toml",
+          "source_file_sha256": "2974bc2f16b5897ef0c0f323a5465b7402295ec573c718d74d5e413f825f3b4a"
+        },
+        {
+          "file": "texts/9eb42b9aa1fa21f8d29340d5a1f299ee4a4490db25f116e9452abe7717afad39.txt",
+          "sha256": "9eb42b9aa1fa21f8d29340d5a1f299ee4a4490db25f116e9452abe7717afad39",
+          "source_path": "display_container-0.9.0/Cargo.toml.orig",
+          "source_file_sha256": "9eb42b9aa1fa21f8d29340d5a1f299ee4a4490db25f116e9452abe7717afad39"
+        },
+        {
+          "file": "texts/3d1742e3af9b9adcc9aa0d1b1c7163b50df41fea184c8f6bbcee48341cffe035.txt",
+          "sha256": "3d1742e3af9b9adcc9aa0d1b1c7163b50df41fea184c8f6bbcee48341cffe035",
+          "source_path": "display_container-0.9.0/src/lib.rs",
+          "source_file_sha256": "13db2d71c93e61a6e9bdf52597a204f1ca6d017f68d0efb15c0598084b96add5",
+          "byte_range": [
+            0,
+            315
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 1,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/eventsource-stream/eventsource-stream-0.2.3.crate",
+      "crate_sha256": "74fef4569247a5f429d9156b9d0a2599914385dd189c539334c625d8099d90ab",
+      "name": "eventsource-stream",
+      "version": "0.2.3",
+      "license_expression": "MIT OR Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/b3a669f64604f19acae611ec2e7b1abb70560d920d23dab003e5090d023a8d83.txt",
+          "sha256": "b3a669f64604f19acae611ec2e7b1abb70560d920d23dab003e5090d023a8d83",
+          "source_path": "eventsource-stream-0.2.3/Cargo.toml",
+          "source_file_sha256": "b3a669f64604f19acae611ec2e7b1abb70560d920d23dab003e5090d023a8d83"
+        },
+        {
+          "file": "texts/f17f6cc26f19643dbadaaad9901d245d4645ef8fbac8266b33105392dd1f8601.txt",
+          "sha256": "f17f6cc26f19643dbadaaad9901d245d4645ef8fbac8266b33105392dd1f8601",
+          "source_path": "eventsource-stream-0.2.3/README.md",
+          "source_file_sha256": "f17f6cc26f19643dbadaaad9901d245d4645ef8fbac8266b33105392dd1f8601"
+        },
+        {
+          "file": "texts/725711996fb72721abc35595e0703ca2d1b55cb4d98cc5ade959fc0f8c2e86a4.txt",
+          "sha256": "725711996fb72721abc35595e0703ca2d1b55cb4d98cc5ade959fc0f8c2e86a4",
+          "source_path": "eventsource-stream-0.2.3/Cargo.toml.orig",
+          "source_file_sha256": "725711996fb72721abc35595e0703ca2d1b55cb4d98cc5ade959fc0f8c2e86a4"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 0,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/fax/fax-0.2.6.crate",
+      "crate_sha256": "f05de7d48f37cd6730705cbca900770cab77a89f413d23e100ad7fad7795a0ab",
+      "name": "fax",
+      "version": "0.2.6",
+      "license_expression": "MIT",
+      "notices": [
+        {
+          "file": "texts/0ea204979bda3a271442d39e327b479e65d5998bf9525c3272d5ce60a53a621d.txt",
+          "sha256": "0ea204979bda3a271442d39e327b479e65d5998bf9525c3272d5ce60a53a621d",
+          "source_path": "fax-0.2.6/Cargo.toml",
+          "source_file_sha256": "0ea204979bda3a271442d39e327b479e65d5998bf9525c3272d5ce60a53a621d"
+        },
+        {
+          "file": "texts/e8f20f4f701f02b565ffa289e1007008d07f933fb4f64f1a3879f8438a4a8406.txt",
+          "sha256": "e8f20f4f701f02b565ffa289e1007008d07f933fb4f64f1a3879f8438a4a8406",
+          "source_path": "fax-0.2.6/Cargo.toml.orig",
+          "source_file_sha256": "e8f20f4f701f02b565ffa289e1007008d07f933fb4f64f1a3879f8438a4a8406"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; same npm/Rust policy, not an independently acquired upstream grant or copyright"
+        },
+        {
+          "file": "texts/7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff.txt",
+          "sha256": "7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff",
+          "url": "https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE",
+          "commit": "5d70a161e33b62305f8bce7af3f7fbd011cfaf5d"
+        }
+      ],
+      "source_header_count": 0,
+      "resolution": "Primary upstream material supplied with explicit version/attribution caveat",
+      "notice_material_resolved": true,
+      "copyright_added": false,
+      "upstream_caveat": "Successor clarification added2025-09-15 after0.2.6 source40b226eb (2025-08-31). Not claimed present in the old published archive. Preserve Copyright \u00a92021 The pdf-rs contributers verbatim.",
+      "rights_guarantee": "not asserted"
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/fax_derive/fax_derive-0.2.0.crate",
+      "crate_sha256": "a0aca10fb742cb43f9e7bb8467c91aa9bcb8e3ffbc6a6f7389bb93ffc920577d",
+      "name": "fax_derive",
+      "version": "0.2.0",
+      "license_expression": "MIT",
+      "notices": [
+        {
+          "file": "texts/6cdaeb86f6147dd70051f5e61cc6d1f89b5f4dd1f1d175c7874d4798292b3e2a.txt",
+          "sha256": "6cdaeb86f6147dd70051f5e61cc6d1f89b5f4dd1f1d175c7874d4798292b3e2a",
+          "source_path": "fax_derive-0.2.0/Cargo.toml",
+          "source_file_sha256": "6cdaeb86f6147dd70051f5e61cc6d1f89b5f4dd1f1d175c7874d4798292b3e2a"
+        },
+        {
+          "file": "texts/34da4cab7ff30ef38fd413da49c787c83a32f782db304c93687567f168060725.txt",
+          "sha256": "34da4cab7ff30ef38fd413da49c787c83a32f782db304c93687567f168060725",
+          "source_path": "fax_derive-0.2.0/Cargo.toml.orig",
+          "source_file_sha256": "34da4cab7ff30ef38fd413da49c787c83a32f782db304c93687567f168060725"
+        },
+        {
+          "file": "provider-notices/MIT-template.txt",
+          "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+          "role": "informational standard conditions only; same npm/Rust policy, not an independently acquired upstream grant or copyright"
+        },
+        {
+          "file": "texts/7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff.txt",
+          "sha256": "7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff",
+          "url": "https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE",
+          "commit": "5d70a161e33b62305f8bce7af3f7fbd011cfaf5d"
+        }
+      ],
+      "source_header_count": 0,
+      "resolution": "Primary upstream material supplied with explicit version/attribution caveat",
+      "notice_material_resolved": true,
+      "copyright_added": false,
+      "upstream_caveat": "Successor clarification added2025-09-15 after0.2.6 source40b226eb (2025-08-31). Not claimed present in the old published archive. Preserve Copyright \u00a92021 The pdf-rs contributers verbatim.",
+      "rights_guarantee": "not asserted"
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/fxhash/fxhash-0.2.1.crate",
+      "crate_sha256": "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c",
+      "name": "fxhash",
+      "version": "0.2.1",
+      "license_expression": "Apache-2.0/MIT",
+      "notices": [
+        {
+          "file": "texts/83bb4c3e7fbfb7380c175923ba7dfe150e4e09bd4ebfb45e65e5f8a494d36ab9.txt",
+          "sha256": "83bb4c3e7fbfb7380c175923ba7dfe150e4e09bd4ebfb45e65e5f8a494d36ab9",
+          "source_path": "fxhash-0.2.1/Cargo.toml",
+          "source_file_sha256": "83bb4c3e7fbfb7380c175923ba7dfe150e4e09bd4ebfb45e65e5f8a494d36ab9"
+        },
+        {
+          "file": "texts/42f07fb23f8b37acf45914ccb71df077455a353850e148afeabb5c684f8ebaab.txt",
+          "sha256": "42f07fb23f8b37acf45914ccb71df077455a353850e148afeabb5c684f8ebaab",
+          "source_path": "fxhash-0.2.1/Cargo.toml.orig",
+          "source_file_sha256": "42f07fb23f8b37acf45914ccb71df077455a353850e148afeabb5c684f8ebaab"
+        },
+        {
+          "file": "texts/4b88f68c805a1bb0883f4c202c95083cf9bfc8122a9c57e16a0786bfe4a3b2e0.txt",
+          "sha256": "4b88f68c805a1bb0883f4c202c95083cf9bfc8122a9c57e16a0786bfe4a3b2e0",
+          "source_path": "fxhash-0.2.1/lib.rs",
+          "source_file_sha256": "885b72a1c977dc1c3ff4e0652719e62b6d8c3e713403e571afd581283f72df7b",
+          "byte_range": [
+            0,
+            467
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 1,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/io_tee/io_tee-0.1.1.crate",
+      "crate_sha256": "4b3f7cef34251886990511df1c61443aa928499d598a9473929ab5a90a527304",
+      "name": "io_tee",
+      "version": "0.1.1",
+      "license_expression": "MIT OR Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/361d0548c8284b9d033b3a94e75bd540c382da1fdbf62f1e99c7562a06ece5e1.txt",
+          "sha256": "361d0548c8284b9d033b3a94e75bd540c382da1fdbf62f1e99c7562a06ece5e1",
+          "source_path": "io_tee-0.1.1/Cargo.toml",
+          "source_file_sha256": "361d0548c8284b9d033b3a94e75bd540c382da1fdbf62f1e99c7562a06ece5e1"
+        },
+        {
+          "file": "texts/0ba20a4b5d8188a85014c5f6d52b5407aec2077986c05f6ba686f9899b767b95.txt",
+          "sha256": "0ba20a4b5d8188a85014c5f6d52b5407aec2077986c05f6ba686f9899b767b95",
+          "source_path": "io_tee-0.1.1/README.md",
+          "source_file_sha256": "0ba20a4b5d8188a85014c5f6d52b5407aec2077986c05f6ba686f9899b767b95"
+        },
+        {
+          "file": "texts/9556395f55b7c67a6041f84553c7c27b3ab3fe5505769f4f1003a7b0988f2586.txt",
+          "sha256": "9556395f55b7c67a6041f84553c7c27b3ab3fe5505769f4f1003a7b0988f2586",
+          "source_path": "io_tee-0.1.1/Cargo.toml.orig",
+          "source_file_sha256": "9556395f55b7c67a6041f84553c7c27b3ab3fe5505769f4f1003a7b0988f2586"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 0,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/linux-keyutils/linux-keyutils-0.2.4.crate",
+      "crate_sha256": "761e49ec5fd8a5a463f9b84e877c373d888935b71c6be78f3767fe2ae6bed18e",
+      "name": "linux-keyutils",
+      "version": "0.2.4",
+      "license_expression": "Apache-2.0 OR MIT",
+      "notices": [
+        {
+          "file": "texts/2a112a5832b2046e8d7cdd5da7168c625bd086dae6a94ad459c037f6898288b9.txt",
+          "sha256": "2a112a5832b2046e8d7cdd5da7168c625bd086dae6a94ad459c037f6898288b9",
+          "source_path": "linux-keyutils-0.2.4/Cargo.toml",
+          "source_file_sha256": "2a112a5832b2046e8d7cdd5da7168c625bd086dae6a94ad459c037f6898288b9"
+        },
+        {
+          "file": "texts/60eaaa21859394c2a1679d47763c4d2c31b3fdab7de327ac72f4b4244cac5695.txt",
+          "sha256": "60eaaa21859394c2a1679d47763c4d2c31b3fdab7de327ac72f4b4244cac5695",
+          "source_path": "linux-keyutils-0.2.4/README.md",
+          "source_file_sha256": "60eaaa21859394c2a1679d47763c4d2c31b3fdab7de327ac72f4b4244cac5695"
+        },
+        {
+          "file": "texts/18c658b216c2031f6849f3638cff80f6f42df2280e95ad4d78fbc335d8dc413a.txt",
+          "sha256": "18c658b216c2031f6849f3638cff80f6f42df2280e95ad4d78fbc335d8dc413a",
+          "source_path": "linux-keyutils-0.2.4/Cargo.toml.orig",
+          "source_file_sha256": "18c658b216c2031f6849f3638cff80f6f42df2280e95ad4d78fbc335d8dc413a"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 0,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/lock_free_hashtable/lock_free_hashtable-0.1.4.crate",
+      "crate_sha256": "ebf3631712f5b790675292ff827af269f5d9f920c920b77dc41d0485e3719612",
+      "name": "lock_free_hashtable",
+      "version": "0.1.4",
+      "license_expression": "MIT OR Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/1cff75df999e28aed7561f5556778fd1e9d1a314fad6d4926540c1f49a69c9a8.txt",
+          "sha256": "1cff75df999e28aed7561f5556778fd1e9d1a314fad6d4926540c1f49a69c9a8",
+          "source_path": "lock_free_hashtable-0.1.4/Cargo.toml",
+          "source_file_sha256": "1cff75df999e28aed7561f5556778fd1e9d1a314fad6d4926540c1f49a69c9a8"
+        },
+        {
+          "file": "texts/94eca265bbc37b34b0c1e6f5ad8992e1c06d47c5cd9402e9824abdcddbb0c70d.txt",
+          "sha256": "94eca265bbc37b34b0c1e6f5ad8992e1c06d47c5cd9402e9824abdcddbb0c70d",
+          "source_path": "lock_free_hashtable-0.1.4/Cargo.toml.orig",
+          "source_file_sha256": "94eca265bbc37b34b0c1e6f5ad8992e1c06d47c5cd9402e9824abdcddbb0c70d"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/examples/stress.rs",
+          "source_file_sha256": "b17d7cc6a889eb11cf263a64250b158698425b5b95cd82cde0828852dd8f2fce",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/src/atomic_value.rs",
+          "source_file_sha256": "54403a2f1cc51036368ffae012b1a6ff6cc21e8cf875a763daebae1a0a0522d3",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/src/fixed_cap.rs",
+          "source_file_sha256": "8b2225ded8534e07ce1f1c694b2b9a81c0db9ad5b2c2f093a69b857c323acc4b",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/src/lib.rs",
+          "source_file_sha256": "fbb09de705f0221006441738152312dc1254b922a087ded4c2f66ba828aedd4a",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/src/raw.rs",
+          "source_file_sha256": "0611935a6364e40dad51b0a2298b42acdcf771fd9db9b42be089fbd9786838ed",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "lock_free_hashtable-0.1.4/src/sharded.rs",
+          "source_file_sha256": "e8eb717ab98eaf378eed284098be2f49c8f87d5a455ba24b7264cb52d95b4a49",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 6,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/pagable_derive/pagable_derive-0.4.1.crate",
+      "crate_sha256": "838d17166587914f4e99353766c29160462b681511f08679545a0d07a0dc9415",
+      "name": "pagable_derive",
+      "version": "0.4.1",
+      "license_expression": "Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/671575298ed67520d6c824e9fa02b9beda81a4714c11610e6b6db1c97bb8ad80.txt",
+          "sha256": "671575298ed67520d6c824e9fa02b9beda81a4714c11610e6b6db1c97bb8ad80",
+          "source_path": "pagable_derive-0.4.1/Cargo.toml",
+          "source_file_sha256": "671575298ed67520d6c824e9fa02b9beda81a4714c11610e6b6db1c97bb8ad80"
+        },
+        {
+          "file": "texts/8f9c90827fe9dbdaefa2ead4b35889c6e9525c2f756f2ea2c33ba47e5745051a.txt",
+          "sha256": "8f9c90827fe9dbdaefa2ead4b35889c6e9525c2f756f2ea2c33ba47e5745051a",
+          "source_path": "pagable_derive-0.4.1/Cargo.toml.orig",
+          "source_file_sha256": "8f9c90827fe9dbdaefa2ead4b35889c6e9525c2f756f2ea2c33ba47e5745051a"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "pagable_derive-0.4.1/src/derive_pagable.rs",
+          "source_file_sha256": "4fa08f2debf74f45409527fc9b27b649a892accda06555c3be80b44ce9859103",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "pagable_derive-0.4.1/src/derive_pagable_panic.rs",
+          "source_file_sha256": "8ff1f9ddb605928d8c67a4a5aa6c1dd61420a857868e21be69939d477b77cd82",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "pagable_derive-0.4.1/src/derive_pagable_tagged.rs",
+          "source_file_sha256": "f06f85a84143e6f14fb107e0cb025f4c0b5cf9e152113a72de0de360e928d8ea",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "pagable_derive-0.4.1/src/lib.rs",
+          "source_file_sha256": "d5a6ac09935f885f642c9d71b6b02a18d8fe4553ec46d322b76ddb3eb29d87b0",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "pagable_derive-0.4.1/src/typetag.rs",
+          "source_file_sha256": "d42f5f55900ab7851c4834feb05f59d1efac05ebe275334733cf741374810392",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 5,
+      "resolution": "Apache-2.0 declared by the package (not an alternative election); original source headers and full standard conditions retained",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/rustls-platform-verifier-android/rustls-platform-verifier-android-0.1.1.crate",
+      "crate_sha256": "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f",
+      "name": "rustls-platform-verifier-android",
+      "version": "0.1.1",
+      "license_expression": "MIT OR Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/34de6835ef5df615acadc4071bb9d38565b23fbe5a9087a7cf30cc7ccfe02a20.txt",
+          "sha256": "34de6835ef5df615acadc4071bb9d38565b23fbe5a9087a7cf30cc7ccfe02a20",
+          "source_path": "rustls-platform-verifier-android-0.1.1/Cargo.toml",
+          "source_file_sha256": "34de6835ef5df615acadc4071bb9d38565b23fbe5a9087a7cf30cc7ccfe02a20"
+        },
+        {
+          "file": "texts/06142c21559d66a76c8740d8c505a2f7ed9078c45e7baee49dac58a131362640.txt",
+          "sha256": "06142c21559d66a76c8740d8c505a2f7ed9078c45e7baee49dac58a131362640",
+          "source_path": "rustls-platform-verifier-android-0.1.1/Cargo.toml.orig",
+          "source_file_sha256": "06142c21559d66a76c8740d8c505a2f7ed9078c45e7baee49dac58a131362640"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 0,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/static_interner/static_interner-0.1.2.crate",
+      "crate_sha256": "fab44341fbf4deae6e8d5ab450f24e1b34e0b2439d39ac0e9b5215a4e5493263",
+      "name": "static_interner",
+      "version": "0.1.2",
+      "license_expression": "MIT OR Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/e484570fd90c2fac292801cfcea36ea608d4ad4c5994d4691c8259d974204ddc.txt",
+          "sha256": "e484570fd90c2fac292801cfcea36ea608d4ad4c5994d4691c8259d974204ddc",
+          "source_path": "static_interner-0.1.2/Cargo.toml",
+          "source_file_sha256": "e484570fd90c2fac292801cfcea36ea608d4ad4c5994d4691c8259d974204ddc"
+        },
+        {
+          "file": "texts/128b24fc8a75912725e46b93446b67283ceae6c8139bc7b7e118591ee6dbde30.txt",
+          "sha256": "128b24fc8a75912725e46b93446b67283ceae6c8139bc7b7e118591ee6dbde30",
+          "source_path": "static_interner-0.1.2/Cargo.toml.orig",
+          "source_file_sha256": "128b24fc8a75912725e46b93446b67283ceae6c8139bc7b7e118591ee6dbde30"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "static_interner-0.1.2/src/lib.rs",
+          "source_file_sha256": "f8859299d67a5478a2038910f446e1104447c47314dc3bb276746e3924df06ac",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 1,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/strong_hash/strong_hash-0.1.0.crate",
+      "crate_sha256": "0831334aea34390b6b6ec7af0a27f9ee6324ad3a69463e6b240d83d6b7bce9c9",
+      "name": "strong_hash",
+      "version": "0.1.0",
+      "license_expression": "MIT OR Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/8cbe5aa749bc56554247ea32dc0b5f170d17cdc0413726b91e87af01be0963aa.txt",
+          "sha256": "8cbe5aa749bc56554247ea32dc0b5f170d17cdc0413726b91e87af01be0963aa",
+          "source_path": "strong_hash-0.1.0/Cargo.toml",
+          "source_file_sha256": "8cbe5aa749bc56554247ea32dc0b5f170d17cdc0413726b91e87af01be0963aa"
+        },
+        {
+          "file": "texts/8e4b2ca9d3e354abbedbef94e22e19d8358bf497979bb6ec4c4bde0e1b3b5a23.txt",
+          "sha256": "8e4b2ca9d3e354abbedbef94e22e19d8358bf497979bb6ec4c4bde0e1b3b5a23",
+          "source_path": "strong_hash-0.1.0/Cargo.toml.orig",
+          "source_file_sha256": "8e4b2ca9d3e354abbedbef94e22e19d8358bf497979bb6ec4c4bde0e1b3b5a23"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "strong_hash-0.1.0/src/impls/num_bigint.rs",
+          "source_file_sha256": "11decb596ea5e7268d751a2067b7d9b7b1176fa672f5afb251f33f49b7d5c160",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "strong_hash-0.1.0/src/impls/triomphe.rs",
+          "source_file_sha256": "c5c26079af2237e8b318dcdb1952292fd7895ac266e0f02026aee8b30052ba16",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "strong_hash-0.1.0/src/impls.rs",
+          "source_file_sha256": "8453f587171bb1ba46211263be07ac595ff86284fc2edb1466df641db009c1b1",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "strong_hash-0.1.0/src/lib.rs",
+          "source_file_sha256": "f5fa77466c86ef7b8d7a5af2f034067a543431fd1047d38d9fcf66cb4ede43d7",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 4,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/strong_hash_derive/strong_hash_derive-0.1.0.crate",
+      "crate_sha256": "ace6b48b7c4383a39bd3b966cca41bc999003aab9f690a2f355525c924296928",
+      "name": "strong_hash_derive",
+      "version": "0.1.0",
+      "license_expression": "MIT OR Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/734392bd2b68ddac73fa0149f56d831c91f175f19cd95774be6768f4832abcf6.txt",
+          "sha256": "734392bd2b68ddac73fa0149f56d831c91f175f19cd95774be6768f4832abcf6",
+          "source_path": "strong_hash_derive-0.1.0/Cargo.toml",
+          "source_file_sha256": "734392bd2b68ddac73fa0149f56d831c91f175f19cd95774be6768f4832abcf6"
+        },
+        {
+          "file": "texts/7e4bc1b1fd90dd8ba3591578677b27ada47c5dabab3ad0cc6db5a2599a9a37ec.txt",
+          "sha256": "7e4bc1b1fd90dd8ba3591578677b27ada47c5dabab3ad0cc6db5a2599a9a37ec",
+          "source_path": "strong_hash_derive-0.1.0/Cargo.toml.orig",
+          "source_file_sha256": "7e4bc1b1fd90dd8ba3591578677b27ada47c5dabab3ad0cc6db5a2599a9a37ec"
+        },
+        {
+          "file": "texts/bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d.txt",
+          "sha256": "bdad10f5ee47c1a52b6ef1d0721c4ab19d70f53e1637e8b8cd637a910f7e184d",
+          "source_path": "strong_hash_derive-0.1.0/src/lib.rs",
+          "source_file_sha256": "391f35b3f1387f7408b135b95458d52eab89713f52f76553254c4dddc54a6185",
+          "byte_range": [
+            0,
+            390
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 1,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/winapi-i686-pc-windows-gnu/winapi-i686-pc-windows-gnu-0.4.0.crate",
+      "crate_sha256": "ac3b87c63620426dd9b991e5ce0329eff545bccbbb34f3be09ff6fb6ab51b7b6",
+      "name": "winapi-i686-pc-windows-gnu",
+      "version": "0.4.0",
+      "license_expression": "MIT/Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/9652222664ffc7e2a26fdcdebdce0917a455b39d8fbcbf451bf0b011a3067bf7.txt",
+          "sha256": "9652222664ffc7e2a26fdcdebdce0917a455b39d8fbcbf451bf0b011a3067bf7",
+          "source_path": "winapi-i686-pc-windows-gnu-0.4.0/Cargo.toml",
+          "source_file_sha256": "9652222664ffc7e2a26fdcdebdce0917a455b39d8fbcbf451bf0b011a3067bf7"
+        },
+        {
+          "file": "texts/5257d6f5283ab052b6af51f578a8c74e14c31deb53a7c6cd9e6fa16135d57eb3.txt",
+          "sha256": "5257d6f5283ab052b6af51f578a8c74e14c31deb53a7c6cd9e6fa16135d57eb3",
+          "source_path": "winapi-i686-pc-windows-gnu-0.4.0/Cargo.toml.orig",
+          "source_file_sha256": "5257d6f5283ab052b6af51f578a8c74e14c31deb53a7c6cd9e6fa16135d57eb3"
+        },
+        {
+          "file": "texts/72f9dd4f441e55dbd746f776e04290d076584f469e9d0c964b152bf909029ad3.txt",
+          "sha256": "72f9dd4f441e55dbd746f776e04290d076584f469e9d0c964b152bf909029ad3",
+          "source_path": "winapi-i686-pc-windows-gnu-0.4.0/build.rs",
+          "source_file_sha256": "4344ce95f51197e1377429cd9ef7a8e3f97d39546776705857991f2f9416f545",
+          "byte_range": [
+            0,
+            383
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/9b0a59b4c5af60f46f79d2adbe433e07189d076972b8d33e9abca077dc10ccf7.txt",
+          "sha256": "9b0a59b4c5af60f46f79d2adbe433e07189d076972b8d33e9abca077dc10ccf7",
+          "source_path": "winapi-i686-pc-windows-gnu-0.4.0/src/lib.rs",
+          "source_file_sha256": "79212a91f610f8a77aa6ed4cc77212c2531eeb35630388bf07323cc328fcca42",
+          "byte_range": [
+            0,
+            378
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 2,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/winapi-x86_64-pc-windows-gnu/winapi-x86_64-pc-windows-gnu-0.4.0.crate",
+      "crate_sha256": "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f",
+      "name": "winapi-x86_64-pc-windows-gnu",
+      "version": "0.4.0",
+      "license_expression": "MIT/Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/a88605a11db5def9b6cf73398e83b3edb72228cb43ea935729fac5cd33cec22c.txt",
+          "sha256": "a88605a11db5def9b6cf73398e83b3edb72228cb43ea935729fac5cd33cec22c",
+          "source_path": "winapi-x86_64-pc-windows-gnu-0.4.0/Cargo.toml",
+          "source_file_sha256": "a88605a11db5def9b6cf73398e83b3edb72228cb43ea935729fac5cd33cec22c"
+        },
+        {
+          "file": "texts/d158846cdb1259d606bfbeb050e386484cb18f14db41478568114eddb76ec43e.txt",
+          "sha256": "d158846cdb1259d606bfbeb050e386484cb18f14db41478568114eddb76ec43e",
+          "source_path": "winapi-x86_64-pc-windows-gnu-0.4.0/Cargo.toml.orig",
+          "source_file_sha256": "d158846cdb1259d606bfbeb050e386484cb18f14db41478568114eddb76ec43e"
+        },
+        {
+          "file": "texts/72f9dd4f441e55dbd746f776e04290d076584f469e9d0c964b152bf909029ad3.txt",
+          "sha256": "72f9dd4f441e55dbd746f776e04290d076584f469e9d0c964b152bf909029ad3",
+          "source_path": "winapi-x86_64-pc-windows-gnu-0.4.0/build.rs",
+          "source_file_sha256": "b4ab421e1dc98159dd4440813cdaf7d9ea98278324bc6118d0f7cf378933f371",
+          "byte_range": [
+            0,
+            383
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/9b0a59b4c5af60f46f79d2adbe433e07189d076972b8d33e9abca077dc10ccf7.txt",
+          "sha256": "9b0a59b4c5af60f46f79d2adbe433e07189d076972b8d33e9abca077dc10ccf7",
+          "source_path": "winapi-x86_64-pc-windows-gnu-0.4.0/src/lib.rs",
+          "source_file_sha256": "79212a91f610f8a77aa6ed4cc77212c2531eeb35630388bf07323cc328fcca42",
+          "byte_range": [
+            0,
+            378
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 2,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/winsplit/winsplit-0.1.0.crate",
+      "crate_sha256": "3ab703352da6a72f35c39a533526393725640575bb211f61987a2748323ad956",
+      "name": "winsplit",
+      "version": "0.1.0",
+      "license_expression": "MIT OR Apache-2.0",
+      "notices": [
+        {
+          "file": "texts/4aef3e030384e8a14f801ee6c8d023ef0a54163bb760f4f07d77ae99ac260f79.txt",
+          "sha256": "4aef3e030384e8a14f801ee6c8d023ef0a54163bb760f4f07d77ae99ac260f79",
+          "source_path": "winsplit-0.1.0/Cargo.toml",
+          "source_file_sha256": "4aef3e030384e8a14f801ee6c8d023ef0a54163bb760f4f07d77ae99ac260f79"
+        },
+        {
+          "file": "texts/39bb1a6d7befd101a9f8228db3b2deab823042b54dc82a410534cb68ba93edbc.txt",
+          "sha256": "39bb1a6d7befd101a9f8228db3b2deab823042b54dc82a410534cb68ba93edbc",
+          "source_path": "winsplit-0.1.0/README.md",
+          "source_file_sha256": "39bb1a6d7befd101a9f8228db3b2deab823042b54dc82a410534cb68ba93edbc"
+        },
+        {
+          "file": "texts/7cc24e9a764e9dec5789436588b54eb8c9e51b188e78de3e6109b6ec8e0adbdb.txt",
+          "sha256": "7cc24e9a764e9dec5789436588b54eb8c9e51b188e78de3e6109b6ec8e0adbdb",
+          "source_path": "winsplit-0.1.0/Cargo.toml.orig",
+          "source_file_sha256": "7cc24e9a764e9dec5789436588b54eb8c9e51b188e78de3e6109b6ec8e0adbdb"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 0,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/zune-core/zune-core-0.4.12.crate",
+      "crate_sha256": "3f423a2c17029964870cfaabb1f13dfab7d092a62a29a89264f4d36990ca414a",
+      "name": "zune-core",
+      "version": "0.4.12",
+      "license_expression": "MIT OR Apache-2.0 OR Zlib",
+      "notices": [
+        {
+          "file": "texts/65d39b608d230ee0a4d39d4de9388d695f2117322aff7005243d5b8e742a6526.txt",
+          "sha256": "65d39b608d230ee0a4d39d4de9388d695f2117322aff7005243d5b8e742a6526",
+          "source_path": "zune-core-0.4.12/Cargo.toml",
+          "source_file_sha256": "65d39b608d230ee0a4d39d4de9388d695f2117322aff7005243d5b8e742a6526"
+        },
+        {
+          "file": "texts/cc3fa616bb3dd673abbdebce2d8b2a1a1ecb6a3dd9654313d6fcc0ab2d3c5f84.txt",
+          "sha256": "cc3fa616bb3dd673abbdebce2d8b2a1a1ecb6a3dd9654313d6fcc0ab2d3c5f84",
+          "source_path": "zune-core-0.4.12/Cargo.toml.orig",
+          "source_file_sha256": "cc3fa616bb3dd673abbdebce2d8b2a1a1ecb6a3dd9654313d6fcc0ab2d3c5f84"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/bit_depth.rs",
+          "source_file_sha256": "879b5b4b3ac99fc567f8d281662dc4125109f835b3944d023d038a084b2c0dd9",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/bytestream/reader.rs",
+          "source_file_sha256": "ca798f96876670bd8bd2a915cafc0eefaef57a09543a2fd310b0b4c3d48ad84a",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/bytestream/traits.rs",
+          "source_file_sha256": "fed12794c3bb7ee0fecc00ca96f96e96a6e3086407efb7b2b2aa10fbf2e01675",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/bytestream/writer.rs",
+          "source_file_sha256": "96227f650b813f68e1fd805ed523bbce7bf97af558bbe02b940e6dc2821eaeab",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/bytestream.rs",
+          "source_file_sha256": "ec12a04b4e1cfe1e592877b5ddc12df1f913677727525b88bfce935fc631519b",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/colorspace.rs",
+          "source_file_sha256": "070830c5f1056d3d0747f6cba1a12159379c192f5044584fb8d20b61abc338e7",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/0c6d164b892a8c1ab08b6338eb9198198dc667286dc919381596f58620ee0115.txt",
+          "sha256": "0c6d164b892a8c1ab08b6338eb9198198dc667286dc919381596f58620ee0115",
+          "source_path": "zune-core-0.4.12/src/lib.rs",
+          "source_file_sha256": "a627136eedec33bdf69996a43f8e8885c065f94d7c450d1503576e5b5922f44c",
+          "byte_range": [
+            0,
+            159
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/log.rs",
+          "source_file_sha256": "1655ea004aee621e4a93e57b6787693348348d8bb23f06feffc1e49537ea7565",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/options/decoder.rs",
+          "source_file_sha256": "f2c419e41c725319ebd777992e74dad19e4454869eed893145c882913ba26baf",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/options/encoder.rs",
+          "source_file_sha256": "22f86e152392a6f1d97832873498c172da34985454a7a0f2d1cb86295c7c58d0",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/result.rs",
+          "source_file_sha256": "92a098ba09ae4e5202da45a2d2165a6df804d3952e8c657950d064e4714afcaa",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5.txt",
+          "sha256": "5ed96584be490c76ca416ddc9f7ef975077bcd17c9447dc270dcf0a57a7a11d5",
+          "source_path": "zune-core-0.4.12/src/serde.rs",
+          "source_file_sha256": "23fe068415888dadb3daa1795f09214fb0d79e1a775fd7dce066386ee9334d59",
+          "byte_range": [
+            0,
+            165
+          ],
+          "material_type": "source-notice-excerpt"
+        },
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "role": "standard Apache-2.0 conditions; grant/declaration and attribution are the exact crate source above, not this generic text"
+        }
+      ],
+      "source_header_count": 12,
+      "resolution": "Apache-2.0 alternative elected from exact publisher declaration, with original source attributions and full standard conditions",
+      "notice_material_resolved": true,
+      "copyright_added": false
+    }
+  ],
+  "unresolved": [
+    "https://static.crates.io/crates/debugserver-types/debugserver-types-0.5.0.crate",
+    "https://static.crates.io/crates/deno_core_icudata/deno_core_icudata-0.77.0.crate"
+  ],
+  "scope": "Exact publisher declarations and original headers, with current primary-material supplements and version caveats; Apache alternatives only where declared, not an enabled-link proof or legal approval."
+}

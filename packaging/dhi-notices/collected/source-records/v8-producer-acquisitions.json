@@ -1,0 +1,42 @@
+[
+  {
+    "url": "https://raw.githubusercontent.com/openai/codex/12b3e88028b983051913fb6bb95d7a11218bdceb/patches/v8_module_deps.patch",
+    "sha256": "ae064039eeba7a97b0f161e0ece8ae03212266face9068e61d31f75569f6bf8e",
+    "size": 11957,
+    "integrity": null,
+    "signature_verified": false,
+    "path": "patches/v8_module_deps.patch"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/openai/codex/12b3e88028b983051913fb6bb95d7a11218bdceb/third_party/v8/BUILD.bazel",
+    "sha256": "765fd13a2e8d096e5dc22dcccd99b82b380a6d053bf11f9c3d8d7224949a38d7",
+    "size": 18912,
+    "integrity": null,
+    "signature_verified": false,
+    "path": "third_party/v8/BUILD.bazel"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/openai/codex/12b3e88028b983051913fb6bb95d7a11218bdceb/.github/workflows/rusty-v8-release.yml",
+    "sha256": "75ea54863c497524e6070c12deee58291128950c72a3b84b9973a795583a4c52",
+    "size": 16307,
+    "integrity": null,
+    "signature_verified": false,
+    "path": ".github/workflows/rusty-v8-release.yml"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/openai/codex/12b3e88028b983051913fb6bb95d7a11218bdceb/.bazelrc",
+    "sha256": "61e5d6da7f206a8e3c4049f6184dcee708420177e84c25e0fc7da339c67ee314",
+    "size": 13220,
+    "integrity": null,
+    "signature_verified": false,
+    "path": ".bazelrc"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/openai/codex/12b3e88028b983051913fb6bb95d7a11218bdceb/MODULE.bazel.lock",
+    "sha256": "be6e2b4532c445a14f00553c44f92acab8ec3547ae25c9490d4fbb275e7c6666",
+    "size": 1519489,
+    "integrity": null,
+    "signature_verified": false,
+    "path": "MODULE.bazel.lock"
+  }
+]

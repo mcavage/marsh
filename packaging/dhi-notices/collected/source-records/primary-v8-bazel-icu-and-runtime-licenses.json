@@ -1,0 +1,79 @@
+{
+  "notices": [
+    {
+      "component": "v8-bazel-icu",
+      "source_file": "LICENSE",
+      "file": "texts/451167c55c0fa447cc2d5632714f5e3c567fe4f1e1badefab2c1333852198aca.txt",
+      "sha256": "451167c55c0fa447cc2d5632714f5e3c567fe4f1e1badefab2c1333852198aca",
+      "acquisition": {
+        "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/a86a32e67b8d1384b33f8fa48c83a6079b86f8cd/LICENSE?format=TEXT",
+        "sha256": "c5a4698576c4195d3b5869d409cb3d4be7fca00201a5f15ecb5b03aae07b2e2e",
+        "size": 35316,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "source_commit": "a86a32e67b8d1384b33f8fa48c83a6079b86f8cd",
+      "legal_text": true
+    },
+    {
+      "component": "v8-bazel-icu",
+      "source_file": "license.html",
+      "file": "texts/c62d7697c03979f5056d28b338fafc7a1152820f7b379adf4a9d88cd37160f96.txt",
+      "sha256": "c62d7697c03979f5056d28b338fafc7a1152820f7b379adf4a9d88cd37160f96",
+      "acquisition": {
+        "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/a86a32e67b8d1384b33f8fa48c83a6079b86f8cd/license.html?format=TEXT",
+        "sha256": "c6575fd2b6e16a2b10fdd8e7be8e11cc118e7a9a4822fa1e62b497491c78046c",
+        "size": 832,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "source_commit": "a86a32e67b8d1384b33f8fa48c83a6079b86f8cd",
+      "legal_text": true
+    },
+    {
+      "component": "dragonbox",
+      "source_file": "LICENSE-Apache2-LLVM",
+      "file": "texts/9e45e856bedccee9f67254082ca11851d954de2fed7448c4bed19ad9aab99a91.txt",
+      "sha256": "9e45e856bedccee9f67254082ca11851d954de2fed7448c4bed19ad9aab99a91",
+      "acquisition": {
+        "url": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE-Apache2-LLVM?format=TEXT",
+        "sha256": "c71962c081584c01a7c18adb3a19137cb831604941bd829dc78751e85862dc1d",
+        "size": 16352,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "source_commit": "beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44",
+      "legal_text": true
+    },
+    {
+      "component": "dragonbox",
+      "source_file": "LICENSE-Boost",
+      "file": "texts/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566.txt",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+      "acquisition": {
+        "url": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE-Boost?format=TEXT",
+        "sha256": "5624d76e1b4569cebba65ba1f7eda5fbd231bc5ee5e4136211561b2109e0c4f8",
+        "size": 1784,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "source_commit": "beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44",
+      "legal_text": true
+    },
+    {
+      "component": "jinja2",
+      "source_file": "LICENSE.rst",
+      "file": "texts/3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b.txt",
+      "sha256": "3b49dcee4105eb37bac10faf1be260408fe85d252b8e9df2e0979fc1e094437b",
+      "acquisition": {
+        "url": "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git/+/c3027d884967773057bf74b957e3fea87e5df4d7/LICENSE.rst?format=TEXT",
+        "sha256": "9f1ec83a2b3616580c2305e3d168c380700bee92b8b20ce92c16b34bd7dba254",
+        "size": 1968,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "source_commit": "c3027d884967773057bf74b957e3fea87e5df4d7",
+      "legal_text": true
+    }
+  ]
+}

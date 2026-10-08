@@ -1,0 +1,76 @@
+diff --git a/brush-core/src/split_interp.rs b/brush-core/src/split_interp.rs
+index 6d1a0e4..c457094 100644
+--- a/brush-core/src/split_interp.rs
++++ b/brush-core/src/split_interp.rs
+@@ -122,12 +122,10 @@ fn settle<SE: extensions::ShellExtensions>(
+     result
+ }
+ 
+-/// Status for every typed stage that did not run (split, then join if present).
+-fn fail_stages(statuses: &mut Vec<u8>, shape: SplitShape, status: u8) {
+-    statuses.push(status);
+-    if shape.join.is_some() {
+-        statuses.push(status);
+-    }
++/// Status for every stage that did not run (split, join if present, and the
++/// stages after them), so `PIPESTATUS` keeps one entry per pipeline stage.
++fn fail_stages(statuses: &mut Vec<u8>, pipeline: &ast::Pipeline, status: u8) {
++    statuses.resize(statuses.len().max(pipeline.seq.len()), status);
+ }
+ 
+ fn write_lines<SE: extensions::ShellExtensions>(
+@@ -153,7 +151,7 @@ pub(crate) async fn execute_split_pipeline<SE: extensions::ShellExtensions>(
+         Ok(join) => join,
+         Err(message) => {
+             writeln!(params.stderr(shell), "{message}")?;
+-            fail_stages(&mut statuses, shape, 2);
++            fail_stages(&mut statuses, pipeline, 2);
+             return Ok(settle(shell, pipeline, statuses, 2));
+         }
+     };
+@@ -179,11 +177,11 @@ pub(crate) async fn execute_split_pipeline<SE: extensions::ShellExtensions>(
+     let Some((prefix_status, input)) =
+         composition_input(&pipeline.seq[..shape.split], shell, params, &mut statuses).await?
+     else {
+-        fail_stages(&mut statuses, shape, 2);
++        fail_stages(&mut statuses, pipeline, 2);
+         return Ok(settle(shell, pipeline, statuses, 2));
+     };
+     if prefix_status != 0 {
+-        fail_stages(&mut statuses, shape, prefix_status);
++        fail_stages(&mut statuses, pipeline, prefix_status);
+         return Ok(settle(shell, pipeline, statuses, prefix_status));
+     }
+ 
+@@ -192,7 +190,7 @@ pub(crate) async fn execute_split_pipeline<SE: extensions::ShellExtensions>(
+             params.stderr(shell),
+             "split: workspaces are unavailable here"
+         )?;
+-        fail_stages(&mut statuses, shape, 2);
++        fail_stages(&mut statuses, pipeline, 2);
+         return Ok(settle(shell, pipeline, statuses, 2));
+     };
+     let branches = split
+@@ -237,13 +235,19 @@ pub(crate) async fn execute_split_pipeline<SE: extensions::ShellExtensions>(
+         Ok(run) => run,
+         Err(message) => {
+             writeln!(params.stderr(shell), "split: {message}")?;
+-            fail_stages(&mut statuses, shape, 2);
++            fail_stages(&mut statuses, pipeline, 2);
+             return Ok(settle(shell, pipeline, statuses, 2));
+         }
+     };
+     if run.cancelled {
+-        fail_stages(&mut statuses, shape, 130);
+-        return Ok(settle(shell, pipeline, statuses, 130));
++        fail_stages(&mut statuses, pipeline, 130);
++        let mut result = settle(shell, pipeline, statuses, 130);
++        // Like a foreground job killed by Ctrl-C, an interactive shell
++        // abandons the rest of the command line.
++        if shell.options().interactive {
++            result.next_control_flow = crate::results::ExecutionControlFlow::Interrupted;
++        }
++        return Ok(result);
+     }
+     let branch_failure = run.status;
+     statuses.push(branch_failure);

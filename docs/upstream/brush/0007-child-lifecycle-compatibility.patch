@@ -1,0 +1,704 @@
+diff --git a/MARSH-VENDORING.md b/MARSH-VENDORING.md
+index f569c8e..40a72a4 100644
+--- a/MARSH-VENDORING.md
++++ b/MARSH-VENDORING.md
+@@ -4,13 +4,17 @@ This source tree is pinned from `reubeno/brush` commit
+ `1389a8e8af6bec56fdfb9ab60a8c898bc14aa961`. It is checked in so a normal
+ `make build` does not depend on an unpublished fork.
+ 
+-The only marsh source deltas are the five ordered patches in
++The marsh source deltas are the seven ordered patches in
+ `../../docs/upstream/brush/`. The first two make registered commands ordinary
+ processes and complete the bounded background-job behavior. The third lets an
+ embedding binary pass Brush an explicit argument vector after consuming its
+ own product options. The fourth implements noninteractive `BASH_ENV`/`ENV`
+ startup-file behavior. The fifth delivers registered `INT` traps after a
+-foreground process group receives SIGINT.
++foreground process group receives SIGINT. The sixth injects marsh's descendant
++command directory and session context at the Brush entry point. The seventh
++repairs generic trapped `TERM` and `wait -n -p` behavior, with a small
++marsh-specific `fanout` TERM path. Generic portions can be proposed upstream
++independently; product routing and composition remain local.
+ 
+ This directory contains only the runtime crate source, manifests, licenses,
+ and build metadata needed by marsh. Upstream integration tests, snapshots,
+@@ -20,6 +24,6 @@ patch series was also checked against the full upstream compatibility suite
+ before this source-only vendor snapshot was produced.
+ 
+ To verify or refresh the pin, check out the exact upstream revision, apply the
+-five patches in order, and compare the resulting tracked files with this
++seven patches in order, and compare the resulting tracked files with this
+ directory. Do not carry product scheduling, daemon, or sandbox code into
+ Brush.
+diff --git a/brush-builtins/src/wait.rs b/brush-builtins/src/wait.rs
+index fe19257..5400ba8 100644
+--- a/brush-builtins/src/wait.rs
++++ b/brush-builtins/src/wait.rs
+@@ -1,7 +1,7 @@
+ use clap::Parser;
+ use std::io::Write;
+ 
+-use brush_core::{ExecutionExitCode, ExecutionResult, builtins, error};
++use brush_core::{ExecutionExitCode, ExecutionResult, builtins, env, error, variables};
+ 
+ /// Wait for jobs to terminate.
+ #[derive(Parser)]
+@@ -28,18 +28,117 @@ impl builtins::Command for WaitCommand {
+ 
+     async fn execute<SE: brush_core::ShellExtensions>(
+         &self,
+-        context: brush_core::ExecutionContext<'_, SE>,
++        mut context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<ExecutionResult, Self::Error> {
+         if self.wait_for_terminate {
+             return error::unimp("wait -f");
+         }
++        if let Some(name) = &self.variable_to_receive_id {
++            if !env::valid_variable_name(name) {
++                writeln!(
++                    context.stderr(),
++                    "{}: `{name}`: not a valid identifier",
++                    context.command_name
++                )?;
++                return Ok(ExecutionResult::general_error());
++            }
++            context.shell.env_mut().unset(name)?;
++        }
++
+         if self.wait_for_first_or_next {
+-            return error::unimp("wait -n");
++            let eligible_ids = if self.ids.is_empty() {
++                context.shell.jobs_mut().waitable_ids()
++            } else {
++                let mut ids = Vec::new();
++                for id in &self.ids {
++                    let job = if id.starts_with('%') {
++                        context.shell.jobs_mut().resolve_job_spec(id)
++                    } else {
++                        id.parse()
++                            .ok()
++                            .and_then(|pid| context.shell.jobs_mut().job_for_pid_mut(pid))
++                    };
++                    if let Some(job) = job {
++                        ids.push(job.id);
++                    } else if let Ok(pid) = id.parse() {
++                        if let Some(job_id) = context.shell.jobs_mut().waitable_id_for_pid(pid) {
++                            ids.push(job_id);
++                        }
++                    }
++                }
++                ids
++            };
++            #[cfg(unix)]
++            let waited = {
++                let term_signal: brush_core::traps::TrapSignal = "TERM".parse()?;
++                if context.shell.traps().handles(term_signal) {
++                    tokio::select! {
++                        result = context.shell.jobs_mut().wait_first(&eligible_ids) => result?,
++                        result = brush_core::traps::await_term() => {
++                            result?;
++                            context.shell.set_last_exit_status(143);
++                            let trap_result = context.shell.invoke_trap_handler(term_signal, &context.params).await?;
++                            return Ok(if trap_result.is_normal_flow() { ExecutionResult::new(143) } else { trap_result });
++                        }
++                    }
++                } else {
++                    context.shell.jobs_mut().wait_first(&eligible_ids).await?
++                }
++            };
++            #[cfg(not(unix))]
++            let waited = context.shell.jobs_mut().wait_first(&eligible_ids).await?;
++            let Some((job_id, pid, result)) = waited else {
++                return Ok(ExecutionResult::new(127));
++            };
++            if let Some(name) = &self.variable_to_receive_id {
++                let value = pid.map_or_else(|| format!("%{job_id}"), |pid| pid.to_string());
++                context.shell.env_mut().update_or_add(
++                    name,
++                    variables::ShellValueLiteral::Scalar(value),
++                    |_| Ok(()),
++                    env::EnvironmentLookup::Anywhere,
++                    env::EnvironmentScope::Global,
++                )?;
++            }
++            return Ok(result);
+         }
+         if self.variable_to_receive_id.is_some() {
+-            return error::unimp("wait -p");
++            return error::unimp("wait -p without -n");
++        }
++
++        #[cfg(unix)]
++        {
++            let term_signal: brush_core::traps::TrapSignal = "TERM".parse()?;
++            if context.shell.traps().handles(term_signal) {
++                let completed = tokio::select! {
++                    result = self.wait_without_next(&mut context) => Some(result),
++                    result = brush_core::traps::await_term() => { result?; None },
++                };
++                if let Some(result) = completed {
++                    return result;
++                }
++                context.shell.set_last_exit_status(143);
++                let trap_result = context
++                    .shell
++                    .invoke_trap_handler(term_signal, &context.params)
++                    .await?;
++                return Ok(if trap_result.is_normal_flow() {
++                    ExecutionResult::new(143)
++                } else {
++                    trap_result
++                });
++            }
+         }
+ 
++        self.wait_without_next(&mut context).await
++    }
++}
++
++impl WaitCommand {
++    async fn wait_without_next<SE: brush_core::ShellExtensions>(
++        &self,
++        context: &mut brush_core::ExecutionContext<'_, SE>,
++    ) -> Result<ExecutionResult, brush_core::Error> {
+         let mut result = ExecutionResult::success();
+         let mut waited_for_pid = false;
+ 
+@@ -49,6 +148,15 @@ impl builtins::Command for WaitCommand {
+                     // It's a job spec.
+                     if let Some(job) = context.shell.jobs_mut().resolve_job_spec(id) {
+                         result = job.wait().await?;
++                    } else if let Some(job_id) = id.strip_prefix('%').and_then(|id| id.parse().ok())
++                    {
++                        if let Some(completed) =
++                            context.shell.jobs_mut().take_completed_for_id(job_id)
++                        {
++                            result = completed;
++                        } else {
++                            result = ExecutionExitCode::GeneralError.into();
++                        }
+                     } else {
+                         writeln!(
+                             context.stderr(),
+@@ -73,6 +181,10 @@ impl builtins::Command for WaitCommand {
+                     if let Some(job) = context.shell.jobs_mut().job_for_pid_mut(pid) {
+                         result = job.wait().await?;
+                         waited_for_pid = true;
++                    } else if let Some(completed) =
++                        context.shell.jobs_mut().take_completed_for_pid(pid)
++                    {
++                        result = completed;
+                     } else {
+                         writeln!(
+                             context.stderr(),
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index 5c1babe..f76bffa 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -674,8 +674,16 @@ pub(crate) fn execute_external_command(
+                 tracing::warn!("could not retrieve pid for child process");
+             }
+ 
++            #[cfg(unix)]
++            let term_trapped = context
++                .shell
++                .traps()
++                .handles(traps::TrapSignal::Signal(sys::signal::Signal::SIGTERM));
++            #[cfg(not(unix))]
++            let term_trapped = false;
++
+             Ok(ExecutionSpawnResult::StartedProcess(
+-                processes::ChildProcess::new(child, pid, actual_pgid),
++                processes::ChildProcess::new(child, pid, actual_pgid, term_trapped),
+             ))
+         }
+         Err(spawn_err) => {
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index b968e78..a93976f 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -776,7 +776,14 @@ async fn execute_composition_pipeline<SE: extensions::ShellExtensions>(
+         Complete(Vec<BranchResult>),
+         OutputLimit,
+         Interrupted,
++        Terminated,
+     }
++    #[cfg(unix)]
++    let term_trapped = shell.traps().handles(crate::traps::TrapSignal::Signal(
++        sys::signal::Signal::SIGTERM,
++    ));
++    #[cfg(not(unix))]
++    let term_trapped = false;
+     let completion = {
+         let all_branches = futures::future::join_all(futures);
+         tokio::pin!(all_branches);
+@@ -788,7 +795,11 @@ async fn execute_composition_pipeline<SE: extensions::ShellExtensions>(
+             result = sys::signal::await_ctrl_c() => {
+                 result?;
+                 BranchCompletion::Interrupted
+-            }
++            },
++            result = sys::signal::await_term(), if term_trapped => {
++                result?;
++                BranchCompletion::Terminated
++            },
+         }
+     };
+     let branch_results = match completion {
+@@ -810,6 +821,27 @@ async fn execute_composition_pipeline<SE: extensions::ShellExtensions>(
+             shell.set_last_exit_status(interrupted);
+             return Ok(ExecutionResult::new(interrupted));
+         }
++        BranchCompletion::Terminated => {
++            let terminated = 143;
++            statuses.push(terminated);
++            if shape.collect.is_some() {
++                statuses.push(terminated);
++            }
++            *shell.last_pipeline_statuses_mut() = statuses;
++            shell.set_last_exit_status(terminated);
++            #[cfg(unix)]
++            {
++                let signal = crate::traps::TrapSignal::Signal(sys::signal::Signal::SIGTERM);
++                let trap_result = shell.invoke_trap_handler(signal, params).await?;
++                return Ok(if trap_result.is_normal_flow() {
++                    ExecutionResult::new(terminated)
++                } else {
++                    trap_result
++                });
++            }
++            #[cfg(not(unix))]
++            return Ok(ExecutionResult::new(terminated));
++        }
+     };
+     if output_exceeded.load(Ordering::Relaxed) {
+         return Err(std::io::Error::new(
+@@ -1159,6 +1191,7 @@ async fn wait_for_pipeline_processes_and_update_status(
+     let mut stopped_children = vec![];
+     let mut last_failure_exit_code: Option<ExecutionExitCode> = None;
+     let mut interrupted = false;
++    let mut terminated = false;
+ 
+     // Clear our the pipeline status so we can start filling it out.
+     shell.last_pipeline_statuses_mut().clear();
+@@ -1174,8 +1207,10 @@ async fn wait_for_pipeline_processes_and_update_status(
+             ExecutionWaitResult::Completed {
+                 result: current_result,
+                 interrupted: child_interrupted,
++                terminated: child_terminated,
+             } => {
+                 interrupted |= child_interrupted;
++                terminated |= child_terminated;
+                 result = current_result;
+                 shell.set_last_exit_status(result.exit_code.into());
+                 shell
+@@ -1210,6 +1245,17 @@ async fn wait_for_pipeline_processes_and_update_status(
+         }
+     }
+ 
++    #[cfg(unix)]
++    if terminated {
++        let signal = crate::traps::TrapSignal::Signal(sys::signal::Signal::SIGTERM);
++        if shell.traps().handles(signal) {
++            let trap_result = shell.invoke_trap_handler(signal, params).await?;
++            if !trap_result.is_normal_flow() {
++                return Ok(trap_result);
++            }
++        }
++    }
++
+     // Apply pipefail semantics if enabled
+     if shell.options().return_last_failure_from_pipeline {
+         if let Some(failure_exit_code) = last_failure_exit_code {
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+index c405e7e..fa2ab69 100644
+--- a/brush-core/src/jobs.rs
++++ b/brush-core/src/jobs.rs
+@@ -21,6 +21,15 @@ pub(crate) type JobResult = (Job, Result<ExecutionResult, error::Error>);
+ pub struct JobManager {
+     /// The jobs that are currently managed by the shell.
+     pub jobs: Vec<Job>,
++    /// Statuses reported at a prompt but not yet collected by wait.
++    completed: VecDeque<CompletedJob>,
++    next_id: usize,
++}
++
++struct CompletedJob {
++    id: usize,
++    pid: Option<sys::process::ProcessId>,
++    result: ExecutionResult,
+ }
+ 
+ /// Represents a task that is part of a job.
+@@ -103,7 +112,8 @@ impl JobManager {
+             }
+         }
+ 
+-        let id = self.jobs.len() + 1;
++        self.next_id += 1;
++        let id = self.next_id;
+         job.id = id;
+         job.annotation = JobAnnotation::Current;
+         self.jobs.push(job);
+@@ -168,9 +178,45 @@ impl JobManager {
+             job.wait().await?;
+         }
+ 
++        self.completed.clear();
+         Ok(self.sweep_completed_jobs())
+     }
+ 
++    /// Waits for the first eligible job to complete, preserving every other
++    /// job so a later wait can still collect its result.
++    pub async fn wait_first(
++        &mut self,
++        eligible_ids: &[usize],
++    ) -> Result<Option<(usize, Option<sys::process::ProcessId>, ExecutionResult)>, error::Error>
++    {
++        if let Some(index) = self
++            .completed
++            .iter()
++            .position(|job| eligible_ids.contains(&job.id))
++        {
++            if let Some(job) = self.completed.remove(index) {
++                return Ok(Some((job.id, job.pid, job.result)));
++            }
++        }
++        let waits = self
++            .jobs
++            .iter_mut()
++            .filter(|job| eligible_ids.contains(&job.id) && !job.tasks.is_empty())
++            .map(|job| {
++                let id = job.id;
++                let pid = job.representative_pid();
++                Box::pin(async move { (id, pid, job.wait().await) })
++            })
++            .collect::<Vec<_>>();
++        if waits.is_empty() {
++            return Ok(None);
++        }
++        let ((id, pid, result), _, _) = futures::future::select_all(waits).await;
++        let result = result?;
++        self.sweep_waited_jobs();
++        Ok(Some((id, pid, result)))
++    }
++
+     /// Resolves a child process ID to its managed job.
+     pub fn job_for_pid_mut(&mut self, pid: sys::process::ProcessId) -> Option<&mut Job> {
+         self.jobs
+@@ -178,6 +224,44 @@ impl JobManager {
+             .find(|job| job.representative_pid() == Some(pid))
+     }
+ 
++    /// Takes an already reported child status by PID.
++    pub fn take_completed_for_pid(
++        &mut self,
++        pid: sys::process::ProcessId,
++    ) -> Option<ExecutionResult> {
++        let index = self.completed.iter().position(|job| job.pid == Some(pid))?;
++        self.completed.remove(index).map(|job| job.result)
++    }
++
++    /// Takes an already reported child status by job ID.
++    pub fn take_completed_for_id(&mut self, id: usize) -> Option<ExecutionResult> {
++        let index = self.completed.iter().position(|job| job.id == id)?;
++        self.completed.remove(index).map(|job| job.result)
++    }
++
++    /// IDs that remain eligible for wait.
++    pub fn waitable_ids(&self) -> Vec<usize> {
++        self.jobs
++            .iter()
++            .map(|job| job.id)
++            .chain(self.completed.iter().map(|job| job.id))
++            .collect()
++    }
++
++    /// Resolves a PID from an active or already reported job.
++    pub fn waitable_id_for_pid(&self, pid: sys::process::ProcessId) -> Option<usize> {
++        self.jobs
++            .iter()
++            .find(|job| job.representative_pid() == Some(pid))
++            .map(|job| job.id)
++            .or_else(|| {
++                self.completed
++                    .iter()
++                    .find(|job| job.pid == Some(pid))
++                    .map(|job| job.id)
++            })
++    }
++
+     /// Removes jobs whose tasks were consumed by an explicit wait.
+     pub fn sweep_waited_jobs(&mut self) {
+         let _ = self.sweep_completed_jobs();
+@@ -189,8 +273,16 @@ impl JobManager {
+ 
+         let mut i = 0;
+         while i != self.jobs.len() {
++            let pid = self.jobs[i].representative_pid();
+             if let Some(result) = self.jobs[i].poll_done()? {
+                 let job = self.jobs.remove(i);
++                if let Ok(completed) = &result {
++                    self.completed.push_back(CompletedJob {
++                        id: job.id,
++                        pid,
++                        result: *completed,
++                    });
++                }
+                 results.push((job, result));
+             } else if matches!(self.jobs[i].state, JobState::Done) {
+                 // TODO(jobs): This is a workaround to remove jobs that are done but for which we
+@@ -269,6 +361,8 @@ impl Display for JobAnnotation {
+ pub struct Job {
+     /// The tasks that make up the job.
+     tasks: VecDeque<JobTask>,
++    /// The rightmost pipeline status, retained across canceled concurrent waits.
++    wait_result: Option<ExecutionResult>,
+ 
+     /// If available, the process group ID of the job's processes.
+     pgid: Option<sys::process::ProcessId>,
+@@ -311,6 +405,7 @@ impl Job {
+         Self {
+             id: 0,
+             tasks: tasks.into_iter().collect(),
++            wait_result: None,
+             pgid: None,
+             annotation: JobAnnotation::None,
+             command_line,
+@@ -381,6 +476,11 @@ impl Job {
+             match task.poll() {
+                 Some(r) => {
+                     self.tasks.remove(0);
++                    if self.tasks.is_empty() {
++                        if let Ok(completed) = &r {
++                            self.wait_result = Some(*completed);
++                        }
++                    }
+                     result = Some(r);
+                 }
+                 None => {
+@@ -402,12 +502,10 @@ impl Job {
+         // observes the rightmost command first; preserve that status while
+         // still reaping every earlier stage. Overwriting it with each prior
+         // stage made `wait $!` report the leftmost command's status.
+-        let mut result = None;
+-
+         while let Some(task) = self.tasks.back_mut() {
+             match task.wait().await? {
+                 JobTaskWaitResult::Completed(execution_result) => {
+-                    result.get_or_insert(execution_result);
++                    self.wait_result.get_or_insert(execution_result);
+                     self.tasks.pop_back();
+                 }
+                 JobTaskWaitResult::Stopped => {
+@@ -419,7 +517,7 @@ impl Job {
+ 
+         self.state = JobState::Done;
+ 
+-        Ok(result.unwrap_or_else(ExecutionResult::success))
++        Ok(self.wait_result.unwrap_or_else(ExecutionResult::success))
+     }
+ 
+     /// Moves the job to execute in the background.
+diff --git a/brush-core/src/processes.rs b/brush-core/src/processes.rs
+index f222d54..c069d1b 100644
+--- a/brush-core/src/processes.rs
++++ b/brush-core/src/processes.rs
+@@ -18,6 +18,8 @@ pub struct ChildProcess {
+     /// If available, the process group ID of the child.
+     pgid: Option<sys::process::ProcessId>,
+     interrupted: bool,
++    term_trapped: bool,
++    terminated: bool,
+ }
+ 
+ impl ChildProcess {
+@@ -26,12 +28,15 @@ impl ChildProcess {
+         child: sys::process::Child,
+         pid: Option<sys::process::ProcessId>,
+         pgid: Option<sys::process::ProcessId>,
++        term_trapped: bool,
+     ) -> Self {
+         Self {
+             exec_future: Box::pin(child.wait_with_output()),
+             pid,
+             pgid,
+             interrupted: false,
++            term_trapped,
++            terminated: false,
+         }
+     }
+ 
+@@ -55,10 +60,22 @@ impl ChildProcess {
+         #[allow(clippy::ignored_unit_patterns)]
+         loop {
+             tokio::select! {
++                biased;
++                result = sys::signal::await_term(), if self.term_trapped => {
++                    result?;
++                    self.terminated = true;
++                },
++                _ = sys::signal::await_ctrl_c() => {
++                    // The foreground group receives SIGINT as well. Remember that the
++                    // shell received it so the interpreter can deliver a registered trap
++                    // after the child has been reaped.
++                    self.interrupted = true;
++                },
+                 output = &mut self.exec_future => {
+                     break Ok(ProcessWaitResult::Completed {
+                         output: output?,
+                         interrupted: std::mem::take(&mut self.interrupted),
++                        terminated: std::mem::take(&mut self.terminated),
+                     })
+                 },
+                 _ = sigtstp.recv() => {
+@@ -69,12 +86,6 @@ impl ChildProcess {
+                         break Ok(ProcessWaitResult::Stopped);
+                     }
+                 },
+-                _ = sys::signal::await_ctrl_c() => {
+-                    // The foreground group receives SIGINT as well. Remember that the
+-                    // shell received it so the interpreter can deliver a registered trap
+-                    // after the child has been reaped.
+-                    self.interrupted = true;
+-                },
+             }
+         }
+     }
+@@ -95,6 +106,8 @@ pub enum ProcessWaitResult {
+         output: std::process::Output,
+         /// Whether the shell received SIGINT while awaiting this process.
+         interrupted: bool,
++        /// Whether a trapped SIGTERM arrived while awaiting the process.
++        terminated: bool,
+     },
+     /// The process stopped and has not yet completed.
+     Stopped,
+diff --git a/brush-core/src/results.rs b/brush-core/src/results.rs
+index cdddb26..362ba35 100644
+--- a/brush-core/src/results.rs
++++ b/brush-core/src/results.rs
+@@ -6,7 +6,7 @@ use std::os::unix::process::ExitStatusExt;
+ use crate::{error, processes};
+ 
+ /// Represents the result of executing a command or similar item.
+-#[derive(Default)]
++#[derive(Clone, Copy, Default)]
+ pub struct ExecutionResult {
+     /// The control flow transition to apply after execution.
+     pub next_control_flow: ExecutionControlFlow,
+@@ -273,9 +273,11 @@ impl ExecutionSpawnResult {
+                     processes::ProcessWaitResult::Completed {
+                         output,
+                         interrupted,
++                        terminated,
+                     } => ExecutionWaitResult::Completed {
+                         result: ExecutionResult::from(output),
+                         interrupted,
++                        terminated,
+                     },
+                     processes::ProcessWaitResult::Stopped => ExecutionWaitResult::Stopped(child),
+                 }
+@@ -283,12 +285,14 @@ impl ExecutionSpawnResult {
+             Self::Completed(result) => ExecutionWaitResult::Completed {
+                 result,
+                 interrupted: false,
++                terminated: false,
+             },
+             Self::StartedTask(join_handle) => {
+                 let result = join_handle.await?;
+                 ExecutionWaitResult::Completed {
+                     result: result?,
+                     interrupted: false,
++                    terminated: false,
+                 }
+             }
+         };
+@@ -302,6 +306,7 @@ impl ExecutionSpawnResult {
+             Self::Completed(result) => ExecutionWaitResult::Completed {
+                 result,
+                 interrupted: false,
++                terminated: false,
+             },
+             Self::StartedTask(join_handle) => {
+                 // TODO(jobs): This isn't right.
+@@ -309,6 +314,7 @@ impl ExecutionSpawnResult {
+                 ExecutionWaitResult::Completed {
+                     result: result?,
+                     interrupted: false,
++                    terminated: false,
+                 }
+             }
+         };
+@@ -325,6 +331,8 @@ pub enum ExecutionWaitResult {
+         result: ExecutionResult,
+         /// Whether SIGINT arrived while awaiting the external process.
+         interrupted: bool,
++        /// Whether a trapped SIGTERM arrived while awaiting the external process.
++        terminated: bool,
+     },
+     /// Indicates that the execution was stopped.
+     Stopped(processes::ChildProcess),
+diff --git a/brush-core/src/shell/traps.rs b/brush-core/src/shell/traps.rs
+index 83c4400..bc39253 100644
+--- a/brush-core/src/shell/traps.rs
++++ b/brush-core/src/shell/traps.rs
+@@ -34,7 +34,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+     /// * `signal`: Signal to run handler for.
+     ///
+     /// * `params`: Execution parameters to use for handler.
+-    pub(crate) async fn invoke_trap_handler(
++    pub async fn invoke_trap_handler(
+         &mut self,
+         signal: TrapSignal,
+         params: &ExecutionParameters,
+diff --git a/brush-core/src/sys/stubs/signal.rs b/brush-core/src/sys/stubs/signal.rs
+index 24cab4e..919e8d5 100644
+--- a/brush-core/src/sys/stubs/signal.rs
++++ b/brush-core/src/sys/stubs/signal.rs
+@@ -75,6 +75,11 @@ pub(crate) async fn await_ctrl_c() -> std::io::Result<()> {
+     Ok(())
+ }
+ 
++pub(crate) async fn await_term() -> Result<(), error::Error> {
++    futures::future::pending::<()>().await;
++    Ok(())
++}
++
+ pub(crate) fn mask_sigttou() -> Result<(), error::Error> {
+     Ok(())
+ }
+diff --git a/brush-core/src/sys/unix/signal.rs b/brush-core/src/sys/unix/signal.rs
+index 36830d6..484d998 100644
+--- a/brush-core/src/sys/unix/signal.rs
++++ b/brush-core/src/sys/unix/signal.rs
+@@ -54,6 +54,12 @@ pub(crate) fn chld_signal_listener() -> Result<tokio::signal::unix::Signal, erro
+ 
+ pub(crate) use tokio::signal::ctrl_c as await_ctrl_c;
+ 
++pub(crate) async fn await_term() -> Result<(), error::Error> {
++    let mut listener = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
++    let _ = listener.recv().await;
++    Ok(())
++}
++
+ pub(crate) fn mask_sigttou() -> Result<(), error::Error> {
+     let ignore = nix::sys::signal::SigAction::new(
+         nix::sys::signal::SigHandler::SigIgn,
+diff --git a/brush-core/src/traps.rs b/brush-core/src/traps.rs
+index e432488..963ba3c 100644
+--- a/brush-core/src/traps.rs
++++ b/brush-core/src/traps.rs
+@@ -1,5 +1,12 @@
+ //! Facilities for configuring trap handlers.
+ 
++/// Wait for SIGTERM without executing shell code in the OS signal handler.
++/// Embedding builtins use this to interrupt an asynchronous wait.
++#[cfg(unix)]
++pub async fn await_term() -> Result<(), crate::error::Error> {
++    crate::sys::signal::await_term().await
++}
++
+ use std::str::FromStr;
+ use std::{collections::HashMap, fmt::Display};
+ 

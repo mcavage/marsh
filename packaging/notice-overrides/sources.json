@@ -1,0 +1,284 @@
+{
+  "duckdb@1.10505.0": [
+    {
+      "commit": "88f673c5cdf09e287c010a910db53b97e523a9fa",
+      "file": "duckdb-1.10505.0-LICENSE",
+      "sha256": "e00a318e49c9ff90254194864b2b695efc04c0384a8682c93ef51518e77ff5ea",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb-rs/88f673c5cdf09e287c010a910db53b97e523a9fa/LICENSE"
+    }
+  ],
+  "fluent-langneg@0.13.1": [
+    {
+      "commit": "7fdc590466ea63ca2367ac10fb1b881fe561f1a8",
+      "file": "fluent-langneg-0.13.1-LICENSE-APACHE",
+      "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
+      "url": "https://raw.githubusercontent.com/projectfluent/fluent-langneg-rs/7fdc590466ea63ca2367ac10fb1b881fe561f1a8/LICENSE-APACHE"
+    },
+    {
+      "commit": "7fdc590466ea63ca2367ac10fb1b881fe561f1a8",
+      "file": "fluent-langneg-0.13.1-LICENSE-MIT",
+      "sha256": "016fcc02048817d628b04b140c54db290fd9d29a5e8a55b77871194e810716ac",
+      "url": "https://raw.githubusercontent.com/projectfluent/fluent-langneg-rs/7fdc590466ea63ca2367ac10fb1b881fe561f1a8/LICENSE-MIT"
+    }
+  ],
+  "intl_pluralrules@7.0.2": [
+    {
+      "file": "intl_pluralrules-7.0.2-LICENSE-MIT",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "url": "https://raw.githubusercontent.com/zbraniecki/pluralrules/d0715d5b7cca72e228d6e6c4de154bd30dfdd06a/intl_pluralrules/LICENSE-MIT"
+    },
+    {
+      "file": "intl_pluralrules-7.0.2-LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "url": "https://raw.githubusercontent.com/zbraniecki/pluralrules/d0715d5b7cca72e228d6e6c4de154bd30dfdd06a/intl_pluralrules/LICENSE-APACHE"
+    }
+  ],
+  "libduckdb-sys@1.10505.0": [
+    {
+      "component": "duckdb",
+      "file": "duckdb-1.5.5-LICENSE",
+      "sha256": "7e17fd31249fa875cb3b1c5e05c6c3e99b75509f6a2804ca176c217834de1dcb",
+      "upstream_path": "LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/LICENSE"
+    },
+    {
+      "component": "brotli",
+      "file": "duckdb-1.5.5-third_party-brotli-LICENSE",
+      "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94",
+      "upstream_path": "third_party/brotli/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/brotli/LICENSE"
+    },
+    {
+      "component": "concurrentqueue",
+      "file": "duckdb-1.5.5-third_party-concurrentqueue-LICENSE",
+      "sha256": "eaf0df40f77e929cd83cd4485de2bdf806c7908db84a52007a700588f6566331",
+      "upstream_path": "third_party/concurrentqueue/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/concurrentqueue/LICENSE"
+    },
+    {
+      "component": "fast_float",
+      "file": "duckdb-1.5.5-third_party-fast_float-LICENSE",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "upstream_path": "third_party/fast_float/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/fast_float/LICENSE"
+    },
+    {
+      "component": "fastpforlib",
+      "file": "duckdb-1.5.5-third_party-fastpforlib-LICENSE",
+      "sha256": "9ff562631a04b8cb1030c53fdf461bd749c9af0655d86e4f17eb270e935a7fe2",
+      "upstream_path": "third_party/fastpforlib/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/fastpforlib/LICENSE"
+    },
+    {
+      "component": "fmt",
+      "file": "duckdb-1.5.5-third_party-fmt-LICENSE",
+      "sha256": "825c9324e70f8c839c8ba910543dd4a7daee243b86ef960594c11381a19980b8",
+      "upstream_path": "third_party/fmt/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/fmt/LICENSE"
+    },
+    {
+      "component": "fsst",
+      "file": "duckdb-1.5.5-third_party-fsst-LICENSE",
+      "sha256": "20e9c14ff437a73a6e2b105f1b5aaf9ef24a84d962741c0ab01d04b4910294ab",
+      "upstream_path": "third_party/fsst/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/fsst/LICENSE"
+    },
+    {
+      "component": "httplib",
+      "file": "duckdb-1.5.5-third_party-httplib-LICENSE",
+      "sha256": "4b45cbe16d7b71b89ae6127e26e0d90a029198ca5e958ad8e3d0b8bbed364d8b",
+      "upstream_path": "third_party/httplib/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/httplib/LICENSE"
+    },
+    {
+      "component": "hyperloglog",
+      "file": "duckdb-1.5.5-third_party-hyperloglog-LICENSE",
+      "sha256": "3a3fcdbaecbeb1e7dea97843961100c637766e59de4674fed809760283b716e1",
+      "upstream_path": "third_party/hyperloglog/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/hyperloglog/LICENSE"
+    },
+    {
+      "component": "jaro_winkler",
+      "file": "duckdb-1.5.5-third_party-jaro_winkler-LICENSE",
+      "sha256": "077815ffd10f0677d060e9d5c0059592d28c41d1e9985c848435e0ea17ea06c3",
+      "upstream_path": "third_party/jaro_winkler/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/jaro_winkler/LICENSE"
+    },
+    {
+      "component": "libpg_query",
+      "file": "duckdb-1.5.5-third_party-libpg_query-LICENSE",
+      "sha256": "2780b6375a5ab1901472b7694958dd0c8c1381a21f0765cbb64e1923d94c6717",
+      "upstream_path": "third_party/libpg_query/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/libpg_query/LICENSE"
+    },
+    {
+      "component": "lz4",
+      "file": "duckdb-1.5.5-third_party-lz4-LICENSE",
+      "sha256": "99b8d2d8011d1ce548c5aaf3270c6bee014507fa821c4f9a7e300a9e11015db7",
+      "upstream_path": "third_party/lz4/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/lz4/LICENSE"
+    },
+    {
+      "component": "mbedtls",
+      "file": "duckdb-1.5.5-third_party-mbedtls-LICENSE",
+      "sha256": "9b405ef4c89342f5eae1dd828882f931747f71001cfba7d114801039b52ad09b",
+      "upstream_path": "third_party/mbedtls/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/mbedtls/LICENSE"
+    },
+    {
+      "component": "miniz",
+      "file": "duckdb-1.5.5-third_party-miniz-LICENSE",
+      "sha256": "0115478d567121238cf6cc1c0c361926cf07a49d9e4c9e66da97fac6a01646b3",
+      "upstream_path": "third_party/miniz/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/miniz/LICENSE"
+    },
+    {
+      "component": "parquet",
+      "file": "duckdb-1.5.5-third_party-parquet-LICENSE",
+      "sha256": "70b6a7d630fae9f49643f9b16bee42a2feda68301f9c14470e7fb5ad0599bb9f",
+      "upstream_path": "third_party/parquet/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/parquet/LICENSE"
+    },
+    {
+      "component": "pcg",
+      "file": "duckdb-1.5.5-third_party-pcg-LICENSE",
+      "sha256": "3febf788fd814bf1f350db169bdc51b28ff7e7596ff1f09cc0181e4fde42b480",
+      "upstream_path": "third_party/pcg/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/pcg/LICENSE"
+    },
+    {
+      "component": "pdqsort",
+      "file": "duckdb-1.5.5-third_party-pdqsort-LICENSE",
+      "sha256": "323fc18e35fcf058d69d684022ef844f206cb8fefb2bac1298fa1767e0b9ae38",
+      "upstream_path": "third_party/pdqsort/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/pdqsort/LICENSE"
+    },
+    {
+      "component": "re2",
+      "file": "duckdb-1.5.5-third_party-re2-LICENSE",
+      "sha256": "6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449",
+      "upstream_path": "third_party/re2/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/re2/LICENSE"
+    },
+    {
+      "component": "ska_sort",
+      "file": "duckdb-1.5.5-third_party-ska_sort-LICENSE",
+      "sha256": "3c3a838f6ac2201bb8255b374fad34e3e1de07940c3acdc09e661e118fb75078",
+      "upstream_path": "third_party/ska_sort/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/ska_sort/LICENSE"
+    },
+    {
+      "component": "skiplist",
+      "file": "duckdb-1.5.5-third_party-skiplist-LICENSE",
+      "sha256": "3b9cac57dbb2d7ec76298cb0d33afe12f891e1d0dbb38ff17993a14f3480ee7c",
+      "upstream_path": "third_party/skiplist/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/skiplist/LICENSE"
+    },
+    {
+      "component": "snappy",
+      "file": "duckdb-1.5.5-third_party-snappy-LICENSE",
+      "sha256": "55172044f7e241207117448a4d9d6ba1d0925c8ad66b5d4c08c70adfa9cc3de6",
+      "upstream_path": "third_party/snappy/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/snappy/LICENSE"
+    },
+    {
+      "component": "tdigest",
+      "file": "duckdb-1.5.5-third_party-tdigest-LICENSE",
+      "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+      "upstream_path": "third_party/tdigest/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/tdigest/LICENSE"
+    },
+    {
+      "component": "tdigest",
+      "file": "duckdb-1.5.5-third_party-tdigest-NOTICES",
+      "sha256": "5ded9726da6c5360c0b0ba0725455f57b367dc9b4954bed7ca8f235d26cee33b",
+      "upstream_path": "third_party/tdigest/NOTICES",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/tdigest/NOTICES"
+    },
+    {
+      "component": "thrift",
+      "file": "duckdb-1.5.5-third_party-thrift-thrift-LICENSE",
+      "sha256": "23df881cec3192d1f4474633c14eb2ec30a45b84f8daeb82b9de5d2bd3ac8218",
+      "upstream_path": "third_party/thrift/thrift/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/thrift/thrift/LICENSE"
+    },
+    {
+      "component": "utf8proc",
+      "file": "duckdb-1.5.5-third_party-utf8proc-LICENSE",
+      "sha256": "fbc720fcc90fb44396985646f67e4d19be03e0c0539f7138ed9dc6efba49dc49",
+      "upstream_path": "third_party/utf8proc/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/utf8proc/LICENSE"
+    },
+    {
+      "component": "vergesort",
+      "file": "duckdb-1.5.5-third_party-vergesort-LICENSE",
+      "sha256": "12dd392860ea2a3633bce5f33d7eebd4308a7e3386b4372260e5e72be7a64033",
+      "upstream_path": "third_party/vergesort/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/vergesort/LICENSE"
+    },
+    {
+      "component": "yyjson",
+      "file": "duckdb-1.5.5-third_party-yyjson-LICENSE",
+      "sha256": "734d7fb3eb56f0a04e6b7ab0c5d3634624a8bfaa2acc87a2c03a029b20868cf8",
+      "upstream_path": "third_party/yyjson/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/yyjson/LICENSE"
+    },
+    {
+      "component": "zstd",
+      "file": "duckdb-1.5.5-third_party-zstd-LICENSE",
+      "sha256": "8b7bc50ec3ecee27224e17d4d316a939fa2ddda9c88e0ddc2f059ce432edbfb9",
+      "upstream_path": "third_party/zstd/LICENSE",
+      "url": "https://raw.githubusercontent.com/duckdb/duckdb/d8cdaa33fda8df955cc76ef58a280f68f4cd43fa/third_party/zstd/LICENSE"
+    }
+  ],
+  "objc2-core-foundation@0.3.2": [
+    {
+      "commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "file": "objc2-core-foundation-0.3.2-LICENSE.md",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+      "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md"
+    }
+  ],
+  "objc2-io-kit@0.3.2": [
+    {
+      "commit": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b",
+      "file": "objc2-io-kit-0.3.2-LICENSE.md",
+      "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+      "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md"
+    }
+  ],
+  "rmcp-macros@3.4.0": [
+    {
+      "commit": "fd7811fdaa9fefa1c8034534b4d7a31c97204f89",
+      "file": "rmcp-macros-3.4.0-LICENSE",
+      "sha256": "0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a",
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/rust-sdk/fd7811fdaa9fefa1c8034534b4d7a31c97204f89/LICENSE"
+    }
+  ],
+  "rmcp@3.4.0": [
+    {
+      "commit": "fd7811fdaa9fefa1c8034534b4d7a31c97204f89",
+      "file": "rmcp-3.4.0-LICENSE",
+      "sha256": "0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a",
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/rust-sdk/fd7811fdaa9fefa1c8034534b4d7a31c97204f89/LICENSE"
+    }
+  ],
+  "utf8-chars@3.0.7": [
+    {
+      "declaration_url": "https://github.com/A1-Triard/utf8-chars/blob/9e35858ccf96914d4eb00c8d31be907e6487cbe4/Cargo.toml",
+      "file": "utf8-chars-3.0.7-LICENSE-APACHE-2.0.txt",
+      "selection": "Apache-2.0 alternative declared by the exact crate Cargo.toml; upstream provides no license text",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+    }
+  ],
+  "calcifer-macos-acl@0.1.0": [
+    {
+      "file": "calcifer-macos-acl-0.1.0-LICENSE",
+      "sha256": "b8c7478dfcdcae0ca7cc5b4c1d0232e7ef0deca0ddc0a199cbdc2889bfa2cd37",
+      "url": "https://raw.githubusercontent.com/kazu-42/calcifer/24a15cc4f7c46802d93d2f9cc93e45e1d5a5313e/LICENSE",
+      "reason": "Exact package source commit MIT notice; crate archive omits license text",
+      "source_commit": "24a15cc4f7c46802d93d2f9cc93e45e1d5a5313e"
+    }
+  ]
+}

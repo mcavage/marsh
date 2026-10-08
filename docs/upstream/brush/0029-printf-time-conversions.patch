@@ -1,0 +1,110 @@
+diff --git a/brush-builtins/src/printf.rs b/brush-builtins/src/printf.rs
+index 32e48fa..4d83fce 100644
+--- a/brush-builtins/src/printf.rs
++++ b/brush-builtins/src/printf.rs
+@@ -58,6 +58,11 @@ impl builtins::Command for PrintfCommand {
+ 
+ fn format(format_and_args: &[String], writer: impl Write) -> Result<(), brush_core::Error> {
+     match format_and_args {
++        // `%(fmt)T` conversions are rendered here; uucore formats the rest.
++        [fmt, args @ ..] if fmt.contains(")T") => {
++            let (fmt, args) = render_time_conversions(fmt, args);
++            format_via_uucore(&fmt, args.iter(), writer)
++        }
+         // Handle format string with arguments using uucore
+         [fmt, args @ ..] => format_via_uucore(fmt, args.iter(), writer),
+         // Handle case with no format string (we shouldn't be able to get here since clap will
+@@ -66,6 +71,93 @@ fn format(format_and_args: &[String], writer: impl Write) -> Result<(), brush_co
+     }
+ }
+ 
++/// Rewrites each Bash `%[flags][width][.precision](strftime)T` conversion as a
++/// `%s` conversion and replaces its argument (an epoch time; empty, missing or
++/// `-1` is now, `-2` is shell start, approximated as now) with the formatted
++/// local time, keeping argument reuse across format cycles.
++fn render_time_conversions(format: &str, args: &[String]) -> (String, Vec<String>) {
++    // Each conversion consumes some arguments; `Some(strftime)` marks the time
++    // argument of a `%(...)T` conversion.
++    let mut consumed: Vec<Option<String>> = Vec::new();
++    let mut rewritten = String::with_capacity(format.len());
++    let mut rest = format;
++    while let Some(percent) = rest.find('%') {
++        rewritten.push_str(&rest[..percent]);
++        let spec = &rest[percent + 1..];
++        if let Some(after) = spec.strip_prefix('%') {
++            rewritten.push_str("%%");
++            rest = after;
++            continue;
++        }
++        let modifiers = spec
++            .find(|c: char| {
++                !matches!(c, '-' | '+' | ' ' | '#' | '0' | '\'' | '.' | '*') && !c.is_ascii_digit()
++            })
++            .unwrap_or(spec.len());
++        let (flags, tail) = spec.split_at(modifiers);
++        for _ in flags.matches('*') {
++            consumed.push(None);
++        }
++        if let Some(time) = tail.strip_prefix('(')
++            && let Some(close) = time.find(")T")
++        {
++            consumed.push(Some(time[..close].to_owned()));
++            rewritten.push('%');
++            rewritten.push_str(flags);
++            rewritten.push('s');
++            rest = &time[close + 2..];
++        } else {
++            let conversion = tail.chars().next().map_or(0, char::len_utf8);
++            if conversion > 0 {
++                consumed.push(None);
++            }
++            rewritten.push('%');
++            rewritten.push_str(&spec[..modifiers + conversion]);
++            rest = &tail[conversion..];
++        }
++    }
++    rewritten.push_str(rest);
++
++    let per_cycle = consumed.len().max(1);
++    let mut args = args.to_vec();
++    // A missing time argument means "now", so complete the last cycle up to its
++    // final time conversion.
++    let partial = args.len() % per_cycle;
++    if args.is_empty() || partial != 0 {
++        let start = args.len() - partial;
++        if let Some(last_time) = consumed.iter().rposition(Option::is_some)
++            && start + last_time >= args.len()
++        {
++            args.resize(start + last_time + 1, String::new());
++        }
++    }
++    for (index, arg) in args.iter_mut().enumerate() {
++        if let Some(Some(strftime)) = consumed.get(index % per_cycle) {
++            *arg = format_time(strftime, arg);
++        }
++    }
++    (rewritten, args)
++}
++
++fn format_time(strftime: &str, arg: &str) -> String {
++    use chrono::TimeZone as _;
++    use std::fmt::Write as _;
++    let seconds = match arg.trim() {
++        "" | "-1" | "-2" => chrono::Local::now().timestamp(),
++        value => value.parse().unwrap_or(0),
++    };
++    let strftime = if strftime.is_empty() { "%X" } else { strftime };
++    let Some(time) = chrono::Local.timestamp_opt(seconds, 0).single() else {
++        return String::new();
++    };
++    let mut out = String::new();
++    if write!(out, "{}", time.format(strftime)).is_err() {
++        return strftime.to_owned();
++    }
++    // The rendered time is passed through `%s`; keep it literal.
++    out
++}
++
+ fn format_via_uucore(
+     format_string: &str,
+     args: impl Iterator<Item = impl Into<OsString>>,

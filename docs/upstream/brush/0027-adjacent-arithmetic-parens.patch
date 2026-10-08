@@ -1,0 +1,25 @@
+diff --git a/brush-parser/src/parser/peg.rs b/brush-parser/src/parser/peg.rs
+index ca153f9..b3827b0 100644
+--- a/brush-parser/src/parser/peg.rs
++++ b/brush-parser/src/parser/peg.rs
+@@ -168,8 +168,19 @@ peg::parser! {
+             non_posix_extensions_enabled() c:extended_test_command() { ast::CompoundCommand::ExtendedTest(c) } /
+             expected!("compound command")
+ 
++        // Like Bash, only adjacent parentheses open an arithmetic command; `( (`
++        // is a nested subshell.
++        rule adjacent_open_parens() -> &'input Token =
++            first:specific_operator("(") second:specific_operator("(") {?
++                if first.location().end.index == second.location().start.index {
++                    Ok(first)
++                } else {
++                    Err("((")
++                }
++            }
++
+         pub(crate) rule arithmetic_command() -> ast::ArithmeticCommand =
+-            start:specific_operator("(") specific_operator("(") expr:arithmetic_expression() specific_operator(")") end:specific_operator(")") {
++            start:adjacent_open_parens() expr:arithmetic_expression() specific_operator(")") end:specific_operator(")") {
+                 let loc = SourceSpan::within(
+                     start.location(),
+                     end.location()

@@ -1,0 +1,120 @@
+{
+  "schema": "marsh.canonical-notice-boundaries/v2",
+  "verification_claim": "A passing verifier run establishes the checked bytes, metadata, package versions and the presence of every required notice. It is not a legal opinion, a build signature, or a grant of redistribution rights.",
+  "shipping_notice_materials": {
+    "current_index": "primary-source-notices.json",
+    "scope": "Original native source license documents, exact crate declarations and source copyright headers are retained. Apache-2.0 is elected only where the publisher's declaration offers it.",
+    "remaining": "debugserver-types 0.5.0 and deno_core_icudata 0.77.0 declare MIT but ship no license file upstream; the declaration is retained with the standard MIT text for information, as for the npm package proxy-agent-negotiate. difflib and fax license files come from upstream with recorded version caveats.",
+    "icu_data": "The icudata package contains ICU 77 data, which is under the Unicode/ICU terms (retained separately), not MIT.",
+    "proxy_agent_negotiate": "Standard MIT text accompanies the publisher's MIT declaration for information; it is not an upstream grant or copyright notice."
+  },
+  "distribution_permissions": {
+    "proprietary_components": "Claude Code and the Claude Agent SDK (Anthropic) and the clipboard-bridge binary in the DHI base (Docker) are proprietary and are distributed under their vendors' terms, not an open-source license. This inventory grants no rights to them.",
+    "dhi_image_license": "The DHI license text covers DHI definitions, patches and build scripts under Apache-2.0; included binaries keep their own terms.",
+    "clipboard_spdx": "The clipboard-bridge SPDX document is retained unchanged and reconciled in source-records/clipboard-spdx-reconciliation.json. Its golang.org/x/sys v0.46.0 dependency notice is collected separately."
+  },
+  "source_and_attestation_limits": [
+    "npm archives pass their SHA-512 checks and SLSA subject/source commits are recorded; Sigstore signatures are not verified.",
+    "Rust notices are collected from each release's Cargo.lock and declared features; they are not a record of what is actually linked. Upstream release builds do not pass --locked, and the v8 crate records dirty=true at its upstream commit.",
+    "Corresponding source for DHI packages and vendor patches is referenced through the published arm64 DHI source-image links; no amd64 source link is recorded.",
+    "The native Claude Code binary's embedded dependencies are not inventoried; its version-matched npm legal texts are retained."
+  ],
+  "lgpl_corresponding_source": {
+    "status": "Upstream sources and license terms identified.",
+    "primary_terms": "The GNU Library GPL v2 or LGPL v2.1 texts (sections 4 and 6 as applicable) govern source and combined-work delivery. Each component keeps its own declaration.",
+    "components": [
+      {
+        "source_archive_url": "https://download.gnome.org/sources/glib/2.88/glib-2.88.3.tar.xz",
+        "source_archive_sha256": "ab24d24e698dfa1e408b7bcdb508f4aafc906185a8b8ce72fdf79bbbdc9b383b",
+        "original_legal_documents": [
+          {
+            "file": "texts/fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb.txt",
+            "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+            "member": "glib-2.88.3/LICENSES/LGPL-2.1-only.txt"
+          },
+          {
+            "file": "texts/fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb.txt",
+            "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+            "member": "glib-2.88.3/LICENSES/LGPL-2.1-or-later.txt"
+          },
+          {
+            "file": "texts/b1ec1d0e5947f81e815d8771f7d4d90671a94bb10a42dc687fb566de461a57aa.txt",
+            "sha256": "b1ec1d0e5947f81e815d8771f7d4d90671a94bb10a42dc687fb566de461a57aa",
+            "member": "glib-2.88.3/docs/reference/COPYING"
+          },
+          {
+            "file": "texts/bdbcdaa7858872393e9d6b216bbdc8a23e99d98dd6cdb7cda19458025b9e19fc.txt",
+            "sha256": "bdbcdaa7858872393e9d6b216bbdc8a23e99d98dd6cdb7cda19458025b9e19fc",
+            "member": "glib-2.88.3/subprojects/gvdb/COPYING"
+          },
+          {
+            "file": "texts/5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2.txt",
+            "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2",
+            "member": "glib-2.88.3/subprojects/gvdb/LICENSES/LGPL-2.1-or-later.txt"
+          }
+        ],
+        "disposition": "The upstream source archive and its LGPL / Library GPL terms are identified. A distributor of the shipped library must provide the complete corresponding source, including any downstream modifications and build scripts, as those terms require."
+      },
+      {
+        "source_archive_url": "https://github.com/frida/proxy-libintl/archive/refs/tags/0.5.tar.gz",
+        "source_archive_sha256": "f7a1cbd7579baaf575c66f9d99fb6295e9b0684a28b095967cfda17857595303",
+        "original_legal_documents": [
+          {
+            "file": "texts/d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5.txt",
+            "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+            "member": "proxy-libintl-0.5/COPYING"
+          }
+        ],
+        "disposition": "The upstream source archive and its LGPL / Library GPL terms are identified. A distributor of the shipped library must provide the complete corresponding source, including any downstream modifications and build scripts, as those terms require."
+      },
+      {
+        "source_archive_url": "https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.6.tar.xz",
+        "source_archive_sha256": "62b6b9f0ad3147a6dd6420ac64a91180b14e990695bddd353b96041611d052ca",
+        "original_legal_documents": [
+          {
+            "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+            "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+            "member": "gstreamer-1.28.6/COPYING"
+          }
+        ],
+        "disposition": "The upstream source archive and its LGPL / Library GPL terms are identified. A distributor of the shipped library must provide the complete corresponding source, including any downstream modifications and build scripts, as those terms require."
+      },
+      {
+        "source_archive_url": "https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.6.tar.xz",
+        "source_archive_sha256": "0ba699c7c6c66f4ba640be78cb38a24715add9683f3e3a199f5369dc5a4f04ac",
+        "original_legal_documents": [
+          {
+            "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+            "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+            "member": "gst-plugins-base-1.28.6/COPYING"
+          }
+        ],
+        "disposition": "The upstream source archive and its LGPL / Library GPL terms are identified. A distributor of the shipped library must provide the complete corresponding source, including any downstream modifications and build scripts, as those terms require."
+      },
+      {
+        "source_archive_url": "https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.6.tar.xz",
+        "source_archive_sha256": "b0c620a4b18b6ee931b4c43bbf1760d308666dc37f730a7e7f1ad327e59ce2df",
+        "original_legal_documents": [
+          {
+            "file": "texts/6095e9ffa777dd22839f7801aa845b31c9ed07f3d6bf8a26dc5d2dec8ccc0ef3.txt",
+            "sha256": "6095e9ffa777dd22839f7801aa845b31c9ed07f3d6bf8a26dc5d2dec8ccc0ef3",
+            "member": "gst-plugins-good-1.28.6/COPYING"
+          }
+        ],
+        "disposition": "The upstream source archive and its LGPL / Library GPL terms are identified. A distributor of the shipped library must provide the complete corresponding source, including any downstream modifications and build scripts, as those terms require."
+      },
+      {
+        "component": "codex bubblewrap",
+        "source": "Codex vendored source at the selected release commit; its COPYING is the Library GPL version 2.",
+        "original_legal_documents": [
+          {
+            "file": "provider-notices/codex-0.155.1-codex-rs-vendor-bubblewrap-COPYING",
+            "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+          }
+        ],
+        "disposition": "The pinned vendored source and license text are retained. A distributor of the bwrap executable must provide the complete corresponding source, including the selected downstream patches and build scripts, as its terms require."
+      }
+    ],
+    "scope": "Identifies the upstream source and terms for each LGPL component; it does not claim the upstream archives reproduce the shipped binaries."
+  }
+}

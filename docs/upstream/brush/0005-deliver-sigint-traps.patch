@@ -1,0 +1,212 @@
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+--- a/brush-core/src/interp.rs	2026-09-20 11:53:27
++++ b/brush-core/src/interp.rs	2026-09-20 11:53:14
+@@ -566,6 +566,7 @@
+     let mut result = ExecutionResult::success();
+     let mut stopped_children = vec![];
+     let mut last_failure_exit_code: Option<ExecutionExitCode> = None;
++    let mut interrupted = false;
+
+     // Clear our the pipeline status so we can start filling it out.
+     shell.last_pipeline_statuses_mut().clear();
+@@ -578,7 +579,11 @@
+         };
+
+         match wait_result {
+-            ExecutionWaitResult::Completed(current_result) => {
++            ExecutionWaitResult::Completed {
++                result: current_result,
++                interrupted: child_interrupted,
++            } => {
++                interrupted |= child_interrupted;
+                 result = current_result;
+                 shell.set_last_exit_status(result.exit_code.into());
+                 shell
+@@ -602,6 +607,17 @@
+         }
+     }
+
++    #[cfg(unix)]
++    if interrupted {
++        let signal = crate::traps::TrapSignal::Signal(sys::signal::Signal::SIGINT);
++        if shell.traps().handles(signal) {
++            let trap_result = shell.invoke_trap_handler(signal, params).await?;
++            if !trap_result.is_normal_flow() {
++                return Ok(trap_result);
++            }
++        }
++    }
++
+     // Apply pipefail semantics if enabled
+     if shell.options().return_last_failure_from_pipeline {
+         if let Some(failure_exit_code) = last_failure_exit_code {
+@@ -785,7 +801,7 @@
+                 .execute_in_pipeline(pipeline_context, child_params)
+                 .await?;
+             match spawn_result.wait().await? {
+-                ExecutionWaitResult::Completed(result) => Ok(result),
++                ExecutionWaitResult::Completed { result, .. } => Ok(result),
+                 ExecutionWaitResult::Stopped(_) => Ok(ExecutionResult::stopped()),
+             }
+         });
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+--- a/brush-core/src/jobs.rs	2026-09-20 11:53:26
++++ b/brush-core/src/jobs.rs	2026-09-20 11:53:14
+@@ -51,7 +51,7 @@
+             Self::External(process) => {
+                 let wait_result = process.wait().await?;
+                 match wait_result {
+-                    processes::ProcessWaitResult::Completed(output) => {
++                    processes::ProcessWaitResult::Completed { output, .. } => {
+                         Ok(JobTaskWaitResult::Completed(output.into()))
+                     }
+                     processes::ProcessWaitResult::Stopped => Ok(JobTaskWaitResult::Stopped),
+diff --git a/brush-core/src/processes.rs b/brush-core/src/processes.rs
+--- a/brush-core/src/processes.rs	2026-09-20 11:53:25
++++ b/brush-core/src/processes.rs	2026-09-20 11:53:14
+@@ -17,6 +17,7 @@
+     pid: Option<sys::process::ProcessId>,
+     /// If available, the process group ID of the child.
+     pgid: Option<sys::process::ProcessId>,
++    interrupted: bool,
+ }
+
+ impl ChildProcess {
+@@ -30,6 +31,7 @@
+             exec_future: Box::pin(child.wait_with_output()),
+             pid,
+             pgid,
++            interrupted: false,
+         }
+     }
+
+@@ -54,7 +56,10 @@
+         loop {
+             tokio::select! {
+                 output = &mut self.exec_future => {
+-                    break Ok(ProcessWaitResult::Completed(output?))
++                    break Ok(ProcessWaitResult::Completed {
++                        output: output?,
++                        interrupted: std::mem::take(&mut self.interrupted),
++                    })
+                 },
+                 _ = sigtstp.recv() => {
+                     break Ok(ProcessWaitResult::Stopped)
+@@ -65,9 +70,10 @@
+                     }
+                 },
+                 _ = sys::signal::await_ctrl_c() => {
+-                    // SIGINT got thrown. Handle it and continue looping. The child should
+-                    // have received it as well, and either handled it or ended up getting
+-                    // terminated (in which case we'll see the child exit).
++                    // The foreground group receives SIGINT as well. Remember that the
++                    // shell received it so the interpreter can deliver a registered trap
++                    // after the child has been reaped.
++                    self.interrupted = true;
+                 },
+             }
+         }
+@@ -84,7 +90,12 @@
+ /// Represents the result of waiting for an executing process.
+ pub enum ProcessWaitResult {
+     /// The process completed.
+-    Completed(std::process::Output),
++    Completed {
++        /// Captured process output and status.
++        output: std::process::Output,
++        /// Whether the shell received SIGINT while awaiting this process.
++        interrupted: bool,
++    },
+     /// The process stopped and has not yet completed.
+     Stopped,
+ }
+diff --git a/brush-core/src/results.rs b/brush-core/src/results.rs
+--- a/brush-core/src/results.rs	2026-09-20 11:53:26
++++ b/brush-core/src/results.rs	2026-09-20 11:53:14
+@@ -107,7 +107,7 @@
+ impl From<ExecutionWaitResult> for ExecutionResult {
+     fn from(wait_result: ExecutionWaitResult) -> Self {
+         match wait_result {
+-            ExecutionWaitResult::Completed(result) => result,
++            ExecutionWaitResult::Completed { result, .. } => result,
+             // TODO(jobs): We need to job-manage the stopped process.
+             ExecutionWaitResult::Stopped(..) => Self::stopped(),
+         }
+@@ -270,16 +270,26 @@
+                 // Wait for the process to exit or for a relevant signal, whichever happens
+                 // first.
+                 match child.wait().await? {
+-                    processes::ProcessWaitResult::Completed(output) => {
+-                        ExecutionWaitResult::Completed(ExecutionResult::from(output))
+-                    }
++                    processes::ProcessWaitResult::Completed {
++                        output,
++                        interrupted,
++                    } => ExecutionWaitResult::Completed {
++                        result: ExecutionResult::from(output),
++                        interrupted,
++                    },
+                     processes::ProcessWaitResult::Stopped => ExecutionWaitResult::Stopped(child),
+                 }
+             }
+-            Self::Completed(result) => ExecutionWaitResult::Completed(result),
++            Self::Completed(result) => ExecutionWaitResult::Completed {
++                result,
++                interrupted: false,
++            },
+             Self::StartedTask(join_handle) => {
+                 let result = join_handle.await?;
+-                ExecutionWaitResult::Completed(result?)
++                ExecutionWaitResult::Completed {
++                    result: result?,
++                    interrupted: false,
++                }
+             }
+         };
+
+@@ -289,11 +299,17 @@
+     pub(crate) async fn poll(self) -> Result<ExecutionWaitResult, error::Error> {
+         let result = match self {
+             Self::StartedProcess(child) => ExecutionWaitResult::Stopped(child),
+-            Self::Completed(result) => ExecutionWaitResult::Completed(result),
++            Self::Completed(result) => ExecutionWaitResult::Completed {
++                result,
++                interrupted: false,
++            },
+             Self::StartedTask(join_handle) => {
+                 // TODO(jobs): This isn't right.
+                 let result = join_handle.await?;
+-                ExecutionWaitResult::Completed(result?)
++                ExecutionWaitResult::Completed {
++                    result: result?,
++                    interrupted: false,
++                }
+             }
+         };
+
+@@ -304,7 +320,12 @@
+ /// Represents the result of waiting for an execution to complete.
+ pub enum ExecutionWaitResult {
+     /// Indicates that the execution completed.
+-    Completed(ExecutionResult),
++    Completed {
++        /// Completed execution result.
++        result: ExecutionResult,
++        /// Whether SIGINT arrived while awaiting the external process.
++        interrupted: bool,
++    },
+     /// Indicates that the execution was stopped.
+     Stopped(processes::ChildProcess),
+ }
+diff --git a/brush-core/src/shell/funcs.rs b/brush-core/src/shell/funcs.rs
+--- a/brush-core/src/shell/funcs.rs	2026-09-20 11:53:27
++++ b/brush-core/src/shell/funcs.rs	2026-09-20 11:53:14
+@@ -121,7 +121,7 @@
+             commands::invoke_shell_function(func_registration, context, &command_args).await?;
+
+         match result.wait().await? {
+-            ExecutionWaitResult::Completed(result) => Ok(result),
++            ExecutionWaitResult::Completed { result, .. } => Ok(result),
+             ExecutionWaitResult::Stopped(..) => {
+                 error::unimp("stopped child from function invocation")
+             }

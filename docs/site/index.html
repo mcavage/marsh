@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>marsh — Bash, extended for agents</title>
+<meta name="description" content="marsh is a Bash-compatible shell with new syntax for parallel agents. Run a few agents on the same bug at once, each on its own copy of your repo, and pipe what they find into another. Every command runs in its own Docker Sandbox microVM.">
+<link rel="canonical" href="{{canonical}}">
+<link rel="alternate" type="text/plain" href="llms.txt" title="llms.txt">
+<meta name="theme-color" content="#0a0c0b">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="marsh">
+<meta property="og:title" content="marsh — Bash, extended for agents">
+<meta property="og:description" content="marsh is a Bash-compatible shell with new syntax for parallel agents. Run a few agents on the same bug at once, each on its own copy of your repo, and pipe what they find into another. Every command runs in its own Docker Sandbox microVM.">
+<meta property="og:url" content="{{canonical}}">
+<meta property="og:image" content="{{base}}/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="marsh: Bash, extended for agents. split { fix: claude, review: codex } | join">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="marsh — Bash, extended for agents">
+<meta name="twitter:description" content="marsh is a Bash-compatible shell with new syntax for parallel agents. Run a few agents on the same bug at once, each on its own copy of your repo, and pipe what they find into another. Every command runs in its own Docker Sandbox microVM.">
+<meta name="twitter:image" content="{{base}}/og.png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+<script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<script src="site.js" defer></script>
+</head>
+<body class="home">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="logo" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#0b0d0c"/><path d="M7.5 16H13c3.2 0 3.8-7 7.5-7H23M13 16h10M13 16c3.2 0 3.8 7 7.5 7H23" fill="none" stroke="#c5f467" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><circle cx="25" cy="9" r="2.1" fill="#c5f467"/><circle cx="25" cy="16" r="2.1" fill="#5ee6d0"/><circle cx="25" cy="23" r="2.1" fill="#c5f467"/></symbol>
+  <symbol id="gh" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
+  <symbol id="star" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z"/></symbol>
+</svg>
+<a class="skip" href="#content">Skip to content</a>
+<header class="top">
+  <div class="top-in">
+    <a class="brand" href="index.html"><svg aria-hidden="true"><use href="#logo"/></svg>marsh</a>
+    <nav aria-label="Site">
+      <a href="docs/index.html">Docs</a>
+      <a href="community.html">Community</a>
+      <a class="gh" href="https://github.com/mcavage/marsh"><svg aria-hidden="true"><use href="#gh"/></svg><span>GitHub</span></a>
+      <button class="theme" type="button" aria-label="Toggle light and dark theme"><svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.5 14.6A8.5 8.5 0 019.4 3.5a8.5 8.5 0 1011.1 11.1z"/></svg><svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </nav>
+  </div>
+</header>
+
+<main id="content">
+  <section class="hero">
+    <div class="wrap">
+      <h1>Bash, extended for <span class="hl">agents.</span></h1>
+      <p class="sub">marsh is a Bash-compatible shell with new syntax for parallel agents. Run a few agents
+      on the same bug at once, each on its own copy of your repo, and pipe what they find into another.</p>
+      <div class="cta">
+        <div class="install" data-copy="brew install docker/tap/sbx mcavage/tap/marsh">
+          <code><span class="ps" aria-hidden="true">$ </span>brew install docker/tap/sbx mcavage/tap/marsh</code>
+          <button class="copy" type="button" aria-label="Copy Homebrew install command">Copy</button>
+        </div>
+        <a class="btn" href="https://github.com/mcavage/marsh"><svg aria-hidden="true"><use href="#star"/></svg>Star on GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="demo" aria-labelledby="demo-h">
+    <div class="wrap">
+      <h2 id="demo-h" class="sr">An example session</h2>
+      <div class="window">
+        <div class="bar"><i></i><i></i><i></i><span class="title">marsh — ~/src/api</span><button class="replay" type="button">Replay</button></div>
+<pre class="term anim" tabindex="0" aria-label="Terminal transcript: Claude fixes a failing test on one private fork while Codex and Claude review on another with fanout; a third agent applies the good results; marsh jobs --tree shows the lineage"><code><span class="ln cmd" data-wait="500"><span class="hp">~/src/api $ </span><span class="tx">marsh</span></span>
+<span class="ln cmd"><span class="p">marsh-0.5$ </span><span class="tx">make test 2&gt;&amp;1 | grep -m1 FAIL</span></span>
+<span class="ln" data-wait="600"><span class="r">--- FAIL: TestDialTimeout (0.31s)</span></span>
+<span class="ln cmd"><span class="p">marsh-0.5$ </span><span class="tx"><span class="c"># one fork fixes; one reviews</span></span></span>
+<span class="ln cmd"><span class="p">marsh-0.5$ </span><span class="tx"><span class="k">split</span> {</span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">  <span class="lb">fix:</span> <span class="k">claude</span> -p <span class="s">"fix TestDialTimeout"</span></span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">  <span class="lb">review:</span> <span class="k">fanout</span> {</span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">    <span class="lb">races:</span> <span class="k">codex</span> exec <span class="s">"find data races"</span></span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">    <span class="lb">leaks:</span> <span class="k">claude</span> -p <span class="s">"find goroutine leaks"</span></span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">  } | <span class="k">collect</span></span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">} | <span class="k">join</span> | tee /dev/tty |</span></span>
+<span class="ln cmd cont" data-wait="1600"><span class="p">&gt; </span><span class="tx"><span class="k">claude</span> -p <span class="s">"apply the good ones"</span></span></span>
+<span class="ln"><span class="d"># split 8d5c8fdd1563: 2 branches; manifest …/out/manifest.json</span></span>
+<span class="ln"> </span>
+<span class="ln"><span class="h">== fix (exited 0, shell-vm) ==</span></span>
+<span class="ln">The test raced on a fixed port; it now asks the kernel for a free one.</span>
+<span class="ln"><span class="lb">-- fix: 1 file (M net/dial_test.go); diff …/out/fix/diff.patch --</span></span>
+<span class="ln"><span class="d">…</span></span>
+<span class="ln"><span class="h">== review (exited 0, shell-vm) ==</span></span>
+<span class="ln"><span class="h">== races (complete) ==</span></span>
+<span class="ln">net/dial.go:88 reads d.timeout without holding d.mu.</span>
+<span class="ln"> </span>
+<span class="ln"><span class="h">== leaks (complete) ==</span></span>
+<span class="ln">None found: every goroutine in net/ exits on ctx.Done().</span>
+<span class="ln"> </span>
+<span class="ln" data-wait="1400"><span class="lb">-- review: no changes --</span></span>
+<span class="ln">Applied fix's patch (net/dial_test.go), and took the races note:</span>
+<span class="ln" data-wait="600">d.timeout is now read under d.mu (net/dial.go). No leaks to fix.</span>
+<span class="ln cmd"><span class="p">marsh-0.5$ </span><span class="tx">make test 2&gt;&amp;1 | tail -1</span></span>
+<span class="ln" data-wait="600"><span class="g">ok</span>  	example.com/api/net	0.412s</span>
+<span class="ln cmd" data-wait="400"><span class="p">marsh-0.5$ </span><span class="tx">marsh jobs --tree</span></span>
+<span class="ln row"><span class="h">ID        STARTED   STATE      EXIT      RUN  COMMAND</span></span>
+<span class="ln row"><span class="d">524499e5</span>  21s ago   <span class="g">finished</span>      0    20.7s  claude -p "apply the good ones"  <span class="d">(consumes split 8d5c8fdd)</span></span>
+<span class="ln row"><span class="d">8d5c8fdd</span>  1m ago    <span class="g">joined</span>        0    1m04s  <span class="k">split</span> (fix, review)</span>
+<span class="ln row"><span class="d">-</span>         1m ago    <span class="g">finished</span>      0    58.2s  <span class="tr">├─</span> <span class="lb">fix:</span> claude -p "fix TestDialTimeout"</span>
+<span class="ln row"><span class="d">9f47f6af</span>  1m ago    <span class="g">finished</span>      0    57.9s  <span class="tr">│  └─</span> claude -p "fix TestDialTimeout"</span>
+<span class="ln row"><span class="d">-</span>         1m ago    <span class="g">finished</span>      0    1m03s  <span class="tr">└─</span> <span class="lb">review:</span> fanout { races: codex exec "find data races"; leaks: cl…</span>
+<span class="ln row"><span class="d">3e0c1a7b</span>  1m ago    <span class="g">finished</span>      0    1m02s  <span class="tr">   └─</span> <span class="k">fanout</span> (races, leaks)</span>
+<span class="ln row"><span class="d">149f157c</span>  1m ago    <span class="g">finished</span>      0    47.9s  <span class="tr">      ├─</span> <span class="lb">races:</span> codex exec "find data races"</span>
+<span class="ln row"><span class="d">c2d9e4a1</span>  1m ago    <span class="g">finished</span>      0    1m02s  <span class="tr">      └─</span> <span class="lb">leaks:</span> claude -p "find goroutine leaks"</span>
+<span class="ln end"><span class="p">marsh-0.5$ </span></span></code></pre>
+      </div>
+      <p class="caption">One branch fixes the test. The other runs two reviewers at once. <code>join</code> hands
+      every branch's output and patch to a third agent, and <code>marsh jobs --tree</code> shows who ran what.
+      Everything else is the shell you know, and every command runs in its own Docker Sandbox microVM.</p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="why">
+    <div class="wrap">
+      <p class="kicker">Why marsh</p>
+      <h2 id="why">Agents that compose like commands.</h2>
+      <p class="lede">Everything here is a shell command, so it works in scripts, Makefiles, and pipes.</p>
+      <div class="features">
+
+        <article class="feature">
+          <div>
+            <h3>Try several agents on the same bug</h3>
+            <p><code>split</code> gives each branch a private copy of your working tree and runs the
+            branches in parallel. <code>join</code> collects each branch's output and a patch you can
+            <code>git apply</code>. Your files and your <code>.git</code> don't change until you apply one.</p>
+            <ul>
+              <li>Up to 16 branches. An agent branch can only write to its own copy.</li>
+              <li>Pipe the results onward: <code>| join | claude -p "…"</code>.</li>
+              <li><code>fanout { } | collect</code> runs things side by side on the same files, with no copies. Good for tests and lint.</li>
+              <li>Works from plain bash on the Mac, and from inside an agent.</li>
+            </ul>
+            <a class="more" href="docs/split.html">Split and join →</a> &nbsp; <a class="more" href="docs/fanout.html">Fanout and collect →</a>
+          </div>
+          <div class="window" role="group" aria-label="Example">
+<pre class="term" tabindex="0"><code><span class="p">marsh-0.5$ </span><span class="k">split</span> { <span class="lb">a:</span> <span class="k">claude</span> -p <span class="s">"fix it"</span>, <span class="lb">b:</span> <span class="k">codex</span> exec <span class="s">"fix it"</span> } | <span class="k">join</span>
+<span class="d"># split 8d5c8fdd1563: 2 branches; manifest …/out/manifest.json</span>
+
+<span class="h">== a (exited 0, shell-vm) ==</span>
+The test raced on a fixed port; it now asks the kernel for a free one.
+<span class="lb">-- a: 1 file (M net/dial_test.go); diff …/out/a/diff.patch --</span>
+<span class="d">…</span>
+<span class="h">== b (exited 0, shell-vm) ==</span>
+Added a retry around Dial and a longer timeout.
+<span class="lb">-- b: 2 files (M net/dial.go, M net/dial_test.go); diff …/out/b/diff.patch --</span>
+<span class="d">…</span></code></pre>
+          </div>
+        </article>
+
+        <article class="feature">
+          <div>
+            <h3>Agents running agents</h3>
+            <p>Inside a job, the registered commands are on <code>PATH</code>. An agent can call another for a second
+            opinion, and every call lands in one job tree.</p>
+            <ul>
+              <li>Limits: depth 4, 4 live children per job, 64 jobs per tree.</li>
+              <li><code>MARSH_SPAWN</code> limits which commands an agent may start. Nothing inside a job can widen it.</li>
+              <li>One Ctrl-C stops the whole tree, and marsh checks that every container is gone.</li>
+            </ul>
+            <a class="more" href="docs/agents.html">Agents running agents →</a>
+          </div>
+          <div class="window" role="group" aria-label="Example">
+<pre class="term" tabindex="0"><code><span class="p">marsh-0.5$ </span>export MARSH_SPAWN=codex
+<span class="p">marsh-0.5$ </span><span class="k">claude</span> -p <span class="s">"ask codex to review net/dial.go"</span>
+<span class="p">marsh-0.5$ </span>marsh jobs --tree
+<span class="h">ID        STARTED   STATE      EXIT      RUN  COMMAND</span>
+<span class="d">301c56d6</span>  2m ago    <span class="g">finished</span>      0    2m12s  claude -p "ask codex to review net/dial.go"
+<span class="d">8e41f0a2</span>  1m ago    <span class="g">finished</span>      0    14.2s  <span class="tr">└─</span> codex exec "review net/dial.go"
+<span class="p">marsh-0.5$ </span><span class="k">claude</span> -p <span class="s">"refactor everything"</span>
+<span class="r">^C</span>
+<span class="p">marsh-0.5$ </span>echo $?
+130</code></pre>
+          </div>
+        </article>
+
+        <article class="feature">
+          <div>
+            <h3>Every command in its own sandbox</h3>
+            <p>Each Kit (the Docker Sandboxes Kit format) gets its own Docker Sandbox microVM. A call to
+            <code>claude</code>, <code>codex</code>, <code>pi</code>, or your own tool runs as a new nonroot
+            container inside it. The container is deleted when the call exits.</p>
+            <ul>
+              <li>Your project appears in the Linux VM at its Mac path. Your Mac home is never mounted.</li>
+              <li>Credentials stay behind the Docker Sandboxes proxy. Containers see placeholders.</li>
+              <li>The shell image and packaged Kits are built on Docker Hardened Images.</li>
+              <li>microVMs stay warm between calls. <code>marsh --load all</code> starts them up front.</li>
+            </ul>
+            <a class="more" href="docs/kits.html">Commands and Kits →</a>
+          </div>
+          <div class="window" role="group" aria-label="Example">
+<pre class="term" tabindex="0"><code><span class="hp">~/src/api $ </span>marsh --load claude,codex
+<span class="p">marsh-0.5$ </span>pwd
+/Users/you/src/api
+<span class="p">marsh-0.5$ </span>uname -sm
+Linux aarch64
+<span class="p">marsh-0.5$ </span>git diff | <span class="k">codex</span> exec <span class="s">'review this diff'</span> &gt; review.txt
+<span class="p">marsh-0.5$ </span><span class="k">claude</span> -p <span class="s">'summarize README.md in one line'</span></code></pre>
+          </div>
+        </article>
+
+        <article class="feature">
+          <div>
+            <h3>Publish pipelines and agents as MCP tools</h3>
+            <p><code>mcp publish</code> turns a pipeline into an MCP tool that agents can call. A running
+            ACP agent session publishes the same way, so an agent on your Mac can drive an agent in marsh.</p>
+            <ul>
+              <li>In marsh: every new Kit VM loads it. <code>mcp load</code> adds it to a running Kit or any sandbox.</li>
+              <li>On the Mac, Codex can load published pipelines and sessions today: <code>marsh mcp install-published</code> and <code>marsh acp install-published</code>.</li>
+              <li>To let Claude Code or Codex drive marsh itself, run <code>marsh mcp install</code>.</li>
+            </ul>
+            <a class="more" href="docs/mcp.html">MCP →</a> &nbsp; <a class="more" href="docs/acp.html">ACP →</a>
+          </div>
+          <div class="window" role="group" aria-label="Example">
+<pre class="term" tabindex="0"><code><span class="p">marsh-0.5$ </span>mcp publish flaky -- \
+<span class="p">&gt; </span>  <span class="s">'go test -run TestDialTimeout -count=20 ./net/ 2&gt;&amp;1 | tail -3'</span>
+<span class="p">marsh-0.5$ </span>mcp load flaky --kit claude     <span class="c"># new Kit VMs get it; load a running one now</span>
+<span class="p">marsh-0.5$ </span>id=$(acp reserve claude-session)
+<span class="p">marsh-0.5$ </span>acp run --reservation <span class="s">"$id"</span> claude-session &amp;
+<span class="p">marsh-0.5$ </span>acp list --mine --wait <span class="s">"$id"</span> &gt;/dev/null
+<span class="p">marsh-0.5$ </span>acp publish <span class="s">"$id"</span> --name net-expert  <span class="c"># a live agent, as a tool</span>
+<span class="p">marsh-0.5$ </span>exit
+<span class="hp">~/src/api $ </span>marsh mcp install-published codex flaky
+<span class="hp">~/src/api $ </span>marsh acp install-published codex net-expert
+<span class="hp">~/src/api $ </span><span class="k">codex</span> exec <span class="s">"run flaky; if it fails, ask net-expert why"</span>
+<span class="c"># Codex on your Mac runs a marsh pipeline, then prompts a marsh agent</span></code></pre>
+          </div>
+        </article>
+
+        <article class="feature">
+          <div>
+            <h3>Use bash or zsh instead</h3>
+            <p>Run the shell VM's own bash or zsh with your own rc files.</p>
+            <ul>
+              <li>You keep: registered commands, agents, MCP, ACP, and <code>marsh split</code>, <code>join</code>, <code>fanout</code>, <code>collect</code>.</li>
+              <li>You lose: the <code>split { }</code> and <code>fanout { }</code> block syntax. Use the CLI forms instead.</li>
+            </ul>
+            <a class="more" href="docs/shells.html">Choosing your shell →</a>
+          </div>
+          <div class="window" role="group" aria-label="Example">
+<pre class="term" tabindex="0"><code><span class="hp">~/src/api $ </span>marsh --shell zsh        <span class="c"># this launch</span>
+<span class="hp">~/src/api $ </span>marsh config shell zsh   <span class="c"># every launch</span>
+<span class="p">% </span>marsh split -n ::: a <span class="k">claude</span> -p <span class="s">"fix it"</span> \
+<span class="p">&gt; </span>  ::: b <span class="k">codex</span> exec <span class="s">"fix it"</span> | marsh join
+<span class="p">% </span>marsh fanout -n -b test=<span class="s">'make test'</span> \
+<span class="p">&gt; </span>  -b lint=<span class="s">'make lint'</span> | marsh collect</code></pre>
+          </div>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="how-h">
+    <div class="wrap">
+      <p class="kicker">How it works</p>
+      <h2 id="how-h">How it fits together</h2>
+      <div class="how">
+        <figure class="diagram" style="margin:0">
+          <svg viewBox="0 0 760 430" role="img" aria-labelledby="dg-t dg-d">
+            <title id="dg-t">How marsh is put together</title>
+            <desc id="dg-d">On your Mac, the marsh client talks to the marshd daemon. The daemon creates a shell microVM, which has your project at its Mac path and runs your shell, and relays your terminal to it. It also creates one warm Docker Sandbox microVM per Kit. Each call from the shell goes back to the daemon, which runs it as a fresh container in that Kit microVM.</desc>
+            <defs>
+              <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0 0L10 5 0 10z"/></marker>
+              <marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrow a" d="M0 0L10 5 0 10z"/></marker>
+            </defs>
+            <rect class="mac" x="8" y="8" width="744" height="414" rx="18"/>
+            <text x="28" y="38" font-size="14" font-weight="700" class="mut">YOUR MAC</text>
+
+            <rect class="box" x="28" y="60" width="200" height="74" rx="12"/>
+            <text x="46" y="90" font-size="16" font-weight="700">Terminal</text>
+            <text x="46" y="115" font-size="14" class="m mut">~/src/api $ marsh</text>
+
+            <path class="wire" d="M128 134V176" marker-start="url(#ah)" marker-end="url(#ah)"/>
+
+            <rect class="box" x="28" y="180" width="200" height="104" rx="12"/>
+            <text x="46" y="210" font-size="16" font-weight="700" class="m">marshd</text>
+            <text x="46" y="234" font-size="13.5" class="mut">jobs · lineage · receipts</text>
+            <text x="46" y="254" font-size="13.5" class="mut">VMs it owns, by name</text>
+            <text x="46" y="274" font-size="13.5" class="mut">and UUID</text>
+
+            <text x="28" y="330" font-size="13.5" class="mut">marshd creates every VM</text>
+            <text x="28" y="348" font-size="13.5" class="mut">with the Docker Sandboxes</text>
+            <text x="28" y="366" font-size="13.5" class="mut"><tspan class="m">sbx</tspan> CLI.</text>
+
+            <path class="wire" d="M228 196H250V96H298" marker-start="url(#ah)" marker-end="url(#ah)"/>
+            <path class="wire" d="M228 250H270M270 232V360"/>
+            <path class="wire" d="M270 232H298" marker-start="url(#ah)" marker-end="url(#ah)"/>
+            <path class="wire" d="M270 360H298" marker-start="url(#ah)" marker-end="url(#ah)"/>
+
+            <rect class="vm" x="302" y="52" width="430" height="88" rx="14"/>
+            <text x="322" y="80" font-size="14" font-weight="700">Shell microVM</text>
+            <text x="430" y="80" font-size="13" class="mut">your shell runs here · project at its Mac path</text>
+            <rect class="box" x="322" y="94" width="390" height="32" rx="8"/>
+            <text x="336" y="115" font-size="13.5" class="m">Bash-compatible · pipes · make · git</text>
+
+            <rect class="vm" x="302" y="166" width="430" height="132" rx="14"/>
+            <text x="322" y="194" font-size="14" font-weight="700">claude Kit microVM</text>
+            <text x="466" y="194" font-size="13" class="mut">a Docker Sandbox, kept warm</text>
+            <rect class="ctr" x="322" y="210" width="124" height="70" rx="9"/>
+            <text x="336" y="236" font-size="13" class="m">container</text>
+            <text x="336" y="258" font-size="12.5" class="m mut">claude -p …</text>
+            <rect class="ctr" x="456" y="210" width="124" height="70" rx="9"/>
+            <text x="470" y="236" font-size="13" class="m">container</text>
+            <text x="470" y="258" font-size="12.5" class="m mut">claude -p …</text>
+            <text x="596" y="230" font-size="13" class="mut">one per call,</text>
+            <text x="596" y="248" font-size="13" class="mut">nonroot, deleted</text>
+            <text x="596" y="266" font-size="13" class="mut">on exit</text>
+
+            <rect class="vm" x="302" y="314" width="430" height="92" rx="14"/>
+            <text x="322" y="340" font-size="14" font-weight="700">codex Kit microVM</text>
+            <rect class="ctr" x="456" y="350" width="124" height="40" rx="9"/>
+            <text x="470" y="366" font-size="13" class="m">container</text>
+            <text x="470" y="382" font-size="12.5" class="m mut">codex exec …</text>
+            <path class="wire a" d="M518 280V346" marker-end="url(#aha)"/>
+            <text x="596" y="366" font-size="13" class="mut">a child job,</text>
+            <text x="596" y="384" font-size="13" class="mut">same tree</text>
+          </svg>
+        </figure>
+        <ol class="steps">
+          <li><strong>Run <code>marsh</code> in your project.</strong> A Linux shell opens in a VM at the same path. Edits on either side show up on the other.</li>
+          <li><strong>Call an agent or tool.</strong> The daemon runs it as a new container in that Kit's microVM, with your project mounted.</li>
+          <li><strong>Agents call agents.</strong> A call from inside a job becomes a child job in the same tree, under the same limits.</li>
+          <li><strong>Look at what ran.</strong> <code>marsh jobs --tree</code> and <code>marsh results</code> show each job, how it ended, and whether cleanup finished.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="section final" aria-labelledby="final-h">
+    <div class="wrap">
+      <h2 id="final-h" class="h2">Run two agents on <span class="hl">one bug.</span></h2>
+      <div class="cta">
+        <div class="install" data-copy="brew install docker/tap/sbx mcavage/tap/marsh">
+          <code><span class="ps" aria-hidden="true">$ </span>brew install docker/tap/sbx mcavage/tap/marsh</code>
+          <button class="copy" type="button" aria-label="Copy Homebrew install command">Copy</button>
+        </div>
+        <a class="btn primary" href="docs/quickstart.html">Quickstart →</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="foot-in">
+    <div>
+      <a class="brand" href="index.html"><svg aria-hidden="true"><use href="#logo"/></svg>marsh</a>
+      <p class="by">By Mark Cavage · <a href="https://github.com/mcavage">GitHub</a> · <a href="https://www.linkedin.com/in/mcavage">LinkedIn</a></p>
+    </div>
+    <nav aria-label="Footer">
+      <a href="docs/index.html">Docs</a>
+      <a href="docs/install.html">Install</a>
+      <a href="docs/security.html">Security</a>
+      <a href="docs/faq.html">FAQ</a>
+      <a href="community.html">Community</a>
+      <a href="https://github.com/mcavage/marsh">GitHub</a>
+      <a href="https://github.com/mcavage/marsh/blob/main/LICENSE">Apache-2.0</a>
+    </nav>
+  </div>
+</footer>
+</body>
+</html>

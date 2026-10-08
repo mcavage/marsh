@@ -1,0 +1,585 @@
+{
+  "schema": "marsh.primary-native-notices/v1",
+  "plan_sha256": "7080ce4c958d917d0761ea832bcf2973fa576c3efeae7d6cd603fe47c54e4c44",
+  "archives": [
+    {
+      "name": "meson",
+      "version": "1.12.0",
+      "role": "build-tool",
+      "archive": "meson-1.12.0.tar",
+      "root": "meson-1.12.0",
+      "url": "https://github.com/mesonbuild/meson/releases/download/1.12.0/meson-1.12.0.tar.gz",
+      "sha256": "88afe0c20e52030218924ac37d0c81c59b4b5f3ae3752c8c6d7470c7d365886c",
+      "provenance": "GitHub release asset digest",
+      "versions": [
+        "0.159.2",
+        "0.155.1",
+        "0.156.1"
+      ],
+      "acquisition": {
+        "url": "https://github.com/mesonbuild/meson/releases/download/1.12.0/meson-1.12.0.tar.gz",
+        "sha256": "88afe0c20e52030218924ac37d0c81c59b4b5f3ae3752c8c6d7470c7d365886c",
+        "size": 2518280,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "member": "meson-1.12.0/COPYING"
+        },
+        {
+          "file": "texts/e3e8d7b15b2021c994047314ad0ac5e367561f64771a60a85a9c0952d8cd4c3a.txt",
+          "sha256": "e3e8d7b15b2021c994047314ad0ac5e367561f64771a60a85a9c0952d8cd4c3a",
+          "member": "meson-1.12.0/packaging/License.rtf"
+        },
+        {
+          "file": "texts/bca11d525505d21cdfb021e634b0f1d48ece827f9bedcf8cd41356c48a09be24.txt",
+          "sha256": "bca11d525505d21cdfb021e634b0f1d48ece827f9bedcf8cd41356c48a09be24",
+          "member": "meson-1.12.0/packaging/macpages/English.lproj/license.html"
+        }
+      ]
+    },
+    {
+      "name": "ninja",
+      "version": "1.13.2",
+      "role": "build-tool",
+      "archive": "ninja-1.13.2.tar",
+      "root": "ninja-3441b633c2fe2c494e958780ba0f4227b1327634",
+      "url": "https://codeload.github.com/ninja-build/ninja/tar.gz/3441b633c2fe2c494e958780ba0f4227b1327634",
+      "sha256": "bccc6197cd8c3ac2a439e26d6bf41506fe49c430cf3d593269a15379f24266ee",
+      "provenance": "GitHub v1.13.2 tag -> commit3441b633c2fe2c494e958780ba0f4227b1327634; archive SHA recorded after fetch",
+      "versions": [
+        "0.159.2",
+        "0.155.1",
+        "0.156.1"
+      ],
+      "acquisition": {
+        "url": "https://codeload.github.com/ninja-build/ninja/tar.gz/3441b633c2fe2c494e958780ba0f4227b1327634",
+        "sha256": "bccc6197cd8c3ac2a439e26d6bf41506fe49c430cf3d593269a15379f24266ee",
+        "size": 292638,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/eb7e9ab9690124c5c9f42bdc81383d886a3dede26345b6ed15bbad7caf81f7ea.txt",
+          "sha256": "eb7e9ab9690124c5c9f42bdc81383d886a3dede26345b6ed15bbad7caf81f7ea",
+          "member": "ninja-3441b633c2fe2c494e958780ba0f4227b1327634/COPYING"
+        }
+      ]
+    },
+    {
+      "name": "libffi",
+      "version": "3.8.0",
+      "role": "native-library",
+      "archive": "libffi-3.8.0.tar",
+      "root": "libffi-3.8.0",
+      "url": "https://github.com/libffi/libffi/releases/download/v3.8.0/libffi-3.8.0.tar.gz",
+      "sha256": "7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4",
+      "provenance": "GitHub release asset digest",
+      "versions": [
+        "0.159.2",
+        "0.155.1",
+        "0.156.1"
+      ],
+      "acquisition": {
+        "url": "https://github.com/libffi/libffi/releases/download/v3.8.0/libffi-3.8.0.tar.gz",
+        "sha256": "7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4",
+        "size": 1581626,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/e67978cd18816c0cb7d29aaaacde7b7447402c2fb321a051698890a8eaedda94.txt",
+          "sha256": "e67978cd18816c0cb7d29aaaacde7b7447402c2fb321a051698890a8eaedda94",
+          "member": "libffi-3.8.0/LICENSE-BUILDTOOLS"
+        },
+        {
+          "file": "texts/17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c.txt",
+          "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
+          "member": "libffi-3.8.0/LICENSE"
+        }
+      ]
+    },
+    {
+      "name": "pcre2",
+      "version": "10.47",
+      "role": "native-library",
+      "archive": "pcre2-10.47.tar",
+      "root": "pcre2-10.47",
+      "url": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.47/pcre2-10.47.tar.gz",
+      "sha256": "c08ae2388ef333e8403e670ad70c0a11f1eed021fd88308d7e02f596fcd9dc16",
+      "provenance": "GitHub release asset digest",
+      "versions": [
+        "0.159.2",
+        "0.155.1",
+        "0.156.1"
+      ],
+      "acquisition": {
+        "url": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.47/pcre2-10.47.tar.gz",
+        "sha256": "c08ae2388ef333e8403e670ad70c0a11f1eed021fd88308d7e02f596fcd9dc16",
+        "size": 2792969,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811.txt",
+          "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
+          "member": "pcre2-10.47/LICENCE.md"
+        },
+        {
+          "file": "texts/5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb.txt",
+          "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+          "member": "pcre2-10.47/deps/sljit/LICENSE"
+        },
+        {
+          "file": "texts/c666ec2313dba24523ccad88f4c04ea4b24fad6545263a35b1d4ab2b08efe50a.txt",
+          "sha256": "c666ec2313dba24523ccad88f4c04ea4b24fad6545263a35b1d4ab2b08efe50a",
+          "member": "pcre2-10.47/cmake/COPYING-CMAKE-SCRIPTS"
+        },
+        {
+          "file": "texts/99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507.txt",
+          "sha256": "99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507",
+          "member": "pcre2-10.47/COPYING"
+        }
+      ]
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.2",
+      "role": "native-library",
+      "archive": "zlib-1.3.2.tar",
+      "root": "zlib-1.3.2",
+      "url": "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz",
+      "sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
+      "provenance": "GitHub release asset digest",
+      "versions": [
+        "0.159.2",
+        "0.155.1",
+        "0.156.1"
+      ],
+      "acquisition": {
+        "url": "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz",
+        "sha256": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
+        "size": 1502830,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2.txt",
+          "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+          "member": "zlib-1.3.2/LICENSE"
+        },
+        {
+          "file": "texts/36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951.txt",
+          "sha256": "36266a8fd073568394cb81cdb2b124f7fdae2c64c1a7ed09db34b4d22efa2951",
+          "member": "zlib-1.3.2/contrib/dotzlib/LICENSE_1_0.txt"
+        },
+        {
+          "file": "texts/fc686023047ce5ce3a18a9b8a777156f0e475929d3de06bac279f3c025d2b2ca.txt",
+          "sha256": "fc686023047ce5ce3a18a9b8a777156f0e475929d3de06bac279f3c025d2b2ca",
+          "member": "zlib-1.3.2/contrib/minizip/LICENSE.Info-Zip"
+        }
+      ]
+    },
+    {
+      "name": "opus",
+      "version": "1.6.1",
+      "role": "native-library",
+      "archive": "opus-1.6.1.tar",
+      "root": "opus-1.6.1",
+      "url": "https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz",
+      "sha256": "6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1",
+      "provenance": "https://downloads.xiph.org/releases/opus/SHA256SUMS.txt",
+      "versions": [
+        "0.159.2",
+        "0.155.1",
+        "0.156.1"
+      ],
+      "acquisition": {
+        "url": "https://downloads.xiph.org/releases/opus/opus-1.6.1.tar.gz",
+        "sha256": "6ffcb593207be92584df15b32466ed64bbec99109f007c82205f0194572411a1",
+        "size": 10472813,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt",
+          "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+          "member": "opus-1.6.1/COPYING"
+        }
+      ]
+    },
+    {
+      "name": "glib",
+      "version": "2.88.3",
+      "role": "native-library",
+      "archive": "glib-2.88.3.tar",
+      "root": "glib-2.88.3",
+      "url": "https://download.gnome.org/sources/glib/2.88/glib-2.88.3.tar.xz",
+      "sha256": "ab24d24e698dfa1e408b7bcdb508f4aafc906185a8b8ce72fdf79bbbdc9b383b",
+      "provenance": "https://download.gnome.org/sources/glib/2.88/glib-2.88.3.sha256sum",
+      "versions": [
+        "0.159.2",
+        "0.155.1",
+        "0.156.1"
+      ],
+      "acquisition": {
+        "url": "https://download.gnome.org/sources/glib/2.88/glib-2.88.3.tar.xz",
+        "sha256": "ab24d24e698dfa1e408b7bcdb508f4aafc906185a8b8ce72fdf79bbbdc9b383b",
+        "size": 5794356,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/7ecc7db84298adb05d2cf10339c63a5315a1c5c270a68d97d7d40a53b508ccde.txt",
+          "sha256": "7ecc7db84298adb05d2cf10339c63a5315a1c5c270a68d97d7d40a53b508ccde",
+          "member": "glib-2.88.3/LICENSES/AFL-2.0.txt"
+        },
+        {
+          "file": "texts/074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff.txt",
+          "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+          "member": "glib-2.88.3/LICENSES/Apache-2.0.txt"
+        },
+        {
+          "file": "texts/3f941b3b89cf7b8370ceb83cc76d2120d471b58735d8ca60238a751a48d7f72f.txt",
+          "sha256": "3f941b3b89cf7b8370ceb83cc76d2120d471b58735d8ca60238a751a48d7f72f",
+          "member": "glib-2.88.3/LICENSES/CC-BY-SA-3.0.txt"
+        },
+        {
+          "file": "texts/a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499.txt",
+          "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+          "member": "glib-2.88.3/LICENSES/CC0-1.0.txt"
+        },
+        {
+          "file": "texts/aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3.txt",
+          "sha256": "aaf135472f81c5b4a0dca9367e5bb5e9750032b5bebe5442b36e4c0a47430df3",
+          "member": "glib-2.88.3/LICENSES/GPL-2.0-or-later.txt"
+        },
+        {
+          "file": "texts/fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb.txt",
+          "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+          "member": "glib-2.88.3/LICENSES/LGPL-2.1-only.txt"
+        },
+        {
+          "file": "texts/fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb.txt",
+          "sha256": "fa6f36630bb1e0c571d34b2bbdf188d08495c9dbf58f28cac112f303fc1f58fb",
+          "member": "glib-2.88.3/LICENSES/LGPL-2.1-or-later.txt"
+        },
+        {
+          "file": "texts/e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e.txt",
+          "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e",
+          "member": "glib-2.88.3/LICENSES/LLVM-exception.txt"
+        },
+        {
+          "file": "texts/fb261b2d5dbe76c4850f90da763210bc385e52428df6bbfd7b06295ac8a32914.txt",
+          "sha256": "fb261b2d5dbe76c4850f90da763210bc385e52428df6bbfd7b06295ac8a32914",
+          "member": "glib-2.88.3/LICENSES/LicenseRef-old-glib-tests.txt"
+        },
+        {
+          "file": "texts/b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0.txt",
+          "sha256": "b85dcd3e453d05982552c52b5fc9e0bdd6d23c6f8e844b984a88af32570b0cc0",
+          "member": "glib-2.88.3/LICENSES/MIT.txt"
+        },
+        {
+          "file": "texts/6214f8b1300bb9f37b16ebc146f8f61af0187e0025042ff95c8b3030744a8795.txt",
+          "sha256": "6214f8b1300bb9f37b16ebc146f8f61af0187e0025042ff95c8b3030744a8795",
+          "member": "glib-2.88.3/LICENSES/MPL-1.1.txt"
+        },
+        {
+          "file": "texts/b1ec1d0e5947f81e815d8771f7d4d90671a94bb10a42dc687fb566de461a57aa.txt",
+          "sha256": "b1ec1d0e5947f81e815d8771f7d4d90671a94bb10a42dc687fb566de461a57aa",
+          "member": "glib-2.88.3/docs/reference/COPYING"
+        },
+        {
+          "file": "texts/bdbcdaa7858872393e9d6b216bbdc8a23e99d98dd6cdb7cda19458025b9e19fc.txt",
+          "sha256": "bdbcdaa7858872393e9d6b216bbdc8a23e99d98dd6cdb7cda19458025b9e19fc",
+          "member": "glib-2.88.3/subprojects/gvdb/COPYING"
+        },
+        {
+          "file": "texts/5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2.txt",
+          "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2",
+          "member": "glib-2.88.3/subprojects/gvdb/LICENSES/LGPL-2.1-or-later.txt"
+        }
+      ]
+    },
+    {
+      "name": "proxy-libintl",
+      "version": "0.5",
+      "role": "native-library",
+      "archive": "proxy-libintl-0.5.tar",
+      "root": "proxy-libintl-0.5",
+      "url": "https://github.com/frida/proxy-libintl/archive/refs/tags/0.5.tar.gz",
+      "sha256": "f7a1cbd7579baaf575c66f9d99fb6295e9b0684a28b095967cfda17857595303",
+      "provenance": "GStreamer1.28.6 upstream wrap SHA; upstream tag commit33934de09af6a6627eb44e310a8079df009abdbb",
+      "versions": [
+        "0.159.2",
+        "0.155.1",
+        "0.156.1"
+      ],
+      "acquisition": {
+        "url": "https://github.com/frida/proxy-libintl/archive/refs/tags/0.5.tar.gz",
+        "sha256": "f7a1cbd7579baaf575c66f9d99fb6295e9b0684a28b095967cfda17857595303",
+        "size": 13056,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5.txt",
+          "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+          "member": "proxy-libintl-0.5/COPYING"
+        }
+      ]
+    },
+    {
+      "name": "gstreamer",
+      "version": "1.28.6",
+      "role": "native-library",
+      "archive": "gstreamer-1.28.6.tar",
+      "root": "gstreamer-1.28.6",
+      "url": "https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.6.tar.xz",
+      "sha256": "62b6b9f0ad3147a6dd6420ac64a91180b14e990695bddd353b96041611d052ca",
+      "provenance": "Official adjacent .sha256sum",
+      "versions": [
+        "0.159.2",
+        "0.155.1",
+        "0.156.1"
+      ],
+      "acquisition": {
+        "url": "https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.6.tar.xz",
+        "sha256": "62b6b9f0ad3147a6dd6420ac64a91180b14e990695bddd353b96041611d052ca",
+        "size": 1955504,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+          "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+          "member": "gstreamer-1.28.6/COPYING"
+        }
+      ]
+    },
+    {
+      "name": "gst-plugins-base",
+      "version": "1.28.6",
+      "role": "native-library",
+      "archive": "gst-plugins-base-1.28.6.tar",
+      "root": "gst-plugins-base-1.28.6",
+      "url": "https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.6.tar.xz",
+      "sha256": "0ba699c7c6c66f4ba640be78cb38a24715add9683f3e3a199f5369dc5a4f04ac",
+      "provenance": "Official adjacent .sha256sum",
+      "versions": [
+        "0.159.2",
+        "0.155.1",
+        "0.156.1"
+      ],
+      "acquisition": {
+        "url": "https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.6.tar.xz",
+        "sha256": "0ba699c7c6c66f4ba640be78cb38a24715add9683f3e3a199f5369dc5a4f04ac",
+        "size": 2553864,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+          "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+          "member": "gst-plugins-base-1.28.6/COPYING"
+        },
+        {
+          "file": "texts/0a64edade36fd17b87485bc39ef05439c86b51a13d65d754e9e10f6bb7bd6894.txt",
+          "sha256": "0a64edade36fd17b87485bc39ef05439c86b51a13d65d754e9e10f6bb7bd6894",
+          "member": "gst-plugins-base-1.28.6/gst-libs/gst/tag/licenses.c",
+          "material_type": "source-notice-excerpt",
+          "source_file_sha256": "1f56aeb38bfc982b535d1c6356658e7d18cff845cb2a144d38cf994183c5f7b6",
+          "byte_range": [
+            0,
+            857
+          ]
+        }
+      ]
+    },
+    {
+      "name": "gst-plugins-good",
+      "version": "1.28.6",
+      "role": "native-library",
+      "archive": "gst-plugins-good-1.28.6.tar",
+      "root": "gst-plugins-good-1.28.6",
+      "url": "https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.6.tar.xz",
+      "sha256": "b0c620a4b18b6ee931b4c43bbf1760d308666dc37f730a7e7f1ad327e59ce2df",
+      "provenance": "Official adjacent .sha256sum",
+      "versions": [
+        "0.159.2",
+        "0.155.1",
+        "0.156.1"
+      ],
+      "acquisition": {
+        "url": "https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.6.tar.xz",
+        "sha256": "b0c620a4b18b6ee931b4c43bbf1760d308666dc37f730a7e7f1ad327e59ce2df",
+        "size": 5999116,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/6095e9ffa777dd22839f7801aa845b31c9ed07f3d6bf8a26dc5d2dec8ccc0ef3.txt",
+          "sha256": "6095e9ffa777dd22839f7801aa845b31c9ed07f3d6bf8a26dc5d2dec8ccc0ef3",
+          "member": "gst-plugins-good-1.28.6/COPYING"
+        },
+        {
+          "file": "texts/0efdd7e1522b73c4a206ab2fb1bb8a609157abccf588837bca6eb7c98d5b35c6.txt",
+          "sha256": "0efdd7e1522b73c4a206ab2fb1bb8a609157abccf588837bca6eb7c98d5b35c6",
+          "member": "gst-plugins-good-1.28.6/gst/rtsp/COPYING.MIT"
+        }
+      ]
+    },
+    {
+      "name": "v8",
+      "version": "15.0.245.2",
+      "url": "https://github.com/v8/v8/archive/refs/tags/15.0.245.2.tar.gz",
+      "sha256": "164f3d3e0a8b4c02a386d3a88d1b1133d37e5c20be0239fecdcdde414a4340d5",
+      "role": "native-library",
+      "versions": [
+        "0.159.2"
+      ],
+      "producer_release_commit": "12b3e88028b983051913fb6bb95d7a11218bdceb",
+      "acquisition": {
+        "url": "https://github.com/v8/v8/archive/refs/tags/15.0.245.2.tar.gz",
+        "sha256": "164f3d3e0a8b4c02a386d3a88d1b1133d37e5c20be0239fecdcdde414a4340d5",
+        "size": 32838188,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509.txt",
+          "sha256": "6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509",
+          "member": "v8-15.0.245.2/LICENSE"
+        },
+        {
+          "file": "texts/e7115e18444dae09d17f361ddc365fb1d342640fe500796209c63f7c80dfae10.txt",
+          "sha256": "e7115e18444dae09d17f361ddc365fb1d342640fe500796209c63f7c80dfae10",
+          "member": "v8-15.0.245.2/LICENSE.fdlibm"
+        },
+        {
+          "file": "texts/6a585a9f466654abc8fc0829d56b1bc987e3a073d31faa03bba37d33640a23cd.txt",
+          "sha256": "6a585a9f466654abc8fc0829d56b1bc987e3a073d31faa03bba37d33640a23cd",
+          "member": "v8-15.0.245.2/LICENSE.strongtalk"
+        },
+        {
+          "file": "texts/4af93c12062c58058378de2397dc1c92bbff9ddfb1d583a01c84127557ce97ca.txt",
+          "sha256": "4af93c12062c58058378de2397dc1c92bbff9ddfb1d583a01c84127557ce97ca",
+          "member": "v8-15.0.245.2/LICENSE.v8"
+        },
+        {
+          "file": "texts/f915aef5cdb93903ae8850c4a1efb638ee1195b1380b6e446a583c1d0eef3ff7.txt",
+          "sha256": "f915aef5cdb93903ae8850c4a1efb638ee1195b1380b6e446a583c1d0eef3ff7",
+          "member": "v8-15.0.245.2/test/js-perf-test/SixSpeed/LICENSE.sixspeed"
+        },
+        {
+          "file": "texts/b5e27ca8c92bf5748046345e3c5621a97542abd931ad5870b2057c4e20e2ece8.txt",
+          "sha256": "b5e27ca8c92bf5748046345e3c5621a97542abd931ad5870b2057c4e20e2ece8",
+          "member": "v8-15.0.245.2/test/mjsunit/third_party/object-keys/LICENSE"
+        },
+        {
+          "file": "texts/f55e9e4ba1ce2ae3b0f21577d9dfd3cea376123cb69e444b891f2f0fc1f9069a.txt",
+          "sha256": "f55e9e4ba1ce2ae3b0f21577d9dfd3cea376123cb69e444b891f2f0fc1f9069a",
+          "member": "v8-15.0.245.2/test/mjsunit/third_party/regexp-pcre/LICENSE"
+        },
+        {
+          "file": "texts/5a7b465d39b5e018bc40cc34162176269f7c476989cb4dbcf0ec0b81701545a7.txt",
+          "sha256": "5a7b465d39b5e018bc40cc34162176269f7c476989cb4dbcf0ec0b81701545a7",
+          "member": "v8-15.0.245.2/test/wasm-js/third_party/LICENSE.testharness"
+        },
+        {
+          "file": "texts/15137d6c822e3ab097093a33c3a39a9df699f373f6438867ad534ff60762a947.txt",
+          "sha256": "15137d6c822e3ab097093a33c3a39a9df699f373f6438867ad534ff60762a947",
+          "member": "v8-15.0.245.2/third_party/colorama/LICENSE"
+        },
+        {
+          "file": "texts/c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d.txt",
+          "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d",
+          "member": "v8-15.0.245.2/third_party/fp16/LICENSE"
+        },
+        {
+          "file": "texts/b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe.txt",
+          "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe",
+          "member": "v8-15.0.245.2/third_party/glibc/LICENSE"
+        },
+        {
+          "file": "texts/43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1.txt",
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+          "member": "v8-15.0.245.2/third_party/highway/LICENSE"
+        },
+        {
+          "file": "texts/450ebb9e9e50c2809d9ca581931fc8946d8d5aa0c8c35aae9ac471342fe4a88e.txt",
+          "sha256": "450ebb9e9e50c2809d9ca581931fc8946d8d5aa0c8c35aae9ac471342fe4a88e",
+          "member": "v8-15.0.245.2/third_party/inspector_protocol/LICENSE"
+        },
+        {
+          "file": "texts/76c45ece83a26117f86f4e349e7df118708e061e87225328fb478ce1e8b3eb86.txt",
+          "sha256": "76c45ece83a26117f86f4e349e7df118708e061e87225328fb478ce1e8b3eb86",
+          "member": "v8-15.0.245.2/third_party/jsoncpp/LICENSE"
+        },
+        {
+          "file": "texts/db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0.txt",
+          "sha256": "db672df7faf793fbe28b8074fdd10822363e1525816b45c9627754885de842b0",
+          "member": "v8-15.0.245.2/third_party/rapidhash-v8/LICENSE"
+        },
+        {
+          "file": "texts/6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449.txt",
+          "sha256": "6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449",
+          "member": "v8-15.0.245.2/third_party/re2/LICENSE"
+        },
+        {
+          "file": "texts/36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673.txt",
+          "sha256": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673",
+          "member": "v8-15.0.245.2/third_party/siphash/LICENSE"
+        },
+        {
+          "file": "texts/3f712e5fbdfdbd5ee7d9b8c8152580220df55de47f4eba2f26c95c4de19ad096.txt",
+          "sha256": "3f712e5fbdfdbd5ee7d9b8c8152580220df55de47f4eba2f26c95c4de19ad096",
+          "member": "v8-15.0.245.2/third_party/utf8-decoder/LICENSE"
+        },
+        {
+          "file": "texts/b9a6d9320b8f2693e8d41e496ce56caadacaddcca9be2a64a61749278f425cf2.txt",
+          "sha256": "b9a6d9320b8f2693e8d41e496ce56caadacaddcca9be2a64a61749278f425cf2",
+          "member": "v8-15.0.245.2/third_party/v8/builtins/LICENSE"
+        },
+        {
+          "file": "texts/17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf.txt",
+          "sha256": "17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf",
+          "member": "v8-15.0.245.2/third_party/v8/codegen/LICENSE"
+        },
+        {
+          "file": "texts/ebf25b8ce59c9e8883acd1ca75b6fc121937ca034f666c4077d2be739d2e1622.txt",
+          "sha256": "ebf25b8ce59c9e8883acd1ca75b6fc121937ca034f666c4077d2be739d2e1622",
+          "member": "v8-15.0.245.2/third_party/valgrind/LICENSE"
+        },
+        {
+          "file": "texts/02aea3ade0c02470335987f7d93ffaed877bcefc8414a416e2e548665bb0bfd0.txt",
+          "sha256": "02aea3ade0c02470335987f7d93ffaed877bcefc8414a416e2e548665bb0bfd0",
+          "member": "v8-15.0.245.2/third_party/vtune/LICENSE"
+        },
+        {
+          "file": "texts/c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08.txt",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "member": "v8-15.0.245.2/third_party/wasm-api/LICENSE"
+        }
+      ]
+    }
+  ],
+  "scope": "Conservative legal-document superset of exact public source archives from recorded build pins; not execution, enabled-feature proof, signature validation or a reproducible build.",
+  "failures": [],
+  "notice_refresh_source": "source-records/primary-native-refresh.json",
+  "notice_refresh_source_sha256": "354c81191c726f4e0bc3d491bd26551f41a8c56ab394abed0e15af25ef88bbaa"
+}

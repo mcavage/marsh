@@ -1,0 +1,117 @@
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 6116fdb..3fe1eca 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -934,12 +934,19 @@ impl Drop for CompositionFile {
+     }
+ }
+ 
+-struct BranchResult {
+-    label: String,
+-    status: u8,
+-    elapsed: std::time::Duration,
+-    stdout: Vec<u8>,
+-    stderr: Vec<u8>,
++/// One finished `fanout` branch, as `collect` renders it (also used by the
++/// `marsh fanout | marsh collect` CLI).
++pub struct BranchResult {
++    /// The branch label.
++    pub label: String,
++    /// The branch exit status.
++    pub status: u8,
++    /// The branch wall time.
++    pub elapsed: std::time::Duration,
++    /// The branch's captured stdout.
++    pub stdout: Vec<u8>,
++    /// The branch's captured stderr.
++    pub stderr: Vec<u8>,
+ }
+ 
+ pub(crate) fn capture_bounded(
+@@ -1213,19 +1220,7 @@ async fn execute_composition_pipeline<SE: extensions::ShellExtensions>(
+         .iter()
+         .find(|result| result.status != 0)
+         .map_or(0, |result| result.status);
+-    for branch in &branch_results {
+-        if !branch.stderr.is_empty() {
+-            writeln!(
+-                collect_params.stderr(shell),
+-                "== {} stderr ==",
+-                branch.label
+-            )?;
+-            collect_params.stderr(shell).write_all(&branch.stderr)?;
+-            if !branch.stderr.ends_with(b"\n") {
+-                writeln!(collect_params.stderr(shell))?;
+-            }
+-        }
+-    }
++    render_collected_stderr(&mut collect_params.stderr(shell), &branch_results)?;
+ 
+     let mut output: Box<dyn Write + Send> = Box::new(collect_params.stdout(shell));
+     render_collected(&mut output, &branch_results, started.elapsed(), options)?;
+@@ -1336,12 +1331,17 @@ async fn execute_fanout_branch<SE: extensions::ShellExtensions>(
+     })
+ }
+ 
++/// `collect` options.
+ #[derive(Clone, Copy, Default)]
+-struct CollectOptions {
+-    timing: bool,
+-    json: bool,
+-    help: bool,
+-    invalid: bool,
++pub struct CollectOptions {
++    /// `--timing`: append per-branch and total wall time.
++    pub timing: bool,
++    /// `--json`: emit one JSON document.
++    pub json: bool,
++    /// `--help`.
++    pub help: bool,
++    /// An unknown option was given.
++    pub invalid: bool,
+ }
+ 
+ async fn collect_options<SE: extensions::ShellExtensions>(
+@@ -1369,7 +1369,25 @@ async fn collect_options<SE: extensions::ShellExtensions>(
+ 
+ const COLLECT_HELP: &str = "collect - render fanout results\n\nUsage: fanout { ... } | collect [--timing] [--json]\n\n  --timing  append per-branch and total wall time\n  --json    emit one JSON document\n\nLimits:\n  input     64 MiB completed stdin\n  output    16 MiB combined branch stdout and stderr\n";
+ 
+-fn render_collected(
++/// Writes each branch's nonempty stderr under a `== LABEL stderr ==` line.
++pub fn render_collected_stderr(
++    output: &mut dyn Write,
++    branches: &[BranchResult],
++) -> std::io::Result<()> {
++    for branch in branches {
++        if !branch.stderr.is_empty() {
++            writeln!(output, "== {} stderr ==", branch.label)?;
++            output.write_all(&branch.stderr)?;
++            if !branch.stderr.ends_with(b"\n") {
++                writeln!(output)?;
++            }
++        }
++    }
++    Ok(())
++}
++
++/// Renders finished branches as `collect` prints them on stdout.
++pub fn render_collected(
+     output: &mut dyn Write,
+     branches: &[BranchResult],
+     total: std::time::Duration,
+diff --git a/brush-core/src/lib.rs b/brush-core/src/lib.rs
+index 013198f..0b94c6d 100644
+--- a/brush-core/src/lib.rs
++++ b/brush-core/src/lib.rs
+@@ -57,7 +57,10 @@ pub mod parser {
+ pub use commands::{CommandArg, ExecutionContext};
+ pub use error::{BuiltinError, Error, ErrorKind};
+ pub use extensions::ShellExtensions;
+-pub use interp::{ExecutionParameters, ProcessGroupPolicy};
++pub use interp::{
++    BranchResult, CollectOptions, ExecutionParameters, ProcessGroupPolicy, render_collected,
++    render_collected_stderr,
++};
+ pub use parser::{SourcePosition, SourcePositionOffset, SourceSpan};
+ pub use results::{ExecutionControlFlow, ExecutionExitCode, ExecutionResult, ExecutionSpawnResult};
+ pub use shell::{

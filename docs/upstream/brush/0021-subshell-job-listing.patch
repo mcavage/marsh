@@ -1,0 +1,103 @@
+diff --git a/brush-builtins/src/jobs.rs b/brush-builtins/src/jobs.rs
+index b194973..d06c73b 100644
+--- a/brush-builtins/src/jobs.rs
++++ b/brush-builtins/src/jobs.rs
+@@ -43,7 +43,7 @@ impl builtins::Command for JobsCommand {
+         }
+ 
+         if self.job_specs.is_empty() {
+-            for job in &context.shell.jobs().jobs {
++            for job in context.shell.jobs().listed_jobs() {
+                 self.display_job(&context, job)?;
+             }
+         } else {
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index b993d18..9528bc8 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -1418,6 +1418,7 @@ impl Execute for ast::CompoundCommand {
+                 // Clone off a new subshell, and run the body of the subshell there.
+                 // TODO(source-info): Do we need to reset the line number?
+                 let mut subshell = shell.clone();
++                subshell.jobs_mut().clear_inherited();
+ 
+                 // Handle errors within the subshell context to prevent fatal errors
+                 // from propagating to the parent shell.
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+index 768faa9..f34c8e8 100644
+--- a/brush-core/src/jobs.rs
++++ b/brush-core/src/jobs.rs
+@@ -32,6 +32,9 @@ pub struct JobManager {
+     /// Exit statuses of PIDs already collected by `wait`, as Bash's `bgpids`.
+     reaped: VecDeque<(sys::process::ProcessId, ExecutionExitCode)>,
+     next_id: usize,
++    /// The parent shell's jobs as seen by `jobs` in a pipeline stage or command
++    /// substitution. Bash lists them there, but they are not waitable.
++    inherited: Vec<Job>,
+ }
+ 
+ struct CompletedJob {
+@@ -102,6 +105,28 @@ impl JobManager {
+         Self::default()
+     }
+ 
++    /// Returns an empty job manager for a subshell that can list, but not wait
++    /// for or signal through job state, this manager's jobs.
++    #[must_use]
++    pub fn subshell_view(&self) -> Self {
++        Self {
++            inherited: self.listed_jobs().map(Job::view).collect(),
++            ..Self::default()
++        }
++    }
++
++    /// Forgets the parent jobs inherited by [`Self::subshell_view`], as an
++    /// explicit `( ... )` subshell does in Bash.
++    pub fn clear_inherited(&mut self) {
++        self.inherited.clear();
++    }
++
++    /// Returns the jobs that `jobs` lists: this shell's own, then any listed
++    /// by the parent shell.
++    pub fn listed_jobs(&self) -> impl Iterator<Item = &Job> {
++        self.jobs.iter().chain(&self.inherited)
++    }
++
+     /// Adds a job to the job manager and marks it as the current job;
+     /// returns an immutable reference to the job.
+     ///
+@@ -521,6 +546,21 @@ impl Job {
+         )
+     }
+ 
++    /// A copy of this job's metadata without its processes or tasks.
++    fn view(&self) -> Self {
++        Self {
++            tasks: VecDeque::new(),
++            representative_pid: self.representative_pid,
++            wait_result: self.wait_result,
++            pipefail: self.pipefail,
++            pgid: self.pgid,
++            annotation: self.annotation.clone(),
++            id: self.id,
++            command_line: self.command_line.clone(),
++            state: self.state.clone(),
++        }
++    }
++
+     /// Returns the annotation of the job.
+     pub fn annotation(&self) -> JobAnnotation {
+         self.annotation.clone()
+diff --git a/brush-core/src/shell.rs b/brush-core/src/shell.rs
+index 2c30d98..cbed476 100644
+--- a/brush-core/src/shell.rs
++++ b/brush-core/src/shell.rs
+@@ -161,7 +161,7 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
+             env: self.env.clone(),
+             funcs: self.funcs.clone(),
+             options: self.options.clone(),
+-            jobs: jobs::JobManager::new(),
++            jobs: self.jobs.subshell_view(),
+             aliases: self.aliases.clone(),
+             last_exit_status: self.last_exit_status,
+             last_exit_status_change_count: self.last_exit_status_change_count,

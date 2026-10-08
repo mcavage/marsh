@@ -1,0 +1,76 @@
+diff --git a/brush-parser/src/parser/mod.rs b/brush-parser/src/parser/mod.rs
+index 201f097..097d8d1 100644
+--- a/brush-parser/src/parser/mod.rs
++++ b/brush-parser/src/parser/mod.rs
+@@ -286,7 +286,7 @@ fn update_fanout_command_start(command_start: &mut bool, token: &Token) {
+             if *command_start
+                 && matches!(
+                     word.as_str(),
+-                    "if" | "then" | "do" | "else" | "elif" | "while" | "until" | "!" | "time"
++                    "if" | "then" | "do" | "else" | "elif" | "while" | "until" | "!" | "time" | "{"
+                 ) => {}
+         Token::Word(_, _) => *command_start = false,
+     }
+@@ -392,6 +392,12 @@ fn normalize_fanout_body(body: Vec<Token>) -> Vec<Token> {
+         }
+         let labeled =
+             matches!(branch.first(), Some(Token::Word(word, _)) if valid_fanout_label(word));
++        // A branch body is in command position after its label, so a nested
++        // `fanout {` or `split {` there (`review: fanout { a: x, b: y }`)
++        // is normalized too. Normalizing a normalized body is a no-op.
++        let mut rest = branch.split_off(usize::from(labeled));
++        normalize_marsh_fanout_tokens(&mut rest);
++        branch.append(&mut rest);
+         if !labeled {
+             let base = branch
+                 .first()
+diff --git a/brush-parser/src/parser/tests/composition.rs b/brush-parser/src/parser/tests/composition.rs
+index 5003740..2dca716 100644
+--- a/brush-parser/src/parser/tests/composition.rs
++++ b/brush-parser/src/parser/tests/composition.rs
+@@ -304,3 +304,45 @@ fn only_a_bare_label_word_right_after_a_semicolon_starts_a_branch() {
+         ["x", "echo"]
+     );
+ }
++
++#[test]
++fn a_fanout_nested_in_a_branch_is_normalized_after_its_label() {
++    // Commas inside a nested `fanout { }` belong to it, in one-line,
++    // multi-line, and grouped forms: the outer block keeps two branches and
++    // the nested fanout keeps its own two.
++    for (input, outer, nested) in [
++        (
++            "split { fix: true, review: fanout { races: true, leaks: true } | collect } | join\n",
++            ["fix", "review"],
++            1,
++        ),
++        (
++            "split {\n  fix: true\n  review: fanout { races: true, leaks: true } | collect\n} | join\n",
++            ["fix", "review"],
++            1,
++        ),
++        (
++            "fanout { a: fanout { races: true, leaks: true } | collect, d: true } | collect\n",
++            ["a", "d"],
++            0,
++        ),
++    ] {
++        let parsed = branches(input);
++        assert_eq!(
++            parsed
++                .iter()
++                .map(|(label, _)| label.as_str())
++                .collect::<Vec<_>>(),
++            outer,
++            "{input:?}"
++        );
++        let body = format!("{}\n", parsed[nested].1.trim());
++        assert_eq!(labels(&body), ["races", "leaks"], "{input:?}: {body:?}");
++    }
++    let grouped = labels(
++        "split { fix: true, review: { fanout { races: true, leaks: true } | collect; } } | join\n",
++    );
++    assert_eq!(grouped, ["fix", "review"]);
++    // `{ fanout {` at the top level is in command position too.
++    assert!(parse("{ fanout { a: true, b: true } | collect; }\n", true).is_ok());
++}

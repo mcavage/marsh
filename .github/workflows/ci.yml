@@ -1,0 +1,149 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+# What CI checks: formatting, lints, the shell through its shipped binaries,
+# protocol callers, harness self-tests, docs links, and the TLA+ model.
+# What it does not: VMs. GitHub runners have no Docker Sandboxes, so the
+# stock-SBX acceptance gate (make acceptance / make dev-smoke) runs on a Mac
+# by hand before a release.
+jobs:
+  linux:
+    name: Linux arm64 (shell, guest crates, protocols)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+      # Exact source key only: never restore build output across a source change.
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-linux-${{ runner.arch }}-rust1.95-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**', 'tests/**') }}
+      - name: Tool versions
+        run: |
+          cargo --version
+          python3 --version
+          node --version
+          bash --version | head -1
+      - name: Format and lint
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build shell and protocol binaries
+        run: cargo build -p marsh -p marsh-mcp -p marsh-backend --bins --locked
+      - name: Onboarding through the shipped entrypoints
+        run: |
+          python3 tests/acceptance/onboarding.py \
+            --marsh target/debug/marsh --shell target/debug/marsh-local \
+            --evidence target/onboarding.json
+      - name: Shell, guest, and ACP tests
+        run: |
+          cargo test --locked -p marsh --test smoke
+          cargo test --locked -p marsh --test bash_audit --test results_cli
+          cargo test --locked -p marsh-worker -p marsh-runtime -p marsh-contracts
+          cargo test --locked -p marsh-daemon dev_broker_attach::
+          cargo test --locked -p marsh-daemon dev_scope::tests
+          cargo test --locked -p marsh-acp --test transport_failure_test --test malformed_update_test
+      - name: Publisher and staging boundaries (no registry access)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/publisher-venv"
+          "$RUNNER_TEMP/publisher-venv/bin/python" -m pip install --require-hashes --no-deps --only-binary=:all: -r scripts/requirements-publish.txt
+          "$RUNNER_TEMP/publisher-venv/bin/python" -W error tests/kits/test_publisher_cli.py
+      - name: Protocol callers and harness self-tests
+        env:
+          MARSH_BINARY: ${{ github.workspace }}/target/debug/marsh
+          MARSH_MCP_BIN: ${{ github.workspace }}/target/debug/marsh-mcp
+        run: |
+          for suite in test_stdio_protocol.py test_publication_cli.py test_guest_export_boundary.py; do
+            python3 -W error -m unittest discover -s tests/mcp -p "$suite"
+          done
+          python3 -W error -m unittest discover -s tests/acceptance -p 'test_*.py'
+          python3 -m unittest discover -s tests/perf -p 'test_*.py'
+          sh tests/kits/selected-home.sh
+          sh tests/kits/cli-adapters.sh
+          sh tests/kits/shell-adapter.sh
+
+  macos:
+    name: macOS arm64 (host build and tests)
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-macos-${{ runner.arch }}-rust1.95-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**', 'tests/**') }}
+      - name: Lint (macOS cfg)
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Host tests use fake sbx executables and temporary homes; none needs
+      # Docker Sandboxes or credentials.
+      - name: Workspace tests
+        run: cargo test --workspace --locked
+      - name: Harness self-tests
+        run: python3 -W error -m unittest discover -s tests/acceptance -p 'test_*.py'
+      - name: Release build, man page, and install script
+        run: |
+          cargo build --workspace --release --locked
+          make man
+          target/release/marsh --version
+          sh -n scripts/install.sh
+
+  docs:
+    name: Docs and site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Install mandoc
+        run: sudo apt-get update -q && sudo apt-get install -y -q mandoc
+      - name: Man page (lint clean)
+        run: make man
+      - name: Site and every Markdown link
+        run: make site-check
+
+  model:
+    name: TLA+ model
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21'
+      # v1.8.0 is TLA+'s rolling prerelease; the checksum pins the build the
+      # model was last checked with. Update both together.
+      - name: TLA+ tools
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/tla2tools.jar" https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+          echo "7beec0f04818732a62fa193731711a99aa4f11279499b2360a7d156c519ea78d  $RUNNER_TEMP/tla2tools.jar" | sha256sum -c
+      - name: Check every config (positive configs pass, negative controls fail as expected)
+        env:
+          TLC_RUNNER: java
+          TLC_WORKERS: '2'
+          TLA2TOOLS_JAR: ${{ runner.temp }}/tla2tools.jar
+        run: docs/model/check.sh

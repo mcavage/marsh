@@ -1,0 +1,115 @@
+diff --git a/brush-core/src/shell/execution.rs b/brush-core/src/shell/execution.rs
+index 4df75cf..5cad1e9 100644
+--- a/brush-core/src/shell/execution.rs
++++ b/brush-core/src/shell/execution.rs
+@@ -150,20 +150,29 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         params: &ExecutionParameters,
+         call_type: callstack::ScriptCallType,
+     ) -> Result<ExecutionResult, error::Error> {
+-        let mut reader = std::io::BufReader::new(file);
+-        let mut parser = brush_parser::Parser::new(&mut reader, &self.parser_options());
++        let mut file = file;
++        let mut bytes = Vec::new();
++        file.read_to_end(&mut bytes)?;
+ 
+         tracing::debug!(target: trace_categories::PARSE, "Parsing sourced file: {}", source_info.source);
+-        let parse_result = parser.parse_program();
++        let parse_result =
++            super::parsing::create_parser(bytes.as_slice(), &self.parser_options()).parse_program();
+ 
+         let script_positional_args = args.map(Into::into);
+ 
+         self.call_stack
+             .push_script(call_type, source_info, script_positional_args);
+ 
+-        let result = self
+-            .run_parsed_result(parse_result, source_info, params)
+-            .await;
++        let result = match String::from_utf8(bytes) {
++            Ok(text) => {
++                self.run_source_text(&text, parse_result, source_info, params)
++                    .await
++            }
++            Err(_) => {
++                self.run_parsed_result(parse_result, source_info, params)
++                    .await
++            }
++        };
+ 
+         self.call_stack.pop();
+ 
+@@ -183,11 +192,51 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         source_info: &crate::SourceInfo,
+         params: &ExecutionParameters,
+     ) -> Result<ExecutionResult, error::Error> {
+-        let parse_result = self.parse_string(command);
+-        self.run_parsed_result(parse_result, source_info, params)
++        let command: String = command.into();
++        let parse_result = self.parse_string(command.as_str());
++        self.run_source_text(&command, parse_result, source_info, params)
+             .await
+     }
+ 
++    /// Runs shell source text as Bash reads it. When `text` parses as a whole
++    /// (`parsed`), it runs as one program. Otherwise each read unit (a line,
++    /// extended until its commands are complete) runs before the next is
++    /// parsed, so commands that precede a lexical error still execute.
++    async fn run_source_text(
++        &mut self,
++        text: &str,
++        parsed: Result<brush_parser::ast::Program, brush_parser::ParseError>,
++        source_info: &crate::SourceInfo,
++        params: &ExecutionParameters,
++    ) -> Result<ExecutionResult, error::Error> {
++        if parsed.is_ok() {
++            return self.run_parsed_result(parsed, source_info, params).await;
++        }
++
++        let mut result = ExecutionResult::success();
++        let mut unit = String::new();
++        let mut lines = text.split_inclusive('\n').enumerate().peekable();
++        while let Some((line_index, line)) = lines.next() {
++            if unit.is_empty() {
++                // Leading newlines keep reported line numbers relative to `text`.
++                unit = "\n".repeat(line_index);
++            }
++            unit.push_str(line);
++            let parsed = super::parsing::create_parser(unit.as_bytes(), &self.parser_options())
++                .parse_program();
++            if lines.peek().is_some() && !is_complete_read_unit(&unit, &parsed) {
++                continue;
++            }
++            unit.clear();
++            let failed = parsed.is_err();
++            result = self.run_parsed_result(parsed, source_info, params).await?;
++            if failed || !result.is_normal_flow() {
++                break;
++            }
++        }
++        Ok(result)
++    }
++
+     /// Executes the given command, provided to a shell executable on the command
+     /// line (i.e., via `-c`).
+     ///
+@@ -300,3 +349,20 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         Ok(expr.eval(self)?)
+     }
+ }
++
++/// Whether `unit` needs no further lines: it parsed (without a trailing line
++/// continuation) or has an error that more input cannot repair.
++fn is_complete_read_unit(
++    unit: &str,
++    parsed: &Result<brush_parser::ast::Program, brush_parser::ParseError>,
++) -> bool {
++    match parsed {
++        Ok(_) => {
++            let line = unit.strip_suffix('\n').unwrap_or(unit);
++            (line.len() - line.trim_end_matches('\\').len()).is_multiple_of(2)
++        }
++        Err(brush_parser::ParseError::Tokenizing { inner, .. }) => !inner.is_incomplete(),
++        Err(brush_parser::ParseError::ParsingAtEndOfInput) => false,
++        Err(brush_parser::ParseError::ParsingNear(_)) => true,
++    }
++}

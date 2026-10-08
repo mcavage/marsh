@@ -1,0 +1,127 @@
+diff --git a/brush-builtins/src/kill.rs b/brush-builtins/src/kill.rs
+index f69b9fa..adb53da 100644
+--- a/brush-builtins/src/kill.rs
++++ b/brush-builtins/src/kill.rs
+@@ -33,8 +33,8 @@ impl builtins::Command for KillCommand {
+         &self,
+         context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+-        // Default signal is SIGKILL.
+-        let mut trap_signal = TrapSignal::Signal(nix::sys::signal::Signal::SIGKILL);
++        // Default signal is SIGTERM, as in Bash.
++        let mut trap_signal = TrapSignal::Signal(nix::sys::signal::Signal::SIGTERM);
+ 
+         // Try parsing the signal name (if specified).
+         if let Some(signal_name) = &self.signal_name {
+@@ -68,10 +68,13 @@ impl builtins::Command for KillCommand {
+             }
+         }
+ 
+-        // Look through the remaining args for a pid/job spec or a -sigspec style option.
+-        let mut pid_or_job_spec = None;
+-        for arg in &self.args {
+-            if let Some(possible_sigspec) = arg.strip_prefix("-") {
++        // A leading -sigspec (or `--`) may precede the operands; every later
++        // argument is a pid, negative process group, or job spec.
++        let mut operands = self.args.as_slice();
++        if let Some(first) = operands.first() {
++            if first == "--" {
++                operands = &operands[1..];
++            } else if let Some(possible_sigspec) = first.strip_prefix('-') {
+                 // See if this is -sigspec syntax. The sigspec may be a signal name
+                 // (e.g., -TERM) or a signal number (e.g., -9).
+                 if let Ok(parsed_trap_signal) = possible_sigspec.parse::<TrapSignal>() {
+@@ -85,30 +88,27 @@ impl builtins::Command for KillCommand {
+                     )?;
+                     return Ok(ExecutionResult::general_error());
+                 }
+-            } else if pid_or_job_spec.is_none() {
+-                pid_or_job_spec = Some(arg);
+-            } else {
+-                writeln!(
+-                    context.stderr(),
+-                    "{}: too many jobs or processes specified",
+-                    context.command_name
+-                )?;
+-                return Ok(ExecutionExitCode::InvalidUsage.into());
++                operands = &operands[1..];
++                if operands.first().is_some_and(|arg| arg == "--") {
++                    operands = &operands[1..];
++                }
+             }
+         }
+ 
+         if self.list_signals {
+             return print_signals(&context, self.args.as_ref());
+-        } else {
+-            let Some(pid_or_job_spec) = pid_or_job_spec else {
+-                writeln!(context.stderr(), "{}: invalid usage", context.command_name)?;
+-                return Ok(ExecutionExitCode::InvalidUsage.into());
+-            };
++        }
++        if operands.is_empty() {
++            writeln!(context.stderr(), "{}: invalid usage", context.command_name)?;
++            return Ok(ExecutionExitCode::InvalidUsage.into());
++        }
+ 
+-            if pid_or_job_spec.starts_with('%') {
++        let mut result = ExecutionResult::success();
++        for pid_or_job_spec in operands {
++            let sent = if pid_or_job_spec.starts_with('%') {
+                 // It's a job spec.
+                 if let Some(job) = context.shell.jobs_mut().resolve_job_spec(pid_or_job_spec) {
+-                    job.kill(trap_signal)?;
++                    job.kill(trap_signal)
+                 } else {
+                     writeln!(
+                         context.stderr(),
+@@ -116,16 +116,23 @@ impl builtins::Command for KillCommand {
+                         context.command_name,
+                         pid_or_job_spec
+                     )?;
+-                    return Ok(ExecutionResult::general_error());
++                    result = ExecutionResult::general_error();
++                    continue;
+                 }
+             } else {
+-                let pid = brush_core::int_utils::parse(pid_or_job_spec.as_str(), 10)?;
+-
+-                // It's a pid.
+-                sys::signal::kill_process(pid, trap_signal)?;
++                brush_core::int_utils::parse(pid_or_job_spec.as_str(), 10)
++                    .and_then(|pid| sys::signal::kill_process(pid, trap_signal))
++            };
++            if let Err(error) = sent {
++                writeln!(
++                    context.stderr(),
++                    "{}: {pid_or_job_spec}: {error}",
++                    context.command_name
++                )?;
++                result = ExecutionResult::general_error();
+             }
+         }
+-        Ok(ExecutionResult::success())
++        Ok(result)
+     }
+ }
+ 
+diff --git a/brush-core/src/sys/unix/signal.rs b/brush-core/src/sys/unix/signal.rs
+index 484d998..0171a52 100644
+--- a/brush-core/src/sys/unix/signal.rs
++++ b/brush-core/src/sys/unix/signal.rs
+@@ -20,11 +20,10 @@ pub fn kill_process(
+     signal: traps::TrapSignal,
+ ) -> Result<(), error::Error> {
+     let translated_signal = match signal {
+-        traps::TrapSignal::Signal(signal) => signal,
+-        traps::TrapSignal::Debug
+-        | traps::TrapSignal::Err
+-        | traps::TrapSignal::Exit
+-        | traps::TrapSignal::Return => {
++        traps::TrapSignal::Signal(signal) => Some(signal),
++        // Signal 0 (named EXIT) probes for existence and permission.
++        traps::TrapSignal::Exit => None,
++        traps::TrapSignal::Debug | traps::TrapSignal::Err | traps::TrapSignal::Return => {
+             return Err(error::ErrorKind::InvalidSignal(signal.to_string()).into());
+         }
+     };

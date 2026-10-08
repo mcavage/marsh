@@ -1,0 +1,12 @@
+{
+  "$canonical_notice_files": {
+    "standardwebhooks-1.1.1-LICENSE": "provider-notices/standardwebhooks-1.1.1-LICENSE"
+  },
+  "standardwebhooks@1.1.1": [
+    {
+      "file": "standardwebhooks-1.1.1-LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "url": "https://raw.githubusercontent.com/standard-webhooks/standard-webhooks/b4d2c14fc5b4ccff3ff271e3b087dff812254c59/LICENSE"
+    }
+  ]
+}

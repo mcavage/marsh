@@ -1,0 +1,76 @@
+{
+  "schema": "marsh.primary-native-notices/v1",
+  "plan_sha256": "71ee5f28129f1adbc7a9e8a03964c981671e5c17398971eca1f5c3494aa30f2e",
+  "archives": [
+    {
+      "url": "https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.6.tar.xz",
+      "sha256": "0ba699c7c6c66f4ba640be78cb38a24715add9683f3e3a199f5369dc5a4f04ac",
+      "acquisition": {
+        "url": "https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.6.tar.xz",
+        "sha256": "0ba699c7c6c66f4ba640be78cb38a24715add9683f3e3a199f5369dc5a4f04ac",
+        "size": 2553864,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
+          "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+          "member": "gst-plugins-base-1.28.6/COPYING"
+        },
+        {
+          "file": "texts/0a64edade36fd17b87485bc39ef05439c86b51a13d65d754e9e10f6bb7bd6894.txt",
+          "sha256": "0a64edade36fd17b87485bc39ef05439c86b51a13d65d754e9e10f6bb7bd6894",
+          "member": "gst-plugins-base-1.28.6/gst-libs/gst/tag/licenses.c",
+          "material_type": "source-notice-excerpt",
+          "source_file_sha256": "1f56aeb38bfc982b535d1c6356658e7d18cff845cb2a144d38cf994183c5f7b6",
+          "byte_range": [
+            0,
+            857
+          ]
+        }
+      ]
+    },
+    {
+      "url": "https://github.com/openssl/openssl/releases/download/openssl-3.6.4/openssl-3.6.4.tar.gz",
+      "sha256": "9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef",
+      "acquisition": {
+        "url": "https://github.com/openssl/openssl/releases/download/openssl-3.6.4/openssl-3.6.4.tar.gz",
+        "sha256": "9bffaa1ad1e07b354c21bd3324ec02fa15579f45a7d0494b3e74bc449b7333ef",
+        "size": 55003802,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/b9f638dfc06b59c2d3b808186c3b30f713805a5db390f5b77b1703ac58acb83e.txt",
+          "sha256": "b9f638dfc06b59c2d3b808186c3b30f713805a5db390f5b77b1703ac58acb83e",
+          "member": "openssl-3.6.4/AUTHORS.md"
+        },
+        {
+          "file": "texts/7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a.txt",
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+          "member": "openssl-3.6.4/LICENSE.txt"
+        },
+        {
+          "file": "texts/9837f05336ef3cbacb6a96e1672a0426d81ad01191f214b8d48e22ca62338181.txt",
+          "sha256": "9837f05336ef3cbacb6a96e1672a0426d81ad01191f214b8d48e22ca62338181",
+          "member": "openssl-3.6.4/external/perl/Text-Template-1.56/LICENSE"
+        },
+        {
+          "file": "texts/ef790eaf397afaaa80b1405c9e65947615f1193cf258c510c90c48f8f4a9a264.txt",
+          "sha256": "ef790eaf397afaaa80b1405c9e65947615f1193cf258c510c90c48f8f4a9a264",
+          "member": "openssl-3.6.4/util/perl/OpenSSL/copyright.pm",
+          "material_type": "source-notice-excerpt",
+          "source_file_sha256": "04213b69dbebc8ba0dd8a6216af1d9422f9b63619c1cf2f1d8aa107b83bbb608",
+          "byte_range": [
+            0,
+            345
+          ]
+        }
+      ]
+    }
+  ],
+  "scope": "Conservative legal-document superset of exact public source archives from recorded build pins; not execution, enabled-feature proof, signature validation or a reproducible build.",
+  "failures": []
+}

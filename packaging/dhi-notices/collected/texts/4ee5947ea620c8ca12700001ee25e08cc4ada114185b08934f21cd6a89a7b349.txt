@@ -1,0 +1,29 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: tree
+Upstream-Contact: Steve Baker <steve.baker.llc@gmail.com>
+Source: http://oldmanprogrammer.net/source.php?dir=projects/tree
+
+Files: *
+Copyright: 1996-2024, Steve Baker (steve.baker.llc@gmail.com)
+License: GPL-2+
+
+Files: tree.c
+Copyright: 1996-2024, Steve Baker (steve.baker.llc@gmail.com)
+  1996-2022, Steve Baker, Thomas Moore, Francesc Rocher, Florian Sesser, Kyosuke Tokoro
+License: GPL-2+
+
+Files: strverscmp.c
+Copyright: 1997, 2002, 2005, Free Software Foundation, Inc.
+License: LGPL-2.1+
+
+Files: debian/*
+Copyright: 2004-2024, Florian Ernst <florian@debian.org>
+License: GPL-2+
+
+License: GPL-2+
+  On Debian systems the full text of the GPL-2 can be found in
+  /usr/share/common-licenses/GPL-2
+
+License: LGPL-2.1+
+  On Debian systems the full text of the LGPL-2.1 can be found in
+  /usr/share/common-licenses/LGPL-2.1

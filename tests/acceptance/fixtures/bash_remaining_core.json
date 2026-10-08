@@ -1,0 +1,288 @@
+{
+  "provenance": {
+    "description": "Let/readonly/declaration option boundaries, arithmetic quoting/typed parse failures, and ordinary well-known variable lifecycle controls from observed GNU inputs; no normalization"
+  },
+  "cases": [
+    {
+      "stdin": "let; echo status:$?\n",
+      "group": "let-boundary",
+      "index": 0
+    },
+    {
+      "stdin": "let --; echo status:$?\n",
+      "group": "let-boundary",
+      "index": 1
+    },
+    {
+      "stdin": "let \"\"; echo status:$?\n",
+      "group": "let-boundary",
+      "index": 2
+    },
+    {
+      "stdin": "b=2; let 'a=$b'; echo status:$?\n",
+      "group": "let-boundary",
+      "index": 3
+    },
+    {
+      "stdin": "let '1 / 0' 'a=2'; echo status:$? a:${a-unset}\n",
+      "group": "let-boundary",
+      "index": 4
+    },
+    {
+      "stdin": "let 'a=3' 'a-=3'; echo status:$? a:$a\n",
+      "group": "let-boundary",
+      "index": 5
+    },
+    {
+      "stdin": "readonly -i x=1/0; echo status:$?; declare -p x 2>/dev/null\n",
+      "group": "readonly-options",
+      "index": 0
+    },
+    {
+      "stdin": "readonly -r x=ok; echo status:$?; declare -p x 2>/dev/null\n",
+      "group": "readonly-options",
+      "index": 1
+    },
+    {
+      "stdin": "readonly -g x=ok; echo status:$?; declare -p x 2>/dev/null\n",
+      "group": "readonly-options",
+      "index": 2
+    },
+    {
+      "stdin": "readonly +i x=ok; echo status:$?; declare -p x 2>/dev/null\n",
+      "group": "readonly-options",
+      "index": 3
+    },
+    {
+      "stdin": "readonly +r x=ok; echo status:$?; declare -p x 2>/dev/null\n",
+      "group": "readonly-options",
+      "index": 4
+    },
+    {
+      "stdin": "readonly +a x=ok; echo status:$?; declare -p x 2>/dev/null\n",
+      "group": "readonly-options",
+      "index": 5
+    },
+    {
+      "stdin": "readonly -A x=ok; echo status:$?; declare -p x 2>/dev/null\n",
+      "group": "readonly-options",
+      "index": 6
+    },
+    {
+      "stdin": "readonly -F x; echo status:$?; declare -p x 2>/dev/null\n",
+      "group": "readonly-options",
+      "index": 7
+    },
+    {
+      "stdin": "readonly -- -i x=ok; echo status:$?; declare -p x 2>/dev/null\n",
+      "group": "readonly-options",
+      "index": 8
+    },
+    {
+      "stdin": "readonly -ip x=ok; echo status:$?; declare -p x 2>/dev/null\n",
+      "group": "readonly-options",
+      "index": 9
+    },
+    {
+      "stdin": "declare x=1 -x y=2; echo status:$?; declare -p x y 2>/dev/null\n",
+      "group": "declaration-options",
+      "index": 0
+    },
+    {
+      "stdin": "readonly x=1 -p; echo status:$?; declare -p x y 2>/dev/null\n",
+      "group": "declaration-options",
+      "index": 1
+    },
+    {
+      "stdin": "declare -- -i x=ok; echo status:$?; declare -p x y 2>/dev/null\n",
+      "group": "declaration-options",
+      "index": 2
+    },
+    {
+      "stdin": "declare +x x=1; echo status:$?; declare -p x y 2>/dev/null\n",
+      "group": "declaration-options",
+      "index": 3
+    },
+    {
+      "stdin": "export x=1 -n y=2; echo status:$?; declare -p x y 2>/dev/null\n",
+      "group": "declaration-options",
+      "index": 4
+    },
+    {
+      "stdin": "echo $(( \"1\" + 2 ))\n",
+      "group": "arithmetic-quotes",
+      "index": 0
+    },
+    {
+      "stdin": "echo $(( '1' + 2 ))\n",
+      "group": "arithmetic-quotes",
+      "index": 1
+    },
+    {
+      "stdin": "unset x; echo $(( ${x:-\"1\"} + 2 ))\n",
+      "group": "arithmetic-quotes",
+      "index": 2
+    },
+    {
+      "stdin": "echo $(( $'1' + 2 ))\n",
+      "group": "arithmetic-quotes",
+      "index": 3
+    },
+    {
+      "stdin": "declare -A a=([key]=2); echo $(( a[\"key\"] + 3 ))\n",
+      "group": "arithmetic-quotes",
+      "index": 4
+    },
+    {
+      "stdin": "declare -A a=([key]=2); echo $(( a['key'] + 3 ))\n",
+      "group": "arithmetic-quotes",
+      "index": 5
+    },
+    {
+      "stdin": "declare -A a; a[$'\\xff\\xfe']=0; echo $(( 7 / a[$'\\xff\\xfe'] + 4 ))\n",
+      "group": "arithmetic-quotes",
+      "index": 6
+    },
+    {
+      "stdin": "unset x; echo $(( ${x:-'1'} + 2 ))\n",
+      "group": "arithmetic-quotes-context",
+      "index": 0
+    },
+    {
+      "stdin": "declare -A a=([key]=2); key=key; echo $(( a[\"$key\"] + 3 ))\n",
+      "group": "arithmetic-quotes-context",
+      "index": 1
+    },
+    {
+      "stdin": "declare -A a=([key]=0); echo $((7 / a[\"key\"] +4))\n",
+      "group": "arithmetic-quotes-context",
+      "index": 2
+    },
+    {
+      "stdin": "unset x; echo $(( ${x:-$'1'} + 2 ))\n",
+      "group": "arithmetic-quotes-default",
+      "index": 0
+    },
+    {
+      "stdin": "declare -A a=([key]=2); key=key; echo $((a['$key']+3))\n",
+      "group": "arithmetic-quotes-default",
+      "index": 1
+    },
+    {
+      "stdin_hex": "6465636c617265202d4120613b20615b22612762225d3d303b206563686f2024282837202f20615b2427615c2762275d202b3429290a",
+      "group": "arithmetic-quotes-escape",
+      "index": 0
+    },
+    {
+      "stdin_hex": "6465636c617265202d4120613b20615b2427615c5c62275d3d303b206563686f2024282837202f20615b2427615c5c62275d202b3429290a",
+      "group": "arithmetic-quotes-escape",
+      "index": 1
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 0,
+      "stdin_hex": "76616c75653d2731202b273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 1,
+      "stdin_hex": "76616c75653d272a273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 2,
+      "stdin_hex": "76616c75653d2731202b0d2032273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 3,
+      "stdin_hex": "76616c75653d273120fffe273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 4,
+      "stdin_hex": "76616c75653d2728312b32273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 5,
+      "stdin_hex": "76616c75653d27312b3229273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 6,
+      "stdin_hex": "76616c75653d273039273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 7,
+      "stdin_hex": "76616c75653d27312330273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 8,
+      "stdin_hex": "76616c75653d273223273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 9,
+      "stdin_hex": "76616c75653d2736352330273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 10,
+      "stdin_hex": "76616c75653d273078273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 11,
+      "stdin_hex": "76616c75653d2730784747273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 12,
+      "stdin_hex": "76616c75653d27313f32273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 13,
+      "stdin_hex": "76616c75653d27313f3a33273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 14,
+      "stdin_hex": "76616c75653d27313d32273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "group": "arithmetic-parser",
+      "index": 15,
+      "stdin_hex": "76616c75653d27312c273b207072696e7466202725735c6e27202224282876616c75652929220a"
+    },
+    {
+      "stdin": "before=$BASH_MONOSECONDS; [[ $before =~ ^[0-9]+$ ]]; echo numeric:$?; printf \"attrs:<%s>\\n\" \"${BASH_MONOSECONDS@a}\"; BASH_MONOSECONDS=-1; [[ $BASH_MONOSECONDS != -1 ]]; echo dynamic:$?; after=$(printf \"%s\" \"$BASH_MONOSECONDS\"); [[ $after =~ ^[0-9]+$ ]]; echo child:$?; unset BASH_MONOSECONDS; [[ -v BASH_MONOSECONDS ]]; echo unset:$?; BASH_MONOSECONDS=9; declare -p BASH_MONOSECONDS\n",
+      "group": "wellknown-startup",
+      "index": 0
+    },
+    {
+      "stdin": "declare -p TERM HISTFILE PS1 PS2\n",
+      "group": "wellknown-startup",
+      "index": 1
+    },
+    {
+      "stdin": "declare -p TERM HISTFILE PS1 PS2\n",
+      "env": {
+        "TERM": "",
+        "HISTFILE": "custom",
+        "PS1": "inherited",
+        "PS2": "inherited"
+      },
+      "group": "wellknown-startup",
+      "index": 2
+    },
+    {
+      "stdin": "declare -p PIPESTATUS; :; declare -p PIPESTATUS\n",
+      "group": "wellknown-startup",
+      "index": 3
+    }
+  ]
+}

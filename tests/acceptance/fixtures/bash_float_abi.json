@@ -1,0 +1,97 @@
+{
+  "provenance": {
+    "description": "Actual native GNU long-double ABI, range, raw invalid numeric bytes and decimal/hex precision controls; no numeric-output normalization"
+  },
+  "cases": [
+    {
+      "stdin": "printf '%a\\n' 1.00000000000000000000000001\n",
+      "group": "float-abi",
+      "index": 0
+    },
+    {
+      "stdin": "printf '%La\\n' 1.00000000000000000000000001\n",
+      "group": "float-abi",
+      "index": 1
+    },
+    {
+      "stdin": "printf '%.30f\\n' 1.00000000000000000000000001\n",
+      "group": "float-abi",
+      "index": 2
+    },
+    {
+      "stdin": "printf '%.30Lf\\n' 1.00000000000000000000000001\n",
+      "group": "float-abi",
+      "index": 3
+    },
+    {
+      "stdin": "printf '%.3a\\n' 1.00000000000000000000000001\n",
+      "group": "float-abi",
+      "index": 4
+    },
+    {
+      "stdin": "printf '%.3La\\n' 1.00000000000000000000000001\n",
+      "group": "float-abi",
+      "index": 5
+    },
+    {
+      "stdin": "printf '%a\\n' 1e6000; echo status:$?\n",
+      "group": "float-range",
+      "index": 0
+    },
+    {
+      "stdin": "printf '%a\\n' 1e-6000; echo status:$?\n",
+      "group": "float-range",
+      "index": 1
+    },
+    {
+      "stdin": "printf '%a\\n' -0; echo status:$?\n",
+      "group": "float-range",
+      "index": 2
+    },
+    {
+      "stdin": "printf '%a\\n' inf; echo status:$?\n",
+      "group": "float-range",
+      "index": 3
+    },
+    {
+      "stdin": "printf '%a\\n' nan; echo status:$?\n",
+      "group": "float-range",
+      "index": 4
+    },
+    {
+      "stdin": "printf '%a\\n' 1.5junk; echo status:$?\n",
+      "group": "float-range",
+      "index": 5
+    },
+    {
+      "stdin_hex": "7072696e7466202725615c6e272027312e3520273b206563686f207374617475733a243f0a",
+      "group": "float-lexical",
+      "index": 0
+    },
+    {
+      "stdin_hex": "7072696e7466202725615c6e27202720312e35273b206563686f207374617475733a243f0a",
+      "group": "float-lexical",
+      "index": 1
+    },
+    {
+      "stdin_hex": "7072696e7466202725615c6e272027273b206563686f207374617475733a243f0a",
+      "group": "float-lexical",
+      "index": 2
+    },
+    {
+      "stdin_hex": "7072696e7466202725615c6e2720276e6f7065273b206563686f207374617475733a243f0a",
+      "group": "float-lexical",
+      "index": 3
+    },
+    {
+      "stdin_hex": "7072696e7466202725615c6e272027312e35ff273b206563686f207374617475733a243f0a",
+      "group": "float-lexical",
+      "index": 4
+    },
+    {
+      "stdin_hex": "7072696e7466202725615c6e2720273078312e31323334353637383961626364656630313233343536373839616263647030273b206563686f207374617475733a243f0a",
+      "group": "float-lexical",
+      "index": 5
+    }
+  ]
+}

@@ -1,0 +1,1856 @@
+diff --git a/Cargo.toml b/Cargo.toml
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,7 +1,6 @@
+ [workspace]
+ resolver = "3"
+ members = [
+-    "brush",
+     "brush-shell",
+     "brush-parser",
+     "brush-core",
+@@ -9,9 +8,6 @@
+     "brush-coreutils-builtins",
+     "brush-experimental-builtins",
+     "brush-interactive",
+-    "brush-test-harness",
+-    "fuzz",
+-    "xtask",
+ ]
+ default-members = ["brush-shell"]
+ 
+diff --git a/brush-builtins/Cargo.toml b/brush-builtins/Cargo.toml
+--- a/brush-builtins/Cargo.toml
++++ b/brush-builtins/Cargo.toml
+@@ -168,7 +168,3 @@
+ 
+ [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+ procfs = "0.18.0"
+-
+-[dev-dependencies]
+-anyhow = "1.0.102"
+-pretty_assertions = { version = "1.4.1", features = ["unstable"] }
+diff --git a/brush-builtins/src/lib.rs b/brush-builtins/src/lib.rs
+--- a/brush-builtins/src/lib.rs
++++ b/brush-builtins/src/lib.rs
+@@ -89,6 +89,8 @@
+ mod return_;
+ #[cfg(feature = "builtin.set")]
+ mod set;
++#[cfg(feature = "builtin.set")]
++pub use set::install_history_disable_hook;
+ #[cfg(feature = "builtin.shift")]
+ mod shift;
+ #[cfg(feature = "builtin.shopt")]
+diff --git a/brush-builtins/src/set.rs b/brush-builtins/src/set.rs
+--- a/brush-builtins/src/set.rs
++++ b/brush-builtins/src/set.rs
+@@ -1,10 +1,26 @@
+ use std::collections::HashMap;
+ use std::io::Write;
++use std::sync::{Arc, OnceLock};
+ 
+ use clap::Parser;
+ use itertools::Itertools;
+ 
+ use brush_core::{ExecutionExitCode, ExecutionResult, builtins, variables};
++
++type HistoryDisableHook = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
++static HISTORY_DISABLE_HOOK: OnceLock<HistoryDisableHook> = OnceLock::new();
++
++/// Install an embedding callback before `set +o history` takes effect.
++pub fn install_history_disable_hook(hook: HistoryDisableHook) {
++    let _ = HISTORY_DISABLE_HOOK.set(hook);
++}
++
++pub(crate) fn run_history_disable_hook() -> Result<(), String> {
++    if let Some(hook) = HISTORY_DISABLE_HOOK.get() {
++        hook()?;
++    }
++    Ok(())
++}
+ 
+ crate::minus_or_plus_flag_arg!(
+     ExportVariablesOnModification,
+@@ -366,6 +382,12 @@
+                 brush_core::namedoptions::options(brush_core::namedoptions::ShellOptionKind::SetO)
+                     .get(option_name.as_str())
+             {
++                if option_name == "history" && !value {
++                    if let Err(error) = run_history_disable_hook() {
++                        writeln!(context.stderr(), "set: cannot disable recording: {error}")?;
++                        return Ok(ExecutionExitCode::GeneralError.into());
++                    }
++                }
+                 option_def.set(context.shell.options_mut(), value);
+             } else {
+                 result = ExecutionExitCode::InvalidUsage.into();
+diff --git a/brush-builtins/src/shopt.rs b/brush-builtins/src/shopt.rs
+--- a/brush-builtins/src/shopt.rs
++++ b/brush-builtins/src/shopt.rs
+@@ -108,6 +108,15 @@
+                     if self.set {
+                         option_definition.set(context.shell.options_mut(), true);
+                     } else if self.unset {
++                        if self.set_o_names_only && option_name == "history" {
++                            if let Err(error) = crate::set::run_history_disable_hook() {
++                                writeln!(
++                                    context.stderr(),
++                                    "shopt: cannot disable recording: {error}"
++                                )?;
++                                return Ok(ExecutionResult::general_error());
++                            }
++                        }
+                         option_definition.set(context.shell.options_mut(), false);
+                     } else {
+                         let option_value = option_definition.get(context.shell.options());
+diff --git a/brush-core/Cargo.toml b/brush-core/Cargo.toml
+--- a/brush-core/Cargo.toml
++++ b/brush-core/Cargo.toml
+@@ -82,8 +82,3 @@
+ [target.wasm32-unknown-unknown.dependencies]
+ getrandom = { version = "0.4.2", features = ["wasm_js"] }
+ uuid = { version = "1.23.1", features = ["js"] }
+-
+-[dev-dependencies]
+-anyhow = "1.0.102"
+-pretty_assertions = { version = "1.4.1", features = ["unstable"] }
+-tempfile = "3.27.0"
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -6,6 +6,7 @@
+     fmt::Display,
+     path::{Path, PathBuf},
+     process::Stdio,
++    sync::{Arc, OnceLock},
+ };
+ 
+ use brush_parser::ast;
+@@ -23,6 +24,31 @@
+     results::ExecutionSpawnResult,
+     sys, trace_categories, traps, variables,
+ };
++
++type PreexecuteHook = Arc<dyn Fn(&str) + Send + Sync>;
++static PREEXECUTE_HOOK: OnceLock<PreexecuteHook> = OnceLock::new();
++
++type BackgroundPrelaunchHook =
++    Arc<dyn Fn(&str) -> Result<Vec<(String, String)>, String> + Send + Sync>;
++static BACKGROUND_PRELAUNCH_HOOK: OnceLock<BackgroundPrelaunchHook> = OnceLock::new();
++
++/// Reserve embedding state before a background command returns the parent prompt.
++pub fn install_background_prelaunch_hook(hook: BackgroundPrelaunchHook) {
++    let _ = BACKGROUND_PRELAUNCH_HOOK.set(hook);
++}
++
++pub(crate) fn background_prelaunch_environment(
++    command: &str,
++) -> Result<Vec<(String, String)>, String> {
++    BACKGROUND_PRELAUNCH_HOOK
++        .get()
++        .map_or(Ok(Vec::new()), |hook| hook(command))
++}
++
++/// Installs an embedding observer for expanded `BASH_COMMAND` text.
++pub fn install_preexecute_hook(hook: PreexecuteHook) {
++    let _ = PREEXECUTE_HOOK.set(hook);
++}
+ 
+ /// Encapsulates the result of waiting for a command to complete.
+ pub enum CommandWaitResult {
+@@ -259,6 +285,9 @@
+     // Set BASH_COMMAND before invoking the DEBUG trap (and generally before
+     // executing commands).
+     let full_cmd = cmd.args.iter().map(|arg| arg.to_string()).join(" ");
++    if let Some(hook) = PREEXECUTE_HOOK.get() {
++        hook(&full_cmd);
++    }
+     cmd.shell.env_mut().update_or_add(
+         "BASH_COMMAND",
+         variables::ShellValueLiteral::Scalar(full_cmd),
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -2,8 +2,10 @@
+ use itertools::Itertools;
+ use std::borrow::Cow;
+ use std::collections::VecDeque;
+-use std::io::Write;
++use std::io::{Read, Seek, Write};
+ use std::path::{Path, PathBuf};
++use std::sync::Arc;
++use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+ 
+ use crate::arithmetic::{self, ExpandAndEvaluate};
+ use crate::commands::{self, CommandArg};
+@@ -278,8 +280,16 @@
+     shell: &'a mut Shell<SE>,
+     params: &ExecutionParameters,
+ ) -> Result<&'a jobs::Job, error::Error> {
+-    if ao_list.additional.is_empty() {
++    let prelaunch_environment = if let Some(command) = background_simple_command(ao_list, shell) {
++        // A failed embedding reservation must not make `&` abort the rest of
++        // the shell list. Let the child run and report its own failure.
++        commands::background_prelaunch_environment(&command).unwrap_or_default()
++    } else {
++        Vec::new()
++    };
++    if ao_list.additional.is_empty() && composition_shape(&ao_list.first).is_none() {
+         let mut child_shell = shell.clone();
++        apply_background_environment(&mut child_shell, &prelaunch_environment)?;
+         child_shell.options_mut().interactive = false;
+         let mut child_params = params.clone();
+         child_params.process_group_policy = ProcessGroupPolicy::NewProcessGroup;
+@@ -305,6 +315,7 @@
+ 
+     // Clone the inputs.
+     let mut cloned_shell = shell.clone();
++    apply_background_environment(&mut cloned_shell, &prelaunch_environment)?;
+     let mut cloned_params = params.clone();
+     let cloned_ao_list = ao_list.clone();
+ 
+@@ -327,6 +338,56 @@
+         ao_list.to_string(),
+         jobs::JobState::Running,
+     )))
++}
++
++fn background_simple_command<SE: extensions::ShellExtensions>(
++    ao_list: &ast::AndOrList,
++    shell: &Shell<SE>,
++) -> Option<String> {
++    // The embedding cannot install a reservation into a readonly shell variable.
++    if shell
++        .env()
++        .get("MARSH_ACP_RESERVATION_ID")
++        .is_some_and(|(_, variable)| variable.is_readonly())
++    {
++        return None;
++    }
++    if !ao_list.additional.is_empty() || ao_list.first.seq.len() != 1 {
++        return None;
++    }
++    let ast::Command::Simple(command) = ao_list.first.seq.first()? else {
++        return None;
++    };
++    if command.prefix.is_some() {
++        return None;
++    }
++    let name = command.word_or_name.as_ref()?.to_string();
++    if shell.funcs().get(&name).is_some()
++        || (shell.options().expand_aliases && shell.aliases().contains_key(&name))
++    {
++        return None;
++    }
++    let mut words = vec![name];
++    for item in command.suffix.iter().flat_map(|suffix| &suffix.0) {
++        match item {
++            ast::CommandPrefixOrSuffixItem::Word(word) => words.push(word.to_string()),
++            ast::CommandPrefixOrSuffixItem::IoRedirect(_) => {}
++            _ => return None,
++        }
++    }
++    Some(words.join(" "))
++}
++
++fn apply_background_environment<SE: extensions::ShellExtensions>(
++    shell: &mut Shell<SE>,
++    environment: &[(String, String)],
++) -> Result<(), error::Error> {
++    for (name, value) in environment {
++        let mut variable = ShellVariable::new(value.clone());
++        variable.export();
++        shell.env_mut().set_global(name.clone(), variable)?;
++    }
++    Ok(())
+ }
+ 
+ #[async_trait::async_trait]
+@@ -392,6 +453,38 @@
+         shell: &mut Shell<impl extensions::ShellExtensions>,
+         params: &ExecutionParameters,
+     ) -> Result<ExecutionResult, error::Error> {
++        if let Some(shape) = composition_shape(self) {
++            let stopwatch = self
++                .timed
++                .is_some()
++                .then(timing::start_timing)
++                .transpose()?;
++            let result = execute_composition_pipeline(self, shape, shell, params).await?;
++            if let (Some(timed), Some(stopwatch)) = (&self.timed, stopwatch)
++                && let Some(mut stderr) = params.try_fd(shell, openfiles::OpenFiles::STDERR_FD)
++            {
++                let measured = stopwatch.stop()?;
++                if timed.is_posix_output() {
++                    write!(
++                        stderr,
++                        "real {}\nuser {}\nsys {}\n",
++                        timing::format_duration_posixly(&measured.wall),
++                        timing::format_duration_posixly(&measured.user),
++                        timing::format_duration_posixly(&measured.system),
++                    )?;
++                } else {
++                    write!(
++                        stderr,
++                        "\nreal\t{}\nuser\t{}\nsys\t{}\n",
++                        timing::format_duration_non_posixly(&measured.wall),
++                        timing::format_duration_non_posixly(&measured.user),
++                        timing::format_duration_non_posixly(&measured.system),
++                    )?;
++                }
++            }
++            return Ok(result);
++        }
++
+         // Capture current timing if so requested.
+         let stopwatch = self
+             .timed
+@@ -468,6 +561,564 @@
+     }
+ }
+ 
++const COMPOSITION_INPUT_LIMIT: u64 = 64 * 1024 * 1024;
++const COMPOSITION_OUTPUT_LIMIT: u64 = 16 * 1024 * 1024;
++
++#[derive(Clone, Copy)]
++struct CompositionShape {
++    fanout: usize,
++    collect: Option<usize>,
++}
++
++fn composition_shape(pipeline: &ast::Pipeline) -> Option<CompositionShape> {
++    let fanout = pipeline
++        .seq
++        .iter()
++        .position(|command| matches!(command, ast::Command::Fanout(_)))?;
++    let collect = pipeline
++        .seq
++        .iter()
++        .position(|command| matches!(command, ast::Command::Collect(_)));
++    if pipeline.seq.iter().enumerate().any(|(index, command)| {
++        matches!(command, ast::Command::Fanout(_) | ast::Command::Collect(_))
++            && index != fanout
++            && Some(index) != collect
++    }) || collect.is_some_and(|index| index != fanout + 1)
++    {
++        return None;
++    }
++    Some(CompositionShape { fanout, collect })
++}
++
++struct CompositionFile {
++    file: std::fs::File,
++    #[cfg(not(unix))]
++    path: PathBuf,
++}
++
++impl CompositionFile {
++    fn create(kind: &str) -> std::io::Result<Self> {
++        for _ in 0..32 {
++            let path =
++                std::env::temp_dir().join(format!(".marsh-{kind}-{:032x}", rand::random::<u128>()));
++            let mut options = std::fs::OpenOptions::new();
++            options.read(true).write(true).create_new(true);
++            #[cfg(unix)]
++            {
++                use std::os::unix::fs::OpenOptionsExt as _;
++                options.mode(0o600);
++            }
++            match options.open(&path) {
++                Ok(file) => {
++                    #[cfg(unix)]
++                    std::fs::remove_file(&path)?;
++                    return Ok(Self {
++                        file,
++                        #[cfg(not(unix))]
++                        path,
++                    });
++                }
++                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
++                Err(error) => return Err(error),
++            }
++        }
++        Err(std::io::Error::new(
++            std::io::ErrorKind::AlreadyExists,
++            "cannot allocate composition spool",
++        ))
++    }
++
++    fn read(&self) -> std::io::Result<std::fs::File> {
++        let mut file = self.file.try_clone()?;
++        file.seek(std::io::SeekFrom::Start(0))?;
++        Ok(file)
++    }
++
++    fn write(&self) -> std::io::Result<std::fs::File> {
++        let mut file = self.file.try_clone()?;
++        file.set_len(0)?;
++        file.seek(std::io::SeekFrom::Start(0))?;
++        Ok(file)
++    }
++}
++
++impl Drop for CompositionFile {
++    fn drop(&mut self) {
++        #[cfg(not(unix))]
++        let _ = std::fs::remove_file(&self.path);
++    }
++}
++
++struct BranchResult {
++    label: String,
++    status: u8,
++    elapsed: std::time::Duration,
++    stdout: Vec<u8>,
++    stderr: Vec<u8>,
++}
++
++fn capture_bounded(
++    mut reader: impl Read,
++    remaining: &AtomicU64,
++    exceeded: &AtomicBool,
++    limit_reached: &tokio::sync::Notify,
++) -> std::io::Result<Vec<u8>> {
++    let mut output = Vec::new();
++    let mut buffer = [0_u8; 64 * 1024];
++    loop {
++        let read = reader.read(&mut buffer)?;
++        if read == 0 {
++            return Ok(output);
++        }
++        let requested = u64::try_from(read).unwrap_or(u64::MAX);
++        let granted = remaining
++            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |available| {
++                Some(available.saturating_sub(requested))
++            })
++            .unwrap_or(0)
++            .min(requested);
++        output.extend_from_slice(&buffer[..usize::try_from(granted).unwrap_or(0)]);
++        if granted != requested && !exceeded.swap(true, Ordering::Relaxed) {
++            limit_reached.notify_one();
++        }
++    }
++}
++
++fn join_capture(
++    capture: std::thread::JoinHandle<std::io::Result<Vec<u8>>>,
++) -> std::io::Result<Vec<u8>> {
++    capture
++        .join()
++        .map_err(|_| std::io::Error::other("composition capture thread panicked"))?
++}
++
++fn collect_as_simple(command: &ast::CollectCommand) -> ast::SimpleCommand {
++    let mut suffix = command
++        .arguments
++        .iter()
++        .cloned()
++        .map(ast::CommandPrefixOrSuffixItem::Word)
++        .collect::<Vec<_>>();
++    suffix.extend(
++        command
++            .redirects
++            .iter()
++            .flat_map(|redirects| redirects.0.iter().cloned())
++            .map(ast::CommandPrefixOrSuffixItem::IoRedirect),
++    );
++    ast::SimpleCommand {
++        prefix: None,
++        word_or_name: Some(ast::Word {
++            value: "collect".into(),
++            loc: Some(command.loc.clone()),
++        }),
++        suffix: (!suffix.is_empty()).then_some(ast::CommandSuffix(suffix)),
++    }
++}
++
++async fn execute_composition_pipeline<SE: extensions::ShellExtensions>(
++    pipeline: &ast::Pipeline,
++    shape: CompositionShape,
++    shell: &mut Shell<SE>,
++    params: &ExecutionParameters,
++) -> Result<ExecutionResult, error::Error> {
++    let ast::Command::Fanout(fanout) = &pipeline.seq[shape.fanout] else {
++        unreachable!()
++    };
++    let collect = shape.collect.and_then(|index| match &pipeline.seq[index] {
++        ast::Command::Collect(command) => Some(command),
++        _ => None,
++    });
++    let typed_end = shape.collect.unwrap_or(shape.fanout) + 1;
++    let has_suffix = typed_end < pipeline.seq.len();
++    let rendered = has_suffix
++        .then(|| CompositionFile::create("collect-output"))
++        .transpose()?;
++    let mut collect_params = params.clone();
++    if let Some(rendered) = &rendered {
++        collect_params.set_fd(OpenFiles::STDOUT_FD, rendered.write()?.into());
++    }
++    if let Some(redirects) = collect.and_then(|command| command.redirects.as_ref()) {
++        for redirect in &redirects.0 {
++            setup_redirect(shell, &mut collect_params, redirect).await?;
++        }
++    }
++    let options = collect_options(collect, shell, &collect_params).await?;
++    if options.invalid {
++        return Ok(ExecutionResult::new(2));
++    }
++    let started = std::time::Instant::now();
++
++    let mut statuses = Vec::new();
++    let (prefix_status, input) = if shape.fanout == 0 {
++        let mut input = Vec::new();
++        if !params
++            .try_stdin(shell)
++            .is_some_and(|stdin| stdin.is_terminal())
++        {
++            let mut reader = params.stdin(shell);
++            reader
++                .by_ref()
++                .take(COMPOSITION_INPUT_LIMIT + 1)
++                .read_to_end(&mut input)?;
++        }
++        if u64::try_from(input.len()).unwrap_or(u64::MAX) > COMPOSITION_INPUT_LIMIT {
++            writeln!(params.stderr(shell), "fanout: input exceeds 64 MiB limit")?;
++            return Ok(ExecutionResult::new(2));
++        }
++        (0, input)
++    } else {
++        let (reader, writer) = std::io::pipe()?;
++        let remaining = Arc::new(AtomicU64::new(COMPOSITION_INPUT_LIMIT));
++        let exceeded = Arc::new(AtomicBool::new(false));
++        let limit_reached = Arc::new(tokio::sync::Notify::new());
++        let capture = {
++            let remaining = Arc::clone(&remaining);
++            let exceeded = Arc::clone(&exceeded);
++            let limit_reached = Arc::clone(&limit_reached);
++            std::thread::spawn(move || {
++                capture_bounded(reader, &remaining, &exceeded, &limit_reached)
++            })
++        };
++        let mut prefix_params = params.clone();
++        prefix_params.set_fd(OpenFiles::STDOUT_FD, writer.into());
++        let result =
++            execute_composition_segment(&pipeline.seq[..shape.fanout], shell, &prefix_params)
++                .await?;
++        statuses.extend_from_slice(shell.last_pipeline_statuses());
++        drop(prefix_params);
++        let input = join_capture(capture)?;
++        if exceeded.load(Ordering::Relaxed) {
++            writeln!(params.stderr(shell), "fanout: input exceeds 64 MiB limit")?;
++            return Ok(ExecutionResult::new(2));
++        }
++        (result.exit_code.into(), input)
++    };
++
++    if prefix_status != 0 {
++        statuses.push(prefix_status);
++        if shape.collect.is_some() {
++            statuses.push(prefix_status);
++        }
++        *shell.last_pipeline_statuses_mut() = statuses;
++        shell.set_last_exit_status(prefix_status);
++        return Ok(ExecutionResult::new(prefix_status));
++    }
++
++    let input = Arc::new(input);
++    let remaining_output = Arc::new(AtomicU64::new(COMPOSITION_OUTPUT_LIMIT));
++    let output_exceeded = Arc::new(AtomicBool::new(false));
++    let output_limit_reached = Arc::new(tokio::sync::Notify::new());
++    let branch_shell = shell.clone();
++    let branch_params = params.clone();
++    let futures = fanout.branches.iter().map(|branch| {
++        let shell = branch_shell.clone();
++        let params = branch_params.clone();
++        let input = Arc::clone(&input);
++        let remaining_output = Arc::clone(&remaining_output);
++        let output_exceeded = Arc::clone(&output_exceeded);
++        let output_limit_reached = Arc::clone(&output_limit_reached);
++        async move {
++            execute_fanout_branch(
++                branch,
++                shell,
++                params,
++                input,
++                remaining_output,
++                output_exceeded,
++                output_limit_reached,
++            )
++            .await
++        }
++    });
++    enum BranchCompletion {
++        Complete(Vec<BranchResult>),
++        OutputLimit,
++        Interrupted,
++    }
++    let completion = {
++        let all_branches = futures::future::join_all(futures);
++        tokio::pin!(all_branches);
++        tokio::select! {
++            results = &mut all_branches => BranchCompletion::Complete(
++                results.into_iter().collect::<Result<Vec<_>, error::Error>>()?
++            ),
++            () = output_limit_reached.notified() => BranchCompletion::OutputLimit,
++            result = sys::signal::await_ctrl_c() => {
++                result?;
++                BranchCompletion::Interrupted
++            }
++        }
++    };
++    let branch_results = match completion {
++        BranchCompletion::Complete(results) => results,
++        BranchCompletion::OutputLimit => {
++            return Err(std::io::Error::new(
++                std::io::ErrorKind::FileTooLarge,
++                "fanout combined output exceeds 16 MiB limit",
++            )
++            .into());
++        }
++        BranchCompletion::Interrupted => {
++            let interrupted = 130;
++            statuses.push(interrupted);
++            if shape.collect.is_some() {
++                statuses.push(interrupted);
++            }
++            *shell.last_pipeline_statuses_mut() = statuses;
++            shell.set_last_exit_status(interrupted);
++            return Ok(ExecutionResult::new(interrupted));
++        }
++    };
++    if output_exceeded.load(Ordering::Relaxed) {
++        return Err(std::io::Error::new(
++            std::io::ErrorKind::FileTooLarge,
++            "fanout combined output exceeds 16 MiB limit",
++        )
++        .into());
++    }
++    let branch_failure = branch_results
++        .iter()
++        .find(|result| result.status != 0)
++        .map_or(0, |result| result.status);
++    for branch in &branch_results {
++        if !branch.stderr.is_empty() {
++            writeln!(
++                collect_params.stderr(shell),
++                "== {} stderr ==",
++                branch.label
++            )?;
++            collect_params.stderr(shell).write_all(&branch.stderr)?;
++            if !branch.stderr.ends_with(b"\n") {
++                writeln!(collect_params.stderr(shell))?;
++            }
++        }
++    }
++
++    let mut output: Box<dyn Write + Send> = Box::new(collect_params.stdout(shell));
++    render_collected(&mut output, &branch_results, started.elapsed(), options)?;
++    drop(output);
++
++    statuses.push(branch_failure);
++    if shape.collect.is_some() {
++        statuses.push(branch_failure);
++    }
++    let mut result = if let Some(rendered) = &rendered {
++        let mut suffix_params = params.clone();
++        suffix_params.set_fd(OpenFiles::STDIN_FD, rendered.read()?.into());
++        let mut suffix =
++            execute_composition_segment(&pipeline.seq[typed_end..], shell, &suffix_params).await?;
++        statuses.extend_from_slice(shell.last_pipeline_statuses());
++        if shell.options().return_last_failure_from_pipeline
++            && branch_failure != 0
++            && suffix.is_success()
++        {
++            suffix.exit_code = ExecutionExitCode::from(branch_failure);
++        }
++        suffix
++    } else {
++        ExecutionResult::new(if branch_failure != 0 {
++            branch_failure
++        } else {
++            prefix_status
++        })
++    };
++    if pipeline.bang && !result.is_return_or_exit() {
++        result.exit_code = ExecutionExitCode::from(if result.is_success() { 1 } else { 0 });
++    }
++    *shell.last_pipeline_statuses_mut() = statuses;
++    shell.set_last_exit_status(result.exit_code.into());
++    Ok(result)
++}
++
++async fn execute_composition_segment<SE: extensions::ShellExtensions>(
++    commands: &[ast::Command],
++    shell: &mut Shell<SE>,
++    params: &ExecutionParameters,
++) -> Result<ExecutionResult, error::Error> {
++    if commands.is_empty() {
++        return Ok(ExecutionResult::success());
++    }
++    let segment = ast::Pipeline {
++        timed: None,
++        bang: false,
++        seq: commands.to_vec(),
++    };
++    let spawned = spawn_pipeline_processes(&segment, shell, params).await?;
++    wait_for_pipeline_processes_and_update_status(&segment, spawned, shell, params).await
++}
++
++async fn execute_fanout_branch<SE: extensions::ShellExtensions>(
++    branch: &ast::FanoutBranch,
++    mut shell: Shell<SE>,
++    mut params: ExecutionParameters,
++    input: Arc<Vec<u8>>,
++    remaining_output: Arc<AtomicU64>,
++    output_exceeded: Arc<AtomicBool>,
++    output_limit_reached: Arc<tokio::sync::Notify>,
++) -> Result<BranchResult, error::Error> {
++    let (input_reader, mut input_writer) = std::io::pipe()?;
++    let (stdout_reader, stdout_writer) = std::io::pipe()?;
++    let (stderr_reader, stderr_writer) = std::io::pipe()?;
++    let input_pump = std::thread::spawn(move || match input_writer.write_all(&input) {
++        Ok(()) => Ok(()),
++        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
++        Err(error) => Err(error),
++    });
++    let stdout_capture = {
++        let remaining = Arc::clone(&remaining_output);
++        let exceeded = Arc::clone(&output_exceeded);
++        let limit_reached = Arc::clone(&output_limit_reached);
++        std::thread::spawn(move || {
++            capture_bounded(stdout_reader, &remaining, &exceeded, &limit_reached)
++        })
++    };
++    let stderr_capture = std::thread::spawn(move || {
++        capture_bounded(
++            stderr_reader,
++            &remaining_output,
++            &output_exceeded,
++            &output_limit_reached,
++        )
++    });
++    params.set_fd(OpenFiles::STDIN_FD, input_reader.into());
++    params.set_fd(OpenFiles::STDOUT_FD, stdout_writer.into());
++    params.set_fd(OpenFiles::STDERR_FD, stderr_writer.into());
++    shell.options_mut().interactive = false;
++    shell.options_mut().kill_external_commands_on_drop = true;
++    let started = std::time::Instant::now();
++    let result = branch.body.execute(&mut shell, &params).await?;
++    drop(params);
++    drop(shell);
++    input_pump
++        .join()
++        .map_err(|_| std::io::Error::other("composition input thread panicked"))??;
++    let stdout = join_capture(stdout_capture)?;
++    let stderr = join_capture(stderr_capture)?;
++    Ok(BranchResult {
++        label: branch.label.clone(),
++        status: result.exit_code.into(),
++        elapsed: started.elapsed(),
++        stdout,
++        stderr,
++    })
++}
++
++#[derive(Clone, Copy, Default)]
++struct CollectOptions {
++    timing: bool,
++    json: bool,
++    help: bool,
++    invalid: bool,
++}
++
++async fn collect_options<SE: extensions::ShellExtensions>(
++    collect: Option<&ast::CollectCommand>,
++    shell: &mut Shell<SE>,
++    params: &ExecutionParameters,
++) -> Result<CollectOptions, error::Error> {
++    let mut options = CollectOptions::default();
++    for argument in collect.into_iter().flat_map(|command| &command.arguments) {
++        match expansion::basic_expand_word(shell, params, argument.to_string())
++            .await?
++            .as_str()
++        {
++            "--timing" => options.timing = true,
++            "--json" => options.json = true,
++            "-h" | "--help" => options.help = true,
++            unknown => {
++                writeln!(params.stderr(shell), "collect: unknown option: {unknown}")?;
++                options.invalid = true;
++            }
++        }
++    }
++    Ok(options)
++}
++
++const COLLECT_HELP: &str = "collect - render fanout results\n\nUsage: fanout { ... } | collect [--timing] [--json]\n\n  --timing  append per-branch and total wall time\n  --json    emit one JSON document\n\nLimits:\n  input     64 MiB completed stdin\n  output    16 MiB combined branch stdout and stderr\n";
++
++fn render_collected(
++    output: &mut dyn Write,
++    branches: &[BranchResult],
++    total: std::time::Duration,
++    options: CollectOptions,
++) -> std::io::Result<()> {
++    if options.help {
++        return output.write_all(COLLECT_HELP.as_bytes());
++    }
++    for branch in branches {
++        if options.json && std::str::from_utf8(&branch.stdout).is_err() {
++            return Err(std::io::Error::new(
++                std::io::ErrorKind::InvalidData,
++                "collect --json requires UTF-8 branch stdout",
++            ));
++        }
++    }
++    if options.json {
++        write!(output, "{{\"branches\":[")?;
++        for (index, branch) in branches.iter().enumerate() {
++            if index != 0 {
++                output.write_all(b",")?;
++            }
++            write!(
++                output,
++                "{{\"label\":\"{}\",\"status\":{},\"duration_ms\":{},\"stdout\":\"{}\"}}",
++                json_escape(&branch.label),
++                branch.status,
++                branch.elapsed.as_millis(),
++                json_escape(std::str::from_utf8(&branch.stdout).expect("validated UTF-8")),
++            )?;
++        }
++        writeln!(output, "],\"total_ms\":{}}}", total.as_millis())?;
++        return Ok(());
++    }
++    for branch in branches {
++        let state = if branch.status == 0 {
++            "complete".to_owned()
++        } else {
++            format!("failed: {}", branch.status)
++        };
++        writeln!(output, "== {} ({state}) ==", branch.label)?;
++        output.write_all(&branch.stdout)?;
++        if !branch.stdout.ends_with(b"\n") {
++            writeln!(output)?;
++        }
++        writeln!(output)?;
++    }
++    if options.timing {
++        writeln!(output, "Timing:")?;
++        for branch in branches {
++            writeln!(
++                output,
++                "  {:<24} {:>8} ms",
++                branch.label,
++                branch.elapsed.as_millis()
++            )?;
++        }
++        writeln!(output, "  {:<24} {:>8} ms", "total", total.as_millis())?;
++    }
++    Ok(())
++}
++
++fn json_escape(value: &str) -> String {
++    let mut escaped = String::with_capacity(value.len());
++    for character in value.chars() {
++        match character {
++            '"' => escaped.push_str("\\\""),
++            '\\' => escaped.push_str("\\\\"),
++            '\n' => escaped.push_str("\\n"),
++            '\r' => escaped.push_str("\\r"),
++            '\t' => escaped.push_str("\\t"),
++            character if character.is_control() => {
++                use std::fmt::Write as _;
++                let _ = write!(escaped, "\\u{:04x}", u32::from(character));
++            }
++            character => escaped.push(character),
++        }
++    }
++    escaped
++}
++
+ async fn spawn_pipeline_processes(
+     pipeline: &ast::Pipeline,
+     shell: &mut Shell<impl extensions::ShellExtensions>,
+@@ -662,6 +1313,18 @@
+         pipeline_context.shell.set_current_cmd(self);
+ 
+         match self {
++            Self::Fanout(_) => {
++                writeln!(
++                    params.stderr(&pipeline_context.shell),
++                    "fanout: use fanout as a pipeline stage"
++                )?;
++                Ok(ExecutionResult::new(2).into())
++            }
++            Self::Collect(command) => {
++                collect_as_simple(command)
++                    .execute_in_pipeline(pipeline_context, params)
++                    .await
++            }
+             Self::Simple(simple) => simple.execute_in_pipeline(pipeline_context, params).await,
+             Self::Compound(compound, redirects) => {
+                 // Set up any additional redirects.
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+--- a/brush-core/src/jobs.rs
++++ b/brush-core/src/jobs.rs
+@@ -398,12 +398,16 @@
+ 
+     /// Waits for the job to complete.
+     pub async fn wait(&mut self) -> Result<ExecutionResult, error::Error> {
+-        let mut result = ExecutionResult::success();
++        // Tasks are stored in pipeline order, so waiting from the back
++        // observes the rightmost command first; preserve that status while
++        // still reaping every earlier stage. Overwriting it with each prior
++        // stage made `wait $!` report the leftmost command's status.
++        let mut result = None;
+ 
+         while let Some(task) = self.tasks.back_mut() {
+             match task.wait().await? {
+                 JobTaskWaitResult::Completed(execution_result) => {
+-                    result = execution_result;
++                    result.get_or_insert(execution_result);
+                     self.tasks.pop_back();
+                 }
+                 JobTaskWaitResult::Stopped => {
+@@ -415,7 +419,7 @@
+ 
+         self.state = JobState::Done;
+ 
+-        Ok(result)
++        Ok(result.unwrap_or_else(ExecutionResult::success))
+     }
+ 
+     /// Moves the job to execute in the background.
+diff --git a/brush-core/src/shell/builder.rs b/brush-core/src/shell/builder.rs
+--- a/brush-core/src/shell/builder.rs
++++ b/brush-core/src/shell/builder.rs
+@@ -144,6 +144,9 @@
+     /// are assigned *after* inherited or well-known variables are set (when applicable).
+     #[builder(field)]
+     pub vars: HashMap<String, ShellVariable>,
++    /// Whether marsh-only composition syntax is enabled.
++    #[builder(default)]
++    pub marsh_extensions: bool,
+     /// Error behavior implementation.
+     #[builder(default)]
+     pub error_formatter: SE::ErrorFormatter,
+@@ -264,6 +267,7 @@
+             last_stopwatch_time: std::time::SystemTime::now(),
+             last_stopwatch_offset: 0,
+             parser_impl: crate::parser::ParserImpl::default(),
++            marsh_extensions: false,
+             key_bindings: None,
+             history: None,
+         }
+diff --git a/brush-core/src/shell/parsing.rs b/brush-core/src/shell/parsing.rs
+--- a/brush-core/src/shell/parsing.rs
++++ b/brush-core/src/shell/parsing.rs
+@@ -35,6 +35,7 @@
+     /// the current configuration state of the shell and may change over time.
+     pub const fn parser_options(&self) -> brush_parser::ParserOptions {
+         brush_parser::ParserOptions {
++            marsh_extensions: self.marsh_extensions,
+             enable_extended_globbing: self.options.extended_globbing,
+             posix_mode: self.options.posix_mode,
+             sh_mode: self.options.sh_mode,
+diff --git a/brush-core/src/shell.rs b/brush-core/src/shell.rs
+--- a/brush-core/src/shell.rs
++++ b/brush-core/src/shell.rs
+@@ -138,6 +138,10 @@
+     /// Parser implementation to use.
+     #[cfg_attr(feature = "serde", serde(skip))]
+     parser_impl: crate::parser::ParserImpl,
++
++    /// Whether marsh-only composition syntax is enabled.
++    #[cfg_attr(feature = "serde", serde(skip))]
++    marsh_extensions: bool,
+ 
+     /// Key bindings for the shell, optionally implemented by an interactive shell.
+     #[cfg_attr(feature = "serde", serde(skip))]
+@@ -181,6 +185,7 @@
+             last_stopwatch_time: self.last_stopwatch_time,
+             last_stopwatch_offset: self.last_stopwatch_offset,
+             parser_impl: self.parser_impl,
++            marsh_extensions: self.marsh_extensions,
+             key_bindings: self.key_bindings.clone(),
+             history: self.history.clone(),
+             depth: self.depth + 1,
+@@ -223,6 +228,7 @@
+             working_dir: options.working_dir.map_or_else(std::env::current_dir, Ok)?,
+             builtins: options.builtins,
+             parser_impl: options.parser,
++            marsh_extensions: options.marsh_extensions,
+             key_bindings: options.key_bindings,
+             ..Self::default()
+         };
+diff --git a/brush-interactive/Cargo.toml b/brush-interactive/Cargo.toml
+--- a/brush-interactive/Cargo.toml
++++ b/brush-interactive/Cargo.toml
+@@ -38,6 +38,3 @@
+ thiserror = "2.0.18"
+ tokio = { version = "1.52.3", features = ["rt", "sync"] }
+ tracing = "0.1.44"
+-
+-[dev-dependencies]
+-pretty_assertions = { version = "1.4.1", features = ["unstable"] }
+diff --git a/brush-parser/Cargo.toml b/brush-parser/Cargo.toml
+--- a/brush-parser/Cargo.toml
++++ b/brush-parser/Cargo.toml
+@@ -42,25 +42,3 @@
+ [target.wasm32-unknown-unknown.dependencies]
+ getrandom = { version = "0.4.2", features = ["wasm_js"] }
+ uuid = { version = "1.23.1", features = ["js"] }
+-
+-[dev-dependencies]
+-anyhow = "1.0.102"
+-criterion = { version = "0.8.2", features = ["html_reports"] }
+-insta = { version = "1.47.1", features = ["glob", "ron", "yaml", "redactions"] }
+-miette = { version = "7.6.0", features = ["fancy"] }
+-pretty_assertions = { version = "1.4.1", features = ["unstable"] }
+-serde = { version = "1.0.228", features = ["derive", "rc"] }
+-serde_json = "1.0.149"
+-serde_yaml = "0.9.34"
+-
+-[[bench]]
+-name = "parser"
+-harness = false
+-
+-[[example]]
+-name = "miette"
+-required-features = ["diagnostics"]
+-
+-[[example]]
+-name = "serde"
+-required-features = ["serde"]
+diff --git a/brush-parser/src/ast.rs b/brush-parser/src/ast.rs
+--- a/brush-parser/src/ast.rs
++++ b/brush-parser/src/ast.rs
+@@ -367,6 +367,10 @@
+     derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)
+ )]
+ pub enum Command {
++    /// An marsh concurrent branch group.
++    Fanout(FanoutCommand),
++    /// An marsh fanout result renderer.
++    Collect(CollectCommand),
+     /// A simple command, directly invoking an external command, a built-in command,
+     /// a shell function, or similar.
+     Simple(SimpleCommand),
+@@ -381,6 +385,8 @@
+ impl SourceLocation for Command {
+     fn location(&self) -> Option<SourceSpan> {
+         match self {
++            Self::Fanout(command) => command.location(),
++            Self::Collect(command) => command.location(),
+             Self::Simple(s) => s.location(),
+             Self::Compound(c, r) => {
+                 match (c.location(), r.as_ref().and_then(SourceLocation::location)) {
+@@ -396,6 +402,8 @@
+ impl Display for Command {
+     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+         match self {
++            Self::Fanout(command) => write!(f, "{command}"),
++            Self::Collect(command) => write!(f, "{command}"),
+             Self::Simple(simple_command) => write!(f, "{simple_command}"),
+             Self::Compound(compound_command, redirect_list) => {
+                 write!(f, "{compound_command}")?;
+@@ -406,6 +414,85 @@
+             }
+             Self::Function(function_definition) => write!(f, "{function_definition}"),
+         }
++    }
++}
++
++#[derive(Clone, Debug)]
++#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
++#[cfg_attr(
++    any(test, feature = "serde"),
++    derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)
++)]
++/// A declaration-ordered group of concurrent shell branches.
++pub struct FanoutCommand {
++    /// Branches in source order.
++    pub branches: Vec<FanoutBranch>,
++    /// Source location of the complete form.
++    pub loc: SourceSpan,
++}
++
++impl Node for FanoutCommand {}
++impl SourceLocation for FanoutCommand {
++    fn location(&self) -> Option<SourceSpan> {
++        Some(self.loc.clone())
++    }
++}
++impl Display for FanoutCommand {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        writeln!(f, "fanout {{")?;
++        for branch in &self.branches {
++            writeln!(f, "{}: {}", branch.label, branch.body)?;
++        }
++        write!(f, "}}")
++    }
++}
++
++#[derive(Clone, Debug)]
++#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
++#[cfg_attr(
++    any(test, feature = "serde"),
++    derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)
++)]
++/// One named fanout branch with a real shell command-list body.
++pub struct FanoutBranch {
++    /// Stable display label.
++    pub label: String,
++    /// Shell body evaluated in a cloned context.
++    pub body: CompoundList,
++}
++
++#[derive(Clone, Debug)]
++#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
++#[cfg_attr(
++    any(test, feature = "serde"),
++    derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)
++)]
++/// Options and redirections for rendering fanout results.
++pub struct CollectCommand {
++    /// Unexpanded command arguments.
++    pub arguments: Vec<Word>,
++    /// Redirections owned by this stage.
++    pub redirects: Option<RedirectList>,
++    /// Source location of the complete form.
++    pub loc: SourceSpan,
++}
++
++impl Node for CollectCommand {}
++impl SourceLocation for CollectCommand {
++    fn location(&self) -> Option<SourceSpan> {
++        Some(self.loc.clone())
++    }
++}
++impl Display for CollectCommand {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        write!(f, "collect")?;
++        for argument in &self.arguments {
++            write!(f, " {argument}")?;
++        }
++        if let Some(redirects) = &self.redirects {
++            write!(f, "{redirects}")?;
++        }
++        Ok(())
+     }
+ }
+ 
+diff --git a/brush-parser/src/parser/mod.rs b/brush-parser/src/parser/mod.rs
+--- a/brush-parser/src/parser/mod.rs
++++ b/brush-parser/src/parser/mod.rs
+@@ -23,6 +23,8 @@
+ /// Options used to control the behavior of the parser.
+ #[derive(Clone, Eq, Hash, PartialEq)]
+ pub struct ParserOptions {
++    /// Whether marsh-only composition syntax is enabled.
++    pub marsh_extensions: bool,
+     /// Whether or not to enable extended globbing (a.k.a. `extglob`).
+     pub enable_extended_globbing: bool,
+     /// Whether or not to enable POSIX compliance mode.
+@@ -40,6 +42,7 @@
+ impl Default for ParserOptions {
+     fn default() -> Self {
+         Self {
++            marsh_extensions: false,
+             enable_extended_globbing: true,
+             posix_mode: false,
+             sh_mode: false,
+@@ -113,6 +116,9 @@
+         #[builder(default = true)]
+         /// Whether or not to enable extended globbing (a.k.a. `extglob`).
+         enable_extended_globbing: bool,
++        #[builder(default = false)]
++        /// Whether marsh-only composition syntax is enabled.
++        marsh_extensions: bool,
+         #[builder(default = false)]
+         /// Whether or not to enable POSIX compliance mode.
+         posix_mode: bool,
+@@ -130,6 +136,7 @@
+         parser_impl: ParserImpl,
+     ) -> Self {
+         let options = ParserOptions {
++            marsh_extensions,
+             enable_extended_globbing,
+             posix_mode,
+             sh_mode,
+@@ -151,7 +158,10 @@
+         //
+         match self.options.parser_impl {
+             ParserImpl::Peg => {
+-                let tokens = self.tokenize()?;
++                let mut tokens = self.tokenize()?;
++                if self.options.marsh_extensions {
++                    normalize_marsh_fanout_tokens(&mut tokens);
++                }
+                 parse_tokens(&tokens, &self.options)
+             }
+             #[cfg(feature = "winnow-parser")]
+@@ -219,6 +229,218 @@
+ 
+         Ok(tokens)
+     }
++}
++
++fn normalize_marsh_fanout_tokens(tokens: &mut Vec<Token>) {
++    let mut start = 0;
++    let mut command_start = true;
++    while start + 1 < tokens.len() {
++        // Carry command-position state forward once. Recomputing it from the
++        // complete prefix for every token made ordinary large scripts O(n²).
++        let fanout = command_start
++            && matches!((&tokens[start], &tokens[start + 1]),
++            (Token::Word(name, _), Token::Word(open, _)) if name == "fanout" && open == "{");
++        if !fanout {
++            update_fanout_command_start(&mut command_start, &tokens[start]);
++            start += 1;
++            continue;
++        }
++        let Some(end) = fanout_end(tokens, start + 2) else {
++            break;
++        };
++        let body = normalize_fanout_body(tokens[start + 2..end].to_vec());
++        tokens.splice(start + 2..end, body);
++        update_fanout_command_start(&mut command_start, &tokens[start]);
++        start += 1;
++    }
++}
++
++fn update_fanout_command_start(command_start: &mut bool, token: &Token) {
++    match token {
++        Token::Operator(operator, _)
++            if matches!(operator.as_str(), "\n" | ";" | "&" | "&&" | "||" | "|") =>
++        {
++            *command_start = true;
++        }
++        Token::Operator(operator, _)
++            if *command_start && matches!(operator.as_str(), "(" | "{") => {}
++        Token::Operator(_, _) => {}
++        Token::Word(word, _)
++            if *command_start
++                && matches!(
++                    word.as_str(),
++                    "if" | "then" | "do" | "else" | "elif" | "while" | "until" | "!" | "time"
++                ) => {}
++        Token::Word(_, _) => *command_start = false,
++    }
++}
++
++fn fanout_end(tokens: &[Token], start: usize) -> Option<usize> {
++    let mut depth = 0usize;
++    for (offset, token) in tokens[start..].iter().enumerate() {
++        match token {
++            Token::Word(word, _) if word == "{" => depth += 1,
++            Token::Word(word, _) if word == "}" => {
++                if depth == 0 {
++                    return Some(start + offset);
++                }
++                depth -= 1;
++            }
++            _ => {}
++        }
++    }
++    None
++}
++
++fn normalize_fanout_body(body: Vec<Token>) -> Vec<Token> {
++    let body = body
++        .into_iter()
++        .flat_map(|token| match token {
++            Token::Word(word, location) => split_fanout_word(&word)
++                .into_iter()
++                .enumerate()
++                .flat_map(|(index, part)| {
++                    let mut tokens = Vec::with_capacity(2);
++                    if index != 0 {
++                        tokens.push(Token::Word(",".into(), location.clone()));
++                    }
++                    if !part.is_empty() {
++                        tokens.push(Token::Word(part, location.clone()));
++                    }
++                    tokens
++                })
++                .collect::<Vec<_>>(),
++            token => vec![token],
++        })
++        .collect::<Vec<_>>();
++    let leading_linebreak = body
++        .first()
++        .cloned()
++        .filter(|token| matches!(token, Token::Operator(operator, _) if operator == "\n"));
++    let mut branches = Vec::<Vec<Token>>::new();
++    let mut current = Vec::new();
++    let mut nesting = 0usize;
++    for token in body {
++        let boundary = nesting == 0
++            && matches!(&token, Token::Operator(operator, _) if operator == "\n" || operator == ";")
++            || nesting == 0 && matches!(&token, Token::Word(word, _) if word == ",");
++        if boundary {
++            branches.push(std::mem::take(&mut current));
++            continue;
++        }
++        match &token {
++            Token::Word(word, _) | Token::Operator(word, _) if word == "{" || word == "(" => {
++                nesting += 1;
++            }
++            Token::Word(word, _) | Token::Operator(word, _)
++                if (word == "}" || word == ")") && nesting > 0 =>
++            {
++                nesting -= 1;
++            }
++            _ => {}
++        }
++        current.push(token);
++    }
++    branches.push(current);
++
++    let explicit = branches
++        .iter()
++        .filter_map(|branch| branch.first())
++        .filter_map(|token| match token {
++            Token::Word(word, _) if valid_fanout_label(word) => {
++                Some(word[..word.len() - 1].to_owned())
++            }
++            _ => None,
++        })
++        .collect::<std::collections::HashSet<_>>();
++    let mut used = explicit;
++    let mut output = Vec::new();
++    if let Some(linebreak) = leading_linebreak {
++        output.push(linebreak);
++    }
++    for mut branch in branches {
++        if branch.is_empty() {
++            continue;
++        }
++        let labeled =
++            matches!(branch.first(), Some(Token::Word(word, _)) if valid_fanout_label(word));
++        if !labeled {
++            let base = branch
++                .first()
++                .and_then(|token| match token {
++                    Token::Word(word, _) if valid_fanout_label(&format!("{word}:")) => {
++                        Some(word.as_str())
++                    }
++                    _ => None,
++                })
++                .unwrap_or("branch");
++            let label = unique_branch_label(base, &mut used);
++            let location = branch[0].location().clone();
++            branch.insert(0, Token::Word(format!("{label}:"), location));
++        }
++        output.append(&mut branch);
++        let location = output.last().expect("nonempty branch").location().clone();
++        output.push(Token::Operator("\n".into(), location));
++    }
++    output
++}
++
++fn split_fanout_word(word: &str) -> Vec<String> {
++    let mut parts = Vec::new();
++    let mut start = 0;
++    let mut quote = None;
++    let mut escaped = false;
++    let mut nesting = 0usize;
++    for (index, character) in word.char_indices() {
++        if escaped {
++            escaped = false;
++            continue;
++        }
++        if character == '\\' && quote != Some('\'') {
++            escaped = true;
++            continue;
++        }
++        if let Some(delimiter) = quote {
++            if character == delimiter {
++                quote = None;
++            }
++            continue;
++        }
++        if matches!(character, '\'' | '"') {
++            quote = Some(character);
++        } else if matches!(character, '(' | '{') {
++            nesting += 1;
++        } else if matches!(character, ')' | '}') {
++            nesting = nesting.saturating_sub(1);
++        } else if character == ',' && nesting == 0 {
++            parts.push(word[start..index].to_owned());
++            start = index + character.len_utf8();
++        }
++    }
++    parts.push(word[start..].to_owned());
++    parts
++}
++
++fn unique_branch_label(base: &str, used: &mut std::collections::HashSet<String>) -> String {
++    if used.insert(base.to_owned()) {
++        return base.to_owned();
++    }
++    for suffix in 2..=16 {
++        let candidate = format!("{base}-{suffix}");
++        if used.insert(candidate.clone()) {
++            return candidate;
++        }
++    }
++    format!("{base}-17")
++}
++
++fn valid_fanout_label(word: &str) -> bool {
++    let Some(label) = word.strip_suffix(':') else {
++        return false;
++    };
++    let mut chars = label.chars();
++    matches!(chars.next(), Some('a'..='z' | 'A'..='Z' | '_'))
++        && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+ }
+ 
+ /// Parses a sequence of tokens into the abstract syntax tree (AST) of a shell program.
+diff --git a/brush-parser/src/parser/peg.rs b/brush-parser/src/parser/peg.rs
+--- a/brush-parser/src/parser/peg.rs
++++ b/brush-parser/src/parser/peg.rs
+@@ -70,7 +70,7 @@
+             c:(c:command() r:&pipe_extension_redirection()? {? // check for `|&` without consuming the stream.
+                 let mut c = c;
+                 if r.is_some() {
+-                    add_pipe_extension_redirection(&mut c);
++                    add_pipe_extension_redirection(&mut c)?;
+                 }
+                 Ok(c)
+             }) ** (pipe_operator() linebreak()) {
+@@ -87,9 +87,69 @@
+         // N.B. We needed to move the function definition branch up to avoid conflicts with array assignment syntax.
+         rule command() -> ast::Command =
+             f:function_definition() { ast::Command::Function(f) } /
+-            c:simple_command() { ast::Command::Simple(c) } /
++            marsh_extensions_enabled() command:fanout_command() { ast::Command::Fanout(command) } /
++            marsh_extensions_enabled() command:collect_command() { ast::Command::Collect(command) } /
++            !fanout_command_start() c:simple_command() { ast::Command::Simple(c) } /
+             c:compound_command() r:redirect_list()? { ast::Command::Compound(c, r) } /
+             expected!("command")
++
++        rule fanout_command_start() =
++            marsh_extensions_enabled() specific_word("fanout") specific_word("{")
++
++        rule fanout_command() -> ast::FanoutCommand =
++            start:specific_word("fanout") specific_word("{") linebreak()
++            branches:fanout_branch() ++ newline_list()
++            linebreak() end:specific_word("}") {?
++                let mut labels = std::collections::HashSet::new();
++                if branches.len() > 16 {
++                    Err("fanout has more than 16 branches")
++                } else if branches.iter().any(|branch| !labels.insert(branch.label.clone())) {
++                    Err("duplicate fanout branch label")
++                } else {
++                    Ok(ast::FanoutCommand {
++                        branches,
++                        loc: SourceSpan::within(start.location(), end.location()),
++                    })
++                }
++            }
++
++        rule fanout_branch() -> ast::FanoutBranch =
++            label:[Token::Word(label, _) if valid_fanout_label(label) && label.len() <= 65]
++            linebreak() body:fanout_branch_body() {
++                ast::FanoutBranch {
++                    label: label[..label.len() - 1].to_owned(),
++                    body,
++                }
++            }
++
++        rule fanout_branch_body() -> ast::CompoundList =
++            first:and_or() remainder:(s:separator_op() l:and_or() { (s, l) })* last_sep:separator_op()? {
++                let mut items = vec![ast::CompoundListItem(first, ast::SeparatorOperator::Sequence)];
++                for (separator, and_or) in remainder {
++                    let last = items.len() - 1;
++                    items[last].1 = separator;
++                    items.push(ast::CompoundListItem(and_or, ast::SeparatorOperator::Sequence));
++                }
++                if let Some(separator) = last_sep {
++                    let last = items.len() - 1;
++                    items[last].1 = separator;
++                }
++                ast::CompoundList(items)
++            }
++
++        rule collect_command() -> ast::CollectCommand =
++            start:specific_word("collect") arguments:(!io_redirect() w:word() { w })* redirects:redirect_list()? {
++                let end = redirects
++                    .as_ref()
++                    .and_then(SourceLocation::location)
++                    .or_else(|| arguments.last().map(|word| word.location().clone()))
++                    .unwrap_or_else(|| start.location().clone());
++                ast::CollectCommand {
++                    arguments: arguments.into_iter().map(ast::Word::from).collect(),
++                    redirects,
++                    loc: SourceSpan::within(start.location(), &end),
++                }
++            }
+ 
+         // N.B. The arithmetic command is a non-sh extension.
+         // N.B. The arithmetic for clause command is a non-sh extension.
+@@ -719,11 +779,24 @@
+ 
+         rule non_posix_extensions_enabled() -> () =
+             &[_] {? if !parser_options.sh_mode { Ok(()) } else { Err("posix") } }
++
++        rule marsh_extensions_enabled() -> () =
++            &[_] {? if parser_options.marsh_extensions { Ok(()) } else { Err("marsh extensions disabled") } }
+     }
+ }
+ 
++fn valid_fanout_label(word: &str) -> bool {
++    let Some(label) = word.strip_suffix(':') else {
++        return false;
++    };
++    let mut chars = label.chars();
++    matches!(chars.next(), Some('a'..='z' | 'A'..='Z' | '_'))
++        && chars
++            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
++}
++
+ // add `2>&1` to the command if the pipeline is `|&`
+-fn add_pipe_extension_redirection(c: &mut ast::Command) {
++fn add_pipe_extension_redirection(c: &mut ast::Command) -> Result<(), &'static str> {
+     fn add_to_redirect_list(l: &mut Option<ast::RedirectList>, r: ast::IoRedirect) {
+         if let Some(l) = l {
+             l.0.push(r);
+@@ -740,6 +813,9 @@
+     );
+ 
+     match c {
++        ast::Command::Fanout(_) | ast::Command::Collect(_) => {
++            return Err("|& is unsupported for marsh composition stages");
++        }
+         ast::Command::Simple(c) => {
+             let r = ast::CommandPrefixOrSuffixItem::IoRedirect(r);
+             if let Some(l) = &mut c.suffix {
+@@ -751,6 +827,7 @@
+         ast::Command::Compound(_, l) => add_to_redirect_list(l, r),
+         ast::Command::Function(f) => add_to_redirect_list(&mut f.body.1, r),
+     }
++    Ok(())
+ }
+ 
+ #[inline]
+diff --git a/brush-parser/src/parser/tests/composition.rs b/brush-parser/src/parser/tests/composition.rs
+new file mode 100644
+--- /dev/null
++++ b/brush-parser/src/parser/tests/composition.rs
+@@ -0,0 +1,86 @@
++use std::io::Cursor;
++
++use crate::{Parser, ParserOptions, ast::Command};
++
++fn parse(input: &str, enabled: bool) -> Result<crate::ast::Program, crate::ParseError> {
++    let options = ParserOptions {
++        marsh_extensions: enabled,
++        ..ParserOptions::default()
++    };
++    Parser::new(Cursor::new(input), &options).parse_program()
++}
++
++#[test]
++fn extension_is_gated_and_parses_branch_pipelines() {
++    let ordinary = parse("fanout { claude, codex }\n", false).unwrap();
++    assert!(matches!(
++        ordinary.complete_commands[0].0[0].0.first.seq[0],
++        Command::Simple(_)
++    ));
++
++    let program = parse(
++        "fanout { first: printf one | sed s/one/1/; second: printf two } | collect --timing\n",
++        true,
++    )
++    .unwrap();
++    let pipeline = &program.complete_commands[0].0[0].0.first;
++    let Command::Fanout(fanout) = &pipeline.seq[0] else {
++        panic!("expected fanout")
++    };
++    assert_eq!(fanout.branches.len(), 2);
++    assert_eq!(fanout.branches[0].label, "first");
++    assert_eq!(fanout.branches[0].body.0[0].0.first.seq.len(), 2);
++    assert!(matches!(pipeline.seq[1], Command::Collect(_)));
++}
++
++#[test]
++fn shorthand_labels_are_stable_and_separators_work() {
++    let program = parse("fanout {\nclaude,\nclaude;\npi\n} | collect --json\n", true).unwrap();
++    let Command::Fanout(fanout) = &program.complete_commands[0].0[0].0.first.seq[0] else {
++        panic!("expected fanout")
++    };
++    assert_eq!(
++        fanout
++            .branches
++            .iter()
++            .map(|branch| branch.label.as_str())
++            .collect::<Vec<_>>(),
++        ["claude", "claude-2", "pi"]
++    );
++}
++
++#[test]
++fn malformed_blocks_fail_closed() {
++    for input in [
++        "fanout { }",
++        "fanout { a: }",
++        "fanout { a: true, a: false }",
++    ] {
++        assert!(parse(input, true).is_err(), "accepted {input:?}");
++    }
++}
++
++#[test]
++fn assignment_prefixed_fanout_remains_an_ordinary_command() {
++    let program = parse("MARKER=ordinary fanout { a,b }\n", true).unwrap();
++    assert!(matches!(
++        program.complete_commands[0].0[0].0.first.seq[0],
++        Command::Simple(_)
++    ));
++}
++
++#[test]
++fn ordinary_large_program_does_not_trigger_quadratic_fanout_scans() {
++    // This is deliberately large enough that rescanning the complete prefix at
++    // every ordinary token makes the regression conspicuous under `cargo test`,
++    // while the lexical fast path remains a routine linear parse.
++    let mut input = "printf x\n".repeat(16_384);
++    input.push_str("fanout { first: printf one; second: printf two } | collect\n");
++
++    let program = parse(&input, true).unwrap();
++    assert_eq!(program.complete_commands.len(), 16_385);
++    assert!(matches!(
++        program.complete_commands.last().unwrap().0[0].0.first.seq[0],
++        Command::Fanout(_)
++    ));
++}
+diff --git a/brush-parser/src/parser/tests/mod.rs b/brush-parser/src/parser/tests/mod.rs
+--- a/brush-parser/src/parser/tests/mod.rs
++++ b/brush-parser/src/parser/tests/mod.rs
+@@ -6,6 +6,7 @@
+ mod and_or_lists;
+ mod assignments;
+ mod complex;
++mod composition;
+ mod compound_commands;
+ mod extended_test;
+ mod functions;
+diff --git a/brush-shell/Cargo.toml b/brush-shell/Cargo.toml
+--- a/brush-shell/Cargo.toml
++++ b/brush-shell/Cargo.toml
+@@ -11,58 +11,16 @@
+ repository.workspace = true
+ # Application tier; see docs/reference/msrv-policy.md.
+ rust-version = "1.95.0"
++autobins = false
++autoexamples = false
++autobenches = false
++autotests = false
+ 
+ [package.metadata.binstall]
+ pkg-url = "{ repo }/releases/download/{ name }-v{ version }/brush-{ target }{ archive-suffix }"
+ 
+ [lib]
+ bench = false
+-
+-[[bin]]
+-name = "brush"
+-path = "src/main.rs"
+-bench = false
+-
+-[[test]]
+-name = "brush-compat-tests"
+-path = "tests/compat_tests.rs"
+-harness = false
+-
+-[[test]]
+-name = "brush-integration-tests"
+-path = "tests/integration_tests.rs"
+-harness = false
+-
+-[[test]]
+-name = "brush-version-tests"
+-path = "tests/version_tests.rs"
+-
+-[[test]]
+-name = "brush-interactive-tests"
+-path = "tests/interactive_tests.rs"
+-
+-[[test]]
+-name = "brush-completion-tests"
+-path = "tests/completion_tests.rs"
+-
+-# N.B. tests/pty_startup_tests.rs and tests/reedline_interactive_tests.rs are
+-# deliberately left auto-discovered (no `brush-*-tests` name): the CI
+-# `brush_*_tests-*` artifact glob would otherwise ship them to the os-tests
+-# jobs, which run prebuilt test binaries outside a cargo target dir and so
+-# can't run pty-based tests (see the interactive/version test skips there).
+-
+-# Generates man pages, markdown help, completion scripts, and the config
+-# schema. Lives here so that xtask doesn't have to depend on brush-shell;
+-# `cargo xtask gen` shells out to it.
+-[[example]]
+-name = "gen"
+-path = "examples/gen.rs"
+-required-features = ["schema"]
+-
+-[[bench]]
+-name = "shell"
+-path = "benches/shell.rs"
+-harness = false
+ 
+ [features]
+ default = ["basic", "reedline", "minimal"]
+@@ -82,6 +40,7 @@
+ ]
+ experimental-load = ["dep:serde_json", "brush-core/serde"]
+ experimental-parser = [
++    "dep:brush-parser",
+     "brush-core/experimental-parser",
+     "brush-parser/winnow-parser",
+ ]
+@@ -95,6 +54,7 @@
+ brush-builtins = { version = "^0.2.0", path = "../brush-builtins" }
+ brush-coreutils-builtins = { version = "^0.1.0", path = "../brush-coreutils-builtins", optional = true }
+ brush-experimental-builtins = { version = "^0.1.0", path = "../brush-experimental-builtins", optional = true }
++brush-parser = { version = "^0.4.0", path = "../brush-parser", optional = true }
+ clap = { version = "4.6.0", features = ["derive", "env"] }
+ color-print = "0.3.7"
+ etcetera = "0.11.0"
+@@ -126,47 +86,3 @@
+ [target.wasm32-unknown-unknown.dependencies]
+ getrandom = { version = "0.4.2", features = ["wasm_js"] }
+ uuid = { version = "1.23.1", features = ["js"] }
+-
+-[dev-dependencies]
+-anyhow = "1.0.102"
+-tempfile = "3.27.0"
+-# Used by the `gen` example.
+-clap-markdown = "0.1.5"
+-clap_complete = "4.6.4"
+-clap_mangen = "0.3.0"
+-# Also a regular optional dependency, enabled by `experimental-load`. The `gen`
+-# example needs it without that feature, so it's listed here too.
+-serde_json = "1.0.149"
+-brush-parser = { version = "^0.4.0", path = "../brush-parser" }
+-brush-test-harness = { path = "../brush-test-harness", features = ["insta"] }
+-assert_cmd = "2.2.0"
+-assert_fs = "1.1.3"
+-colored = "3.1.1"
+-criterion = { version = "0.8.2", features = ["async_tokio", "html_reports"] }
+-descape = "3.0.0"
+-diff = "0.1.13"
+-glob = "0.3.3"
+-indent = "0.1.1"
+-indexmap = "2.13.0"
+-junit-report = "0.9.0"
+-os-release = "0.1.0"
+-predicates = "3.1.4"
+-pretty_assertions = { version = "1.4.1", features = ["unstable"] }
+-regex = "1.12.3"
+-serde = { version = "1.0.228", features = ["derive"] }
+-serde_yaml = "0.9.34"
+-strip-ansi-escapes = "0.2.1"
+-test-with = { version = "0.17.0", default-features = false, features = [
+-    "executable",
+-] }
+-version-compare = "0.2.1"
+-walkdir = "2.5.0"
+-which = "8.0.2"
+-
+-[target.'cfg(unix)'.dev-dependencies]
+-nix = { version = "0.31.2" }
+-
+-# expectrl's pty support (via ptyprocess) is limited to these platforms;
+-# the interactive tests that rely on it are gated accordingly.
+-[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "freebsd"))'.dev-dependencies]
+-expectrl = "0.9.0"
+diff --git a/brush-shell/src/bundled.rs b/brush-shell/src/bundled.rs
+--- a/brush-shell/src/bundled.rs
++++ b/brush-shell/src/bundled.rs
+@@ -30,7 +30,38 @@
+ use std::ffi::OsString;
+ use std::io::Write;
+ use std::path::PathBuf;
++use std::sync::Arc;
+ use std::sync::OnceLock;
++
++/// Install the host shell's synchronous history privacy callback.
++pub fn install_history_disable_hook(hook: Arc<dyn Fn() -> Result<(), String> + Send + Sync>) {
++    brush_builtins::install_history_disable_hook(hook);
++}
++
++/// Install an observer for the expanded simple command before execution.
++pub fn install_preexecute_hook(hook: Arc<dyn Fn(&str) + Send + Sync>) {
++    brush_core::commands::install_preexecute_hook(hook);
++}
++
++/// Install an embedding hook that runs before a background command is spawned.
++pub fn install_background_prelaunch_hook(
++    hook: Arc<dyn Fn(&str) -> Result<Vec<(String, String)>, String> + Send + Sync>,
++) {
++    brush_core::commands::install_background_prelaunch_hook(hook);
++}
++
++static INITIALIZED_HOOK: OnceLock<Arc<dyn Fn() + Send + Sync>> = OnceLock::new();
++
++/// Notify embedders when profile and rc loading has finished.
++pub fn install_initialized_hook(hook: Arc<dyn Fn() + Send + Sync>) {
++    let _ = INITIALIZED_HOOK.set(hook);
++}
++
++pub(crate) fn notify_initialized() {
++    if let Some(hook) = INITIALIZED_HOOK.get() {
++        hook();
++    }
++}
+ 
+ use brush_core::ExecutionExitCode;
+ use brush_core::builtins::{BoxFuture, ContentOptions, ContentType, ProcessShim, Registration};
+diff --git a/brush-shell/src/entry.rs b/brush-shell/src/entry.rs
+--- a/brush-shell/src/entry.rs
++++ b/brush-shell/src/entry.rs
+@@ -4,6 +4,14 @@
+ use crate::args::InputBackendType;
+ use crate::brushctl::ShellBuilderBrushBuiltinExt as _;
+ use crate::bundled;
++
++static MARSH_EXTENSIONS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++
++/// Enables the marsh parser and evaluator additions for subsequently created shells.
++/// Embedders must opt in explicitly; ordinary Brush behavior is unchanged.
++pub fn enable_marsh_extensions() {
++    MARSH_EXTENSIONS.store(true, std::sync::atomic::Ordering::Release);
++}
+ use crate::config;
+ use crate::error_formatter;
+ use crate::events;
+@@ -344,6 +352,7 @@
+ 
+     // Load profile and rc files as appropriate.
+     initialize_shell(shell_ref, &args).await?;
++    bundled::notify_initialized();
+ 
+     // If a command was specified via -c, then run that command and then exit.
+     if let Some(command) = args.command {
+@@ -529,6 +538,7 @@
+     // NOTE: We skip loading profile and rc files here; that will be handled later after we've
+     // fully instantiated everything we want set before running any code.
+     let shell = brush_core::Shell::builder_with_extensions::<BrushShellExtensions>()
++        .marsh_extensions(MARSH_EXTENSIONS.load(std::sync::atomic::Ordering::Acquire))
+         .disable_options(args.disabled_options.clone())
+         .disable_shopt_options(args.disabled_shopt_options.clone())
+         .disallow_overwriting_regular_files_via_output_redirection(
+diff --git a/brush-shell/src/main.rs b/brush-shell/src/main.rs
+deleted file mode 100644
+--- a/brush-shell/src/main.rs
++++ /dev/null
+@@ -1,5 +0,0 @@
+-//! Main entry for the `brush` shell.
+-
+-fn main() {
+-    brush_shell::entry::run();
+-}

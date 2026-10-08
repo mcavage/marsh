@@ -1,0 +1,23 @@
+diff --git a/brush-shell/src/entry.rs b/brush-shell/src/entry.rs
+index 51570c7..b278144 100644
+--- a/brush-shell/src/entry.rs
++++ b/brush-shell/src/entry.rs
+@@ -395,6 +395,18 @@ async fn run_in_shell(
+     initialize_shell(shell_ref, &args).await?;
+     bundled::notify_initialized();
+ 
++    // An interactive shell running `-c` or a script operand still uses job
++    // control, so it must own the terminal before starting foreground process
++    // groups. (The stdin-reading path acquires it in `InteractiveShell`.)
++    let _terminal_control = if !read_commands_from_stdin
++        && shell_ref.lock().await.options().interactive
++        && std::io::stdin().is_terminal()
++    {
++        Some(brush_core::terminal::TerminalControl::acquire()?)
++    } else {
++        None
++    };
++
+     // If a command was specified via -c, then run that command and then exit.
+     if let Some(command) = args.command {
+         shell_ref.lock().await.run_dash_c_command(command).await?;

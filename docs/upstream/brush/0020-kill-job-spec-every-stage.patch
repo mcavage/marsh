@@ -1,0 +1,74 @@
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+index f3836b5..768faa9 100644
+--- a/brush-core/src/jobs.rs
++++ b/brush-core/src/jobs.rs
+@@ -666,11 +666,33 @@ impl Job {
+     ///
+     /// * `signal` - The signal to send to the job.
+     pub fn kill(&self, signal: traps::TrapSignal) -> Result<(), error::Error> {
+-        if let Some(pid) = self.process_group_id() {
+-            sys::signal::kill_process(pid, signal)
+-        } else {
+-            Err(error::ErrorKind::FailedToSendSignal.into())
++        let pgid = self.process_group_id();
++        // A job in its own process group is signaled as a group. Otherwise (no
++        // job control), Bash signals each of the job's processes.
++        if let Some(pgid) = pgid.filter(|pgid| sys::signal::leads_separate_process_group(*pgid)) {
++            return sys::signal::kill_process(-pgid, signal);
++        }
++        let pids = self
++            .tasks
++            .iter()
++            .filter_map(|(_, task)| match task {
++                JobTask::External(process) => process.pid(),
++                JobTask::Internal(_) => None,
++            })
++            .collect::<Vec<_>>();
++        if pids.is_empty() {
++            return pgid.map_or_else(
++                || Err(error::ErrorKind::FailedToSendSignal.into()),
++                |pid| sys::signal::kill_process(pid, signal),
++            );
++        }
++        let mut result = Ok(());
++        for pid in pids {
++            if let Err(error) = sys::signal::kill_process(pid, signal) {
++                result = Err(error);
++            }
+         }
++        result
+     }
+ 
+     /// Tries to retrieve a "representative" pid for the job.
+diff --git a/brush-core/src/sys/stubs/signal.rs b/brush-core/src/sys/stubs/signal.rs
+index 919e8d5..8860eaa 100644
+--- a/brush-core/src/sys/stubs/signal.rs
++++ b/brush-core/src/sys/stubs/signal.rs
+@@ -46,6 +46,10 @@ pub fn kill_process(
+     Err(error::ErrorKind::NotSupportedOnThisPlatform("killing process").into())
+ }
+ 
++pub(crate) const fn leads_separate_process_group(_pid: sys::process::ProcessId) -> bool {
++    false
++}
++
+ pub(crate) fn lead_new_process_group() -> Result<(), error::Error> {
+     Ok(())
+ }
+diff --git a/brush-core/src/sys/unix/signal.rs b/brush-core/src/sys/unix/signal.rs
+index 0171a52..4505836 100644
+--- a/brush-core/src/sys/unix/signal.rs
++++ b/brush-core/src/sys/unix/signal.rs
+@@ -34,6 +34,12 @@ pub fn kill_process(
+     Ok(())
+ }
+ 
++/// Whether `pid` leads a process group other than the shell's own.
++pub(crate) fn leads_separate_process_group(pid: sys::process::ProcessId) -> bool {
++    let pid = nix::unistd::Pid::from_raw(pid);
++    nix::unistd::getpgid(Some(pid)) == Ok(pid) && nix::unistd::getpgrp() != pid
++}
++
+ pub(crate) fn lead_new_process_group() -> Result<(), error::Error> {
+     nix::unistd::setpgid(nix::unistd::Pid::from_raw(0), nix::unistd::Pid::from_raw(0))?;
+     Ok(())

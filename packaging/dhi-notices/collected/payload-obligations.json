@@ -1,0 +1,799 @@
+{
+  "schema": "marsh.payload-notice-obligations/v1",
+  "agents": {
+    "arm64": {
+      "codex": {
+        "version": "0.159.2",
+        "required_notices": [
+          {
+            "file": "provider-notices/codex-0.159.2-LICENSE",
+            "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-NOTICE",
+            "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+            "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+            "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-COPYING",
+            "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-docs-license.md",
+            "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-NOTICE.md",
+            "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-LGPL-2.1.txt",
+            "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-Opus.txt",
+            "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-PCRE2.md",
+            "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-libffi.txt",
+            "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-proxy-libintl.txt",
+            "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-sljit.txt",
+            "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-zlib.txt",
+            "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-wezterm-LICENSE",
+            "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-LICENSE",
+            "sha256": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
+          },
+          {
+            "file": "texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt",
+            "sha256": "d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5"
+          },
+          {
+            "file": "texts/9cf7ac6976099a1d856826d3ef1b093bd6b84489dc6100628ac79e740cf9885a.txt",
+            "sha256": "9cf7ac6976099a1d856826d3ef1b093bd6b84489dc6100628ac79e740cf9885a"
+          },
+          {
+            "file": "texts/99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507.txt",
+            "sha256": "99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507"
+          }
+        ],
+        "binaries": [
+          {
+            "gid": 1000,
+            "links": 1,
+            "mode": 493,
+            "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex",
+            "sha256": "113aa5d5952a6fd3950a88323219747d0c91978ebee948509a540c8a460e59a3",
+            "size": 247524632,
+            "type": "file",
+            "uid": 1000,
+            "required_notices": [
+              {
+                "file": "provider-notices/codex-0.159.2-LICENSE",
+                "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-NOTICE",
+                "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-COPYING",
+                "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-docs-license.md",
+                "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-NOTICE.md",
+                "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-LGPL-2.1.txt",
+                "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-Opus.txt",
+                "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-PCRE2.md",
+                "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-libffi.txt",
+                "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-proxy-libintl.txt",
+                "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-sljit.txt",
+                "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-zlib.txt",
+                "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-wezterm-LICENSE",
+                "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-LICENSE",
+                "sha256": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
+              }
+            ]
+          },
+          {
+            "gid": 1000,
+            "links": 1,
+            "mode": 493,
+            "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex-code-mode-host",
+            "sha256": "6979f2fea8cb1d5d72614abfe2f42b16727cdce2c356cc6af933157e732a7277",
+            "size": 66921472,
+            "type": "file",
+            "uid": 1000,
+            "required_notices": [
+              {
+                "file": "provider-notices/codex-0.159.2-LICENSE",
+                "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-NOTICE",
+                "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-COPYING",
+                "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-docs-license.md",
+                "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-NOTICE.md",
+                "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-LGPL-2.1.txt",
+                "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-Opus.txt",
+                "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-PCRE2.md",
+                "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-libffi.txt",
+                "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-proxy-libintl.txt",
+                "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-sljit.txt",
+                "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-zlib.txt",
+                "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-wezterm-LICENSE",
+                "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-LICENSE",
+                "sha256": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
+              }
+            ]
+          },
+          {
+            "gid": 1000,
+            "links": 1,
+            "mode": 493,
+            "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/bwrap",
+            "sha256": "c547cbdc762a70ed216789ffaa4c6c0e7d2beabe32245a498f8e365a9fc8dab4",
+            "size": 529168,
+            "type": "file",
+            "uid": 1000,
+            "required_notices": [
+              {
+                "file": "provider-notices/codex-0.159.2-LICENSE",
+                "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-NOTICE",
+                "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-COPYING",
+                "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-docs-license.md",
+                "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-NOTICE.md",
+                "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-LGPL-2.1.txt",
+                "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-Opus.txt",
+                "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-PCRE2.md",
+                "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-libffi.txt",
+                "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-proxy-libintl.txt",
+                "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-sljit.txt",
+                "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-zlib.txt",
+                "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-wezterm-LICENSE",
+                "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-LICENSE",
+                "sha256": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
+              }
+            ]
+          },
+          {
+            "gid": 1000,
+            "links": 1,
+            "mode": 493,
+            "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
+            "sha256": "7feeacd883e1dc749847936948c378653c80a69ec4a9542f0f126b411882c179",
+            "size": 878056,
+            "type": "file",
+            "uid": 1000,
+            "required_notices": [
+              {
+                "file": "texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt",
+                "sha256": "d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5"
+              }
+            ]
+          }
+        ]
+      },
+      "claude": {
+        "version": "2.1.285",
+        "required_notices": [
+          {
+            "file": "provider-notices/claude-2.1.285-package-LICENSE.md",
+            "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a"
+          },
+          {
+            "file": "provider-notices/claude-2.1.285-package-README.md",
+            "sha256": "da7cf15ce4e35bad6a107acd6a36b4fe052083068bb9e564b1aa3f2078b5d0ce"
+          }
+        ],
+        "binaries": [
+          {
+            "path": "/home/agent/.local/share/claude/versions/2.1.285",
+            "sha256": "24fac77749bed3d91365d6b6915aa4b824e14318ecb6bc17adbc192f01c9173d",
+            "size": 239722488,
+            "required_notices": [
+              {
+                "file": "provider-notices/claude-2.1.285-package-LICENSE.md",
+                "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a"
+              },
+              {
+                "file": "provider-notices/claude-2.1.285-package-README.md",
+                "sha256": "da7cf15ce4e35bad6a107acd6a36b4fe052083068bb9e564b1aa3f2078b5d0ce"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "amd64": {
+      "codex": {
+        "version": "0.159.2",
+        "required_notices": [
+          {
+            "file": "provider-notices/codex-0.159.2-LICENSE",
+            "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-NOTICE",
+            "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+            "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+            "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+            "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-COPYING",
+            "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-docs-license.md",
+            "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-NOTICE.md",
+            "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-LGPL-2.1.txt",
+            "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-Opus.txt",
+            "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-PCRE2.md",
+            "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-libffi.txt",
+            "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-proxy-libintl.txt",
+            "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-sljit.txt",
+            "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-zlib.txt",
+            "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-third_party-wezterm-LICENSE",
+            "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+          },
+          {
+            "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-LICENSE",
+            "sha256": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
+          },
+          {
+            "file": "texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt",
+            "sha256": "d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5"
+          },
+          {
+            "file": "texts/9cf7ac6976099a1d856826d3ef1b093bd6b84489dc6100628ac79e740cf9885a.txt",
+            "sha256": "9cf7ac6976099a1d856826d3ef1b093bd6b84489dc6100628ac79e740cf9885a"
+          },
+          {
+            "file": "texts/99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507.txt",
+            "sha256": "99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507"
+          }
+        ],
+        "binaries": [
+          {
+            "gid": 1000,
+            "links": 1,
+            "mode": 493,
+            "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
+            "sha256": "1748767b230ebfc3d4ab7e4e254920d0c0ad9691fd8c11f190e7d44511a4a92e",
+            "size": 286754152,
+            "type": "file",
+            "uid": 1000,
+            "required_notices": [
+              {
+                "file": "provider-notices/codex-0.159.2-LICENSE",
+                "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-NOTICE",
+                "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-COPYING",
+                "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-docs-license.md",
+                "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-NOTICE.md",
+                "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-LGPL-2.1.txt",
+                "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-Opus.txt",
+                "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-PCRE2.md",
+                "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-libffi.txt",
+                "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-proxy-libintl.txt",
+                "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-sljit.txt",
+                "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-zlib.txt",
+                "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-wezterm-LICENSE",
+                "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-LICENSE",
+                "sha256": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
+              }
+            ]
+          },
+          {
+            "gid": 1000,
+            "links": 1,
+            "mode": 493,
+            "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
+            "sha256": "5b2c075ac2380fa04d76d7313fbc044d29c8d0a0d0b9138415acd4610211ca03",
+            "size": 74068880,
+            "type": "file",
+            "uid": 1000,
+            "required_notices": [
+              {
+                "file": "provider-notices/codex-0.159.2-LICENSE",
+                "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-NOTICE",
+                "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-COPYING",
+                "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-docs-license.md",
+                "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-NOTICE.md",
+                "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-LGPL-2.1.txt",
+                "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-Opus.txt",
+                "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-PCRE2.md",
+                "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-libffi.txt",
+                "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-proxy-libintl.txt",
+                "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-sljit.txt",
+                "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-zlib.txt",
+                "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-wezterm-LICENSE",
+                "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-LICENSE",
+                "sha256": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
+              }
+            ]
+          },
+          {
+            "gid": 1000,
+            "links": 1,
+            "mode": 493,
+            "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
+            "sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+            "size": 529776,
+            "type": "file",
+            "uid": 1000,
+            "required_notices": [
+              {
+                "file": "provider-notices/codex-0.159.2-LICENSE",
+                "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-NOTICE",
+                "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+                "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+                "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-COPYING",
+                "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-docs-license.md",
+                "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-NOTICE.md",
+                "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-LGPL-2.1.txt",
+                "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-Opus.txt",
+                "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-PCRE2.md",
+                "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-libffi.txt",
+                "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-proxy-libintl.txt",
+                "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-sljit.txt",
+                "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-voice-licenses-zlib.txt",
+                "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-third_party-wezterm-LICENSE",
+                "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
+              },
+              {
+                "file": "provider-notices/codex-0.159.2-codex-rs-vendor-bubblewrap-LICENSE",
+                "sha256": "400d38e5cfee181230373a8b02d38f50271a5bf62c62410382efddb8e8b19e22"
+              }
+            ]
+          },
+          {
+            "gid": 1000,
+            "links": 1,
+            "mode": 493,
+            "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
+            "sha256": "67faaaa89242c4a332e16e508a1977cffc24bf7fca31d4411cdfd101f3831ef3",
+            "size": 898480,
+            "type": "file",
+            "uid": 1000,
+            "required_notices": [
+              {
+                "file": "texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt",
+                "sha256": "d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5"
+              }
+            ]
+          }
+        ]
+      },
+      "claude": {
+        "version": "2.1.285",
+        "required_notices": [
+          {
+            "file": "provider-notices/claude-2.1.285-package-LICENSE.md",
+            "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a"
+          },
+          {
+            "file": "provider-notices/claude-2.1.285-package-README.md",
+            "sha256": "da7cf15ce4e35bad6a107acd6a36b4fe052083068bb9e564b1aa3f2078b5d0ce"
+          }
+        ],
+        "binaries": [
+          {
+            "path": "/home/agent/.local/share/claude/versions/2.1.285",
+            "sha256": "33dad1ec615a2e08cc78b494f05c110e49916de2c79d78ec8799ebf46b233d29",
+            "size": 240327864,
+            "required_notices": [
+              {
+                "file": "provider-notices/claude-2.1.285-package-LICENSE.md",
+                "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a"
+              },
+              {
+                "file": "provider-notices/claude-2.1.285-package-README.md",
+                "sha256": "da7cf15ce4e35bad6a107acd6a36b4fe052083068bb9e564b1aa3f2078b5d0ce"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "image_files": [
+    {
+      "path": "/opt/docker/.license.txt",
+      "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a",
+      "scope": "Docker image-level legal text retained in place; verified each run"
+    },
+    {
+      "path": "/opt/docker/sbom/clipboard-bridge/.spdx.clipboard-bridge.json",
+      "sha256": "d5c77119d54318abb4f8d17ba74a900b7100ad501527f20b76f5b48257990a47",
+      "scope": "Observed public SPDX hash; reconciled in source-records/clipboard-spdx-reconciliation.json, including preserved x/sys vendor metadata discrepancies."
+    }
+  ]
+}

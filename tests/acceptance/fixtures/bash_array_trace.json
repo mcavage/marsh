@@ -1,0 +1,65 @@
+{
+  "provenance": {
+    "description": "GNU standalone array lexical source trace versus expanded declaration trace, ANSI-C byte quotes and side-effect ordering; no output normalization"
+  },
+  "cases": [
+    {
+      "stdin": "set -x; a=(1 'a b' $'\\xff' ''); a+=([5]='v x'); set +x\n",
+      "group": "array-trace",
+      "index": 0
+    },
+    {
+      "stdin": "v='one two'; set -x; a=(\"$v\" $v $(printf one)); declare -a b=(\"$v\" $v $(printf one)); set +x\n",
+      "group": "array-source-phase",
+      "index": 0
+    },
+    {
+      "stdin": "set -x; a=(\"'\" 'a,b' '~x' 'x~y' 'caf\u00e9' $'a\\nb'); set +x\n",
+      "env": {
+        "LC_ALL": "C"
+      },
+      "group": "array-quote-modes",
+      "index": 0
+    },
+    {
+      "stdin": "set -x; a=(\"'\" 'a,b' '~x' 'x~y' 'caf\u00e9' $'a\\nb'); set +x\n",
+      "env": {
+        "LC_ALL": "C.utf8"
+      },
+      "group": "array-quote-modes",
+      "index": 1
+    },
+    {
+      "stdin": "set -x; a=(${x:-$'\\xff'}); set +x\n",
+      "group": "array-nested-lexical",
+      "index": 0
+    },
+    {
+      "stdin": "set -x; a=($(printf $'\\xff')); set +x\n",
+      "group": "array-nested-lexical",
+      "index": 1
+    },
+    {
+      "stdin": "set -x; a=($'x\\n'$v); set +x\n",
+      "group": "array-nested-lexical",
+      "index": 2
+    },
+    {
+      "name": "Status from assignment with xtrace",
+      "stdin": "set -x\nfalse\nscalar=value\necho \"Status after scalar assignment: $?\"\n\nfalse\narr=(1 2)\necho \"Status after array assignment: $?\"\n\nfalse\nappended+=more\necho \"Status after appending assignment: $?\"\n\nfalse\nfirst=1 second=2\necho \"Status after multiple assignments: $?\"\n\nfalse\nexpanded=${undefined:-fallback}\necho \"Status after expanded assignment: $?\"\n",
+      "group": "status.yaml",
+      "index": 7,
+      "test_files": []
+    },
+    {
+      "group": "array-source-protection",
+      "index": 0,
+      "stdin": "set -x\na=($(# $'comment'\nprintf x))\nset +x\n"
+    },
+    {
+      "group": "array-source-protection",
+      "index": 1,
+      "stdin": "set -x\na=($(cat <<'EOF'\n$'literal'\nEOF\n))\nset +x\n"
+    }
+  ]
+}

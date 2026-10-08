@@ -1,0 +1,182 @@
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+index f34c8e8..ac68653 100644
+--- a/brush-core/src/jobs.rs
++++ b/brush-core/src/jobs.rs
+@@ -31,7 +31,6 @@ pub struct JobManager {
+     last_background_pid: Option<sys::process::ProcessId>,
+     /// Exit statuses of PIDs already collected by `wait`, as Bash's `bgpids`.
+     reaped: VecDeque<(sys::process::ProcessId, ExecutionExitCode)>,
+-    next_id: usize,
+     /// The parent shell's jobs as seen by `jobs` in a pipeline stage or command
+     /// substitution. Bash lists them there, but they are not waitable.
+     inherited: Vec<Job>,
+@@ -139,14 +138,23 @@ impl JobManager {
+     )]
+     pub fn add_as_current(&mut self, mut job: Job) -> &Job {
+         for j in &mut self.jobs {
+-            if matches!(j.annotation, JobAnnotation::Current) {
+-                j.annotation = JobAnnotation::Previous;
+-                break;
+-            }
++            j.annotation = match j.annotation {
++                JobAnnotation::Current => JobAnnotation::Previous,
++                JobAnnotation::Previous | JobAnnotation::None => JobAnnotation::None,
++            };
+         }
+ 
+-        self.next_id += 1;
+-        let id = self.next_id;
++        // Bash numbers a new job one past the highest job still in the table,
++        // so numbers are reused once earlier jobs are reported done.
++        let id = self.jobs.iter().map(|j| j.id).max().unwrap_or(0) + 1;
++        // A reported job with this number keeps its `wait PID` status only.
++        while let Some(index) = self.completed.iter().position(|c| c.id == id) {
++            if let Some(stale) = self.completed.remove(index) {
++                if let Some(pid) = stale.pid {
++                    self.remember_reaped(pid, &stale.result);
++                }
++            }
++        }
+         job.id = id;
+         job.annotation = JobAnnotation::Current;
+         self.jobs.push(job);
+@@ -382,9 +390,42 @@ impl JobManager {
+             }
+         }
+ 
++        if !results.is_empty() {
++            self.reannotate();
++        }
+         Ok(results)
+     }
+ 
++    /// After jobs leave the table, keep one current (`+`) and one previous
++    /// (`-`) job as Bash does: the previous job is promoted, then the newest.
++    fn reannotate(&mut self) {
++        if !self
++            .jobs
++            .iter()
++            .any(|j| matches!(j.annotation, JobAnnotation::Current))
++        {
++            if let Some(previous) = self.prev_job_mut() {
++                previous.annotation = JobAnnotation::Current;
++            } else if let Some(newest) = self.jobs.iter_mut().max_by_key(|j| j.id) {
++                newest.annotation = JobAnnotation::Current;
++            }
++        }
++        if !self
++            .jobs
++            .iter()
++            .any(|j| matches!(j.annotation, JobAnnotation::Previous))
++        {
++            if let Some(next) = self
++                .jobs
++                .iter_mut()
++                .filter(|j| matches!(j.annotation, JobAnnotation::None))
++                .max_by_key(|j| j.id)
++            {
++                next.annotation = JobAnnotation::Previous;
++            }
++        }
++    }
++
+     fn sweep_completed_jobs(&mut self) -> Vec<Job> {
+         let mut completed_jobs = vec![];
+ 
+@@ -397,6 +438,9 @@ impl JobManager {
+             }
+         }
+ 
++        if !completed_jobs.is_empty() {
++            self.reannotate();
++        }
+         completed_jobs
+     }
+ }
+@@ -436,6 +480,17 @@ pub enum JobAnnotation {
+     Previous,
+ }
+ 
++impl JobAnnotation {
++    /// The one-character listing marker: `+`, `-`, or a space.
++    const fn marker(&self) -> char {
++        match self {
++            Self::None => ' ',
++            Self::Current => '+',
++            Self::Previous => '-',
++        }
++    }
++}
++
+ impl Display for JobAnnotation {
+     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+         match self {
+@@ -475,11 +530,20 @@ pub struct Job {
+ }
+ 
+ impl Display for Job {
++    /// Bash's standard listing: `[1]+  Running                 sleep 10 &`.
+     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        let state = self.state.to_string();
++        let background = if matches!(self.state, JobState::Running) {
++            " &"
++        } else {
++            ""
++        };
+         write!(
+             f,
+-            "[{}]{:3}{}\t{}",
+-            self.id, self.annotation, self.state, self.command_line
++            "[{}]{}  {state:<27}{}{background}",
++            self.id,
++            self.annotation.marker(),
++            self.command_line
+         )
+     }
+ }
+@@ -526,7 +590,25 @@ impl Job {
+             .map_or(Cow::Borrowed("<pid unknown>"), |pid| {
+                 Cow::Owned(pid.to_string())
+             });
+-        std::format!("[{}]{}\t{}", self.id, self.annotation, display_pid)
++        // Bash's launch line: `[1] 467`.
++        std::format!("[{}] {}", self.id, display_pid)
++    }
++
++    /// Bash's completion notification: `[1]+  Done                    sleep 1`,
++    /// or `Exit N` for a nonzero status.
++    pub fn to_completion_string(&self, result: &ExecutionResult) -> String {
++        let code = u8::from(result.exit_code);
++        let state = if code == 0 {
++            "Done".to_owned()
++        } else {
++            std::format!("Exit {code}")
++        };
++        std::format!(
++            "[{}]{}  {state:<27}{}",
++            self.id,
++            self.annotation.marker(),
++            self.command_line
++        )
+     }
+ 
+     /// Returns the long `jobs -l` representation.
+diff --git a/brush-core/src/shell/job_control.rs b/brush-core/src/shell/job_control.rs
+index 2ddb350..e597067 100644
+--- a/brush-core/src/shell/job_control.rs
++++ b/brush-core/src/shell/job_control.rs
+@@ -10,8 +10,12 @@ impl<SE: extensions::ShellExtensions> crate::Shell<SE> {
+         let results = self.jobs.poll()?;
+ 
+         if self.options.enable_job_control {
+-            for (job, _result) in results {
+-                writeln!(self.stderr(), "{job}")?;
++            for (job, result) in results {
++                let line = match result {
++                    Ok(result) => job.to_completion_string(&result),
++                    Err(_) => job.to_string(),
++                };
++                writeln!(self.stderr(), "{line}")?;
+             }
+         }
+ 

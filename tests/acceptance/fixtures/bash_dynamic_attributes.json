@@ -1,0 +1,52 @@
+{
+  "provenance": {
+    "description": "Actual dynamic native-child attribute/provenance regressions and ordinary/unset negative controls; PID output is not normalized"
+  },
+  "cases": [
+    {
+      "stdin": "declare -rx EPOCHREALTIME; printf \"parent:<%s>\\n\" \"${EPOCHREALTIME@a}\"; (printf \"child:<%s>\\n\" \"${EPOCHREALTIME@a}\")\n",
+      "group": "dynamic-handler-attributes",
+      "index": 0
+    },
+    {
+      "stdin": "declare -irx SECONDS; printf \"parent:<%s>\\n\" \"${SECONDS@a}\"; (printf \"child:<%s>\\n\" \"${SECONDS@a}\")\n",
+      "group": "dynamic-handler-attributes",
+      "index": 1
+    },
+    {
+      "stdin": "declare -rx BASHPID; printf \"parent:<%s>\\n\" \"${BASHPID@a}\"; (printf \"child:<%s>\\n\" \"${BASHPID@a}\")\n",
+      "group": "bashpid-binding",
+      "index": 0
+    },
+    {
+      "stdin": "declare +i BASHPID; printf \"parent:<%s>\\n\" \"${BASHPID@a}\"; (printf \"child:<%s>\\n\" \"${BASHPID@a}\")\n",
+      "group": "bashpid-binding",
+      "index": 1
+    },
+    {
+      "stdin": "unset BASHPID; BASHPID=custom; printf \"parent:<%s>\\n\" \"$BASHPID\"; (printf \"child:<%s>\\n\" \"$BASHPID\")\n",
+      "group": "bashpid-binding",
+      "index": 2
+    },
+    {
+      "stdin": "before=$BASHPID; BASHPID=7; [[ $BASHPID == \"$before\" ]]; echo ignored:$?; ( [[ $BASHPID != \"$before\" ]]; echo child:$? )\n",
+      "group": "bashpid-binding",
+      "index": 3
+    },
+    {
+      "group": "ordinary-after-unset",
+      "index": 0,
+      "stdin": "unset EPOCHREALTIME; EPOCHREALTIME=ordinary; (printf \"<%s>\\n\" \"$EPOCHREALTIME\" \"${EPOCHREALTIME@a}\")\n"
+    },
+    {
+      "group": "ordinary-after-unset",
+      "index": 1,
+      "stdin": "unset SECONDS; SECONDS=ordinary; (printf \"<%s>\\n\" \"$SECONDS\" \"${SECONDS@a}\")\n"
+    },
+    {
+      "group": "ordinary-after-unset",
+      "index": 2,
+      "stdin": "unset BASHPID; ( [[ -v BASHPID ]]; echo absent:$? )\n"
+    }
+  ]
+}

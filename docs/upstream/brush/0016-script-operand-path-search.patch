@@ -1,0 +1,34 @@
+diff --git a/brush-core/src/shell/execution.rs b/brush-core/src/shell/execution.rs
+index bea89e3..4df75cf 100644
+--- a/brush-core/src/shell/execution.rs
++++ b/brush-core/src/shell/execution.rs
+@@ -85,9 +85,26 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         let mut options = std::fs::File::options();
+         options.read(true);
+ 
+-        let opened_file: openfiles::OpenFile = self
+-            .open_file(&options, path, params)
+-            .map_err(|e| error::ErrorKind::FailedSourcingFile(path.to_owned(), e))?;
++        let mut opened = self.open_file(&options, path, params);
++        // Like Bash, a script operand without a slash that is absent from the
++        // working directory is read from the first regular file on PATH; $0
++        // keeps the operand as given. Execute permission is not required.
++        if matches!(call_type, callstack::ScriptCallType::Run)
++            && path.components().count() == 1
++            && opened
++                .as_ref()
++                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
++        {
++            let search = self.env_str("PATH").unwrap_or_default().into_owned();
++            if let Some(found) = std::env::split_paths(&search)
++                .map(|directory| directory.join(path))
++                .find(|candidate| candidate.is_file())
++            {
++                opened = self.open_file(&options, &found, params);
++            }
++        }
++        let opened_file: openfiles::OpenFile =
++            opened.map_err(|e| error::ErrorKind::FailedSourcingFile(path.to_owned(), e))?;
+ 
+         if opened_file.is_dir() {
+             return Err(error::ErrorKind::FailedSourcingFile(

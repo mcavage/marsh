@@ -1,0 +1,22 @@
+diff --git a/brush-core/src/sys/unix/poll.rs b/brush-core/src/sys/unix/poll.rs
+index aca3151..6a00278 100644
+--- a/brush-core/src/sys/unix/poll.rs
++++ b/brush-core/src/sys/unix/poll.rs
+@@ -79,9 +79,14 @@ fn poll_fd_for_input(fd: BorrowedFd<'_>, deadline: Option<Instant>) -> std::io::
+                 let revents = poll_fds[0].revents().unwrap_or(PollFlags::empty());
+                 // POLLIN means data available. POLLHUP/POLLERR without POLLIN means
+                 // EOF/error - return true so caller reads and gets the proper result.
+-                return Ok(
+-                    revents.intersects(PollFlags::POLLIN | PollFlags::POLLHUP | PollFlags::POLLERR)
+-                );
++                // Darwin's poll reports POLLNVAL for character devices such as
++                // /dev/null; let the read decide there too.
++                return Ok(revents.intersects(
++                    PollFlags::POLLIN
++                        | PollFlags::POLLHUP
++                        | PollFlags::POLLERR
++                        | PollFlags::POLLNVAL,
++                ));
+             }
+             Err(nix::errno::Errno::EINTR) => (), // Retry on signal with recalculated timeout.
+             Err(e) => return Err(std::io::Error::from_raw_os_error(e as i32)),

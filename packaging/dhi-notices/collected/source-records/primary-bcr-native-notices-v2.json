@@ -1,0 +1,77 @@
+{
+  "schema": "marsh.primary-native-notices/v1",
+  "plan_sha256": "683a842f9098e1cd74f44404b4a7c3cd4d9e6dbe146e2036b3200258ce674f1e",
+  "archives": [
+    {
+      "name": "abseil-cpp/20250814.1",
+      "url": "https://github.com/abseil/abseil-cpp/releases/download/20250814.1/abseil-cpp-20250814.1.tar.gz",
+      "sha256": "1692f77d1739bacf3f94337188b78583cf09bab7e420d2dc6c5605a4f86785a1",
+      "role": "V8 producer BCR exact source",
+      "bcr_acquisition": {
+        "url": "https://bcr.bazel.build/modules/abseil-cpp/20250814.1/source.json",
+        "sha256": "cea3901d7e299da7320700abbaafe57a65d039f10d0d7ea601c4a66938ea4b0c",
+        "size": 229,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "acquisition": {
+        "url": "https://github.com/abseil/abseil-cpp/releases/download/20250814.1/abseil-cpp-20250814.1.tar.gz",
+        "sha256": "1692f77d1739bacf3f94337188b78583cf09bab7e420d2dc6c5605a4f86785a1",
+        "size": 2235716,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747.txt",
+          "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+          "member": "abseil-cpp-20250814.1/LICENSE"
+        }
+      ]
+    },
+    {
+      "name": "llvm/0.8.11",
+      "url": "https://github.com/hermeticbuild/hermetic-llvm/releases/download/v0.8.11/hermetic-llvm-v0.8.11.tar.gz",
+      "sha256": "781670efedbcffe9e6bedd086a8037a3fe467baec16d24124534062e36e727a4",
+      "role": "V8 producer BCR exact source",
+      "bcr_acquisition": {
+        "url": "https://bcr.bazel.build/modules/llvm/0.8.11/source.json",
+        "sha256": "b40edb2bb2ed271bf613b396d245cb473c42fb057a2b26a3bc7d7e8bfcf6aa71",
+        "size": 479,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "acquisition": {
+        "url": "https://github.com/hermeticbuild/hermetic-llvm/releases/download/v0.8.11/hermetic-llvm-v0.8.11.tar.gz",
+        "sha256": "781670efedbcffe9e6bedd086a8037a3fe467baec16d24124534062e36e727a4",
+        "size": 514739,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "notices": [
+        {
+          "file": "texts/dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551.txt",
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551",
+          "member": "hermetic-llvm-0.8.11/3rd_party/libc/glibc/COPYING.LIB"
+        },
+        {
+          "file": "texts/5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177.txt",
+          "sha256": "5c537d6853e005298a285d508cff9ac7192cea23576c840d485b2b586a7ff177",
+          "member": "hermetic-llvm-0.8.11/3rd_party/libc/glibc/LICENSE"
+        },
+        {
+          "file": "texts/5f07f451f48790a57f5ea014b51a804718a3d65a68d58309af019ef3a4ba06ae.txt",
+          "sha256": "5f07f451f48790a57f5ea014b51a804718a3d65a68d58309af019ef3a4ba06ae",
+          "member": "hermetic-llvm-0.8.11/3rd_party/libc/glibc/NOTICE"
+        },
+        {
+          "file": "texts/4139ed7c5b5a93a163d15f36f1e7aa3bfc7a7b0a541b1756f6090b8fc17147e9.txt",
+          "sha256": "4139ed7c5b5a93a163d15f36f1e7aa3bfc7a7b0a541b1756f6090b8fc17147e9",
+          "member": "hermetic-llvm-0.8.11/LICENSE"
+        }
+      ]
+    }
+  ],
+  "scope": "Conservative legal-document superset of exact public source archives from recorded build pins; not execution, enabled-feature proof, signature validation or a reproducible build.",
+  "failures": []
+}

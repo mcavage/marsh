@@ -1,0 +1,233 @@
+{
+  "provenance": {
+    "description": "Actual GNU lexical array-assignment eligibility: direct/quoted names, wrappers, POSIX, prefixes/redirects/functions; rejected syntax remains exact status/streams"
+  },
+  "cases": [
+    {
+      "args": [],
+      "stdin": "declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 0
+    },
+    {
+      "args": [],
+      "stdin": "\"declare\" a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 1
+    },
+    {
+      "args": [],
+      "stdin": "'declare' a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 2
+    },
+    {
+      "args": [],
+      "stdin": "typeset a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 3
+    },
+    {
+      "args": [],
+      "stdin": "export a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 4
+    },
+    {
+      "args": [],
+      "stdin": "readonly a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 5
+    },
+    {
+      "args": [],
+      "stdin": "command declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 6
+    },
+    {
+      "args": [],
+      "stdin": "builtin declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 7
+    },
+    {
+      "args": [],
+      "stdin": "command -p declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 8
+    },
+    {
+      "args": [],
+      "stdin": "command -- declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 9
+    },
+    {
+      "args": [],
+      "stdin": "command builtin declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 10
+    },
+    {
+      "args": [],
+      "stdin": "builtin command declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 11
+    },
+    {
+      "args": [],
+      "stdin": "echo a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 12
+    },
+    {
+      "args": [],
+      "stdin": "true a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 13
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 14
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "\"declare\" a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 15
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "'declare' a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 16
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "typeset a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 17
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "export a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 18
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "readonly a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 19
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "command declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 20
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "builtin declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 21
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "command -p declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 22
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "command -- declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 23
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "command builtin declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 24
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "builtin command declare a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 25
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "echo a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 26
+    },
+    {
+      "args": [
+        "--posix"
+      ],
+      "stdin": "true a=(one two)\ndeclare -p a 2>/dev/null\n",
+      "group": "compound-command-grammar",
+      "index": 27
+    },
+    {
+      "stdin": "p=x declare a=(one two); declare -p a\n",
+      "group": "compound-command-grammar",
+      "index": 28
+    },
+    {
+      "stdin": ">/dev/null declare a=(one two); declare -p a\n",
+      "group": "compound-command-grammar",
+      "index": 29
+    },
+    {
+      "stdin": "name=declare; $name a=(one two); declare -p a\n",
+      "group": "compound-command-grammar",
+      "index": 30
+    },
+    {
+      "stdin": "declare() { echo function; }; declare a=(one two)\n",
+      "group": "compound-command-grammar",
+      "index": 31
+    },
+    {
+      "stdin": "f() { local a=(one two); declare -p a; }; f\n",
+      "group": "compound-command-grammar",
+      "index": 32
+    },
+    {
+      "stdin": "f() { :; }; f a=(one two)\n",
+      "group": "compound-command-grammar",
+      "index": 33
+    }
+  ]
+}

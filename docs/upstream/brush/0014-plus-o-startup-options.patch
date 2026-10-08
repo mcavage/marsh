@@ -1,0 +1,60 @@
+diff --git a/brush-shell/src/entry.rs b/brush-shell/src/entry.rs
+index 1ab3b8e..51570c7 100644
+--- a/brush-shell/src/entry.rs
++++ b/brush-shell/src/entry.rs
+@@ -42,6 +42,40 @@ type BrushShell = brush_core::Shell<BrushShellExtensions>;
+ 
+ // WARN: this implementation shadows `clap::Parser::parse_from` one so it must be defined
+ // after the `use clap::Parser`
++/// Rewrites `+o`/`+O` startup options as clap long options, stopping at the
++/// first operand so command strings and script arguments are left untouched.
++fn qualify_plus_options(args: &mut [String]) {
++    const VALUE_OPTIONS: &[&str] = &[
++        "-o",
++        "-O",
++        "--config",
++        "--inherit-fd",
++        "--rcfile",
++        "--init-file",
++        "--xtrace-file",
++        "--input-backend",
++        "--load",
++        "--debug",
++        "--log-enable",
++        "--disable-event",
++        "--log-disable",
++    ];
++    let mut index = 1;
++    while let Some(arg) = args.get_mut(index) {
++        if arg.starts_with("+o") || arg.starts_with("+O") {
++            let takes_value = arg.len() == 2;
++            arg.insert_str(0, "--");
++            index += if takes_value { 2 } else { 1 };
++        } else if VALUE_OPTIONS.contains(&arg.as_str()) {
++            index += 2;
++        } else if arg == "--" || !arg.starts_with('-') || CommandLineArgs::has_pending_c_flag(arg) {
++            break;
++        } else {
++            index += 1;
++        }
++    }
++}
++
+ impl CommandLineArgs {
+     // Work around clap's limitation handling `--` like a regular value
+     // TODO(cmdline): We can safely remove this `impl` after the issue is resolved
+@@ -169,12 +203,8 @@ pub fn run_from(mut args: Vec<String>) -> i32 {
+     //
+     // Parse args.
+     //
+-    // Work around clap's limitations handling +O options.
+-    for arg in &mut args {
+-        if arg.starts_with("+O") {
+-            arg.insert_str(0, "--");
+-        }
+-    }
++    // Work around clap's limitations handling +O/+o options.
++    qualify_plus_options(&mut args);
+ 
+     let parsed_args = match CommandLineArgs::try_parse_from(args.iter().cloned()) {
+         Ok(parsed_args) => parsed_args,

@@ -1,0 +1,231 @@
+diff --git a/brush-builtins/src/jobs.rs b/brush-builtins/src/jobs.rs
+index c3686a9..9ab1749 100644
+--- a/brush-builtins/src/jobs.rs
++++ b/brush-builtins/src/jobs.rs
+@@ -38,9 +38,6 @@ impl builtins::Command for JobsCommand {
+         &self,
+         context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+-        if self.also_show_pids {
+-            return error::unimp("jobs -l");
+-        }
+         if self.list_changed_only {
+             return error::unimp("jobs -n");
+         }
+@@ -74,6 +71,8 @@ impl JobsCommand {
+             if let Some(pid) = job.representative_pid() {
+                 writeln!(context.stdout(), "{pid}")?;
+             }
++        } else if self.also_show_pids {
++            writeln!(context.stdout(), "{}", job.to_long_string())?;
+         } else {
+             writeln!(context.stdout(), "{job}")?;
+         }
+diff --git a/brush-builtins/src/wait.rs b/brush-builtins/src/wait.rs
+index 05b2009..fe19257 100644
+--- a/brush-builtins/src/wait.rs
++++ b/brush-builtins/src/wait.rs
+@@ -41,13 +41,14 @@ impl builtins::Command for WaitCommand {
+         }
+ 
+         let mut result = ExecutionResult::success();
++        let mut waited_for_pid = false;
+ 
+         if !self.ids.is_empty() {
+             for id in &self.ids {
+                 if id.starts_with('%') {
+                     // It's a job spec.
+                     if let Some(job) = context.shell.jobs_mut().resolve_job_spec(id) {
+-                        job.wait().await?;
++                        result = job.wait().await?;
+                     } else {
+                         writeln!(
+                             context.stderr(),
+@@ -60,9 +61,31 @@ impl builtins::Command for WaitCommand {
+                     }
+                 } else {
+                     // It's a process ID.
+-                    return error::unimp("wait with process IDs");
++                    let Ok(pid) = id.parse() else {
++                        writeln!(
++                            context.stderr(),
++                            "{}: `{id}`: not a pid or valid job spec",
++                            context.command_name
++                        )?;
++                        result = ExecutionExitCode::GeneralError.into();
++                        continue;
++                    };
++                    if let Some(job) = context.shell.jobs_mut().job_for_pid_mut(pid) {
++                        result = job.wait().await?;
++                        waited_for_pid = true;
++                    } else {
++                        writeln!(
++                            context.stderr(),
++                            "{}: pid {pid} is not a child of this shell",
++                            context.command_name
++                        )?;
++                        result = ExecutionExitCode::GeneralError.into();
++                    }
+                 }
+             }
++            if waited_for_pid {
++                context.shell.jobs_mut().sweep_waited_jobs();
++            }
+         } else {
+             // Wait for all jobs.
+             let jobs = context.shell.jobs_mut().wait_all().await?;
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index b2d342d..3abe25e 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -249,7 +249,7 @@ impl Execute for ast::CompoundList {
+             let run_async = matches!(sep, ast::SeparatorOperator::Async);
+ 
+             if run_async {
+-                let job = spawn_async_ao_list_in_task(ao_list, shell, params);
++                let job = spawn_async_ao_list(ao_list, shell, params).await?;
+                 let job_formatted = job.to_pid_style_string();
+ 
+                 if shell.options().interactive && !shell.is_subshell() {
+@@ -273,11 +273,36 @@ impl Execute for ast::CompoundList {
+     }
+ }
+ 
+-fn spawn_async_ao_list_in_task<'a, SE: extensions::ShellExtensions>(
++async fn spawn_async_ao_list<'a, SE: extensions::ShellExtensions>(
+     ao_list: &ast::AndOrList,
+     shell: &'a mut Shell<SE>,
+     params: &ExecutionParameters,
+-) -> &'a jobs::Job {
++) -> Result<&'a jobs::Job, error::Error> {
++    if ao_list.additional.is_empty() {
++        let mut child_shell = shell.clone();
++        child_shell.options_mut().interactive = false;
++        let mut child_params = params.clone();
++        child_params.process_group_policy = ProcessGroupPolicy::NewProcessGroup;
++        if let Ok(null) = openfiles::null() {
++            child_params.set_fd(openfiles::OpenFiles::STDIN_FD, null);
++        }
++
++        let spawned =
++            spawn_pipeline_processes(&ao_list.first, &mut child_shell, &child_params).await?;
++        let tasks = spawned.into_iter().map(|spawn_result| match spawn_result {
++            ExecutionSpawnResult::StartedProcess(process) => jobs::JobTask::External(process),
++            ExecutionSpawnResult::StartedTask(task) => jobs::JobTask::Internal(task),
++            ExecutionSpawnResult::Completed(result) => {
++                jobs::JobTask::Internal(tokio::spawn(async move { Ok(result) }))
++            }
++        });
++        return Ok(shell.jobs_mut().add_as_current(jobs::Job::new(
++            tasks,
++            ao_list.to_string(),
++            jobs::JobState::Running,
++        )));
++    }
++
+     // Clone the inputs.
+     let mut cloned_shell = shell.clone();
+     let mut cloned_params = params.clone();
+@@ -297,11 +322,11 @@ fn spawn_async_ao_list_in_task<'a, SE: extensions::ShellExtensions>(
+             .await
+     });
+ 
+-    shell.jobs_mut().add_as_current(jobs::Job::new(
++    Ok(shell.jobs_mut().add_as_current(jobs::Job::new(
+         [jobs::JobTask::Internal(join_handle)],
+         ao_list.to_string(),
+         jobs::JobState::Running,
+-    ))
++    )))
+ }
+ 
+ #[async_trait::async_trait]
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+index a549c92..2f76373 100644
+--- a/brush-core/src/jobs.rs
++++ b/brush-core/src/jobs.rs
+@@ -171,6 +171,18 @@ impl JobManager {
+         Ok(self.sweep_completed_jobs())
+     }
+ 
++    /// Resolves a child process ID to its managed job.
++    pub fn job_for_pid_mut(&mut self, pid: sys::process::ProcessId) -> Option<&mut Job> {
++        self.jobs
++            .iter_mut()
++            .find(|job| job.representative_pid() == Some(pid))
++    }
++
++    /// Removes jobs whose tasks were consumed by an explicit wait.
++    pub fn sweep_waited_jobs(&mut self) {
++        let _ = self.sweep_completed_jobs();
++    }
++
+     /// Polls all managed jobs for completion.
+     pub fn poll(&mut self) -> Result<Vec<JobResult>, error::Error> {
+         let mut results = Vec::with_capacity(self.jobs.len());
+@@ -316,6 +328,23 @@ impl Job {
+         std::format!("[{}]{}\t{}", self.id, self.annotation, display_pid)
+     }
+ 
++    /// Returns the long `jobs -l` representation.
++    pub fn to_long_string(&self) -> String {
++        let display_pid = self
++            .representative_pid()
++            .map_or(Cow::Borrowed("<pid unknown>"), |pid| {
++                Cow::Owned(pid.to_string())
++            });
++        std::format!(
++            "[{}]{:3} {}\t{}\t{}",
++            self.id,
++            self.annotation,
++            display_pid,
++            self.state,
++            self.command_line
++        )
++    }
++
+     /// Returns the annotation of the job.
+     pub fn annotation(&self) -> JobAnnotation {
+         self.annotation.clone()
+diff --git a/brush-shell/tests/cases/compat/background_jobs.yaml b/brush-shell/tests/cases/compat/background_jobs.yaml
+index 7afb338..6488846 100644
+--- a/brush-shell/tests/cases/compat/background_jobs.yaml
++++ b/brush-shell/tests/cases/compat/background_jobs.yaml
+@@ -81,6 +81,37 @@ cases:
+         echo 2 &
+         wait
+ 
++  - name: "Last background PID is a child and waitable"
++    args:
++      - "-c"
++      - |
++        sh -c 'sleep 0.05; exit 23' &
++        pid=$!
++        test -n "$pid" || exit 90
++        wait "$pid"
++        test "$?" -eq 23
++
++  - name: "jobs -p reports the last background PID"
++    args:
++      - "-c"
++      - |
++        sleep 0.1 &
++        pid=$!
++        test "$(jobs -p)" = "$pid"
++        wait "$pid"
++
++  - name: "jobs -l includes PID and command"
++    args:
++      - "-c"
++      - |
++        sleep 0.1 &
++        pid=$!
++        jobs -l >jobs.txt
++        grep -F "$pid" jobs.txt >/dev/null
++        grep -F 'sleep 0.1' jobs.txt >/dev/null
++        rm jobs.txt
++        wait "$pid"
++
+   - name: "Two sequential background jobs with explicit wait via stdin"
+     stdin: |
+       echo 1 &

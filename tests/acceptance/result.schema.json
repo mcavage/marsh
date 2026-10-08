@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mcavage/marsh/tests/acceptance/result.schema.json",
+  "title": "marsh bounded direct-command acceptance result",
+  "$defs": {
+    "timing_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["durations_ms", "milestones_unix_ms", "wall_ms", "orchestration_ms"],
+      "properties": {
+        "durations_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["vm_prepare", "admission", "mount_prepare", "worker_start", "execution", "output_drain", "result_capture", "cleanup"],
+          "properties": {
+            "vm_prepare": { "type": "integer", "minimum": 0 },
+            "admission": { "type": "integer", "minimum": 0 },
+            "mount_prepare": { "type": "integer", "minimum": 0 },
+            "worker_start": { "type": "integer", "minimum": 0 },
+            "execution": { "type": "integer", "minimum": 0 },
+            "output_drain": { "type": "integer", "minimum": 0 },
+            "result_capture": { "type": "integer", "minimum": 0 },
+            "cleanup": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "milestones_unix_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["request_received", "worker_progress", "process_exit", "output_drained", "completed"],
+          "properties": {
+            "request_received": { "type": "integer", "minimum": 0 },
+            "worker_progress": { "type": "integer", "minimum": 0 },
+            "first_output": { "type": "integer", "minimum": 0 },
+            "process_exit": { "type": "integer", "minimum": 0 },
+            "output_drained": { "type": "integer", "minimum": 0 },
+            "completed": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "wall_ms": { "type": "integer", "minimum": 0 },
+        "orchestration_ms": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "started_at", "finished_at", "outcome", "environment", "checks", "commands", "snapshots"],
+  "properties": {
+    "schema": { "const": "marsh.acceptance-result/v1" },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "outcome": { "enum": ["passed", "failed"] },
+    "failure": { "type": "string" },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host_platform", "source_revision", "source_dirty", "source_tree_sha256", "marsh_binary", "marsh_binary_sha256", "guest_artifact_sha256", "sbx_binary", "sbx_version", "fixture_kit_ref", "command_mapping_sha256", "project", "marsh_home", "job_limits"],
+      "properties": {
+        "host_platform": { "type": "string" },
+        "source_revision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "source_dirty": { "type": "boolean" },
+        "source_tree_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "marsh_binary": { "type": "string" },
+        "marsh_binary_sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+        "guest_artifact_sha256": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["marsh-linux-arm64", "marsh-worker-linux-arm64", "marsh-relay-linux-arm64"],
+          "properties": {
+            "marsh-linux-arm64": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "marsh-worker-linux-arm64": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+            "marsh-relay-linux-arm64": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+          }
+        },
+        "sbx_binary": { "type": "string" },
+        "sbx_version": { "type": ["string", "null"] },
+        "fixture_kit_ref": { "type": ["string", "null"] },
+        "command_mapping_sha256": { "type": ["string", "null"], "pattern": "^sha256:[0-9a-f]{64}$" },
+        "project": { "type": "string" },
+        "marsh_home": { "type": "string" },
+        "job_limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cpu_millis", "memory_bytes", "pids", "writable_bytes", "output_bytes", "wall_seconds"],
+          "properties": {
+            "cpu_millis": { "type": "integer", "minimum": 1 },
+            "memory_bytes": { "type": "integer", "minimum": 1 },
+            "pids": { "type": "integer", "minimum": 1 },
+            "writable_bytes": { "type": "integer", "minimum": 1 },
+            "output_bytes": { "type": "integer", "minimum": 1 },
+            "wall_seconds": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "outcome"],
+        "properties": {
+          "name": { "type": "string" },
+          "outcome": { "enum": ["passed", "failed", "not-run"] },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["argv", "cwd", "stdin_base64", "stdout_base64", "stderr_base64", "status", "elapsed_ms"],
+        "properties": {
+          "argv": { "type": "array", "items": { "type": "string" } },
+          "cwd": { "type": "string" },
+          "stdin_base64": { "type": "string" },
+          "stdout_base64": { "type": "string" },
+          "stderr_base64": { "type": "string" },
+          "status": { "type": "integer" },
+          "elapsed_ms": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "snapshots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "source", "value"],
+        "properties": {
+          "label": { "type": "string" },
+          "source": { "enum": ["marsh", "sbx", "host"] },
+          "value": {
+            "description": "Versioned public state. Job-receipt timing values follow $defs.timing_report."
+          }
+        }
+      }
+    }
+  }
+}

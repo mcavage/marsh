@@ -1,0 +1,28 @@
+[package]
+name = "marsh-backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+marsh-acp = { path = "../marsh-acp" }
+marsh-contracts = { path = "../marsh-contracts" }
+marsh-daemon = { path = "../marsh-daemon" }
+marsh-runtime = { path = "../marsh-runtime" }
+marsh-sbx = { path = "../marsh-sbx" }
+marsh-worker = { path = "../marsh-worker" }
+nix = { version = "0.31", features = ["user"] }
+rustix = { version = "1.1", features = ["process", "fs"] }
+serde = "1"
+serde_json = "1"
+sha2 = "0.10"
+signal-hook = "0.3"
+tempfile = "3.23"
+
+[dev-dependencies]
+marsh-sbx = { path = "../marsh-sbx", features = ["test-support"] }
+
+[lints]
+workspace = true

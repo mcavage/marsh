@@ -1,0 +1,20 @@
+[
+  {
+    "package": "dhi-image-build-definitions",
+    "notices": [
+      {
+        "file": "texts/275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a.txt",
+        "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
+      }
+    ],
+    "required_notices": [
+      {
+        "file": "texts/275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a.txt",
+        "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
+      }
+    ],
+    "acquisition_receipt": "source-records/public-image-primary-receipt.json",
+    "receipt_sha256": "7a04cf1008303b0a5fd344f408958b1dcd8717bd096317a05c4fe25a8e85dfed",
+    "scope": "DHI definitions (Dockerfiles), patches and build scripts are Apache-2.0. Included packages/binaries retain their own upstream terms. SPDX CC0-1.0 covers the document, not proprietary clipboard code."
+  }
+]

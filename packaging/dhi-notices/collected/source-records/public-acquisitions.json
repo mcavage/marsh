@@ -1,0 +1,1396 @@
+{
+  "zsh-workflow": {
+    "url": "https://raw.githubusercontent.com/openai/codex/891f1f4c8584a082fc4658cabd48f1a8b01354e0/.github/workflows/rust-release-zsh.yml",
+    "sha256": "fe7f6fe367d05899734b2ad40c9cdfebce7a3958d6f90ea44941aa09845b6335",
+    "size": 5572,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "zsh-patch": {
+    "url": "https://raw.githubusercontent.com/openai/codex/891f1f4c8584a082fc4658cabd48f1a8b01354e0/codex-rs/shell-escalation/patches/zsh-exec-wrapper.patch",
+    "sha256": "696b7d923b8071554d00e811afb9a08fcad4baada796f7314d12ecd72d06152c",
+    "size": 998,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "zsh-build": {
+    "url": "https://raw.githubusercontent.com/openai/codex/891f1f4c8584a082fc4658cabd48f1a8b01354e0/.github/scripts/build-zsh-release-artifact.sh",
+    "sha256": "1a087f7201639bd093a5b7dad3b4561a376fc4bef3f12d6ee0d7a8cf7e5cde1f",
+    "size": 1629,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "codex-workflow": {
+    "url": "https://raw.githubusercontent.com/openai/codex/ff6aec96948b70d94983af2641a6b67c94faeff5/.github/workflows/rust-release.yml",
+    "sha256": "150b407712ea66d4310d0286ca4054323586ef578c898092032ca205b4c55059",
+    "size": 82797,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "codex-source": {
+    "url": "https://codeload.github.com/openai/codex/tar.gz/ff6aec96948b70d94983af2641a6b67c94faeff5",
+    "sha256": "8cfd92ccc784603d0ef94165f5a70bb99fd3de6e8b4bccda58580fc3f5f4961d",
+    "size": 16582551,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "codex-lock": {
+    "url": "https://raw.githubusercontent.com/openai/codex/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/Cargo.lock",
+    "sha256": "4fab6fe99180e2b8f305bd4b33c1b4bd825e3fa4cdef1045be750843bd3d431e",
+    "size": 406552,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "codex-cargo": {
+    "url": "https://raw.githubusercontent.com/openai/codex/ff6aec96948b70d94983af2641a6b67c94faeff5/codex-rs/Cargo.toml",
+    "sha256": "71396507bfea65c2b34c91dfcf38798aabb3ebf3e544d02dab7c45a3d1f5bd6b",
+    "size": 20615,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "claude-manifest": {
+    "url": "https://downloads.claude.ai/claude-code-releases/2.1.285/manifest.json",
+    "sha256": "ab45eee79e59db6c01147e19b83074df8773304d790f5553b03c2a495eaa8297",
+    "size": 2161,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "claude-kit-manifest": {
+    "url": "https://downloads.claude.ai/claude-code-releases/2.1.278/manifest.json",
+    "sha256": "d1bf63d94621d6aa6fb84297b235ddb8f5aaadc9252cef8020d170ef661b2f28",
+    "size": 2161,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "rg-source": {
+    "url": "https://codeload.github.com/BurntSushi/ripgrep/tar.gz/e89fff89ac9af12e8d4ce9d5fd07beb408ca730f",
+    "sha256": "af40d0f4cb7a55994906c009a7ba865047f0d487c95bceb8db59ffc4f2173d20",
+    "size": 607432,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "rg-lock": {
+    "url": "https://raw.githubusercontent.com/BurntSushi/ripgrep/e89fff89ac9af12e8d4ce9d5fd07beb408ca730f/Cargo.lock",
+    "sha256": "7a7d39cda8a03930e578f1dbb724e055771901842eca239e03b01e19da946a64",
+    "size": 12745,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "pcre2-source": {
+    "url": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.46/pcre2-10.46.tar.gz",
+    "sha256": "8d28d7f2c3b970c3a4bf3776bcbb5adfc923183ce74bc8df1ebaad8c1985bd07",
+    "size": 2718545,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "codex_native_build_source_members": [
+    {
+      "member": "codex-rs/bwrap/BUILD.bazel",
+      "sha256": "27d1be7161048f34b2fa8f59148d7690426dadd82b7c4323ff87b0a34b0ecac4",
+      "size": 1603
+    },
+    {
+      "member": "codex-rs/bwrap/Cargo.toml",
+      "sha256": "5b524ac2c30f4029cae77721c026d3487a6628473b042d26f354ab6075ec4a7c",
+      "size": 305
+    },
+    {
+      "member": "codex-rs/bwrap/build.rs",
+      "sha256": "3ca3f0c90e075d38215e74ff19049df1ff6fdd80a04711ee05f3acd39dfd7b70",
+      "size": 3851
+    },
+    {
+      "member": "codex-rs/bwrap/config.h",
+      "sha256": "55f7dedf5504659f50b6575571eb4a4c884afc0597fa11435a8318e0cccccd1e",
+      "size": 52
+    },
+    {
+      "member": "codex-rs/bwrap/src/main.rs",
+      "sha256": "1fdfa3549d633f7d260c9bccc896f59a7f32275b9130b72ee796622b639081aa",
+      "size": 1383
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/.dir-locals.el",
+      "sha256": "3063e15ab1474f222ea3668d843f1a0fa44b64254430f4dce11e62621206b537",
+      "size": 63
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/.editorconfig",
+      "sha256": "5748246c4a7f55466e40e7dbe2be844d6cd476644cd64a96fa7451d0bf08ea97",
+      "size": 103
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/.github/workflows/check.yml",
+      "sha256": "7020cc5c9fbda542d3e748fb8b4d549922e4fcdabadfc28cb33e54ddf7695d12",
+      "size": 3214
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/CODE-OF-CONDUCT.md",
+      "sha256": "ed4702f2e031b188b9ccdc44c62780cabfccdbdac3f879083eeaa8837c5d2612",
+      "size": 195
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/COPYING",
+      "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c",
+      "size": 25383
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/NEWS.md",
+      "sha256": "53c9018f3fc3427d0594c8ba2dc74e366fe2156a0a3f5a957ad43eaa146cd063",
+      "size": 3137
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/README.md",
+      "sha256": "92e4ef5d6ad034e68c0fc3161ab139b0118b014fad569b4fba13460656f61ceb",
+      "size": 11238
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/SECURITY.md",
+      "sha256": "15927261f07466f2e2481a9d25903de27841dee3454d457229bc0ccf3067ecd6",
+      "size": 2375
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/bind-mount.c",
+      "sha256": "19a6ae020803e342667dd562efab027967b1c1f2965525ec7ee09521554f8f71",
+      "size": 15808
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/bind-mount.h",
+      "sha256": "1f82ced233f5538215920182f5ad02d15acf2ed8b2b53e6a711aa43633268ce1",
+      "size": 1822
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/bubblewrap.c",
+      "sha256": "9bc38fb46080b6854e0c414ccb5fbd369d9d7c0230fdfa877283d31aef0c5720",
+      "size": 117032
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/bubblewrap.jpg",
+      "sha256": "52b05a562bc4d5aaf4adc1e5306dc4450790f2e4eb9a34efe43a9fe823a8c8b4",
+      "size": 40239
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/bwrap.xml",
+      "sha256": "8af8e849cd635c1db3bbe06733ac4817671441b6c46cb2f0701cbe487278463d",
+      "size": 32070
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/ci/builddeps.sh",
+      "sha256": "859315da7e23057ebbfaf11193509590a93bf0e2382e84a6962e0b0dee10769b",
+      "size": 1790
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/ci/enable-userns.sh",
+      "sha256": "a8fb26d71d4b4a0946fd94088bcb9cfbee5ca57d126b3a534fe42f9a05f8bd12",
+      "size": 124
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/completions/bash/bwrap",
+      "sha256": "7e24c1e29b4102b7f0b557d5a2d72c721c7d81975fd2d47c897e07e4e52c1d79",
+      "size": 1218
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/completions/bash/meson.build",
+      "sha256": "46b1cfa83e589d6f923fc94331071cfb4d59e187743336ac24df881ad7cb863e",
+      "size": 944
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/completions/meson.build",
+      "sha256": "7e705cff6052ae54db28fa9ae50fb9ed7b89ea9d8995c8ec85e3ed8be2f28b20",
+      "size": 131
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/completions/zsh/_bwrap",
+      "sha256": "7b0de2aafa68f7a4936d1323c4301cd491bf8c0598f1965d1bce6042a3525666",
+      "size": 7396
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/completions/zsh/meson.build",
+      "sha256": "27885c02c489846f89748aca50c2e20ff1d4c755a1e0adccd1d25999bcffba77",
+      "size": 219
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/demos/bubblewrap-shell.sh",
+      "sha256": "dd2ed261e8a29df26d4ca8e629d57e882b7fdf0f019cb495a26bc1a74ca17c51",
+      "size": 1204
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/demos/flatpak-run.sh",
+      "sha256": "571dbc8beb5a43236dd4142345ad74c6a536027820747ac9f6eea86925c23610",
+      "size": 2642
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/demos/flatpak.bpf",
+      "sha256": "8fd08d3d6db04338dd4ac9b710b14b23a21162154359c6ef5cf16810802eed66",
+      "size": 744
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/demos/userns-block-fd.py",
+      "sha256": "3df0a68201b58c20144a29cb748e0fc3ac3881c09a427d315e5132f627e041bc",
+      "size": 969
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/meson.build",
+      "sha256": "3132e188bdfe4f9c133da1b98410d499a5659e94893b9c9cc9dd04b7548fe0bd",
+      "size": 4613
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/meson_options.txt",
+      "sha256": "9709561d740712bd44063dee0fb34b9ed400af5fdc50c8684a26711821c00a71",
+      "size": 1673
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/network.c",
+      "sha256": "1cfe04fcc38d33d5197feb96fc503d3fd51d234fb9392699a00bf4780ed6e9f0",
+      "size": 5429
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/network.h",
+      "sha256": "10a8c88c647de85f4c60574355f9d530c06d568afbeb096611f4c8e85b9a5598",
+      "size": 819
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/packaging/bubblewrap.spec",
+      "sha256": "3e47e91782f7dfb009877d6f1a8e0ab3ecbb2a4cab479d50626c41c7042779ef",
+      "size": 1302
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/release-checklist.md",
+      "sha256": "99a43f1c07af118a61b399e2a4b40f43f8c4e231bc3cea394be1986cdf87869e",
+      "size": 777
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/libtest-core.sh",
+      "sha256": "2fcecd032e52306e87cd148d694ed16cee7370b3287c84587d580b44436718b0",
+      "size": 4780
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/libtest.sh",
+      "sha256": "c6aad3ce09d602ea12f9f2565729c2a69ea9accd5b57b207631d8340a026de85",
+      "size": 3340
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/meson.build",
+      "sha256": "1c2e8c020949586a215705b5d6446c886349818f119d9a55dafd6c685b50ed09",
+      "size": 1391
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/test-run.sh",
+      "sha256": "7b40f12cc4833c97c22c72baaa38676508b49bff17239892033d138f860fe865",
+      "size": 28658
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/test-seccomp.py",
+      "sha256": "dcf11f0b49fb3a3d8639cc6f91bf52838d7de27b45c4c7e85c338abbcda8ead8",
+      "size": 19642
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/test-specifying-pidns.sh",
+      "sha256": "5074734ed2df18bebdd72ee537ad9921fe990a0ee7e5ff87c9605c9961625707",
+      "size": 863
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/test-specifying-userns.sh",
+      "sha256": "42b21db98198f6efea6f48da0233fd9ba3d6df3e158e4c32491ed2a5e7f54261",
+      "size": 756
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/test-utils.c",
+      "sha256": "9ba229a39e707f2e7202b2095a113ca71ef01a24b144a879cd09b33bf0197a37",
+      "size": 6589
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/try-syscall.c",
+      "sha256": "b08365eab4e36132fe0ab85718a8d19784f10e40b39c53f9a9a98bfa21736229",
+      "size": 4674
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/use-as-subproject/.gitignore",
+      "sha256": "1d31575b3991a38270385550d119a811977aaeedc8253b15f97596e66854fad1",
+      "size": 23
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/use-as-subproject/README",
+      "sha256": "0b5cc7152085b9fbb2b4dccbca2b20dbc393d5770be531283a9ab022c58d952e",
+      "size": 188
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/use-as-subproject/assert-correct-rpath.py",
+      "sha256": "e0abeb87a9259f402f2e7687e113af96d71a5f6e571784451790d548b8884ef8",
+      "size": 697
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/use-as-subproject/config.h",
+      "sha256": "17889d060805f6ec7fc718e33d66a1a6b67a1b570f7c6149c74013914698b5df",
+      "size": 66
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/use-as-subproject/dummy-config.h.in",
+      "sha256": "6ecfc119118dbcd9dbeadf72ce50d02cc459fa1489c31eef520bb5efbbe4902d",
+      "size": 76
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/tests/use-as-subproject/meson.build",
+      "sha256": "4c740d7b0ca368cc4027ad4c1f92576f6ba8f577912a4c15679d6063a1fb9a1b",
+      "size": 343
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/uncrustify.cfg",
+      "sha256": "49fce87f9d408f7833ff7457a8a03e06e231f71214e268c66764322b913791e5",
+      "size": 4474
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/uncrustify.sh",
+      "sha256": "2a519b517a6df871e3d16a13312ab70211ad3b5599438b7bdca06adb64072c12",
+      "size": 102
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/utils.c",
+      "sha256": "c99f12bf7f74bb299e102852fb30ff76a6dfee0a2f6bfed5c840beb3249d4ddb",
+      "size": 21879
+    },
+    {
+      "member": "codex-rs/vendor/bubblewrap/utils.h",
+      "sha256": "67f31ade42f56671e770fa3064494c63dcd331f9cd272e01488d55524a99df04",
+      "size": 6435
+    },
+    {
+      "member": "third_party/v8/BUILD.bazel",
+      "sha256": "50b874701edde0b24166680f0ac22463661eebe55216d60e879acbb779382bc2",
+      "size": 18320
+    },
+    {
+      "member": "third_party/v8/README.md",
+      "sha256": "b37e2b8db6821453337d9d590d7e2b9a32cb491037b850c0d09f54a9073fd2a9",
+      "size": 6980
+    },
+    {
+      "member": "third_party/v8/gnu_libcxx_shared_exception_symbols.txt",
+      "sha256": "094f2a3e9fdfa34418a0545ef38402b10433209405cb7feed25de862b5e41364",
+      "size": 489
+    },
+    {
+      "member": "third_party/v8/libcxx.BUILD.bazel",
+      "sha256": "25e537d364b6e465f20e3f9ecd5168481ece3728796b137a9811273303e184d1",
+      "size": 4400
+    },
+    {
+      "member": "third_party/v8/libcxx_config/BUILD.bazel",
+      "sha256": "c93beb4cab10801a988be98274987a6b6fa20365babd45346123883991f62ad1",
+      "size": 235
+    },
+    {
+      "member": "third_party/v8/libcxx_config/__assertion_handler",
+      "sha256": "9880b4c09b07dd2e91f15595da6e27c57edb23a96149f8e18540d4e92c49c8be",
+      "size": 606
+    },
+    {
+      "member": "third_party/v8/libcxx_config/__config_site",
+      "sha256": "d34ba8abb5ba623606f6f05a6cf3b1ae5f09a66de6183c3790ab3f71aa62c21f",
+      "size": 1466
+    },
+    {
+      "member": "third_party/v8/libcxxabi.BUILD.bazel",
+      "sha256": "22fcb5a8a969a6b358ef64fdd72dcf01418fba3e047f07acd5bd34decc0b3fb2",
+      "size": 2859
+    },
+    {
+      "member": "third_party/v8/llvm_libc.BUILD.bazel",
+      "sha256": "15158ca2fcc1db8412fd64e47706f4af267ec01b82053dc5bba1b1627f7861ad",
+      "size": 388
+    },
+    {
+      "member": "third_party/v8/rusty_v8_150_4_0.sha256",
+      "sha256": "c355f85667ed05e97382a47f4fef523c3513b978b2ba43cbb82118e64f94c7b6",
+      "size": 1259
+    },
+    {
+      "member": "third_party/v8/rusty_v8_150_4_0_release_manifests.sha256",
+      "sha256": "7036a86ed062f4edd81667e161e5e94eade669c69362b136ccba9a1508fecc4b",
+      "size": 1040
+    },
+    {
+      "member": "third_party/v8/v8_crate.BUILD.bazel",
+      "sha256": "10aeda13b3bfd7cb00f3a68bd5a2bcbcc4581781f63670d1609e0851c9274369",
+      "size": 1098
+    }
+  ],
+  "codex_native_build_scope": "rust-release.yml runs cargo build --target <musl> --release --bin bwrap; bwrap/build.rs defaults to vendor/bubblewrap and links pkg-config libcap, but permits CODEX_BWRAP_SOURCE_DIR. SLSA publication statement is not a complete build-material/feature attestation. setup-rusty-v8 downloads separate archives. Lock notices are conservative, not proof of all native inputs.",
+  "claude-2.1.285-legal-archive": {
+    "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.285.tgz",
+    "sha256": "6560abb7c2d71de8cdd164676a2386930e96f12c8c9c7e33b7548d2fbd734a92",
+    "size": 28026,
+    "integrity": "sha512-frr0DLmVHSDNjw+hC6ZmXMVQ8yH4nNmVcI4lVFzWt0bdPNZP7clOKsuLcqSdwQabIpe6A3NEc3TJfiBVD8B2Bg==",
+    "signature_verified": false
+  },
+  "claude-2.1.278-legal-archive": {
+    "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.278.tgz",
+    "sha256": "08c6dfcf3dafcfd30e09b2926c596e274f0fa20844a5801ada7f1c8e6227157e",
+    "size": 27538,
+    "integrity": "sha512-mfNRqC0GaEXqmP97NiwJBeYBmRuqe2VzgLUreUUaEhyJxJWx2Z6ClW1tBOncGNNXdhj6EY4LPvUIWP+oq311CA==",
+    "signature_verified": false
+  },
+  "ripgrep_both_archive_member_correspondence": [
+    {
+      "platform": "linux-aarch64",
+      "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-gnu.tar.gz",
+      "archive_sha256": "a740b91c82eaf9914cfedd353572f2791cbe0162c84101ee0951058f4dcbc90d",
+      "binary_sha256": "e36d0eb52e70696bdf1781392722e05a21bb91d3b7b762ef5ec20e5df2ec687b",
+      "notice_members": [
+        {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-gnu.tar.gz",
+          "archive_sha256": "a740b91c82eaf9914cfedd353572f2791cbe0162c84101ee0951058f4dcbc90d",
+          "member": "ripgrep-15.2.0-aarch64-unknown-linux-gnu/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-aarch64-unknown-linux-gnu.tar.gz",
+          "archive_sha256": "a740b91c82eaf9914cfedd353572f2791cbe0162c84101ee0951058f4dcbc90d",
+          "member": "ripgrep-15.2.0-aarch64-unknown-linux-gnu/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        }
+      ]
+    },
+    {
+      "platform": "linux-x86_64",
+      "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
+      "archive_sha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+      "binary_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "notice_members": [
+        {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
+          "archive_sha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+          "member": "ripgrep-15.2.0-x86_64-unknown-linux-musl/LICENSE-MIT",
+          "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+          "file": "texts/0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f.txt"
+        },
+        {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.2.0/ripgrep-15.2.0-x86_64-unknown-linux-musl.tar.gz",
+          "archive_sha256": "33e15bcf1624b25cdd2a55813a47a2f95dbe126268203e76aa6a585d1e7b149c",
+          "member": "ripgrep-15.2.0-x86_64-unknown-linux-musl/COPYING",
+          "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+          "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt"
+        }
+      ]
+    }
+  ],
+  "ripgrep_license_election": "MIT alternative elected for ripgrep itself; UNLICENSE is not relied upon. Dependencies keep their own terms.",
+  "codex-arm64-npm": [
+    {
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.159.2.tgz",
+      "sha256": "cf1e5d7b6e317a4a1d36dbff2ebd9b3cf048ac98d06fcb6682c57248e023cad2",
+      "size": 4904,
+      "integrity": "sha512-SE13C3nZCYoVL569BdegoOl6vwjb7o2sXOo7ivwVzaVoY0cswwi0/6pIE0TyO/C0vIkQh3jslExitET7PBTfIg==",
+      "signature_verified": false,
+      "members": [
+        {
+          "member": "package/bin/codex.js",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/bin/codex.js",
+          "sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+          "size": 8790
+        },
+        {
+          "member": "package/package.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/package.json",
+          "sha256": "d4e69a623f79ede30c5abb2a4a4bef8b7ff71dbda1362ebe198676ab56113c15",
+          "size": 1082
+        },
+        {
+          "member": "package/README.md",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/README.md",
+          "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
+          "size": 3334
+        }
+      ],
+      "slsa_acquisition": {
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.159.2",
+        "sha256": "0574ca993bba7c4ec813baa53fff05815a9b877744b268a9d9bc4dd4287ea684",
+        "size": 14685,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "slsa_statement": {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [
+          {
+            "name": "pkg:npm/%40openai/codex@0.159.2",
+            "digest": {
+              "sha512": "484d770b79d9098a152f9ebd05d7a0a0e97abf08dbee8dac5cea3b8afc15cda56863472cc308b4ffaa481344f23bf0b4bc89108778ec944c62b444fb3c14df22"
+            }
+          }
+        ],
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "predicate": {
+          "buildDefinition": {
+            "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
+            "externalParameters": {
+              "workflow": {
+                "ref": "refs/tags/rust-v0.159.2",
+                "repository": "https://github.com/openai/codex",
+                "path": ".github/workflows/rust-release.yml"
+              }
+            },
+            "internalParameters": {
+              "github": {
+                "event_name": "push",
+                "repository_id": "965415649",
+                "repository_owner_id": "14957082"
+              }
+            },
+            "resolvedDependencies": [
+              {
+                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.159.2",
+                "digest": {
+                  "gitCommit": "ff6aec96948b70d94983af2641a6b67c94faeff5"
+                }
+              }
+            ]
+          },
+          "runDetails": {
+            "builder": {
+              "id": "https://github.com/actions/runner/github-hosted"
+            },
+            "metadata": {
+              "invocationId": "https://github.com/openai/codex/actions/runs/36642524844/attempts/1"
+            }
+          }
+        }
+      },
+      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed"
+    },
+    {
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.159.2-linux-arm64.tgz",
+      "sha256": "1c4756c2f67f1310ffb03234d61d540ad85916cef5383e46e0e7851f1721c142",
+      "size": 155020250,
+      "integrity": "sha512-Pm0W2PnFeTEqPx+AOIwgOVB4dBtY24cuD0tx1hjCor60CbSAT7WBPZVNUINSrTCDrMndvQC67p71ZEz+gmPPkA==",
+      "signature_verified": false,
+      "members": [
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/bwrap",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/bwrap",
+          "sha256": "c547cbdc762a70ed216789ffaa4c6c0e7d2beabe32245a498f8e365a9fc8dab4",
+          "size": 529168
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/bin/codex",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex",
+          "sha256": "113aa5d5952a6fd3950a88323219747d0c91978ebee948509a540c8a460e59a3",
+          "size": 247524632
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/bin/codex-code-mode-host",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex-code-mode-host",
+          "sha256": "6979f2fea8cb1d5d72614abfe2f42b16727cdce2c356cc6af933157e732a7277",
+          "size": 66921472
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
+          "sha256": "028cce6a14b5f2c6dabe184183d1947ab708b8ddafad6863b9903cc9978b6095",
+          "size": 67057232
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-path/rg",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-path/rg",
+          "sha256": "e36d0eb52e70696bdf1781392722e05a21bb91d3b7b762ef5ec20e5df2ec687b",
+          "size": 4506992
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
+          "sha256": "7feeacd883e1dc749847936948c378653c80a69ec4a9542f0f126b411882c179",
+          "size": 878056
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
+          "sha256": "234e9ef87e976e292fc842e9385a4c9dd7e5fe6531740904007d2655e8835074",
+          "size": 2590176
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
+          "sha256": "01da1f362d68b4ce4e948e36d4bad44f0b1c0dd662ea162c946d076599a3d8f3",
+          "size": 1565504
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
+          "sha256": "747366160b22b78407ea1624395094c6f874802027a0f5e0a873c59930cf288a",
+          "size": 16584
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
+          "sha256": "0dd31d832cf0e4057570dc26e4ff5618b24cd4d279b02c34d6a0450f6599cbc7",
+          "size": 492608
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
+          "sha256": "ed39c48d1a429c3213e1df7ca2543b67718ac23a0406f6bb7237a4fa32b823b3",
+          "size": 33520
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
+          "sha256": "c814926626cf6cba5fd805b56349dedd4bbb3c17603ca5f7b71d72d239a8d5f5",
+          "size": 111856
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
+          "sha256": "e659b727eca719ea5bf21f0f4277b05a9beca0fc49a2695323526e0704c02fd5",
+          "size": 594072
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
+          "sha256": "93f4eb180b5c8bf95d54e9adfe5b397502d2ccccdc43100000803a9610bbf69d",
+          "size": 570192
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
+          "sha256": "cd42e1a0a518d9cd4834526bb2fa3191a7ab3e19aecaba4eb63ffc08eb0f2994",
+          "size": 78152
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
+          "sha256": "8adb2913de82cf400a56c98c0671857c140a2940b65df889936eddd313e90362",
+          "size": 341720
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
+          "sha256": "f9c1a90a458355194524c41b22b083c244332fe61fe1b70ad955922cf501e11b",
+          "size": 1682744
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
+          "sha256": "e727766dd06347e408fc4c81e7401eecc1c47239de55c06b6237b610ad9ff260",
+          "size": 222344
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
+          "sha256": "9e740b30edde1c8be8cc72c69a860a47e92f8969f580b41256cde6ee09262f0e",
+          "size": 274480
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
+          "sha256": "5da004673b00bb2ec06501ca7bd650706c722e13b87ed7632ef5814329c9bda3",
+          "size": 1049992
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
+          "sha256": "8b421c72204baa5282580503bc187875dd650299a0256750cdd9468703105a06",
+          "size": 499096
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libpcre2-8.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libpcre2-8.so.0",
+          "sha256": "ed12ebb1003748d284f98c4f90f060a80e25f085b0251c8d8ebcc7fa8ba58f35",
+          "size": 412576
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libz.so.1",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libz.so.1",
+          "sha256": "284a7e1475cccabdda7fb91d9917a95a1abfbe73688033acc7ac27241d97ceca",
+          "size": 112752
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libffi.so.8",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libffi.so.8",
+          "sha256": "51cb79b1866970f577b87dca19bf8e77bb28d3dd3bed27b7ace57780cb86ef49",
+          "size": 97368
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libintl.so.8",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libintl.so.8",
+          "sha256": "b5c96edabcd6f9a9e444c325b0fd191ad480555cea7cc799970507303d413fa6",
+          "size": 6904
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-package.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-package.json",
+          "sha256": "d408845280e8ffe021b53343eb51aeda5ce641b851682be2362c2ecf5e306da0",
+          "size": 206
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/manifest.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/manifest.json",
+          "sha256": "06dee2a9e6b40c20ff34d255facc27042f2acd378f7c314dea60ce99adbcfbfb",
+          "size": 4770
+        },
+        {
+          "member": "package/package.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/package.json",
+          "sha256": "dd308d68cf5659e804b7409cb4851150ac58d4498f03a979446c22c1d22023f6",
+          "size": 515
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/runtime.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/runtime.json",
+          "sha256": "0a21652e0af91c9b80d52d9c9ba5038214c7820919eb29d208609d86bd65dd95",
+          "size": 14536
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/sources.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/sources.json",
+          "sha256": "e2f6b124f6277e7c3c4f5c7cc8830c66190f671ad65e972bb2cc9507dbfcb937",
+          "size": 4911
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/NOTICE.md",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/NOTICE.md",
+          "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48",
+          "size": 2403
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md",
+          "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
+          "size": 4011
+        },
+        {
+          "member": "package/README.md",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/README.md",
+          "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
+          "size": 3334
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
+          "sha256": "ee908e36f90ffad21b33466f8c8b5c7c5900ec0353def57aea43ea250ed06fee",
+          "size": 7264
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
+          "sha256": "f3f01582d621161aeb2508980bdc1999d91833a28a2d6c975c95dd9784055aef",
+          "size": 42600
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
+          "sha256": "dcdb224e78c8afdeb8633b6c4d6d529349468f82503b5a7c560d17d71067a2bc",
+          "size": 36136
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
+          "sha256": "0fdd8058ad1a07aee05d847525684c81fe7c703a287814fcabb4e1e522fcdd2e",
+          "size": 477024
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
+          "sha256": "f5daa0745bd3b776c3d5000aefcc153f51c8827510a4df680049ddb757185227",
+          "size": 72120
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
+          "sha256": "6d2b9fd22ce4d63a765fc4688734432786207dc9eb6d4cf3205d969ce6e801f3",
+          "size": 771240
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
+          "sha256": "62528cacb9ff20d84439d6e47795d8a5bc2a1421b002c8784a36629a0ae529fd",
+          "size": 571648
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt",
+          "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+          "size": 26431
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt",
+          "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
+          "size": 1132
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt",
+          "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+          "size": 1945
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt",
+          "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+          "size": 25292
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt",
+          "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+          "size": 1444
+        },
+        {
+          "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt",
+          "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+          "size": 1002
+        }
+      ],
+      "slsa_acquisition": {
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.159.2-linux-arm64",
+        "sha256": "4f910afc7a39194e405dca67cca82acf98a4326e23210807cd6db155ffc139eb",
+        "size": 14813,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "slsa_statement": {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [
+          {
+            "name": "pkg:npm/%40openai/codex@0.159.2-linux-arm64",
+            "digest": {
+              "sha512": "3e6d16d8f9c579312a3f1f80388c20395078741b58db872e0f4b71d618c2a2beb409b4804fb5813d954d508352ad3083acc9ddbd00baee9ef5644cfe8263cf90"
+            }
+          }
+        ],
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "predicate": {
+          "buildDefinition": {
+            "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
+            "externalParameters": {
+              "workflow": {
+                "ref": "refs/tags/rust-v0.159.2",
+                "repository": "https://github.com/openai/codex",
+                "path": ".github/workflows/rust-release.yml"
+              }
+            },
+            "internalParameters": {
+              "github": {
+                "event_name": "push",
+                "repository_id": "965415649",
+                "repository_owner_id": "14957082"
+              }
+            },
+            "resolvedDependencies": [
+              {
+                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.159.2",
+                "digest": {
+                  "gitCommit": "ff6aec96948b70d94983af2641a6b67c94faeff5"
+                }
+              }
+            ]
+          },
+          "runDetails": {
+            "builder": {
+              "id": "https://github.com/actions/runner/github-hosted"
+            },
+            "metadata": {
+              "invocationId": "https://github.com/openai/codex/actions/runs/36642524844/attempts/1"
+            }
+          }
+        }
+      },
+      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed"
+    }
+  ],
+  "codex-amd64-npm": [
+    {
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.159.2.tgz",
+      "sha256": "cf1e5d7b6e317a4a1d36dbff2ebd9b3cf048ac98d06fcb6682c57248e023cad2",
+      "size": 4904,
+      "integrity": "sha512-SE13C3nZCYoVL569BdegoOl6vwjb7o2sXOo7ivwVzaVoY0cswwi0/6pIE0TyO/C0vIkQh3jslExitET7PBTfIg==",
+      "signature_verified": false,
+      "members": [
+        {
+          "member": "package/bin/codex.js",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/bin/codex.js",
+          "sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+          "size": 8790
+        },
+        {
+          "member": "package/package.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/package.json",
+          "sha256": "d4e69a623f79ede30c5abb2a4a4bef8b7ff71dbda1362ebe198676ab56113c15",
+          "size": 1082
+        },
+        {
+          "member": "package/README.md",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/README.md",
+          "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
+          "size": 3334
+        }
+      ],
+      "slsa_acquisition": {
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.159.2",
+        "sha256": "0574ca993bba7c4ec813baa53fff05815a9b877744b268a9d9bc4dd4287ea684",
+        "size": 14685,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "slsa_statement": {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [
+          {
+            "name": "pkg:npm/%40openai/codex@0.159.2",
+            "digest": {
+              "sha512": "484d770b79d9098a152f9ebd05d7a0a0e97abf08dbee8dac5cea3b8afc15cda56863472cc308b4ffaa481344f23bf0b4bc89108778ec944c62b444fb3c14df22"
+            }
+          }
+        ],
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "predicate": {
+          "buildDefinition": {
+            "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
+            "externalParameters": {
+              "workflow": {
+                "ref": "refs/tags/rust-v0.159.2",
+                "repository": "https://github.com/openai/codex",
+                "path": ".github/workflows/rust-release.yml"
+              }
+            },
+            "internalParameters": {
+              "github": {
+                "event_name": "push",
+                "repository_id": "965415649",
+                "repository_owner_id": "14957082"
+              }
+            },
+            "resolvedDependencies": [
+              {
+                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.159.2",
+                "digest": {
+                  "gitCommit": "ff6aec96948b70d94983af2641a6b67c94faeff5"
+                }
+              }
+            ]
+          },
+          "runDetails": {
+            "builder": {
+              "id": "https://github.com/actions/runner/github-hosted"
+            },
+            "metadata": {
+              "invocationId": "https://github.com/openai/codex/actions/runs/36642524844/attempts/1"
+            }
+          }
+        }
+      },
+      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed"
+    },
+    {
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.159.2-linux-x64.tgz",
+      "sha256": "84a6b35fb45bdcb94cef9fcb329438045a8911f53876cc9a9a7e6f9bb1382eba",
+      "size": 162475310,
+      "integrity": "sha512-RrCZ1X52wpa1lOsXtCtSyhjOFdQPh7LH5Ccv8HsKmd/2UXbUwxXFqWXFK3JzatquUNGtW/TLox5Y7qVOGkV0/Q==",
+      "signature_verified": false,
+      "members": [
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
+          "sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+          "size": 529776
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/bin/codex",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
+          "sha256": "1748767b230ebfc3d4ab7e4e254920d0c0ad9691fd8c11f190e7d44511a4a92e",
+          "size": 286754152
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
+          "sha256": "5b2c075ac2380fa04d76d7313fbc044d29c8d0a0d0b9138415acd4610211ca03",
+          "size": 74068880
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
+          "sha256": "ec657f62509489459849219047bf397f05c0a09c5d2f092a07c9edbdfb89c769",
+          "size": 64531104
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-path/rg",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-path/rg",
+          "sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+          "size": 5408904
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/zsh/bin/zsh",
+          "sha256": "67faaaa89242c4a332e16e508a1977cffc24bf7fca31d4411cdfd101f3831ef3",
+          "size": 898480
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
+          "sha256": "81d92399c8d3c4b97cfe8058750387a51d8dd03de408aa943a4c83fb74704f8d",
+          "size": 2307904
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
+          "sha256": "cfa99126563d2b434a239fcafaa91af531131da85c4afe5c2975d26a0486d765",
+          "size": 1480224
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
+          "sha256": "14e6c565b48399a157a7c75a471c70f35b59959547ff31d9487ff9cecd0b4f5a",
+          "size": 15656
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
+          "sha256": "4d60cc690456b854109d82443c6d80ca8d83224964fcba007a035379c2a103e6",
+          "size": 449600
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
+          "sha256": "3a3b5a49b39f087c2d8a66057051b97d347db274edfdf0c220267ef56e87d1a9",
+          "size": 30128
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
+          "sha256": "55a6d6f7ec47f97efa69f7a112e0e9bb20ae06a3cd8753eb37125d8dba6531d4",
+          "size": 105200
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
+          "sha256": "0d074b4119f64399f7c0ee5857dc62c2cdcf2b31af8378abbced2887b6b1c8d3",
+          "size": 597832
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
+          "sha256": "5f4a20109b86120ed9327a48d80549ec98750c7dc08f9b8838886438962d6747",
+          "size": 564592
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
+          "sha256": "770aae3497bf3128e92cfbb3fb7369be1263ed212c5b94bfe3fa0f55335c229b",
+          "size": 73856
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
+          "sha256": "60a654b690be3da35418e75294bbf243a9e953c4905a194bdee5498f3d8558a1",
+          "size": 316576
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
+          "sha256": "8fadf43bdb8e81b29662277ff42424fd8b9f998207f6bfe703b900a467478e7a",
+          "size": 1548568
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
+          "sha256": "a48ef4b17b0bd22630dda672c4c9a81dc1fd4b32ca6d1a809c4de88796050d3d",
+          "size": 209200
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
+          "sha256": "4e1afca9a1bfe815ea0e18c4caeccee5923935ee277c9709957a98b62fb28615",
+          "size": 268280
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
+          "sha256": "6254a976661d2a3807071dd35dd70a47e7f4232c18dae3a722dc75e64d858c53",
+          "size": 975136
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
+          "sha256": "8596a3dc8e3f85ebf0649e45e649a584d4ea472c646bd0c0ce4bf0f76aeb72cd",
+          "size": 565744
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libpcre2-8.so.0",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libpcre2-8.so.0",
+          "sha256": "e39519b242f40686734ed8d0218f68cac24f0e956ec64c8c1b49b9da5cc9788b",
+          "size": 442424
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libz.so.1",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libz.so.1",
+          "sha256": "6c5d765f42d9368cc4bdbd11f725c1bcf6b14b78322033d3c94f787fc6261f5e",
+          "size": 109296
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libffi.so.8",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libffi.so.8",
+          "sha256": "6ef5db59b2e4b1eb63032fa6c8afb1669bc09b073789233c379efda85b1353db",
+          "size": 63112
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libintl.so.8",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libintl.so.8",
+          "sha256": "f50f3ab34be7b3392f2db82bd67d50e133b35fa41d352dc3b3a97b70b0ffd960",
+          "size": 6288
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-package.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-package.json",
+          "sha256": "6e812d1eecc3ffa0b339df730a53137d8ec1d1e2617d09c23878bd25e1a56845",
+          "size": 205
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/manifest.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/manifest.json",
+          "sha256": "f2cc6166e9ae10f623490a976b2b0f00eaa9d8aa10dad1b7bf1924116668664d",
+          "size": 4768
+        },
+        {
+          "member": "package/package.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/package.json",
+          "sha256": "64bcf4ada80b1236fbc20de2a41f10cd91ede666e50350148a931e221eb5c25f",
+          "size": 511
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/runtime.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/runtime.json",
+          "sha256": "3dbfc637044aab6a4bb1cbab0f3bf3fa55fa3c7c7f8470351ca8e9591f76dcc2",
+          "size": 13941
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/sources.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/sources.json",
+          "sha256": "e2f6b124f6277e7c3c4f5c7cc8830c66190f671ad65e972bb2cc9507dbfcb937",
+          "size": 4911
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/NOTICE.md",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/NOTICE.md",
+          "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48",
+          "size": 2403
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md",
+          "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
+          "size": 4011
+        },
+        {
+          "member": "package/README.md",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/README.md",
+          "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
+          "size": 3334
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
+          "sha256": "05372bf869c2b4ce254eb596ecbe6dae7508b34c21994d2aa3bac534f01aae05",
+          "size": 6488
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
+          "sha256": "657f8d61ea52a663591f38f9e3ed9a6fb296de17c4f45fcf8a57c332a6e5bb5b",
+          "size": 40928
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
+          "sha256": "fc2888cf80bcf2f44d613eb7f86bd9e0988a1cae21ee86c8a62a00f1c559456b",
+          "size": 35120
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
+          "sha256": "f946fbc9f37b4d775f2c52d45f68e61dddb8e9f824c3fddcc9ae046f8a8c1477",
+          "size": 473176
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
+          "sha256": "75af8aa18e6fbc14e2198c5334a17043a46027612b34cb482d912c3c5df8839d",
+          "size": 71992
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
+          "sha256": "c58d49189b52d88910147bbbb3673700e927c518b3a7880e8b3a149fcccb062a",
+          "size": 739744
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
+          "sha256": "894f7c73a26d2360203f17bfe5e56095fa7333ac2abc403a7f1dc19a8ee9f3b2",
+          "size": 558104
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt",
+          "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
+          "size": 26431
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt",
+          "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
+          "size": 1132
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt",
+          "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
+          "size": 1945
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt",
+          "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
+          "size": 25292
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt",
+          "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
+          "size": 1444
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt",
+          "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
+          "size": 1002
+        }
+      ],
+      "slsa_acquisition": {
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.159.2-linux-x64",
+        "sha256": "5fff08bfe2d54eb9f17120b2fc17e2d4093d2a4d026003c6d522a3c255983b63",
+        "size": 14865,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "slsa_statement": {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [
+          {
+            "name": "pkg:npm/%40openai/codex@0.159.2-linux-x64",
+            "digest": {
+              "sha512": "46b099d57e76c296b594eb17b42b52ca18ce15d40f87b2c7e4272ff07b0a99dff65176d4c315c5a965c52b72736adaae50d1ad5bf4cba31e58eea54e1a4574fd"
+            }
+          }
+        ],
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "predicate": {
+          "buildDefinition": {
+            "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
+            "externalParameters": {
+              "workflow": {
+                "ref": "refs/tags/rust-v0.159.2",
+                "repository": "https://github.com/openai/codex",
+                "path": ".github/workflows/rust-release.yml"
+              }
+            },
+            "internalParameters": {
+              "github": {
+                "event_name": "push",
+                "repository_id": "965415649",
+                "repository_owner_id": "14957082"
+              }
+            },
+            "resolvedDependencies": [
+              {
+                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.159.2",
+                "digest": {
+                  "gitCommit": "ff6aec96948b70d94983af2641a6b67c94faeff5"
+                }
+              }
+            ]
+          },
+          "runDetails": {
+            "builder": {
+              "id": "https://github.com/actions/runner/github-hosted"
+            },
+            "metadata": {
+              "invocationId": "https://github.com/openai/codex/actions/runs/36642524844/attempts/1"
+            }
+          }
+        }
+      },
+      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed"
+    }
+  ],
+  "kit-arm64-codex": {
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-aarch64-unknown-linux-musl.tar.gz",
+    "sha256": "d6c7e62fbd688d52ee04f3929d0613705d32a920a42db7a139e366eaf1f4a2d7",
+    "size": 94309124,
+    "integrity": null,
+    "signature_verified": false,
+    "members": [
+      {
+        "member": "codex-aarch64-unknown-linux-musl",
+        "sha256": "298d3d73d0bbc1367e58a370df5b6216fe30ce0a92e8b6b0afb0377a958dc335",
+        "size": 232726912,
+        "mode": 493
+      }
+    ]
+  },
+  "kit-arm64-codex-code-mode-host": {
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz",
+    "sha256": "516f2ed76d4ae96c2074d3c08f4576ed1bdc5c3a97e26734d7319de8b6861683",
+    "size": 24355380,
+    "integrity": null,
+    "signature_verified": false,
+    "members": [
+      {
+        "member": "codex-code-mode-host-aarch64-unknown-linux-musl",
+        "sha256": "7348d1c1cee36270b5599da24ed431e1ac6372666a94bb09e09ef87d1bc9e3b8",
+        "size": 63381656,
+        "mode": 493
+      }
+    ]
+  },
+  "kit-amd64-codex": {
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-x86_64-unknown-linux-musl.tar.gz",
+    "sha256": "a0ef8b2debc3bf747e07b1a039354de31300ac0dcc2276498ba281470b5d9115",
+    "size": 101581479,
+    "integrity": null,
+    "signature_verified": false,
+    "members": [
+      {
+        "member": "codex-x86_64-unknown-linux-musl",
+        "sha256": "0753dfe1d8b87a52436deb13eb1c549661ef4c84fee2c5aa688385eebeccb761",
+        "size": 269273536,
+        "mode": 493
+      }
+    ]
+  },
+  "kit-amd64-codex-code-mode-host": {
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz",
+    "sha256": "9fd083743af55be818aceb351d371fb5136f5b6aa3938f167087373d27067b2d",
+    "size": 25727325,
+    "integrity": null,
+    "signature_verified": false,
+    "members": [
+      {
+        "member": "codex-code-mode-host-x86_64-unknown-linux-musl",
+        "sha256": "210ab8ebaebf4bc1421d9e30339c858354ca35fa91e2f87f4c6204e5382f8a63",
+        "size": 69423168,
+        "mode": 493
+      }
+    ]
+  },
+  "clipboard": {
+    "revision": "54a695035350bab5f126a88c892a9bc3b5ae162a",
+    "license_sha256": "aedab40ad891a0108bff8780a6127226f2fa4cf9ae606e0177d24673d3f4a9d1",
+    "computed_git_blob_sha1": "9d71495b51b5b9115064549f01e61e9d2ebec23d",
+    "acquisition": "The Git blob ID above is computed from the retained LICENSE text.",
+    "third_party_notices": "The THIRD-PARTY-NOTICES file referenced by the LICENSE is not published. The golang.org/x/sys v0.46.0 notice is collected separately for that dependency.",
+    "spdx_reconciliation": "Completed using the public image's primary legal files, receipt SHA256 7a04cf1008303b0a5fd344f408958b1dcd8717bd096317a05c4fe25a8e85dfed. See clipboard-spdx-reconciliation.json: the proprietary declaration and full commit agree; the x/sys purl agrees with the v0.46.0 build information, but the vendor versionInfo/downloadLocation/SHA1 fields repeat the main repository commit. Vendor bytes are retained unchanged."
+  }
+}

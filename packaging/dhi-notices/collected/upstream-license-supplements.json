@@ -1,0 +1,10 @@
+[
+  {
+    "module": "github.com/moby/extensions@v0.0.0-20260909112015-86305e92aa39",
+    "scope": "Upstream maintainer subsequently added Apache-2.0 licensing and SPDX source headers to the existing project on 2026-09-17. The 2026-09-09 module archive contains no license text; this supplement is not claimed to have appeared in that archive.",
+    "url": "https://raw.githubusercontent.com/moby/extensions/e5d80bc0b1e93239364fd283ae1292baa936073b/LICENSE",
+    "revision": "e5d80bc0b1e93239364fd283ae1292baa936073b",
+    "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+  }
+]

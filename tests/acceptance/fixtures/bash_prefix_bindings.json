@@ -1,0 +1,102 @@
+{
+  "provenance": {
+    "description": "GNU-observed scalar command-prefix attribute/value boundaries and BASHPID ignored-RHS policy; exact streams/effects, no PID normalization"
+  },
+  "cases": [
+    {
+      "stdin": "declare +i BASHPID='1/0'; echo status:$?\n",
+      "group": "bashpid-ignore-rhs",
+      "index": 0
+    },
+    {
+      "stdin": "BASHPID='1/0'; echo status:$?\n",
+      "group": "bashpid-ignore-rhs",
+      "index": 1
+    },
+    {
+      "stdin": "declare +i BASHPID='side=8'; echo status:$? side:${side-unset}\n",
+      "group": "bashpid-ignore-rhs",
+      "index": 2
+    },
+    {
+      "stdin": "declare +i BASHPID; BASHPID='side=9'; echo status:$? side:${side-unset}\n",
+      "group": "bashpid-ignore-rhs",
+      "index": 3
+    },
+    {
+      "stdin": "readonly BASHPID; BASHPID='1/0'; echo status:$?\n",
+      "group": "bashpid-policy",
+      "index": 0
+    },
+    {
+      "stdin": "set -a; BASHPID=7; printf '<%s>\\n' \"${BASHPID@a}\"\n",
+      "group": "bashpid-policy",
+      "index": 1
+    },
+    {
+      "stdin": "BASHPID=7 /usr/bin/env | grep '^BASHPID='\n",
+      "group": "bashpid-policy",
+      "index": 2
+    },
+    {
+      "stdin": "BASHPID='side=3' /usr/bin/env | grep '^BASHPID='; echo side:${side-unset}\n",
+      "group": "bashpid-policy",
+      "index": 3
+    },
+    {
+      "stdin": "BASHPID=7 eval 'echo value:$BASHPID flags:${BASHPID@a}'\n",
+      "group": "bashpid-prefix",
+      "index": 0
+    },
+    {
+      "stdin": "f() { echo value:$BASHPID flags:${BASHPID@a}; }; BASHPID=7 f\n",
+      "group": "bashpid-prefix",
+      "index": 1
+    },
+    {
+      "stdin": "BASHPID=7 exec /usr/bin/env\n",
+      "group": "bashpid-prefix",
+      "index": 2
+    },
+    {
+      "stdin": "export BASHPID='side=4'; echo side:${side-unset} flags:${BASHPID@a}\n",
+      "group": "bashpid-prefix",
+      "index": 3
+    },
+    {
+      "stdin": "declare -i n=4; n='side=3' /usr/bin/env | grep '^n='; echo side:${side-unset} n:$n\n",
+      "group": "prefix-attributes",
+      "index": 0
+    },
+    {
+      "stdin": "declare -i n=4; n='side=3' eval 'echo n:$n attrs:${n@a}'; echo side:${side-unset} n:$n\n",
+      "group": "prefix-attributes",
+      "index": 1
+    },
+    {
+      "stdin": "declare -n r=x; x=old; r=new /usr/bin/env | grep -E '^(r|x)='; echo r:$r x:$x\n",
+      "group": "prefix-attributes",
+      "index": 2
+    },
+    {
+      "stdin": "SECONDS=7 eval 'echo value:$SECONDS attrs:${SECONDS@a}'\n",
+      "group": "prefix-attributes",
+      "index": 3
+    },
+    {
+      "stdin": "readonly BASHPID; BASHPID=7 /usr/bin/env | grep '^BASHPID='; echo status:${PIPESTATUS[*]}\n",
+      "group": "prefix-attributes",
+      "index": 4
+    },
+    {
+      "stdin": "set -a; declare BASHPID=7; echo flags:${BASHPID@a}\n",
+      "group": "prefix-append-export",
+      "index": 0
+    },
+    {
+      "stdin": "declare -i n=4; n+='side=3' eval 'echo n:$n attrs:${n@a}'; echo side:${side-unset}\n",
+      "group": "prefix-append-export",
+      "index": 1
+    }
+  ]
+}

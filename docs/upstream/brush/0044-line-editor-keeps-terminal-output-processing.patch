@@ -1,0 +1,94 @@
+diff --git a/brush-interactive/Cargo.toml b/brush-interactive/Cargo.toml
+index 146b348..9cde0ad 100644
+--- a/brush-interactive/Cargo.toml
++++ b/brush-interactive/Cargo.toml
+@@ -20,7 +20,7 @@ default = []
+ basic = ["dep:crossterm", "completion"]
+ completion = []
+ minimal = []
+-reedline = ["dep:reedline", "dep:nu-ansi-term", "completion", "highlighting"]
++reedline = ["dep:reedline", "dep:crossterm", "dep:libc", "dep:nu-ansi-term", "completion", "highlighting"]
+ highlighting = []
+ 
+ [lints]
+@@ -38,3 +38,6 @@ reedline = { version = "0.51.0", optional = true }
+ thiserror = "2.0.18"
+ tokio = { version = "1.52.3", features = ["io-std", "io-util", "rt", "sync"] }
+ tracing = "0.1.44"
++
++[target.'cfg(unix)'.dependencies]
++libc = { version = "0.2.183", optional = true }
+diff --git a/brush-interactive/src/reedline/input_backend.rs b/brush-interactive/src/reedline/input_backend.rs
+index d7ab926..e1e26b1 100644
+--- a/brush-interactive/src/reedline/input_backend.rs
++++ b/brush-interactive/src/reedline/input_backend.rs
+@@ -178,6 +178,8 @@ impl InputBackend for ReedlineInputBackend {
+ 
+         let mut attempt: u32 = 1;
+         loop {
++            #[cfg(unix)]
++            enter_raw_mode_keeping_output_processing();
+             match reedline.read_line(&prompt) {
+                 Ok(reedline::Signal::Success(s)) => {
+                     self.answered = true;
+@@ -360,6 +362,60 @@ mod tests {
+     }
+ }
+ 
++/// Puts the terminal in crossterm's raw mode *before* reedline does, keeping
++/// the terminal's output flags (`c_oflag`: `OPOST`, `ONLCR`, ...) as they
++/// were. reedline's own `enable_raw_mode()` is then a no-op (crossterm keeps
++/// one saved mode), and its `disable_raw_mode()` restores the full original
++/// termios when the line is read.
++///
++/// `cfmakeraw` clears `OPOST`, so without this a background job that writes
++/// `a\nb\n` while the prompt is up stair-steps (LF without CR). GNU readline
++/// leaves output processing on while editing, and so does this.
++#[cfg(unix)]
++fn enter_raw_mode_keeping_output_processing() {
++    use std::os::fd::AsRawFd as _;
++
++    // The descriptor crossterm uses: stdin when it is a terminal, else /dev/tty.
++    // SAFETY: isatty on a constant descriptor.
++    let tty_file;
++    let fd = if unsafe { libc::isatty(libc::STDIN_FILENO) } == 1 {
++        libc::STDIN_FILENO
++    } else if let Ok(file) = std::fs::OpenOptions::new()
++        .read(true)
++        .write(true)
++        .open("/dev/tty")
++    {
++        tty_file = file;
++        tty_file.as_raw_fd()
++    } else {
++        return;
++    };
++
++    // SAFETY: termios is plain data; tcgetattr fills it on success.
++    let mut original: libc::termios = unsafe { std::mem::zeroed() };
++    if unsafe { libc::tcgetattr(fd, &raw mut original) } != 0 {
++        return;
++    }
++    // A failure here is reported by reedline's own attempt.
++    if crossterm::terminal::enable_raw_mode().is_err() {
++        return;
++    }
++    // SAFETY: as above.
++    let mut raw: libc::termios = unsafe { std::mem::zeroed() };
++    if unsafe { libc::tcgetattr(fd, &raw mut raw) } != 0 || raw.c_oflag == original.c_oflag {
++        return;
++    }
++    raw.c_oflag = original.c_oflag;
++    // SAFETY: fd is an open terminal; raw is a valid termios.
++    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw const raw) } != 0 {
++        tracing::debug!(
++            target: trace_categories::INPUT,
++            "could not keep terminal output processing on: {}",
++            std::io::Error::last_os_error()
++        );
++    }
++}
++
+ /// Whether `err` is crossterm's timeout waiting for a cursor position report.
+ fn is_cursor_position_timeout(err: &std::io::Error) -> bool {
+     err.to_string()

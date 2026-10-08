@@ -1,0 +1,88 @@
+{
+  "schema": "marsh.current-notice-disposition/v2",
+  "historical_input_sha256": "6c8febf3a4fc0e14106c2de88a27fa2de08319c1240092816c4cbebdb92473de",
+  "current_resolution_index": "primary-source-notices.json",
+  "unresolved_original_texts": [
+    {
+      "name": "debugserver-types",
+      "version": "0.5.0",
+      "crate_url": "https://static.crates.io/crates/debugserver-types/debugserver-types-0.5.0.crate",
+      "reason": "Original declaration/headers retained; no original MIT full licence text located in exact archive/upstream source",
+      "source_default_linux_normal_consumers": {
+        "0.159.2": [
+          "aarch64-unknown-linux-musl",
+          "x86_64-unknown-linux-musl"
+        ],
+        "0.155.1": [
+          "aarch64-unknown-linux-musl",
+          "x86_64-unknown-linux-musl"
+        ],
+        "0.156.1": [
+          "aarch64-unknown-linux-musl",
+          "x86_64-unknown-linux-musl"
+        ]
+      },
+      "scope": "Informational standard MIT conditions accompany the original declaration; original full-text/rights disposition remains unresolved. Exact VCS trees were rechecked; see source-records/external-wrapper-source-recheck.json."
+    },
+    {
+      "name": "deno_core_icudata",
+      "version": "0.77.0",
+      "crate_url": "https://static.crates.io/crates/deno_core_icudata/deno_core_icudata-0.77.0.crate",
+      "reason": "Original declaration/headers retained; no original MIT full licence text located in exact archive/upstream source",
+      "source_default_linux_normal_consumers": {
+        "0.159.2": [
+          "aarch64-unknown-linux-musl",
+          "x86_64-unknown-linux-musl"
+        ],
+        "0.155.1": [
+          "aarch64-unknown-linux-musl",
+          "x86_64-unknown-linux-musl"
+        ],
+        "0.156.1": [
+          "aarch64-unknown-linux-musl",
+          "x86_64-unknown-linux-musl"
+        ]
+      },
+      "scope": "Informational standard MIT conditions accompany the original declaration; original full-text/rights disposition remains unresolved. Exact VCS trees were rechecked; see source-records/external-wrapper-source-recheck.json."
+    }
+  ],
+  "upstream_material_clarifications": {
+    "difflib": {
+      "notices": [
+        {
+          "file": "texts/6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5.txt",
+          "sha256": "6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5",
+          "url": "https://raw.githubusercontent.com/DimaKudosh/difflib/8748d65b8c631a244af70f9d9f0339b6e7e9d29c/LICENSE",
+          "commit": "8748d65b8c631a244af70f9d9f0339b6e7e9d29c"
+        }
+      ],
+      "acquisition": {
+        "url": "https://raw.githubusercontent.com/DimaKudosh/difflib/8748d65b8c631a244af70f9d9f0339b6e7e9d29c/LICENSE",
+        "sha256": "6725d1437fc6c77301f2ff0e7d52914cf4f9509213e1078dc77d9356dbe6eac5",
+        "size": 1086,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "version_caveat": "Licence introduced with0.3.0 before0.4.0;0.4.0 crate include list omits it and has no VCS record. Preserve upstream copyright Kevin B. Knapp verbatim; no inferred author identity or exact0.4.0 tree guarantee."
+    },
+    "fax": {
+      "notices": [
+        {
+          "file": "texts/7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff.txt",
+          "sha256": "7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff",
+          "url": "https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE",
+          "commit": "5d70a161e33b62305f8bce7af3f7fbd011cfaf5d"
+        }
+      ],
+      "acquisition": {
+        "url": "https://raw.githubusercontent.com/pdf-rs/fax/5d70a161e33b62305f8bce7af3f7fbd011cfaf5d/LICENSE",
+        "sha256": "7101390b4c8edd752f4c0de47f35d61b44d9cf0ee8dd032115e25644e277cfff",
+        "size": 1075,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "version_caveat": "Successor clarification added2025-09-15 after0.2.6 source40b226eb (2025-08-31). Not claimed present in the old published archive. Preserve Copyright \u00a92021 The pdf-rs contributers verbatim."
+    }
+  },
+  "scope": "Current disposition, not stale raw archive missing-file counts or runtime qualification. Historical input is retained in regeneration seed evidence."
+}

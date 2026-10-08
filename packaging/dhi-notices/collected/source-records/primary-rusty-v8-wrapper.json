@@ -1,0 +1,16 @@
+{
+  "notices": [
+    {
+      "file": "texts/1c6356fb751d45f0c53093ebf8a7f5e580e802f51999178e19d60f3ec39e147d.txt",
+      "sha256": "1c6356fb751d45f0c53093ebf8a7f5e580e802f51999178e19d60f3ec39e147d",
+      "acquisition": {
+        "url": "https://raw.githubusercontent.com/denoland/rusty_v8/5c15a6995c9bb4bacd3e341b59fff32c909c80bf/LICENSE",
+        "sha256": "1c6356fb751d45f0c53093ebf8a7f5e580e802f51999178e19d60f3ec39e147d",
+        "size": 1078,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "scope": "Original rusty_v8 wrapper licence from the exact crate-recorded upstream commit; crate dirty=true remains explicit, not a full clean-source assertion."
+    }
+  ]
+}

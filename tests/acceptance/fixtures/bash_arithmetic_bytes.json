@@ -1,0 +1,398 @@
+{
+  "provenance": {
+    "description": "Exact GNU33 parser-owner source controls plus five indirect-label and four positive caller controls; invalid/unsupported results remain failures"
+  },
+  "cases": [
+    {
+      "group": "arithmetic-provenance",
+      "index": 0,
+      "name": "division_spacing",
+      "args_hex": [
+        "2d63",
+        "7a65726f3d303b206563686f2022242828200937202f20287a65726f29202b20392020292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 1,
+      "name": "division_unary",
+      "args_hex": [
+        "2d63",
+        "6563686f20222428282037202f202d2030202b203920292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 2,
+      "name": "division_comma",
+      "args_hex": [
+        "2d63",
+        "6563686f202224282837202f20302c2033292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 3,
+      "name": "modulo_tail",
+      "args_hex": [
+        "2d63",
+        "6563686f20222428283720252028312d3129202b2034292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 4,
+      "name": "negative_power_tail",
+      "args_hex": [
+        "2d63",
+        "6563686f202224282832202a2a202d31202b2039292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 5,
+      "name": "negative_power_end",
+      "args_hex": [
+        "2d63",
+        "6563686f202224282832202a2a202d31292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 6,
+      "name": "negative_power_paren",
+      "args_hex": [
+        "2d63",
+        "6563686f202224282832202a2a20282d3129292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 7,
+      "name": "compound_division_tail",
+      "args_hex": [
+        "2d63",
+        "7a3d343b2028287a202f3d2028312d31292c20382929"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 8,
+      "name": "compound_division_end",
+      "args_hex": [
+        "2d63",
+        "7a3d343b2028287a202f3d2028312d31292929"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 9,
+      "name": "compound_modulo_tail",
+      "args_hex": [
+        "2d63",
+        "7a3d343b2028287a20253d20302c20382929"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 10,
+      "name": "expanded_parameter",
+      "args_hex": [
+        "2d63",
+        "7a3d303b206563686f20222428282037202f20247b7a7d202b203920292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 11,
+      "name": "nested_arithmetic",
+      "args_hex": [
+        "2d63",
+        "6563686f20222428282032202b202428282037202f203020292920292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 12,
+      "name": "integer_assignment",
+      "args_hex": [
+        "2d63",
+        "6465636c617265202d69206e3b206e3d222037202f2030202b20332022"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 13,
+      "name": "recursive_self",
+      "args_hex": [
+        "2d63",
+        "613d22202061202b20312020223b206563686f2022242828206120292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 14,
+      "name": "recursive_mutual",
+      "args_hex": [
+        "2d63",
+        "613d623b20623d613b206563686f2022242828206120292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 15,
+      "name": "raw_expression",
+      "args_hex": [
+        "2d63",
+        "613d2231202f2030fffe223b206563686f202224282861292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 16,
+      "name": "raw_associative_operand",
+      "args_hex": [
+        "2d63",
+        "6465636c617265202d4120613b20615b24275c7866665c786665275d3d303b206563686f202224282837202f20615b24275c7866665c786665275d202b2034292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 17,
+      "name": "unbound_bare_positional",
+      "args_hex": [
+        "2d63",
+        "736574202d753b206563686f2022243122"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 18,
+      "name": "unbound_braced_positional",
+      "args_hex": [
+        "2d63",
+        "736574202d753b206563686f2022247b317d22"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 19,
+      "name": "unbound_bare_special",
+      "args_hex": [
+        "2d63",
+        "736574202d753b206563686f2022242122"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 20,
+      "name": "unbound_braced_special",
+      "args_hex": [
+        "2d63",
+        "736574202d753b206563686f2022247b217d22"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 21,
+      "name": "unbound_nested_bare",
+      "args_hex": [
+        "2d63",
+        "736574202d753b206563686f2022247b782d24317d22"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 22,
+      "name": "unbound_nested_braced",
+      "args_hex": [
+        "2d63",
+        "736574202d753b206563686f2022247b782d247b317d7d22"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 23,
+      "name": "unbound_arithmetic_bare",
+      "args_hex": [
+        "2d63",
+        "736574202d753b206563686f202224282831202b202431292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 24,
+      "name": "unbound_arithmetic_braced",
+      "args_hex": [
+        "2d63",
+        "736574202d753b206563686f202224282831202b20247b317d292922"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 25,
+      "name": "unbound_named",
+      "args_hex": [
+        "2d63",
+        "736574202d753b206563686f2022246d697373696e6722"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 26,
+      "name": "unbound_indirect",
+      "args_hex": [
+        "2d63",
+        "736574202d753b207265663d6d697373696e673b206563686f2022247b217265667d22"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 27,
+      "name": "multiline_word",
+      "args_hex": [
+        "2d63",
+        "736574202d750a7072696e74662022257322202266697273740a2431220a"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 28,
+      "name": "file_context",
+      "args_hex": [
+        "61726974686d657469632e696e63"
+      ],
+      "stdin_hex": "",
+      "test_files": [
+        {
+          "path": "arithmetic.inc",
+          "contents_hex": "2320736f7572636520636f6d6d656e740a662829207b0a20206563686f20222428282037202f2030202b2038202929220a7d0a660a"
+        }
+      ]
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 29,
+      "name": "source_context",
+      "args_hex": [
+        "2d63",
+        "2e202e2f61726974686d657469632e696e63"
+      ],
+      "stdin_hex": "",
+      "test_files": [
+        {
+          "path": "arithmetic.inc",
+          "contents_hex": "2320736f7572636520636f6d6d656e740a662829207b0a20206563686f20222428282037202f2030202b2038202929220a7d0a660a"
+        }
+      ]
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 30,
+      "name": "eval_context",
+      "args_hex": [
+        "2d63",
+        "6576616c2022243122",
+        "70726f6265",
+        "2320736f7572636520636f6d6d656e740a662829207b0a20206563686f20222428282037202f2030202b2038202929220a7d0a660a"
+      ],
+      "stdin_hex": ""
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 31,
+      "name": "stdin_context",
+      "args_hex": [],
+      "stdin_hex": "2320736f7572636520636f6d6d656e740a662829207b0a20206563686f20222428282037202f2030202b2038202929220a7d0a660a"
+    },
+    {
+      "group": "arithmetic-provenance",
+      "index": 32,
+      "name": "source_function_nounset",
+      "args_hex": [
+        "2d63",
+        "2e202e2f6e6f756e7365742e696e633b2066"
+      ],
+      "stdin_hex": "",
+      "test_files": [
+        {
+          "path": "nounset.inc",
+          "contents_hex": "2320646566696e6974696f6e0a662829207b0a2020736574202d750a20206563686f20222431220a7d0a"
+        }
+      ]
+    },
+    {
+      "stdin": "set -u; echo \"${!ref}\"\n",
+      "group": "indirect-provenance",
+      "index": 0
+    },
+    {
+      "stdin": "ref=missing; set -u; echo \"${!ref}\"\n",
+      "group": "indirect-provenance",
+      "index": 1
+    },
+    {
+      "stdin": "declare -a a; ref='a[$unknown]'; set -u; echo \"${!ref}\"\n",
+      "group": "indirect-provenance",
+      "index": 2
+    },
+    {
+      "stdin": "declare -A a; ref='a[$unknown]'; set -u; echo \"${!ref}\"\n",
+      "group": "indirect-provenance",
+      "index": 3
+    },
+    {
+      "stdin": "ref=1; set -u; echo \"${!ref}\"\n",
+      "group": "indirect-provenance",
+      "index": 4
+    },
+    {
+      "group": "arithmetic-positive",
+      "index": 0,
+      "stdin": "echo \"$((0 && (1/0)))\" \"$((1 || (1/0)))\" \"$((1 ? 7 : 1/0))\"\n"
+    },
+    {
+      "group": "arithmetic-positive",
+      "index": 1,
+      "stdin": "a='3+4'; echo \"$((a*2))\" \"$((2**3**2))\"\n"
+    },
+    {
+      "group": "arithmetic-positive",
+      "index": 2,
+      "stdin": "set -- bound; set -u; printf \"<%s>\\n\" \"$1\" \"${1}\"\n"
+    },
+    {
+      "group": "arithmetic-positive",
+      "index": 3,
+      "stdin": "f() { local x=2; ((x+=3)); echo \"$x\"; }; (f); f\n"
+    }
+  ]
+}

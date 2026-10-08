@@ -1,0 +1,91 @@
+diff --git a/brush-core/src/expansion.rs b/brush-core/src/expansion.rs
+index df57104..2d0ae02 100644
+--- a/brush-core/src/expansion.rs
++++ b/brush-core/src/expansion.rs
+@@ -2049,9 +2049,7 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                 Expansion::from(std::process::id().to_string())
+             }
+             brush_parser::word::SpecialParameter::LastBackgroundProcessId => {
+-                if let Some(job) = self.shell.jobs().current_job()
+-                    && let Some(pid) = job.representative_pid()
+-                {
++                if let Some(pid) = self.shell.jobs().last_background_pid() {
+                     return Expansion::from(pid.to_string());
+                 }
+                 Expansion::from(String::new())
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 4e7f002..a822ecc 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -306,7 +306,7 @@ async fn spawn_async_ao_list<'a, SE: extensions::ShellExtensions>(
+                 jobs::JobTask::Internal(tokio::spawn(async move { Ok(result) }))
+             }
+         });
+-        return Ok(shell.jobs_mut().add_as_current(jobs::Job::new(
++        return Ok(shell.jobs_mut().add_as_background(jobs::Job::new(
+             tasks,
+             ao_list.to_string(),
+             jobs::JobState::Running,
+@@ -333,7 +333,7 @@ async fn spawn_async_ao_list<'a, SE: extensions::ShellExtensions>(
+             .await
+     });
+ 
+-    Ok(shell.jobs_mut().add_as_current(jobs::Job::new(
++    Ok(shell.jobs_mut().add_as_background(jobs::Job::new(
+         [jobs::JobTask::Internal(join_handle)],
+         ao_list.to_string(),
+         jobs::JobState::Running,
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+index 14ea9bd..822d847 100644
+--- a/brush-core/src/jobs.rs
++++ b/brush-core/src/jobs.rs
+@@ -23,6 +23,8 @@ pub struct JobManager {
+     pub jobs: Vec<Job>,
+     /// Statuses reported at a prompt but not yet collected by wait.
+     completed: VecDeque<CompletedJob>,
++    /// Bash retains `$!` after the job finishes or another job becomes current.
++    last_background_pid: Option<sys::process::ProcessId>,
+     next_id: usize,
+ }
+ 
+@@ -122,6 +124,17 @@ impl JobManager {
+         self.jobs.last().unwrap()
+     }
+ 
++    /// Adds a background job and remembers its last pipeline process for `$!`.
++    pub fn add_as_background(&mut self, job: Job) -> &Job {
++        self.last_background_pid = job.representative_pid();
++        self.add_as_current(job)
++    }
++
++    /// Returns the most recently launched background process, even after reap.
++    pub fn last_background_pid(&self) -> Option<sys::process::ProcessId> {
++        self.last_background_pid
++    }
++
+     /// Returns the current job, if there is one.
+     pub fn current_job(&self) -> Option<&Job> {
+         self.jobs
+@@ -423,16 +436,20 @@ impl Job {
+         I: IntoIterator<Item = JobTask>,
+     {
+         let tasks: VecDeque<_> = tasks.into_iter().collect();
+-        let representative_pid = tasks.iter().find_map(|task| match task {
++        let representative_pid = tasks.iter().rev().find_map(|task| match task {
+             JobTask::External(process) => process.pid(),
+             JobTask::Internal(_) => None,
+         });
++        let pgid = tasks.iter().find_map(|task| match task {
++            JobTask::External(process) => process.pgid().or_else(|| process.pid()),
++            JobTask::Internal(_) => None,
++        });
+         Self {
+             id: 0,
+             tasks,
+             representative_pid,
+             wait_result: None,
+-            pgid: None,
++            pgid,
+             annotation: JobAnnotation::None,
+             command_line,
+             state,

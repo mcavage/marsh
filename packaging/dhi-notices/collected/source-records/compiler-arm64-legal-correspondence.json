@@ -1,0 +1,37 @@
+{
+  "schema": "marsh.release-compiler-legal-correspondence/v1",
+  "acquisition": {
+    "url": "https://static.rust-lang.org/dist/2026-04-16/rustc-1.95.0-aarch64-unknown-linux-gnu.tar.xz",
+    "sha256": "0fe3689eeaed603e5ef24572d11597d3edadaefd2cb181674ad621260f2501d2",
+    "size": 62041096,
+    "integrity": null,
+    "signature_verified": false
+  },
+  "members": [
+    {
+      "member": "rustc-1.95.0-aarch64-unknown-linux-gnu/LICENSE-APACHE",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "size": 9723,
+      "identical_to_retained_x86_64_legal_text": true
+    },
+    {
+      "member": "rustc-1.95.0-aarch64-unknown-linux-gnu/COPYRIGHT",
+      "sha256": "172020dbfd5b53a226dfde77616190a48dcff519b0bc0e6deb91a8450782c4af",
+      "size": 1571,
+      "identical_to_retained_x86_64_legal_text": true
+    },
+    {
+      "member": "rustc-1.95.0-aarch64-unknown-linux-gnu/LICENSE-MIT",
+      "sha256": "b71bd43a069ca0641a9ecfe585ca7b3c53b5cc1608f8b68321168698e28b5ea1",
+      "size": 1068,
+      "identical_to_retained_x86_64_legal_text": true
+    },
+    {
+      "member": "rustc-1.95.0-aarch64-unknown-linux-gnu/rustc/share/doc/rust/COPYRIGHT.html",
+      "sha256": "9bd02a099a3f9fdf977f9dd6ea3dc664723e992a267d86f447ea9e7d068824ac",
+      "size": 14263576,
+      "identical_to_retained_x86_64_legal_text": true
+    }
+  ],
+  "scope": "Original legal bytes from both GNU release compiler architectures are equal. This does not inventory the Rust toolchain copied into the development shell image or show which compiler CI ran."
+}

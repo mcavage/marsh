@@ -1,0 +1,188 @@
+diff --git a/brush-parser/src/parser/mod.rs b/brush-parser/src/parser/mod.rs
+index 2d2f899..68ec3c5 100644
+--- a/brush-parser/src/parser/mod.rs
++++ b/brush-parser/src/parser/mod.rs
+@@ -334,13 +334,24 @@ fn normalize_fanout_body(body: Vec<Token>) -> Vec<Token> {
+         .first()
+         .cloned()
+         .filter(|token| matches!(token, Token::Operator(operator, _) if operator == "\n"));
++    // Label-led branches: a branch ends at a top-level newline or `,`, or at a
++    // top-level `;` whose next word is a `LABEL:`. Any other `;` (like `&&`,
++    // `||`, groups, and subshells) is ordinary sequencing within the branch.
+     let mut branches = Vec::<Vec<Token>>::new();
+     let mut current = Vec::new();
+     let mut nesting = 0usize;
+-    for token in body {
++    let mut body = body.into_iter().peekable();
++    while let Some(token) = body.next() {
+         let boundary = nesting == 0
+-            && matches!(&token, Token::Operator(operator, _) if operator == "\n" || operator == ";")
+-            || nesting == 0 && matches!(&token, Token::Word(word, _) if word == ",");
++            && match &token {
++                Token::Operator(operator, _) if operator == "\n" => true,
++                Token::Operator(operator, _) if operator == ";" => matches!(
++                    body.peek(),
++                    Some(Token::Word(word, _)) if valid_fanout_label(word)
++                ),
++                Token::Word(word, _) => word == ",",
++                Token::Operator(_, _) => false,
++            };
+         if boundary {
+             branches.push(std::mem::take(&mut current));
+             continue;
+diff --git a/brush-parser/src/parser/tests/composition.rs b/brush-parser/src/parser/tests/composition.rs
+index 65e6cfb..4b9d02d 100644
+--- a/brush-parser/src/parser/tests/composition.rs
++++ b/brush-parser/src/parser/tests/composition.rs
+@@ -112,8 +112,10 @@ fn split_is_gated_and_parses_labels_shorthand_and_join() {
+             .iter()
+             .map(|b| b.label.as_str())
+             .collect::<Vec<_>>(),
+-        ["fix", "tests", "pi"]
++        ["fix", "tests"]
+     );
++    // `; pi` has no label, so it is sequenced inside the `tests` branch.
++    assert_eq!(split.branches[1].body.0.len(), 2);
+     assert!(pipeline.seq[2].is_split_join_stage());
+     assert!(matches!(pipeline.seq[3], Command::Simple(_)));
+     assert!(matches!(pipeline.seq[4], Command::Simple(_)));
+@@ -166,3 +168,139 @@ fn coreutils_split_and_join_stay_ordinary_commands() {
+     let program = parse("split { a: true } | X=1 join a b\n", true).unwrap();
+     assert!(!first_pipeline(&program).seq[1].is_split_join_stage());
+ }
++
++fn branches(input: &str) -> Vec<(String, String)> {
++    let program = parse(input, true).unwrap_or_else(|e| panic!("{input:?}: {e}"));
++    let (Command::Fanout(command) | Command::Split(command)) = &first_pipeline(&program).seq[0]
++    else {
++        panic!("{input:?} is not a fanout or split")
++    };
++    command
++        .branches
++        .iter()
++        .map(|branch| (branch.label.clone(), branch.body.to_string()))
++        .collect()
++}
++
++fn labels(input: &str) -> Vec<String> {
++    branches(input)
++        .into_iter()
++        .map(|(label, _)| label)
++        .collect()
++}
++
++#[test]
++fn a_semicolon_starts_a_branch_only_before_a_label() {
++    // Labeled `;` separation.
++    assert_eq!(
++        labels("fanout { ok: true; bad: false } | collect\n"),
++        ["ok", "bad"]
++    );
++    let split = branches("split { a: cd x; make; b: cd y; make } | join\n");
++    assert_eq!(
++        split
++            .iter()
++            .map(|(label, _)| label.as_str())
++            .collect::<Vec<_>>(),
++        ["a", "b"]
++    );
++    for (_, body) in &split {
++        assert!(body.contains("cd") && body.contains("make"), "{body:?}");
++    }
++    // Labels may use hyphens and underscores, and may start with `_`.
++    assert_eq!(
++        labels("split { fix-lint: true; run_tests: true; _x: true; A-1_b: true } | join\n"),
++        ["fix-lint", "run_tests", "_x", "A-1_b"]
++    );
++    // Newline and `,` still start branches without a label.
++    assert_eq!(
++        labels("fanout {\necho one; echo two\nprintf x, true\n}\n"),
++        ["echo", "printf", "true"]
++    );
++}
++
++#[test]
++fn an_unlabeled_semicolon_is_bash_sequencing() {
++    let one = branches("fanout { echo one; echo two } | collect\n");
++    assert_eq!(one.len(), 1, "{one:?}");
++    assert_eq!(one[0].0, "echo");
++    let program = parse("fanout { echo one; echo two } | collect\n", true).unwrap();
++    let Command::Fanout(fanout) = &first_pipeline(&program).seq[0] else {
++        panic!("expected fanout")
++    };
++    assert_eq!(fanout.branches[0].body.0.len(), 2);
++
++    // `a: cmd; cmd` keeps both commands in `a`.
++    assert_eq!(labels("split { a: true; false; true } | join\n"), ["a"]);
++}
++
++#[test]
++fn groups_subshells_and_lists_stay_inside_one_branch() {
++    for (input, expected) in [
++        ("fanout { a: { echo 1; echo 2; } } | collect\n", vec!["a"]),
++        (
++            "fanout { a: { echo 1; echo 2; }; b: true } | collect\n",
++            vec!["a", "b"],
++        ),
++        (
++            "fanout { a: (cd x; make); b: true } | collect\n",
++            vec!["a", "b"],
++        ),
++        (
++            "fanout { a: true && echo x; false || echo y; b: true } | collect\n",
++            vec!["a", "b"],
++        ),
++        (
++            "split { a: make && make test || echo failed } | join\n",
++            vec!["a"],
++        ),
++        (
++            "fanout { a: case $x in y) echo y;; *) echo z;; esac; echo after; b: true } | collect\n",
++            vec!["a", "b"],
++        ),
++    ] {
++        assert_eq!(labels(input), expected, "{input:?}");
++    }
++    let group = branches("fanout { a: { echo 1; echo 2; }; b: true } | collect\n");
++    assert!(
++        group[0].1.contains("echo 1") && group[0].1.contains("echo 2"),
++        "{group:?}"
++    );
++    let case = branches(
++        "fanout { a: case $x in y) echo y;; *) echo z;; esac; echo after; b: true } | collect\n",
++    );
++    assert!(
++        case[0].1.contains("esac") && case[0].1.contains("after"),
++        "{case:?}"
++    );
++}
++
++#[test]
++fn only_a_bare_label_word_right_after_a_semicolon_starts_a_branch() {
++    // `a:` mid-command is an argument, not a label.
++    let parsed = branches("fanout { x: echo a: b; echo c: d } | collect\n");
++    assert_eq!(parsed.len(), 1, "{parsed:?}");
++    assert!(
++        parsed[0].1.contains("a: b") && parsed[0].1.contains("c: d"),
++        "{parsed:?}"
++    );
++    // Quoted, expanded, or otherwise non-label words do not start a branch.
++    for input in [
++        "fanout { x: true; 'b:' true } | collect\n",
++        "fanout { x: true; \"b:\" true } | collect\n",
++        "fanout { x: true; $b: true } | collect\n",
++        "fanout { x: true; 1b: true } | collect\n",
++    ] {
++        assert_eq!(labels(input), ["x"], "{input:?}");
++    }
++    // `b-:` is a valid label (hyphens are allowed after the first character).
++    assert_eq!(
++        labels("fanout { x: true; b-: true } | collect\n"),
++        ["x", "b-"]
++    );
++    // The documented ambiguity: a command named `echo:` after `;` is a label.
++    assert_eq!(
++        labels("fanout { x: true; echo: hi } | collect\n"),
++        ["x", "echo"]
++    );
++}

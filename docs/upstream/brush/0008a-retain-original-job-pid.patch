@@ -1,0 +1,78 @@
+diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
+--- a/brush-core/src/jobs.rs
++++ b/brush-core/src/jobs.rs
+@@ -378,6 +378,9 @@
+ pub struct Job {
+     /// The tasks that make up the job.
+     tasks: VecDeque<JobTask>,
++    /// The original process ID used by `$!` and `wait`, even after polling
++    /// removes a completed stage from a pipeline.
++    representative_pid: Option<sys::process::ProcessId>,
+     /// The rightmost pipeline status, retained across canceled concurrent waits.
+     wait_result: Option<ExecutionResult>,
+ 
+@@ -419,9 +422,15 @@
+     where
+         I: IntoIterator<Item = JobTask>,
+     {
++        let tasks: VecDeque<_> = tasks.into_iter().collect();
++        let representative_pid = tasks.iter().find_map(|task| match task {
++            JobTask::External(process) => process.pid(),
++            JobTask::Internal(_) => None,
++        });
+         Self {
+             id: 0,
+-            tasks: tasks.into_iter().collect(),
++            tasks,
++            representative_pid,
+             wait_result: None,
+             pgid: None,
+             annotation: JobAnnotation::None,
+@@ -495,10 +504,17 @@
+                     self.tasks.remove(0);
+                     if self.tasks.is_empty() {
+                         if let Ok(completed) = &r {
+-                            self.wait_result = Some(*completed);
++                            // A concurrent wait may already have reaped the
++                            // rightmost pipeline stage. Keep that status when
++                            // a later prompt poll reaps the remaining stages.
++                            let status = *self.wait_result.get_or_insert(*completed);
++                            result = Some(Ok(status));
++                        } else {
++                            result = Some(r);
+                         }
++                    } else {
++                        result = Some(r);
+                     }
+-                    result = Some(r);
+                 }
+                 None => {
+                     return Ok(None);
+@@ -515,7 +531,7 @@
+ 
+     /// Waits for the job to complete.
+     pub async fn wait(&mut self) -> Result<ExecutionResult, error::Error> {
+-        // Tasks are stored in pipeline order, so waiting from the back
++        // Pipeline tasks are stored in command order. Waiting from the back
+         // observes the rightmost command first; preserve that status while
+         // still reaping every earlier stage. Overwriting it with each prior
+         // stage made `wait $!` report the leftmost command's status.
+@@ -595,17 +611,7 @@
+ 
+     /// Tries to retrieve a "representative" pid for the job.
+     pub fn representative_pid(&self) -> Option<sys::process::ProcessId> {
+-        for task in &self.tasks {
+-            match task {
+-                JobTask::External(p) => {
+-                    if let Some(pid) = p.pid() {
+-                        return Some(pid);
+-                    }
+-                }
+-                JobTask::Internal(_) => (),
+-            }
+-        }
+-        None
++        self.representative_pid
+     }
+ 
+     /// Tries to retrieve the process group ID (PGID) of the job.

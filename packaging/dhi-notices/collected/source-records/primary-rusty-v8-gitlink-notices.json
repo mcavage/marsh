@@ -1,0 +1,911 @@
+{
+  "schema": "marsh.exact-gitlink-notices/v1",
+  "components": [
+    {
+      "path": "build",
+      "commit": "8acb33ac8dceef0503443109c0a92988189563ef",
+      "repo": "https://github.com/denoland/chromium_build.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [],
+      "attempts": [
+        {
+          "url": "https://raw.githubusercontent.com/denoland/chromium_build/8acb33ac8dceef0503443109c0a92988189563ef/LICENSE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/denoland/chromium_build/8acb33ac8dceef0503443109c0a92988189563ef/LICENSE.TXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/denoland/chromium_build/8acb33ac8dceef0503443109c0a92988189563ef/LICENSE.txt",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/denoland/chromium_build/8acb33ac8dceef0503443109c0a92988189563ef/LICENSE.md",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/denoland/chromium_build/8acb33ac8dceef0503443109c0a92988189563ef/COPYING",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/denoland/chromium_build/8acb33ac8dceef0503443109c0a92988189563ef/NOTICE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/denoland/chromium_build/8acb33ac8dceef0503443109c0a92988189563ef/license.html",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "buildtools",
+      "commit": "17495e454aae81b581e8b3caccbb53054509b280",
+      "repo": "https://chromium.googlesource.com/chromium/src/buildtools.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/ff11d445fb41a1087c7630e120ab15f1a2cb67c1b707173cb494141805fca35e.txt",
+          "sha256": "ff11d445fb41a1087c7630e120ab15f1a2cb67c1b707173cb494141805fca35e",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/src/buildtools.git/+/17495e454aae81b581e8b3caccbb53054509b280/LICENSE?format=TEXT",
+            "sha256": "b419e435f754c3e74514e6d7f2fdd9096b0b6662f2c3e5b5b944151b1dc2fa5e",
+            "size": 2052,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/buildtools.git/+/17495e454aae81b581e8b3caccbb53054509b280/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/buildtools.git/+/17495e454aae81b581e8b3caccbb53054509b280/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/buildtools.git/+/17495e454aae81b581e8b3caccbb53054509b280/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/buildtools.git/+/17495e454aae81b581e8b3caccbb53054509b280/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/buildtools.git/+/17495e454aae81b581e8b3caccbb53054509b280/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/buildtools.git/+/17495e454aae81b581e8b3caccbb53054509b280/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/abseil-cpp",
+      "commit": "d16e32215c3ab90ba57c2e904a5344d85c7353e4",
+      "repo": "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747.txt",
+          "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git/+/d16e32215c3ab90ba57c2e904a5344d85c7353e4/LICENSE?format=TEXT",
+            "sha256": "cb63961fac969b523344c5c40ec27ef60d7e8c7b34d2ef63548eb19f35a261e4",
+            "size": 15148,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git/+/d16e32215c3ab90ba57c2e904a5344d85c7353e4/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git/+/d16e32215c3ab90ba57c2e904a5344d85c7353e4/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git/+/d16e32215c3ab90ba57c2e904a5344d85c7353e4/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git/+/d16e32215c3ab90ba57c2e904a5344d85c7353e4/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git/+/d16e32215c3ab90ba57c2e904a5344d85c7353e4/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp.git/+/d16e32215c3ab90ba57c2e904a5344d85c7353e4/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/dragonbox/src",
+      "commit": "beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44",
+      "repo": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/jk-jeon/dragonbox.git/+/beeeef91cf6fef89a4d4ba5e95d47ca64ccb3a44/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/fast_float/src",
+      "commit": "05087a303dad9c98768b33c829d398223a649bc6",
+      "repo": "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git/+/05087a303dad9c98768b33c829d398223a649bc6/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git/+/05087a303dad9c98768b33c829d398223a649bc6/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git/+/05087a303dad9c98768b33c829d398223a649bc6/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git/+/05087a303dad9c98768b33c829d398223a649bc6/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git/+/05087a303dad9c98768b33c829d398223a649bc6/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git/+/05087a303dad9c98768b33c829d398223a649bc6/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float.git/+/05087a303dad9c98768b33c829d398223a649bc6/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/fp16/src",
+      "commit": "3d2de1816307bac63c16a297e8c4dc501b4076df",
+      "repo": "https://github.com/Maratyszcza/FP16.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf.txt",
+          "sha256": "17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://raw.githubusercontent.com/Maratyszcza/FP16/3d2de1816307bac63c16a297e8c4dc501b4076df/LICENSE",
+            "sha256": "17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf",
+            "size": 1157,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "identity"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://raw.githubusercontent.com/Maratyszcza/FP16/3d2de1816307bac63c16a297e8c4dc501b4076df/LICENSE.TXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/Maratyszcza/FP16/3d2de1816307bac63c16a297e8c4dc501b4076df/LICENSE.txt",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/Maratyszcza/FP16/3d2de1816307bac63c16a297e8c4dc501b4076df/LICENSE.md",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/Maratyszcza/FP16/3d2de1816307bac63c16a297e8c4dc501b4076df/COPYING",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/Maratyszcza/FP16/3d2de1816307bac63c16a297e8c4dc501b4076df/NOTICE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/Maratyszcza/FP16/3d2de1816307bac63c16a297e8c4dc501b4076df/license.html",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/highway/src",
+      "commit": "2607d3b5b0113992fe84d3848859eae13b3b52c1",
+      "repo": "https://chromium.googlesource.com/external/github.com/google/highway.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/e340270d4f64384569a91d546acb5b094d69ce47f0c015db77abb74dc6f815af.txt",
+          "sha256": "e340270d4f64384569a91d546acb5b094d69ce47f0c015db77abb74dc6f815af",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/google/highway.git/+/2607d3b5b0113992fe84d3848859eae13b3b52c1/LICENSE?format=TEXT",
+            "sha256": "df4a26d95470525c7d4bd0740051d584aec59d9d51fc0e6b091b1f1c7827e5d6",
+            "size": 27716,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/google/highway.git/+/2607d3b5b0113992fe84d3848859eae13b3b52c1/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/google/highway.git/+/2607d3b5b0113992fe84d3848859eae13b3b52c1/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/google/highway.git/+/2607d3b5b0113992fe84d3848859eae13b3b52c1/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/google/highway.git/+/2607d3b5b0113992fe84d3848859eae13b3b52c1/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/google/highway.git/+/2607d3b5b0113992fe84d3848859eae13b3b52c1/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/google/highway.git/+/2607d3b5b0113992fe84d3848859eae13b3b52c1/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/icu",
+      "commit": "ee5f27adc28bd3f15b2c293f726d14d2e336cbd5",
+      "repo": "https://chromium.googlesource.com/chromium/deps/icu.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/451167c55c0fa447cc2d5632714f5e3c567fe4f1e1badefab2c1333852198aca.txt",
+          "sha256": "451167c55c0fa447cc2d5632714f5e3c567fe4f1e1badefab2c1333852198aca",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/ee5f27adc28bd3f15b2c293f726d14d2e336cbd5/LICENSE?format=TEXT",
+            "sha256": "c5a4698576c4195d3b5869d409cb3d4be7fca00201a5f15ecb5b03aae07b2e2e",
+            "size": 35316,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        },
+        {
+          "file": "texts/c62d7697c03979f5056d28b338fafc7a1152820f7b379adf4a9d88cd37160f96.txt",
+          "sha256": "c62d7697c03979f5056d28b338fafc7a1152820f7b379adf4a9d88cd37160f96",
+          "source_path": "license.html",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/ee5f27adc28bd3f15b2c293f726d14d2e336cbd5/license.html?format=TEXT",
+            "sha256": "c6575fd2b6e16a2b10fdd8e7be8e11cc118e7a9a4822fa1e62b497491c78046c",
+            "size": 832,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/ee5f27adc28bd3f15b2c293f726d14d2e336cbd5/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/ee5f27adc28bd3f15b2c293f726d14d2e336cbd5/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/ee5f27adc28bd3f15b2c293f726d14d2e336cbd5/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/ee5f27adc28bd3f15b2c293f726d14d2e336cbd5/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/ee5f27adc28bd3f15b2c293f726d14d2e336cbd5/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/jinja2",
+      "commit": "c3027d884967773057bf74b957e3fea87e5df4d7",
+      "repo": "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git/+/c3027d884967773057bf74b957e3fea87e5df4d7/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git/+/c3027d884967773057bf74b957e3fea87e5df4d7/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git/+/c3027d884967773057bf74b957e3fea87e5df4d7/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git/+/c3027d884967773057bf74b957e3fea87e5df4d7/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git/+/c3027d884967773057bf74b957e3fea87e5df4d7/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git/+/c3027d884967773057bf74b957e3fea87e5df4d7/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/jinja2.git/+/c3027d884967773057bf74b957e3fea87e5df4d7/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/libc++/src",
+      "commit": "5abc7f839700f0f17338434e1c1c6a8c87c00c11",
+      "repo": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b.txt",
+          "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+          "source_path": "LICENSE.TXT",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx.git/+/5abc7f839700f0f17338434e1c1c6a8c87c00c11/LICENSE.TXT?format=TEXT",
+            "sha256": "2df883eed85d488ef641ac22f3ce8afb495508b6f87c38847af95ddbf94aea70",
+            "size": 22272,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx.git/+/5abc7f839700f0f17338434e1c1c6a8c87c00c11/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx.git/+/5abc7f839700f0f17338434e1c1c6a8c87c00c11/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx.git/+/5abc7f839700f0f17338434e1c1c6a8c87c00c11/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx.git/+/5abc7f839700f0f17338434e1c1c6a8c87c00c11/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx.git/+/5abc7f839700f0f17338434e1c1c6a8c87c00c11/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx.git/+/5abc7f839700f0f17338434e1c1c6a8c87c00c11/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/libc++abi/src",
+      "commit": "8f11bb1d4438d0239d0dfc1bd9456a9f31629dda",
+      "repo": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c.txt",
+          "sha256": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c",
+          "source_path": "LICENSE.TXT",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi.git/+/8f11bb1d4438d0239d0dfc1bd9456a9f31629dda/LICENSE.TXT?format=TEXT",
+            "sha256": "8d3456e92a31955fdaea9c32634e2e2d5abf87e32e862ca28f40b979e68ea612",
+            "size": 22276,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi.git/+/8f11bb1d4438d0239d0dfc1bd9456a9f31629dda/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi.git/+/8f11bb1d4438d0239d0dfc1bd9456a9f31629dda/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi.git/+/8f11bb1d4438d0239d0dfc1bd9456a9f31629dda/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi.git/+/8f11bb1d4438d0239d0dfc1bd9456a9f31629dda/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi.git/+/8f11bb1d4438d0239d0dfc1bd9456a9f31629dda/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi.git/+/8f11bb1d4438d0239d0dfc1bd9456a9f31629dda/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/libunwind/src",
+      "commit": "d6c7a21e978f0adaa43accaad53bc64f0b64f6ec",
+      "repo": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d.txt",
+          "sha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d",
+          "source_path": "LICENSE.TXT",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind.git/+/d6c7a21e978f0adaa43accaad53bc64f0b64f6ec/LICENSE.TXT?format=TEXT",
+            "sha256": "74a62b8fafbbab7567095cdca5e84a9044e31a68a16bb52080f1525643308e2d",
+            "size": 22276,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind.git/+/d6c7a21e978f0adaa43accaad53bc64f0b64f6ec/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind.git/+/d6c7a21e978f0adaa43accaad53bc64f0b64f6ec/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind.git/+/d6c7a21e978f0adaa43accaad53bc64f0b64f6ec/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind.git/+/d6c7a21e978f0adaa43accaad53bc64f0b64f6ec/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind.git/+/d6c7a21e978f0adaa43accaad53bc64f0b64f6ec/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind.git/+/d6c7a21e978f0adaa43accaad53bc64f0b64f6ec/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/llvm-libc/src",
+      "commit": "9309c117ebae84dd2f9df1ef99de4782162527d5",
+      "repo": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47.txt",
+          "sha256": "ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47",
+          "source_path": "LICENSE.TXT",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git/+/9309c117ebae84dd2f9df1ef99de4782162527d5/LICENSE.TXT?format=TEXT",
+            "sha256": "0cced642a3b6d411a42ad6e8ebd7942b4768a530c6e063fa41455a3600a82887",
+            "size": 20188,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git/+/9309c117ebae84dd2f9df1ef99de4782162527d5/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git/+/9309c117ebae84dd2f9df1ef99de4782162527d5/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git/+/9309c117ebae84dd2f9df1ef99de4782162527d5/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git/+/9309c117ebae84dd2f9df1ef99de4782162527d5/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git/+/9309c117ebae84dd2f9df1ef99de4782162527d5/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libc.git/+/9309c117ebae84dd2f9df1ef99de4782162527d5/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/markupsafe",
+      "commit": "4256084ae14175d38a3ff7d739dca83ae49ccec6",
+      "repo": "https://chromium.googlesource.com/chromium/src/third_party/markupsafe.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/0bbe88228fd63d20ec097f64e58d5a0a465123ae139140a18d406c60b48824b5.txt",
+          "sha256": "0bbe88228fd63d20ec097f64e58d5a0a465123ae139140a18d406c60b48824b5",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/src/third_party/markupsafe.git/+/4256084ae14175d38a3ff7d739dca83ae49ccec6/LICENSE?format=TEXT",
+            "sha256": "629efc2bc394ba5878e90c41089117cd4d7545bd3268bf0b06dbf35082970488",
+            "size": 2112,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/markupsafe.git/+/4256084ae14175d38a3ff7d739dca83ae49ccec6/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/markupsafe.git/+/4256084ae14175d38a3ff7d739dca83ae49ccec6/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/markupsafe.git/+/4256084ae14175d38a3ff7d739dca83ae49ccec6/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/markupsafe.git/+/4256084ae14175d38a3ff7d739dca83ae49ccec6/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/markupsafe.git/+/4256084ae14175d38a3ff7d739dca83ae49ccec6/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/markupsafe.git/+/4256084ae14175d38a3ff7d739dca83ae49ccec6/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/partition_alloc",
+      "commit": "ff3b8b885b8374cbd3902642d94dc737bda93d5d",
+      "repo": "https://chromium.googlesource.com/chromium/src/base/allocator/partition_allocator.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/base/allocator/partition_allocator.git/+/ff3b8b885b8374cbd3902642d94dc737bda93d5d/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/base/allocator/partition_allocator.git/+/ff3b8b885b8374cbd3902642d94dc737bda93d5d/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/base/allocator/partition_allocator.git/+/ff3b8b885b8374cbd3902642d94dc737bda93d5d/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/base/allocator/partition_allocator.git/+/ff3b8b885b8374cbd3902642d94dc737bda93d5d/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/base/allocator/partition_allocator.git/+/ff3b8b885b8374cbd3902642d94dc737bda93d5d/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/base/allocator/partition_allocator.git/+/ff3b8b885b8374cbd3902642d94dc737bda93d5d/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/base/allocator/partition_allocator.git/+/ff3b8b885b8374cbd3902642d94dc737bda93d5d/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/rust",
+      "commit": "26e8ff47f18a8d28d6187a04b6a16cb7332356f8",
+      "repo": "https://chromium.googlesource.com/chromium/src/third_party/rust",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/rust/+/26e8ff47f18a8d28d6187a04b6a16cb7332356f8/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/rust/+/26e8ff47f18a8d28d6187a04b6a16cb7332356f8/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/rust/+/26e8ff47f18a8d28d6187a04b6a16cb7332356f8/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/rust/+/26e8ff47f18a8d28d6187a04b6a16cb7332356f8/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/rust/+/26e8ff47f18a8d28d6187a04b6a16cb7332356f8/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/rust/+/26e8ff47f18a8d28d6187a04b6a16cb7332356f8/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/rust/+/26e8ff47f18a8d28d6187a04b6a16cb7332356f8/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "third_party/simdutf",
+      "commit": "f7356eed293f8208c40b3c1b344a50bd70971983",
+      "repo": "https://chromium.googlesource.com/chromium/src/third_party/simdutf",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f.txt",
+          "sha256": "fc8dbc04e03ad4efc08a647ffe7f995b811a95bc04c0e85a56d5277c6593fa5f",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://chromium.googlesource.com/chromium/src/third_party/simdutf/+/f7356eed293f8208c40b3c1b344a50bd70971983/LICENSE?format=TEXT",
+            "sha256": "978d0d3cf8b2907e241ef30912ed5b277b4c37aa7d51f35d96485293621723d4",
+            "size": 1412,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "base64"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/simdutf/+/f7356eed293f8208c40b3c1b344a50bd70971983/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/simdutf/+/f7356eed293f8208c40b3c1b344a50bd70971983/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/simdutf/+/f7356eed293f8208c40b3c1b344a50bd70971983/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/simdutf/+/f7356eed293f8208c40b3c1b344a50bd70971983/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/simdutf/+/f7356eed293f8208c40b3c1b344a50bd70971983/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/third_party/simdutf/+/f7356eed293f8208c40b3c1b344a50bd70971983/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "tools/clang",
+      "commit": "45f4b9e25124809497a27a8ae0e63d603b0f9f1b",
+      "repo": "https://chromium.googlesource.com/chromium/src/tools/clang.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/clang.git/+/45f4b9e25124809497a27a8ae0e63d603b0f9f1b/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/clang.git/+/45f4b9e25124809497a27a8ae0e63d603b0f9f1b/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/clang.git/+/45f4b9e25124809497a27a8ae0e63d603b0f9f1b/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/clang.git/+/45f4b9e25124809497a27a8ae0e63d603b0f9f1b/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/clang.git/+/45f4b9e25124809497a27a8ae0e63d603b0f9f1b/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/clang.git/+/45f4b9e25124809497a27a8ae0e63d603b0f9f1b/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/clang.git/+/45f4b9e25124809497a27a8ae0e63d603b0f9f1b/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "tools/win",
+      "commit": "faefd1b6fa9eeb033ad6fe60368ccb9bf908cbd0",
+      "repo": "https://chromium.googlesource.com/chromium/src/tools/win",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/win/+/faefd1b6fa9eeb033ad6fe60368ccb9bf908cbd0/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/win/+/faefd1b6fa9eeb033ad6fe60368ccb9bf908cbd0/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/win/+/faefd1b6fa9eeb033ad6fe60368ccb9bf908cbd0/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/win/+/faefd1b6fa9eeb033ad6fe60368ccb9bf908cbd0/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/win/+/faefd1b6fa9eeb033ad6fe60368ccb9bf908cbd0/COPYING?format=TEXT",
+          "error": "HTTP Error 429: Too Many Requests"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/win/+/faefd1b6fa9eeb033ad6fe60368ccb9bf908cbd0/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/src/tools/win/+/faefd1b6fa9eeb033ad6fe60368ccb9bf908cbd0/license.html?format=TEXT",
+          "error": "HTTP Error 429: Too Many Requests"
+        }
+      ]
+    },
+    {
+      "path": "v8",
+      "commit": "ac1e23989121713ca642f6650b34deff7b686896",
+      "repo": "https://github.com/denoland/v8.git",
+      "scope": "rusty_v8150.4.0 pinned Git submodule; source/notice input, not proof all source is linked",
+      "notices": [
+        {
+          "file": "texts/6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509.txt",
+          "sha256": "6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509",
+          "source_path": "LICENSE",
+          "acquisition": {
+            "url": "https://raw.githubusercontent.com/denoland/v8/ac1e23989121713ca642f6650b34deff7b686896/LICENSE",
+            "sha256": "6ab33af8774a0f396ee3aeeb761e3229057682d6f9fa7f572e390c2cb3a6e509",
+            "size": 3093,
+            "integrity": null,
+            "signature_verified": false
+          },
+          "encoding": "identity"
+        }
+      ],
+      "attempts": [
+        {
+          "url": "https://raw.githubusercontent.com/denoland/v8/ac1e23989121713ca642f6650b34deff7b686896/LICENSE.TXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/denoland/v8/ac1e23989121713ca642f6650b34deff7b686896/LICENSE.txt",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/denoland/v8/ac1e23989121713ca642f6650b34deff7b686896/LICENSE.md",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/denoland/v8/ac1e23989121713ca642f6650b34deff7b686896/COPYING",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/denoland/v8/ac1e23989121713ca642f6650b34deff7b686896/NOTICE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/denoland/v8/ac1e23989121713ca642f6650b34deff7b686896/license.html",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "path": "deno_core_icudata-0.77.0-origin",
+      "commit": "a22a8f24224ddda8b856437d7e8560de1da3f8e1",
+      "repo": "https://chromium.googlesource.com/chromium/deps/icu.git",
+      "scope": "Candidate exact ICU data origin from rusty_v8 0.77.0 Git submodule; binary equality checked separately",
+      "notices": [],
+      "attempts": [
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/a22a8f24224ddda8b856437d7e8560de1da3f8e1/LICENSE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/a22a8f24224ddda8b856437d7e8560de1da3f8e1/LICENSE.TXT?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/a22a8f24224ddda8b856437d7e8560de1da3f8e1/LICENSE.txt?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/a22a8f24224ddda8b856437d7e8560de1da3f8e1/LICENSE.md?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/a22a8f24224ddda8b856437d7e8560de1da3f8e1/COPYING?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/a22a8f24224ddda8b856437d7e8560de1da3f8e1/NOTICE?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://chromium.googlesource.com/chromium/deps/icu.git/+/a22a8f24224ddda8b856437d7e8560de1da3f8e1/license.html?format=TEXT",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    }
+  ]
+}

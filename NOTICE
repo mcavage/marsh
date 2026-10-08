@@ -1,0 +1,15 @@
+marsh — marshal your agents
+Copyright 2026 Mark Cavage
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software developed by the Brush project
+(https://github.com/reubeno/brush), Copyright (c) 2024 Reuben Olinsky and Brush
+contributors, licensed under the MIT License. The vendored source is in
+vendor/brush/ with its license text; local changes are recorded in
+docs/upstream/brush/.
+
+Binary releases also contain third-party Rust crates and, in the published
+container images, third-party packages, each under its own license. Their
+notices are installed under share/licenses/marsh/ and libexec/marsh/licenses/
+and are listed in THIRD_PARTY.md.

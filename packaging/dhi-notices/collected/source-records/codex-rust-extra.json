@@ -1,0 +1,135 @@
+[
+  {
+    "url": "https://codeload.github.com/rust-bakery/cookie-factory/tar.gz/d36b805dbd7dd65f2df947235c5bcc573afe2c76",
+    "sha256": "974a08cc89853fe331ca62d26ac2708da61366db9015e39c61218ce582df8b8c",
+    "size": 21891,
+    "integrity": null,
+    "signature_verified": false,
+    "crates": [
+      "https://static.crates.io/crates/cookie-factory/cookie-factory-0.3.3.crate"
+    ],
+    "notices": [
+      {
+        "file": "texts/d09216dc1ea5f273997667935a8d6514d80f00b89fb6954ecc3a43e0a6e360de.txt",
+        "sha256": "d09216dc1ea5f273997667935a8d6514d80f00b89fb6954ecc3a43e0a6e360de",
+        "member": "cookie-factory-d36b805dbd7dd65f2df947235c5bcc573afe2c76/LICENSES/MIT.txt"
+      }
+    ]
+  },
+  {
+    "url": "https://codeload.github.com/zowens/crc32c/tar.gz/254a861f7cc71bfe455e86f0e1d86e3c83c33390",
+    "sha256": "11f08e5902798018108e28f4e87c1709e83dffa46cd60c4f9d76c3b0b107b8c5",
+    "size": 10409,
+    "integrity": null,
+    "signature_verified": false,
+    "crates": [
+      "https://static.crates.io/crates/crc32c/crc32c-0.6.8.crate"
+    ],
+    "notices": []
+  },
+  {
+    "url": "https://codeload.github.com/Marwes/debugserver-types/tar.gz/d444f163123af5b4fbce7375d1afead7e9b8a224",
+    "sha256": "3813fb8402616d4fb229a305c047850874742fe63bc10147bfdea67afb146799",
+    "size": 17839,
+    "integrity": null,
+    "signature_verified": false,
+    "crates": [
+      "https://static.crates.io/crates/debugserver-types/debugserver-types-0.5.0.crate"
+    ],
+    "notices": []
+  },
+  {
+    "url": "https://codeload.github.com/denoland/deno_core_icudata/tar.gz/83537ba16a4bf1645fc8322e81f7aaf0149a8922",
+    "sha256": "8cc3ca087fd8d721fcc88f8809c90d3aa716e5934855974c04bf6a6701b1997e",
+    "size": 4621686,
+    "integrity": null,
+    "signature_verified": false,
+    "crates": [
+      "https://static.crates.io/crates/deno_core_icudata/deno_core_icudata-0.77.0.crate"
+    ],
+    "notices": []
+  },
+  {
+    "url": "https://codeload.github.com/jpopesculian/eventsource-stream/tar.gz/3d46f1c758f9ee4681e9da0427556d24c53f9c01",
+    "sha256": "a0e3127364232a5a7037d1cc42b72515ae37575fac4d37e23fd5693dcfda6bfc",
+    "size": 8037,
+    "integrity": null,
+    "signature_verified": false,
+    "crates": [
+      "https://static.crates.io/crates/eventsource-stream/eventsource-stream-0.2.3.crate"
+    ],
+    "notices": []
+  },
+  {
+    "url": "https://codeload.github.com/pdf-rs/fax/tar.gz/40b226eb97b391355e971fd95a8dd532a4c127a0",
+    "sha256": "422a860c004620d9ef07aa42278887319b1845dd670289517b62d89cf35b162f",
+    "size": 110365,
+    "integrity": null,
+    "signature_verified": false,
+    "crates": [
+      "https://static.crates.io/crates/fax/fax-0.2.6.crate",
+      "https://static.crates.io/crates/fax_derive/fax_derive-0.2.0.crate"
+    ],
+    "notices": []
+  },
+  {
+    "url": "https://codeload.github.com/TheOnlyMrCat/io_tee/tar.gz/8a7adecebf3429cbc58a0368751d1851dfaf58ed",
+    "sha256": "4fbb3f7cf85ae1bf9dd69cae0d7cdaefc25ee4b3c444a79238a9dd0b782c6a03",
+    "size": 2393,
+    "integrity": null,
+    "signature_verified": false,
+    "crates": [
+      "https://static.crates.io/crates/io_tee/io_tee-0.1.1.crate"
+    ],
+    "notices": []
+  },
+  {
+    "url": "https://codeload.github.com/landhb/linux-keyutils/tar.gz/2e81f726ffd3c0165e11fcdbde279b5d8638f47d",
+    "sha256": "2c387f2da5d92f7f85f9fe746cb9500b0f57252c827fb55f5a8e3859f468f47a",
+    "size": 16750,
+    "integrity": null,
+    "signature_verified": false,
+    "crates": [
+      "https://static.crates.io/crates/linux-keyutils/linux-keyutils-0.2.4.crate"
+    ],
+    "notices": []
+  },
+  {
+    "url": "https://codeload.github.com/ardaku/wasite/tar.gz/0c72934ad329ab4670eb017581640c2d6eceb289",
+    "sha256": "3302ebff42125f7a1a6ed6007675fda1e6a9307ba34469f69647571b45f72635",
+    "size": 9684,
+    "integrity": null,
+    "signature_verified": false,
+    "crates": [
+      "https://static.crates.io/crates/wasite/wasite-0.1.0.crate"
+    ],
+    "notices": [
+      {
+        "file": "texts/62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a.txt",
+        "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+        "member": "wasite-0c72934ad329ab4670eb017581640c2d6eceb289/LICENSE_APACHE_2_0.txt"
+      },
+      {
+        "file": "texts/c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566.txt",
+        "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+        "member": "wasite-0c72934ad329ab4670eb017581640c2d6eceb289/LICENSE_BOOST_1_0.txt"
+      },
+      {
+        "file": "texts/508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1.txt",
+        "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+        "member": "wasite-0c72934ad329ab4670eb017581640c2d6eceb289/LICENSE_MIT.txt"
+      }
+    ]
+  },
+  {
+    "url": "https://codeload.github.com/chipsenkbeil/winsplit-rs/tar.gz/691e800ac384bc7fc815ca55d1dd2b09b1f15d96",
+    "sha256": "9a0597cec26d117f96f3a6de6e747e0115404ee87af34fe9c51a6e82d092ea9e",
+    "size": 6809,
+    "integrity": null,
+    "signature_verified": false,
+    "crates": [
+      "https://static.crates.io/crates/winsplit/winsplit-0.1.0.crate"
+    ],
+    "notices": []
+  }
+]

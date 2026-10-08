@@ -1,0 +1,75 @@
+{
+  "schema": "marsh.notice-regeneration/v1",
+  "seed_tree_sha256": "6ee406d31008bd2683da357fe553013f607ed85ec7798157260897a2c5dc3c41",
+  "vocabulary_sha256": "95f9dff0d51fedea0f3844dca31b1bac8ccf154b0fb5c6f70aa3a5ef970a13bb",
+  "changes": [
+    {
+      "source": "dario.cat/mergo@v1.0.2/testdata/license.json",
+      "old_file": "texts/0819ea84597f2051f7381c26a67d4119be0770c6ec977ff63c59e26251db2ac0.txt",
+      "action": "drop-code-not-notice"
+    },
+    {
+      "source": "github.com/cilium/ebpf@v0.22.0/testdata/windows/LICENSE",
+      "old_file": "texts/f5f846842cc206d49785c2a70b3cdced806490e14c313b5fa5b1e98db37078f8.txt",
+      "action": "drop-code-not-notice"
+    },
+    {
+      "source": "github.com/grpc-ecosystem/grpc-gateway/v2@v2.30.0/protoc-gen-openapiv3/internal/genopenapi/testdata/license_missing_name.prototext",
+      "old_file": "texts/c2382787dab8660e35020c56ff1eccabc7738427e6154a9c4e627295cd477aba.txt",
+      "action": "drop-code-not-notice"
+    },
+    {
+      "source": "gst-plugins-base-1.28.6/gst-libs/gst/tag/license-translations.dict",
+      "old_file": "texts/25ebb771dd2bc53bedf66e1b4bee7e6169bd5c0eee84621e7c4ac2d91f9826c2.txt",
+      "action": "drop-code-not-notice"
+    },
+    {
+      "source": "gst-plugins-base-1.28.6/tests/files/license-uris",
+      "old_file": "texts/de0f312e9784884e211d50d4344dae0d9beb9074bfb9812566f904888c47c121.txt",
+      "action": "drop-code-not-notice"
+    },
+    {
+      "source": "openssl-src-300.6.1+3.6.3/openssl/util/perl/OpenSSL/copyright.pm",
+      "old_file": "texts/04213b69dbebc8ba0dd8a6216af1d9422f9b63619c1cf2f1d8aa107b83bbb608.txt",
+      "action": "exact-leading-legal-excerpt",
+      "sha256": "ef790eaf397afaaa80b1405c9e65947615f1193cf258c510c90c48f8f4a9a264"
+    },
+    {
+      "source": "starlark_syntax-0.14.2/testcases/parse/license.star",
+      "old_file": "texts/a6d5ae5183a5681f86648588fa84ec7fef84f2d7709b0d644a14d0fd8d68a1e9.txt",
+      "action": "drop-code-not-notice"
+    },
+    {
+      "source": "openssl-src-300.6.1+3.6.3/openssl/util/perl/OpenSSL/copyright.pm",
+      "old_file": "texts/04213b69dbebc8ba0dd8a6216af1d9422f9b63619c1cf2f1d8aa107b83bbb608.txt",
+      "action": "exact-leading-legal-excerpt",
+      "sha256": "ef790eaf397afaaa80b1405c9e65947615f1193cf258c510c90c48f8f4a9a264"
+    },
+    {
+      "source": "starlark_syntax-0.14.2/testcases/parse/license.star",
+      "old_file": "texts/a6d5ae5183a5681f86648588fa84ec7fef84f2d7709b0d644a14d0fd8d68a1e9.txt",
+      "action": "drop-code-not-notice"
+    },
+    {
+      "source": "openssl-src-300.6.1+3.6.3/openssl/util/perl/OpenSSL/copyright.pm",
+      "old_file": "texts/04213b69dbebc8ba0dd8a6216af1d9422f9b63619c1cf2f1d8aa107b83bbb608.txt",
+      "action": "exact-leading-legal-excerpt",
+      "sha256": "ef790eaf397afaaa80b1405c9e65947615f1193cf258c510c90c48f8f4a9a264"
+    },
+    {
+      "source": "starlark_syntax-0.14.2/testcases/parse/license.star",
+      "old_file": "texts/a6d5ae5183a5681f86648588fa84ec7fef84f2d7709b0d644a14d0fd8d68a1e9.txt",
+      "action": "drop-code-not-notice"
+    }
+  ],
+  "unreferenced_derived_texts_removed": [
+    "04213b69dbebc8ba0dd8a6216af1d9422f9b63619c1cf2f1d8aa107b83bbb608.txt",
+    "0819ea84597f2051f7381c26a67d4119be0770c6ec977ff63c59e26251db2ac0.txt",
+    "25ebb771dd2bc53bedf66e1b4bee7e6169bd5c0eee84621e7c4ac2d91f9826c2.txt",
+    "a6d5ae5183a5681f86648588fa84ec7fef84f2d7709b0d644a14d0fd8d68a1e9.txt",
+    "c2382787dab8660e35020c56ff1eccabc7738427e6154a9c4e627295cd477aba.txt",
+    "de0f312e9784884e211d50d4344dae0d9beb9074bfb9812566f904888c47c121.txt",
+    "f5f846842cc206d49785c2a70b3cdced806490e14c313b5fa5b1e98db37078f8.txt"
+  ],
+  "scope": "Deterministic regeneration from retained source seed, exact archive collector results and primary acquisitions; no original receipt or source data deletion."
+}

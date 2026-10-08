@@ -1,0 +1,38 @@
+{
+  "schema": "marsh.clipboard-spdx-reconciliation/v1",
+  "receipt_sha256": "7a04cf1008303b0a5fd344f408958b1dcd8717bd096317a05c4fe25a8e85dfed",
+  "root_observed_image_id": "sha256:36fd3782db091cec28ddfcb28458fbc96ed540435b91d910c1a00b07ec50d5a2",
+  "platform": "linux/arm64",
+  "spdx_sha256": "d5c77119d54318abb4f8d17ba74a900b7100ad501527f20b76f5b48257990a47",
+  "clipboard_commit": "54a695035350bab5f126a88c892a9bc3b5ae162a",
+  "spdx_declared_license": "LicenseRef-Proprietary",
+  "spdx_concluded_license": "NOASSERTION",
+  "x_sys": {
+    "observed_build_information_version": "v0.46.0",
+    "spdx_purl": "pkg:golang/golang.org/x/sys@v0.46.0",
+    "license_declared": "BSD-3-Clause",
+    "go_archive_sha256": "36dc83b6bc5884d260cdbd9d09e597b1eed64d15dfdc374ca6e31aef99d533d7",
+    "go_sum": "h1:noSf2Fq6F8DBgS+LysIkx7rIExoNHJsxOAtPp4rthXw=",
+    "required_notices": [
+      {
+        "source_path": "golang.org/x/sys@v0.46.0/LICENSE",
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+        "file": "texts/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt"
+      }
+    ],
+    "vendor_spdx_inconsistencies": {
+      "versionInfo": "54a695035350bab5f126a88c892a9bc3b5ae162a",
+      "downloadLocation": "git+https://github.com/docker/sandboxes.git#54a695035350bab5f126a88c892a9bc3b5ae162a",
+      "checksums": [
+        {
+          "algorithm": "SHA1",
+          "checksumValue": "54a695035350bab5f126a88c892a9bc3b5ae162a"
+        }
+      ]
+    },
+    "interpretation": "versionInfo/downloadLocation/checksums repeat the main repository/commit, not the module version/source/hash. Preserve vendor document unchanged; use its correct purl corroborated by embedded Go build information and checksum-verified module archive. These fields are NOT proof of x/sys corresponding source."
+  },
+  "image_license_scope": "DHI definitions (Dockerfiles), patches and build scripts are Apache-2.0. Included packages/binaries retain their own upstream terms. SPDX CC0-1.0 covers the document, not proprietary clipboard code.",
+  "private_acquisition": "The clipboard-bridge LICENSE text is retained as published by Docker. The THIRD-PARTY-NOTICES file it refers to is not published; the golang.org/x/sys v0.46.0 notice is collected separately from the observed dependency.",
+  "permission_scope": "No license grant is asserted for the proprietary clipboard-bridge component; it is distributed under Docker's terms."
+}

@@ -1,0 +1,8 @@
+{
+  "max_commands": 251,
+  "max_name_bytes": 128,
+  "max_document_bytes": 1048576,
+  "allowed_name_characters": "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-",
+  "forbidden_name_prefixes": ["-"],
+  "reserved_names": [".", "..", "marsh", "fanout", "collect", "acp", "mcp", "ps", "top"]
+}

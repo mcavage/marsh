@@ -1,0 +1,130 @@
+diff --git a/brush-interactive/src/reedline/input_backend.rs b/brush-interactive/src/reedline/input_backend.rs
+index 46ba3d1..d7ab926 100644
+--- a/brush-interactive/src/reedline/input_backend.rs
++++ b/brush-interactive/src/reedline/input_backend.rs
+@@ -9,6 +9,12 @@ use crate::{InputBackend, ReadResult, ShellError, input_backend::InteractiveProm
+ /// and reporting results to standard output and standard error streams.
+ pub struct ReedlineInputBackend {
+     reedline: Option<reedline::Reedline>,
++    /// Set once the terminal fails to answer reedline's cursor position query
++    /// (at the first prompt, or twice in a row later); lines are then read
++    /// plainly for the rest of the session.
++    plain: bool,
++    /// Whether reedline has read a line in this session.
++    answered: bool,
+ }
+ 
+ const COMPLETION_MENU_NAME: &str = "completion_menu";
+@@ -128,6 +134,8 @@ impl ReedlineInputBackend {
+ 
+         Ok(Self {
+             reedline: Some(reedline),
++            plain: false,
++            answered: false,
+         })
+     }
+ }
+@@ -157,17 +165,24 @@ impl InputBackend for ReedlineInputBackend {
+     /// * `prompt` - The prompt to display to the user.
+     fn read_line(
+         &mut self,
+-        _shell: &crate::ShellRef<impl brush_core::ShellExtensions>,
++        shell: &crate::ShellRef<impl brush_core::ShellExtensions>,
+         prompt: InteractivePrompt,
+     ) -> Result<ReadResult, ShellError> {
+         let Some(reedline) = &mut self.reedline else {
+             return Ok(ReadResult::Eof);
+         };
+ 
++        if self.plain {
++            return read_plain_line(shell, &prompt);
++        }
++
+         let mut attempt: u32 = 1;
+         loop {
+             match reedline.read_line(&prompt) {
+-                Ok(reedline::Signal::Success(s)) => return Ok(ReadResult::Input(s)),
++                Ok(reedline::Signal::Success(s)) => {
++                    self.answered = true;
++                    return Ok(ReadResult::Input(s));
++                }
+                 Ok(reedline::Signal::CtrlC) => return Ok(ReadResult::Interrupted),
+                 Ok(reedline::Signal::CtrlD) => return Ok(ReadResult::Eof),
+                 Ok(reedline::Signal::ExternalBreak(_)) => {
+@@ -194,6 +209,24 @@ impl InputBackend for ReedlineInputBackend {
+                 // prompts afresh. That is a tcsetattr failure on a tty that just
+                 // worked; the alternative -- exiting the shell -- loses the same
+                 // line and everything else with it.
++                // A terminal (or pty driver) that never answers the cursor
++                // position query must not end the session. One that never
++                // answered gets no retry; after that, one retry. Then lines are
++                // read without reedline for the rest of the session (Bash's
++                // readline never queries the cursor).
++                Err(err)
++                    if is_cursor_position_timeout(&err) && (attempt >= 2 || !self.answered) =>
++                {
++                    tracing::debug!(
++                        target: trace_categories::INPUT,
++                        "terminal did not report the cursor position; reading lines plainly: {err}"
++                    );
++                    eprintln!(
++                        "warning: the terminal did not answer a cursor position query; line editing is off for this session"
++                    );
++                    self.plain = true;
++                    return read_plain_line(shell, &prompt);
++                }
+                 Err(err) if attempt < MAX_READ_LINE_ATTEMPTS => {
+                     attempt += 1;
+                     tracing::debug!(
+@@ -326,3 +359,51 @@ mod tests {
+         assert!(selected_match_text_style.is_underline);
+     }
+ }
++
++/// Whether `err` is crossterm's timeout waiting for a cursor position report.
++fn is_cursor_position_timeout(err: &std::io::Error) -> bool {
++    err.to_string()
++        .contains("cursor position could not be read")
++}
++
++/// Reads one complete program a line at a time from the terminal in its
++/// ordinary (cooked) mode, showing the prompt and continuation prompt. Ctrl-C
++/// typed while reading is reported when the line ends, discarding it.
++fn read_plain_line(
++    shell: &crate::ShellRef<impl brush_core::ShellExtensions>,
++    prompt: &InteractivePrompt,
++) -> Result<ReadResult, ShellError> {
++    use std::io::{BufRead as _, Write as _};
++
++    let mut program = String::new();
++    loop {
++        let shown = if program.is_empty() {
++            &prompt.prompt
++        } else {
++            &prompt.continuation_prompt
++        };
++        let mut stderr = std::io::stderr();
++        write!(stderr, "{shown}")?;
++        stderr.flush()?;
++
++        let mut line = String::new();
++        let read = std::io::stdin().lock().read_line(&mut line)?;
++        #[cfg(unix)]
++        if brush_core::traps::take_pending_interrupt() {
++            writeln!(stderr)?;
++            return Ok(ReadResult::Interrupted);
++        }
++        if read == 0 {
++            break;
++        }
++        program.push_str(&line);
++        if !crate::completeness::needs_more_input(shell, &program) {
++            break;
++        }
++    }
++    if program.is_empty() {
++        Ok(ReadResult::Eof)
++    } else {
++        Ok(ReadResult::Input(program))
++    }
++}
