@@ -202,10 +202,11 @@ if [ "$#" -eq 0 ] && [ ! -t 0 ]; then
 elif [ "$#" -eq 2 ] && [ "$1" = --prompt ] && [ ! -t 0 ]; then
   codex_pipe_prompt=$2
   codex_pipe_prompt_set=1
+  set --
 elif [ "$#" -eq 1 ] && [ ! -t 0 ]; then
   case "$1" in
     -*|agents|exec|e|review|login|logout|mcp|plugin|app-server|remote-control|app|completion|update|doctor|sandbox|debug|apply|a|resume|queue|archive|delete|migrate-rollouts|unarchive|fork|cloud|exec-server|features|help) ;;
-    *) codex_pipe_prompt=$1; codex_pipe_prompt_set=1 ;;
+    *) codex_pipe_prompt=$1; codex_pipe_prompt_set=1; set -- ;;
   esac
 fi
 # In an marsh job, /run/marsh/context.md tells the agent how to start child

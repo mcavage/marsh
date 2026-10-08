@@ -21,6 +21,14 @@ make_fake claude
 make_fake codex
 make_fake pi
 
+# The Codex adapter execs its pinned /usr/local/bin/codex, never PATH. Test a
+# copy whose pin names the fake; the adapter logic is otherwise byte-identical.
+codex_entry="$root/codex-entrypoint.sh"
+sed "s#/usr/local/bin/codex#$bin/codex#g" kits/marsh-codex/marsh-entrypoint.sh >"$codex_entry"
+adapter() {
+  if [ "$1" = codex ]; then printf "%s\n" "$codex_entry"; else printf "%s\n" "kits/marsh-$1/marsh-entrypoint.sh"; fi
+}
+
 run_kit() {
   kit=$1
   home="$root/$kit-home"
@@ -32,7 +40,7 @@ run_kit() {
     MARSH_SELECTED_HOME="$home" \
     SBX_CRED_ANTHROPIC_MODE=apikey \
     SBX_CRED_OPENAI_MODE=oauth \
-  sh "kits/marsh-$kit/marsh-entrypoint.sh" --version || status=$?
+  sh "$(adapter "$kit")" --version || status=$?
   test "$status" -eq 0 || return "$status"
   test "$(cat "$capture/home")" = "$home"
   test "$(tail -n 1 "$capture/args")" = "--version"
@@ -283,7 +291,7 @@ while [ "$codex_index" -le 8 ]; do
       MARSH_TEST_CAPTURE="$capture" \
       MARSH_SELECTED_HOME="$root/codex-home" \
       SBX_CRED_OPENAI_MODE=oauth \
-      sh "$OLDPWD/kits/marsh-codex/marsh-entrypoint.sh" --version
+      sh "$codex_entry" --version
   ) &
   codex_pids="$codex_pids $!"
   codex_index=$((codex_index + 1))
@@ -319,7 +327,7 @@ if PATH="$bin:$PATH" \
   MARSH_TEST_CAPTURE="$root/codex-capture" \
   MARSH_SELECTED_HOME="$root/codex-home" \
   SBX_CRED_OPENAI_MODE=oauth \
-  sh kits/marsh-codex/marsh-entrypoint.sh --version \
+  sh "$codex_entry" --version \
   >"$root/codex-malformed.out" 2>"$root/codex-malformed.err"; then
   echo 'malformed Codex config path unexpectedly accepted' >&2
   exit 1
@@ -340,7 +348,7 @@ if PATH="$bin:$PATH" \
   MARSH_TEST_CAPTURE="$root/codex-capture" \
   MARSH_SELECTED_HOME="$root/codex-home" \
   SBX_CRED_OPENAI_MODE=oauth \
-  sh kits/marsh-codex/marsh-entrypoint.sh --version \
+  sh "$codex_entry" --version \
   >"$root/codex-malformed.out" 2>"$root/codex-malformed.err"; then
   echo 'malformed Codex TOML unexpectedly accepted' >&2
   exit 1

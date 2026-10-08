@@ -50,8 +50,10 @@ pub struct Stat {
     pub identity: (u64, u64),
 }
 
+// stat field types differ by platform (signed on macOS, unsigned on Linux).
 #[allow(
     clippy::cast_sign_loss,
+    clippy::cast_possible_wrap,
     clippy::cast_lossless,
     clippy::useless_conversion,
     clippy::unnecessary_cast
@@ -143,6 +145,8 @@ impl Dir {
         self.write_new_mode(name, bytes, 0o644)
     }
 
+    // RawMode is u16 on macOS and u32 on Linux; mode bits fit either.
+    #[allow(clippy::cast_possible_truncation, clippy::unnecessary_cast)]
     pub fn write_new_mode(
         &self,
         name: impl AsRef<OsStr>,
@@ -153,7 +157,7 @@ impl Dir {
             &self.0,
             name.as_ref(),
             OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
-            Mode::from_bits_truncate(mode.try_into().unwrap_or(0o644)),
+            Mode::from_raw_mode(mode as rustix::fs::RawMode),
         )
         .map_err(rustix_err)?;
         let mut file = std::fs::File::from(fd);

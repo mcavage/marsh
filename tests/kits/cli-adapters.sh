@@ -28,6 +28,14 @@ make_fake claude
 make_fake codex
 make_fake pi
 
+# The Codex adapter execs its pinned /usr/local/bin/codex, never PATH. Test a
+# copy whose pin names the fake; the adapter logic is otherwise byte-identical.
+codex_entry="$root/codex-entrypoint.sh"
+sed "s#/usr/local/bin/codex#$bin/codex#g" kits/marsh-codex/marsh-entrypoint.sh >"$codex_entry"
+adapter() {
+  if [ "$1" = codex ]; then printf "%s\n" "$codex_entry"; else printf "%s\n" "kits/marsh-$1/marsh-entrypoint.sh"; fi
+}
+
 run_adapter() {
   kit=$1
   capture=$2
@@ -37,7 +45,7 @@ run_adapter() {
   PATH="$bin:$PATH" \
     MARSH_TEST_CAPTURE="$capture" \
     MARSH_SELECTED_HOME="$home" \
-    sh "kits/marsh-$kit/marsh-entrypoint.sh" "$@"
+    sh "$(adapter "$kit")" "$@"
 }
 
 assert_invocation() {
@@ -143,7 +151,7 @@ arg=--help'
 PATH="$bin:$PATH" \
   MARSH_TEST_CAPTURE="$root/codex-tty" \
   MARSH_SELECTED_HOME="$root/codex-home" \
-  python3 - "$(pwd)/kits/marsh-codex/marsh-entrypoint.sh" <<'PY'
+  python3 - "$codex_entry" <<'PY'
 import os
 import pty
 import subprocess

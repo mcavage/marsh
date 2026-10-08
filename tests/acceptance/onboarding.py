@@ -82,7 +82,7 @@ def main():
                "MARSH_HOME": str(root / "unused-scope")}
         cases = report["cases"]
         cases.append(run_case("public-help", [marsh, "--help"], project, env, 0,
-                              lambda out: out.startswith(b"marsh - ") and b"Usage:" in out))
+                              lambda out: out.startswith("marsh — ".encode()) and b"Usage:" in out))
         cases.append(run_case("public-version", [marsh, "--version"], project, env, 0,
                               lambda out: out.startswith(b"marsh ") and out.endswith(b"\n")))
         cases.append(run_case("missing-load-argument", [marsh, "--load"],

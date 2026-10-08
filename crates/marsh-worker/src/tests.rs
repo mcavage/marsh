@@ -1300,6 +1300,8 @@ fn channel_eof_is_controller_loss_even_after_explicit_input_close() {
 struct LifecycleState {
     signals: Vec<JobSignal>,
     resizes: Vec<TerminalSize>,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))] // Linux-only test
+    started: bool,
     complete: bool,
     deleted: bool,
 }
@@ -1383,6 +1385,7 @@ impl JobRuntime for RecordingRuntime {
     }
 
     fn start(&self, _container: &ContainerId) -> Result<(), RuntimeError> {
+        self.state.lock().unwrap().started = true;
         Ok(())
     }
 
@@ -1712,6 +1715,22 @@ impl ControlSource for ScriptedControls {
     }
 }
 
+/// A controller that is lost only after the runtime has started the job, so
+/// the loss reaches supervision rather than cancelling setup.
+#[cfg(target_os = "linux")]
+struct LostAfterStart(Arc<RecordingRuntime>);
+
+#[cfg(target_os = "linux")]
+impl ControlSource for LostAfterStart {
+    fn receive(&mut self, timeout: Duration) -> Result<Option<WorkerControl>, WorkerError> {
+        if self.0.state.lock().unwrap().started {
+            return Err(WorkerError::ControlClosed);
+        }
+        thread::sleep(timeout.min(Duration::from_millis(10)));
+        Ok(None)
+    }
+}
+
 fn recording_attachment(
     stdin_bytes: Arc<Mutex<Vec<u8>>>,
     stdin_dropped: Arc<AtomicBool>,
@@ -1981,7 +2000,7 @@ fn intentional_stdin_close_can_precede_successful_exit_by_more_than_cleanup_grac
 // Guest-only (the worker ships as a Linux binary); macOS scheduling
 // cancels setup / misses the resize before attach. Unverified off Linux.
 #[cfg(target_os = "linux")]
-fn resize_failure_is_visible_on_bounded_job_stderr() {
+fn resize_failure_is_a_nonfatal_control_error_on_a_bounded_job() {
     let runtime = Arc::new(RecordingRuntime {
         control_behavior: ControlBehavior::ResizeFails,
         ..RecordingRuntime::default()
@@ -1996,7 +2015,7 @@ fn resize_failure_is_visible_on_bounded_job_stderr() {
         }))]),
     };
     let outcome = ThreadSupervisor::default().supervise(
-        runtime,
+        runtime.clone(),
         &ContainerId::parse("d".repeat(64)).unwrap(),
         recording_attachment(
             Arc::new(Mutex::new(Vec::new())),
@@ -2008,13 +2027,28 @@ fn resize_failure_is_visible_on_bounded_job_stderr() {
             stderr: output_stream(stderr.clone()),
         },
         SupervisionLimits {
-            wall_time: Duration::from_secs(5),
+            wall_time: Duration::from_millis(500),
             output_bytes: 1024,
             writable_bytes: 1024,
         },
     );
 
-    assert_eq!(outcome.delivery, DeliveryOutcome::Failed);
+    // A rejected resize is counted, never a reason to end the job: it runs
+    // to its own bound.
+    assert_eq!(outcome.control_errors, 1);
+    assert_eq!(
+        outcome.delivery,
+        DeliveryOutcome::LimitExceeded {
+            resource: ResourceLimit::Wall
+        }
+    );
+    assert_eq!(
+        runtime.state.lock().unwrap().resizes,
+        [TerminalSize {
+            rows: 40,
+            columns: 120,
+        }]
+    );
 }
 
 #[test]
@@ -2431,9 +2465,7 @@ fn controller_loss_terminates_kills_and_verifies_container_cleanup() {
             termination_grace: Duration::from_millis(20),
         }),
     );
-    let mut controls = ScriptedControls {
-        controls: VecDeque::from([Err(WorkerError::ControlClosed)]),
-    };
+    let mut controls = LostAfterStart(runtime.clone());
 
     let report = worker.run(&job(), &mut controls, streams());
 

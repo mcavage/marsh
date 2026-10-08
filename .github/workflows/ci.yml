@@ -30,6 +30,19 @@ jobs:
           node-version: '22'
       - name: Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+      # Bash is the differential-test oracle, and the oracle is GNU Bash 5.3
+      # (docs/design/bash-compatibility.md); Ubuntu 24.04 ships 5.2.
+      - name: GNU Bash 5.3 (test oracle)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/bash-5.3.tar.gz" https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz
+          echo "0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba  $RUNNER_TEMP/bash-5.3.tar.gz" | sha256sum -c
+          tar -xzf "$RUNNER_TEMP/bash-5.3.tar.gz" -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/bash-5.3"
+          ./configure --quiet --prefix="$RUNNER_TEMP/bash"
+          make -s -j"$(nproc)"
+          make -s install
+          "$RUNNER_TEMP/bash/bin/bash" -c '[ "${BASH_VERSINFO[0]}${BASH_VERSINFO[1]}" -ge 53 ]'
+          echo "$RUNNER_TEMP/bash/bin" >> "$GITHUB_PATH"
       # Exact source key only: never restore build output across a source change.
       - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
@@ -90,6 +103,17 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+      # The differential-test oracle is GNU Bash 5.3; the runner has only
+      # /bin/bash 3.2.
+      - name: GNU Bash 5.3 (test oracle)
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          brew install bash
+          "$(brew --prefix)/bin/bash" -c '[ "${BASH_VERSINFO[0]}${BASH_VERSINFO[1]}" -ge 53 ]'
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          "$(brew --prefix)/bin/bash" --version | head -1
       - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: |
@@ -126,9 +150,15 @@ jobs:
         run: make site-check
 
   model:
-    name: TLA+ model
+    # Workspace_depth3_pass alone runs ~30 min with two workers; the full
+    # sweep does not fit one 60-minute job, so it runs as two shards.
+    name: TLA+ model (${{ matrix.shard }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [depth3, rest]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
@@ -144,6 +174,14 @@ jobs:
       - name: Check every config (positive configs pass, negative controls fail as expected)
         env:
           TLC_RUNNER: java
-          TLC_WORKERS: '2'
+          TLC_WORKERS: auto
           TLA2TOOLS_JAR: ${{ runner.temp }}/tla2tools.jar
-        run: docs/model/check.sh
+          SHARD: ${{ matrix.shard }}
+        run: |
+          big=Workspace_depth3_pass.cfg
+          if [ "$SHARD" = depth3 ]; then
+            configs=$big
+          else
+            configs=$(cd docs/model && ls *.cfg | grep -vxF "$big" | tr '\n' ' ')
+          fi
+          docs/model/check.sh "$configs"

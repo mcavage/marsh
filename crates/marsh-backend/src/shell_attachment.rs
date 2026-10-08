@@ -657,7 +657,7 @@ mod tests {
         let (server, mut client) = UnixStream::pair().unwrap();
         let (send, receive) = mpsc::channel();
         let task = thread::spawn(move || {
-            let outcome = run(process, &ServerAttachment::new(server).unwrap(), None);
+            let outcome = run(process, &ServerAttachment::new(server).unwrap());
             send.send(outcome).unwrap();
         });
         marsh_daemon::write_frame(&mut client, &AttachmentFrame::StdinEof).unwrap();
@@ -681,8 +681,7 @@ mod tests {
     fn early_real_consumer_preserves_nonzero_status_while_closing_input() {
         let process = fixture("head -c 1 >/dev/null; exit 7", false);
         let (server, mut client) = UnixStream::pair().unwrap();
-        let task =
-            thread::spawn(move || run(process, &ServerAttachment::new(server).unwrap(), None));
+        let task = thread::spawn(move || run(process, &ServerAttachment::new(server).unwrap()));
         marsh_daemon::write_frame(
             &mut client,
             &AttachmentFrame::Stdin {
@@ -703,7 +702,7 @@ mod tests {
             let process = fixture(&format!("head -c 1 >/dev/null; exit {expected}"), false);
             let (server, client) = ServerAttachment::shell_pair().unwrap();
             let task = thread::spawn(move || {
-                let outcome = run(process, &server, None);
+                let outcome = run(process, &server);
                 server
                     .send(&AttachmentFrame::Exited {
                         code: outcome.status(),
@@ -738,8 +737,7 @@ mod tests {
     fn blocked_real_stdin_disconnect_escalates_and_reaps() {
         let process = fixture("trap '' TERM; exec sleep 60", false);
         let (server, mut client) = UnixStream::pair().unwrap();
-        let task =
-            thread::spawn(move || run(process, &ServerAttachment::new(server).unwrap(), None));
+        let task = thread::spawn(move || run(process, &ServerAttachment::new(server).unwrap()));
         for _ in 0..SHELL_STDIN_WINDOW {
             marsh_daemon::write_frame(
                 &mut client,
@@ -766,7 +764,7 @@ mod tests {
             );
             let (server, client) = ServerAttachment::shell_pair().unwrap();
             let task = thread::spawn(move || {
-                let outcome = run(process, &server, None);
+                let outcome = run(process, &server);
                 let _ = server.send(&AttachmentFrame::Exited {
                     code: outcome.status(),
                 });
@@ -809,7 +807,7 @@ mod tests {
         let process = fixture(&format!("exec python3 -c '{program}'"), false);
         let (server, client) = ServerAttachment::shell_pair().unwrap();
         let task = thread::spawn(move || {
-            let outcome = run(process, &server, None);
+            let outcome = run(process, &server);
             let _ = server.send(&AttachmentFrame::Exited {
                 code: outcome.status(),
             });
@@ -869,7 +867,7 @@ mod tests {
             }
             let (server, client) = ServerAttachment::shell_pair().unwrap();
             let task = thread::spawn(move || {
-                let outcome = run(process, &server, None);
+                let outcome = run(process, &server);
                 server
                     .send(&AttachmentFrame::Exited {
                         code: outcome.status(),
@@ -933,7 +931,7 @@ mod tests {
         );
         let process = fixture(&format!("exec python3 -c '{program}'"), false);
         let (server, client) = ServerAttachment::shell_pair().unwrap();
-        let task = thread::spawn(move || run(process, &server, None));
+        let task = thread::spawn(move || run(process, &server));
         client.send(&AttachmentFrame::StdinEof).unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         while !ready.exists() && Instant::now() < deadline {
@@ -974,7 +972,7 @@ mod tests {
         let (server, client) = UnixStream::pair().unwrap();
         drop(client);
         let start = Instant::now();
-        let outcome = run(process, &ServerAttachment::new(server).unwrap(), None);
+        let outcome = run(process, &ServerAttachment::new(server).unwrap());
         assert!(start.elapsed() < Duration::from_secs(5));
         assert!(
             matches!(outcome.cleanup, Cleanup::Uncertain(_)),
@@ -1013,7 +1011,7 @@ mod tests {
         let (server, client) = UnixStream::pair().unwrap();
         drop(client);
         let start = Instant::now();
-        let outcome = run(process, &ServerAttachment::new(server).unwrap(), None);
+        let outcome = run(process, &ServerAttachment::new(server).unwrap());
         assert!(start.elapsed() < Duration::from_secs(5));
         assert!(matches!(outcome.cleanup, Cleanup::Verified), "{outcome:?}");
         assert!(!outcome.delivered);
