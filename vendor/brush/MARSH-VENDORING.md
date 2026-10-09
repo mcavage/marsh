@@ -74,6 +74,9 @@ Patch `0046` renders a failed branch's stderr inline after its header
 (`collect --stderr` shows every branch's).
 Patch `0050` records caught `INT`/`TERM` arrivals in the signal handler, as
 Bash does, so a shell checking between commands never misses a delivered signal.
+Patch `0051` makes a forked child prove it can start a thread before it runs
+anything, replacing one that cannot (a fork that lands while another thread is
+starting leaves the child holding a lock nothing can release).
 
 This directory contains only the runtime crate source, manifests, licenses,
 and build metadata needed by marsh. Upstream integration tests, snapshots,

@@ -387,6 +387,25 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   (about one run in eight failed before) and by
   `noninteractive_group_sigint_ends_the_command_list`, which flaked in CI.
 
+- `0051` makes a forked child prove it can start a thread before it runs
+  anything. A starting thread holds the standard library's process-wide
+  thread registry lock (its stack overflow handler's, on Darwin); a `fork`
+  landing in that window hands the child the lock held, with no thread left to
+  release it, and the child's first thread spawn (the host of its fresh
+  runtime) never returns, hanging the whole command. Brush made that likely:
+  `fanout` starts three capture threads per branch and forks straight after,
+  a pipeline starts a pool thread for a leading builtin before forking the next
+  stage, and a child's own runtime is still starting workers when its body
+  forks. Two parts. The Brush-owned thread starts (`spawn_running`) wait for
+  the thread to be past its start, removing the systematic collisions without
+  a delay. `fork` then waits for the child to claim its start in a word of
+  shared memory (compare-and-swap, so exactly one side decides); a child that
+  has not claimed it within a bounded time has run nothing, so it is killed
+  and replaced (a bounded number of times, then an error, never a hang). Not
+  Bash-visible. Covered by `forked_branch_shells_always_start_when_launched_concurrently`
+  (96 concurrent two-branch fanouts; 5 of 5 runs hung before) and by the
+  `fanout` smoke tests, which hung about 1.7% of runs.
+
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
 path is sourced before it.
