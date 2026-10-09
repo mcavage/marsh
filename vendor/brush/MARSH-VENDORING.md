@@ -72,6 +72,8 @@ background output at the prompt starts each line at column 0, as in Bash.
 Patch `0045` makes the `collect` renderer public for the `marsh collect` CLI.
 Patch `0046` renders a failed branch's stderr inline after its header
 (`collect --stderr` shows every branch's).
+Patch `0050` records caught `INT`/`TERM` arrivals in the signal handler, as
+Bash does, so a shell checking between commands never misses a delivered signal.
 
 This directory contains only the runtime crate source, manifests, licenses,
 and build metadata needed by marsh. Upstream integration tests, snapshots,

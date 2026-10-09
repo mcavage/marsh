@@ -1147,18 +1147,28 @@ fn coreutils_split_and_join_are_unaffected_by_split_join_composition() {
 /// SIGINT to the process group of a noninteractive shell whose foreground
 /// child dies of it ends the shell by SIGINT: nothing after runs. A child that
 /// handles SIGINT and exits normally lets the list continue.
+///
+/// The `ready` marker is written by the foreground child itself (after it has
+/// installed its trap, where it has one), so the signal is only sent once the
+/// shell is waiting on that child. A marker written by the shell before it
+/// started the child leaves a window that a loaded machine can stretch past
+/// any fixed delay.
 #[test]
 fn noninteractive_group_sigint_ends_the_command_list() {
     use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
     for (script, status, stdout) in [
         (
-            "printf r > ready; for i in 1 2 3; do sleep 5; echo it$i; done; echo loopdone",
+            "for i in 1 2 3; do sh -c 'printf r >> ready; exec sleep 5'; echo it$i; done; echo loopdone",
             None,
             b"".as_slice(),
         ),
-        ("printf r > ready; sleep 30; echo after", None, b""),
         (
-            "printf r > ready; sh -c 'trap \"exit 3\" INT; sleep 5 & wait'; echo after $?",
+            "sh -c 'printf r > ready; exec sleep 30'; echo after",
+            None,
+            b"",
+        ),
+        (
+            "sh -c 'trap \"exit 3\" INT; printf r > ready; sleep 5 & wait'; echo after $?",
             Some(0),
             b"after 3\n",
         ),
@@ -1204,6 +1214,49 @@ fn noninteractive_group_sigint_ends_the_command_list() {
                 assert_eq!(output.status.signal(), Some(2), "{program}: {output:?}");
             }
             assert_eq!(output.stdout, stdout, "{program}: {script}: {output:?}");
+        }
+    }
+}
+
+/// A shell that signals itself with SIGINT acts on it before its next command,
+/// as Bash does: an untrapped one ends a noninteractive shell by SIGINT, a
+/// trapped one runs its trap first. The preceding external command makes the
+/// shell catch SIGINT (until then its default action applies), so this
+/// exercises the caught-signal path. The signal is delivered to the shell
+/// synchronously by `kill`; the shell must not depend on its runtime having
+/// dispatched the arrival yet. Each case is repeated because the dispatch race
+/// it closes (13% of runs before it was closed) is only a window.
+#[test]
+fn noninteractive_self_sigint_is_acted_on_before_the_next_command() {
+    use std::os::unix::process::ExitStatusExt as _;
+    for (script, signal, stdout) in [
+        ("sh -c :; kill -INT $$; echo after", Some(2), b"".as_slice()),
+        (
+            "trap 'echo trapped' INT; sh -c :; kill -INT $$; echo after",
+            None,
+            b"trapped\nafter\n",
+        ),
+    ] {
+        for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
+            for attempt in 0..40 {
+                let output = run(program, script, false);
+                assert_eq!(
+                    output.status.signal(),
+                    signal,
+                    "{program}: {script}: attempt {attempt}: {output:?}"
+                );
+                assert_eq!(
+                    output.stdout, stdout,
+                    "{program}: {script}: attempt {attempt}: {output:?}"
+                );
+                if signal.is_none() {
+                    assert_eq!(
+                        output.status.code(),
+                        Some(0),
+                        "{program}: {script}: attempt {attempt}: {output:?}"
+                    );
+                }
+            }
         }
     }
 }

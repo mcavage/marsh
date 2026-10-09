@@ -374,6 +374,19 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   `idle_term_trap_can_resume_reading_commands`, which flaked on a loaded
   machine.
 
+- `0050` records a caught `INT`/`TERM` in the signal handler itself (a flag set
+  through `signal-hook`, installed before the runtime's own handler) instead of
+  reading it from a persistent Tokio signal stream. A stream only learns of a
+  signal when the runtime's driver next dispatches it, so a check made between
+  delivery and dispatch (`deliver_pending_signals` after the foreground child
+  that the same group `INT` killed was reaped; an `INT` the shell sends itself)
+  missed the arrival and ran the next command before the shell died by the
+  signal. Bash records the arrival in its handler, so the window is closed
+  there. Generic; the only new dependency edge is `signal-hook`, already in the
+  lock file. Covered by `noninteractive_self_sigint_is_acted_on_before_the_next_command`
+  (about one run in eight failed before) and by
+  `noninteractive_group_sigint_ends_the_command_list`, which flaked in CI.
+
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
 path is sourced before it.
