@@ -155,7 +155,15 @@ Assumptions (outside the model, stated not checked):
 - Host names behave the same and are independent, so configs use one host name. Bounds
   are small: 3 UUIDs, 3 attempts with CAP=2, 2 transport generations, and 2 source identities.
 
-Run: `docs/model/check.sh [glob]` (`TLC_WORKERS=2` caps TLC threads; default `auto`). This needs Docker (or `TLC_RUNNER=java` with a local Java 17+) and the
+Run: `docs/model/check.sh [--quick | --huge | --no-huge] [--cores N] [--workers N] [CONFIG...]`. Configs run
+concurrently inside a core budget (default: the runner's CPUs, at most 8), one TLC process each with its own
+log; the verdict of a config does not depend on scheduling. `--quick` skips the configs marked `slow`
+(`\* marsh-check: slow` on the first line of the `.cfg`; about 30 s to 7 min with two workers, and
+`Workspace_depth3_pass` about 30 min) and is the static gate (`make verify-static`); the default and
+`make regress` run everything. `--huge` / `--no-huge` split the one config that does not fit a CI job with
+its siblings from the rest. `TLC_CACHE=DIR` skips a config whose spec, config, jar and `check.sh` are
+byte-identical to one that already gave its expected verdict; the release run does not set it. This needs
+Docker (or `TLC_RUNNER=java` with a local Java 17+) and the
 TLA+ tools jar at `/private/tmp/marsh-tla2tools-1.8.0.jar` (override with
 `TLA2TOOLS_JAR`). The script exits nonzero if a positive config fails or a
 negative control passes or fails for the wrong reason. The jar is not committed.

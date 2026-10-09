@@ -41,7 +41,8 @@ make dev                              # build everything; install ~/.marsh-dev
 make fixture-ref                      # once: published fixture ref -> target/fixture-ref
 make dev-smoke                        # acceptance smoke against the dev install (or DEV_KIT=<ref>)
 make dev && make check                # the loop: fast real smoke, warm scope in target/check
-make regress                          # every existing suite, sequentially, before release
+make verify                           # before pushing: check + high-signal suites, concurrent (tests/regress.py)
+make regress                          # every sbx-backed suite, concurrent, before release (regress-serial: one at a time)
 python3 tests/perf/warm.py --marsh ~/.marsh-dev/bin/marsh \
   --guest-artifacts ~/.marsh-dev/libexec/marsh --kit <fixture-ref>
 ```

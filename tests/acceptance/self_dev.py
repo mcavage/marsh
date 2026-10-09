@@ -20,12 +20,37 @@ import sys
 import tempfile
 import time
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from provenance import SharedBaseline, stock_baseline  # noqa: E402
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
+# VM-name prefixes of every dev grant this run opened (outer and relay-kill sessions).
+PREFIXES: set[str] = set()
 
 
 def stock(sbx: str) -> dict[str, dict]:
     out = subprocess.run([sbx, "ls", "--json"], check=True, capture_output=True, text=True).stdout
     return {row["name"]: row for row in json.loads(out).get("sandboxes", [])}
+
+
+def owned_names(control: pathlib.Path) -> set[str]:
+    """VM names in this run's own daemon ownership map (empty once the scope is stopped)."""
+    names: set[str] = set()
+    for path in control.glob("*/vm-ownership.json"):
+        try:
+            names |= set(json.loads(path.read_text()).get("vms", {}))
+        except (OSError, ValueError):
+            pass
+    return names
+
+
+def new_vms(before: dict, after: dict, owned: set[str]) -> list[str]:
+    """VMs that appeared and are this run's: alone, any new VM; beside concurrent
+    suites (SharedBaseline), only those in our ownership map or under a grant prefix."""
+    fresh = set(after) - set(before)
+    if isinstance(before, SharedBaseline):
+        fresh = {n for n in fresh if n in owned or any(n.startswith(p) for p in PREFIXES if p)}
+    return sorted(fresh)
 
 
 def stage(prefix_dir: str, sbx: str, prefix: str) -> tuple[str, dict, pathlib.Path]:
@@ -42,7 +67,7 @@ def stage(prefix_dir: str, sbx: str, prefix: str) -> tuple[str, dict, pathlib.Pa
         raise SystemExit(f"{install} is inside the checkout; run make dev and pass its DEV_PREFIX")
     if not (install / "libexec/marsh/dev-enabled").is_file():
         raise SystemExit(f"{install} is not a dev install (no libexec/marsh/dev-enabled); run make dev")
-    tmp = pathlib.Path(tempfile.gettempdir()).resolve()
+    tmp = pathlib.Path(os.environ.get("MARSH_UAT_ROOT") or tempfile.gettempdir()).resolve()
     root = pathlib.Path(tempfile.mkdtemp(prefix=prefix, dir=tmp)).resolve()
     home, control, cache = root / "home", root / "control", root / "devcache"
     for path in (home, control, cache):
@@ -199,6 +224,7 @@ def relay_kill(args: argparse.Namespace, env: dict, control: pathlib.Path) -> di
             if line.startswith(key + "="):
                 marks[key] = line.split("=", 1)[1]
     prefix = marks.get("PREFIX", "")
+    PREFIXES.add(prefix)
     time.sleep(2)
     stray = subprocess.run(["pgrep", "-f", "sbx exec .*sleep 97"], capture_output=True, text=True).stdout
     ownership = list(control.glob("*/vm-ownership.json"))
@@ -248,7 +274,7 @@ def main() -> int:
     args = parser.parse_args()
     args.depth2 = args.depth2 or args.depth3
 
-    before = stock(args.sbx)
+    before = stock_baseline(args.sbx)  # name -> stable id
     args.marsh, env, control = stage(args.prefix, args.sbx, "marsh-selfdev-")
     root = control.parent
     # A first session creates the warm dev shell VM; its name is a probe target.
@@ -277,6 +303,7 @@ def main() -> int:
                 marks["PREFIX"] = line.split()[1].split("=", 1)[1]
                 marks["SCRATCH"] = line.split()[2].split("=", 1)[1]
         prefix, scratch = marks.get("PREFIX", ""), pathlib.Path(marks.get("SCRATCH", "/nonexistent"))
+        PREFIXES.add(prefix)
         checks["session_exit_0"] = session.returncode == 0
         checks["build"] = marks.get("BUILD_EXIT") == "0"
         checks["run"] = marks.get("RUN_EXIT") == "0"
@@ -320,17 +347,18 @@ def main() -> int:
         checks["disposable_scratch_removed"] = scratch.is_dir() and not any(
             (scratch / leaf).exists() for leaf in ("home", "control", "tmp"))
         checks["artifacts_kept"] = (scratch / "artifacts/bin/marsh").is_file()
-        checks["baseline_unchanged"] = all(after.get(name, {}).get("id") == row["id"] for name, row in before.items())
+        checks["baseline_unchanged"] = all(after.get(name, {}).get("id") == vm_id for name, vm_id in before.items())
     if args.relay_kill or args.only_relay_kill:
         checks.update(relay_kill(args, env, control))
         after = stock(args.sbx)
-        checks["baseline_unchanged"] = all(after.get(name, {}).get("id") == row["id"]
-                                           for name, row in before.items())
+        checks["baseline_unchanged"] = all(after.get(name, {}).get("id") == vm_id
+                                           for name, vm_id in before.items())
     # Retire the dev shell VM this run created (outer marsh stop).
+    owned = owned_names(control)
     stop = subprocess.run([args.marsh, "stop"], cwd=REPO, env=env, capture_output=True, text=True,
                           timeout=600)
     final = stock(args.sbx)
-    leftovers = sorted(set(final) - set(before))
+    leftovers = new_vms(before, final, owned | owned_names(control))
     checks["scope_stop_leaves_no_new_vm"] = stop.returncode == 0 and not leftovers
     report = {"schema": "marsh.self-dev-e2e/v1", "passed": all(checks.values()), "checks": checks,
               "marks": marks, "probes": probe_lines, "elapsed_s": round(elapsed, 1), "leftovers": leftovers,

@@ -58,8 +58,20 @@ make fixture-ref                       # writes target/fixture-ref
 make dev-smoke                         # or: make dev-smoke DEV_KIT=REPO@sha256:...
 ```
 
-The everyday loop is `make dev && make check` (about 30 s cold, under 10 s
-warm; `make check-reset` stops its scope). Run `make regress` before a release.
+Three test tiers, all against the installed dev product and real stock `sbx`:
+
+| tier | wall time | when |
+|---|---|---|
+| `make check` | ~7 s warm, ~30 s cold | after every change (`make dev && make check`; `make check-reset` stops its scope) |
+| `make verify` | ~3 min | before you push: `check` plus the highest-signal acceptance scenarios, run concurrently |
+| `make regress` | ~12 min | before a release: every sbx-backed suite, sharded and concurrent, then the host suites |
+
+`make verify` and `make regress` run `tests/regress.py`: each suite gets its own
+isolated scope and evidence directory, at most 3 run at once (`REGRESS_JOBS=N`;
+it backs off while load or disk is high), and failures keep their log in
+`target/regress/` (`last.json` is the summary). `ONLY=workspaces-1 SKIP=self-dev`
+select suites (`python3 tests/regress.py --list`). `make regress-serial` runs
+the same suites one at a time, for debugging.
 
 To publish your own fixture instead:
 `make kit-publish-fixture KIT_REPOSITORY_PREFIX=docker.io/YOU KIT_REPOSITORY_NAME_PREFIX=marsh-`.
@@ -88,11 +100,12 @@ with results. On a small disk, set `CARGO_PROFILE_DEV_DEBUG=0` and
 ## Before you send a change
 
 ```sh
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
+make verify-static     # fmt, clippy, every Rust test, quick TLA+ sweep; no VMs
 ```
 
-plus focused tests for the crate you changed. Prefer real-caller tests that run
+(that is `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
+--locked -- -D warnings`, `cargo test --workspace`, and `docs/model/check.sh --quick`
+run together, under `cargo-nextest` when installed), plus focused tests for the crate you changed. Prefer real-caller tests that run
 the shipped binaries and check output, exit status, receipts, and cleanup over
 unit tests that restate the implementation. On a Mac, run `make dev-smoke`.
 `make acceptance` builds a fresh candidate and runs the full gate; it is the

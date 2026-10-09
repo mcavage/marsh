@@ -528,14 +528,12 @@ async fn fixture_caller_all_turns_and_published_actions() {
     let mut cursor = ask["start_cursor"].as_u64().unwrap();
     let mut texts = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(10);
-    let mut idle = 0;
     loop {
         let page = call!(json!({"action":"status","turn_id":turn,"cursor":cursor}));
         assert!(!page["updates_lost"].as_bool().unwrap());
         let next = page["next_cursor"].as_u64().unwrap();
         if page["updates"].as_array().unwrap().is_empty() {
             assert_eq!(cursor, next);
-            idle += 1;
         }
         for u in page["updates"].as_array().unwrap() {
             assert_eq!(u["turn_id"], turn);
@@ -548,7 +546,6 @@ async fn fixture_caller_all_turns_and_published_actions() {
         assert!(Instant::now() < deadline);
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(idle > 3);
     assert_eq!(
         texts,
         std::iter::once("fixture:slow-6".to_owned())
@@ -558,6 +555,26 @@ async fn fixture_caller_all_turns_and_published_actions() {
     let retry = call!(json!({"action":"ask","key":key,"text":"slow-6"}));
     assert_eq!(retry, ask);
     let hold = call!(json!({"action":"ask","key":Uuid::new_v4().to_string(),"text":"hold"}));
+    // Idle polling is a property of a turn that cannot progress, so it is
+    // observed on a held turn: after its echo the agent writes nothing until
+    // cancelled, and every further page is empty with an unmoved cursor. (A
+    // paced turn only shows empty pages if the poller outruns the pacing, which
+    // a stalled machine does not.)
+    let mut held_cursor = hold["start_cursor"].as_u64().unwrap();
+    let mut idle = 0;
+    let held_deadline = Instant::now() + Duration::from_secs(10);
+    while idle < 4 {
+        let page = call!(json!({"action":"status","turn_id":hold["turn_id"],"cursor":held_cursor}));
+        assert_eq!(page["turn_active"], true, "{page}");
+        let next = page["next_cursor"].as_u64().unwrap();
+        if page["updates"].as_array().unwrap().is_empty() {
+            assert_eq!(held_cursor, next);
+            idle += 1;
+        }
+        held_cursor = next;
+        assert!(Instant::now() < held_deadline, "held turn never went idle");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     let _ = call!(json!({"action":"cancel"}));
     rig.done();
     let cancelled = call!(json!({"action":"status","turn_id":hold["turn_id"]}));
@@ -1082,7 +1099,13 @@ fn failed_publication_revokes_its_grant_even_after_project_replacement() {
 fn status_remains_available_during_blocked_cancel_dispatch() {
     let rig = Rig::new();
     rig.prompt("control-flood");
-    thread::sleep(Duration::from_millis(250));
+    // The agent echoes the prompt and then stops reading its stdin (its bounded
+    // hostile lifetime starts here). Wait for that echo, not a fixed delay.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while rig.status(0).updates.is_empty() {
+        assert!(Instant::now() < deadline, "agent never received the prompt");
+        thread::sleep(Duration::from_millis(5));
+    }
     thread::scope(|scope| {
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let rig_ref = &rig;
@@ -1092,13 +1115,16 @@ fn status_remains_available_during_blocked_cancel_dispatch() {
                 .acp_cancel(rig_ref.id.clone(), rig_ref.shell.clone());
             done_tx.send(result).unwrap();
         });
-        thread::sleep(Duration::from_millis(100));
+        // The cancel has reached dispatch once status reports it requested; it
+        // then blocks on the agent's unread stdin.
+        while !rig.status(0).cancel_requested {
+            assert!(Instant::now() < deadline, "cancel never reached dispatch");
+            thread::sleep(Duration::from_millis(1));
+        }
+        let early = done_rx.try_recv();
         assert!(
-            matches!(
-                done_rx.try_recv(),
-                Err(std::sync::mpsc::TryRecvError::Empty)
-            ),
-            "probe did not reach blocked cancellation"
+            matches!(early, Err(std::sync::mpsc::TryRecvError::Empty)),
+            "probe did not reach blocked cancellation: {early:?}"
         );
         let started = Instant::now();
         let status = rig.status(0);

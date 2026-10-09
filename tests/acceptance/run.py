@@ -30,7 +30,7 @@ import pwd
 from typing import Any, Callable
 
 from provenance import (candidate_arguments, candidate_environment, host_only_path, source_identity, verify_candidate,
-                        stock_vm_inventory, stock_cleanup_errors, remove_owned_stock_vm)
+                        stock_vm_inventory, stock_baseline, stock_cleanup_errors, remove_owned_stock_vm)
 
 
 CHECKS = [
@@ -118,7 +118,11 @@ JOB_LIMITS = {
     "pids": 32,
     "writable_bytes": 16 * 1024 * 1024,
     "output_bytes": 1024 * 1024,
-    "wall_seconds": 10,
+    # Gated containers are held while the harness runs `sbx exec docker inspect`
+    # and status calls; beside concurrent suites those take seconds, and a 10 s
+    # limit then expired mid-gate. The enforcement check still observes the
+    # limit, just at 30 s.
+    "wall_seconds": 30,
 }
 JOB_LIMIT_ENV = {
     "cpu_millis": "MARSH_JOB_CPU_MILLIS",
@@ -149,7 +153,9 @@ def resolve_executable(value: str) -> str:
 def disposable_root(prefix: str) -> pathlib.Path:
     """Create mutable acceptance state outside the user's natural home tree."""
     parent = pathlib.Path("/private/tmp") if sys.platform == "darwin" else pathlib.Path(tempfile.gettempdir())
-    parent = parent.resolve()
+    # tests/regress.py keeps each suite's roots in its own directory so it can
+    # find the suite's ownership maps without touching anyone else's VMs.
+    parent = pathlib.Path(os.environ.get("MARSH_UAT_ROOT") or parent).resolve()
     if not parent.is_dir():
         raise ValueError(f"system temporary directory is unavailable: {parent}")
     root = pathlib.Path(tempfile.mkdtemp(prefix=prefix, dir=parent)).resolve()
@@ -170,7 +176,7 @@ def scoped_control_home(control_root: pathlib.Path, selected_home: pathlib.Path)
 def shell_vm_name(home: pathlib.Path) -> str:
     """Return the exact shell VM identity for one isolated selected home."""
     home = home.resolve()
-    metadata = home.stat(follow_symlinks=False)
+    metadata = os.lstat(home)
     digest = hashlib.sha256()
     digest.update(os.fsencode(home))
     digest.update(
@@ -332,6 +338,26 @@ class IsolatedScopeCleanup:
         self.owned_daemon_process_identity: tuple[int, str] | None = None
         self.owned_daemon_control_token: str | None = None
         self.owned_vms: set[str] = set()
+        self.owned_names_seen: set[str] = set()
+        self.extra_owned_names: set[str] = set()
+
+    def owned_stock_names(self) -> set[str]:
+        """Names of every stock VM this scope owns: its daemon's ownership map
+        (read live while it exists, remembered after the root is removed), the
+        identities learned from authenticated status, and VMs the harness
+        itself created (extra_owned_names)."""
+        names = set(getattr(self, "owned_names_seen", ())) | set(getattr(self, "extra_owned_names", ()))
+        names |= set(getattr(self, "owned_vm_identities", {}))
+        try:
+            names |= product_owned_vm_names(getattr(self, "control_home", None))
+        except (OSError, AssertionError, ValueError):
+            pass
+        self.owned_names_seen = set(names) - set(getattr(self, "extra_owned_names", ()))
+        return names
+
+    def stock_leftover_errors(self, after: dict[str, str]) -> list[str]:
+        """Pre-existing VMs unchanged and none of this scope's own remaining."""
+        return stock_cleanup_errors(self.stock_before, after, owned=self.owned_stock_names())
 
     def remember_owned_status(self, status: dict[str, Any]) -> None:
         owner = status.get("endpoint_owner", {})
@@ -485,6 +511,7 @@ class IsolatedScopeCleanup:
                     )
                     return errors
         vm_ids = set()
+        self.owned_stock_names()  # remember them: the root (and its map) is removed below
         if self.owned_scope_id is not None:
             try:
                 inventory = stock_vm_inventory(self.sbx)
@@ -516,7 +543,7 @@ class IsolatedScopeCleanup:
                 after = stock_vm_inventory(self.sbx)
                 if vm_ids.intersection(after.values()):
                     errors.append("owned stock VM IDs remain after removal")
-                errors.extend(stock_cleanup_errors(self.stock_before, after))
+                errors.extend(self.stock_leftover_errors(after))
             except (OSError, ValueError, subprocess.SubprocessError) as error:
                 errors.append(f"stock cleanup inventory unavailable: {error}")
         if not errors:
@@ -817,7 +844,7 @@ class Harness(IsolatedScopeCleanup):
             try:
                 after = stock_vm_inventory(self.sbx)
                 self.result["snapshots"].append({"label": "stock-sbx-after-cleanup", "source": "sbx", "value": after})
-                cleanup_errors.extend(stock_cleanup_errors(self.stock_before, after))
+                cleanup_errors.extend(self.stock_leftover_errors(after))
             except Exception as error:
                 cleanup_errors.append(f"independent stock cleanup unavailable: {error}")
         if cleanup_errors:
@@ -1122,7 +1149,7 @@ class Harness(IsolatedScopeCleanup):
         return f"not run after the shared fixture worker was quarantined: {identities}"
 
     def prepare(self) -> str | None:
-        self.stock_before = stock_vm_inventory(self.sbx)
+        self.stock_before = stock_baseline(self.sbx)
         self.result["snapshots"].append({"label": "stock-sbx-before", "source": "sbx", "value": self.stock_before})
         # The first public command may start marshd, and the daemon freezes its
         # command registry at startup. Install the isolated UAT mapping before
@@ -1994,7 +2021,7 @@ class Harness(IsolatedScopeCleanup):
             self.result["snapshots"].append({"label": "stock-sbx-after-workloads", "source": "sbx", "value": after})
             # Owned VMs still live here. finish() also rejects post-cleanup leaks.
             preserved = {name: after[name] for name in self.stock_before if name in after}
-            errors = stock_cleanup_errors(self.stock_before, preserved)
+            errors = stock_cleanup_errors(self.stock_before, preserved, owned=set())
             if errors:
                 raise AssertionError("; ".join(errors))
 
@@ -2371,7 +2398,7 @@ class Smoke(IsolatedScopeCleanup):
         raise TimeoutError("parallel shells did not reach their container gates")
 
     def run_all(self) -> None:
-        self.stock_before = stock_vm_inventory(self.sbx)
+        self.stock_before = stock_baseline(self.sbx)
         self.source["stock_before"] = self.stock_before
         status = self.document("status", "--json")
         if status.get("schema") != "marsh.status/v1":
@@ -2775,7 +2802,7 @@ class Smoke(IsolatedScopeCleanup):
             try:
                 after = stock_vm_inventory(self.sbx)
                 self.source["stock_after"] = after
-                cleanup_errors.extend(stock_cleanup_errors(self.stock_before, after))
+                cleanup_errors.extend(self.stock_leftover_errors(after))
             except Exception as caught:
                 cleanup_errors.append(f"independent stock cleanup unavailable: {caught}")
         if cleanup_errors:

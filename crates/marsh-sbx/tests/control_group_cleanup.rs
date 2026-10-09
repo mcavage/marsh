@@ -85,12 +85,39 @@ os._exit(0)
     );
 }
 
+// The deadline must outlast a cold /usr/bin/python3 start (the Xcode shim takes
+// hundreds of ms on a loaded runner), or the fixture is killed before it writes
+// `ready` and that attempt observes nothing about cleanup. An attempt whose
+// fixture never started is inconclusive, not a failure: it is repeated with a
+// doubled deadline until the fixture has really started.
+const DEADLINE: Duration = Duration::from_secs(2);
+const OVERFLOW_DEADLINE: Duration = Duration::from_secs(3);
+const CLEANUP_SLACK: Duration = Duration::from_millis(2700);
+const ATTEMPTS: u32 = 4;
+
 #[test]
 fn deadline_and_capture_overflow_remove_owned_late_effect_authority() {
     for overflow in [false, true] {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().canonicalize().unwrap();
-        let script = r"
+        let base = if overflow {
+            OVERFLOW_DEADLINE
+        } else {
+            DEADLINE
+        };
+        let observed = (0..ATTEMPTS)
+            .any(|attempt| late_effect_authority_removed(overflow, base * 2_u32.pow(attempt)));
+        assert!(
+            observed,
+            "fixture never started in {ATTEMPTS} attempts (overflow={overflow})"
+        );
+    }
+}
+
+/// Returns false if the fixture was killed before it started; asserts
+/// everything else.
+fn late_effect_authority_removed(overflow: bool, deadline: Duration) -> bool {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let script = r"
 import os, pathlib, sys, time
 root = pathlib.Path(sys.argv[1])
 (root/'ready').write_text(str(os.getpid()))
@@ -99,54 +126,54 @@ deadline = time.monotonic()+5
 while not (root/'release').exists() and time.monotonic()<deadline: time.sleep(.005)
 if (root/'release').exists(): (root/'late-effect').write_text('still alive after control failure')
 ";
-        let started = Instant::now();
-        let result = run_stock_command_capped(
-            &SystemCommandRunner::new(&root),
-            &Invocation {
-                program: "/usr/bin/python3".into(),
-                arguments: vec![
-                    "-I".into(),
-                    "-S".into(),
-                    "-c".into(),
-                    script.into(),
-                    root.clone().into_os_string(),
-                    if overflow { "overflow" } else { "deadline" }.into(),
-                ],
-                working_directory: Some(root.clone()),
-            },
-            if overflow {
-                Duration::from_secs(3)
-            } else {
-                Duration::from_millis(300)
-            },
-            1024,
-        );
-        let elapsed = started.elapsed();
-        assert!(
-            root.join("ready").exists(),
-            "fixture never started: {result:?}"
-        );
-        fs::write(root.join("release"), b"caller failed").unwrap();
-        thread::sleep(Duration::from_millis(100));
-        assert!(
-            !root.join("late-effect").exists(),
-            "failed capture retained live effect authority"
-        );
-        let error = result.unwrap_err().to_string();
-        assert!(
-            error.contains(if overflow {
-                "capture limit"
-            } else {
-                "deadline"
-            }),
-            "{error}"
-        );
-        assert!(
-            elapsed < Duration::from_secs(3),
-            "cleanup exceeded its bound: {elapsed:?}"
-        );
-        eprintln!("overflow={overflow}; elapsed={elapsed:?}; error={error}; late_effect=false");
+    let started = Instant::now();
+    let result = run_stock_command_capped(
+        &SystemCommandRunner::new(&root),
+        &Invocation {
+            program: "/usr/bin/python3".into(),
+            arguments: vec![
+                "-I".into(),
+                "-S".into(),
+                "-c".into(),
+                script.into(),
+                root.clone().into_os_string(),
+                if overflow { "overflow" } else { "deadline" }.into(),
+            ],
+            working_directory: Some(root.clone()),
+        },
+        deadline,
+        1024,
+    );
+    let elapsed = started.elapsed();
+    if !root.join("ready").exists() {
+        eprintln!("fixture never started within {deadline:?}: {result:?}; retrying");
+        return false;
     }
+    fs::write(root.join("release"), b"caller failed").unwrap();
+    thread::sleep(Duration::from_millis(100));
+    assert!(
+        !root.join("late-effect").exists(),
+        "failed capture retained live effect authority"
+    );
+    let error = result.unwrap_err().to_string();
+    assert!(
+        error.contains(if overflow {
+            "capture limit"
+        } else {
+            "deadline"
+        }),
+        "{error}"
+    );
+    // Cleanup after the failure must finish within the same slack as ever:
+    // overflow ends the call early, a deadline ends it at the deadline.
+    let bound = if overflow {
+        deadline
+    } else {
+        deadline + CLEANUP_SLACK
+    };
+    assert!(elapsed < bound, "cleanup exceeded its bound: {elapsed:?}");
+    eprintln!("overflow={overflow}; elapsed={elapsed:?}; error={error}; late_effect=false");
+    true
 }
 
 struct RejectCleanup(SystemCommandRunner);

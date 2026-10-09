@@ -45,7 +45,7 @@ async fn delayed_consumer_preserves_every_burst_chunk() {
     });
     sleep(Duration::from_millis(100)).await;
     let mut seen = Vec::new();
-    while let Some(update) = timeout(Duration::from_secs(2), receiver.recv())
+    while let Some(update) = timeout(Duration::from_secs(20), receiver.recv())
         .await
         .unwrap()
     {

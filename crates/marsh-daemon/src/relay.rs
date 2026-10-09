@@ -1017,10 +1017,10 @@ mod tests {
         let listener = UnixListener::bind(&socket).unwrap();
         let (host, mut guest) = UnixStream::pair().unwrap();
         guest
-            .set_read_timeout(Some(Duration::from_secs(5)))
+            .set_read_timeout(Some(Duration::from_secs(30)))
             .unwrap();
         guest
-            .set_write_timeout(Some(Duration::from_secs(5)))
+            .set_write_timeout(Some(Duration::from_secs(30)))
             .unwrap();
         let host_reader = host.try_clone().unwrap();
         let relay = thread::spawn(move || run_host(host_reader, host, &socket, "a".repeat(64)));
@@ -1032,9 +1032,11 @@ mod tests {
         write_frame(&mut guest, &TunnelFrame::Open { connection: 1 }).unwrap();
         let stalled = listener.accept().unwrap().0;
         write_frame(&mut guest, &TunnelFrame::Open { connection: 2 }).unwrap();
+        // A permanently blocked sibling never gets its bytes, so these bounds only
+        // need to outlast a starved machine, not to be tight.
         let mut sibling = listener.accept().unwrap().0;
         sibling
-            .set_read_timeout(Some(Duration::from_secs(3)))
+            .set_read_timeout(Some(Duration::from_secs(30)))
             .unwrap();
         let sender = thread::spawn(move || {
             for _ in 0..256 {
@@ -1064,7 +1066,7 @@ mod tests {
         let mut guest = sender.join().unwrap().unwrap();
         write_frame(&mut guest, &TunnelFrame::Shutdown).unwrap();
         write_frame(&mut guest, &TunnelFrame::Cleaned).unwrap();
-        join_within(relay, Duration::from_secs(10)).unwrap();
+        join_within(relay, Duration::from_secs(30)).unwrap();
         sibling_result.unwrap();
         assert_eq!(&actual, b"sibling");
     }

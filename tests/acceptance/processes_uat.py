@@ -37,7 +37,7 @@ from typing import Any, Callable
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from provenance import stock_cleanup_errors, stock_vm_inventory  # noqa: E402
+from provenance import stock_baseline, stock_vm_inventory  # noqa: E402
 from run import stable_process_identity  # noqa: E402
 from workspaces_uat import Fail, Workspaces, find_records, require, text  # noqa: E402
 
@@ -1325,7 +1325,7 @@ class Processes(Workspaces):
         return None
 
     def run_all(self) -> None:
-        self.stock_before = stock_vm_inventory(self.sbx)
+        self.stock_before = stock_baseline(self.sbx)
         self.source["stock_before"] = self.stock_before
         (self.project / "README.md").write_text("processes acceptance\n")
         self.git(self.project, "init", "-q", "-b", "main")
@@ -1379,7 +1379,7 @@ class Processes(Workspaces):
             try:
                 after = stock_vm_inventory(self.sbx)
                 self.source["stock_after"] = after
-                cleanup_errors.extend(stock_cleanup_errors(self.stock_before, after))
+                cleanup_errors.extend(self.stock_leftover_errors(after))
             except Exception as caught:
                 cleanup_errors.append(f"independent stock cleanup unavailable: {caught}")
         if cleanup_errors:

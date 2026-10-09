@@ -348,7 +348,7 @@ if args[:2] == ['buildx','build']:
             os.killpg(process.pid, signal.SIGTERM)
             _, errors = process.communicate(timeout=15)
             self.assertNotEqual(process.returncode, 0, errors)
-            self.assertEqual((self.root/'terminated').read_text(), str(signal.SIGTERM))
+            self.assertEqual((self.root/'terminated').read_text(), str(int(signal.SIGTERM)))
             self.assertEqual(self.output.read_text(), 'previous reference')
         finally:
             if process.poll() is None:

@@ -275,7 +275,51 @@ def remove_owned_stock_vm(sbx: str | Path, name: str, identifier: str | None,
         raise ValueError(f"owned stock VM remains: {identifier}")
 
 
-def stock_cleanup_errors(before: dict[str, str], after: dict[str, str]) -> list[str]:
+BASELINE_ENV = "MARSH_REGRESS_BASELINE"
+
+
+class SharedBaseline(dict):
+    """Stock VMs that existed before tests/regress.py started any suite.
+
+    Peer suites create and remove their own VMs while this one runs, so a live
+    snapshot taken at this suite's start would hold peers' VMs: they would
+    later "disappear" (their owner removed them) or look like leaks (they are
+    not ours). The runner's pre-launch snapshot holds only resources no suite
+    owns. Leak checks then cover only the VMs this suite itself owns (see
+    stock_cleanup_errors); the runner repeats the strict global check once
+    every suite has finished.
+    """
+
+
+def stock_baseline(sbx: str | Path, *, env: dict | None = None) -> dict[str, str]:
+    """The pre-existing inventory a harness compares against.
+
+    Standalone (no MARSH_REGRESS_BASELINE) this is a live snapshot, and any new
+    marsh-* VM at the end fails the run. Under the runner it is the runner's
+    snapshot; every entry is still required to be unchanged (same name and
+    stable ID) at the end of this suite.
+    """
+    live = stock_vm_inventory(sbx, env=env)
+    path = (env if env is not None else os.environ).get(BASELINE_ENV)
+    if not path:
+        return live
+    document = json.loads(Path(path).read_text(encoding="utf-8"))
+    vms = document.get("vms") if isinstance(document, dict) else None
+    if not isinstance(vms, dict) or not all(isinstance(k, str) and isinstance(v, str)
+                                            for k, v in vms.items()):
+        raise ValueError(f"malformed shared stock baseline: {path}")
+    return SharedBaseline(vms)
+
+
+def stock_cleanup_errors(before: dict[str, str], after: dict[str, str],
+                         owned: "set[str] | frozenset[str] | None" = None) -> list[str]:
+    """Pre-existing VMs must be unchanged and none of this suite's own may remain.
+
+    `owned` names the VMs this suite created or recorded in its own ownership
+    map. With a SharedBaseline it is required and bounds the leak check to
+    them (concurrent peers' VMs are neither pre-existing nor leaks); with a
+    private snapshot every new marsh-* VM is a leak, as before.
+    """
     errors = []
     if not isinstance(before, dict) or not isinstance(after, dict):
         raise ValueError("cleanup requires name-to-stable-ID inventories, not names alone")
@@ -284,10 +328,16 @@ def stock_cleanup_errors(before: dict[str, str], after: dict[str, str]) -> list[
     for name in before.keys() & after.keys():
         if before[name] != after[name]:
             errors.append(f"pre-existing stock sandbox was replaced: {name}: {before[name]} -> {after[name]}")
-    leaked = sorted(name for name in after.keys() - before.keys() if name.startswith("marsh-"))
-    if leaked:
+    new = after.keys() - before.keys()
+    if isinstance(before, SharedBaseline):
+        if owned is None:
+            raise ValueError("a shared stock baseline requires the suite's own VM names")
+        leaked = sorted(name for name in new if name in owned)
+    else:
         # New unrelated concurrent marsh runs conservatively fail qualification;
         # inventory differences never grant authority to remove them.
+        leaked = sorted(name for name in new if name.startswith("marsh-"))
+    if leaked:
         errors.append(f"new marsh sandboxes remain: {leaked}")
     return errors
 

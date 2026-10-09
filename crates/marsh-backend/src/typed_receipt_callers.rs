@@ -296,7 +296,10 @@ fn worker_observation(root: &Path, mode: &'static str) -> (WorkerReport, Vec<u8>
             pids: 32,
             writable_bytes: 16_777_216,
             output_bytes: 32768,
-            wall_seconds: 1,
+            // Only the wall mode is meant to hit its budget. Every other mode must
+            // outlast a cold /usr/bin/python3 start on a loaded machine, or the
+            // process is killed before it writes the effect the test observes.
+            wall_seconds: if mode == "wall" { 3 } else { 60 },
         },
         terminal: false,
         terminal_size: None,

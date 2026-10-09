@@ -41,11 +41,15 @@ for await (const line of inputLines) {
       send({ id, result: { protocolVersion: 1 } });
       break;
     case "session/new":
-      send({ id, result: { sessionId } });
-      // Real agents announce their command list right after session/new.
-      // It is session state, not a stray update: status must not report it.
+      // Real agents announce their command list around session/new. It is
+      // session state, not a stray update: status must not report it. It is
+      // written before the response so the caller has consumed it by the time
+      // session/new returns; after the response it races the caller's first
+      // prompt, and a prompt that wins the race would own the announcement as
+      // turn output (a loaded machine did exactly that).
       send({ method: "session/update", params: { sessionId, update: {
         sessionUpdate: "available_commands_update", availableCommands: [] } } });
+      send({ id, result: { sessionId } });
       break;
     case "session/prompt": {
       const text = params?.prompt?.[0]?.text;
@@ -57,7 +61,7 @@ for await (const line of inputLines) {
       }
       if (text === "control-flood") {
         inputLines.pause();
-        setTimeout(() => process.exit(0), 2000); // bounded hostile peer lifetime
+        setTimeout(() => process.exit(0), 5000); // bounded hostile peer lifetime; outlasts a starved caller's probes
         pendingPrompt = id;
         for (let n = 0; n < 200; n++) send({id:10000+n, method:"future/"+"x".repeat(30000), params:{}});
       } else if (text === "lossy") {

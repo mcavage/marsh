@@ -223,8 +223,10 @@ fn wait_n_returns_first_child_status_and_pid() {
 
 #[test]
 fn wait_n_can_collect_each_job_once_and_reports_empty_set() {
+    let dir = tempfile::tempdir().unwrap();
     let output = marsh()
-        .args(["--no-config", "--noprofile", "--norc", "-c", "sh -c 'sleep .03; exit 7' & sh -c 'sleep .15; exit 9' & wait -n; first=$?; wait -n; second=$?; wait -n; printf '%s:%s:%s' \"$first\" \"$second\" \"$?\""])
+        .current_dir(dir.path())
+        .args(["--no-config", "--noprofile", "--norc", "-c", "sh -c 'exit 7' & sh -c 'while test ! -e second-may-exit; do sleep .01; done; exit 9' & wait -n; first=$?; : >second-may-exit; wait -n; second=$?; wait -n; third=$?; rm -f second-may-exit; printf '%s:%s:%s' \"$first\" \"$second\" \"$third\""])
         .output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{:?}", output.stderr);
     assert_eq!(output.stdout, b"7:9:127");
@@ -1490,6 +1492,51 @@ impl PtyShell {
         self.input.lock().unwrap().write_all(bytes).unwrap();
     }
 
+    /// Asks the shell for its own PID; `prompts` is the prompt count that
+    /// follows the answer.
+    fn shell_pid(&mut self, prompts: usize) -> u32 {
+        self.send(b"echo shell-pid=$$\r");
+        self.expect("PROMPT$ ", prompts);
+        let output = self.output();
+        let (_, tail) = output.rsplit_once("shell-pid=").unwrap();
+        let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
+        digits
+            .parse()
+            .unwrap_or_else(|_| panic!("no shell pid in {output:?}"))
+    }
+
+    /// Waits until the shell has no live child (an exited child may linger as a
+    /// zombie until the shell reaps it, which is the shell's business).
+    fn expect_children_exited(&mut self, shell: u32) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            let table = Command::new("ps")
+                .args(["-A", "-o", "pid=,ppid=,stat="])
+                .output()
+                .unwrap();
+            let live = String::from_utf8_lossy(&table.stdout)
+                .lines()
+                .filter_map(|row| {
+                    let mut fields = row.split_whitespace();
+                    let (_, ppid, stat) = (fields.next()?, fields.next()?, fields.next()?);
+                    (ppid.parse() == Ok(shell) && !stat.starts_with('Z')).then_some(())
+                })
+                .count();
+            if live == 0 {
+                return;
+            }
+            if std::time::Instant::now() > deadline {
+                let output = self.output();
+                self.kill();
+                panic!(
+                    "{}: children of {shell} still running: {output:?}",
+                    self.program
+                );
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     fn kill(&mut self) {
         let _ = nix::sys::signal::killpg(
             nix::unistd::Pid::from_raw(i32::try_from(self.child.id()).unwrap()),
@@ -1646,27 +1693,31 @@ fn interactive_job_launch_and_completion_lines_match_bash() {
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
         let mut shell = PtyShell::spawn(program, true);
         shell.expect("PROMPT$ ", 1);
+        let pid = shell.shell_pid(2);
+        // Each notification is read only after the real condition: every job
+        // the shell started has exited. (Fixed sleeps raced a loaded machine:
+        // `sh -c 'exit 3'` had not run yet when `true` asked for the report.)
         shell.send(b"sleep 1 &\r");
-        shell.expect("PROMPT$ ", 2);
-        thread::sleep(Duration::from_millis(1500));
+        shell.expect("PROMPT$ ", 3);
+        shell.expect_children_exited(pid);
         shell.send(b"true\r");
         shell.expect("Done", 1);
-        shell.expect("PROMPT$ ", 3);
-        shell.send(b"sh -c 'exit 3' &\r");
         shell.expect("PROMPT$ ", 4);
-        thread::sleep(Duration::from_millis(500));
+        shell.send(b"sh -c 'exit 3' &\r");
+        shell.expect("PROMPT$ ", 5);
+        shell.expect_children_exited(pid);
         shell.send(b"true\r");
         shell.expect("Exit 3", 1);
-        shell.expect("PROMPT$ ", 5);
-        shell.send(b"sleep 2 & sleep 2 &\r");
         shell.expect("PROMPT$ ", 6);
+        shell.send(b"sleep 2 & sleep 2 &\r");
+        shell.expect("PROMPT$ ", 7);
         shell.send(b"jobs\r");
         shell.expect("Running", 2);
-        shell.expect("PROMPT$ ", 7);
-        thread::sleep(Duration::from_millis(2500));
+        shell.expect("PROMPT$ ", 8);
+        shell.expect_children_exited(pid);
         shell.send(b"true\r");
         shell.expect("Done", 3);
-        shell.expect("PROMPT$ ", 8);
+        shell.expect("PROMPT$ ", 9);
         shell.send(b"exit 0\r");
         let (status, output) = shell.finish();
         assert_eq!(status, Some(0), "{program}: {output:?}");

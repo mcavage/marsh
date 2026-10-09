@@ -67,6 +67,14 @@ pub(crate) async fn await_ctrl_c() -> std::io::Result<()> {
 pub(crate) async fn await_term() -> Result<(), error::Error> {
     crate::signals::listen(libc::SIGTERM);
     let mut listener = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    // This listener only sees signals from its creation on. One that arrived
+    // earlier (while a command ran, or between the last command and this wait)
+    // was only recorded by the persistent listener, and would otherwise wait
+    // for the next command boundary. Checking after creating the listener
+    // leaves no gap: an arrival is in one of the two.
+    if crate::signals::take(libc::SIGTERM) {
+        return Ok(());
+    }
     let _ = listener.recv().await;
     Ok(())
 }

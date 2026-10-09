@@ -43,6 +43,12 @@ jobs:
           make -s install
           "$RUNNER_TEMP/bash/bin/bash" -c '[ "${BASH_VERSINFO[0]}${BASH_VERSINFO[1]}" -ge 53 ]'
           echo "$RUNNER_TEMP/bash/bin" >> "$GITHUB_PATH"
+      - name: cargo-nextest
+        run: |
+          mkdir -p "$HOME/.cargo/bin"
+          curl -fsSL -o "$RUNNER_TEMP/nextest.tgz" https://get.nexte.st/0.9.148/linux-arm
+          echo "81469eb963ef883fd590e60189e77d6aba3d91b418591d3391f50fe3e9480d2b  $RUNNER_TEMP/nextest.tgz" | sha256sum -c
+          tar -xzf "$RUNNER_TEMP/nextest.tgz" -C "$HOME/.cargo/bin"
       # Exact source key only: never restore build output across a source change.
       - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
@@ -68,27 +74,37 @@ jobs:
           python3 tests/acceptance/onboarding.py \
             --marsh target/debug/marsh --shell target/debug/marsh-local \
             --evidence target/onboarding.json
+      # One build and one run of the sets the Linux job has always run (smoke,
+      # bash_audit, results_cli; all of worker, runtime, contracts; two ACP
+      # binaries) plus the daemon's dev broker tests. The old `dev_broker_attach::`
+      # and `dev_scope::tests` filters named modules that no longer exist and
+      # selected zero tests; `dev_broker::` is where those tests live now.
       - name: Shell, guest, and ACP tests
         run: |
-          cargo test --locked -p marsh --test smoke
-          cargo test --locked -p marsh --test bash_audit --test results_cli
-          cargo test --locked -p marsh-worker -p marsh-runtime -p marsh-contracts
-          cargo test --locked -p marsh-daemon dev_broker_attach::
-          cargo test --locked -p marsh-daemon dev_scope::tests
-          cargo test --locked -p marsh-acp --test transport_failure_test --test malformed_update_test
+          cargo nextest run --locked --no-fail-fast \
+            -p marsh -p marsh-worker -p marsh-runtime -p marsh-contracts -p marsh-daemon -p marsh-acp \
+            -E '(package(marsh) & (binary(smoke) | binary(bash_audit) | binary(results_cli)))
+                | package(marsh-worker) | package(marsh-runtime) | package(marsh-contracts)
+                | (package(marsh-daemon) & test(~dev_broker::))
+                | (package(marsh-acp) & (binary(transport_failure_test) | binary(malformed_update_test)))'
       - name: Publisher and staging boundaries (no registry access)
         run: |
           python3 -m venv "$RUNNER_TEMP/publisher-venv"
           "$RUNNER_TEMP/publisher-venv/bin/python" -m pip install --require-hashes --no-deps --only-binary=:all: -r scripts/requirements-publish.txt
-          "$RUNNER_TEMP/publisher-venv/bin/python" -W error tests/kits/test_publisher_cli.py
+          # Eight of the 39 tests walk the full canonical checkout and take most of
+          # the time; they start first, three tests at a time.
+          "$RUNNER_TEMP/publisher-venv/bin/python" tests/parallel_unittest.py -j 3 -W error \
+            --first test_prepared_stale_actual_sources --first test_publication_receipt_binds \
+            --first test_long_checkout --first test_real_default4 --first test_umask077 \
+            --first test_prepared_receipt_tampering --first test_preparation_output_private \
+            tests/kits/test_publisher_cli.py
       - name: Protocol callers and harness self-tests
         env:
           MARSH_BINARY: ${{ github.workspace }}/target/debug/marsh
           MARSH_MCP_BIN: ${{ github.workspace }}/target/debug/marsh-mcp
         run: |
-          for suite in test_stdio_protocol.py test_publication_cli.py test_guest_export_boundary.py; do
-            python3 -W error -m unittest discover -s tests/mcp -p "$suite"
-          done
+          python3 tests/parallel_unittest.py -j 3 -W error \
+            tests/mcp/test_stdio_protocol.py tests/mcp/test_publication_cli.py tests/mcp/test_guest_export_boundary.py
           python3 -W error -m unittest discover -s tests/acceptance -p 'test_*.py'
           python3 -m unittest discover -s tests/perf -p 'test_*.py'
           sh tests/kits/selected-home.sh
@@ -98,7 +114,7 @@ jobs:
   macos:
     name: macOS arm64 (host build and tests)
     runs-on: macos-14
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Rust toolchain
@@ -114,19 +130,43 @@ jobs:
           "$(brew --prefix)/bin/bash" -c '[ "${BASH_VERSINFO[0]}${BASH_VERSINFO[1]}" -ge 53 ]'
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
           "$(brew --prefix)/bin/bash" --version | head -1
+      # Registry sources are content-addressed by Cargo.lock, so they may be
+      # restored across source changes; build output is not (exact source key).
       - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
+          key: cargo-registry-macos-${{ hashFiles('Cargo.lock') }}
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: target
           key: cargo-macos-${{ runner.arch }}-rust1.95-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**', 'tests/**') }}
+      - name: Tool versions
+        run: |
+          cargo --version
+          python3 --version
+          /usr/bin/python3 --version
+          node --version
+          bash --version | head -1
+          sysctl -n hw.ncpu
       - name: Lint (macOS cfg)
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # nextest runs the same tests, one process each, all test binaries at once
+      # (a third to a half of `cargo test --workspace`'s wall time); it does not
+      # run doctests, so those keep their own (empty today) cargo step.
+      - name: cargo-nextest
+        run: |
+          mkdir -p "$HOME/.cargo/bin"
+          curl -fsSL -o "$RUNNER_TEMP/nextest.tgz" https://get.nexte.st/0.9.148/mac
+          echo "6c23b7fb4ca82c571fc8dfedbab45bfa773d45918f933170c85d21cd7f4b852b  $RUNNER_TEMP/nextest.tgz" | shasum -a 256 -c
+          tar -xzf "$RUNNER_TEMP/nextest.tgz" -C "$HOME/.cargo/bin"
       # Host tests use fake sbx executables and temporary homes; none needs
       # Docker Sandboxes or credentials.
       - name: Workspace tests
-        run: cargo test --workspace --locked
+        run: |
+          cargo nextest run --workspace --locked --no-fail-fast
+          cargo test --workspace --doc --locked
       - name: Harness self-tests
         run: python3 -W error -m unittest discover -s tests/acceptance -p 'test_*.py'
       - name: Release build, man page, and install script
@@ -150,8 +190,14 @@ jobs:
         run: make site-check
 
   model:
-    # Workspace_depth3_pass alone runs ~30 min with two workers; the full
-    # sweep does not fit one 60-minute job, so it runs as two shards.
+    # Workspace_depth3_pass alone runs ~30 min; the full sweep does not fit one
+    # job, so the config marked `huge` is its own shard and the rest share one.
+    # Inside a shard check.sh runs configs concurrently across the runner's
+    # cores (docs/model/check.sh --help). A config whose spec, config, jar and
+    # check.sh are byte-identical to one that already gave its expected verdict
+    # is not re-run (TLC is deterministic; the cache entry is written only by a
+    # fully passing shard), so a change that does not touch docs/model skips
+    # the model; any change under docs/model re-checks every config.
     name: TLA+ model (${{ matrix.shard }})
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -171,17 +217,17 @@ jobs:
         run: |
           curl -fsSL -o "$RUNNER_TEMP/tla2tools.jar" https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
           echo "7beec0f04818732a62fa193731711a99aa4f11279499b2360a7d156c519ea78d  $RUNNER_TEMP/tla2tools.jar" | sha256sum -c
+      - name: Verdict cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ runner.temp }}/tlc-cache
+          key: tlc-${{ matrix.shard }}-java21-${{ hashFiles('docs/model/**') }}
       - name: Check every config (positive configs pass, negative controls fail as expected)
         env:
           TLC_RUNNER: java
-          TLC_WORKERS: auto
           TLA2TOOLS_JAR: ${{ runner.temp }}/tla2tools.jar
+          TLC_CACHE: ${{ runner.temp }}/tlc-cache
           SHARD: ${{ matrix.shard }}
         run: |
-          big=Workspace_depth3_pass.cfg
-          if [ "$SHARD" = depth3 ]; then
-            configs=$big
-          else
-            configs=$(cd docs/model && ls *.cfg | grep -vxF "$big" | tr '\n' ' ')
-          fi
-          docs/model/check.sh "$configs"
+          if [ "$SHARD" = depth3 ]; then flag=--huge; else flag=--no-huge; fi
+          docs/model/check.sh "$flag"

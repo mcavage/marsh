@@ -365,6 +365,15 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   (`a_fanout_nested_in_a_branch_is_normalized_after_its_label`), run in a
   scratch copy as for `0033`.
 
+- `0049` makes the TERM wait (`await_term`: idle-input trap delivery and the
+  `wait` builtins) also take a TERM recorded before its listener existed. The
+  listener it creates sees signals only from its creation on, so a TERM that
+  landed while the previous command finished, just before the shell began
+  waiting for input, was recorded but not delivered until the next command
+  line arrived (Bash runs the trap at once). Generic; covered by
+  `idle_term_trap_can_resume_reading_commands`, which flaked on a loaded
+  machine.
+
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
 path is sourced before it.

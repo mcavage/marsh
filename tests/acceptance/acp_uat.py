@@ -17,7 +17,7 @@ import time
 import traceback
 
 from run import IsolatedScopeCleanup, disposable_root, resolve_executable, scoped_control_home, source_identity
-from provenance import verify_candidate, host_only_path, stock_vm_names, stock_cleanup_errors
+from provenance import verify_candidate, host_only_path, stock_vm_names, stock_baseline
 
 
 SCRIPT = r'''
@@ -503,7 +503,7 @@ class Scope(IsolatedScopeCleanup):
         evidence = pathlib.Path(args.evidence).absolute()
         evidence.mkdir(parents=True, mode=0o700, exist_ok=True)
         host_only_path(evidence / "source-binding.json", pathlib.Path(args.source_tree).resolve())
-        self.stock_before = stock_vm_names(self.sbx)
+        self.stock_before = stock_baseline(self.sbx)
         self.root = disposable_root("marsh-acp-uat-")
         self.home = self.root / "home"
         self.control_root = self.root / "control"
@@ -545,7 +545,7 @@ class Scope(IsolatedScopeCleanup):
         errors.extend(super().cleanup_isolated_scope())
         try:
             self.stock_after = stock_vm_names(self.sbx)
-            errors.extend(stock_cleanup_errors(self.stock_before, self.stock_after))
+            errors.extend(self.stock_leftover_errors(self.stock_after))
         except Exception as error:
             errors.append(f"independent stock cleanup inventory unavailable: {error}")
         return errors

@@ -50,34 +50,51 @@ def main():
             return receipt, key
 
         def collect(receipt):
-            cursor, chunks, polls = receipt["start_cursor"], [], 0
+            cursor, chunks = receipt["start_cursor"], []
             deadline = time.monotonic() + 15
             while True:
                 page = call(action="status", turn_id=receipt["turn_id"], cursor=cursor)
                 assert not page["updates_lost"], page
                 if not page["updates"]:
                     assert page["next_cursor"] == cursor, page
-                    polls += 1
                 for update in page["updates"]:
                     assert update["turn_id"] == receipt["turn_id"], update
                     chunks.append(update["update"]["content"]["text"])
                 cursor = page["next_cursor"]
                 if not page["turn_active"] and not page["more_updates"]:
-                    return chunks, page, polls
+                    return chunks, page
                 assert time.monotonic() < deadline, "turn did not complete"
                 time.sleep(.02)
 
         first, key = ask("slow-6")
-        chunks, page, polls = collect(first)
-        assert chunks == ["fixture:slow-6", *(f"u{n};" for n in range(6))] and polls > 0, chunks
+        chunks, page = collect(first)
+        assert chunks == ["fixture:slow-6", *(f"u{n};" for n in range(6))], chunks
         assert call(action="ask", text="slow-6", key=key) == first
+        # Idle polling is observed on a held turn (after its echo the agent writes
+        # nothing until cancelled), not by racing a paced one: a stalled machine
+        # can poll after the paced turn is over.
+        held, _ = ask("hold")
+        cursor, idle = held["start_cursor"], 0
+        deadline = time.monotonic() + 15
+        while idle < 4:
+            page = call(action="status", turn_id=held["turn_id"], cursor=cursor)
+            assert page["turn_active"], page
+            if not page["updates"]:
+                assert page["next_cursor"] == cursor, page
+                idle += 1
+            cursor = page["next_cursor"]
+            assert time.monotonic() < deadline, "held turn never went idle"
+            time.sleep(.005)
+        call(action="cancel")
+        chunks, page = collect(held)
+        assert page["last_stop_reason"] == "cancelled", page
         tail, _ = ask("cancel-burst")
         call(action="cancel")
-        chunks, page, _ = collect(tail)
+        chunks, page = collect(tail)
         assert chunks == ["fixture:cancel-burst", *(f"c{n};" for n in range(200))], chunks
         assert page["last_stop_reason"] == "cancelled", page
         late, _ = ask("late")
-        chunks, page, _ = collect(late)
+        chunks, page = collect(late)
         assert chunks == ["fixture:late"], chunks
         deadline = time.monotonic() + 5
         while page["session_out_of_turn_updates"] != 1:
@@ -95,7 +112,7 @@ def main():
             time.sleep(.01)
         older = call(action="status", turn_id=first["turn_id"], cursor=first["start_cursor"])
         assert not older["updates_lost"] and older["last_stop_reason"] == "end_turn", older
-        print(json.dumps(dict(external_mcp_caller="passed", idle_polls=polls, cancel_tail_chunks=201, old_turn_preserved=first["turn_id"], out_of_turn_updates=1)))
+        print(json.dumps(dict(external_mcp_caller="passed", idle_polls=idle, cancel_tail_chunks=201, old_turn_preserved=first["turn_id"], out_of_turn_updates=1)))
 
 
 if __name__ == "__main__":

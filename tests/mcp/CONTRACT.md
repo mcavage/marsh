@@ -360,10 +360,21 @@ not replace this boundary test.
     `make mcp-load-callers` (also run by `make test` and `make mcp-test`) invokes
     `run_publication_callers.py`: it builds all three host binaries into an owned
     cache, retains their hashes and copies in `$(TARGET_DIR)/mcp-callers/bin`,
-    retires only that cache, then builds and runs the real Rust callers from a
-    second owned cache. It runs the public host CLI suite once. No stale default
-    or prebuilt-binary shortcut substitutes for that build. Source and all host
-    and test executable hashes are checked again after the gate. Callers require an explicit binary path,
+    then builds and runs the real Rust callers from a second owned cache. The
+    two caches persist under `$(TARGET_DIR)/mcp-callers/cargo-host` and
+    `cargo-tests`, so a rerun recompiles only what Cargo's own fingerprints
+    mark changed, and Cargo (never a copied binary) produces every executable
+    that runs. A cache is discarded and rebuilt from empty when the toolchain
+    or the Cargo/rustc environment differs, when it
+    exceeds its size bound, or when any build input (crates, vendored Brush,
+    Cargo and toolchain files, embedded packaging and fixture files) has
+    different content from the last passing run yet no newer mtime, the one
+    change Cargo's mtime fingerprints cannot see. `MCP_FRESH=1`
+    (`--fresh`) builds both in empty temporary caches as the original gate did,
+    and an immutable source capsule (no Git root) always does. It runs the public
+    host CLI suite once. No stale default or prebuilt-binary shortcut
+    substitutes for that build. Source and all host and test executable hashes
+    are checked again after the gate. Callers require an explicit binary path,
     fail if any sibling is missing, and record their binary SHA256s in
     `$(TARGET_DIR)/mcp-test-evidence`. These are controlled process/Unixsocket
     tests, not VM qualification or observed-build provenance receipts. The host

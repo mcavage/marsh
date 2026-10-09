@@ -31,7 +31,7 @@ from typing import Any, Callable
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import doc_examples  # noqa: E402
-from provenance import stock_cleanup_errors, stock_vm_inventory  # noqa: E402
+from provenance import stock_baseline, stock_vm_inventory  # noqa: E402
 from run import (  # noqa: E402
     CONTAINER,
     Smoke,
@@ -1360,7 +1360,7 @@ class Workspaces(Smoke):
         return None
 
     def run_all(self) -> None:
-        self.stock_before = stock_vm_inventory(self.sbx)
+        self.stock_before = stock_baseline(self.sbx)
         self.source["stock_before"] = self.stock_before
         self.seed_main()
         self.document("status", "--json")
@@ -1408,7 +1408,7 @@ class Workspaces(Smoke):
             try:
                 after = stock_vm_inventory(self.sbx)
                 self.source["stock_after"] = after
-                cleanup_errors.extend(stock_cleanup_errors(self.stock_before, after))
+                cleanup_errors.extend(self.stock_leftover_errors(after))
             except Exception as caught:
                 cleanup_errors.append(f"independent stock cleanup unavailable: {caught}")
         if cleanup_errors:

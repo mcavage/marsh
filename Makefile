@@ -42,13 +42,14 @@ GITHUB_REPOSITORY ?= mcavage/marsh
 # Publication CLI runs once in mcp-load-callers, not again in discovery.
 MCP_TEST_FILES := $(filter-out test_publication_cli.py,$(if $(filter Darwin,$(shell uname -s)),$(notdir $(wildcard tests/mcp/test_*.py)),test_stdio_protocol.py test_guest_export_boundary.py))
 
-.PHONY: help build build-host build-linux prepare-shell-image test onboarding mcp mcp-test kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf dev-check man site site-check dist dist-local fixture-ref formula
+.PHONY: help build build-host build-linux prepare-shell-image test onboarding mcp mcp-test kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf dev-check verify-static man site site-check dist dist-local fixture-ref formula
 
 help:
 	@printf '%s\n' \
 		'make build             Build artifacts and import the repaired shell locally (no push)' \
 		'make prepare-shell-image  Prepare locally; SHELL_IMAGE_REPOSITORY opts into publication' \
 		'make test              Run format, lint, and workspace tests' \
+		'make verify-static     Fast VM-free gate: fmt, clippy, all Rust tests (nextest if installed), quick TLA+ sweep' \
 		'make onboarding        Run credential-free production shell journeys' \
 		'make mcp               Run installed host stdio MCP server for this workspace' \
 		'make mcp-test          Run the host MCP server tests' \
@@ -68,7 +69,9 @@ help:
 		'make dev               Build everything (host, guest, images, Kits) and install the dev product in $$(DEV_PREFIX)' \
 		'make check [DEV_KIT=ref]  Fast real smoke of the installed dev product (warm scope in target/check)' \
 		'make check-reset       Stop the make check scope and delete target/check' \
-		'make regress [DEV_KIT=ref]  Run every existing suite sequentially (before a release)' \
+		'make verify [DEV_KIT=ref]  Pre-push gate: check + the highest-signal sbx suites, concurrently' \
+		'make regress [DEV_KIT=ref]  Every sbx-backed suite, concurrently, then the host suites (before a release)' \
+		'make regress-serial [DEV_KIT=ref]  The same suites strictly one at a time (debugging)' \
 		'make dev-smoke [DEV_KIT=ref]  Run the acceptance smoke against the installed dev product (no receipt)' \
 		'make dev-acceptance DEV_KIT=ref  Run the full acceptance gate against the installed dev product' \
 		'make dev-split DEV_KIT=ref  Run the split/join observation against the installed dev product' \
@@ -114,6 +117,10 @@ test:
 		$(PYTHON) -m unittest discover -s tests/mcp -p "$$suite"; \
 	done
 
+# scripts/verify-static.sh: fmt, clippy, tests and the quick TLA+ sweep, no VMs.
+verify-static:
+	@TARGET_DIR="$(TARGET_DIR)" CARGO="$(CARGO)" sh scripts/verify-static.sh
+
 mcp:
 	@test -x "$(MCP_BIN)" || { echo 'make mcp: install first with make install, or set MCP_BIN=/absolute/marsh-mcp'; exit 1; }
 	@test -x "$(MCP_MARSH)" || { echo 'make mcp: install marsh outside this checkout, or set MCP_MARSH=/absolute/marsh'; exit 1; }
@@ -130,7 +137,7 @@ onboarding:
 MCP_TEST_EVIDENCE ?= $(abspath $(TARGET_DIR))/mcp-test-evidence
 mcp-load-callers:
 	$(PYTHON) tests/mcp/run_publication_callers.py --cargo "$(CARGO)" \
-		--target-dir "$(TARGET_DIR)" --evidence "$(MCP_TEST_EVIDENCE)" $(if $(MCP_LONG_PREPARE),--long-prepare,) $(if $(MCP_LONG_ROLLBACK),--long-rollback,) $(if $(MCP_ACP_CALLERS),--acp,)
+		--target-dir "$(TARGET_DIR)" --evidence "$(MCP_TEST_EVIDENCE)" $(if $(MCP_FRESH),--fresh,) $(if $(MCP_LONG_PREPARE),--long-prepare,) $(if $(MCP_LONG_ROLLBACK),--long-rollback,) $(if $(MCP_ACP_CALLERS),--acp,)
 
 mcp-test:
 	$(CARGO) test -p marsh-mcp --locked --target-dir "$(TARGET_DIR)"
@@ -463,7 +470,7 @@ dev-shells:
 
 # Fast real smoke (tests/check.py): one persistent isolated scope in
 # target/check whose daemon and VMs stay warm between runs. Run after make dev.
-.PHONY: check check-reset regress
+.PHONY: check check-reset regress regress-serial regress-host verify
 check:
 	@test -n "$(DEV_KIT)" || { echo 'make check: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
 	@$(PYTHON) tests/check.py --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)"
@@ -471,9 +478,31 @@ check:
 check-reset:
 	@$(PYTHON) tests/check.py --reset --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)"
 
-# Every existing suite, sequentially, against the dev product (slow).
+# Three tiers (CONTRIBUTING.md): `make check` (seconds), `make verify` (the
+# pre-push gate, minutes), `make regress` (every sbx-backed suite, concurrently).
+# tests/regress.py runs the same harnesses as regress-serial with isolated
+# scopes, bounded adaptive concurrency, and per-suite logs in target/regress/.
+# VERIFY_DEPS= skips the incremental `make dev` rebuild.
+VERIFY_DEPS ?= dev
+REGRESS_JOBS ?= 3
+verify: $(VERIFY_DEPS)
+	@test -n "$(DEV_KIT)" || { echo 'make verify: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
+	$(PYTHON) tests/regress.py --tier verify --jobs $(REGRESS_JOBS) --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)" $(foreach s,$(ONLY),--only $(s)) $(foreach s,$(SKIP),--skip $(s))
+
+regress: $(VERIFY_DEPS)
+	@test -n "$(DEV_KIT)" || { echo 'make regress: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
+	$(PYTHON) tests/regress.py --tier regress --jobs $(REGRESS_JOBS) --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)" $(foreach s,$(ONLY),--only $(s)) $(foreach s,$(SKIP),--skip $(s))
+	@$(MAKE) --no-print-directory regress-host
+
+# The non-sbx steps of a release run.
+regress-host:
+	$(MAKE) --no-print-directory mcp-test
+	$(CARGO) test --workspace --locked --target-dir "$(TARGET_DIR)"
+	docs/model/check.sh
+
+# Every existing suite, sequentially, against the dev product (slow; for debugging).
 REGRESS_EVIDENCE ?= $(shell cd "$${TMPDIR:-/tmp}" && pwd -P)/marsh-regress-$(shell id -u)
-regress:
+regress-serial:
 	@test -n "$(DEV_KIT)" || { echo 'make regress: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
 	@mkdir -p "$(REGRESS_EVIDENCE)" && chmod 700 "$(REGRESS_EVIDENCE)"
 	@printf '{"fixture": "%s"}\n' "$(DEV_KIT)" > "$(REGRESS_EVIDENCE)/fixture-commands.json"

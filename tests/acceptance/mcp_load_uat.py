@@ -18,7 +18,7 @@ import sys
 import traceback
 
 from mcp_gateway_uat import Scope, gateway_call, gateway_data, wait_until
-from provenance import host_only_path, stock_vm_names, verify_candidate
+from provenance import SharedBaseline, host_only_path, stock_vm_names, verify_candidate
 
 
 def checked(result: subprocess.CompletedProcess) -> str:
@@ -192,6 +192,11 @@ def exercise_default_publication(scope: Scope, kit: str, report: dict) -> list[s
     return [tool, stale]
 
 
+def owned_view(scope) -> tuple[frozenset[str], dict[str, str]]:
+    names = frozenset(scope.owned_stock_names())
+    return names, {n: i for n, i in stock_vm_names(scope.sbx).items() if n in names}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in ("marsh", "guest-artifacts", "source-tree", "source-revision", "evidence"):
@@ -308,11 +313,18 @@ def main() -> int:
         assert not any(worker["vm_id"] == target and worker["warm"] for worker in cold["workers"]), cold
         before = stock_vm_names(scope.sbx)
         assert target not in before and target not in before.values(), "reset did not remove exact target VM"
+        owned_before = owned_view(scope)
         report["cold_denial_workers_before"] = cold["workers"]
         denied = scope.command("-c", f"mcp load {tool} --kit {shlex.quote(args.kit)}")
         assert denied.returncode != 0, "revoked publication was loaded"
         assert scope.registration_absent(tool)
-        assert stock_vm_names(scope.sbx) == before, "revoked load changed stock VM inventory"
+        # Alone, the whole stock inventory is unchanged. Beside concurrent
+        # suites (their VMs come and go) the witness is this scope's own view:
+        # its ownership map (a daemon records a VM before `sbx create`) and the
+        # stock VMs those names resolve to are both unchanged.
+        assert owned_view(scope) == owned_before, "revoked load changed this scope's stock VMs"
+        if not isinstance(scope.stock_before, SharedBaseline):
+            assert stock_vm_names(scope.sbx) == before, "revoked load changed stock VM inventory"
         after_denial = scope.status()
         assert after_denial["workers"] == cold["workers"], "revoked load prepared a cold worker"
         report["cold_denial_workers_after"] = after_denial["workers"]

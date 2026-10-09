@@ -959,34 +959,45 @@ json.dump(state, open(state_path, "w"))
     }
 
     /// One `DevSbx` call; returns (exit code or None for a refusal, output).
+    /// The client reads frames as the broker sends them and closes after the
+    /// final frame, as a real client does: the broker's graceful close waits for
+    /// that close (up to its two-second drain bound), so a client that reads
+    /// only after `serve` returns made every call cost the whole bound.
     fn call(fixture: &Fixture, session: &str, argv: &[&str]) -> (Option<i64>, String) {
         let (host, mut guest) = UnixStream::pair().unwrap();
         let argv = argv
             .iter()
             .map(|word| (*word).to_owned())
             .collect::<Vec<_>>();
+        let client = thread::spawn(move || {
+            let mut output = String::new();
+            let result = loop {
+                let Ok(frame) = crate::read_frame::<serde_json::Value>(&mut guest) else {
+                    break (None, output);
+                };
+                match frame["type"].as_str() {
+                    Some("output" | "diagnostic") => {
+                        let bytes = frame["bytes"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|b| b.as_u64().unwrap() as u8)
+                            .collect::<Vec<_>>();
+                        output.push_str(&String::from_utf8_lossy(&bytes));
+                    }
+                    Some("exit") => break (frame["code"].as_i64(), output),
+                    Some("error") => {
+                        break (None, frame["message"].as_str().unwrap().to_owned());
+                    }
+                    _ => {}
+                }
+            };
+            drop(guest);
+            result
+        });
         let _ = fixture.broker.serve(&host, session, &argv, None, None);
         drop(host);
-        let mut output = String::new();
-        loop {
-            let Ok(frame) = crate::read_frame::<serde_json::Value>(&mut guest) else {
-                return (None, output);
-            };
-            match frame["type"].as_str() {
-                Some("output" | "diagnostic") => {
-                    let bytes = frame["bytes"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .map(|b| b.as_u64().unwrap() as u8)
-                        .collect::<Vec<_>>();
-                    output.push_str(&String::from_utf8_lossy(&bytes));
-                }
-                Some("exit") => return (frame["code"].as_i64(), output),
-                Some("error") => return (None, frame["message"].as_str().unwrap().to_owned()),
-                _ => {}
-            }
-        }
+        client.join().unwrap()
     }
 
     #[test]

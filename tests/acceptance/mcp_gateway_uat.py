@@ -17,7 +17,7 @@ import time
 import traceback
 import uuid
 
-from provenance import host_only_path, stock_cleanup_errors, stock_vm_names, verify_candidate, remove_owned_stock_vm
+from provenance import host_only_path, stock_baseline, stock_vm_names, verify_candidate, remove_owned_stock_vm
 
 
 GATEWAY_PROBE = r'''
@@ -172,7 +172,7 @@ class Scope:
         self.marshd = self.marsh.with_name("marshd").resolve(strict=True)
         self.mcp = self.marsh.with_name("marsh-mcp").resolve(strict=True)
         self.sbx = resolve_executable(args.sbx)
-        self.stock_before = stock_vm_names(self.sbx)
+        self.stock_before = stock_baseline(self.sbx)
         self.stock_after: dict[str, str] | None = None
         self.root = disposable_root("marsh-mcp-gateway-uat-")
         self.real_home = pathlib.Path(os.environ["HOME"]).resolve(strict=True)
@@ -208,6 +208,14 @@ class Scope:
         self.owned_daemon_process_identity = None
         self.owned_daemon_control_token = None
         self.owned_vms: set[str] = set()
+        self.owned_names_seen: set[str] = set()
+        self.extra_owned_names: set[str] = {self.sandbox}  # created directly by this harness
+
+    def owned_stock_names(self) -> set[str]:
+        return self._cleanup_cls.owned_stock_names(self)
+
+    def stock_leftover_errors(self, after: dict[str, str]) -> list[str]:
+        return self._cleanup_cls.stock_leftover_errors(self, after)
 
     def command(self, *args: str, timeout: float = 180) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run([str(self.marsh), *args], cwd=self.project, env=self.environment, stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
@@ -354,7 +362,7 @@ mcp unpublish {tool} || exit 45
             errors.extend(self._cleanup_cls.cleanup_isolated_scope(self))
         try:
             self.stock_after = stock_vm_names(self.sbx)
-            errors.extend(stock_cleanup_errors(self.stock_before, self.stock_after))
+            errors.extend(self.stock_leftover_errors(self.stock_after))
         except Exception as error:
             errors.append(f"independent stock cleanup could not be verified: {error}")
         return errors

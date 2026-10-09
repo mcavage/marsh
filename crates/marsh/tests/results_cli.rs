@@ -23,7 +23,13 @@ use std::{
 const OWNED_CALLER: &str = r"
 import json, os, pathlib, signal, subprocess, sys
 p = subprocess.Popen(sys.argv[2:], start_new_session=True)
-record = {'pid': p.pid, 'pgid': os.getpgid(p.pid)}
+try:
+    pgid = os.getpgid(p.pid)
+except ProcessLookupError:
+    # Already exited (macOS reports ESRCH for a zombie). start_new_session made
+    # it its own group leader, so the group is its pid.
+    pgid = p.pid
+record = {'pid': p.pid, 'pgid': pgid}
 try:
     status = p.wait(timeout=8)
 except subprocess.TimeoutExpired:
