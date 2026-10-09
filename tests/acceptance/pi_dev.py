@@ -108,7 +108,8 @@ def main() -> int:
         scratch / "artifacts/bin/marsh").stat().st_mtime >= started
     checks["receipt_in_scratch_control"] = int(marks.get("RECEIPTS", "0") or 0) > 0
     try:
-        rows = json.loads(marks.get("LS", "{}")).get("sandboxes", [])
+        listing = json.loads(marks.get("LS", "{}"))
+        rows = listing if isinstance(listing, list) else listing.get("sandboxes", [])
     except json.JSONDecodeError:
         rows = None
     checks["child_vms_have_grant_prefix"] = bool(rows) and bool(prefix) and all(

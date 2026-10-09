@@ -631,6 +631,7 @@ mod tests {
                 program: "/bin/sh".into(),
                 arguments: vec!["-c".into(), format!("echo $$; {script}").into()],
                 working_directory: None,
+                environment: Vec::new(),
             })
             .unwrap();
         let mut pid = Vec::new();
@@ -989,6 +990,7 @@ mod tests {
                 program: "/bin/sleep".into(),
                 arguments: vec!["60".into()],
                 working_directory: None,
+                environment: Vec::new(),
             })
             .unwrap();
         let relay = Relay::start(

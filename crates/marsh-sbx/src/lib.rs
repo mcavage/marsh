@@ -866,6 +866,19 @@ struct LocalResolution {
     local_tag: String,
 }
 
+/// Why one cold local Kit preparation failed: a host build that disagrees
+/// with stock SBX's Kit VM image is recoverable by rebuilding.
+enum ColdLocalFailure {
+    HostBuildMismatch { error: SbxError },
+    Other(SbxError),
+}
+
+impl From<SbxError> for ColdLocalFailure {
+    fn from(error: SbxError) -> Self {
+        Self::Other(error)
+    }
+}
+
 #[derive(Debug)]
 struct LocalBuild {
     source_fingerprint: String,
@@ -2239,7 +2252,6 @@ impl StockSbx {
                 self.preparation_timeouts.sbx,
                 [
                     "create",
-                    "--quiet",
                     "--name",
                     &spec.name,
                     "--pull",
@@ -3245,19 +3257,16 @@ impl StockSbx {
         let Some(listed) = listed else {
             return true;
         };
-        !listed
-            .get("images")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|images| {
-                images.iter().any(|image| {
-                    image
-                        .get("tag")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|candidate| {
-                            candidate == digest_tag || tag.as_deref() == Some(candidate)
-                        })
-                })
+        !template_list_rows(&listed).is_some_and(|images| {
+            images.iter().any(|image| {
+                image
+                    .get("tag")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|candidate| {
+                        candidate == digest_tag || tag.as_deref() == Some(candidate)
+                    })
             })
+        })
     }
 
     fn published_image_id(&self, vm: &str, reference: &OciImage) -> Result<OciImage, SbxError> {
@@ -4215,7 +4224,6 @@ impl StockSbx {
             selected_home_environment.push(spec.lifecycle_workspace.as_os_str());
             let arguments = vec![
                 OsString::from("create"),
-                OsString::from("--quiet"),
                 OsString::from("--name"),
                 OsString::from(&spec.name),
                 OsString::from("--pull"),
@@ -4253,30 +4261,49 @@ impl StockSbx {
         spec: &KitVmSpec,
         source: &Path,
         before: &AdmittedHostGrant,
+        rebuild: bool,
     ) -> Result<CommandOutput, SbxError> {
         self.preflight_host_grants(std::slice::from_ref(before))?;
         self.ownership.invalidate();
         let outcome = (|| {
             let mut selected_home_environment = OsString::from("MARSH_SELECTED_HOME=");
             selected_home_environment.push(spec.lifecycle_workspace.as_os_str());
-            let output = self.run_bounded_os(
-                "create local kit VM",
-                self.preparation_timeouts.sbx,
-                [
-                    OsStr::new("create"),
-                    OsStr::new("--quiet"),
-                    OsStr::new("--name"),
-                    OsStr::new(&spec.name),
-                    OsStr::new("--pull"),
-                    OsStr::new("never"),
-                    OsStr::new("--skills"),
-                    OsStr::new("off"),
-                    OsStr::new("-e"),
-                    selected_home_environment.as_os_str(),
-                    source.as_os_str(),
-                    spec.lifecycle_workspace.as_os_str(),
-                ],
-            );
+            let mut invocation = self.invocation([
+                OsStr::new("create"),
+                OsStr::new("--name"),
+                OsStr::new(&spec.name),
+                OsStr::new("--pull"),
+                OsStr::new("never"),
+                OsStr::new("--skills"),
+                OsStr::new("off"),
+                OsStr::new("-e"),
+                selected_home_environment.as_os_str(),
+                source.as_os_str(),
+                spec.lifecycle_workspace.as_os_str(),
+            ]);
+            // Stock builds this source on the same host BuildKit as marsh's own
+            // build; only a shared cache makes the two image digests agree.
+            invocation
+                .environment
+                .push(("SBX_KIT_BUILDER".into(), "host".into()));
+            if rebuild {
+                invocation
+                    .environment
+                    .push(("SBX_KIT_REBUILD".into(), "1".into()));
+            }
+            let output = self
+                .runner
+                .run_bounded(&invocation, self.preparation_timeouts.sbx)
+                .map_err(|error| {
+                    if error.kind() == io::ErrorKind::TimedOut {
+                        SbxError::PreparationTimeout {
+                            operation: "create local kit VM",
+                            timeout: self.preparation_timeouts.sbx,
+                        }
+                    } else {
+                        SbxError::Io(error)
+                    }
+                });
             Self::require_success("create local kit VM", output?)?;
             before.verify_path()?;
             // The read-only outer inspect overlaps the inventory refresh that
@@ -4321,11 +4348,14 @@ impl StockSbx {
     }
 
     fn public_image_digest(output: &CommandOutput) -> Result<OciImage, SbxError> {
-        let inspect: PublicKitInspect =
-            serde_json::from_slice(&output.stdout).map_err(|_| SbxError::LocalKitDigestMismatch)?;
+        let inspect: PublicKitInspect = serde_json::from_slice(&output.stdout).map_err(|_| {
+            SbxError::LocalKitDigestMismatch("Kit VM inspect returned invalid JSON".into())
+        })?;
         inspect
             .image_digest
-            .ok_or(SbxError::LocalKitDigestMismatch)
+            .ok_or_else(|| {
+                SbxError::LocalKitDigestMismatch("Kit VM inspect has no image_digest".into())
+            })
             .and_then(|image| OciImage::parse(image).map_err(SbxError::from))
     }
 
@@ -4360,10 +4390,10 @@ impl StockSbx {
             VmClass::Foreign => return Err(SbxError::ForeignVm(spec.name.clone())),
             // Inventory already proves absence: no inspect round trip.
             VmClass::Absent => {
-                return self.prepare_cold_local_kit(
+                return self.prepare_cold_local_kit_recovering(
                     spec,
                     source,
-                    fingerprint,
+                    &fingerprint,
                     &marker,
                     lifecycle_grant,
                 );
@@ -4412,7 +4442,59 @@ impl StockSbx {
             return Err(command_failed("inspect kit VM", existing));
         }
 
-        self.prepare_cold_local_kit(spec, source, fingerprint, &marker, lifecycle_grant)
+        self.prepare_cold_local_kit_recovering(spec, source, &fingerprint, &marker, lifecycle_grant)
+    }
+
+    /// Cold local preparation that recovers from one stale stock build.
+    ///
+    /// marsh's host Buildx build and stock SBX's own Kit build of the same
+    /// source agree only when both come out of one `BuildKit` cache: Kit
+    /// builds are not reproducible from scratch. Stock SBX reuses any build
+    /// it already holds for the same source tree, however old, so after a
+    /// mismatch the VM is recreated once with `SBX_KIT_REBUILD=1` (and a
+    /// fresh host build when the cached archive was the stale side).
+    fn prepare_cold_local_kit_recovering(
+        &self,
+        spec: &KitVmSpec,
+        source: &Path,
+        fingerprint: &str,
+        marker: &str,
+        lifecycle_grant: &AdmittedHostGrant,
+    ) -> Result<ReadyKitVm, SbxError> {
+        let mut rebuild = false;
+        loop {
+            let error = match self.prepare_cold_local_kit(
+                spec,
+                source,
+                fingerprint.to_owned(),
+                marker,
+                lifecycle_grant,
+                rebuild,
+            ) {
+                Ok(ready) => return Ok(ready),
+                Err(ColdLocalFailure::Other(error)) => return Err(error),
+                Err(ColdLocalFailure::HostBuildMismatch { error }) if rebuild => {
+                    return Err(match error {
+                        SbxError::LocalKitDigestMismatch(detail) => {
+                            SbxError::LocalKitDigestMismatch(format!(
+                                "{detail}; still mismatched after stock SBX rebuilt the Kit"
+                            ))
+                        }
+                        error => error,
+                    });
+                }
+                Err(ColdLocalFailure::HostBuildMismatch { error }) => {
+                    rebuild = true;
+                    error
+                }
+            };
+            // A VM whose removal could not be proven is quarantined: never
+            // recreate under it.
+            if self.reject_quarantined(&spec.name).is_err() {
+                return Err(error);
+            }
+            lifecycle_grant.verify_path()?;
+        }
     }
 
     fn prepare_cold_local_kit(
@@ -4422,20 +4504,30 @@ impl StockSbx {
         fingerprint: String,
         marker: &str,
         lifecycle_grant: &AdmittedHostGrant,
-    ) -> Result<ReadyKitVm, SbxError> {
+        rebuild: bool,
+    ) -> Result<ReadyKitVm, ColdLocalFailure> {
         let (outer_manifest, build) =
-            self.create_and_build_local(spec, source, &fingerprint, lifecycle_grant)?;
+            self.create_and_build_local(spec, source, &fingerprint, lifecycle_grant, rebuild)?;
+        let host_build_mismatch = build.manifest_digest != outer_manifest;
         let prepared = (|| -> Result<OciImage, SbxError> {
             if build.source_fingerprint != local_source_fingerprint(source)? {
                 return Err(SbxError::SourceChanged(source.to_owned()));
             }
             if build.manifest_digest != outer_manifest {
-                return Err(SbxError::LocalKitDigestMismatch);
+                return Err(SbxError::LocalKitDigestMismatch(format!(
+                    "host build {}, Kit VM image_digest {}",
+                    build.manifest_digest.as_str(),
+                    outer_manifest.as_str()
+                )));
             }
             self.load_nested_archive(&spec.name, &build.docker_archive)?;
             let image_id = self.inspect_nested_image(&spec.name, &build.local_tag)?;
             if image_id != outer_manifest {
-                return Err(SbxError::LocalKitDigestMismatch);
+                return Err(SbxError::LocalKitDigestMismatch(format!(
+                    "Kit VM image_digest {}, image loaded in the VM {}",
+                    outer_manifest.as_str(),
+                    image_id.as_str()
+                )));
             }
             if fingerprint != local_source_fingerprint(source)? {
                 return Err(SbxError::SourceChanged(source.to_owned()));
@@ -4458,9 +4550,13 @@ impl StockSbx {
         };
         let image_id = match (prepared, cleanup) {
             (Ok(image_id), Ok(())) => image_id,
+            (Err(error @ SbxError::LocalKitDigestMismatch(_)), _) if host_build_mismatch => {
+                self.cleanup_created_kit(spec);
+                return Err(ColdLocalFailure::HostBuildMismatch { error });
+            }
             (Err(error), _) | (Ok(_), Err(error)) => {
                 self.cleanup_created_kit(spec);
-                return Err(error);
+                return Err(error.into());
             }
         };
         let ready = ReadyKitVm {
@@ -4492,6 +4588,7 @@ impl StockSbx {
         source: &Path,
         fingerprint: &str,
         lifecycle_grant: &AdmittedHostGrant,
+        rebuild: bool,
     ) -> Result<(OciImage, LocalBuild), SbxError> {
         let private_scratch = if lifecycle_grant.ephemeral.is_some() {
             let parent = spec
@@ -4515,7 +4612,8 @@ impl StockSbx {
             .filter(|_| lifecycle_grant.ephemeral.is_none())
             .and_then(|cache| cached_local_build(cache, fingerprint));
         let (create_result, build_result) = thread::scope(|scope| {
-            let create = scope.spawn(|| self.create_local_vm(spec, source, lifecycle_grant));
+            let create =
+                scope.spawn(|| self.create_local_vm(spec, source, lifecycle_grant, rebuild));
             let build = scope.spawn(|| match cached {
                 Some(cached) => Ok(cached),
                 None => self.build_local_source(source, fingerprint, build_workspace),
@@ -4722,7 +4820,12 @@ impl StockSbx {
                 OsStr::new("--platform"),
                 OsStr::new("linux/arm64"),
                 OsStr::new("--output"),
-                OsStr::new(&format!("type=docker,dest={}", docker_archive.display())),
+                // Stock SBX exports its own build of this source as OCI; the
+                // two manifest digests agree only with matching media types.
+                OsStr::new(&format!(
+                    "type=docker,oci-mediatypes=true,dest={}",
+                    docker_archive.display()
+                )),
                 OsStr::new("--tag"),
                 OsStr::new(&tag),
                 OsStr::new("--metadata-file"),
@@ -5488,6 +5591,7 @@ impl StockSbx {
                 .map(|value| value.as_ref().to_os_string())
                 .collect(),
             working_directory: None,
+            environment: Vec::new(),
         }
     }
 
@@ -5566,6 +5670,7 @@ impl StockSbx {
                         .map(|value| value.as_ref().to_os_string())
                         .collect(),
                     working_directory: None,
+                    environment: Vec::new(),
                 },
                 timeout,
             )
@@ -5928,9 +6033,7 @@ fn cached_local_build(directory: &Path, fingerprint: &str) -> Option<LocalBuild>
     let key = kit_image_cache_key(fingerprint)?;
     let record_path = directory.join(format!("{key}.json"));
     let regular = |path: &Path| {
-        fs::symlink_metadata(path)
-            .ok()
-            .is_some_and(|metadata| metadata.file_type().is_file())
+        fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_file())
     };
     let metadata = fs::symlink_metadata(directory).ok()?;
     if !metadata.file_type().is_dir()
@@ -6101,10 +6204,7 @@ fn cached_published_image(directory: &Path, reference: &OciImage) -> Option<Path
     if !metadata.file_type().is_dir() || metadata.permissions().mode() & 0o077 != 0 {
         return None;
     }
-    if !fs::symlink_metadata(&record_path)
-        .ok()
-        .is_some_and(|metadata| metadata.file_type().is_file())
-    {
+    if !fs::symlink_metadata(&record_path).is_ok_and(|metadata| metadata.file_type().is_file()) {
         return None;
     }
     let record: serde_json::Value = serde_json::from_slice(&fs::read(&record_path).ok()?).ok()?;
@@ -6114,10 +6214,7 @@ fn cached_published_image(directory: &Path, reference: &OciImage) -> Option<Path
         return None;
     }
     let archive = kit_image_cache_archive(directory, key, &digest)?;
-    if !fs::symlink_metadata(&archive)
-        .ok()
-        .is_some_and(|metadata| metadata.file_type().is_file())
-    {
+    if !fs::symlink_metadata(&archive).is_ok_and(|metadata| metadata.file_type().is_file()) {
         return None;
     }
     if let Ok(file) = fs::OpenOptions::new().append(true).open(&record_path) {
@@ -6532,11 +6629,24 @@ fn normalized_output(output: &CommandOutput) -> String {
         .join(" ")
 }
 
+/// Rows of `sbx template ls --json`, which stock SBX has emitted both as
+/// `{"images": [...]}` and as a bare `[...]`.
+fn template_list_rows(listed: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    listed
+        .as_array()
+        .or_else(|| listed.get("images").and_then(serde_json::Value::as_array))
+}
+
 fn supported_sbx_version(output: &str) -> bool {
     output.lines().any(|line| {
-        let Some(record) = line.trim().strip_prefix("sbx version: ") else {
+        // Stock SBX has printed both `sbx version: vX` and `sbx version vX`.
+        let Some(record) = line.trim().strip_prefix("sbx version") else {
             return false;
         };
+        let record = record.strip_prefix(':').unwrap_or(record);
+        if !record.starts_with(char::is_whitespace) {
+            return false;
+        }
         let mut fields = record.split_whitespace();
         let (Some(version), Some(commit), None) = (fields.next(), fields.next(), fields.next())
         else {
@@ -6705,9 +6815,9 @@ pub enum SbxError {
         source: serde_yaml::Error,
     },
     #[error(
-        "stock SBX's Kit builder holds a stale build of this Kit (for example after pruning Docker's build cache), so the Kit VM image does not match the host build; fix: run `sbx kit builder rm --force`, then retry"
+        "stock SBX's build of this local Kit does not match marsh's host build ({0}); both must build on the same host Docker BuildKit: check that `docker buildx` selects a local builder"
     )]
-    LocalKitDigestMismatch,
+    LocalKitDigestMismatch(String),
     #[error("stock Docker local Kit build metadata lacks an immutable manifest digest")]
     InvalidLocalBuildMetadata,
     #[error("trusted worker lease exited before dispatch: {0}")]

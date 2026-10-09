@@ -52,6 +52,7 @@ os._exit(0)
         ]
         .into(),
         working_directory: Some(root.clone()),
+        environment: Vec::new(),
     };
     let result = if runtime {
         runner
@@ -140,6 +141,7 @@ if (root/'release').exists(): (root/'late-effect').write_text('still alive after
                 if overflow { "overflow" } else { "deadline" }.into(),
             ],
             working_directory: Some(root.clone()),
+            environment: Vec::new(),
         },
         deadline,
         1024,
@@ -231,6 +233,7 @@ fn successful_native_output_preserves_typed_termination_uncertainty() {
                 .map(Into::into)
                 .into(),
             working_directory: Some(root.path().to_owned()),
+            environment: Vec::new(),
         },
         Duration::from_secs(3),
         4096,

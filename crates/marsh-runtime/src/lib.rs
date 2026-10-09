@@ -79,6 +79,9 @@ pub struct Invocation {
     /// Optional process working directory used for argument formats that
     /// resolve relative paths before crossing an external API boundary.
     pub working_directory: Option<PathBuf>,
+    /// Stock CLI selectors for this invocation only, applied after the
+    /// runner's control environment. Never workload or credential values.
+    pub environment: Vec<(OsString, OsString)>,
 }
 
 /// Captured result from a bounded runtime command.
@@ -814,6 +817,7 @@ impl CommandRunner for SystemCommandRunner {
             .env("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin")
             .env("HOME", &self.home)
             .envs(self.stock_environment.iter().cloned())
+            .envs(invocation.environment.iter().cloned())
             .stdin(Stdio::null());
         if let Some(directory) = &invocation.working_directory {
             command.current_dir(directory);
@@ -840,6 +844,7 @@ impl CommandRunner for SystemCommandRunner {
             .env("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin")
             .env("HOME", &self.home)
             .envs(self.stock_environment.iter().cloned())
+            .envs(invocation.environment.iter().cloned())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -940,6 +945,7 @@ impl CommandRunner for SystemCommandRunner {
             .env("PATH", "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin")
             .env("HOME", &self.home)
             .envs(self.stock_environment.iter().cloned())
+            .envs(invocation.environment.iter().cloned())
             .stdin(Stdio::from(slave.try_clone()?))
             .stdout(Stdio::from(slave.try_clone()?))
             .stderr(Stdio::from(slave))
@@ -1123,6 +1129,7 @@ impl<R> DockerCliRuntime<R> {
             program: self.executable.clone(),
             arguments: arguments.into_iter().map(Into::into).collect(),
             working_directory: None,
+            environment: Vec::new(),
         }
     }
 }

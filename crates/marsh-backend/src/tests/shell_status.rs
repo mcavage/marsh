@@ -12,6 +12,7 @@ fn execute_seven() -> marsh_runtime::CommandOutput {
                 "import os; os.write(1,b'actual-seven'); os._exit(7)".into(),
             ],
             working_directory: None,
+            environment: Vec::new(),
         })
         .unwrap()
 }

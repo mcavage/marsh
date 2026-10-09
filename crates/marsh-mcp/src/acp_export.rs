@@ -309,6 +309,8 @@ fn public_status(
     }))
 }
 
+// `ServerHandler` declares these methods async; some bodies have nothing to await.
+#[allow(unknown_lints, clippy::unused_async_trait_impl)]
 impl ServerHandler for AcpExportMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
