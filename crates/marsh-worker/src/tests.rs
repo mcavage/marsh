@@ -1844,15 +1844,18 @@ fn blocked_container_stdin_cannot_prevent_explicit_cancellation() {
         process: Box::new(CancellableMemoryProcess(cancel)),
         control: no_attachment_control(),
     };
-    let started = Instant::now();
     let outcome = ThreadSupervisor::default().supervise(
         runtime.clone(),
         &ContainerId::parse("c".repeat(64)).unwrap(),
         attachment,
         &mut controls,
         streams(),
+        // The wall limit only has to be out of reach: if blocked stdin kept the
+        // Kill from being acted on, the run would end at the wall limit and
+        // report that, not `Cancelled`. That outcome is the proof, so there is
+        // no stopwatch to lose to a slow machine.
         SupervisionLimits {
-            wall_time: Duration::from_secs(5),
+            wall_time: Duration::from_mins(1),
             output_bytes: 1024,
             writable_bytes: 1024,
         },
@@ -1860,7 +1863,6 @@ fn blocked_container_stdin_cannot_prevent_explicit_cancellation() {
 
     assert_eq!(outcome.execution, ExecutionOutcome::Exited { code: 7 });
     assert_eq!(outcome.delivery, DeliveryOutcome::Cancelled);
-    assert!(started.elapsed() < Duration::from_secs(3));
     assert!(
         runtime
             .state
@@ -2259,13 +2261,57 @@ fn supervisor_enforces_one_combined_stdout_stderr_budget() {
             resource: ResourceLimit::Output
         }
     );
-    assert_eq!(
-        stdout.lock().unwrap().len() + stderr.lock().unwrap().len(),
-        10
-    );
+    // Crossing the budget cancels the writers at once (a consumer that has
+    // stopped reading cannot hold the limit hostage), so how much of the last
+    // chunk lands before the cancel is a race: all of it, or none. What holds
+    // is that the two streams never deliver more than one budget between them
+    // (`output_pumps_share_one_exact_budget` pins the exact split without a
+    // supervisor to cancel anything).
+    assert!(stdout.lock().unwrap().len() + stderr.lock().unwrap().len() <= 10);
     assert!(b"stdout-bytes".starts_with(&stdout.lock().unwrap()));
     assert!(b"stderr-bytes".starts_with(&stderr.lock().unwrap()));
     assert_eq!(runtime.state.lock().unwrap().signals, [JobSignal::Kill]);
+}
+
+#[test]
+fn output_pumps_share_one_exact_budget() {
+    let used = Arc::new(AtomicU64::new(0));
+    let stdout = Arc::new(Mutex::new(Vec::new()));
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+    let (events, received) = mpsc::channel();
+    let pumps = [(b"stdout-bytes", &stdout), (b"stderr-bytes", &stderr)].map(|(bytes, sink)| {
+        drain::spawn_copy(
+            Box::new(Cursor::new(bytes.to_vec())),
+            output_stream(sink.clone()),
+            used.clone(),
+            10,
+            events.clone(),
+        )
+    });
+    for pump in pumps {
+        pump.join().unwrap();
+    }
+    drop(events);
+
+    // Nothing cancels a writer here, so the budget is delivered exactly:
+    // whichever stream reserved first got its 10 bytes, the other none.
+    let (stdout, stderr) = (stdout.lock().unwrap(), stderr.lock().unwrap());
+    assert_eq!(stdout.len() + stderr.len(), 10);
+    assert!(b"stdout-bytes".starts_with(&stdout));
+    assert!(b"stderr-bytes".starts_with(&stderr));
+    let events: Vec<_> = received.iter().collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, drain::PumpEvent::Limit))
+    );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, drain::PumpEvent::Output(true)))
+            .count(),
+        2
+    );
 }
 
 #[test]
