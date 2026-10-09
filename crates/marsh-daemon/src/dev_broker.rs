@@ -871,10 +871,15 @@ fn filter_listing(
 ) -> Result<Vec<u8>, String> {
     let mut document: serde_json::Value =
         serde_json::from_slice(raw).map_err(|error| error.to_string())?;
-    let rows = document
-        .get_mut("sandboxes")
-        .and_then(serde_json::Value::as_array_mut)
-        .ok_or("stock inventory has no sandboxes array")?;
+    // Keep whichever envelope stock SBX used: `{"sandboxes": [...]}` or `[...]`.
+    let rows = if document.is_array() {
+        document.as_array_mut()
+    } else {
+        document
+            .get_mut("sandboxes")
+            .and_then(serde_json::Value::as_array_mut)
+    }
+    .ok_or("stock inventory has no sandboxes array")?;
     rows.retain(|row| {
         row.get("name")
             .and_then(serde_json::Value::as_str)
@@ -1107,5 +1112,11 @@ json.dump(state, open(state_path, "w"))
         assert!(!json.contains("user-a") && !json.contains("xother"));
         let text = String::from_utf8(filter_listing(raw, &names, false).unwrap()).unwrap();
         assert_eq!(text.lines().count(), 2);
+
+        let bare = br#"[{"name":"user-a","id":"1","status":"running"},{"name":"marsh-xab12c-s-00000000","id":"2","status":"running"}]"#;
+        let json: serde_json::Value =
+            serde_json::from_slice(&filter_listing(bare, &names, true).unwrap()).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 1);
+        assert_eq!(json[0]["name"], "marsh-xab12c-s-00000000");
     }
 }

@@ -96,6 +96,21 @@ fn shell_quarantine_retains_admitted_authority_and_rejects_before_stock_effects(
 }
 
 #[test]
+fn template_listing_accepts_images_object_and_bare_array() {
+    let bare = serde_json::json!([
+        {"id": "5d07893aec0d", "repository": "docker.io/docker/sandbox-kit", "tag": "3"}
+    ]);
+    let wrapped = serde_json::json!({"images": bare.clone()});
+    for listed in [&bare, &wrapped] {
+        let rows = template_list_rows(listed).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["tag"], "3");
+    }
+    assert!(template_list_rows(&serde_json::json!({"templates": []})).is_none());
+    assert!(template_list_rows(&serde_json::json!("images")).is_none());
+}
+
+#[test]
 fn supported_versions_accept_stable_and_coherent_nightly_from_045() {
     assert!(supported_sbx_version(
         "sbx version: v0.45.0 0000000000000000000000000000000000000000"
@@ -135,6 +150,18 @@ fn supported_versions_accept_stable_and_coherent_nightly_from_045() {
     ));
     assert!(!supported_sbx_version(
         "sbx version: v0.45.1-1-g2222222 1111111111111111111111111111111111111111"
+    ));
+    assert!(supported_sbx_version(
+        "\nsbx version v0.47.0-924-gb56475e0f b56475e0f0cc7edcb4fbed580396f72ee0a9c405\n"
+    ));
+    assert!(supported_sbx_version(
+        "sbx version v0.47.0 1111111111111111111111111111111111111111"
+    ));
+    assert!(!supported_sbx_version(
+        "sbx version v0.44.9 1111111111111111111111111111111111111111"
+    ));
+    assert!(!supported_sbx_version(
+        "sbx versionv0.47.0 1111111111111111111111111111111111111111"
     ));
     assert!(!supported_sbx_version("not an sbx version"));
     assert!(!supported_sbx_version(
@@ -1376,7 +1403,6 @@ fn cold_vm_uses_native_workload_and_installs_worker() {
         commands[0],
         vec![
             "create".to_owned(),
-            "--quiet".to_owned(),
             "--name".to_owned(),
             "marsh-kit-fixture-abc".to_owned(),
             "--pull".to_owned(),

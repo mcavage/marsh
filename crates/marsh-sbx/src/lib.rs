@@ -2239,7 +2239,6 @@ impl StockSbx {
                 self.preparation_timeouts.sbx,
                 [
                     "create",
-                    "--quiet",
                     "--name",
                     &spec.name,
                     "--pull",
@@ -3245,19 +3244,16 @@ impl StockSbx {
         let Some(listed) = listed else {
             return true;
         };
-        !listed
-            .get("images")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|images| {
-                images.iter().any(|image| {
-                    image
-                        .get("tag")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|candidate| {
-                            candidate == digest_tag || tag.as_deref() == Some(candidate)
-                        })
-                })
+        !template_list_rows(&listed).is_some_and(|images| {
+            images.iter().any(|image| {
+                image
+                    .get("tag")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|candidate| {
+                        candidate == digest_tag || tag.as_deref() == Some(candidate)
+                    })
             })
+        })
     }
 
     fn published_image_id(&self, vm: &str, reference: &OciImage) -> Result<OciImage, SbxError> {
@@ -4215,7 +4211,6 @@ impl StockSbx {
             selected_home_environment.push(spec.lifecycle_workspace.as_os_str());
             let arguments = vec![
                 OsString::from("create"),
-                OsString::from("--quiet"),
                 OsString::from("--name"),
                 OsString::from(&spec.name),
                 OsString::from("--pull"),
@@ -4264,7 +4259,6 @@ impl StockSbx {
                 self.preparation_timeouts.sbx,
                 [
                     OsStr::new("create"),
-                    OsStr::new("--quiet"),
                     OsStr::new("--name"),
                     OsStr::new(&spec.name),
                     OsStr::new("--pull"),
@@ -6532,11 +6526,24 @@ fn normalized_output(output: &CommandOutput) -> String {
         .join(" ")
 }
 
+/// Rows of `sbx template ls --json`, which stock SBX has emitted both as
+/// `{"images": [...]}` and as a bare `[...]`.
+fn template_list_rows(listed: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    listed
+        .as_array()
+        .or_else(|| listed.get("images").and_then(serde_json::Value::as_array))
+}
+
 fn supported_sbx_version(output: &str) -> bool {
     output.lines().any(|line| {
-        let Some(record) = line.trim().strip_prefix("sbx version: ") else {
+        // Stock SBX has printed both `sbx version: vX` and `sbx version vX`.
+        let Some(record) = line.trim().strip_prefix("sbx version") else {
             return false;
         };
+        let record = record.strip_prefix(':').unwrap_or(record);
+        if !record.starts_with(char::is_whitespace) {
+            return false;
+        }
         let mut fields = record.split_whitespace();
         let (Some(version), Some(commit), None) = (fields.next(), fields.next(), fields.next())
         else {

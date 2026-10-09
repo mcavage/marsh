@@ -205,8 +205,8 @@ def copy_verified_package(receipt: dict, candidate: Path, guest: Path) -> dict:
             "marsh": str(marsh), "guest_artifacts": str(guest), "artifacts": expected}
 
 
-def parse_stock_inventory(document: dict) -> dict[str, str]:
-    rows = document.get("sandboxes")
+def parse_stock_inventory(document: dict | list) -> dict[str, str]:
+    rows = document if isinstance(document, list) else document.get("sandboxes")
     if not isinstance(rows, list):
         raise ValueError("invalid stock SBX sandbox inventory")
     inventory = {}
@@ -225,7 +225,7 @@ def observe_stock_inventory(run) -> dict[str, str]:
     if result.returncode:
         raise ValueError("stock SBX listing failed")
     document = json.loads(result.stdout)
-    rows = document.get("sandboxes")
+    rows = document if isinstance(document, list) else document.get("sandboxes")
     if not isinstance(rows, list):
         raise ValueError("invalid stock SBX sandbox inventory")
     # Some stock versions omit IDs from ls. Obtain the exact ID through inspect,
