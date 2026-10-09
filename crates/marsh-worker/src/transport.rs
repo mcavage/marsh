@@ -381,7 +381,8 @@ fn next_frame(state: &mut State, priority_run: &mut usize) -> Option<Frame> {
             let frame = state.priority.pop_front()?;
             state.priority_bytes -= frame.bytes.len();
             frame
-        } else if let Some(id) = state.ready.pop_front() {
+        } else {
+            let id = state.ready.pop_front()?;
             *priority_run = 0;
             let Some(queue) = state.attempts.get_mut(&id) else {
                 continue;
@@ -394,8 +395,6 @@ fn next_frame(state: &mut State, priority_run: &mut usize) -> Option<Frame> {
                 state.ready.push_back(id);
             }
             frame
-        } else {
-            return None;
         };
         if frame
             .cancel

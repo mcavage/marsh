@@ -2649,6 +2649,8 @@ impl HostMcp {
     }
 }
 
+// `ServerHandler` declares these methods async; some bodies have nothing to await.
+#[allow(unknown_lints, clippy::unused_async_trait_impl)]
 #[tool_handler(
     name = "marsh-host",
     version = "0.1.0",

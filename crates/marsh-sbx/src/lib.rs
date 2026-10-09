@@ -6033,9 +6033,7 @@ fn cached_local_build(directory: &Path, fingerprint: &str) -> Option<LocalBuild>
     let key = kit_image_cache_key(fingerprint)?;
     let record_path = directory.join(format!("{key}.json"));
     let regular = |path: &Path| {
-        fs::symlink_metadata(path)
-            .ok()
-            .is_some_and(|metadata| metadata.file_type().is_file())
+        fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_file())
     };
     let metadata = fs::symlink_metadata(directory).ok()?;
     if !metadata.file_type().is_dir()
@@ -6206,10 +6204,7 @@ fn cached_published_image(directory: &Path, reference: &OciImage) -> Option<Path
     if !metadata.file_type().is_dir() || metadata.permissions().mode() & 0o077 != 0 {
         return None;
     }
-    if !fs::symlink_metadata(&record_path)
-        .ok()
-        .is_some_and(|metadata| metadata.file_type().is_file())
-    {
+    if !fs::symlink_metadata(&record_path).is_ok_and(|metadata| metadata.file_type().is_file()) {
         return None;
     }
     let record: serde_json::Value = serde_json::from_slice(&fs::read(&record_path).ok()?).ok()?;
@@ -6219,10 +6214,7 @@ fn cached_published_image(directory: &Path, reference: &OciImage) -> Option<Path
         return None;
     }
     let archive = kit_image_cache_archive(directory, key, &digest)?;
-    if !fs::symlink_metadata(&archive)
-        .ok()
-        .is_some_and(|metadata| metadata.file_type().is_file())
-    {
+    if !fs::symlink_metadata(&archive).is_ok_and(|metadata| metadata.file_type().is_file()) {
         return None;
     }
     if let Ok(file) = fs::OpenOptions::new().append(true).open(&record_path) {
