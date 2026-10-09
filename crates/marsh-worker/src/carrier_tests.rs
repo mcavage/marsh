@@ -9,6 +9,11 @@ use std::os::{
 };
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 
+/// Deadline for a condition that holds within milliseconds on an idle machine
+/// (a fixture process starting, both pipes filling). It is large so a starved
+/// CI runner is never mistaken for a hang, and still ends a real hang.
+const CONDITION_DEADLINE: Duration = Duration::from_secs(30);
+
 struct OwnedDirectory(PathBuf);
 impl OwnedDirectory {
     fn new() -> Self {
@@ -271,7 +276,7 @@ impl Fixture {
                 working_directory: None,
             })
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + CONDITION_DEADLINE;
         let carrier_pid = loop {
             if let Ok(pid) = fs::read_to_string(&pid_path)
                 && let Ok(pid) = pid.parse()
@@ -438,8 +443,13 @@ fn observed_exit_does_not_expire_a_healthy_paused_output_carrier() {
     }
 }
 
-fn wait_both_blocked(mode: &str, progress: &AtomicUsize, input_progress: &AtomicUsize) {
-    let deadline = Instant::now() + Duration::from_secs(2);
+fn wait_both_blocked(
+    mode: &str,
+    progress: &AtomicUsize,
+    input_progress: &AtomicUsize,
+    worker_returned: &AtomicBool,
+) {
+    let deadline = Instant::now() + CONDITION_DEADLINE;
     loop {
         let before = progress.load(Ordering::SeqCst);
         thread::sleep(Duration::from_millis(100));
@@ -450,12 +460,59 @@ fn wait_both_blocked(mode: &str, progress: &AtomicUsize, input_progress: &Atomic
             return;
         }
         assert!(
+            !worker_returned.load(Ordering::SeqCst),
+            "{mode}: the worker returned before real stdin and socket writes both blocked; \
+             stdout_progress={} stdin_progress={}",
+            progress.load(Ordering::SeqCst),
+            input_progress.load(Ordering::SeqCst)
+        );
+        assert!(
             Instant::now() < deadline,
             "real stdin and socket writes must both block before {mode}; stdout_progress={} stdin_progress={}",
             progress.load(Ordering::SeqCst),
             input_progress.load(Ordering::SeqCst)
         );
     }
+}
+
+/// Waits until the worker's stdin and stdout writes have both really blocked,
+/// then does what `mode` calls for. Returns whether the worker returned while
+/// this side still held the control channel open.
+fn spawn_controller(
+    mode: &'static str,
+    send: mpsc::Sender<Result<WorkerControl, WorkerError>>,
+    release: PathBuf,
+    progress: Arc<AtomicUsize>,
+    input_progress: Arc<AtomicUsize>,
+    worker_returned: Arc<AtomicBool>,
+) -> thread::JoinHandle<bool> {
+    thread::spawn(move || {
+        wait_both_blocked(mode, &progress, &input_progress, &worker_returned);
+        match mode {
+            "cancel" => send
+                .send(Ok(WorkerControl::Signal {
+                    signal: JobSignal::Kill,
+                }))
+                .unwrap(),
+            // Dropping the sender is the loss itself: nothing is held open.
+            "loss" => return true,
+            "output" => fs::write(release, b"release stderr only after stdout blocks").unwrap(),
+            _ => {}
+        }
+        // The cancel, the wall limit or the output limit must end the run on
+        // their own. Keep the channel open until they have: a worker that
+        // waited for it to close would only return once this deadline releases
+        // it. Waiting on the worker instead of a fixed sleep keeps the check
+        // about ordering, not about how fast the machine is.
+        let deadline = Instant::now() + CONDITION_DEADLINE;
+        while !worker_returned.load(Ordering::SeqCst) {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        true
+    })
 }
 
 #[test]
@@ -470,27 +527,21 @@ fn blocked_output_cancel_loss_wall_and_output_limit_preserve_actual42() {
             .unwrap();
         }
         let output_progress = Arc::new(AtomicUsize::new(0));
-        let progress = output_progress.clone();
-        let input_progress = fixture.input_progress.clone();
-        let release = fixture.root.0.join("pid.release");
-        let controller = thread::spawn(move || {
-            wait_both_blocked(mode, &progress, &input_progress);
-            match mode {
-                "cancel" => send
-                    .send(Ok(WorkerControl::Signal {
-                        signal: JobSignal::Kill,
-                    }))
-                    .unwrap(),
-                "loss" => return,
-                "output" => fs::write(release, b"release stderr only after stdout blocks").unwrap(),
-                _ => {}
-            }
-            thread::sleep(Duration::from_secs(2));
-        });
+        let returned = Arc::new(AtomicBool::new(false));
+        let controller = spawn_controller(
+            mode,
+            send,
+            fixture.root.0.join("pid.release"),
+            output_progress.clone(),
+            fixture.input_progress.clone(),
+            returned.clone(),
+        );
         let (output, _paused_reader) = UnixStream::pair().unwrap();
         let mut policy = limits();
         if mode == "wall" {
-            policy.wall_time = Duration::from_secs(1);
+            // The limit is the action in this mode, so it cannot wait for both
+            // writers to block: it must be well past the time they need.
+            policy.wall_time = Duration::from_secs(5);
         }
         if mode == "output" {
             policy.output_bytes = 512 * 1024;
@@ -525,9 +576,11 @@ fn blocked_output_cancel_loss_wall_and_output_limit_preserve_actual42() {
                 stderr: InterruptibleWriter::sink(),
             },
         );
+        returned.store(true, Ordering::SeqCst);
+        // Joined first: a precondition panic in the controller names the cause.
         assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "{mode}: {report:?}"
+            controller.join().unwrap(),
+            "{mode}: the worker returned only after its control channel was released: {report:?}"
         );
         assert_eq!(report.execution, ExecutionOutcome::Exited { code: 42 });
         let expected = match mode {
@@ -554,7 +607,6 @@ fn blocked_output_cancel_loss_wall_and_output_limit_preserve_actual42() {
             started.elapsed(),
             fixture.carrier_pid
         );
-        controller.join().unwrap();
     }
 }
 

@@ -949,6 +949,26 @@ pub struct BranchResult {
     pub stderr: Vec<u8>,
 }
 
+/// Spawns a thread and returns once it is running its closure.
+///
+/// A thread that is still starting holds the standard library's process-wide
+/// thread registry lock (its stack overflow handler's, on Darwin). A `fork`
+/// while that lock is held hands the child the lock held, with no thread left
+/// to release it, so the child's first thread spawn (the host of its runtime)
+/// never returns. Brush forks right after starting these threads, so it waits
+/// for each to be past its start first.
+fn spawn_running<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> std::thread::JoinHandle<T> {
+    let (running, started) = std::sync::mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        let _ = running.send(());
+        work()
+    });
+    let _ = started.recv();
+    handle
+}
+
 pub(crate) fn capture_bounded(
     mut reader: impl Read,
     remaining: &AtomicU64,
@@ -1043,7 +1063,7 @@ pub(crate) async fn composition_input<SE: extensions::ShellExtensions>(
         let remaining = Arc::clone(&remaining);
         let exceeded = Arc::clone(&exceeded);
         let limit_reached = Arc::clone(&limit_reached);
-        std::thread::spawn(move || capture_bounded(reader, &remaining, &exceeded, &limit_reached))
+        spawn_running(move || capture_bounded(reader, &remaining, &exceeded, &limit_reached))
     };
     let mut prefix_params = params.clone();
     prefix_params.set_fd(OpenFiles::STDOUT_FD, writer.into());
@@ -1299,7 +1319,7 @@ async fn execute_fanout_branch<SE: extensions::ShellExtensions>(
     let (input_reader, mut input_writer) = std::io::pipe()?;
     let (stdout_reader, stdout_writer) = std::io::pipe()?;
     let (stderr_reader, stderr_writer) = std::io::pipe()?;
-    let input_pump = std::thread::spawn(move || match input_writer.write_all(&input) {
+    let input_pump = spawn_running(move || match input_writer.write_all(&input) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
         Err(error) => Err(error),
@@ -1308,11 +1328,9 @@ async fn execute_fanout_branch<SE: extensions::ShellExtensions>(
         let remaining = Arc::clone(&remaining_output);
         let exceeded = Arc::clone(&output_exceeded);
         let limit_reached = Arc::clone(&output_limit_reached);
-        std::thread::spawn(move || {
-            capture_bounded(stdout_reader, &remaining, &exceeded, &limit_reached)
-        })
+        spawn_running(move || capture_bounded(stdout_reader, &remaining, &exceeded, &limit_reached))
     };
-    let stderr_capture = std::thread::spawn(move || {
+    let stderr_capture = spawn_running(move || {
         capture_bounded(
             stderr_reader,
             &remaining_output,

@@ -302,6 +302,7 @@ dependencies = [
  "normalize-path",
  "rand 0.10.2",
  "rpds",
+ "signal-hook",
  "strum",
  "strum_macros",
  "terminfo",

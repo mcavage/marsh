@@ -60,7 +60,9 @@ fn production_runtime_wait_cancellation_joins_and_reaps_its_cli_carrier() {
     let started = Instant::now();
     cancel.cancel();
     assert!(task.join().unwrap().is_err());
-    assert!(started.elapsed() < Duration::from_secs(2));
+    // The carrier sleeps for 60 s; a cancel that did not interrupt it would
+    // take that long. The bound separates the two, not machine speeds.
+    assert!(started.elapsed() < Duration::from_secs(30));
     #[cfg(target_os = "linux")]
     assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
     println!(

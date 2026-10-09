@@ -115,6 +115,7 @@ mod imp {
     use std::os::fd::RawFd;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
 
     static SHELL_PID: AtomicU32 = AtomicU32::new(0);
     static DESCRIPTORS_BEFORE_RUNTIME: Mutex<Option<HashSet<RawFd>>> = Mutex::new(None);
@@ -328,11 +329,171 @@ mod imp {
         unsafe { libc::_exit(code) }
     }
 
+    /// How long a forked child gets to prove it can start a thread, per
+    /// attempt. A healthy child needs well under a millisecond; the first limits
+    /// are short because a stuck child never recovers, and the later ones long
+    /// because a starved machine can delay a healthy one.
+    const START_TIMEOUTS: [Duration; 5] = [
+        Duration::from_millis(250),
+        Duration::from_millis(500),
+        Duration::from_secs(1),
+        Duration::from_secs(2),
+        Duration::from_secs(4),
+    ];
+
+    /// One word of `MAP_SHARED` memory, visible to a child across `fork`, on
+    /// which a forked child and its parent settle whether the child has started.
+    ///
+    /// A starting thread holds the standard library's process-wide thread
+    /// registry lock (its stack overflow handler's, on Darwin). When the fork
+    /// lands in that window the child inherits the lock held by a thread that
+    /// does not exist there, and the first thread it spawns (the host of its
+    /// runtime) never starts. Nothing in the child can recover that, so the
+    /// parent replaces the child instead. The claim is a compare-and-swap, so
+    /// exactly one side decides: a child is only ever killed before it has
+    /// begun, and its body never runs twice.
+    #[derive(Clone, Copy)]
+    struct StartFlag(*const AtomicU32);
+
+    // SAFETY: the pointer is to a shared mapping that outlives every use of the
+    // flag, and the word is only accessed atomically.
+    unsafe impl Send for StartFlag {}
+
+    impl StartFlag {
+        const IDLE: u32 = 0;
+        const STARTED: u32 = 1;
+        const CANCELLED: u32 = 2;
+
+        fn new() -> std::io::Result<Self> {
+            // SAFETY: an anonymous shared mapping; failure is checked. Fresh
+            // anonymous memory is zero, which is `IDLE`.
+            let page = unsafe {
+                libc::mmap(
+                    std::ptr::null_mut(),
+                    std::mem::size_of::<AtomicU32>(),
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    libc::MAP_SHARED | libc::MAP_ANON,
+                    -1,
+                    0,
+                )
+            };
+            if page == libc::MAP_FAILED {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(Self(page.cast()))
+        }
+
+        fn word(&self) -> &AtomicU32 {
+            // SAFETY: points at the live mapping created in `new`.
+            unsafe { &*self.0 }
+        }
+
+        /// The child's first action once it can run a thread. False when the
+        /// parent has already given up on it.
+        fn claim(&self) -> bool {
+            self.word()
+                .compare_exchange(
+                    Self::IDLE,
+                    Self::STARTED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+        }
+
+        fn started(&self) -> bool {
+            self.word().load(Ordering::Acquire) == Self::STARTED
+        }
+
+        /// The parent's decision to give up. False when the child had started
+        /// after all, which then stands.
+        fn cancel(&self) -> bool {
+            self.word()
+                .compare_exchange(
+                    Self::IDLE,
+                    Self::CANCELLED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+        }
+
+        fn reset(&self) {
+            self.word().store(Self::IDLE, Ordering::Release);
+        }
+
+        /// Unmaps the page. Only the parent does; a child keeps it until it exits.
+        fn release(self) {
+            // SAFETY: unmaps the page created in `new`; nothing uses it afterwards.
+            unsafe {
+                libc::munmap(
+                    self.0 as *mut libc::c_void,
+                    std::mem::size_of::<AtomicU32>(),
+                )
+            };
+        }
+    }
+
+    /// Whether `pid` has exited, without reaping it.
+    fn has_exited(pid: i32) -> bool {
+        // SAFETY: a zeroed siginfo is a valid out-parameter; `WNOWAIT` leaves
+        // the child for its usual wait.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let result = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                pid as libc::id_t,
+                &raw mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        // SAFETY: reads the pid field `waitid` filled in.
+        result == 0 && unsafe { info.si_pid() } != 0
+    }
+
+    /// Waits for a freshly forked `pid` to claim its start. True when it has
+    /// started (or has already exited, which its usual wait reports); false
+    /// when it is stuck and has been cancelled.
+    fn await_start(flag: StartFlag, pid: i32, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        let mut polls = 0_u32;
+        loop {
+            if flag.started() || has_exited(pid) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return !flag.cancel();
+            }
+            polls += 1;
+            if polls < 64 {
+                std::thread::yield_now();
+            } else {
+                std::thread::sleep(Duration::from_micros(100));
+            }
+        }
+    }
+
+    /// Kills a child that never started and reaps it.
+    fn discard_child(pid: i32) {
+        // SAFETY: signals and waits only for the child this fork created.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+            let mut status = 0;
+            while libc::waitpid(pid, &raw mut status, 0) == -1
+                && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
+            {
+            }
+        }
+    }
+
     /// Forks a child that runs `body` on a fresh runtime and exits with its status.
     ///
     /// Returns `Ok(None)` when forking is unavailable. `keep` lists the
     /// descriptors the child's shell references; other inherited close-on-exec
     /// pipes are closed in the child.
+    ///
+    /// Returns once the child is known to be able to start threads. A child
+    /// that is not (see [`StartFlag`]) has run nothing, so it is replaced.
     pub(crate) fn fork<F, Fut>(
         group: ChildGroup,
         signals: &ChildSignals,
@@ -348,84 +509,134 @@ mod imp {
         }
         let _ = std::io::stdout().flush();
         let _ = std::io::stderr().flush();
-        // SAFETY: the child only uses fork-safe state: it replaces the runtime's
-        // signal sockets, never touches the parent's runtime, and leaves with _exit.
-        let pid = unsafe { libc::fork() };
-        if pid < 0 {
-            return Err(std::io::Error::last_os_error().into());
-        }
-        if pid == 0 {
-            if !replace_signal_sockets() {
-                exit_child(126);
+        let flag = StartFlag::new()?;
+        let forked = fork_until_started(flag, group, signals, &keep, body);
+        flag.release();
+        forked
+    }
+
+    fn fork_until_started<F, Fut>(
+        flag: StartFlag,
+        group: ChildGroup,
+        signals: &ChildSignals,
+        keep: &HashSet<RawFd>,
+        body: F,
+    ) -> Result<Option<Forked>, crate::error::Error>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = i32>,
+    {
+        for timeout in START_TIMEOUTS {
+            // SAFETY: the child only uses fork-safe state: it replaces the runtime's
+            // signal sockets, never touches the parent's runtime, and leaves with _exit.
+            let pid = unsafe { libc::fork() };
+            if pid < 0 {
+                return Err(std::io::Error::last_os_error().into());
             }
-            crate::signals::forget_after_fork();
-            match group {
-                ChildGroup::Inherit => {}
-                ChildGroup::New { foreground } => {
-                    // SAFETY: changes only this process's group.
-                    unsafe { libc::setpgid(0, 0) };
-                    if foreground {
-                        let _ = crate::sys::terminal::move_self_to_foreground();
-                    }
-                }
-                ChildGroup::Join(pgid) => {
-                    // SAFETY: changes only this process's group.
-                    unsafe { libc::setpgid(0, pgid) };
-                }
+            if pid == 0 {
+                run_child(flag, group, signals, keep, body);
             }
-            let interrupt = if signals.ignore_interrupts {
-                libc::SIG_IGN
-            } else {
-                libc::SIG_DFL
+            let pgid = match group {
+                ChildGroup::Inherit => None,
+                ChildGroup::New { .. } => Some(pid),
+                ChildGroup::Join(pgid) => Some(pgid),
             };
-            for (signal, handler) in [
-                (libc::SIGINT, interrupt),
-                (libc::SIGQUIT, interrupt),
-                (libc::SIGTERM, libc::SIG_DFL),
-                (libc::SIGPIPE, libc::SIG_DFL),
-            ] {
-                let handler = if signals.ignored.contains(&signal) {
-                    libc::SIG_IGN
-                } else {
-                    handler
-                };
-                set_disposition(signal, handler, true);
+            if let Some(pgid) = pgid {
+                // SAFETY: mirrors the child's own setpgid so either order wins the race.
+                unsafe { libc::setpgid(pid, pgid) };
             }
-            if signals.default_stop_signals {
-                for signal in [libc::SIGTSTP, libc::SIGTTIN, libc::SIGTTOU] {
-                    if !signals.ignored.contains(&signal) {
-                        set_disposition(signal, libc::SIG_DFL, true);
-                    }
-                }
+            if await_start(flag, pid, timeout) {
+                drop(body);
+                return Ok(Some(Forked { pid, pgid }));
             }
-            close_foreign_pipes(&keep);
-            let thread = std::thread::Builder::new().spawn(move || {
-                let runtime = tokio::runtime::Builder::new_multi_thread()
-                    .worker_threads(2)
-                    .enable_all()
-                    .build();
-                let code = match runtime {
-                    Ok(runtime) => runtime.block_on(body()),
-                    Err(_) => 126,
-                };
-                exit_child(code)
-            });
-            if let Ok(thread) = thread {
-                let _ = thread.join();
-            }
+            discard_child(pid);
+            flag.reset();
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "a forked shell process never started",
+        )
+        .into())
+    }
+
+    /// The forked child: joins its process group, sets its signal dispositions,
+    /// and runs `body` on a fresh runtime. Never returns.
+    fn run_child<F, Fut>(
+        flag: StartFlag,
+        group: ChildGroup,
+        signals: &ChildSignals,
+        keep: &HashSet<RawFd>,
+        body: F,
+    ) -> !
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = i32>,
+    {
+        if !replace_signal_sockets() {
             exit_child(126);
         }
-        let pgid = match group {
-            ChildGroup::Inherit => None,
-            ChildGroup::New { .. } => Some(pid),
-            ChildGroup::Join(pgid) => Some(pgid),
-        };
-        if let Some(pgid) = pgid {
-            // SAFETY: mirrors the child's own setpgid so either order wins the race.
-            unsafe { libc::setpgid(pid, pgid) };
+        crate::signals::forget_after_fork();
+        match group {
+            ChildGroup::Inherit => {}
+            ChildGroup::New { foreground } => {
+                // SAFETY: changes only this process's group.
+                unsafe { libc::setpgid(0, 0) };
+                if foreground {
+                    let _ = crate::sys::terminal::move_self_to_foreground();
+                }
+            }
+            ChildGroup::Join(pgid) => {
+                // SAFETY: changes only this process's group.
+                unsafe { libc::setpgid(0, pgid) };
+            }
         }
-        drop(body);
-        Ok(Some(Forked { pid, pgid }))
+        let interrupt = if signals.ignore_interrupts {
+            libc::SIG_IGN
+        } else {
+            libc::SIG_DFL
+        };
+        for (signal, handler) in [
+            (libc::SIGINT, interrupt),
+            (libc::SIGQUIT, interrupt),
+            (libc::SIGTERM, libc::SIG_DFL),
+            (libc::SIGPIPE, libc::SIG_DFL),
+        ] {
+            let handler = if signals.ignored.contains(&signal) {
+                libc::SIG_IGN
+            } else {
+                handler
+            };
+            set_disposition(signal, handler, true);
+        }
+        if signals.default_stop_signals {
+            for signal in [libc::SIGTSTP, libc::SIGTTIN, libc::SIGTTOU] {
+                if !signals.ignored.contains(&signal) {
+                    set_disposition(signal, libc::SIG_DFL, true);
+                }
+            }
+        }
+        close_foreign_pipes(keep);
+        let thread = std::thread::Builder::new().spawn(move || {
+            // The parent is waiting for this, and gives up on a child that
+            // never gets here. Nothing has run yet, so being given up on is
+            // simply the end.
+            if !flag.claim() {
+                exit_child(125);
+            }
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build();
+            let code = match runtime {
+                Ok(runtime) => runtime.block_on(body()),
+                Err(_) => 126,
+            };
+            exit_child(code)
+        });
+        if let Ok(thread) = thread {
+            let _ = thread.join();
+        }
+        exit_child(126);
     }
 
     /// Ends this process by `signal` with its default action, as an untrapped

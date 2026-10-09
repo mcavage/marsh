@@ -767,6 +767,78 @@ fn fanout_runs_pipelines_concurrently_and_collects_in_declaration_order() {
     assert!(output.stderr.is_empty());
 }
 
+/// Runs a two-branch fanout whose branches only finish once both are running,
+/// so every branch must really start. Returns false if it did not finish.
+#[cfg(unix)]
+fn rendezvous_fanout_finishes() -> bool {
+    let directory = tempfile::tempdir().unwrap();
+    let mut child = composition_shell()
+        .current_dir(directory.path())
+        .args([
+            "--no-config",
+            "--noprofile",
+            "--norc",
+            "-c",
+            "printf input | fanout { first: sh -c 'touch first-ready; i=0; while test ! -e second-ready; do i=$((i+1)); test \"$i\" -lt 600 || exit 41; sleep 0.01; done; printf one' | cat; second: (sh -c 'touch second-ready; i=0; while test ! -e first-ready; do i=$((i+1)); test \"$i\" -lt 600 || exit 42; sleep 0.01; done; printf input' | tr a-z A-Z) } | collect",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    // The branches give up after six seconds, so a run that outlives this is a
+    // hang, not a slow machine.
+    let deadline = std::time::Instant::now() + Duration::from_mins(1);
+    while child.try_wait().unwrap().is_none() {
+        if std::time::Instant::now() >= deadline {
+            let group = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap());
+            let _ = nix::sys::signal::killpg(group, nix::sys::signal::Signal::SIGKILL);
+            let _ = child.wait();
+            return false;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("one") && stdout.contains("INPUT"),
+        "{output:?}"
+    );
+    true
+}
+
+/// A forked shell must be able to start threads before it runs anything.
+/// `fork` landing while another thread was starting left the child holding
+/// the standard library's thread registry lock with no owner, so its first
+/// thread never started and the whole command hung (about one run in sixty on
+/// a development machine, more under load). Launching many fanouts at once
+/// makes that the common failure rather than a rare one.
+#[cfg(unix)]
+#[test]
+fn forked_branch_shells_always_start_when_launched_concurrently() {
+    const LAUNCHERS: usize = 6;
+    const RUNS_EACH: usize = 16;
+    let hung: usize = thread::scope(|scope| {
+        let launchers: Vec<_> = (0..LAUNCHERS)
+            .map(|_| {
+                scope.spawn(|| {
+                    (0..RUNS_EACH)
+                        .filter(|_| !rendezvous_fanout_finishes())
+                        .count()
+                })
+            })
+            .collect();
+        launchers.into_iter().map(|l| l.join().unwrap()).sum()
+    });
+    assert_eq!(
+        hung,
+        0,
+        "{hung} of {} fanouts hung before every branch started",
+        LAUNCHERS * RUNS_EACH
+    );
+}
+
 #[test]
 fn collect_renders_failed_branch_stderr_inline_and_propagates_required_failure() {
     // docs/fanout.md: a failed branch's stderr follows its header on stdout;

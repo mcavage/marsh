@@ -77,6 +77,7 @@ nix = { version = "0.31.2", features = [
     "term",
     "user",
 ] }
+signal-hook = { version = "0.3.18", default-features = false }
 terminfo = "0.9.0"
 uzers = "0.12.2"
 
