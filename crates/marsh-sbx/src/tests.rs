@@ -3607,7 +3607,7 @@ fn local_v3_cold_preparation_overlaps_stock_create_and_direct_build() {
     let fingerprint = spec.workload_kit.validate_captured_source(&source).unwrap();
     let lifecycle_grant = StockSbx::open_lifecycle_workspace(&spec).unwrap();
     let (_, build) = adapter
-        .create_and_build_local(&spec, &source, &fingerprint, &lifecycle_grant)
+        .create_and_build_local(&spec, &source, &fingerprint, &lifecycle_grant, false)
         .unwrap();
     assert!(runner.overlapped.load(Ordering::SeqCst));
     StockSbx::cleanup_local_build(&build).unwrap();
@@ -4082,34 +4082,245 @@ fn published_kit_create_timeout_is_typed() {
     fs::remove_file(spec.worker_binary).unwrap();
 }
 
+/// The stock Kit-build selectors of every local Kit VM `sbx create`, in order.
+fn local_create_environments(runner: &FakeRunner) -> Vec<Vec<(String, String)>> {
+    runner
+        .invocations()
+        .iter()
+        .filter(|invocation| {
+            invocation.program == Path::new("sbx")
+                && invocation
+                    .arguments
+                    .first()
+                    .is_some_and(|argument| argument == "create")
+        })
+        .map(|invocation| {
+            invocation
+                .environment
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.to_string_lossy().into_owned(),
+                        value.to_string_lossy().into_owned(),
+                    )
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn pinned(rebuild: bool) -> Vec<(String, String)> {
+    let mut environment = vec![("SBX_KIT_BUILDER".to_owned(), "host".to_owned())];
+    if rebuild {
+        environment.push(("SBX_KIT_REBUILD".to_owned(), "1".to_owned()));
+    }
+    environment
+}
+
+fn kit_builder_resets(runner: &FakeRunner) -> usize {
+    runner
+        .invocations()
+        .iter()
+        .filter(|invocation| {
+            invocation
+                .arguments
+                .starts_with(&["kit".into(), "builder".into()])
+        })
+        .count()
+}
+
 #[test]
 fn local_v3_rejects_outer_and_direct_build_digest_mismatch() {
     let source = local_kit_source();
     let home = selected_home();
     let worker = artifact();
     let outer_manifest = format!("sha256:{}", "a".repeat(64));
-    let runner = FakeRunner::with_outputs([ok(), ok(), local_inspect(&outer_manifest), ok()]);
+    // Two cold attempts, the second forcing a stock rebuild; both disagree.
+    let runner = FakeRunner::with_outputs([
+        ok(),
+        ok(),
+        local_inspect(&outer_manifest),
+        ok(),
+        ok(),
+        ok(),
+        local_inspect(&outer_manifest),
+        ok(),
+    ]);
     let adapter = StockSbx::new("sbx", runner.clone());
+    let result = adapter.ensure_kit_vm(&KitVmSpec {
+        name: "marsh-kit-local-source".into(),
+        worker_binary: worker.clone(),
+        workload_kit: NativeKitRef::local_v3_source(source.clone()).unwrap(),
+        lifecycle_workspace: home.clone(),
+    });
     assert!(matches!(
-        adapter.ensure_kit_vm(&KitVmSpec {
-            name: "marsh-kit-local-source".into(),
-            worker_binary: worker.clone(),
-            workload_kit: NativeKitRef::local_v3_source(source.clone()).unwrap(),
-            lifecycle_workspace: home.clone(),
-        }),
-        Err(SbxError::LocalKitDigestMismatch)
+        &result,
+        Err(SbxError::LocalKitDigestMismatch(detail)) if detail.contains("after stock SBX rebuilt")
     ));
+    assert_eq!(
+        local_create_environments(&runner),
+        [pinned(false), pinned(true)]
+    );
+    assert_eq!(kit_builder_resets(&runner), 0);
     assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
     assert!(runner.spawns.lock().unwrap().is_empty());
-    assert!(
-        runner.invocations().iter().any(|invocation| {
-            invocation.arguments == ["rm", "--force", "marsh-kit-local-source"]
-        })
+    assert_eq!(
+        runner
+            .invocations()
+            .iter()
+            .filter(|invocation| {
+                invocation.arguments == ["rm", "--force", "marsh-kit-local-source"]
+            })
+            .count(),
+        2
     );
 
     fs::remove_file(worker).unwrap();
     fs::remove_dir_all(source).unwrap();
     fs::remove_dir(home).unwrap();
+}
+
+#[test]
+fn local_v3_stale_stock_build_is_rebuilt_and_the_vm_recreated() {
+    let source = local_kit_source();
+    let home = selected_home();
+    let worker = artifact();
+    let stale = format!("sha256:{}", "a".repeat(64));
+    let manifest = format!("sha256:{}", "f".repeat(64));
+    let runner = FakeRunner::with_outputs([
+        ok(),
+        ok(),
+        local_inspect(&stale),
+        ok(),
+        ok(),
+        ok(),
+        local_inspect(&manifest),
+        stdout(format!("{manifest}\n").as_bytes()),
+        ok(),
+        ok(),
+        ok(),
+        ok(),
+        stdout(b"0:0:700\n"),
+    ]);
+    let adapter = StockSbx::new("sbx", runner.clone());
+    let ready = adapter
+        .ensure_kit_vm(&KitVmSpec {
+            name: "marsh-kit-local-source".into(),
+            worker_binary: worker.clone(),
+            workload_kit: NativeKitRef::local_v3_source(source.clone()).unwrap(),
+            lifecycle_workspace: home.clone(),
+        })
+        .unwrap();
+    assert_eq!(ready.job_image.as_str(), manifest);
+    assert!(ready.cold_started);
+    assert_eq!(
+        local_create_environments(&runner),
+        [pinned(false), pinned(true)]
+    );
+    assert_eq!(kit_builder_resets(&runner), 0);
+    // The stale VM is removed before the rebuilding recreate.
+    let commands = runner.arguments();
+    let position = |wanted: &[&str]| {
+        commands
+            .iter()
+            .position(|arguments| {
+                arguments.starts_with(&wanted.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>())
+            })
+            .unwrap()
+    };
+    let removed = position(&["rm", "--force", "marsh-kit-local-source"]);
+    let recreated = commands
+        .iter()
+        .rposition(|arguments| {
+            arguments
+                .first()
+                .is_some_and(|argument| argument == "create")
+        })
+        .unwrap();
+    assert!(removed < recreated);
+    assert!(fs::read_dir(&home).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".marsh-kit-")
+    }));
+
+    fs::remove_file(worker).unwrap();
+    fs::remove_dir_all(source).unwrap();
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn local_v3_stale_kit_image_cache_entry_is_rebuilt_on_both_sides() {
+    let source = local_kit_source();
+    let home = selected_home();
+    let worker = artifact();
+    let temp = tempfile::tempdir().unwrap();
+    let cache = temp.path().join("kit-images");
+    assert!(private_cache_directory(&cache));
+    let fingerprint = local_source_fingerprint(&source).unwrap();
+    let stale = format!("sha256:{}", "a".repeat(64));
+    let manifest = format!("sha256:{}", "f".repeat(64));
+    let scratch = temp.path().join("stale.tar");
+    fs::write(&scratch, b"stale image archive").unwrap();
+    retain_local_build(
+        &cache,
+        &LocalBuild {
+            source_fingerprint: fingerprint.clone(),
+            local_tag: String::new(),
+            manifest_digest: OciImage::parse(stale).unwrap(),
+            docker_archive: scratch,
+            metadata: temp.path().join("absent.json"),
+            retained: false,
+            _private_scratch: None,
+        },
+    )
+    .unwrap();
+    // Attempt one loads nothing: the cached manifest already disagrees.
+    let runner = FakeRunner::with_outputs([
+        ok(),
+        local_inspect(&manifest),
+        ok(),
+        ok(),
+        ok(),
+        local_inspect(&manifest),
+        stdout(format!("{manifest}\n").as_bytes()),
+        ok(),
+        ok(),
+        ok(),
+        ok(),
+        stdout(b"0:0:700\n"),
+    ]);
+    let adapter = StockSbx::new("sbx", runner.clone()).with_kit_image_cache(cache.clone());
+    let ready = adapter
+        .ensure_kit_vm(&KitVmSpec {
+            name: "marsh-kit-local-source".into(),
+            worker_binary: worker.clone(),
+            workload_kit: NativeKitRef::local_v3_source(source.clone()).unwrap(),
+            lifecycle_workspace: home.clone(),
+        })
+        .unwrap();
+    assert_eq!(ready.job_image.as_str(), manifest);
+    assert_eq!(
+        local_create_environments(&runner),
+        [pinned(false), pinned(true)]
+    );
+    assert_eq!(
+        runner
+            .invocations()
+            .iter()
+            .filter(|invocation| invocation.program == Path::new("docker"))
+            .count(),
+        1
+    );
+    // The fresh, verified build replaced the stale entry.
+    let hit = cached_local_build(&cache, &fingerprint).unwrap();
+    assert_eq!(hit.manifest_digest.as_str(), manifest);
+
+    fs::remove_file(worker).unwrap();
+    fs::remove_dir_all(source).unwrap();
+    fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
