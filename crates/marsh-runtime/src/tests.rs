@@ -1141,6 +1141,7 @@ fn system_runner_honors_argument_safe_working_directory() {
         program: "/bin/pwd".into(),
         arguments: Vec::new(),
         working_directory: Some(directory.path().to_owned()),
+        environment: Vec::new(),
     };
 
     let output = runner.run(&invocation).unwrap();
@@ -1161,6 +1162,7 @@ fn bounded_system_runner_preserves_output_and_status() {
             "printf stdout; printf stderr >&2; exit 37".into(),
         ],
         working_directory: None,
+        environment: Vec::new(),
     };
 
     let output = runner
@@ -1181,6 +1183,7 @@ fn bounded_system_runner_kills_descendant_process_group() {
         program: "/bin/sh".into(),
         arguments: vec!["-c".into(), script.into()],
         working_directory: None,
+        environment: Vec::new(),
     };
 
     let started = std::time::Instant::now();
@@ -1310,6 +1313,7 @@ fn bounded_system_runner_cancels_escaped_pipe_holders_without_waiting_for_eof() 
             .into(),
         ],
         working_directory: None,
+        environment: Vec::new(),
     };
     let started = std::time::Instant::now();
     let result =
@@ -1340,6 +1344,7 @@ fn local_control_is_fenced_after_reaping_for_both_pipe_and_pty() {
             program: "/usr/bin/true".into(),
             arguments: vec![],
             working_directory: None,
+            environment: Vec::new(),
         };
         let mut attachment = if terminal {
             runner.spawn_pty(&invocation)
@@ -1390,6 +1395,7 @@ fn bounded_system_runner_kills_group_even_when_leader_exited_before_pipe_drain()
             .into(),
         ],
         working_directory: None,
+        environment: Vec::new(),
     };
     let result =
         SystemCommandRunner::new("/tmp").run_bounded(&invocation, Duration::from_millis(200));
@@ -1429,6 +1435,7 @@ fn system_pty_preserves_color_paste_bytes_and_resize() {
             "test -t 0 && test -t 1 || exit 90; printf '\\033[31mRED\\033[0m'; IFS= read -r line; stty size; printf '<%s>' \"$line\"".into(),
         ],
         working_directory: None,
+        environment: Vec::new(),
     };
     let mut attachment = runner.spawn_pty(&invocation).unwrap();
     let mut stdout = attachment.stdout;
@@ -1477,6 +1484,7 @@ fn system_pty_delivers_cursor_response_bytes_without_echo_or_newline() {
         program: "/bin/sh".into(),
         arguments: vec!["-c".into(), "dd bs=1 count=7 2>/dev/null".into()],
         working_directory: None,
+        environment: Vec::new(),
     };
     let mut attachment = runner.spawn_pty(&invocation).unwrap();
     let response = b"\x1b[56;1R";
@@ -1504,6 +1512,7 @@ fn system_pty_forwards_sigint_to_exact_child() {
             "trap 'printf INTERRUPTED; exit 130' INT; printf READY; while :; do :; done".into(),
         ],
         working_directory: None,
+        environment: Vec::new(),
     };
     let mut attachment = runner.spawn_pty(&invocation).unwrap();
     let mut output = vec![0; 5];
@@ -1531,6 +1540,7 @@ fn system_pipe_attachment_forwards_sigint_to_exact_child() {
             "trap 'printf INTERRUPTED; exit 130' INT; printf READY; while :; do :; done".into(),
         ],
         working_directory: None,
+        environment: Vec::new(),
     };
     let mut attachment = runner.spawn_attached(&invocation).unwrap();
     let mut output = vec![0; 5];
@@ -1549,6 +1559,7 @@ fn attached_process_reports_real_pre_execution_failure_status() {
         program: "/bin/sh".into(),
         arguments: vec!["-c".into(), "exit 37".into()],
         working_directory: None,
+        environment: Vec::new(),
     };
     let mut attachment = runner.spawn_attached(&invocation).unwrap();
     assert_eq!(attachment.process.wait().unwrap(), 37);

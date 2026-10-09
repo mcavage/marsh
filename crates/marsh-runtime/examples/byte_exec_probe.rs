@@ -120,6 +120,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map(Into::into)
             .to_vec(),
             working_directory: None,
+            environment: Vec::new(),
         },
         Duration::from_secs(10),
     )?;

@@ -385,6 +385,7 @@ impl DevBroker {
             program,
             arguments: argv.iter().map(OsString::from).collect(),
             working_directory: None,
+            environment: Vec::new(),
         }
     }
 

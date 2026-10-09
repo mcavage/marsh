@@ -5487,6 +5487,7 @@ impl StockSbx {
                 .map(|value| value.as_ref().to_os_string())
                 .collect(),
             working_directory: None,
+            environment: Vec::new(),
         }
     }
 
@@ -5565,6 +5566,7 @@ impl StockSbx {
                         .map(|value| value.as_ref().to_os_string())
                         .collect(),
                     working_directory: None,
+                    environment: Vec::new(),
                 },
                 timeout,
             )

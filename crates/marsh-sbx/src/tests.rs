@@ -4915,6 +4915,7 @@ fn published_kit_images_share_the_cache_by_digest() {
             program: "sbx".into(),
             arguments: Vec::new(),
             working_directory: None,
+            environment: Vec::new(),
         },
         &cache,
         &reference,
