@@ -4716,7 +4716,12 @@ impl StockSbx {
                 OsStr::new("--platform"),
                 OsStr::new("linux/arm64"),
                 OsStr::new("--output"),
-                OsStr::new(&format!("type=docker,dest={}", docker_archive.display())),
+                // Stock SBX exports its own build of this source as OCI; the
+                // two manifest digests agree only with matching media types.
+                OsStr::new(&format!(
+                    "type=docker,oci-mediatypes=true,dest={}",
+                    docker_archive.display()
+                )),
                 OsStr::new("--tag"),
                 OsStr::new(&tag),
                 OsStr::new("--metadata-file"),

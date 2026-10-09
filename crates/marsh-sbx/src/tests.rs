@@ -485,11 +485,11 @@ impl CommandRunner for ConcurrentPreparationRunner {
             .and_then(|argument| argument.to_str());
         if invocation.program == Path::new("docker") && command == Some("buildx") {
             self.rendezvous(false)?;
-            for destination in invocation
-                .arguments
-                .iter()
-                .filter_map(|argument| argument.to_str()?.strip_prefix("type=docker,dest="))
-            {
+            for destination in invocation.arguments.iter().filter_map(|argument| {
+                argument
+                    .to_str()?
+                    .strip_prefix("type=docker,oci-mediatypes=true,dest=")
+            }) {
                 fs::write(destination, b"fake image archive")?;
             }
             let metadata_index = invocation
@@ -777,7 +777,7 @@ impl CommandRunner for FakeRunner {
         if output.succeeded() && is_build {
             for destination in invocation.arguments.iter().filter_map(|argument| {
                 let argument = argument.to_str()?;
-                argument.strip_prefix("type=docker,dest=")
+                argument.strip_prefix("type=docker,oci-mediatypes=true,dest=")
             }) {
                 fs::write(destination, b"fake image archive")?;
             }
@@ -3680,7 +3680,7 @@ fn local_v3_cold_start_builds_verifies_and_seeds_exact_image() {
         .iter()
         .filter_map(|argument| {
             let argument = argument.to_str()?;
-            argument.strip_prefix("type=docker,dest=")
+            argument.strip_prefix("type=docker,oci-mediatypes=true,dest=")
         })
         .map(PathBuf::from)
         .collect::<Vec<_>>();
