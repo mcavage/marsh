@@ -1,16 +1,24 @@
 name: Release
-# Tag vX.Y.Z (matching Cargo.toml's workspace version) to publish a release:
-#   1. guest:   Linux arm64 guest binaries (Buildx)
-#   2. images:  log in to Docker Hub (docker.io and dhi.io), build and push the
-#               shell template and Kit images to docker.io/mcavage/marsh-*, and
-#               record their digests
-#   3. host:    macOS arm64 host binaries; pin the digests into commands.json and
-#               shell-image; package marsh-X.Y.Z-darwin-arm64.tar.gz + .sha256
-#   4. release: GitHub Release with the tarball, checksum, fixture-ref.txt and
-#               the rendered Homebrew formula
-#   5. tap:     push Formula/marsh.rb to mcavage/homebrew-tap
-# workflow_dispatch builds everything and makes a draft release; images are
-# still pushed (by digest) but nothing is announced.
+# One pipeline, two channels. The version is never hand-edited: it is stamped
+# into the build (scripts/stamp-version.py) and never committed.
+#
+#   stable   push a tag vX.Y.Z. Version = the tag. Publishes the GitHub Release,
+#            Docker Hub images (:X.Y.Z, :latest, :release) and the Homebrew
+#            formula `marsh`.
+#   nightly  every commit on main whose CI run passed. Version =
+#            <next patch>-nightly.<commit UTC time>.g<sha>, e.g.
+#            0.1.3-nightly.20261009171916.gb1f7e8b. Publishes a GitHub
+#            prerelease (the newest 10 are kept), Docker Hub images (:nightly
+#            and :<version>; prune-nightlies.yml trims them the same way) and
+#            the Homebrew formula `marsh-nightly`.
+#   manual   workflow_dispatch with a version builds a DRAFT stable release
+#            (nothing announced); without a version it publishes a nightly
+#            from the selected ref.
+#
+# Stages: version, guest (Linux arm64 binaries), images (shell template and Kit
+# images to docker.io/mcavage/marsh-*, digests recorded), host (macOS binaries;
+# digests pinned into commands.json and shell-image; tarball + checksum),
+# release (GitHub Release), tap (mcavage/homebrew-tap).
 #
 # Secrets:
 #   DOCKERHUB_USERNAME,       Docker account that can push docker.io/mcavage/*
@@ -21,15 +29,21 @@ name: Release
 on:
   push:
     tags: ['v*.*.*']
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to build (X.Y.Z); creates a draft release'
-        required: true
+        description: 'X.Y.Z: build a draft stable release. Empty: publish a nightly from this ref.'
+        required: false
 permissions:
   contents: read
+# Stable and nightly queue separately so a stream of nightlies can never
+# replace a pending release. Nothing is cancelled: runs publish in order.
 concurrency:
-  group: release
+  group: release-${{ (github.event_name == 'push' || github.event.inputs.version) && 'stable' || 'nightly' }}
   cancel-in-progress: false
 env:
   KIT_REPOSITORY_PREFIX: docker.io/mcavage
@@ -38,25 +52,58 @@ env:
 
 jobs:
   version:
+    # Nightlies ship only commits whose CI run on main passed.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
     outputs:
+      channel: ${{ steps.v.outputs.channel }}
       version: ${{ steps.v.outputs.version }}
       draft: ${{ steps.v.outputs.draft }}
+      sha: ${{ steps.v.outputs.sha }}
+      formula: ${{ steps.v.outputs.formula }}
+      image_tag: ${{ steps.v.outputs.image_tag }}
+      extra_tags: ${{ steps.v.outputs.extra_tags }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
       - id: v
         env:
-          INPUT: ${{ inputs.version }}
+          INPUT: ${{ github.event.inputs.version }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = push ]; then version=${GITHUB_REF_NAME#v}; draft=false
-          else version=${INPUT#v}; draft=true; fi
-          case $version in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad version: $version"; exit 1;; esac
-          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
-          if [ "$cargo_version" != "$version" ]; then
-            echo "tag $version does not match Cargo.toml version $cargo_version"; exit 1
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          case $GITHUB_EVENT_NAME in
+            push) channel=stable; version=${GITHUB_REF_NAME#v}; draft=false ;;
+            workflow_dispatch)
+              if [ -n "$INPUT" ]; then channel=stable; version=${INPUT#v}; draft=true
+              else channel=nightly; draft=false; fi ;;
+            *) channel=nightly; draft=false ;;
+          esac
+          if [ "$channel" = stable ]; then
+            echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "bad version: $version"; exit 1; }
+            if [ "$draft" = false ]; then
+              git merge-base --is-ancestor "$sha" origin/main || { echo "tag $GITHUB_REF_NAME is not on main"; exit 1; }
+            fi
+            formula=marsh; image_tag=; extra_tags="$version latest"
+          else
+            last=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+            base=${last#v}; base=${base:-0.0.0}
+            IFS=. read -r major minor patch <<< "$base"
+            stamp=$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S "$sha")
+            version="$major.$minor.$((patch + 1))-nightly.$stamp.g$(git rev-parse --short=7 "$sha")"
+            formula=marsh-nightly; image_tag=nightly; extra_tags="$version"
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "draft=$draft" >> "$GITHUB_OUTPUT"
+          {
+            echo "channel=$channel"; echo "version=$version"; echo "draft=$draft"; echo "sha=$sha"
+            echo "formula=$formula"; echo "image_tag=$image_tag"; echo "extra_tags=$extra_tags"
+          } >> "$GITHUB_OUTPUT"
+          echo "### $channel $version (${sha:0:7})" >> "$GITHUB_STEP_SUMMARY"
 
   guest:
     needs: version
@@ -64,6 +111,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - name: Stamp the version
+        run: python3 scripts/stamp-version.py "${{ needs.version.outputs.version }}"
       - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
       - name: Build Linux arm64 guest binaries
         run: |
@@ -78,14 +129,22 @@ jobs:
           path: out/guest
           if-no-files-found: error
 
+  # The images do not contain the marsh version, so this job builds the
+  # checkout as committed and does not stamp it.
   images:
     needs: version
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     permissions:
       contents: read
+    env:
+      # Empty for stable: the publishers' default tags (:release, :repaired).
+      IMAGE_TAG: ${{ needs.version.outputs.image_tag }}
+      EXTRA_TAGS: ${{ needs.version.outputs.extra_tags }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.version.outputs.sha }}
       - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
       - name: Log in to Docker Hub and Docker Hardened Images
         env:
@@ -104,17 +163,28 @@ jobs:
         run: |
           mkdir -m 700 -p "$RUNNER_TEMP/out"
           python3 scripts/prepare-shell-image.py --repository "$SHELL_IMAGE_REPOSITORY" \
-            --output "$RUNNER_TEMP/out/shell-image"
+            ${IMAGE_TAG:+--tag "$IMAGE_TAG"} --output "$RUNNER_TEMP/out/shell-image"
       - name: Kits
         run: |
-          make kit-publish KIT_REPOSITORY_PREFIX="$KIT_REPOSITORY_PREFIX" \
+          make kit-publish KIT_REPOSITORY_PREFIX="$KIT_REPOSITORY_PREFIX" KIT_TAG="$IMAGE_TAG" \
             TARGET_DIR="$RUNNER_TEMP/target" KIT_RELEASE_COMMANDS="$RUNNER_TEMP/out/commands.json"
       - name: Acceptance fixture Kit
         run: |
-          make kit-publish-fixture KIT_REPOSITORY_PREFIX="$KIT_REPOSITORY_PREFIX" KIT_REPOSITORY_NAME_PREFIX=marsh- \
+          make kit-publish-fixture KIT_REPOSITORY_PREFIX="$KIT_REPOSITORY_PREFIX" KIT_REPOSITORY_NAME_PREFIX=marsh- KIT_TAG="$IMAGE_TAG" \
             TARGET_DIR="$RUNNER_TEMP/target" KIT_FIXTURE_COMMANDS="$RUNNER_TEMP/out/fixture-commands.json"
           python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["fixture"])' \
             "$RUNNER_TEMP/out/fixture-commands.json" > "$RUNNER_TEMP/out/fixture-ref.txt"
+      # The moving tag (:release or :nightly) was pushed above; add the tags
+      # that name this build. Consumers still pin by digest.
+      - name: Tag every image with this version
+        run: |
+          out="$RUNNER_TEMP/out"
+          refs=$({ cat "$out/shell-image" "$out/fixture-ref.txt"; jq -r '.[]' "$out/commands.json"; } | sort -u)
+          for ref in $refs; do
+            for tag in $EXTRA_TAGS; do
+              docker buildx imagetools create --tag "${ref%@*}:$tag" "$ref"
+            done
+          done
       - name: Record digests
         run: |
           cat "$RUNNER_TEMP/out/shell-image" "$RUNNER_TEMP/out/commands.json" "$RUNNER_TEMP/out/fixture-ref.txt"
@@ -142,8 +212,13 @@ jobs:
     timeout-minutes: 60
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      FORMULA_CHANNEL: ${{ needs.version.outputs.channel }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - name: Stamp the version
+        run: python3 scripts/stamp-version.py "$VERSION"
       - name: Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -161,7 +236,7 @@ jobs:
           chmod 755 target/libexec/marsh/*-linux-arm64
           cp target/images/shell-image target/images/shell-image.build.json target/libexec/marsh/
           make dist VERSION="$VERSION" KIT_COMMANDS=target/images/commands.json
-          make formula VERSION="$VERSION"
+          make formula VERSION="$VERSION" FORMULA_CHANNEL="$FORMULA_CHANNEL"
           cp target/images/fixture-ref.txt target/dist/
       - name: Install the tarball and run it
         run: |
@@ -187,7 +262,10 @@ jobs:
       attestations: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      CHANNEL: ${{ needs.version.outputs.channel }}
+      FORMULA: ${{ needs.version.outputs.formula }}
       DRAFT: ${{ needs.version.outputs.draft }}
+      SHA: ${{ needs.version.outputs.sha }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -200,14 +278,30 @@ jobs:
       - uses: actions/attest-build-provenance@db473fddc028af60658334401dc6fa3ffd8669fd # v2.3.0
         with:
           subject-path: dist/marsh-${{ env.VERSION }}-darwin-arm64.tar.gz
+      # A token-created tag does not start another workflow run, so a nightly's
+      # tag (which also matches v*.*.*) cannot re-trigger this one.
       - name: Create the GitHub Release
         run: |
-          draft=; [ "$DRAFT" = true ] && draft=--draft
-          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" $draft \
-            --title "marsh $VERSION" --generate-notes --target "$GITHUB_SHA" \
+          args=(--repo "$GITHUB_REPOSITORY" --target "$SHA")
+          if [ "$CHANNEL" = nightly ]; then
+            args+=(--prerelease --latest=false --title "marsh $VERSION (nightly)"
+                   --notes "Nightly build of ${SHA:0:7}. Install: brew install mcavage/tap/marsh-nightly")
+          else
+            args+=(--title "marsh $VERSION" --generate-notes)
+            if [ "$DRAFT" = true ]; then args+=(--draft); fi
+          fi
+          gh release create "v$VERSION" "${args[@]}" \
             "dist/marsh-$VERSION-darwin-arm64.tar.gz" \
             "dist/marsh-$VERSION-darwin-arm64.tar.gz.sha256" \
-            dist/fixture-ref.txt dist/marsh.rb
+            dist/fixture-ref.txt "dist/$FORMULA.rb"
+      - name: Keep the newest 10 nightly releases
+        if: env.CHANNEL == 'nightly'
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName,isPrerelease,createdAt \
+            --jq '[.[] | select(.isPrerelease and (.tagName | test("-nightly\\.")))] | sort_by(.createdAt) | reverse | .[10:] | .[].tagName' |
+            while read -r tag; do
+              gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+            done
 
   tap:
     needs: [version, release]
@@ -215,6 +309,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.version.outputs.version }}
+      FORMULA: ${{ needs.version.outputs.formula }}
       TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -222,34 +317,46 @@ jobs:
           name: dist
           path: dist
       # The tap also holds other formulae (Formula/pix.rb) and its own
-      # .github/workflows. This job writes exactly one path, Formula/marsh.rb,
-      # and refuses to push if anything else would change.
+      # .github/workflows. This job writes exactly one path, Formula/$FORMULA.rb,
+      # and refuses to push if anything else would change. A stable release and
+      # a nightly can finish together, so a rejected push is retried from a
+      # fresh clone.
       - name: Update mcavage/homebrew-tap
         shell: bash
         run: |
           set -euo pipefail
           if [ -z "${TAP_TOKEN:-}" ]; then echo "HOMEBREW_TAP_TOKEN not set; skipping the tap"; exit 0; fi
-          grep -q '^class Marsh < Formula$' dist/marsh.rb || { echo "dist/marsh.rb is not the marsh formula" >&2; exit 1; }
-          git clone --depth 1 "https://x-access-token:$TAP_TOKEN@github.com/mcavage/homebrew-tap.git" tap
-          cd tap
-          base=$(git rev-parse HEAD)
-          branch=$(git symbolic-ref --short HEAD)
-          if [ -e Formula/marsh.rb ] && { [ -L Formula/marsh.rb ] || [ ! -f Formula/marsh.rb ]; }; then
-            echo "tap Formula/marsh.rb is not a regular file" >&2; exit 1
-          fi
-          mkdir -p Formula
-          cp ../dist/marsh.rb Formula/marsh.rb
-          git config user.name "marsh release"
-          git config user.email "marsh-release@users.noreply.github.com"
-          git add -- Formula/marsh.rb
-          changed=$(git status --porcelain --untracked-files=all)
-          if [ -z "$changed" ]; then echo "tap already has marsh $VERSION; nothing to push"; exit 0; fi
-          if [ "$changed" != "M  Formula/marsh.rb" ] && [ "$changed" != "A  Formula/marsh.rb" ]; then
-            printf 'refusing to push: tap changes outside Formula/marsh.rb:\n%s\n' "$changed" >&2; exit 1
-          fi
-          git commit -q -m "marsh $VERSION"
-          paths=$(git diff --name-only "$base" HEAD)
-          if [ "$paths" != "Formula/marsh.rb" ]; then
-            printf 'refusing to push: commit touches:\n%s\n' "$paths" >&2; exit 1
-          fi
-          git push origin "HEAD:refs/heads/$branch"
+          case $FORMULA in marsh) class=Marsh;; marsh-nightly) class=MarshNightly;; *) echo "unknown formula $FORMULA" >&2; exit 1;; esac
+          file="Formula/$FORMULA.rb"
+          grep -q "^class $class < Formula\$" "dist/$FORMULA.rb" || { echo "dist/$FORMULA.rb is not the $FORMULA formula" >&2; exit 1; }
+          for attempt in 1 2 3 4; do
+            rm -rf tap
+            git clone --depth 1 "https://x-access-token:$TAP_TOKEN@github.com/mcavage/homebrew-tap.git" tap
+            cd tap
+            base=$(git rev-parse HEAD)
+            branch=$(git symbolic-ref --short HEAD)
+            if [ -e "$file" ] && { [ -L "$file" ] || [ ! -f "$file" ]; }; then
+              echo "tap $file is not a regular file" >&2; exit 1
+            fi
+            mkdir -p Formula
+            cp "../dist/$FORMULA.rb" "$file"
+            git config user.name "marsh release"
+            git config user.email "marsh-release@users.noreply.github.com"
+            git add -- "$file"
+            changed=$(git status --porcelain --untracked-files=all)
+            if [ -z "$changed" ]; then echo "tap already has $FORMULA $VERSION; nothing to push"; exit 0; fi
+            if [ "$changed" != "M  $file" ] && [ "$changed" != "A  $file" ]; then
+              printf 'refusing to push: tap changes outside %s:\n%s\n' "$file" "$changed" >&2; exit 1
+            fi
+            git commit -q -m "$FORMULA $VERSION"
+            paths=$(git diff --name-only "$base" HEAD)
+            if [ "$paths" != "$file" ]; then
+              printf 'refusing to push: commit touches:\n%s\n' "$paths" >&2; exit 1
+            fi
+            if git push origin "HEAD:refs/heads/$branch"; then exit 0; fi
+            echo "tap push rejected (attempt $attempt); retrying" >&2
+            cd ..
+            sleep $((attempt * 5))
+          done
+          echo "could not push the tap after 4 attempts" >&2
+          exit 1

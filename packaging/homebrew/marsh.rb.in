@@ -1,12 +1,15 @@
-# Homebrew formula for marsh. Rendered by scripts/render-formula.py at release
-# time and pushed to the tap (github.com/mcavage/homebrew-tap, Formula/marsh.rb).
+# Homebrew formula for marsh and marsh-nightly. Rendered by
+# scripts/render-formula.py by release CI and pushed to the tap
+# (github.com/mcavage/homebrew-tap, Formula/@FORMULA@.rb).
 # Do not edit the rendered copy; edit this template.
-class Marsh < Formula
-  desc "Bash-compatible shell whose agents and tools run in sandboxed containers"
+class @CLASS@ < Formula
+  desc "Bash-compatible shell whose agents and tools run in sandboxed containers@DESC_SUFFIX@"
   homepage "https://runmar.sh"
   url "https://github.com/@REPOSITORY@/releases/download/v@VERSION@/marsh-@VERSION@-darwin-arm64.tar.gz"
-  sha256 "@SHA256@"
+@VERSION_LINE@  sha256 "@SHA256@"
   license "Apache-2.0"
+
+  conflicts_with "@CONFLICTS_WITH@", because: "both install marsh, msh, marshd and marsh-mcp"
 
   depends_on arch: :arm64
   depends_on :macos
@@ -30,7 +33,7 @@ class Marsh < Formula
     <<~EOS
       marsh needs Docker Sandboxes: brew install docker/tap/sbx; then `sbx login`
       (sbx 0.45.0 or newer). Then open a shell in a project:
-        cd ~/your/project && marsh
+        cd ~/your/project && marsh@CAVEAT_EXTRA@
     EOS
   end
 
