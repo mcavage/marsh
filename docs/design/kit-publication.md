@@ -125,7 +125,8 @@ overwritten. Consumers can verify the receipt filename and `registry_sha256`.
 A failure before registry commit preserves the previous registry and receipts;
 a crash can leave an unreferenced new receipt. These two local files are not
 claimed to be a filesystem-wide transaction. Remote pushes are not transactional:
-partial runs can leave images and move mutable `:release` tags.
+partial runs can leave images and move the mutable tag (`:release`, or `--tag`;
+nightlies use `:nightly`). Consumers pin by digest, so a moved tag changes nothing they run.
 
 This is byte provenance, **not a signature, attestation of trustworthy source,
 legal completeness proof, or runtime/image qualification**. Do not modify source

@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 IMMUTABLE = re.compile(r"(?![a-z]+://)[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}\Z")
 REPOSITORY = re.compile(r"[a-z0-9][a-z0-9.-]*(?::[0-9]{1,5})?/[a-z0-9][a-z0-9._/-]*\Z")
+TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}\Z")
 
 
 def file_hash(path: Path) -> str:
@@ -145,6 +146,8 @@ def main() -> None:
     parser.add_argument("--docker", default="docker")
     parser.add_argument("--sbx", default="sbx")
     parser.add_argument("--repository", help="explicit registry/repository, without tag or digest")
+    parser.add_argument("--tag", default="repaired",
+                        help="moving tag to push with --repository (default: repaired); consumers pin by digest")
     parser.add_argument("--output", type=Path, help="packaged immutable shell-image file")
     parser.add_argument("--insecure-registry", action="store_true",
                         help="explicitly allow a local HTTP test registry")
@@ -152,6 +155,8 @@ def main() -> None:
     args = parser.parse_args()
     if not args.validate_only and not args.output:
         parser.error("--output is required; registry publication additionally requires explicit --repository")
+    if not TAG.fullmatch(args.tag):
+        parser.error("--tag must be a valid image tag")
     if args.repository is not None and not REPOSITORY.fullmatch(args.repository):
         parser.error("--repository must be registry/repository without a tag or digest")
     if args.insecure_registry and not args.repository:
@@ -188,7 +193,7 @@ def main() -> None:
         if args.validate_only:
             output = ["--output", "type=cacheonly"]
         elif args.repository:
-            output = ["--output", f"type=image,name={args.repository}:repaired,push=true" +
+            output = ["--output", f"type=image,name={args.repository}:{args.tag},push=true" +
                       (",registry.insecure=true" if args.insecure_registry else "")]
         else:
             output = ["--load", "--tag", temporary_tag]

@@ -46,7 +46,8 @@ curl -fsSL https://runmar.sh/install | sh
 The script verifies a release from GitHub and installs into `~/.local`. The
 Homebrew tap, the installer, and GitHub Releases are live. To build from
 source instead, use `make install` (or `make dist-local` for a tarball).
-See [Install](docs/install.md) for options, upgrading, and removal.
+See [Install](docs/install.md) for options, upgrading, removal, and the
+nightly channel (`brew install mcavage/tap/marsh-nightly`).
 
 ## Quickstart
 
@@ -102,14 +103,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports:
 
 Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Brush is MIT
 licensed; see [THIRD_PARTY.md](THIRD_PARTY.md).
-
-## Thanks
-
-marsh's shell is built on a patched [Brush](https://github.com/reubeno/brush):
-upstream revision `1389a8e` plus the 49 patches in
-[docs/upstream/brush](docs/upstream/brush/README.md). 34 of them fix Bash
-compatibility: job control, signals and traps, `wait`, aliases, namerefs,
-subshells, globstar, redirections, and startup files. The other 15 add marsh's
-registered commands, `split`/`join`, and `fanout`/`collect`. Thanks to Reuben
-Olinsky and the Brush contributors, and to the
-[Docker Sandboxes](https://docs.docker.com/ai/sandboxes/) team.
