@@ -1,0 +1,4 @@
+# Workflows publish releases and hold secrets.
+/.github/        @mcavage
+/scripts/        @mcavage
+/packaging/      @mcavage
