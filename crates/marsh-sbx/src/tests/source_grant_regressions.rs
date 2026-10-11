@@ -1,5 +1,5 @@
-//! Identical caller regressions run against retained pre-repair grant code and
-//! the repaired adapter. The stock runner records effects but never calls SBX.
+//! Source-fencing regressions through the shell mount caller. Stock SBX is
+//! the model; a rejected source must cause no stock call at all.
 use super::*;
 
 fn fixture() -> tempfile::TempDir {
@@ -9,12 +9,11 @@ fn fixture() -> tempfile::TempDir {
         .unwrap()
 }
 
-fn shell() -> ReadyShellVm {
-    ReadyShellVm {
-        name: "owned-shell".into(),
-        user: shell_spec("/unused".into()).user,
-        cold_started: false,
-    }
+/// An adapter whose owned shell VM exists, so only the source can refuse.
+fn owned_shell(model: &Arc<StockModel>) -> StockSbx {
+    let adapter = model.adapter();
+    model.seed_owned(&adapter, "owned-shell");
+    adapter
 }
 
 #[test]
@@ -45,13 +44,12 @@ fn rejects_changed_parent_even_if_leaf_inode_is_preserved() {
     fs::rename(root.path().join("moved/project"), &source).unwrap();
     let leaf = fs::metadata(&source).unwrap();
     assert_eq!(admitted.source_identity(), (leaf.dev(), leaf.ino()));
-    let runner = FakeRunner::with_outputs([ok()]);
-    let adapter = StockSbx::new("/never-call-real-stock", runner.clone());
-    let outcome = adapter.prepare_shell_mounts(&shell(), &[admitted]);
+    let model = StockModel::new();
+    let outcome = owned_shell(&model).prepare_shell_mounts(&shell_vm("owned-shell"), &[admitted]);
     assert!(
-        outcome.is_err() && runner.arguments().is_empty(),
+        matches!(outcome, Err(SbxError::SourceChanged(_))) && model.mutations() == 0,
         "parent swap admitted: outcome={outcome:?}, effects={:?}",
-        runner.arguments()
+        model.calls()
     );
 }
 
@@ -61,12 +59,12 @@ fn rejects_entire_overlapping_batch_before_first_mount() {
     let project = root.path().join("project");
     let home = project.join("home");
     fs::create_dir_all(&home).unwrap();
-    let runner = FakeRunner::with_outputs([ok(), ok()]);
-    let adapter = StockSbx::new("/never-call-real-stock", runner.clone());
-    let outcome = adapter.prepare_shell_mounts(&shell(), &shell_grants(&project, &home));
+    let model = StockModel::new();
+    let outcome = owned_shell(&model)
+        .prepare_shell_mounts(&shell_vm("owned-shell"), &shell_grants(&project, &home));
     assert!(
-        outcome.is_err() && runner.arguments().is_empty(),
+        matches!(outcome, Err(SbxError::HostGrantFence(_))) && model.mutations() == 0,
         "overlapping project/home admitted: outcome={outcome:?}, effects={:?}",
-        runner.arguments()
+        model.calls()
     );
 }

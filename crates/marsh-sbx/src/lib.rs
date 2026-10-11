@@ -856,6 +856,7 @@ pub struct StockSbx {
     local_resolution_locks: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
     local_resolutions: Mutex<BTreeMap<String, LocalResolution>>,
     retained_process_teardown_timeout: Duration,
+    shell_close_transition_wait: Duration,
     ephemeral_root: PathBuf,
 }
 
@@ -969,6 +970,7 @@ impl StockSbx {
             local_resolution_locks: Mutex::new(BTreeMap::new()),
             local_resolutions: Mutex::new(BTreeMap::new()),
             retained_process_teardown_timeout: RETAINED_PROCESS_TEARDOWN_TIMEOUT,
+            shell_close_transition_wait: SHELL_CLOSE_TRANSITION_WAIT,
             ephemeral_root: ephemeral_home::default_root(),
         }
     }
@@ -1428,6 +1430,12 @@ impl StockSbx {
     #[cfg(test)]
     fn with_retained_process_teardown_timeout(mut self, timeout: Duration) -> Self {
         self.retained_process_teardown_timeout = timeout;
+        self
+    }
+
+    #[cfg(test)]
+    fn with_shell_close_transition_wait(mut self, wait: Duration) -> Self {
+        self.shell_close_transition_wait = wait;
         self
     }
 
@@ -2719,33 +2727,6 @@ impl StockSbx {
             })
     }
 
-    /// Starts a supervisor generation for a VM a test constructed directly.
-    #[cfg(test)]
-    fn start_test_supervisor(&self, vm: &str) {
-        let attachment = self
-            .runner
-            .spawn_attached(&self.invocation([
-                "exec",
-                "-i",
-                "-u",
-                "root",
-                "-w",
-                "/",
-                vm,
-                "/usr/local/bin/marsh",
-                "--internal-supervisor",
-            ]))
-            .unwrap();
-        let generation = self.shell_generation.fetch_add(1, Ordering::Relaxed);
-        let lease =
-            shell_supervisor::Supervisor::start(attachment, generation, Duration::from_secs(5))
-                .unwrap();
-        self.shell_leases
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(vm.to_owned(), lease);
-    }
-
     fn shell_supervisor(&self, vm: &str) -> Result<Arc<shell_supervisor::Supervisor>, SbxError> {
         self.shell_leases
             .lock()
@@ -3423,7 +3404,7 @@ impl StockSbx {
         // (for example the same project) holds these fences for one stock
         // call. Wait a bounded moment for it instead of quarantining the
         // shared worker over an ordinary overlap.
-        let deadline = Instant::now() + SHELL_CLOSE_TRANSITION_WAIT;
+        let deadline = Instant::now() + self.shell_close_transition_wait;
         let keys = shell_admission_before(|| self.grant_mount_references.try_lock(), deadline)
             .map_err(|_| busy())?
             .iter()
@@ -4205,11 +4186,6 @@ impl StockSbx {
             MountAccess::ReadWrite,
         )?;
         Ok(grant)
-    }
-
-    #[cfg(test)]
-    fn create_published_vm(&self, spec: &KitVmSpec) -> Result<(), SbxError> {
-        self.create_published_vm_with_grant(spec, &Self::open_lifecycle_workspace(spec)?)
     }
 
     fn create_published_vm_with_grant(
