@@ -10,14 +10,15 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc,
     },
 };
 
+/// Ordered replies for the byte-carrier fault-injection cases.
 #[derive(Default)]
 struct FakeRunner {
     outputs: Mutex<VecDeque<CommandOutput>>,
     invocations: Mutex<Vec<Invocation>>,
-    pty_sizes: Mutex<Vec<TerminalSize>>,
 }
 
 impl FakeRunner {
@@ -25,35 +26,7 @@ impl FakeRunner {
         Self {
             outputs: Mutex::new(outputs.into_iter().collect()),
             invocations: Mutex::new(Vec::new()),
-            pty_sizes: Mutex::new(Vec::new()),
         }
-    }
-
-    fn with_create_outputs(outputs: impl IntoIterator<Item = CommandOutput>) -> Self {
-        Self::with_outputs(
-            std::iter::once(byte_bridge_cases::inspected(
-                &job(),
-                serde_json::json!(["/entry"]),
-                serde_json::json!(["default"]),
-            ))
-            .chain(outputs),
-        )
-    }
-
-    fn lifecycle_calls(&self) -> Vec<Vec<String>> {
-        let calls = self.calls();
-        assert_eq!(
-            calls[0],
-            [
-                "image",
-                "inspect",
-                "--format",
-                "{{json .}}",
-                "--",
-                job().image.as_str()
-            ]
-        );
-        calls[1..].to_vec()
     }
 
     fn calls(&self) -> Vec<Vec<String>> {
@@ -61,14 +34,210 @@ impl FakeRunner {
             .lock()
             .unwrap()
             .iter()
-            .map(|invocation| {
-                invocation
-                    .arguments
-                    .iter()
-                    .map(|argument| argument.to_string_lossy().into_owned())
-                    .collect()
+            .map(|invocation| words(&invocation.arguments))
+            .collect()
+    }
+}
+
+fn words(arguments: &[OsString]) -> Vec<String> {
+    arguments
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect()
+}
+
+/// The value after each occurrence of `flag`.
+fn values<'a>(call: &'a [String], flag: &str) -> Vec<&'a str> {
+    call.windows(2)
+        .filter(|pair| pair[0] == flag)
+        .map(|pair| pair[1].as_str())
+        .collect()
+}
+
+/// A stand-in Docker CLI with container state, answering by verb: image
+/// inspect, create, container inspect/ls, start, wait, kill and rm.
+#[derive(Default)]
+struct DockerModel {
+    state: Mutex<DockerState>,
+}
+
+#[derive(Default)]
+struct DockerState {
+    calls: Vec<Vec<String>>,
+    pty_sizes: Vec<TerminalSize>,
+    /// Live containers (`None`), or removed ones still listed this many more
+    /// times (`usize::MAX`: forever).
+    containers: BTreeMap<String, Option<usize>>,
+    next: u8,
+    create_failure: Option<CommandOutput>,
+    /// Successive `{{.State.Pid}}\t{{.State.Status}}` replies.
+    pid_states: VecDeque<&'static str>,
+    exit_code: i32,
+    /// Listings that keep showing a removed container (`usize::MAX`: forever).
+    lingering: usize,
+    listing_failure: Option<CommandOutput>,
+}
+
+impl DockerModel {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn with_container(id: &str) -> Self {
+        let model = Self::default();
+        model
+            .state
+            .lock()
+            .unwrap()
+            .containers
+            .insert(id.to_owned(), None);
+        model
+    }
+
+    fn calls(&self) -> Vec<Vec<String>> {
+        self.state.lock().unwrap().calls.clone()
+    }
+
+    fn calls_of(&self, verb: &[&str]) -> Vec<Vec<String>> {
+        self.calls()
+            .into_iter()
+            .filter(|call| {
+                call.starts_with(
+                    &verb
+                        .iter()
+                        .map(|word| (*word).to_owned())
+                        .collect::<Vec<_>>(),
+                )
             })
             .collect()
+    }
+
+    /// The one `docker create` this model saw.
+    fn create(&self) -> Vec<String> {
+        let creates = self.calls_of(&["create"]);
+        assert_eq!(creates.len(), 1, "{creates:?}");
+        creates.into_iter().next().unwrap()
+    }
+
+    fn exists(&self, id: &str) -> bool {
+        self.state.lock().unwrap().containers.get(id) == Some(&None)
+    }
+
+    fn reply(&self, call: &[String]) -> CommandOutput {
+        let mut state = self.state.lock().unwrap();
+        state.calls.push(call.to_vec());
+        let words = call.iter().map(String::as_str).collect::<Vec<_>>();
+        match words.as_slice() {
+            ["image", "inspect", .., image] if *image == job().image.as_str() => {
+                byte_bridge_cases::inspected(
+                    &job(),
+                    serde_json::json!(["/entry"]),
+                    serde_json::json!(["default"]),
+                )
+            }
+            ["create", ..] => {
+                if let Some(failure) = state.create_failure.take() {
+                    return failure;
+                }
+                state.next += 1;
+                let id = format!("{:02x}", state.next).repeat(32);
+                state.containers.insert(id.clone(), None);
+                success(format!("{id}\n"))
+            }
+            [
+                "container",
+                "inspect",
+                "--format",
+                "{{.State.Pid}}\t{{.State.Status}}",
+                _,
+            ] => success(state.pid_states.pop_front().unwrap_or("0\texited\n")),
+            ["wait", _] => success(format!("{}\n", state.exit_code)),
+            ["container", "inspect", "--size", "--format", _, _] => {
+                success(format!("false\t{}\t4096\n", state.exit_code))
+            }
+            ["kill", "--signal", _, id] | ["rm", "--force", id]
+                if state.containers.get(*id) != Some(&None) =>
+            {
+                failure_output(&format!(
+                    "Error response from daemon: No such container: {id}"
+                ))
+            }
+            ["kill", ..] => success(Vec::new()),
+            ["rm", "--force", id] => {
+                let lingering = state.lingering;
+                state.containers.insert((*id).to_owned(), Some(lingering));
+                success(Vec::new())
+            }
+            [
+                "container",
+                "ls",
+                "--all",
+                "--no-trunc",
+                "--filter",
+                filter,
+                ..,
+            ] => {
+                if let Some(failure) = state.listing_failure.take() {
+                    return failure;
+                }
+                let id = filter.strip_prefix("id=").unwrap_or_default().to_owned();
+                let listed = match state.containers.get_mut(&id) {
+                    None | Some(Some(0)) => false,
+                    Some(None | Some(usize::MAX)) => true,
+                    Some(Some(remaining)) => {
+                        *remaining -= 1;
+                        true
+                    }
+                };
+                if !listed {
+                    state.containers.remove(&id);
+                }
+                success(if listed {
+                    format!("{id}\n")
+                } else {
+                    String::new()
+                })
+            }
+            _ => failure_output(&format!("model has no docker command {words:?}")),
+        }
+    }
+}
+
+fn failure_output(stderr: &str) -> CommandOutput {
+    CommandOutput {
+        exit_code: Some(1),
+        stdout: Vec::new(),
+        stderr: stderr.as_bytes().to_vec(),
+    }
+}
+
+impl CommandRunner for DockerModel {
+    fn run(&self, invocation: &Invocation) -> io::Result<CommandOutput> {
+        Ok(self.reply(&words(&invocation.arguments)))
+    }
+
+    fn run_bounded(&self, invocation: &Invocation, _: Duration) -> io::Result<CommandOutput> {
+        self.run(invocation)
+    }
+
+    fn spawn_attached(&self, invocation: &Invocation) -> io::Result<Attachment> {
+        let output = self.reply(&words(&invocation.arguments));
+        Ok(Attachment {
+            stdin: Box::new(io::sink()),
+            stdout: Box::new(Cursor::new(output.stdout)),
+            stderr: Box::new(Cursor::new(output.stderr)),
+            process: Box::new(FakeAttachedProcess(output.exit_code.unwrap_or(125))),
+            control: no_attachment_control(),
+        })
+    }
+
+    fn spawn_pty_sized(
+        &self,
+        invocation: &Invocation,
+        size: TerminalSize,
+    ) -> io::Result<Attachment> {
+        self.state.lock().unwrap().pty_sizes.push(size);
+        self.spawn_attached(invocation)
     }
 }
 
@@ -136,15 +305,6 @@ impl CommandRunner for FakeRunner {
             control: no_attachment_control(),
         })
     }
-
-    fn spawn_pty_sized(
-        &self,
-        invocation: &Invocation,
-        size: TerminalSize,
-    ) -> io::Result<Attachment> {
-        self.pty_sizes.lock().unwrap().push(size);
-        self.spawn_attached(invocation)
-    }
 }
 
 fn engine_response(
@@ -179,12 +339,13 @@ fn success(stdout: impl Into<Vec<u8>>) -> CommandOutput {
 fn command_failure_preserves_bounded_sanitized_stderr_and_exit_code() {
     let mut stderr = b"manifest rejected\0: ".to_vec();
     stderr.extend(vec![b'x'; MAX_COMMAND_STDERR * 2]);
-    let runner = FakeRunner::with_create_outputs([CommandOutput {
+    let model = DockerModel::new();
+    model.state.lock().unwrap().create_failure = Some(CommandOutput {
         exit_code: Some(125),
         stdout: Vec::new(),
         stderr,
-    }]);
-    let runtime = DockerCliRuntime::new(runner, "/trusted/docker");
+    });
+    let runtime = DockerCliRuntime::new(model, "/trusted/docker");
     let error = runtime.create(&job()).unwrap_err();
     let RuntimeError::CommandFailed {
         operation,
@@ -250,27 +411,28 @@ fn job() -> JobSpec {
 fn nested_job_receives_only_exact_stock_sbx_proxy_plumbing() {
     let ca = tempfile::NamedTempFile::new().unwrap();
     let owner = ca.as_file().metadata().unwrap().uid();
-    let runner = FakeRunner::with_create_outputs([success(format!("{}\n", "b".repeat(64)))]);
-    let runtime = DockerCliRuntime::new(runner, "/trusted/docker").with_sbx_environment(
-        vec![
-            (
-                "HTTP_PROXY".into(),
-                "http://gateway.docker.internal:3128".into(),
-            ),
-            (
-                "HTTPS_PROXY".into(),
-                "http://gateway.docker.internal:3128".into(),
-            ),
-            ("NODE_USE_ENV_PROXY".into(), "1".into()),
-            ("SBX_CRED_ANTHROPIC_MODE".into(), "apikey".into()),
-            ("SBX_CRED_OPENAI_MODE".into(), "oauth".into()),
-        ],
-        ca.path(),
-        owner,
-    );
+    let runtime = DockerCliRuntime::new(DockerModel::new(), "/trusted/docker")
+        .with_sbx_environment(
+            vec![
+                (
+                    "HTTP_PROXY".into(),
+                    "http://gateway.docker.internal:3128".into(),
+                ),
+                (
+                    "HTTPS_PROXY".into(),
+                    "http://gateway.docker.internal:3128".into(),
+                ),
+                ("NODE_USE_ENV_PROXY".into(), "1".into()),
+                ("SBX_CRED_ANTHROPIC_MODE".into(), "apikey".into()),
+                ("SBX_CRED_OPENAI_MODE".into(), "oauth".into()),
+            ],
+            ca.path(),
+            owner,
+        );
 
     runtime.create(&job()).unwrap();
-    let call = &runtime.runner.lifecycle_calls()[0];
+    let call = &runtime.runner.create();
+    let environment = values(call, "--env");
     for expected in [
         "HTTP_PROXY=http://gateway.docker.internal:3128",
         "HTTPS_PROXY=http://gateway.docker.internal:3128",
@@ -278,17 +440,22 @@ fn nested_job_receives_only_exact_stock_sbx_proxy_plumbing() {
         "SBX_CRED_ANTHROPIC_MODE=apikey",
         "SBX_CRED_OPENAI_MODE=oauth",
     ] {
-        assert!(call.windows(2).any(|pair| pair == ["--env", expected]));
+        assert!(environment.contains(&expected), "{expected}");
     }
     for name in ["NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"] {
         let expected = format!("{name}={}", ca.path().display());
-        assert!(call.windows(2).any(|pair| pair == ["--env", &expected]));
+        assert!(environment.contains(&expected.as_str()), "{expected}");
     }
-    assert!(call.contains(&format!(
-        "type=bind,source={},target={},readonly",
-        ca.path().display(),
-        ca.path().display()
-    )));
+    assert!(
+        values(call, "--mount").contains(
+            &format!(
+                "type=bind,source={},target={},readonly",
+                ca.path().display(),
+                ca.path().display()
+            )
+            .as_str()
+        )
+    );
     assert!(!call.iter().any(|argument| {
         argument.starts_with("ANTHROPIC_API_KEY=")
             || argument.starts_with("OPENAI_API_KEY=")
@@ -300,55 +467,49 @@ fn nested_job_receives_only_exact_stock_sbx_proxy_plumbing() {
 
 #[test]
 fn nested_job_receives_exported_shell_values_after_runtime_proxy_values() {
-    let runner = FakeRunner::with_create_outputs([success(format!("{}\n", "b".repeat(64)))]);
-    let runtime = DockerCliRuntime::new(runner, "/trusted/docker");
+    let runtime = DockerCliRuntime::new(DockerModel::new(), "/trusted/docker");
     let mut spec = job();
     spec.exported_environment
         .insert("MY_SETTING".into(), "per-command".into());
     runtime.create(&spec).unwrap();
-    let call = &runtime.runner.lifecycle_calls()[0];
-    assert!(
-        call.windows(2)
-            .any(|pair| pair == ["--env", "MY_SETTING=per-command"])
-    );
-    assert!(
-        call.windows(2)
-            .any(|pair| pair == ["--env", "HOME=/Users/alice"])
-    );
+    let call = &runtime.runner.create();
+    let environment = values(call, "--env");
+    assert!(environment.contains(&"MY_SETTING=per-command"));
+    assert!(environment.contains(&"HOME=/Users/alice"));
 }
 
 #[test]
 fn nested_job_receives_stock_sbx_mcp_gateway_pair() {
     let ca = tempfile::NamedTempFile::new().unwrap();
     let owner = ca.as_file().metadata().unwrap().uid();
-    let runner = FakeRunner::with_create_outputs([success(format!("{}\n", "b".repeat(64)))]);
-    let runtime = DockerCliRuntime::new(runner, "/trusted/docker").with_sbx_environment(
-        vec![
-            (
-                "HTTP_PROXY".into(),
-                "http://gateway.docker.internal:3128".into(),
-            ),
-            (
-                "HTTPS_PROXY".into(),
-                "http://gateway.docker.internal:3128".into(),
-            ),
-            (
-                "MCP_GATEWAY_URL".into(),
-                "http://mcp-gateway.docker.internal/mcp".into(),
-            ),
-            ("MCP_SENTINEL_TOKEN_NAME".into(), "proxy-managed".into()),
-        ],
-        ca.path(),
-        owner,
-    );
+    let runtime = DockerCliRuntime::new(DockerModel::new(), "/trusted/docker")
+        .with_sbx_environment(
+            vec![
+                (
+                    "HTTP_PROXY".into(),
+                    "http://gateway.docker.internal:3128".into(),
+                ),
+                (
+                    "HTTPS_PROXY".into(),
+                    "http://gateway.docker.internal:3128".into(),
+                ),
+                (
+                    "MCP_GATEWAY_URL".into(),
+                    "http://mcp-gateway.docker.internal/mcp".into(),
+                ),
+                ("MCP_SENTINEL_TOKEN_NAME".into(), "proxy-managed".into()),
+            ],
+            ca.path(),
+            owner,
+        );
 
     runtime.create(&job()).unwrap();
-    let call = &runtime.runner.lifecycle_calls()[0];
+    let call = &runtime.runner.create();
     for expected in [
         "MCP_GATEWAY_URL=http://mcp-gateway.docker.internal/mcp",
         "MCP_SENTINEL_TOKEN_NAME=proxy-managed",
     ] {
-        assert!(call.windows(2).any(|pair| pair == ["--env", expected]));
+        assert!(values(call, "--env").contains(&expected), "{expected}");
     }
 }
 
@@ -430,15 +591,15 @@ fn nested_job_rejects_forged_or_incomplete_mcp_gateway_before_create() {
             "MCP_SENTINEL_TOKEN_NAME",
         ),
     ] {
-        let runner = FakeRunner::default();
-        let runtime = DockerCliRuntime::new(runner, "/trusted/docker").with_sbx_environment(
-            environment
-                .into_iter()
-                .map(|(name, value)| (name.into(), value.into()))
-                .collect(),
-            "/nonexistent/ca.crt",
-            0,
-        );
+        let runtime = DockerCliRuntime::new(DockerModel::new(), "/trusted/docker")
+            .with_sbx_environment(
+                environment
+                    .into_iter()
+                    .map(|(name, value)| (name.into(), value.into()))
+                    .collect(),
+                "/nonexistent/ca.crt",
+                0,
+            );
         let error = runtime.create(&job()).unwrap_err();
         assert!(
             matches!(&error, RuntimeError::InvalidSbxEnvironment { variable } if variable == offending),
@@ -540,34 +701,59 @@ fn invalid_proxy_variable_diagnostic_escapes_control_bytes() {
 }
 
 #[test]
-#[allow(clippy::too_many_lines)] // One exact argv audit covers the complete Docker lifecycle.
-fn complete_lifecycle_uses_runtime_identity_and_exact_arguments() {
-    let id = "b".repeat(64);
-    let runner = FakeRunner::with_create_outputs(
-        [success(format!("{id}\n"))]
-            .into_iter()
-            // Docker is still starting it, then it has already exited: the
-            // PID search stops without spending every attempt.
-            .chain([
-                success(b"0\tcreated\n".to_vec()),
-                success(b"0\texited\n".to_vec()),
-            ])
-            .chain([
-                success(b"17\n".to_vec()),
-                success(b"false\t17\t4096\n".to_vec()),
-                success(Vec::new()),
-                success(Vec::new()),
-                success(Vec::new()),
-                success(Vec::new()),
-            ]),
+fn create_passes_identity_limits_mounts_and_argv_to_docker_create() {
+    let runtime = DockerCliRuntime::new(DockerModel::new(), "/trusted/docker");
+    runtime.create(&job()).unwrap();
+    let create = runtime.runner.create();
+
+    assert!(create.contains(&"--init".to_owned()));
+    assert!(!create.contains(&"--entrypoint".to_owned()));
+    for (flag, value) in [
+        ("--user", "501:20"),
+        ("--pids-limit", "96"),
+        ("--memory", "536870912"),
+        ("--cpus", "1.500"),
+        ("--storage-opt", "size=4294967296"),
+        ("--workdir", "/Users/alice/dev/project"),
+    ] {
+        assert_eq!(values(&create, flag), [value], "{flag}");
+    }
+    assert!(values(&create, "--env").contains(&"HOME=/Users/alice"));
+    // The home is mounted before the project nested in it, or it would hide it.
+    assert_eq!(
+        values(&create, "--mount"),
+        [
+            "type=bind,source=/run/marsh/grants/attempt-1/home,target=/Users/alice",
+            "type=bind,source=/run/marsh/grants/attempt-1/project,target=/Users/alice/dev/project",
+        ]
     );
+    // The inspected image ID, then the argv bytes, after `--`: never options
+    // and never shell text.
+    let end_of_options = create.iter().position(|word| word == "--").unwrap();
+    assert_eq!(
+        create[end_of_options + 1..],
+        [
+            format!("sha256:{}", "d".repeat(64)),
+            "$(touch /tmp/must-not-execute)".to_owned()
+        ]
+    );
+    assert!(!create.iter().any(|word| word.contains("docker.sock")));
+}
+
+#[test]
+fn lifecycle_attaches_waits_signals_resizes_and_verifies_deletion() {
+    let model = DockerModel::new();
+    {
+        let mut state = model.state.lock().unwrap();
+        state.exit_code = 17;
+        // Docker is still starting it, then it has already exited.
+        state.pid_states = VecDeque::from(["0\tcreated\n", "0\texited\n"]);
+    }
     let (_engine_directory, engine_socket, engine) =
         engine_response(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
-    let runtime =
-        DockerCliRuntime::new(runner, "/trusted/docker").with_engine_socket(engine_socket);
+    let runtime = DockerCliRuntime::new(model, "/trusted/docker").with_engine_socket(engine_socket);
 
     let container = runtime.create(&job()).unwrap();
-    assert_eq!(container.as_str(), id);
     let mut attachment = runtime.attach(&container, job().terminal_size).unwrap();
     runtime.start(&container).unwrap();
     assert_eq!(
@@ -592,106 +778,24 @@ fn complete_lifecycle_uses_runtime_identity_and_exact_arguments() {
         .unwrap();
     runtime.delete(&container).unwrap();
     attachment.process.wait().unwrap();
+
     let resize_request = String::from_utf8(engine.join().unwrap()).unwrap();
     assert!(resize_request.starts_with(&format!(
-        "POST /containers/{id}/resize?h=48&w=160 HTTP/1.1\r\n"
+        "POST /containers/{}/resize?h=48&w=160 HTTP/1.1\r\n",
+        container.as_str()
     )));
+    let model = &runtime.runner;
     assert_eq!(
-        runtime.runner.pty_sizes.lock().unwrap().as_slice(),
-        &[TerminalSize {
+        model.state.lock().unwrap().pty_sizes,
+        [TerminalSize {
             rows: 47,
             columns: 123,
         }]
     );
-
-    let calls = runtime.runner.lifecycle_calls();
-    assert_eq!(calls[0][0], "create");
-    assert!(calls[0].iter().any(|argument| argument == "--init"));
-    assert!(calls[0].windows(2).any(|pair| pair == ["--user", "501:20"]));
-    assert!(
-        calls[0]
-            .windows(2)
-            .any(|pair| pair == ["--env", "HOME=/Users/alice"])
-    );
-    assert!(!calls[0].iter().any(|argument| argument == "--entrypoint"));
-    assert!(
-        calls[0]
-            .windows(2)
-            .any(|pair| pair == ["--pids-limit", "96"])
-    );
-    assert!(
-        calls[0]
-            .windows(2)
-            .any(|pair| pair == ["--memory", "536870912"])
-    );
-    assert!(calls[0].windows(2).any(|pair| pair == ["--cpus", "1.500"]));
-    assert!(
-        calls[0]
-            .windows(2)
-            .any(|pair| pair == ["--storage-opt", "size=4294967296"])
-    );
-    assert!(
-        calls[0].contains(
-            &"type=bind,source=/run/marsh/grants/attempt-1/project,target=/Users/alice/dev/project"
-                .into()
-        )
-    );
-    let home_mount = calls[0]
-        .iter()
-        .position(|argument| {
-            argument == "type=bind,source=/run/marsh/grants/attempt-1/home,target=/Users/alice"
-        })
-        .unwrap();
-    let project_mount = calls[0]
-        .iter()
-        .position(|argument| {
-            argument
-                == "type=bind,source=/run/marsh/grants/attempt-1/project,target=/Users/alice/dev/project"
-        })
-        .unwrap();
-    assert!(home_mount < project_mount);
-    assert!(calls[0].contains(&"$(touch /tmp/must-not-execute)".into()));
-    let image_index = calls[0]
-        .iter()
-        .position(|argument| argument == &format!("sha256:{}", "d".repeat(64)))
-        .unwrap();
-    assert_eq!(calls[0][image_index - 1], "--");
-    assert_eq!(calls[0][image_index + 1], "$(touch /tmp/must-not-execute)");
-    assert!(
-        !calls[0]
-            .iter()
-            .any(|argument| argument.contains("docker.sock"))
-    );
-    assert_atomic_start_attach(&calls[1], &id);
-    assert_eq!(
-        calls[2],
-        [
-            "container",
-            "inspect",
-            "--format",
-            "{{.State.Pid}}\t{{.State.Status}}",
-            &id
-        ]
-    );
-    let wait = 4;
-    assert_eq!(calls[wait], ["wait", &id]);
-    assert_eq!(
-        calls[wait + 1],
-        [
-            "container",
-            "inspect",
-            "--size",
-            "--format",
-            "{{.State.OOMKilled}}\t{{.State.ExitCode}}\t{{.SizeRw}}",
-            &id
-        ]
-    );
-    assert_eq!(calls[wait + 2], ["kill", "--signal", "TERM", &id]);
-    assert_eq!(calls[wait + 3], ["rm", "--force", &id]);
-    assert_eq!(
-        calls[wait + 4][..4],
-        ["container", "ls", "--all", "--no-trunc"]
-    );
+    let kills = model.calls_of(&["kill"]);
+    assert_eq!(kills.len(), 1);
+    assert_eq!(values(&kills[0], "--signal"), ["TERM"]);
+    assert!(!model.exists(container.as_str()));
 }
 
 #[test]
@@ -907,9 +1011,35 @@ fn pids_monitor_retains_the_last_valid_counter() {
     );
 }
 
+/// A poll interval no test could wait out: a monitor that returns did so
+/// because it was woken, not because the interval elapsed.
+const UNREACHED_POLL_DELAY: Duration = Duration::from_hours(1);
+
+/// Wait for `samples` to reach 1, then stop the monitor; its result must come
+/// back long before `UNREACHED_POLL_DELAY`.
+fn stop_after_first_sample(
+    samples: &AtomicUsize,
+    stop: &AtomicBool,
+    handle: thread::JoinHandle<Result<Option<u64>, RuntimeError>>,
+) -> Option<u64> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while samples.load(Ordering::SeqCst) == 0 {
+        assert!(std::time::Instant::now() < deadline, "no first sample");
+        thread::sleep(Duration::from_millis(1));
+    }
+    // One sample per interval: nothing more until it is woken.
+    assert_eq!(samples.load(Ordering::SeqCst), 1);
+    stop.store(true, Ordering::Release);
+    handle.thread().unpark();
+    let (send, receive) = mpsc::channel();
+    thread::spawn(move || send.send(handle.join().unwrap().unwrap()));
+    receive
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the monitor slept through its exit wake-up")
+}
+
 #[test]
-fn pids_monitor_is_rate_limited_and_wakes_immediately_on_exit() {
-    assert_eq!(RESOURCE_EVENT_POLL_DELAY, Duration::from_millis(50));
+fn pids_monitor_samples_once_per_interval_and_wakes_on_exit() {
     let stop = Arc::new(AtomicBool::new(false));
     let samples = Arc::new(AtomicUsize::new(0));
     let evidence = CountingCgroupEvidence {
@@ -918,19 +1048,9 @@ fn pids_monitor_is_rate_limited_and_wakes_immediately_on_exit() {
     };
     let thread_stop = Arc::clone(&stop);
     let handle = thread::spawn(move || {
-        monitor_pids_events_with_delay(evidence, &thread_stop, Duration::from_secs(5))
+        monitor_pids_events_with_delay(evidence, &thread_stop, UNREACHED_POLL_DELAY)
     });
-    let sample_deadline = std::time::Instant::now() + Duration::from_secs(1);
-    while samples.load(Ordering::SeqCst) == 0 && std::time::Instant::now() < sample_deadline {
-        thread::sleep(Duration::from_millis(1));
-    }
-    assert_eq!(samples.load(Ordering::SeqCst), 1);
-
-    let stopped_at = std::time::Instant::now();
-    stop.store(true, Ordering::Release);
-    handle.thread().unpark();
-    assert_eq!(handle.join().unwrap().unwrap(), Some(0));
-    assert!(stopped_at.elapsed() < Duration::from_secs(1));
+    assert_eq!(stop_after_first_sample(&samples, &stop, handle), Some(0));
 }
 
 #[test]
@@ -943,17 +1063,9 @@ fn pids_monitor_takes_a_final_sample_when_the_process_exits_between_polls() {
     };
     let thread_stop = Arc::clone(&stop);
     let handle = thread::spawn(move || {
-        monitor_pids_events_with_delay(evidence, &thread_stop, Duration::from_secs(5))
+        monitor_pids_events_with_delay(evidence, &thread_stop, UNREACHED_POLL_DELAY)
     });
-    let sample_deadline = std::time::Instant::now() + Duration::from_secs(1);
-    while samples.load(Ordering::SeqCst) == 0 && std::time::Instant::now() < sample_deadline {
-        thread::sleep(Duration::from_millis(1));
-    }
-    assert_eq!(samples.load(Ordering::SeqCst), 1);
-
-    stop.store(true, Ordering::Release);
-    handle.thread().unpark();
-    assert_eq!(handle.join().unwrap().unwrap(), Some(1));
+    assert_eq!(stop_after_first_sample(&samples, &stop, handle), Some(1));
     assert_eq!(samples.load(Ordering::SeqCst), 2);
 }
 
@@ -972,82 +1084,57 @@ fn only_vanished_cgroup_errors_are_optional() {
     )));
 }
 
-fn assert_atomic_start_attach(call: &[String], container: &str) {
-    assert_eq!(call, ["start", "--attach", "--interactive", container,]);
-}
-
 #[test]
 fn fast_output_uses_one_atomic_start_and_attach_invocation() {
-    let runner = FakeRunner::default();
-    let runtime = DockerCliRuntime::new(runner, "/trusted/docker");
     let container = ContainerId::parse("f".repeat(64)).unwrap();
+    let runtime = DockerCliRuntime::new(
+        DockerModel::with_container(container.as_str()),
+        "/trusted/docker",
+    );
 
     let _attachment = runtime.attach(&container, job().terminal_size).unwrap();
     runtime.start(&container).unwrap();
 
-    assert_eq!(
-        runtime.runner.calls(),
-        [vec![
-            "start".to_owned(),
-            "--attach".to_owned(),
-            "--interactive".to_owned(),
-            container.as_str().to_owned(),
-        ]]
-    );
+    // One Docker process both starts and attaches: no output before attach.
+    let [start] = runtime.runner.calls().try_into().unwrap();
+    assert_eq!(start[0], "start");
+    assert!(start.contains(&"--attach".to_owned()) && start.contains(&"--interactive".to_owned()));
+    assert_eq!(start.last(), Some(&container.as_str().to_owned()));
+}
+
+fn deleting(
+    lingering: usize,
+    listing_failure: Option<CommandOutput>,
+) -> (DockerCliRuntime<DockerModel>, ContainerId) {
+    let container = ContainerId::parse("c".repeat(64)).unwrap();
+    let model = DockerModel::with_container(container.as_str());
+    {
+        let mut state = model.state.lock().unwrap();
+        state.lingering = lingering;
+        state.listing_failure = listing_failure;
+    }
+    (DockerCliRuntime::new(model, "/trusted/docker"), container)
 }
 
 #[test]
 fn deletion_is_uncertain_while_the_exact_container_remains() {
-    let id = "c".repeat(64);
-    let runner = FakeRunner::with_outputs(
-        [success(Vec::new())]
-            .into_iter()
-            .chain((0..DELETION_VERIFY_ATTEMPTS).map(|_| success(format!("{id}\n")))),
-    );
-    let runtime = DockerCliRuntime::new(runner, "/trusted/docker");
-    let container = ContainerId::parse(id).unwrap();
+    let (runtime, container) = deleting(usize::MAX, None);
     assert!(matches!(
         runtime.delete(&container),
         Err(RuntimeError::DeletionUncertain)
     ));
-    assert_eq!(runtime.runner.calls().len(), DELETION_VERIFY_ATTEMPTS + 1);
 }
 
 #[test]
-fn deletion_verification_retries_until_container_disappears() {
-    let id = "c".repeat(64);
-    let runner = FakeRunner::with_outputs([
-        success(Vec::new()),
-        success(format!("{id}\n")),
-        success(format!("{id}\n")),
-        success(Vec::new()),
-    ]);
-    let runtime = DockerCliRuntime::new(runner, "/trusted/docker");
-    let container = ContainerId::parse(id).unwrap();
+fn deletion_verification_waits_until_the_container_disappears() {
+    let (runtime, container) = deleting(2, None);
     runtime.delete(&container).unwrap();
-    let calls = runtime.runner.calls();
-    assert_eq!(calls.len(), 4);
-    assert_eq!(calls[0], ["rm", "--force", container.as_str()]);
-    assert!(
-        calls[1..]
-            .iter()
-            .all(|call| call[0..4] == ["container", "ls", "--all", "--no-trunc"])
-    );
+    assert_eq!(runtime.runner.calls_of(&["container", "ls"]).len(), 3);
 }
 
 #[test]
-fn deletion_verification_command_error_is_immediately_uncertain() {
-    let id = "c".repeat(64);
-    let runner = FakeRunner::with_outputs([
-        success(Vec::new()),
-        CommandOutput {
-            exit_code: Some(125),
-            stdout: Vec::new(),
-            stderr: b"daemon unavailable".to_vec(),
-        },
-    ]);
-    let runtime = DockerCliRuntime::new(runner, "/trusted/docker");
-    let container = ContainerId::parse(id).unwrap();
+fn deletion_verification_command_error_is_uncertain_without_retry() {
+    let (runtime, container) = deleting(0, Some(failure_output("daemon unavailable")));
     assert!(matches!(
         runtime.delete(&container),
         Err(RuntimeError::CommandFailed {
@@ -1055,13 +1142,12 @@ fn deletion_verification_command_error_is_immediately_uncertain() {
             ..
         })
     ));
-    assert_eq!(runtime.runner.calls().len(), 2);
+    assert_eq!(runtime.runner.calls_of(&["container", "ls"]).len(), 1);
 }
 
 #[test]
 fn invalid_specs_never_reach_the_runtime() {
-    let runner = FakeRunner::default();
-    let runtime = DockerCliRuntime::new(runner, "/trusted/docker");
+    let runtime = DockerCliRuntime::new(DockerModel::new(), "/trusted/docker");
     let mut socket = job();
     socket.mounts.push(JobMount {
         source: "/var/run/docker.sock".into(),
@@ -1118,19 +1204,16 @@ fn docker_mount_fields_quote_csv_punctuation_without_changing_the_path() {
 
 #[test]
 fn docker_create_preserves_comma_equals_project_target_as_one_csv_field() {
-    let runner = FakeRunner::with_create_outputs([success(format!("{}\n", "c".repeat(64)))]);
-    let runtime = DockerCliRuntime::new(runner, "/trusted/docker");
+    let runtime = DockerCliRuntime::new(DockerModel::new(), "/trusted/docker");
     let mut spec = job();
     spec.mounts[0].target = "/Users/example/dev/comma,equals=project".into();
     spec.working_directory = spec.mounts[0].target.clone();
 
     runtime.create(&spec).unwrap();
 
-    let calls = runtime.runner.lifecycle_calls();
-    assert!(calls[0].iter().any(|argument| {
-        argument
-            == "type=bind,source=/run/marsh/grants/attempt-1/project,\"target=/Users/example/dev/comma,equals=project\""
-    }));
+    assert!(values(&runtime.runner.create(), "--mount").contains(
+        &"type=bind,source=/run/marsh/grants/attempt-1/project,\"target=/Users/example/dev/comma,equals=project\""
+    ));
 }
 
 #[test]
@@ -1173,11 +1256,63 @@ fn bounded_system_runner_preserves_output_and_status() {
     assert_eq!(output.stderr, b"stderr");
 }
 
+/// Long enough for a starved runner to start the fixture's shell and write
+/// its pid file; the deadline itself is what ends each call.
+const FIXTURE_DEADLINE: Duration = Duration::from_secs(2);
+/// The fixtures' descendants sleep this long: a call that waited for them
+/// instead of its deadline would take this long.
+const DESCENDANT_LIFETIME_SECS: u64 = 60;
+
+fn fixture_pid(path: &Path) -> i32 {
+    fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("fixture did not record its pid: {error}"))
+        .trim()
+        .parse()
+        .unwrap()
+}
+
+/// Whether `pid` exits (or is a zombie awaiting its reaper) within a generous
+/// bound after it has been signalled.
+fn exits(pid: i32) -> bool {
+    let exited = || {
+        if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None)
+            == Err(nix::errno::Errno::ESRCH)
+        {
+            return true;
+        }
+        if cfg!(target_os = "linux") {
+            return fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+                stat.rsplit_once(')')
+                    .is_some_and(|(_, state)| state.trim_start().starts_with('Z'))
+            });
+        }
+        std::process::Command::new("/bin/ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .is_ok_and(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .starts_with('Z')
+            })
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !exited() {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    true
+}
+
 #[test]
 fn bounded_system_runner_kills_descendant_process_group() {
     let directory = tempfile::tempdir().unwrap();
     let child_pid = directory.path().join("child.pid");
-    let script = format!("sleep 30 & echo $! > '{}'; wait", child_pid.display());
+    let script = format!(
+        "sleep {DESCENDANT_LIFETIME_SECS} & echo $! > '{}'; wait",
+        child_pid.display()
+    );
     let runner = SystemCommandRunner::new("/tmp");
     let invocation = Invocation {
         program: "/bin/sh".into(),
@@ -1188,18 +1323,13 @@ fn bounded_system_runner_kills_descendant_process_group() {
 
     let started = std::time::Instant::now();
     let error = runner
-        .run_bounded(&invocation, Duration::from_millis(200))
+        .run_bounded(&invocation, FIXTURE_DEADLINE)
         .unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
-    assert!(started.elapsed() < Duration::from_secs(2));
-    let child = std::fs::read_to_string(child_pid)
-        .unwrap()
-        .trim()
-        .parse::<i32>()
-        .unwrap();
-    assert_eq!(
-        nix::sys::signal::kill(nix::unistd::Pid::from_raw(child), None),
-        Err(nix::errno::Errno::ESRCH)
+    assert!(started.elapsed() < Duration::from_secs(DESCENDANT_LIFETIME_SECS / 2));
+    assert!(
+        exits(fixture_pid(&child_pid)),
+        "the descendant outlived its process group's deadline"
     );
 }
 
@@ -1307,7 +1437,7 @@ fn bounded_system_runner_cancels_escaped_pipe_holders_without_waiting_for_eof() 
         arguments: vec![
             "-c".into(),
             format!(
-                "setsid /bin/sh -c 'echo $$ > {}; exec sleep 60' & exit 7",
+                "setsid /bin/sh -c 'echo $$ > {}; exec sleep {DESCENDANT_LIFETIME_SECS}' & exit 7",
                 pid_file.display()
             )
             .into(),
@@ -1316,14 +1446,9 @@ fn bounded_system_runner_cancels_escaped_pipe_holders_without_waiting_for_eof() 
         environment: Vec::new(),
     };
     let started = std::time::Instant::now();
-    let result =
-        SystemCommandRunner::new("/tmp").run_bounded(&invocation, Duration::from_millis(200));
+    let result = SystemCommandRunner::new("/tmp").run_bounded(&invocation, FIXTURE_DEADLINE);
     let elapsed = started.elapsed();
-    let pid: i32 = fs::read_to_string(&pid_file)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
+    let pid = fixture_pid(&pid_file);
     // This deliberately escaped fixture remains alive: EOF was not manufactured
     // by killing it. Test teardown explicitly terminates its own exact group.
     let live = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok();
@@ -1333,7 +1458,10 @@ fn bounded_system_runner_cancels_escaped_pipe_holders_without_waiting_for_eof() 
     );
     assert!(live);
     assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
-    assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+    assert!(
+        elapsed < Duration::from_secs(DESCENDANT_LIFETIME_SECS / 2),
+        "{elapsed:?}"
+    );
 }
 
 #[test]
@@ -1389,7 +1517,7 @@ fn bounded_system_runner_kills_group_even_when_leader_exited_before_pipe_drain()
         arguments: vec![
             "-c".into(),
             format!(
-                "/bin/sh -c 'echo $$ > {}; exec sleep 60' & exit 7",
+                "/bin/sh -c 'echo $$ > {}; exec sleep {DESCENDANT_LIFETIME_SECS}' & exit 7",
                 pid_file.display()
             )
             .into(),
@@ -1397,22 +1525,10 @@ fn bounded_system_runner_kills_group_even_when_leader_exited_before_pipe_drain()
         working_directory: None,
         environment: Vec::new(),
     };
-    let result =
-        SystemCommandRunner::new("/tmp").run_bounded(&invocation, Duration::from_millis(200));
-    let pid: i32 = fs::read_to_string(&pid_file)
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
-    let live = fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
-        !stat
-            .rsplit_once(')')
-            .unwrap()
-            .1
-            .trim_start()
-            .starts_with('Z')
-    });
-    if live {
+    let result = SystemCommandRunner::new("/tmp").run_bounded(&invocation, FIXTURE_DEADLINE);
+    let pid = fixture_pid(&pid_file);
+    let exited = exits(pid);
+    if !exited {
         let _ = nix::sys::signal::kill(
             nix::unistd::Pid::from_raw(pid),
             nix::sys::signal::Signal::SIGKILL,
@@ -1420,7 +1536,7 @@ fn bounded_system_runner_kills_group_even_when_leader_exited_before_pipe_drain()
     }
     assert_eq!(result.unwrap_err().kind(), io::ErrorKind::TimedOut);
     assert!(
-        !live,
+        exited,
         "local group descendant survived after its leader exited"
     );
 }
@@ -1567,17 +1683,11 @@ fn attached_process_reports_real_pre_execution_failure_status() {
 
 #[test]
 fn only_explicit_session_identity_enters_the_job_environment() {
-    let id = "c".repeat(64);
-    let runner = FakeRunner::with_create_outputs([success(format!("{id}\n"))]);
-    let runtime = DockerCliRuntime::new(runner, "/trusted/docker");
+    let runtime = DockerCliRuntime::new(DockerModel::new(), "/trusted/docker");
 
     runtime.create(&job()).unwrap();
-    let create = &runtime.runner.lifecycle_calls()[0];
-    let environment = create
-        .windows(2)
-        .filter(|pair| pair[0] == "--env")
-        .map(|pair| pair[1].as_str())
-        .collect::<Vec<_>>();
+    let create = runtime.runner.create();
+    let environment = values(&create, "--env");
     assert_eq!(environment.len(), 4);
     assert!(environment.contains(&"HOME=/Users/alice"));
     assert!(environment.contains(&"MARSH_SELECTED_HOME=/Users/alice"));
