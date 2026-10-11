@@ -1,0 +1,169 @@
+// Renovate sweeps every pinned dependency: Cargo crates, GitHub Actions, npm
+// (the Kits' adapters), the DHI and Rust base images (by digest), and the agent
+// CLIs the Kits install (Claude Code, Codex, Pi). Self-hosted: see
+// .github/workflows/renovate.yml and .github/renovate-global.js.
+//
+// Nothing here merges itself. The builds take pinned inputs on purpose
+// (docs/design/supply-chain.md), so a bump is a reviewed change: CI builds the
+// images on the PR (the `images` job), and a bump that needs more than a
+// version edit (new license notices, Pi's brace-expansion patch) goes red until
+// a person does the rest.
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended", "helpers:pinGitHubActionDigests"],
+  labels: ["dependencies"],
+  dependencyDashboard: true,
+  dependencyDashboardTitle: "Dependency updates",
+  prConcurrentLimit: 6,
+  prHourlyLimit: 3,
+  // Avoid just-published releases (a compromised release is usually pulled
+  // within days). Security updates ignore this.
+  minimumReleaseAge: "3 days",
+  internalChecksFilter: "strict",
+  ignorePaths: ["vendor/**", "packaging/dhi-notices/**", "**/node_modules/**", "docs/**"],
+  enabledManagers: ["github-actions", "cargo", "npm", "dockerfile", "pip_requirements", "custom.regex"],
+  // scripts/requirements-publish.txt is not named requirements.txt.
+  "pip_requirements": { managerFilePatterns: ["/(^|/)requirements-publish\\.txt$/"] },
+  lockFileMaintenance: { enabled: true, schedule: ["before 6am on the first day of the month"] },
+
+  customManagers: [
+    {
+      description: "The shell VM template's DHI base (packaging/shell-image), by digest",
+      customType: "regex",
+      managerFilePatterns: ["/^packaging/shell-image$/"],
+      matchStrings: ["(?<depName>\\S+?):(?<currentValue>[^\\s:@]+)@(?<currentDigest>sha256:[a-f0-9]{64})"],
+      datasourceTemplate: "docker",
+    },
+    {
+      description: "RUST_IMAGE in the Makefile, by digest (mirrors packaging/linux-arm64/Dockerfile)",
+      customType: "regex",
+      managerFilePatterns: ["/^Makefile$/"],
+      matchStrings: ["RUST_IMAGE \\?= (?<depName>[^:\\s]+):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"],
+      datasourceTemplate: "docker",
+    },
+    // Each Kit declares its CLI once (args.version.default) and its ACP adapter
+    // in `provides`. The adapter is also in package.json, so Renovate's npm
+    // manager and these managers see the same package and update it together.
+    {
+      description: "Claude Code release installed by the claude Kit",
+      customType: "regex",
+      managerFilePatterns: ["/^kits/marsh-claude/claude\\.yaml$/"],
+      matchStrings: ["args:\\n  version:\\n    default: \"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "@anthropic-ai/claude-code",
+      datasourceTemplate: "npm",
+    },
+    {
+      description: "Claude ACP adapter version declared in the claude Kit's provides",
+      customType: "regex",
+      managerFilePatterns: ["/^kits/marsh-claude/claude\\.yaml$/"],
+      matchStrings: ["claude-acp@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      depNameTemplate: "@agentclientprotocol/claude-agent-acp",
+      datasourceTemplate: "npm",
+    },
+    {
+      description: "Codex release installed by the codex Kit",
+      customType: "regex",
+      managerFilePatterns: ["/^kits/marsh-codex/codex\\.yaml$/"],
+      matchStrings: ["args:\\n  version:\\n    default: \"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "openai/codex",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^rust-v(?<version>.+)$",
+    },
+    {
+      description: "Codex ACP adapter version declared in the codex Kit's provides",
+      customType: "regex",
+      managerFilePatterns: ["/^kits/marsh-codex/codex\\.yaml$/"],
+      matchStrings: ["codex-acp@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      depNameTemplate: "@agentclientprotocol/codex-acp",
+      datasourceTemplate: "npm",
+    },
+    {
+      description: "Pi release installed by the pi Kit (must equal package.json's)",
+      customType: "regex",
+      managerFilePatterns: ["/^kits/marsh-pi/pi\\.yaml$/"],
+      matchStrings: ["args:\\n  version:\\n    default: \"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "@earendil-works/pi-coding-agent",
+      datasourceTemplate: "npm",
+    },
+    {
+      description: "Pi ACP adapter version declared in the pi Kit's provides",
+      customType: "regex",
+      managerFilePatterns: ["/^kits/marsh-pi/pi\\.yaml$/"],
+      matchStrings: ["pi-acp@(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      depNameTemplate: "pi-acp",
+      datasourceTemplate: "npm",
+    },
+  ],
+
+  packageRules: [
+    {
+      // ignorePaths alone is not enough: presets set it too. Brush is a patched
+      // vendored snapshot (docs/upstream/brush), and the notices archive holds
+      // verbatim upstream files (Codex's Cargo.toml, workflows) as evidence.
+      description: "Never bump vendored or archived upstream files",
+      matchFileNames: ["vendor/**", "packaging/dhi-notices/**"],
+      enabled: false,
+    },
+    {
+      description: "Base images move by digest only; the Rust toolchain moves by hand with rust-toolchain.toml and CI",
+      matchPackageNames: ["rust"],
+      matchUpdateTypes: ["major", "minor", "patch"],
+      enabled: false,
+    },
+    {
+      description: "All DHI bases in one PR: their license notices are verified together",
+      matchPackageNames: ["dhi.io/**"],
+      groupName: "DHI base images",
+      // Digest updates carry no release date.
+      minimumReleaseAge: null,
+      schedule: ["at any time"],
+    },
+    {
+      description: "The CLI release and its checksum file move together",
+      matchPackageNames: ["@anthropic-ai/claude-code", "openai/codex"],
+      minimumReleaseAge: "1 day",
+      schedule: ["at any time"],
+      postUpgradeTasks: {
+        commands: ["python3 scripts/refresh-agent-checksums.py"],
+        fileFilters: ["kits/*/release-checksums.txt"],
+        executionMode: "branch",
+      },
+    },
+    {
+      description: "A package that is both in a Kit descriptor and package.json updates in one PR",
+      matchPackageNames: [
+        "@agentclientprotocol/claude-agent-acp",
+        "@agentclientprotocol/codex-acp",
+        "@earendil-works/pi-coding-agent",
+        "pi-acp",
+      ],
+      minimumReleaseAge: "1 day",
+      schedule: ["at any time"],
+    },
+    {
+      description: "Pi's nested shrinkwrap pins brace-expansion; patch-pi-dependencies.mjs validates the reviewed version",
+      matchFileNames: ["kits/marsh-pi/package.json"],
+      matchPackageNames: ["brace-expansion"],
+      enabled: false,
+    },
+    {
+      description: "Rust crates and other libraries: weekly, minor and patch together",
+      matchManagers: ["cargo", "npm"],
+      matchPackageNames: [
+        "!@agentclientprotocol/claude-agent-acp",
+        "!@agentclientprotocol/codex-acp",
+        "!@earendil-works/pi-coding-agent",
+        "!pi-acp",
+      ],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "libraries (minor and patch)",
+      schedule: ["before 6am on monday"],
+    },
+    {
+      description: "GitHub Actions: weekly, one PR",
+      matchManagers: ["github-actions"],
+      groupName: "GitHub Actions",
+      schedule: ["before 6am on monday"],
+    },
+  ],
+}
