@@ -3880,27 +3880,43 @@ fn scope_lifecycle_client_has_an_absolute_deadline_and_server_recovers_after_tea
     });
     let client = Client::connect(home.path()).unwrap();
 
+    // The caller's deadline must outlast the daemon's pickup of its request: a
+    // daemon does not tear down for a caller that has already gone, and a
+    // 25 ms deadline is often gone before a loaded runner's daemon has read the
+    // request. So give the caller a generous deadline, in a thread, wait for the
+    // teardown it started to be blocked on the gate, and only then expect the
+    // caller to return at its own deadline without any reply from the server.
+    let timeout = Duration::from_secs(2);
+    let timed = Client::connect(home.path()).unwrap();
     let started = Instant::now();
-    let error = client
-        .scope_lifecycle_with_timeout(PublicRequest::ResetScope, Duration::from_millis(25))
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        DaemonError::Io(ref error) if error.kind() == io::ErrorKind::TimedOut
-    ));
-    assert!(started.elapsed() < Duration::from_secs(1));
-
+    let caller = thread::spawn(move || {
+        timed.scope_lifecycle_with_timeout(PublicRequest::ResetScope, timeout)
+    });
     {
-        // The client's deadline is absolute, so it fired whether or not the server
-        // had reached the teardown yet. A loaded runner can be slow to start it:
-        // wait for it to begin (it is blocked on this gate) before releasing it.
         let (state, changed) = &*gate;
         let state = state.lock().unwrap();
-        let (mut state, waited) = changed
+        let (_state, waited) = changed
             .wait_timeout_while(state, Duration::from_secs(30), |state| !state.0)
             .unwrap();
         assert!(!waited.timed_out(), "teardown never began");
-        state.1 = true;
+    }
+    let error = caller.join().unwrap().unwrap_err();
+    assert!(
+        matches!(
+            error,
+            DaemonError::Io(ref error) if error.kind() == io::ErrorKind::TimedOut
+        ),
+        "expected the client's own deadline: {error:?}"
+    );
+    assert!(
+        started.elapsed() >= timeout,
+        "the caller returned before its deadline"
+    );
+    assert!(started.elapsed() < Duration::from_secs(30));
+
+    {
+        let (state, changed) = &*gate;
+        state.lock().unwrap().1 = true;
         changed.notify_all();
     }
 
