@@ -1,0 +1,58 @@
+name: Renovate
+# Self-hosted Renovate (free, open source) that keeps every pin current: DHI and
+# Rust base image digests, the Kits' agent CLIs and ACP adapters, npm and Cargo
+# dependencies, and GitHub Actions. What it watches and how it groups updates is
+# .github/renovate.json5; credentials and the one command it may run are
+# .github/renovate-global.js. It opens PRs and never merges one: CI (including the
+# `images` job, which builds every image) and a person decide.
+#
+# Secrets:
+#   RENOVATE_TOKEN          a token that can open PRs and update workflow files
+#                           on this repository. A fine-grained PAT for this one
+#                           repository with: Contents, Issues, Pull requests,
+#                           Commit statuses and Workflows read/write, and
+#                           Dependabot alerts read (docs.renovatebot.com/modules/
+#                           platform/github). Or a GitHub App installation token.
+#                           It must not be GITHUB_TOKEN: PRs it opens would not
+#                           run CI.
+#   DOCKERHUB_USERNAME      the Docker account (also used by release.yml)
+#   DOCKERHUB_READ_TOKEN    a read-only access token for it, to look up
+#                           dhi.io and docker.io digests. Not the publishing token.
+#
+# First run: Actions > Renovate > Run workflow with dry_run=full. The log lists
+# the PRs it would open and opens none.
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'full: log what would be opened and open nothing. none: open PRs.'
+        type: choice
+        options: [full, lookup, none]
+        default: full
+permissions:
+  contents: read
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+jobs:
+  renovate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Dry run (manual runs only)
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run != 'none'
+        run: echo "RENOVATE_DRY_RUN=${{ inputs.dry_run }}" >> "$GITHUB_ENV"
+      - uses: renovatebot/github-action@230ce922b08968d0a4f6f70f295601daff09ef1d # v46.3.7
+        with:
+          configurationFile: .github/renovate-global.js
+          token: ${{ secrets.RENOVATE_TOKEN }}
+          additional-env-list: |
+            DOCKER_HUB_USERNAME
+            DOCKER_HUB_TOKEN
+        env:
+          LOG_LEVEL: info
+          DOCKER_HUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKER_HUB_TOKEN: ${{ secrets.DOCKERHUB_READ_TOKEN }}

@@ -234,3 +234,82 @@ jobs:
         run: |
           if [ "$SHARD" = depth3 ]; then flag=--huge; else flag=--no-huge; fi
           docs/model/check.sh "$flag"
+
+  images:
+    # Builds the shell template and every Kit from their pinned inputs, without
+    # pushing (make kits, prepare-shell-image --validate-only). This is where a
+    # base-image or agent-CLI bump (Renovate) proves it still builds: the build
+    # verifies the downloaded checksums and the license notices. It runs only
+    # when an input changed, and not for fork PRs (no registry secrets there).
+    name: Kit and shell images (build, no push)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Did an image input change?
+        id: changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then range="origin/$BASE_REF...HEAD"
+          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then range="$BEFORE...HEAD"
+          else echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          inputs='^(kits/|packaging/(shell|shell-image|commands\.json|agents\.json|image-repair|dhi-notices|notice-overrides)|tests/acceptance/[a-z-]*fixture/|scripts/(publish-kits|prepare-shell-image|prepare-kit-inputs|build_inputs|image_observations|stage-kits|owned_process|stock_sdk)\.py|scripts/requirements-publish\.txt|Makefile$|\.github/workflows/ci\.yml$)'
+          if git diff --name-only "$range" | grep -Eq "$inputs"; then echo "run=true" >> "$GITHUB_OUTPUT"
+          else echo "run=false" >> "$GITHUB_OUTPUT"; echo "No image input changed; nothing to build."; fi
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+        if: steps.changes.outputs.run == 'true'
+      - name: Log in to Docker Hub and Docker Hardened Images
+        if: steps.changes.outputs.run == 'true'
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          for registry in docker.io dhi.io; do
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login "$registry" --username "$DOCKERHUB_USERNAME" --password-stdin
+          done
+      - name: Publisher dependencies
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --require-hashes --no-deps --only-binary=:all: -r scripts/requirements-publish.txt
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: Shell VM template
+        if: steps.changes.outputs.run == 'true'
+        run: python3 scripts/prepare-shell-image.py --validate-only
+      - name: Kits and the acceptance fixture
+        if: steps.changes.outputs.run == 'true'
+        run: make kits TARGET_DIR="$RUNNER_TEMP/target"
+
+  renovate-config:
+    name: Renovate config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Did the config change?
+        id: changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
+             ! git diff --name-only "origin/$BASE_REF...HEAD" | grep -Eq '^\.github/renovate'; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "Renovate config unchanged."
+          else echo "run=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.changes.outputs.run == 'true'
+        with:
+          node-version: '22'
+      - name: Validate the repository and global configs
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          npx --yes --package renovate@44 renovate-config-validator --strict
+          RENOVATE_CONFIG_FILE=.github/renovate-global.js npx --yes --package renovate@44 renovate-config-validator --strict
