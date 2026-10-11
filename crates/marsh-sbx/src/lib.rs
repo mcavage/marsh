@@ -6709,7 +6709,13 @@ fn missing_vm_error(error: &SbxError) -> bool {
 
 fn missing_vm_message(message: &str) -> bool {
     let message = message.to_ascii_lowercase();
-    message.contains("sandbox not found")
+    // Stock v0.47.0 names the VM: `Error: sandbox 'NAME' not found`.
+    let named_missing = message.split("sandbox '").skip(1).any(|rest| {
+        rest.split_once('\'')
+            .is_some_and(|(_, after)| after.trim_start().starts_with("not found"))
+    });
+    named_missing
+        || message.contains("sandbox not found")
         || message.contains("sandbox does not exist")
         || message.contains("container missing before start")
 }

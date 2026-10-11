@@ -120,6 +120,25 @@ fn a_vanished_vm_with_a_dead_idle_supervisor_is_recreated() {
     assert!(model.vm(SHELL).is_some());
 }
 
+/// Stock reports a VM missing with `Error: sandbox 'NAME' not found`
+/// (captured from v0.47.0). That must drop the ready shell, not leave a
+/// cached "warm" VM that no longer exists.
+#[test]
+fn a_stock_missing_vm_report_invalidates_the_ready_shell() {
+    let model = StockModel::new();
+    let (adapter, shell, vm) = ready_shell(&model);
+    model.remove_vm(SHELL);
+    let relay = shell.dir.path().join("relay-binary");
+    fs::write(&relay, b"relay").unwrap();
+    assert!(matches!(
+        adapter.launch_shell_relay(&vm, &relay, "session-1"),
+        Err(SbxError::CommandFailed { .. })
+    ));
+    let recovered = adapter.ensure_shell_vm(&shell.spec).unwrap();
+    assert!(recovered.cold_started);
+    assert!(model.vm(SHELL).is_some());
+}
+
 #[test]
 fn shell_attach_preserves_natural_cwd_identity_environment_and_argv() {
     let model = StockModel::new();
