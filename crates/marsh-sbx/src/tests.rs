@@ -96,6 +96,21 @@ fn shell_quarantine_retains_admitted_authority_and_rejects_before_stock_effects(
 }
 
 #[test]
+fn template_listing_accepts_images_object_and_bare_array() {
+    let bare = serde_json::json!([
+        {"id": "5d07893aec0d", "repository": "docker.io/docker/sandbox-kit", "tag": "3"}
+    ]);
+    let wrapped = serde_json::json!({"images": bare.clone()});
+    for listed in [&bare, &wrapped] {
+        let rows = template_list_rows(listed).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["tag"], "3");
+    }
+    assert!(template_list_rows(&serde_json::json!({"templates": []})).is_none());
+    assert!(template_list_rows(&serde_json::json!("images")).is_none());
+}
+
+#[test]
 fn supported_versions_accept_stable_and_coherent_nightly_from_045() {
     assert!(supported_sbx_version(
         "sbx version: v0.45.0 0000000000000000000000000000000000000000"
@@ -135,6 +150,18 @@ fn supported_versions_accept_stable_and_coherent_nightly_from_045() {
     ));
     assert!(!supported_sbx_version(
         "sbx version: v0.45.1-1-g2222222 1111111111111111111111111111111111111111"
+    ));
+    assert!(supported_sbx_version(
+        "\nsbx version v0.47.0-924-gb56475e0f b56475e0f0cc7edcb4fbed580396f72ee0a9c405\n"
+    ));
+    assert!(supported_sbx_version(
+        "sbx version v0.47.0 1111111111111111111111111111111111111111"
+    ));
+    assert!(!supported_sbx_version(
+        "sbx version v0.44.9 1111111111111111111111111111111111111111"
+    ));
+    assert!(!supported_sbx_version(
+        "sbx versionv0.47.0 1111111111111111111111111111111111111111"
     ));
     assert!(!supported_sbx_version("not an sbx version"));
     assert!(!supported_sbx_version(
@@ -458,11 +485,11 @@ impl CommandRunner for ConcurrentPreparationRunner {
             .and_then(|argument| argument.to_str());
         if invocation.program == Path::new("docker") && command == Some("buildx") {
             self.rendezvous(false)?;
-            for destination in invocation
-                .arguments
-                .iter()
-                .filter_map(|argument| argument.to_str()?.strip_prefix("type=docker,dest="))
-            {
+            for destination in invocation.arguments.iter().filter_map(|argument| {
+                argument
+                    .to_str()?
+                    .strip_prefix("type=docker,oci-mediatypes=true,dest=")
+            }) {
                 fs::write(destination, b"fake image archive")?;
             }
             let metadata_index = invocation
@@ -750,7 +777,7 @@ impl CommandRunner for FakeRunner {
         if output.succeeded() && is_build {
             for destination in invocation.arguments.iter().filter_map(|argument| {
                 let argument = argument.to_str()?;
-                argument.strip_prefix("type=docker,dest=")
+                argument.strip_prefix("type=docker,oci-mediatypes=true,dest=")
             }) {
                 fs::write(destination, b"fake image archive")?;
             }
@@ -1376,7 +1403,6 @@ fn cold_vm_uses_native_workload_and_installs_worker() {
         commands[0],
         vec![
             "create".to_owned(),
-            "--quiet".to_owned(),
             "--name".to_owned(),
             "marsh-kit-fixture-abc".to_owned(),
             "--pull".to_owned(),
@@ -3581,7 +3607,7 @@ fn local_v3_cold_preparation_overlaps_stock_create_and_direct_build() {
     let fingerprint = spec.workload_kit.validate_captured_source(&source).unwrap();
     let lifecycle_grant = StockSbx::open_lifecycle_workspace(&spec).unwrap();
     let (_, build) = adapter
-        .create_and_build_local(&spec, &source, &fingerprint, &lifecycle_grant)
+        .create_and_build_local(&spec, &source, &fingerprint, &lifecycle_grant, false)
         .unwrap();
     assert!(runner.overlapped.load(Ordering::SeqCst));
     StockSbx::cleanup_local_build(&build).unwrap();
@@ -3654,7 +3680,7 @@ fn local_v3_cold_start_builds_verifies_and_seeds_exact_image() {
         .iter()
         .filter_map(|argument| {
             let argument = argument.to_str()?;
-            argument.strip_prefix("type=docker,dest=")
+            argument.strip_prefix("type=docker,oci-mediatypes=true,dest=")
         })
         .map(PathBuf::from)
         .collect::<Vec<_>>();
@@ -4056,34 +4082,245 @@ fn published_kit_create_timeout_is_typed() {
     fs::remove_file(spec.worker_binary).unwrap();
 }
 
+/// The stock Kit-build selectors of every local Kit VM `sbx create`, in order.
+fn local_create_environments(runner: &FakeRunner) -> Vec<Vec<(String, String)>> {
+    runner
+        .invocations()
+        .iter()
+        .filter(|invocation| {
+            invocation.program == Path::new("sbx")
+                && invocation
+                    .arguments
+                    .first()
+                    .is_some_and(|argument| argument == "create")
+        })
+        .map(|invocation| {
+            invocation
+                .environment
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.to_string_lossy().into_owned(),
+                        value.to_string_lossy().into_owned(),
+                    )
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn pinned(rebuild: bool) -> Vec<(String, String)> {
+    let mut environment = vec![("SBX_KIT_BUILDER".to_owned(), "host".to_owned())];
+    if rebuild {
+        environment.push(("SBX_KIT_REBUILD".to_owned(), "1".to_owned()));
+    }
+    environment
+}
+
+fn kit_builder_resets(runner: &FakeRunner) -> usize {
+    runner
+        .invocations()
+        .iter()
+        .filter(|invocation| {
+            invocation
+                .arguments
+                .starts_with(&["kit".into(), "builder".into()])
+        })
+        .count()
+}
+
 #[test]
 fn local_v3_rejects_outer_and_direct_build_digest_mismatch() {
     let source = local_kit_source();
     let home = selected_home();
     let worker = artifact();
     let outer_manifest = format!("sha256:{}", "a".repeat(64));
-    let runner = FakeRunner::with_outputs([ok(), ok(), local_inspect(&outer_manifest), ok()]);
+    // Two cold attempts, the second forcing a stock rebuild; both disagree.
+    let runner = FakeRunner::with_outputs([
+        ok(),
+        ok(),
+        local_inspect(&outer_manifest),
+        ok(),
+        ok(),
+        ok(),
+        local_inspect(&outer_manifest),
+        ok(),
+    ]);
     let adapter = StockSbx::new("sbx", runner.clone());
+    let result = adapter.ensure_kit_vm(&KitVmSpec {
+        name: "marsh-kit-local-source".into(),
+        worker_binary: worker.clone(),
+        workload_kit: NativeKitRef::local_v3_source(source.clone()).unwrap(),
+        lifecycle_workspace: home.clone(),
+    });
     assert!(matches!(
-        adapter.ensure_kit_vm(&KitVmSpec {
-            name: "marsh-kit-local-source".into(),
-            worker_binary: worker.clone(),
-            workload_kit: NativeKitRef::local_v3_source(source.clone()).unwrap(),
-            lifecycle_workspace: home.clone(),
-        }),
-        Err(SbxError::LocalKitDigestMismatch)
+        &result,
+        Err(SbxError::LocalKitDigestMismatch(detail)) if detail.contains("after stock SBX rebuilt")
     ));
+    assert_eq!(
+        local_create_environments(&runner),
+        [pinned(false), pinned(true)]
+    );
+    assert_eq!(kit_builder_resets(&runner), 0);
     assert_eq!(fs::read_dir(&home).unwrap().count(), 0);
     assert!(runner.spawns.lock().unwrap().is_empty());
-    assert!(
-        runner.invocations().iter().any(|invocation| {
-            invocation.arguments == ["rm", "--force", "marsh-kit-local-source"]
-        })
+    assert_eq!(
+        runner
+            .invocations()
+            .iter()
+            .filter(|invocation| {
+                invocation.arguments == ["rm", "--force", "marsh-kit-local-source"]
+            })
+            .count(),
+        2
     );
 
     fs::remove_file(worker).unwrap();
     fs::remove_dir_all(source).unwrap();
     fs::remove_dir(home).unwrap();
+}
+
+#[test]
+fn local_v3_stale_stock_build_is_rebuilt_and_the_vm_recreated() {
+    let source = local_kit_source();
+    let home = selected_home();
+    let worker = artifact();
+    let stale = format!("sha256:{}", "a".repeat(64));
+    let manifest = format!("sha256:{}", "f".repeat(64));
+    let runner = FakeRunner::with_outputs([
+        ok(),
+        ok(),
+        local_inspect(&stale),
+        ok(),
+        ok(),
+        ok(),
+        local_inspect(&manifest),
+        stdout(format!("{manifest}\n").as_bytes()),
+        ok(),
+        ok(),
+        ok(),
+        ok(),
+        stdout(b"0:0:700\n"),
+    ]);
+    let adapter = StockSbx::new("sbx", runner.clone());
+    let ready = adapter
+        .ensure_kit_vm(&KitVmSpec {
+            name: "marsh-kit-local-source".into(),
+            worker_binary: worker.clone(),
+            workload_kit: NativeKitRef::local_v3_source(source.clone()).unwrap(),
+            lifecycle_workspace: home.clone(),
+        })
+        .unwrap();
+    assert_eq!(ready.job_image.as_str(), manifest);
+    assert!(ready.cold_started);
+    assert_eq!(
+        local_create_environments(&runner),
+        [pinned(false), pinned(true)]
+    );
+    assert_eq!(kit_builder_resets(&runner), 0);
+    // The stale VM is removed before the rebuilding recreate.
+    let commands = runner.arguments();
+    let position = |wanted: &[&str]| {
+        commands
+            .iter()
+            .position(|arguments| {
+                arguments.starts_with(&wanted.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>())
+            })
+            .unwrap()
+    };
+    let removed = position(&["rm", "--force", "marsh-kit-local-source"]);
+    let recreated = commands
+        .iter()
+        .rposition(|arguments| {
+            arguments
+                .first()
+                .is_some_and(|argument| argument == "create")
+        })
+        .unwrap();
+    assert!(removed < recreated);
+    assert!(fs::read_dir(&home).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".marsh-kit-")
+    }));
+
+    fs::remove_file(worker).unwrap();
+    fs::remove_dir_all(source).unwrap();
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn local_v3_stale_kit_image_cache_entry_is_rebuilt_on_both_sides() {
+    let source = local_kit_source();
+    let home = selected_home();
+    let worker = artifact();
+    let temp = tempfile::tempdir().unwrap();
+    let cache = temp.path().join("kit-images");
+    assert!(private_cache_directory(&cache));
+    let fingerprint = local_source_fingerprint(&source).unwrap();
+    let stale = format!("sha256:{}", "a".repeat(64));
+    let manifest = format!("sha256:{}", "f".repeat(64));
+    let scratch = temp.path().join("stale.tar");
+    fs::write(&scratch, b"stale image archive").unwrap();
+    retain_local_build(
+        &cache,
+        &LocalBuild {
+            source_fingerprint: fingerprint.clone(),
+            local_tag: String::new(),
+            manifest_digest: OciImage::parse(stale).unwrap(),
+            docker_archive: scratch,
+            metadata: temp.path().join("absent.json"),
+            retained: false,
+            _private_scratch: None,
+        },
+    )
+    .unwrap();
+    // Attempt one loads nothing: the cached manifest already disagrees.
+    let runner = FakeRunner::with_outputs([
+        ok(),
+        local_inspect(&manifest),
+        ok(),
+        ok(),
+        ok(),
+        local_inspect(&manifest),
+        stdout(format!("{manifest}\n").as_bytes()),
+        ok(),
+        ok(),
+        ok(),
+        ok(),
+        stdout(b"0:0:700\n"),
+    ]);
+    let adapter = StockSbx::new("sbx", runner.clone()).with_kit_image_cache(cache.clone());
+    let ready = adapter
+        .ensure_kit_vm(&KitVmSpec {
+            name: "marsh-kit-local-source".into(),
+            worker_binary: worker.clone(),
+            workload_kit: NativeKitRef::local_v3_source(source.clone()).unwrap(),
+            lifecycle_workspace: home.clone(),
+        })
+        .unwrap();
+    assert_eq!(ready.job_image.as_str(), manifest);
+    assert_eq!(
+        local_create_environments(&runner),
+        [pinned(false), pinned(true)]
+    );
+    assert_eq!(
+        runner
+            .invocations()
+            .iter()
+            .filter(|invocation| invocation.program == Path::new("docker"))
+            .count(),
+        1
+    );
+    // The fresh, verified build replaced the stale entry.
+    let hit = cached_local_build(&cache, &fingerprint).unwrap();
+    assert_eq!(hit.manifest_digest.as_str(), manifest);
+
+    fs::remove_file(worker).unwrap();
+    fs::remove_dir_all(source).unwrap();
+    fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
@@ -4889,6 +5126,7 @@ fn published_kit_images_share_the_cache_by_digest() {
             program: "sbx".into(),
             arguments: Vec::new(),
             working_directory: None,
+            environment: Vec::new(),
         },
         &cache,
         &reference,

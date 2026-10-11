@@ -844,6 +844,7 @@ impl McpHostControl {
             program: self.sbx.clone(),
             arguments: arguments.iter().map(std::ffi::OsString::from).collect(),
             working_directory: Some(session.launch_directory.clone()),
+            environment: Vec::new(),
         };
         match marsh_sbx::run_stock_command_capped(
             &runner,

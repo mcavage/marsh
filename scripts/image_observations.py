@@ -179,8 +179,13 @@ def import_local_image(docker, sbx, temporary_tag, directory: Path, kind: str) -
         run([sbx, "template", "load", str(archive)])
         trail["phase"] = "sdk-template-list"
         inventory = json.loads(run([sbx, "template", "ls", "--json"]).stdout)
-        rows = [row for row in inventory.get("images", [])
-                if row.get("repository") == repository and row.get("tag") == tag]
+        # Stock SBX has emitted both {"images": [...]} and a bare [...].
+        if isinstance(inventory, dict):
+            inventory = inventory.get("images", [])
+        if not isinstance(inventory, list):
+            raise ValueError("stock template listing is not a JSON array or images object")
+        rows = [row for row in inventory if isinstance(row, dict)
+                and row.get("repository") == repository and row.get("tag") == tag]
         records[-1]["stdout"] = json.dumps({"images": [{key: row.get(key) for key in ("repository", "tag", "id")} for row in rows[:4]]})
         if len(rows) != 1 or rows[0].get("id") != imported["platform_manifest_digest"][7:19]:
             raise ValueError("stock template listing differs from the produced/imported image")

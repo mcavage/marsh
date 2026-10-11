@@ -57,7 +57,9 @@ elif args[:2]==['template','load']:
  (root/'template.json').write_text(json.dumps(row))
  all_images=json.loads((root/'templates.json').read_text()) if (root/'templates.json').exists() else {}
  all_images[name]=row;(root/'templates.json').write_text(json.dumps(all_images))
-elif args==['template','ls','--json']:print(json.dumps({'images':list(json.loads((root/'templates.json').read_text()).values())}))
+elif args==['template','ls','--json']:
+ rows=list(json.loads((root/'templates.json').read_text()).values())
+ print(json.dumps(rows if (root/'bare-template-list').exists() else {'images':rows}))
 else:sys.exit(99)
 '''
 
@@ -181,6 +183,15 @@ class ImageCallerTests(unittest.TestCase):
                     self.assertEqual(local['sdk_observation']['image_id'], archive['platform_manifest_digest'])
                     self.assertTrue(local['runtime_reference'].endswith(':sha256-' + archive['config_digest'][7:]))
                     self.assertEqual(proof['publication_effects'], [])
+
+    def test_bare_array_template_listing_from_newer_sbx_imports_the_exact_template(self):
+        (self.root/'bare-template-list').write_text('')
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        proof = json.loads(self.output.with_name('shell-image.build.json').read_text())
+        local = proof['local_image']
+        self.assertEqual(local['template']['id'], local['archive']['platform_manifest_digest'][7:19])
+        self.assertEqual(proof['reference'], self.output.read_text().strip())
 
     def test_foreign_wrong_extra_and_missing_archive_tags_fail_before_sdk_with_bounded_evidence(self):
         for script in ('prepare-shell-image.py',):

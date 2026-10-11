@@ -94,9 +94,18 @@ pathlib.Path(__file__).with_name('created').write_text(json.dumps(args));sys.exi
     let created = fs::read(root.path().join("created"))
         .unwrap_or_else(|read| panic!("stock create not reached ({read}): {error}"));
     let args: Vec<String> = serde_json::from_slice(&created).unwrap();
+    // Find each value after its flag: positions move whenever stock sbx adds or
+    // drops a flag (`--quiet` went away after v0.47.0).
+    let after = |flag: &str| -> String {
+        let at = args
+            .iter()
+            .position(|arg| arg == flag)
+            .unwrap_or_else(|| panic!("no {flag} in {args:?}"));
+        args[at + 1].clone()
+    };
     assert_eq!(
-        args[9],
+        after("--template"),
         format!("docker.io/library/alpine@sha256:{}", "b".repeat(64))
     );
-    assert_eq!(args[5], "missing");
+    assert_eq!(after("--pull"), "missing");
 }

@@ -30,7 +30,9 @@ PREFIXES: set[str] = set()
 
 def stock(sbx: str) -> dict[str, dict]:
     out = subprocess.run([sbx, "ls", "--json"], check=True, capture_output=True, text=True).stdout
-    return {row["name"]: row for row in json.loads(out).get("sandboxes", [])}
+    listing = json.loads(out)
+    rows = listing if isinstance(listing, list) else listing.get("sandboxes", [])
+    return {row["name"]: row for row in rows}
 
 
 def owned_names(control: pathlib.Path) -> set[str]:
@@ -112,7 +114,7 @@ def depth3_script(kit: str) -> str:
         # Stock resolves a local template by its tag (the product verifies
         # the digest after create).
         'D3VM="${MARSH_VM_PREFIX}s-d3d3d3d3"',
-        'sbx create --quiet --name "$D3VM" --pull never --skills off'
+        'sbx create --name "$D3VM" --pull never --skills off'
         ' --template "${MARSH_DEV_SHELL_TEMPLATE%@*}" shell; echo "D3_CREATE_RC=$?"',
         'sbx exec "$D3VM" true; echo "D3_EXEC_RC=$?"',
         'sbx rm --force "$D3VM" >/dev/null; echo "D3_RM_RC=$?"',
@@ -195,7 +197,7 @@ RELAY_KILL_SCRIPT = "\n".join([
     "set -u",
     'echo "RK PREFIX=$MARSH_VM_PREFIX"',
     'RKVM="${MARSH_VM_PREFIX}s-rk0rk0rk"',
-    'sbx create --quiet --name "$RKVM" --pull never --skills off'
+    'sbx create --name "$RKVM" --pull never --skills off'
     ' --template "${MARSH_DEV_SHELL_TEMPLATE%@*}" shell; echo "RK_CREATE_RC=$?"',
     # A brokered exec in flight when the relay dies.
     'sbx exec "$RKVM" sleep 97 >"$MARSH_DEV_SCRATCH/tmp/rk.out" 2>&1 & EXEC=$!',
@@ -311,7 +313,8 @@ def main() -> int:
         checks["receipt_in_scratch_control"] = int(marks.get("RECEIPTS", "0") or 0) > 0
         ls_line = next((line[3:] for line in out.splitlines() if line.startswith("LS=")), "{}")
         try:
-            rows = json.loads(ls_line).get("sandboxes", [])
+            listing = json.loads(ls_line)
+            rows = listing if isinstance(listing, list) else listing.get("sandboxes", [])
         except json.JSONDecodeError:
             rows = None
         checks["child_vms_have_grant_prefix"] = bool(rows) and bool(prefix) and all(

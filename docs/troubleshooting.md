@@ -198,12 +198,18 @@ outputs. marsh aims to match Bash.
 Do not paste tokens or private files. Report security problems as described
 in [SECURITY.md](../SECURITY.md).
 
-## Kit builder holds a stale build
+## Local Kit build does not match
 
-`marsh` reports that stock SBX's Kit builder holds a stale build of a Kit,
-typically after Docker's build cache was pruned. Remove the builder; stock
-`sbx` recreates it on the next Kit build. Then retry:
+A local-source Kit is built twice: once by marsh (Buildx, plus its per-user
+Kit image cache) and once by stock `sbx create`, and the two image digests
+must agree. Kit builds are not reproducible from scratch, so they agree only
+when both come out of one BuildKit cache. marsh runs `sbx create` with
+`SBX_KIT_BUILDER=host` (your own `SBX_KIT_BUILDER` does not reach it), and
+stock SBX reuses any build it already holds for the same source tree, however
+old. On a mismatch marsh recovers on its own: it drops a stale cache entry and
+recreates the Kit VM once with `SBX_KIT_REBUILD=1`.
 
-```sh
-sbx kit builder rm --force
-```
+If `marsh` still reports a mismatch ("still mismatched after stock SBX rebuilt
+the Kit"), the two builds did not share a cache. Check that `docker buildx ls`
+selects a local builder (the `*` entry, for example `desktop-linux`), not a
+remote or cloud builder, then retry.

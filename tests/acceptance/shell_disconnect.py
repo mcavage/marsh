@@ -137,7 +137,7 @@ class Journey:
 
     def stock_names(self):
         document = json.loads(self.command([self.sbx, "ls", "--json"]).stdout)
-        rows = document.get("sandboxes")
+        rows = document if isinstance(document, list) else document.get("sandboxes")
         if not isinstance(rows, list) or any(not isinstance(row, dict) or not isinstance(row.get("name"), str) or not row["name"] for row in rows):
             raise AssertionError("malformed stock sandbox inventory")
         names = {row["name"] for row in rows}
@@ -371,7 +371,8 @@ class Journey:
                 if len(created) != 1:
                     raise AssertionError(f"cannot identify this run's shell VM: {created}")
                 self.vm = created[0]
-            rows = json.loads(self.command([self.sbx, "ls", "--json"]).stdout)["sandboxes"]
+            listing = json.loads(self.command([self.sbx, "ls", "--json"]).stdout)
+            rows = listing if isinstance(listing, list) else listing["sandboxes"]
             row = next(row for row in rows if row["name"] == self.vm)
             identity = row.get("id")
             if not isinstance(identity, str) or not identity:

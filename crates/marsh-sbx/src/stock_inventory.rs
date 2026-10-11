@@ -44,6 +44,8 @@ impl StockInventory {
             "workspaces",
             // sbx 0.46 marks a VM whose workspace path no longer exists.
             "workspace_missing",
+            // sbx after v0.47.0 adds a boolean `detached` to some rows; marsh ignores it.
+            "detached",
             "last_used_at",
             "created_at",
             "cpus",
@@ -55,11 +57,18 @@ impl StockInventory {
         }
         let document: serde_json::Value =
             serde_json::from_slice(bytes).map_err(|_| invalid("invalid stock inventory JSON"))?;
-        let object = document
-            .as_object()
-            .filter(|object| object.len() == 1 && object.contains_key("sandboxes"))
-            .ok_or_else(|| invalid("unknown or incomplete stock inventory envelope"))?;
-        let rows = object["sandboxes"]
+        // Stock SBX has emitted both `{"sandboxes": [...]}` and a bare `[...]`;
+        // any other envelope is unknown.
+        let rows = match &document {
+            serde_json::Value::Array(_) => &document,
+            serde_json::Value::Object(object)
+                if object.len() == 1 && object.contains_key("sandboxes") =>
+            {
+                &object["sandboxes"]
+            }
+            _ => return Err(invalid("unknown or incomplete stock inventory envelope")),
+        };
+        let rows = rows
             .as_array()
             .filter(|rows| rows.len() <= MAX_VMS)
             .ok_or_else(|| invalid("stock inventory has missing or excessive rows"))?;
@@ -154,5 +163,25 @@ mod tests {
         assert!(inventory.contains_uuid("0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9"));
         let unknown = br#"{"sandboxes":[{"name":"user-agent-project","id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"running","surprise":1}]}"#;
         assert!(StockInventory::decode(unknown).is_err());
+    }
+
+    #[test]
+    fn bare_array_listing_from_newer_sbx_decodes_with_the_same_row_rules() {
+        // Row shape from a stock sbx nightly after v0.47.0, which drops the envelope.
+        let listing = br#"[{"name":"general","id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","agent":"shell","status":"stopped","last_used_at":"2026-10-09T07:00:00Z","created_at":"2026-10-01T07:00:00Z"}]"#;
+        let inventory = StockInventory::decode(listing).unwrap();
+        assert!(inventory.contains_uuid("0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9"));
+        assert!(StockInventory::decode(b"[]").is_ok());
+        let detached = br#"[{"name":"scratch","id":"1a2b3c4d-4b5a-4978-8695-a4b3c2d1e0f9","agent":"shell","status":"running","detached":true,"last_used_at":"2026-10-09T07:00:00Z","created_at":"2026-10-01T07:00:00Z"}]"#;
+        assert!(StockInventory::decode(detached).is_ok());
+        let unknown = br#"[{"name":"general","id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"running","surprise":1}]"#;
+        assert!(StockInventory::decode(unknown).is_err());
+        for envelope in [
+            &br#"{"sandboxes":[],"next":null}"#[..],
+            br#"{"vms":[]}"#,
+            br#""sandboxes""#,
+        ] {
+            assert!(StockInventory::decode(envelope).is_err());
+        }
     }
 }

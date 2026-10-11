@@ -24,6 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             arguments[2].clone(),
         ],
         working_directory: Some(directory.clone()),
+        environment: Vec::new(),
     };
     let started = Instant::now();
     let result = runner.run_bounded(&invocation, timeout);

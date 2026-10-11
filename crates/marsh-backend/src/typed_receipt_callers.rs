@@ -163,6 +163,7 @@ else:
                 self.mode.into(),
             ],
             working_directory: Some(self.root.clone()),
+            environment: Vec::new(),
         })?;
         let process = SharedProcess(Arc::new(Mutex::new(ProcessState {
             process: attachment.process,

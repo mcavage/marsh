@@ -254,6 +254,7 @@ impl Fixture {
         let runner = SystemCommandRunner::new("/tmp");
         let observed = runner.run(&Invocation {
             program: "/usr/bin/python3".into(), arguments: vec!["-c".into(), format!("import os,sys; open(sys.argv[1],'wb').write(bytes(range(256))*16384); os._exit({code})").into(), payload.as_os_str().to_owned()], working_directory: None,
+            environment: Vec::new(),
         }).unwrap();
         assert_eq!(observed.exit_code, Some(code));
         let pid_path = root.0.join("pid");
@@ -274,6 +275,7 @@ impl Fixture {
                     pid_path.as_os_str().to_owned(),
                 ],
                 working_directory: None,
+                environment: Vec::new(),
             })
             .unwrap();
         let deadline = Instant::now() + CONDITION_DEADLINE;
