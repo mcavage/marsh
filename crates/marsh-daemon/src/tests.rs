@@ -3891,12 +3891,15 @@ fn scope_lifecycle_client_has_an_absolute_deadline_and_server_recovers_after_tea
     assert!(started.elapsed() < Duration::from_secs(1));
 
     {
+        // The client's deadline is absolute, so it fired whether or not the server
+        // had reached the teardown yet. A loaded runner can be slow to start it:
+        // wait for it to begin (it is blocked on this gate) before releasing it.
         let (state, changed) = &*gate;
-        let mut state = state.lock().unwrap();
-        assert!(
-            state.0,
-            "teardown must have begun before the client timed out"
-        );
+        let state = state.lock().unwrap();
+        let (mut state, waited) = changed
+            .wait_timeout_while(state, Duration::from_secs(30), |state| !state.0)
+            .unwrap();
+        assert!(!waited.timed_out(), "teardown never began");
         state.1 = true;
         changed.notify_all();
     }
