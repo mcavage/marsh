@@ -14,7 +14,7 @@ import traceback
 
 from provenance import (host_only_path, stock_cleanup_errors, stock_vm_names,
                         verify_candidate)
-from run import (CONTAINER, IMAGE, disposable_root, scoped_control_home,
+from harness import (CONTAINER, IMAGE, disposable_root, scoped_control_home,
                  verify_container_deleted)
 
 

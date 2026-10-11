@@ -10,8 +10,9 @@ import sys
 import time
 import traceback
 
-from mcp_gateway_uat import Scope, gateway_call, gateway_data, sha256, wait_until
-from run import source_identity
+from harness import sha256, wait_until
+from mcp_harness import McpScope as Scope, gateway_call, gateway_data
+from provenance import source_identity
 from provenance import host_only_path, stock_vm_inventory, remove_owned_stock_vm
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "mcp"))

@@ -11,16 +11,12 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import stat
 import subprocess
-import threading
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from package_observations import (HOST_NAMES, LICENSE_NAMES, GUEST_NAMES,
-                                  file_digest, host_only_path, artifact_manifest,
-                                  relocated_manifest, verify_relocated_package)
+from package_observations import artifact_manifest, file_digest, host_only_path
 
 from build_inputs import tree_inventory
 from image_observations import verify_local_image_proof
@@ -97,11 +93,6 @@ def source_identity(source_tree: Path, revision: str) -> dict:
     return _source_snapshot(source_tree, revision)[0]
 
 
-def source_file_records(source_tree: Path, revision: str) -> dict:
-    """Private UAT edit fence; not a build receipt or a verifier override."""
-    return _source_snapshot(source_tree, revision)[1]
-
-
 def input_files(root: Path) -> dict:
     return {name: {"sha256": row["sha256"], "mode": row["mode"]}
             for name, row in tree_inventory(root)["files"].items()}
@@ -173,36 +164,6 @@ def verify_build_receipt(receipt: Path, *, source_tree: Path, revision: str,
             source_tree, guest_artifacts, build.get("shell_image_repository"), build.get("shell_image_insecure")):
         raise ValueError("shell image proof differs from observed build receipt")
     return value
-
-
-def copy_verified_package(receipt: dict, candidate: Path, guest: Path) -> dict:
-    """Host-copy an observed package, comparing ALL copied bytes/types/modes.
-
-    Destination directories must be new. On failure the caller removes only its
-    own staging root. Source and copies are checked before any product effects.
-    """
-    original = Path(receipt["marsh"])
-    original_guest = Path(receipt["guest_artifacts"])
-    destinations = (candidate, guest)
-    if (any(not path.is_absolute() or path.resolve() != path for path in destinations)
-            or candidate.is_relative_to(guest) or guest.is_relative_to(candidate)
-            or any(path.is_relative_to(origin) or origin.is_relative_to(path)
-                   for path in destinations for origin in (original.parent, original_guest))):
-        raise ValueError("package relocation requires separate canonical destination trees outside its inputs")
-    if artifact_manifest(original, original_guest) != receipt["artifacts"]:
-        raise ValueError("input package changed before relocation")
-    candidate.mkdir(mode=0o700)
-    for name in HOST_NAMES:
-        shutil.copy2(original.with_name(name), candidate / name)
-    shutil.copytree(original_guest, guest)
-    marsh = candidate / "marsh"
-    expected = relocated_manifest(receipt, marsh, guest)
-    if (artifact_manifest(original, original_guest) != receipt["artifacts"] or
-            artifact_manifest(marsh, guest) != expected):
-        raise ValueError("package bytes/modes changed during relocation")
-    return {"schema": "marsh.package-relocation/v1", "source_marsh": str(original),
-            "source_guest_artifacts": str(original_guest), "source_identity": receipt["source_after"],
-            "marsh": str(marsh), "guest_artifacts": str(guest), "artifacts": expected}
 
 
 def parse_stock_inventory(document: dict | list) -> dict[str, str]:
@@ -340,164 +301,6 @@ def stock_cleanup_errors(before: dict[str, str], after: dict[str, str],
     if leaked:
         errors.append(f"new marsh sandboxes remain: {leaked}")
     return errors
-
-
-class DriveObserver:
-    """Read-only stock-SBX witness, running on the host, never in agent checkout.
-
-    Scope directory names are discovery hints only. Success requires an actual
-    newly listed VM, candidate bytes/help executed by stock SBX, two fresh nonroot
-    containers per scope with the requested argv/project, and healthy-Engine
-    deletion. Guest command implementations and Docker are still trusted: this
-    detects lying guest reports, not hostile-root fabrication of exec responses.
-    Without expected_candidate_digest it proves staged/runtime agreement only,
-    NOT a source-to-child-build relationship or equality to the host package.
-    """
-    def __init__(self, sbx: Path, checkout: Path, marker: str, baseline: dict[str, str], *,
-                 route_marker: str | None = None, expected_candidate_digest: str | None = None):
-        self.sbx, self.checkout, self.marker = sbx, checkout, marker
-        self.route_marker = route_marker or marker
-        self.expected_candidate_digest = expected_candidate_digest
-        self.baseline = baseline
-        self.vms: set[str] = set()
-        self.vm_identities: dict[str, str] = {}
-        self.candidates: dict[str, dict] = {}
-        self.containers: dict[str, dict] = {}
-        self.deleted: set[str] = set()
-        self.records: list[dict] = []
-        self.error: str | None = None
-        self.stop = threading.Event()
-        self.thread = threading.Thread(target=self._watch, daemon=True)
-
-    def command(self, argv):
-        result = subprocess.run([str(self.sbx), *argv], capture_output=True, timeout=30, start_new_session=True)
-        self.records.append({"argv": [str(self.sbx), *argv], "status": result.returncode,
-                             "stdout": result.stdout.decode(errors="replace"),
-                             "stderr": result.stderr.decode(errors="replace")})
-        return result
-
-    def poll(self):
-        from run import verify_container_deleted
-        current = observe_stock_inventory(self.command)
-        for name, identifier in {**self.baseline, **self.vm_identities}.items():
-            if name in current and current[name] != identifier:
-                raise ValueError(f"stock sandbox identity changed during observation: {name}")
-        if not self.baseline.keys() <= current.keys():
-            raise ValueError("pre-existing stock sandbox disappeared during observation")
-        scope_root = self.checkout / ".marsh-dev"
-        if scope_root.resolve() != scope_root:
-            raise ValueError("child-scope discovery path traverses a symlink")
-        scopes = [path for path in scope_root.glob("*")
-                  if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f-]{27}", path.name)
-                  and path.is_dir() and not path.is_symlink()]
-        for scope in scopes:
-            prefix = f"marsh-dev-{scope.name[:8]}-"
-            for vm in sorted(current.keys() - self.baseline.keys()):
-                if not vm.startswith(prefix):
-                    continue
-                self.vms.add(vm)
-                self.vm_identities[vm] = current[vm]
-                exec_prefix = ["exec", current[vm]]
-                if vm not in self.candidates:
-                    help_result = self.command([*exec_prefix, "/usr/local/bin/marsh", "--help"])
-                    if help_result.returncode == 0 and ("marsh - " + self.marker).encode() in help_result.stdout.splitlines():
-                        hashes = self.command([*exec_prefix, "sha256sum", "/usr/local/bin/marsh"])
-                        artifact = scope / "artifacts/marsh-linux-arm64"
-                        if artifact.resolve() != artifact:
-                            raise ValueError("staged candidate path traverses a symlink")
-                        expected = file_digest(artifact)
-                        if self.expected_candidate_digest is not None and expected != self.expected_candidate_digest:
-                            raise ValueError("child candidate differs from the host-observed Linux package")
-                        if hashes.returncode or hashes.stdout.split()[0].decode() != expected.removeprefix("sha256:"):
-                            raise ValueError("executed child candidate differs from staged artifact")
-                        self.candidates[vm] = {"scope_id": scope.name, "sha256": expected,
-                                               "help": help_result.stdout.decode()}
-                active = self.command([*exec_prefix, "docker", "ps", "--no-trunc", "-q"])
-                if active.returncode:
-                    continue  # Booting VMs do not constitute proof.
-                for container in active.stdout.decode().splitlines():
-                    if container in self.containers or not re.fullmatch(r"[0-9a-f]{64}", container):
-                        continue
-                    inspected = self.command([*exec_prefix, "docker", "inspect", container])
-                    if inspected.returncode:
-                        continue  # May have exited before inspection; no proof recorded.
-                    rows = json.loads(inspected.stdout)
-                    if len(rows) != 1 or rows[0].get("Id") != container:
-                        raise ValueError("runtime container identity mismatch")
-                    row = rows[0]
-                    attempts = [attempt for attempt in (1, 2)
-                                if f"printf '{self.route_marker}_{attempt}\\n'; sleep 20" in row.get("Config", {}).get("Cmd", [])]
-                    if len(attempts) != 1:
-                        continue  # Not the exact challenge workload.
-                    if row.get("HostConfig", {}).get("Privileged") is not False:
-                        raise ValueError("challenge container has privileged/unknown authority")
-                    project = str(scope / "project")
-                    state = row.get("State", {})
-                    if (type(state.get("Pid")) is not int or state["Pid"] <= 0
-                            or not isinstance(state.get("StartedAt"), str) or not state["StartedAt"]):
-                        raise ValueError("challenge container lacks live process identity")
-                    if not state.get("Running") or not any(
-                            mount.get("Destination") == project and mount.get("RW") is True
-                            for mount in row.get("Mounts", [])):
-                        raise ValueError("challenge container lacks live project identity")
-                    uid = self.command([*exec_prefix, "docker", "exec", container, "id", "-u"])
-                    if uid.returncode or not uid.stdout.strip().isdigit() or int(uid.stdout) == 0:
-                        raise ValueError("challenge container is not independently observed nonroot")
-                    self.containers[container] = {"vm": vm, "scope_id": scope.name,
-                                                  "attempt": attempts[0], "uid": int(uid.stdout),
-                                                  "process": {"pid": state["Pid"], "started_at": state["StartedAt"]},
-                                                  "challenge": self.route_marker, "inspect": row}
-        for container, row in self.containers.items():
-            if container in self.deleted or row["vm"] not in current:
-                continue
-            prefix = ["exec", self.vm_identities[row["vm"]]]
-            inspected = self.command([*prefix, "docker", "inspect", container])
-            if inspected.returncode:
-                verify_container_deleted(lambda argv: self.command(argv), prefix, container)
-                self.deleted.add(container)
-
-    def _watch(self):
-        try:
-            while not self.stop.is_set():
-                self.poll()
-                self.stop.wait(0.5)
-        except Exception as error:
-            self.error = f"{type(error).__name__}: {error}"
-
-    def start(self):
-        self.thread.start()
-
-    def finish(self):
-        self.stop.set()
-        self.thread.join(timeout=65)
-        if self.thread.is_alive():
-            raise ValueError("host observer did not stop")
-
-    def verify(self):
-        if self.error:
-            raise ValueError(self.error)
-        scopes = {row["scope_id"] for row in self.candidates.values()}
-        eligible = {key: row for key, row in self.containers.items() if row["scope_id"] in scopes}
-        if not scopes or len(eligible) < 2:
-            raise ValueError("no independent candidate runtime and two fresh container observations; agent JSON is not proof")
-        if any(row["vm"] in self.candidates for row in eligible.values()):
-            raise ValueError("registered challenge ran in the shell VM instead of a separate Kit worker")
-        for scope in scopes:
-            runs = [row for row in eligible.values() if row["scope_id"] == scope]
-            if (len(runs) != 2 or len({row["vm"] for row in runs}) != 1 or
-                    {row["attempt"] for row in runs} != {1, 2}):
-                raise ValueError("each candidate scope must run both attempts in one reused worker VM")
-            if len({(row["process"]["pid"], row["process"]["started_at"]) for row in runs}) != 2:
-                raise ValueError("challenge containers lack distinct runtime process identities")
-        if not set(eligible).issubset(self.deleted):
-            raise ValueError("container deletion not independently verified before VM teardown")
-
-    def evidence(self):
-        return {"trust_limit": "host-issued stock probes into guest-controlled userspace, not hostile-guest attestation",
-                "expected_candidate_digest": self.expected_candidate_digest,
-                "route_marker": self.route_marker, "candidates": self.candidates, "containers": self.containers,
-                "deleted_containers": sorted(self.deleted), "owned_vms": dict(self.vm_identities),
-                "error": self.error, "commands": self.records}
 
 
 def candidate_environment(args, receipt: dict | None) -> dict[str, str]:

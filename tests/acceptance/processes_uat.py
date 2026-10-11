@@ -32,14 +32,13 @@ import sys
 import termios
 import threading
 import time
-import traceback
 from typing import Any, Callable
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from provenance import stock_baseline, stock_vm_inventory  # noqa: E402
-from run import stable_process_identity  # noqa: E402
-from workspaces_uat import Fail, Workspaces, find_records, require, text  # noqa: E402
+from harness import (ScenarioSuite, find_records, request_authenticated_daemon_shutdown,  # noqa: E402
+                     require, scenario_parser, stable_process_identity, suite_main, text)
+from provenance import stock_baseline  # noqa: E402
 
 SCENARIOS = {
     "P01-job-surface": "job_surface",
@@ -98,7 +97,12 @@ def q(argv: list[str]) -> str:
     return shlex.join(argv)
 
 
-class Processes(Workspaces):
+class Processes(ScenarioSuite):
+    LABEL = "processes"
+    EVIDENCE = "processes.json"
+    SCENARIOS = SCENARIOS
+    ORDER = ORDER
+
     def __init__(self, arguments: argparse.Namespace) -> None:
         super().__init__(arguments)
         self.selected = [s for s in ORDER if (not arguments.only or s in arguments.only)
@@ -120,52 +124,7 @@ class Processes(Workspaces):
         self.fixture_capable(completed.stdout, completed.stderr)
         return completed
 
-    def fixture_capable(self, *blobs: bytes | str) -> None:
-        joined = "".join(b if isinstance(b, str) else text(b) for b in blobs)
-        mode = re.search(r"unknown fixture mode: (\S+)", joined)
-        if mode:
-            raise Fail(f"fixture Kit lacks the `{mode.group(1)}` mode; pass --kit tests/acceptance/fixture "
-                       "or republish the fixture from this checkout")
-
     # ---- receipts and lineage ---------------------------------------------
-    def job_ids(self) -> set[str]:
-        return {s["job_id"] for s in self.document("jobs", "--json")["jobs"]}
-
-    def show(self, job: str) -> dict[str, Any]:
-        return self.document("jobs", "show", job, "--json")
-
-    def settle(self, before: set[str], count: int, *, timeout: float = 120, exact: bool = True,
-               verified: bool = True) -> list[dict[str, Any]]:
-        """Wait until `count` new jobs are terminal (and cleanup verified); with `exact`, no more appear."""
-        deadline = time.monotonic() + timeout
-        while True:
-            fresh = [self.show(j) for j in sorted(self.job_ids() - before)]
-            done = [r for r in fresh if r.get("state") not in ("running", "queued", "submitted")
-                    and (not verified or r.get("cleanup") == "verified")]
-            if len(fresh) >= count and len(done) == len(fresh):
-                break
-            if time.monotonic() > deadline:
-                raise Fail(f"want {count} settled new jobs, got "
-                           f"{[(r.get('command'), r.get('state'), r.get('cleanup')) for r in fresh]}")
-            time.sleep(0.5)
-        if exact:
-            time.sleep(3)
-            fresh = [self.show(j) for j in sorted(self.job_ids() - before)]
-            require(len(fresh) == count, f"want exactly {count} new jobs, got {len(fresh)}: "
-                                         f"{[(r.get('command'), self.lin(r, strict=False)) for r in fresh]}"[:900])
-        return fresh
-
-    def running(self, before: set[str]) -> list[dict[str, Any]]:
-        return [r for r in (self.show(j) for j in self.job_ids() - before) if r.get("state") == "running"]
-
-    @staticmethod
-    def lin(receipt: dict[str, Any], strict: bool = True) -> dict[str, Any]:
-        lineage = receipt.get("lineage")
-        if strict:
-            require(isinstance(lineage, dict) and {"parent", "root", "depth"} <= set(lineage),
-                    f"receipt lacks lineage {{parent, root, depth, spawn}} (s9): {receipt!r}"[:800])
-        return lineage if isinstance(lineage, dict) else {}
-
     def parent_is(self, child: dict[str, Any], parent: dict[str, Any]) -> bool:
         return parent["job_id"] in json.dumps(self.lin(child).get("parent"))
 
@@ -193,16 +152,6 @@ class Processes(Workspaces):
             require(isinstance(depth, int) and lineage.get("depth") == depth + 1,
                     f"{what}: child depth {lineage.get('depth')} != parent depth {depth} + 1")
         return children
-
-    def kv(self, stdout: bytes) -> dict[str, str]:
-        return dict(line.split("=", 1) for line in text(stdout).splitlines() if "=" in line)
-
-    def identity(self, stdout: bytes) -> list[dict[str, Any]]:
-        found = []
-        for line in text(stdout).splitlines():
-            if line.startswith("{\"cwd\""):
-                found.append(json.loads(line))
-        return found
 
     # ---- scenarios --------------------------------------------------------
     def job_surface(self) -> None:
@@ -1105,28 +1054,6 @@ class Processes(Workspaces):
         return process, master
 
     @staticmethod
-    def pty_expect(master: int, output: bytearray, pattern: str, timeout: float, start: int = 0) -> re.Match[str]:
-        """Read (answering cursor queries) until `pattern` appears in output[start:]."""
-        deadline = time.monotonic() + timeout
-        while True:
-            found = re.search(pattern, text(bytes(output[start:])))
-            if found:
-                return found
-            if time.monotonic() > deadline:
-                raise Fail(f"terminal never showed {pattern!r}: {text(bytes(output))[-1500:]!r}")
-            ready, _, _ = select.select([master], [], [], 0.25)
-            if ready:
-                try:
-                    chunk = os.read(master, 65536)
-                except OSError:
-                    chunk = b""
-                if not chunk:
-                    raise Fail(f"terminal closed before {pattern!r}: {text(bytes(output))[-1500:]!r}")
-                if b"\x1b[6n" in chunk:
-                    os.write(master, b"\x1b[1;1R")
-                output.extend(chunk)
-
-    @staticmethod
     def pty_drain(master: int, output: bytearray, stop: threading.Event) -> None:
         """Read (answering cursor queries) until `stop` is set."""
         while not stop.is_set():
@@ -1202,7 +1129,6 @@ class Processes(Workspaces):
     def restart_daemon(self, settings: dict[str, str | None]) -> None:
         """Stop the idle owned daemon gracefully (its VMs stay) and let the next call start
         one with `settings` (MARSH_* daemon-start variables; None unsets)."""
-        from run import request_authenticated_daemon_shutdown
         self.document("status", "--json")
         pid, token = self.owned_daemon_pid, self.owned_daemon_control_token
         require(pid and token and stable_process_identity(pid) == self.owned_daemon_process_identity,
@@ -1335,118 +1261,24 @@ class Processes(Workspaces):
         if self.preflight_enabled:
             blocked = self.preflight()
             if blocked:
-                for scenario in self.selected:
-                    self.results.append({"scenario": scenario, "outcome": "blocked", "failure": blocked})
-                    print(f"processes: {scenario}: blocked: {blocked}", flush=True)
-                raise Fail(f"preflight: process CLI unavailable: {blocked}")
+                self.blocked(blocked, "process CLI")
         self.run([self.marsh, "--load", "fixture", "-c", "true"], timeout=900)
         if LIVE & set(self.selected):
             self.run([self.marsh, "--load", "claude,codex", "-c", "true"], timeout=1800)
         if NEEDS_SHELL_KIT & set(self.selected):
             self.run([self.marsh, "--load", "shell", "-c", "true"], timeout=900)
         self.document("status", "--json")
-        failures = []
-        for scenario in self.selected:
-            began = time.monotonic()
-            try:
-                getattr(self, SCENARIOS[scenario])()
-                outcome, failure = "passed", None
-            except Fail as error:
-                outcome, failure = "failed", str(error)
-            except Exception as error:  # a product or harness break is still a failure
-                outcome, failure = "failed", f"{type(error).__name__}: {error}"
-                self.records.append({"scenario": scenario, "traceback": traceback.format_exc()})
-            finally:
-                for process in self.live:
-                    self.kill(process)
-                self.live.clear()
-            self.results.append({"scenario": scenario, "outcome": outcome, "failure": failure,
-                                 "seconds": round(time.monotonic() - began, 1)})
-            print(f"processes: {scenario}: {outcome}" + (f": {failure[:400]}" if failure else ""), flush=True)
-            if failure:
-                failures.append(scenario)
-                if self.fail_fast:
-                    break
-        self.document("status", "--json")
-        if failures:
-            raise Fail(f"{len(failures)}/{len(self.selected)} scenarios failed: {', '.join(failures)}")
-
-    def finish(self, error: Exception | None) -> int:
-        for process in self.live:
-            self.kill(process)
-        cleanup_errors = self.cleanup_isolated_scope()
-        if self.stock_before is not None:
-            try:
-                after = stock_vm_inventory(self.sbx)
-                self.source["stock_after"] = after
-                cleanup_errors.extend(self.stock_leftover_errors(after))
-            except Exception as caught:
-                cleanup_errors.append(f"independent stock cleanup unavailable: {caught}")
-        if cleanup_errors:
-            cleanup = RuntimeError("; ".join(dict.fromkeys(cleanup_errors)))
-            error = cleanup if error is None else RuntimeError(f"{error}; cleanup: {cleanup}")
-        destination = self.evidence / "processes.json"
-        destination.write_text(json.dumps({
-            "outcome": "failed" if error else "passed", "failure": str(error) if error else None,
-            "scenarios": self.results, "root": str(self.root), "environment": self.source,
-            "records": self.records}, indent=2, default=str) + "\n", encoding="utf-8")
-        destination.chmod(0o600)
-        passed = sum(r["outcome"] == "passed" for r in self.results)
-        print(f"processes: {passed}/{len(self.selected)} passed; {'failed' if error else 'passed'}; "
-              f"evidence: {destination}")
-        if error:
-            print(f"processes: {error}")
-        return 1 if error else 0
+        self.run_scenarios()
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--prefix", default=str(pathlib.Path.home() / ".marsh-dev"),
-                        help="installed dev product (bin/marsh, libexec/marsh)")
-    parser.add_argument("--sbx", default="sbx")
-    parser.add_argument("--kit", default=None,
-                        help="fixture Kit: immutable OCI ref, native v3 source dir, or a commands.json whose "
-                             "\"fixture\" key holds the ref (needs the exec/bench/cap-flood modes)")
-    parser.add_argument("--evidence", default=None)
-    parser.add_argument("--only", action="append", choices=sorted(SCENARIOS), help="repeatable")
-    parser.add_argument("--fail-fast", action="store_true", help="stop at the first failed scenario")
-    parser.add_argument("--no-preflight", action="store_true")
-    parser.add_argument("--list", action="store_true", help="print scenario ids and exit")
+    parser = scenario_parser(
+        __doc__, SCENARIOS,
+        kit_help="fixture Kit: immutable OCI ref, native v3 source dir, or a commands.json whose \"fixture\" "
+                 "key holds the ref (needs the exec/bench/cap-flood modes)")
     parser.add_argument("--live", action="store_true",
                         help="also run billed checks (P32: a real claude turn that runs codex; 1-2 model calls)")
-    parser.add_argument("--source-tree", default=str(pathlib.Path(__file__).resolve().parents[2]))
-    parser.add_argument("--source-revision", default=None)
-    parser.add_argument("--build-receipt", type=pathlib.Path, default=None)
-    arguments = parser.parse_args()
-    if arguments.list:
-        for scenario in ORDER:
-            print(f"{scenario}\t{getattr(Processes, SCENARIOS[scenario]).__doc__.strip().splitlines()[0]}")
-        return 0
-    if not arguments.kit:
-        parser.error("--kit is required")
-    prefix = pathlib.Path(arguments.prefix).expanduser().resolve()
-    arguments.marsh = str(prefix / "bin" / "marsh")
-    arguments.guest_artifacts = prefix / "libexec" / "marsh"
-    if not os.access(arguments.marsh, os.X_OK):
-        print(f"processes: no installed product at {arguments.marsh} (run `make dev`)")
-        return 1
-    kit = pathlib.Path(arguments.kit).expanduser()
-    if kit.is_file():
-        arguments.kit = json.loads(kit.read_text())["fixture"]
-    if arguments.source_revision is None:
-        arguments.source_revision = subprocess.run(
-            ["git", "-C", arguments.source_tree, "rev-parse", "HEAD"], capture_output=True, text=True,
-            timeout=30, check=True).stdout.strip()
-    if arguments.evidence is None:
-        arguments.evidence = f"/private/tmp/marsh-dev-processes-{os.getuid()}"
-    harness = Processes(arguments)
-    try:
-        harness.run_all()
-    except KeyboardInterrupt:
-        return harness.finish(InterruptedError("processes acceptance interrupted"))
-    except Exception as error:
-        return harness.finish(error)
-    return harness.finish(None)
+    return suite_main(Processes, parser)
 
 
 if __name__ == "__main__":

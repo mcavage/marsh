@@ -15,9 +15,10 @@ import time
 import traceback
 import uuid
 
-from acp_uat import Scope
-from mcp_gateway_uat import sha256, wait_marker, wait_until
-from run import source_identity
+from harness import AcpScope as Scope
+from harness import sha256, wait_until
+from mcp_harness import wait_marker
+from provenance import source_identity
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "mcp"))
 from jsonrpc_peer import JsonRpcPeer  # noqa: E402
