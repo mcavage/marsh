@@ -1107,25 +1107,40 @@ fn status_remains_available_during_blocked_cancel_dispatch() {
         thread::sleep(Duration::from_millis(5));
     }
     thread::scope(|scope| {
-        let (done_tx, done_rx) = std::sync::mpsc::channel();
         let rig_ref = &rig;
-        scope.spawn(move || {
-            let result = rig_ref
-                .client
-                .acp_cancel(rig_ref.id.clone(), rig_ref.shell.clone());
-            done_tx.send(result).unwrap();
-        });
-        // The cancel has reached dispatch once status reports it requested; it
-        // then blocks on the agent's unread stdin.
-        while !rig.status(0).cancel_requested {
-            assert!(Instant::now() < deadline, "cancel never reached dispatch");
-            thread::sleep(Duration::from_millis(1));
-        }
-        let early = done_rx.try_recv();
-        assert!(
-            matches!(early, Err(std::sync::mpsc::TryRecvError::Empty)),
-            "probe did not reach blocked cancellation: {early:?}"
-        );
+        // A cancel blocks only once the agent's unread stdin is full, which takes
+        // the daemon a few replies to the flood (about 30 KB each) to do. How long
+        // that takes depends on machine load, so do not assume it: cancel until one
+        // is stuck. A cancel that returns without blocking has just put its small
+        // frame in the pipe, and the turn is still active, so the next one is closer
+        // to blocking. The agent exits after 5 s, so stop trying well before that.
+        let attempts_until = Instant::now() + Duration::from_secs(3);
+        let done_rx = loop {
+            assert!(
+                Instant::now() < attempts_until,
+                "no cancel ever blocked behind the agent's unread stdin"
+            );
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            scope.spawn(move || {
+                let result = rig_ref
+                    .client
+                    .acp_cancel(rig_ref.id.clone(), rig_ref.shell.clone());
+                done_tx.send(result).unwrap();
+            });
+            // The cancel has reached dispatch once status reports it requested.
+            while !rig.status(0).cancel_requested {
+                assert!(Instant::now() < deadline, "cancel never reached dispatch");
+                thread::sleep(Duration::from_millis(1));
+            }
+            match done_rx.recv_timeout(Duration::from_millis(250)) {
+                Ok(_) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break done_rx,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("the cancel call ended without a result")
+                }
+            }
+        };
+        // This cancel is in flight and blocked on the agent's unread stdin.
         let started = Instant::now();
         let status = rig.status(0);
         assert!(

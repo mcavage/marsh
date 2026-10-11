@@ -482,7 +482,9 @@ async fn test_permission_handler_does_not_block_reader() {
 
 #[tokio::test]
 async fn test_subprocess_cancelled_permission_on_caller_drop() {
-    struct HangingHandler;
+    struct HangingHandler {
+        entered: std::sync::Arc<tokio::sync::Notify>,
+    }
     impl marsh_acp::client::PermissionHandler for HangingHandler {
         fn handle_permission(
             &self,
@@ -493,6 +495,7 @@ async fn test_subprocess_cancelled_permission_on_caller_drop() {
                     + Send,
             >,
         > {
+            self.entered.notify_one();
             Box::pin(async move {
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 marsh_acp::protocol::RequestPermissionOutcome::cancel()
@@ -500,12 +503,15 @@ async fn test_subprocess_cancelled_permission_on_caller_drop() {
         }
     }
 
+    let entered = std::sync::Arc::new(tokio::sync::Notify::new());
     let mut cmd = Command::new(fake_agent_bin());
     cmd.arg("permission-hang");
     let (client, _handle) = SubprocessHandle::spawn_client(
         cmd,
         AcpClientConfig::default(),
-        Some(std::sync::Arc::new(HangingHandler)),
+        Some(std::sync::Arc::new(HangingHandler {
+            entered: std::sync::Arc::clone(&entered),
+        })),
     )
     .expect("spawn client");
 
@@ -520,21 +526,29 @@ async fn test_subprocess_cancelled_permission_on_caller_drop() {
     let prompt_task =
         tokio::spawn(async move { c1.prompt(&s1, vec![ContentBlock::text("hang")], tx).await });
 
-    // Give subprocess time to reach permission request
-    tokio::time::sleep(Duration::from_millis(80)).await;
+    // The agent has asked for permission once the handler is running.
+    tokio::time::timeout(Duration::from_secs(30), entered.notified())
+        .await
+        .expect("agent never asked for permission");
 
     // Caller drops prompt turn
     prompt_task.abort();
 
-    // TurnGuard should abort permission handler and dispatch cancel to agent
-    // Active turn should be cleaned up within cancel_timeout
-    tokio::time::sleep(Duration::from_millis(150)).await;
-
+    // TurnGuard should abort permission handler and dispatch cancel to agent.
+    // The active turn is cleaned up within cancel_timeout (10 s by default), so
+    // a prompt that sees Busy is retried until then instead of after a fixed delay.
+    let cleanup_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let res2 = loop {
+        let (tx2, _rx2) = mpsc::channel(64);
+        let res = client_arc
+            .prompt(&session_id, vec![ContentBlock::text("turn 2")], tx2)
+            .await;
+        if !matches!(res, Err(AcpError::Busy)) || tokio::time::Instant::now() >= cleanup_deadline {
+            break res;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
     // Subsequent prompt should NOT return Busy
-    let (tx2, _rx2) = mpsc::channel(64);
-    let res2 = client_arc
-        .prompt(&session_id, vec![ContentBlock::text("turn 2")], tx2)
-        .await;
     // Subprocess finished or is ready for next turn
     assert!(
         res2.is_ok() || matches!(res2, Err(AcpError::TransportLost(_))),
