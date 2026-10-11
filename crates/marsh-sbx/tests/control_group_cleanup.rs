@@ -8,6 +8,44 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Whether `pid` has exited (gone, or a zombie awaiting its reaper), waiting
+/// up to a generous bound for an already-signalled process to die.
+fn exits(pid: i32) -> bool {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if exited(pid) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn exited(pid: i32) -> bool {
+    let Some(process) = rustix::process::Pid::from_raw(pid) else {
+        return true;
+    };
+    if rustix::process::test_kill_process(process) == Err(rustix::io::Errno::SRCH) {
+        return true;
+    }
+    if cfg!(target_os = "linux") {
+        return fs::read_to_string(format!("/proc/{pid}/stat")).is_ok_and(|stat| {
+            stat.rsplit_once(')')
+                .is_some_and(|(_, state)| state.trim_start().starts_with('Z'))
+        });
+    }
+    std::process::Command::new("/bin/ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .is_ok_and(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .starts_with('Z')
+        })
+}
+
 #[test]
 fn completed_control_leader_cannot_leave_a_same_group_late_effect() {
     closed_stdio_descendant(false);
@@ -28,13 +66,15 @@ leader = os.getpid()
 child = os.fork()
 if child == 0:
     for fd in (0, 1, 2): os.close(fd)
-    (root/'descendant.json').write_text(json.dumps({'leader':leader, 'child':os.getpid(), 'pgid':os.getpgrp()}))
+    # Atomic publish: the leader exits as soon as the name exists.
+    (root/'descendant.tmp').write_text(json.dumps({'leader':leader, 'child':os.getpid(), 'pgid':os.getpgrp()}))
+    os.replace(root/'descendant.tmp', root/'descendant.json')
     deadline = time.monotonic() + 5
     while not (root/'release').exists() and time.monotonic() < deadline: time.sleep(.005)
     if (root/'release').exists(): (root/'late-effect').write_text('descendant retained authority after successful capture')
     (root/'child-finished').write_text('finished')
     os._exit(0)
-deadline = time.monotonic() + 3
+deadline = time.monotonic() + 8
 while not (root/'descendant.json').exists():
     if time.monotonic() > deadline: os._exit(3)
     time.sleep(.005)
@@ -56,21 +96,22 @@ os._exit(0)
     };
     let result = if runtime {
         runner
-            .run_bounded(&invocation, Duration::from_secs(3))
+            .run_bounded(&invocation, Duration::from_secs(10))
             .map_err(|error| error.to_string())
     } else {
-        run_stock_command_capped(&runner, &invocation, Duration::from_secs(3), 4096)
+        run_stock_command_capped(&runner, &invocation, Duration::from_secs(10), 4096)
             .map_err(|error| error.to_string())
     };
     let identity: serde_json::Value =
         serde_json::from_slice(&fs::read(root.join("descendant.json")).unwrap()).unwrap();
     assert_eq!(identity["leader"], identity["pgid"]);
     assert_ne!(identity["child"], identity["leader"]);
+    let child = i32::try_from(identity["child"].as_i64().unwrap()).unwrap();
+    assert!(
+        exits(child),
+        "closed stdio and leader exit left a live same-group descendant"
+    );
     fs::write(root.join("release"), b"caller returned").unwrap();
-    let deadline = Instant::now() + Duration::from_secs(1);
-    while !root.join("child-finished").exists() && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(5));
-    }
     let late_effect = root.join("late-effect").exists();
     eprintln!(
         "completed capture {:?}; same-group identity {identity}; effect after caller return={late_effect}",
@@ -86,73 +127,52 @@ os._exit(0)
     );
 }
 
-// The deadline must outlast a cold /usr/bin/python3 start (the Xcode shim takes
-// hundreds of ms on a loaded runner), or the fixture is killed before it writes
-// `ready` and that attempt observes nothing about cleanup. An attempt whose
-// fixture never started is inconclusive, not a failure: it is repeated with a
-// doubled deadline until the fixture has really started.
+// The fixture is `/bin/sh`, which starts in milliseconds; the deadline only
+// has to outlast that start for the attempt to observe cleanup.
 const DEADLINE: Duration = Duration::from_secs(2);
-const OVERFLOW_DEADLINE: Duration = Duration::from_secs(3);
 const CLEANUP_SLACK: Duration = Duration::from_millis(2700);
-const ATTEMPTS: u32 = 4;
 
 #[test]
 fn deadline_and_capture_overflow_remove_owned_late_effect_authority() {
     for overflow in [false, true] {
-        let base = if overflow {
-            OVERFLOW_DEADLINE
-        } else {
-            DEADLINE
-        };
-        let observed = (0..ATTEMPTS)
-            .any(|attempt| late_effect_authority_removed(overflow, base * 2_u32.pow(attempt)));
-        assert!(
-            observed,
-            "fixture never started in {ATTEMPTS} attempts (overflow={overflow})"
-        );
+        late_effect_authority_removed(overflow);
     }
 }
 
-/// Returns false if the fixture was killed before it started; asserts
-/// everything else.
-fn late_effect_authority_removed(overflow: bool, deadline: Duration) -> bool {
+fn late_effect_authority_removed(overflow: bool) {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().canonicalize().unwrap();
-    let script = r"
-import os, pathlib, sys, time
-root = pathlib.Path(sys.argv[1])
-(root/'ready').write_text(str(os.getpid()))
-if sys.argv[2] == 'overflow': os.write(1, b'x'*8192)
-deadline = time.monotonic()+5
-while not (root/'release').exists() and time.monotonic()<deadline: time.sleep(.005)
-if (root/'release').exists(): (root/'late-effect').write_text('still alive after control failure')
-";
+    let script = r#"
+echo $$ > "$1/ready"
+if [ "$2" = overflow ]; then head -c 8192 /dev/zero; fi
+i=0
+while [ ! -e "$1/release" ] && [ $i -lt 2000 ]; do sleep 0.005; i=$((i + 1)); done
+if [ -e "$1/release" ]; then echo 'still alive after control failure' > "$1/late-effect"; fi
+"#;
     let started = Instant::now();
     let result = run_stock_command_capped(
         &SystemCommandRunner::new(&root),
         &Invocation {
-            program: "/usr/bin/python3".into(),
+            program: "/bin/sh".into(),
             arguments: vec![
-                "-I".into(),
-                "-S".into(),
                 "-c".into(),
                 script.into(),
+                "fixture".into(),
                 root.clone().into_os_string(),
                 if overflow { "overflow" } else { "deadline" }.into(),
             ],
             working_directory: Some(root.clone()),
             environment: Vec::new(),
         },
-        deadline,
+        DEADLINE,
         1024,
     );
     let elapsed = started.elapsed();
-    if !root.join("ready").exists() {
-        eprintln!("fixture never started within {deadline:?}: {result:?}; retrying");
-        return false;
-    }
+    let leader = fs::read_to_string(root.join("ready"))
+        .unwrap_or_else(|error| panic!("fixture never started within {DEADLINE:?}: {error}"));
+    let leader = leader.trim().parse::<i32>().unwrap();
+    assert!(exits(leader), "failed capture left its leader running");
     fs::write(root.join("release"), b"caller failed").unwrap();
-    thread::sleep(Duration::from_millis(100));
     assert!(
         !root.join("late-effect").exists(),
         "failed capture retained live effect authority"
@@ -166,16 +186,14 @@ if (root/'release').exists(): (root/'late-effect').write_text('still alive after
         }),
         "{error}"
     );
-    // Cleanup after the failure must finish within the same slack as ever:
-    // overflow ends the call early, a deadline ends it at the deadline.
+    // Overflow ends the call early; a deadline ends it at the deadline, and
+    // cleanup after either finishes within the same slack.
     let bound = if overflow {
-        deadline
+        DEADLINE
     } else {
-        deadline + CLEANUP_SLACK
+        DEADLINE + CLEANUP_SLACK
     };
     assert!(elapsed < bound, "cleanup exceeded its bound: {elapsed:?}");
-    eprintln!("overflow={overflow}; elapsed={elapsed:?}; error={error}; late_effect=false");
-    true
 }
 
 struct RejectCleanup(SystemCommandRunner);
