@@ -118,6 +118,24 @@ sh install.sh
 Keep `bin/` and `libexec/marsh/` under the same prefix. `marsh` looks for its
 VM binaries in `../libexec/marsh`.
 
+## Nightly builds
+
+Every commit on `main` that passes CI is published as a nightly build, a few
+hours behind `main` at most. Nightlies can break things and make no
+compatibility promise. Releases are what most people should run.
+
+```sh
+brew install mcavage/tap/marsh-nightly    # replaces a stable install: they conflict
+brew upgrade mcavage/tap/marsh-nightly
+```
+
+`marsh --version` shows a nightly as `X.Y.Z-nightly.TIME.gSHA`; the number is
+the next release after the latest one. Nightlies are GitHub prereleases on the
+[releases page](https://github.com/mcavage/marsh/releases) (the newest 10 are
+kept). The curl installer takes one with `--version`. A nightly and a stable
+install share `~/.marsh`, so go back with `brew uninstall marsh-nightly &&
+brew install mcavage/tap/marsh`.
+
 ## Upgrade
 
 With Homebrew:
@@ -169,7 +187,8 @@ Uninstalling does not remove your data. To remove it as well:
 ## Docker Sandboxes policy
 
 Release Kits and the shell image are published on Docker Hub as
-`docker.io/mcavage/marsh-*`. If your Docker Sandboxes policy restricts Kit
+`docker.io/mcavage/marsh-*` (tags `:X.Y.Z` and `:latest`; nightlies use
+`:nightly`). If your Docker Sandboxes policy restricts Kit
 sources, allow `docker.io/mcavage`.
 
 ## From source

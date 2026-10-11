@@ -37,6 +37,8 @@ MAN_DIR ?= $(TARGET_DIR)/man
 DIST_DIR ?= $(TARGET_DIR)/dist
 SITE_DIR ?= $(TARGET_DIR)/site
 KIT_REPOSITORY_NAME_PREFIX ?=
+KIT_TAG ?=
+FORMULA_CHANNEL ?= stable
 GITHUB_REPOSITORY ?= mcavage/marsh
 # Export serving is a Mac host boundary, not a Linux contributor capability.
 # Publication CLI runs once in mcp-load-callers, not again in discovery.
@@ -162,6 +164,7 @@ kit-publish:
 	$(PYTHON) scripts/prepare-kit-inputs.py --commands "$(KIT_COMMANDS)" --output "$(KIT_PREPARED_INPUTS)" \
 		$(if $(KIT_BUILD_INPUTS),--extra-inputs "$(KIT_BUILD_INPUTS)",)
 	$(PYTHON) scripts/publish-kits.py --repository-prefix "$(KIT_REPOSITORY_PREFIX)" \
+		$(if $(KIT_TAG),--tag "$(KIT_TAG)",) \
 		--commands "$(KIT_COMMANDS)" --build-inputs "$(KIT_PREPARED_INPUTS)" \
 		--output "$(KIT_RELEASE_COMMANDS)"
 
@@ -169,6 +172,7 @@ kit-publish-fixture:
 	@test -n "$(KIT_REPOSITORY_PREFIX)" || { echo 'make kit-publish-fixture: set KIT_REPOSITORY_PREFIX=registry/repository'; exit 1; }
 	$(PYTHON) scripts/prepare-kit-inputs.py --commands tests/acceptance/fixture/commands.json --output "$(KIT_FIXTURE_INPUTS)"
 	$(PYTHON) scripts/publish-kits.py --repository-prefix "$(KIT_REPOSITORY_PREFIX)" \
+		$(if $(KIT_TAG),--tag "$(KIT_TAG)",) \
 		$(if $(KIT_REPOSITORY_NAME_PREFIX),--repository-name-prefix "$(KIT_REPOSITORY_NAME_PREFIX)",) \
 		--commands tests/acceptance/fixture/commands.json --build-inputs "$(KIT_FIXTURE_INPUTS)" --output "$(KIT_FIXTURE_COMMANDS)"
 
@@ -261,11 +265,12 @@ dist-local: install-preflight man
 		MAN_DIR="$(MAN_DIR)" NOTICES_DIR="$(TARGET_DIR)/notices" \
 		sh scripts/dist.sh "$(VERSION)" "$(DIST_DIR)"
 
-# Homebrew formula for the tap, from a dist tarball's checksum.
+# Homebrew formula for the tap, from a dist tarball's checksum
+# (FORMULA_CHANNEL=nightly renders marsh-nightly.rb).
 formula:
-	$(PYTHON) scripts/render-formula.py --version "$(VERSION)" --repository "$(GITHUB_REPOSITORY)" \
+	$(PYTHON) scripts/render-formula.py --version "$(VERSION)" --repository "$(GITHUB_REPOSITORY)" --channel "$(FORMULA_CHANNEL)" \
 		--sha256 "$$(cut -d' ' -f1 "$(DIST_DIR)/marsh-$(VERSION)-darwin-arm64.tar.gz.sha256")" \
-		--output "$(DIST_DIR)/marsh.rb"
+		--output "$(DIST_DIR)/$(if $(filter nightly,$(FORMULA_CHANNEL)),marsh-nightly,marsh).rb"
 
 fixture-ref:
 	@mkdir -p "$(dir $(FIXTURE_REF_FILE))"

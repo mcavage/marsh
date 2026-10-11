@@ -15,9 +15,11 @@ env:
 
 # What CI checks: formatting, lints, the shell through its shipped binaries,
 # protocol callers, harness self-tests, docs links, and the TLA+ model.
-# What it does not: VMs. GitHub runners have no Docker Sandboxes, so the
-# stock-SBX acceptance gate (make acceptance / make dev-smoke) runs on a Mac
-# by hand before a release.
+# What it does not: start microVMs. GitHub's macOS arm64 runners are VMs
+# without nested virtualization and its Linux arm64 runners have no KVM; Linux
+# x64 has KVM, but the guests are linux/arm64 and the host needs APFS file IDs
+# (crates/marsh-host-identity). So the stock-SBX gate (make verify / regress /
+# acceptance) runs on a Mac by hand; see CONTRIBUTING.md.
 jobs:
   linux:
     name: Linux arm64 (shell, guest crates, protocols)
@@ -106,6 +108,7 @@ jobs:
           python3 tests/parallel_unittest.py -j 3 -W error \
             tests/mcp/test_stdio_protocol.py tests/mcp/test_publication_cli.py tests/mcp/test_guest_export_boundary.py
           python3 -W error -m unittest discover -s tests/acceptance -p 'test_*.py'
+          python3 -W error -m unittest discover -s tests/release -p 'test_*.py'
           python3 -m unittest discover -s tests/perf -p 'test_*.py'
           sh tests/kits/selected-home.sh
           sh tests/kits/cli-adapters.sh

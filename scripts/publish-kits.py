@@ -26,6 +26,7 @@ import uuid
 
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 REPOSITORY = re.compile(r"[a-z0-9][a-z0-9.-]*(?::[0-9]{1,5})?/[a-z0-9][a-z0-9._/-]*\Z")
+TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}\Z")
 ARGUMENT = re.compile(r"[A-Za-z][A-Za-z0-9_]*\Z")
 RULES_PATH = Path(__file__).resolve().parents[1] / "crates/marsh-contracts/src/command_registry_rules.json"
 # Explicit local loading preserves the historical importlib API without
@@ -764,7 +765,7 @@ def run(args):
                 for source, plan in plans.items():
                     recheck()
                     repository = f"{prefix}/{name_prefix}{source.name}"
-                    output = f"type=image,name={repository}:release,push=true"
+                    output = f"type=image,name={repository}:{args.tag},push=true"
                     if args.insecure_registry:
                         output += ",registry.insecure=true"
                     metadata = build(source, plan, temporary, output, "publish")
@@ -793,13 +794,15 @@ def run(args):
                 print(f"Publication receipt: {args.output.parent / receipt_name}", flush=True)
                 print(f"Pinned command registry: {args.output}", flush=True)
             except (ValueError, OSError, TypeError, KeyError, RecursionError, subprocess.SubprocessError) as error:
-                raise ValueError(f"publication may have occurred (including :release tag moves); "
+                raise ValueError(f"publication may have occurred (including :{args.tag} tag moves); "
                                  f"previous local registry retained until atomic commit: {error}") from error
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repository-prefix", help="registry/repository prefix without a tag or digest")
+    parser.add_argument("--tag", default="release",
+                        help="moving tag to push on each Kit image (default: release); consumers pin by digest")
     parser.add_argument("--commands", type=Path, default=Path("packaging/commands.json"))
     parser.add_argument("--source-root", type=Path, default=Path("."))
     parser.add_argument("--repository-name-prefix", default="",
@@ -810,6 +813,8 @@ def main():
     parser.add_argument("--validate-only", action="store_true", help="run full cache-only builds (may execute Dockerfile instructions); no push or registry write")
     args = parser.parse_args()
     try:
+        if not TAG.fullmatch(args.tag):
+            raise ValueError("--tag must be a valid image tag")
         if args.repository_name_prefix and not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", args.repository_name_prefix):
             raise ValueError("--repository-name-prefix must be at most 64 lowercase repository-name characters")
         if not args.validate_only:

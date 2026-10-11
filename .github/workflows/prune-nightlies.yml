@@ -1,0 +1,44 @@
+name: Prune nightlies
+# After a nightly publishes (and once a day, as a backstop), forget the older
+# nightly image tags on Docker Hub: keep the newest 10 per marsh-* repository (the same 10 builds whose GitHub
+# prereleases release.yml keeps). Only tags shaped X.Y.Z-nightly.STAMP.gSHA are
+# ever deleted (scripts/prune-nightlies.py). This is its own workflow, so a
+# failure here is a red run to look at and never blocks CI or a release.
+#
+# DOCKERHUB_TOKEN must be an access token with delete permission (the push-only
+# token that publishes can list tags but not delete them). Run it by hand first
+# with apply=false to see what it would delete.
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Delete (false: only report what would be deleted)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: prune-nightlies
+  cancel-in-progress: false
+jobs:
+  prune:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Prune
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_PRUNE_TOKEN || secrets.DOCKERHUB_TOKEN }}
+          APPLY: ${{ github.event_name != 'workflow_dispatch' || inputs.apply }}
+        shell: bash
+        run: |
+          python3 scripts/prune-nightlies.py --namespace mcavage --prefix marsh- --keep 10 \
+            $([ "$APPLY" = true ] && echo --apply) | tee -a "$GITHUB_STEP_SUMMARY"
