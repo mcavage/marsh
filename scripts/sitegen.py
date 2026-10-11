@@ -8,6 +8,7 @@ Layout of DIR:
   community.html        community page (docs/site/community.html)
   docs/index.html       docs/README.md
   docs/NAME.html        docs/NAME.md
+  docs/guides/...       docs/guides/*.md
   docs/design/...       docs/design/*.md, docs/architecture.md
   docs/marsh.1.html     docs/man/marsh.1.md
   docs/NAME.md          the same pages as Markdown for agents (links rewritten)
@@ -385,6 +386,9 @@ def page_map() -> dict[pathlib.Path, str]:
     for source in sorted((ROOT / "docs").glob("*.md")):
         name = "index" if source.name == "README.md" else source.stem
         pages[source] = f"docs/{name}.html"
+    for source in sorted((ROOT / "docs/guides").glob("*.md")):
+        name = "index" if source.name == "README.md" else source.stem
+        pages[source] = f"docs/guides/{name}.html"
     for source in sorted((ROOT / "docs/design").glob("*.md")):
         name = "index" if source.name == "README.md" else source.stem
         pages[source] = f"docs/design/{name}.html"
@@ -395,6 +399,9 @@ def page_map() -> dict[pathlib.Path, str]:
 NAV_GROUPS = [
     ("Start", [("Overview", "docs/index.html"), ("Install", "docs/install.html"),
                ("Quickstart", "docs/quickstart.html")]),
+    ("Guides", [("Overview", "docs/guides/index.html"), ("Race two agents", "docs/guides/race-two-agents.html"),
+                ("Let a judge pick", "docs/guides/add-a-judge.html"),
+                ("Review with a panel", "docs/guides/review-with-a-panel.html")]),
     ("Use", [("The shell", "docs/shell.html"), ("Choosing a shell", "docs/shells.html"),
              ("Commands and Kits", "docs/kits.html")]),
     ("Compose", [("Agents running agents", "docs/agents.html"), ("Split and join", "docs/split.html"),
@@ -413,6 +420,10 @@ DESCRIPTIONS = {
     "docs/index.html": "Manual index: what marsh is and where each topic lives.",
     "docs/install.html": "Install marsh and Docker Sandboxes with Homebrew or the install script. Upgrade, uninstall, build from source.",
     "docs/quickstart.html": "Open a shell, run an agent, split work across two agents, and read the results, in about ten minutes.",
+    "docs/guides/index.html": "Task-shaped walkthroughs: race agents on a bug, have a judge pick, review a change with a panel.",
+    "docs/guides/race-two-agents.html": "Run two agents on the same failing test at once, each on a private copy, gate each on your tests, and apply the one that passes.",
+    "docs/guides/add-a-judge.html": "Add a judge agent after join: it reads every branch's result and names the patch to apply, or applies it.",
+    "docs/guides/review-with-a-panel.html": "Run one reviewer agent per concern plus your own checks at once, in forks, before you merge.",
     "docs/shell.html": "The Bash-compatible shell: where it runs, startup files, and the documented differences from Bash.",
     "docs/shells.html": "Use the shell VM's own bash or zsh instead of Brush, and what you lose.",
     "docs/kits.html": "Registered commands and Kits: the default claude, codex, and pi commands, signing in, adding your own, and limits.",

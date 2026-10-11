@@ -1209,9 +1209,13 @@ class Workspaces(Smoke):
         return vm
 
     def doc_examples(self) -> None:
-        """docs/split.md: every marked example runs as written (host bash and/or the shell)."""
+        """docs/split.md and docs/guides/*.md: every marked example runs as written (host bash
+        and/or the shell); guides replace their model calls with fixture commands."""
         failures = []
-        for number, example in enumerate(doc_examples.examples()):
+        docs = [doc_examples.DOC, *sorted((doc_examples.DOC.parent / "guides").glob("*.md"))]
+        found = [example for doc in docs for example in doc_examples.examples(doc)]
+        require(any(example.doc == "race-two-agents.md" for example in found), "no guide examples found")
+        for number, example in enumerate(found):
             runs = [(example.script, True)]
             if example.control:
                 require(example.control in example.script, f"{example.name()}: control text missing")
