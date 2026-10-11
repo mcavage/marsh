@@ -156,8 +156,9 @@ A model pass supports a review; it is not evidence about the Rust code.
 User docs live in `docs/` and become [runmar.sh](https://runmar.sh). Commands
 shown must match `marsh --help`. `make site` builds the site and checks every
 link; `make man` renders the manual page from `docs/man/marsh.1.md`. Examples
-marked `<!-- doc-test: ... -->` in `docs/split.md` and `docs/agents.md` run in
-the acceptance suite.
+marked `<!-- doc-test: ... -->` in `docs/split.md`, `docs/agents.md`, and
+`docs/guides/` run in the acceptance suite (a guide swaps its model calls for
+fixture commands with `replace=`).
 
 ## Pull requests
 

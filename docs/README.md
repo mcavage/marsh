@@ -33,6 +33,18 @@ Start with the [Quickstart](quickstart.md).
 - [Quickstart](quickstart.md): split two agents, apply a patch, set up
   credentials
 
+## Guides
+
+Walkthroughs for doing a job, in the order to read them
+([all guides](guides/README.md)):
+
+- [Race two agents on one bug](guides/race-two-agents.md): parallel attempts,
+  each proved by your tests, and one patch you choose
+- [Let a judge pick the winner](guides/add-a-judge.md): a third agent reads
+  both results
+- [Review a change with a panel](guides/review-with-a-panel.md): one reviewer
+  per concern, plus your checks, at once
+
 ## Using marsh
 
 - [The shell](shell.md): where you are, startup files, Bash compatibility
