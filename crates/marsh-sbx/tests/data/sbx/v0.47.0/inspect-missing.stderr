@@ -1,0 +1,2 @@
+error: sandbox 'marsh-nonexistent-zz9' not found
+  try: sbx ls

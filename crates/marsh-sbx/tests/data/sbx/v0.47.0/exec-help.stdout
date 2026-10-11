@@ -1,0 +1,37 @@
+Execute a command in a sandbox. If the sandbox is stopped, it is started first. Or — with --cloud — the cloud sandbox
+ID (sbx_*) or name from "sbx --cloud ls".
+
+Flags match the behavior of "docker exec", except detached exec (-d/--detach)
+is not supported. Some flags (-d, --user, --privileged)
+are not supported with --cloud and are rejected rather than silently ignored.
+--detach-keys applies only to an interactive (-i/-t) cloud exec.
+
+Usage:
+  sbx exec [flags] SANDBOX COMMAND [ARG...]
+
+Examples:
+  # Open a shell inside a sandbox
+  sbx exec -it my-sandbox bash
+
+  # Run as root
+  sbx exec -u root my-sandbox apt-get update
+
+  # Cloud: run a command in a cloud sandbox by ID or name
+  sbx --cloud exec -it sbx_abc123 bash
+  sbx --cloud exec -it claude/my-sandbox bash
+
+Flags:
+  -d, --detach                 Detached mode (not supported)
+      --detach-keys string     Override the key sequence for detaching a container
+  -e, --env stringArray        Set environment variables
+      --env-file stringArray   Read in a file of environment variables
+  -h, --help                   help for exec
+  -i, --interactive            Keep STDIN open even if not attached
+      --privileged             Give extended privileges to the command
+  -t, --tty                    Allocate a pseudo-TTY
+  -u, --user string            Username or UID (format: <name|uid>[:<group|gid>])
+  -w, --workdir string         Working directory inside the container
+
+Global Flags:
+      --cloud   Dispatch to Docker Cloud Sandboxes API instead of local sandboxd (supported by a growing set of verbs — run 'sbx --cloud --help' for the current list)
+  -D, --debug   Enable debug logging

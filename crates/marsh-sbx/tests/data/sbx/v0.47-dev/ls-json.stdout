@@ -1,0 +1,1 @@
+[{"name":"general","id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","agent":"shell","status":"stopped","last_used_at":"2026-10-09T07:00:00Z","created_at":"2026-10-01T07:00:00Z"},{"name":"scratch","id":"1a2b3c4d-4b5a-4978-8695-a4b3c2d1e0f9","agent":"shell","status":"running","detached":true,"last_used_at":"2026-10-09T07:00:00Z","created_at":"2026-10-01T07:00:00Z"}]
