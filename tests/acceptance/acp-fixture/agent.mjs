@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import readline from "node:readline";
 
 const sessionId = "synthetic-acp-session";
@@ -60,8 +61,17 @@ for await (const line of inputLines) {
         } });
       }
       if (text === "control-flood") {
+        // Stop reading stdin until the caller creates the release file. The
+        // 60 s bound only keeps a failed caller from leaving a stuck peer.
         inputLines.pause();
-        setTimeout(() => process.exit(0), 5000); // bounded hostile peer lifetime; outlasts a starved caller's probes
+        const release = process.env.MARSH_FIXTURE_RELEASE;
+        const started = Date.now();
+        const timer = setInterval(() => {
+          if ((release && fs.existsSync(release)) || Date.now() - started > 60000) {
+            clearInterval(timer);
+            inputLines.resume();
+          }
+        }, 10);
         pendingPrompt = id;
         for (let n = 0; n < 200; n++) send({id:10000+n, method:"future/"+"x".repeat(30000), params:{}});
       } else if (text === "lossy") {
