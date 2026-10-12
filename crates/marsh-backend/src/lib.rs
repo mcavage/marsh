@@ -2184,7 +2184,7 @@ impl CapabilityBridges {
                     .to_vec();
                 out.extend_from_slice(&frame);
                 out.extend_from_slice(&pending[4 + length..]);
-                let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&socket) else {
+                let Ok(mut stream) = marsh_runtime::connect_unix(&socket) else {
                     break;
                 };
                 let Ok(mut reader) = stream.try_clone() else {

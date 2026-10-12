@@ -17,7 +17,9 @@ mod command_start;
 mod host_fd;
 mod writable_monitor;
 pub use command_start::command_not_started;
-pub use host_fd::with_host_descriptor_creation_excluded;
+pub use host_fd::{
+    accept_unix, connect_unix, unix_stream_pair, with_host_descriptor_creation_excluded,
+};
 
 use marsh_contracts::{ContainerId, JobSignal, JobSpec, JobSpecError, MountAccess, TerminalSize};
 use std::collections::BTreeMap;
@@ -922,18 +924,8 @@ impl CommandRunner for SystemCommandRunner {
         invocation: &Invocation,
         size: TerminalSize,
     ) -> io::Result<Attachment> {
-        let opened = nix::pty::openpty(
-            Some(&nix::pty::Winsize {
-                ws_row: size.rows,
-                ws_col: size.columns,
-                ws_xpixel: 0,
-                ws_ypixel: 0,
-            }),
-            None,
-        )
-        .map_err(io::Error::other)?;
-        let master = Arc::new(File::from(opened.master));
-        let slave = File::from(opened.slave);
+        let (master, slave) = open_pty(size)?;
+        let master = Arc::new(master);
         let mut attributes = nix::sys::termios::tcgetattr(&slave).map_err(io::Error::other)?;
         nix::sys::termios::cfmakeraw(&mut attributes);
         nix::sys::termios::tcsetattr(&slave, nix::sys::termios::SetArg::TCSANOW, &attributes)
@@ -995,6 +987,38 @@ impl CommandRunner for SystemCommandRunner {
             control,
         })
     }
+}
+
+/// A PTY whose ends are close-on-exec from creation, so a host command spawned
+/// concurrently (or later) never holds another job's terminal.
+fn open_pty(size: TerminalSize) -> io::Result<(File, File)> {
+    use rustix::pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt};
+    #[cfg(target_os = "linux")]
+    let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY | OpenptFlags::CLOEXEC)?;
+    #[cfg(not(target_os = "linux"))]
+    let master = with_host_descriptor_creation_excluded(|| -> io::Result<OwnedFd> {
+        let master = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY)?;
+        rustix::io::fcntl_setfd(&master, rustix::io::FdFlags::CLOEXEC)?;
+        Ok(master)
+    })?;
+    grantpt(&master)?;
+    unlockpt(&master)?;
+    let name = ptsname(&master, Vec::new())?;
+    let slave = rustix::fs::open(
+        name.as_c_str(),
+        rustix::fs::OFlags::RDWR | rustix::fs::OFlags::NOCTTY | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )?;
+    rustix::termios::tcsetwinsize(
+        &slave,
+        rustix::termios::Winsize {
+            ws_row: size.rows,
+            ws_col: size.columns,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        },
+    )?;
+    Ok((File::from(master), File::from(slave)))
 }
 
 /// Generic fresh-container lifecycle implemented by local and future remote runtimes.

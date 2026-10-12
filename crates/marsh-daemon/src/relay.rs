@@ -272,7 +272,7 @@ where
                     }
                     continue;
                 }
-                let Ok(stream) = UnixStream::connect(daemon_socket) else {
+                let Ok(stream) = marsh_runtime::connect_unix(daemon_socket) else {
                     if let Err(error) = send(&tunnel, &TunnelFrame::Close { connection }) {
                         break Err(error);
                     }

@@ -3205,7 +3205,7 @@ impl Server {
     }
 
     pub fn serve_one(&self) -> Result<(), DaemonError> {
-        let (stream, _) = self.lifecycle.listener.accept()?;
+        let stream = marsh_runtime::accept_unix(&self.lifecycle.listener)?;
         self.handler().handle(stream)
     }
 
@@ -3216,8 +3216,8 @@ impl Server {
         self.lifecycle.listener.set_nonblocking(true)?;
         let active_connections = Arc::new(AtomicUsize::new(0));
         while !stop() && !self.shutdown_requested.load(Ordering::Acquire) {
-            match self.lifecycle.listener.accept() {
-                Ok((stream, _)) => {
+            match marsh_runtime::accept_unix(&self.lifecycle.listener) {
+                Ok(stream) => {
                     let Some(permit) = acquire_daemon_connection(&active_connections) else {
                         drop(stream);
                         continue;
@@ -4785,13 +4785,13 @@ impl ServerAttachment {
     /// Builds an in-process framed attachment for an independently managed
     /// Kit caller. The backend receives `server`; the controller retains `client`.
     pub fn pair() -> Result<(Self, ClientExecution), DaemonError> {
-        let (server, client) = UnixStream::pair()?;
+        let (server, client) = marsh_runtime::unix_stream_pair()?;
         Ok((Self::new(server)?, ClientExecution::new(client)?))
     }
 
     /// In-process shell caller using the same stdin credit window as public `OpenShell`.
     pub fn shell_pair() -> Result<(Self, ClientExecution), DaemonError> {
-        let (server, client) = UnixStream::pair()?;
+        let (server, client) = marsh_runtime::unix_stream_pair()?;
         Ok((Self::new(server)?, ClientExecution::new_shell(client)?))
     }
 
@@ -5142,7 +5142,7 @@ impl Client {
         pty: Option<TerminalSize>,
         cwd: Option<PathBuf>,
     ) -> Result<i32, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         write_frame(
             &mut stream,
             &Envelope {
@@ -5164,7 +5164,7 @@ impl Client {
         body: PublicRequest,
         read_timeout: Duration,
     ) -> Result<PublicReply, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_read_timeout(Some(read_timeout))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         write_frame(
@@ -5203,7 +5203,7 @@ impl Client {
         session: SessionSpec,
         reservation_id: Option<String>,
     ) -> Result<(String, String, UnixStream), DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_read_timeout(Some(Duration::from_mins(4)))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         write_frame(
@@ -5486,8 +5486,8 @@ impl Client {
         let rejected = |error: DaemonError| {
             DaemonError::Publication(PublicationOutcome::rejected(error.to_string()))
         };
-        let mut stream =
-            UnixStream::connect(&self.paths.socket).map_err(|error| rejected(error.into()))?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)
+            .map_err(|error| rejected(error.into()))?;
         // Backend owns cold preparation deadlines. A lost reply after complete
         // dispatch is not a rejection and must never imply remote cancellation.
         stream
@@ -5570,7 +5570,7 @@ impl Client {
     }
 
     pub fn reset_workers(&self, selection: LoadSelection) -> Result<Vec<String>, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         write_frame(
             &mut stream,
@@ -5617,7 +5617,7 @@ impl Client {
         request: PublicRequest,
         timeout: Duration,
     ) -> Result<ScopeLifecycleReport, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         write_frame(
             &mut stream,
@@ -5674,7 +5674,7 @@ impl Client {
         dev: bool,
         mut progress_output: impl Write,
     ) -> Result<PreparationResult, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         write_frame(
             &mut stream,
             &Envelope {
@@ -5786,7 +5786,7 @@ impl Client {
     }
 
     fn start_attached(&self, body: PublicRequest) -> Result<ClientExecution, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         write_frame(
             &mut stream,
             &Envelope {
@@ -5823,7 +5823,7 @@ impl Client {
     /// Send one request and hand back the stream for a streamed exchange
     /// (`SplitCreate`, `SplitJoin`).
     pub fn open_request(&self, request: PublicRequest) -> Result<UnixStream, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         write_frame(
             &mut stream,
             &Envelope {
@@ -5836,7 +5836,7 @@ impl Client {
     }
 
     pub fn start_shell(&self, spec: ShellSpec) -> Result<ClientExecution, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         write_frame(
             &mut stream,
             &Envelope {

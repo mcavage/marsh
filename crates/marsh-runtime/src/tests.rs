@@ -6,7 +6,6 @@ use marsh_contracts::{JobIdentity, JobMount, JobResources, MountAccess, OciImage
 use std::{
     collections::{BTreeMap, VecDeque},
     io::{self, Cursor},
-    os::unix::net::UnixListener,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -312,9 +311,11 @@ fn engine_response(
 ) -> (tempfile::TempDir, PathBuf, thread::JoinHandle<Vec<u8>>) {
     let directory = tempfile::tempdir().unwrap();
     let socket = directory.path().join("engine.sock");
-    let listener = UnixListener::bind(&socket).unwrap();
+    let listener =
+        with_host_descriptor_creation_excluded(|| std::os::unix::net::UnixListener::bind(&socket))
+            .unwrap();
     let server = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
+        let mut stream = accept_unix(&listener).unwrap();
         let mut request = Vec::new();
         let mut byte = [0_u8; 1];
         while !request.ends_with(b"\r\n\r\n") {
@@ -1701,4 +1702,30 @@ fn only_explicit_session_identity_enters_the_job_environment() {
     ] {
         assert!(!environment.iter().any(|value| value.starts_with(forbidden)));
     }
+}
+
+/// A terminal job's PTY belongs to that job alone: a later host command (for
+/// another job, scope or session) must not inherit either end.
+#[test]
+fn later_host_commands_do_not_inherit_a_terminal_jobs_pty() {
+    let runner = SystemCommandRunner::new("/tmp");
+    let invocation = |program: &str, arguments: &[&str]| Invocation {
+        program: program.into(),
+        arguments: arguments.iter().map(Into::into).collect(),
+        working_directory: None,
+        environment: Vec::new(),
+    };
+    let descriptors = || {
+        let output = runner.run(&invocation("/bin/ls", &["/dev/fd"])).unwrap();
+        assert!(output.succeeded());
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let before = descriptors();
+    let mut terminal = runner
+        .spawn_pty(&invocation("/bin/sh", &["-c", "read line"]))
+        .unwrap();
+    let during = descriptors();
+    terminal.stdin.write_all(b"done\n").unwrap();
+    terminal.process.wait().unwrap();
+    assert_eq!(during, before, "a later host command inherited the PTY");
 }
