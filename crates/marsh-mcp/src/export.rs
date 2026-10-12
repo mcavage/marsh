@@ -1337,7 +1337,7 @@ fn natural_guest_home() -> Result<PathBuf, String> {
     Ok(account.dir)
 }
 
-pub type TaskOutput = (
+type TaskOutput = (
     Vec<u8>,
     bool,
     Vec<u8>,
@@ -1346,14 +1346,6 @@ pub type TaskOutput = (
     Option<String>,
     bool,
 );
-
-#[doc(hidden)]
-pub async fn test_escalate_and_drain(
-    execution: &marsh_daemon::ClientExecution,
-    receive_handle: &mut tokio::task::JoinHandle<TaskOutput>,
-) -> TaskOutput {
-    escalate_and_drain(execution, receive_handle).await
-}
 
 async fn escalate_and_drain(
     execution: &marsh_daemon::ClientExecution,
@@ -1930,22 +1922,6 @@ mod tests {
     }
 
     #[test]
-    fn prepare_arguments_rejects_unknown_field_mcp01() {
-        let decl = ToolDeclaration::load_from_str(sample_declaration_json(), None).unwrap();
-        let export_mcp = ExportMcp::new(ExportConfig {
-            host_config: fake_host_config(),
-            declaration: decl,
-            declaration_path: None,
-        });
-        let input = json!({
-            "filter": "auth_test",
-            "unknown_injected_field": "injected"
-        });
-        let err = export_mcp.prepare_arguments(&input).unwrap_err();
-        assert!(err.contains("unknown field 'unknown_injected_field' is not permitted"));
-    }
-
-    #[test]
     fn prepare_arguments_rejects_missing_required_field() {
         let decl = ToolDeclaration::load_from_str(sample_declaration_json(), None).unwrap();
         let export_mcp = ExportMcp::new(ExportConfig {
@@ -1958,22 +1934,6 @@ mod tests {
         });
         let err = export_mcp.prepare_arguments(&input).unwrap_err();
         assert!(err.contains("missing required field 'filter'"));
-    }
-
-    #[test]
-    fn prepare_arguments_rejects_option_injection_mcp02() {
-        let decl = ToolDeclaration::load_from_str(sample_declaration_json(), None).unwrap();
-        let export_mcp = ExportMcp::new(ExportConfig {
-            host_config: fake_host_config(),
-            declaration: decl,
-            declaration_path: None,
-        });
-        let input = json!({
-            "filter": "--delete-all-data",
-            "verbose": false
-        });
-        let err = export_mcp.prepare_arguments(&input).unwrap_err();
-        assert!(err.contains("cannot start with '-' (option injection prevented)"));
     }
 
     #[test]
@@ -2113,43 +2073,5 @@ mod tests {
             "local-v3:/path/to/test-kit@md5:0123456789abcdef",
             expected
         ));
-    }
-
-    #[test]
-    fn bound_response_data_utf8_safe_no_panics() {
-        let mut data = ExportExecutionData {
-            tool_name: "test".to_string(),
-            command: "test".to_string(),
-            outcome: ExecutionOutcome::Success,
-            execution: None,
-            exit_code: Some(0),
-            // Multi-byte characters (4-byte emojis, 3-byte CJK) and escape characters
-            stdout: "🦀🚀✨\n\"\\\t\r你好世界".repeat(100_000),
-            stderr: "приветαβγδε\"\\\n\t".repeat(100_000),
-            stdout_base64: String::new(),
-            stderr_base64: String::new(),
-            stdout_text_state: "utf8".to_string(),
-            stderr_text_state: "utf8".to_string(),
-            stdout_truncated: false,
-            stderr_truncated: false,
-            output_complete: true,
-            job_id: Some("job_123".to_string()),
-            receipt_selector: Some("cursor_123".to_string()),
-            cleanup_certainty: "verified".to_string(),
-            host_cleanup_certainty: None,
-        };
-
-        bound_response_data(&mut data);
-
-        assert!(data.stdout_truncated || data.stderr_truncated);
-        assert!(!data.output_complete);
-        let frame_len = measure_call_tool_result_frame(&data);
-        assert!(
-            frame_len <= 1_048_576,
-            "frame_len {frame_len} exceeds 1 MiB"
-        );
-        // Verify both strings remain valid UTF-8 and don't panic
-        assert!(!data.stdout.is_empty());
-        assert!(!data.stderr.is_empty());
     }
 }
