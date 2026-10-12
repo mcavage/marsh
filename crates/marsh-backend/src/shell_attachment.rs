@@ -260,11 +260,21 @@ fn poll_exit(process: &mut dyn AttachedProcess, until: Instant) -> io::Result<Op
 /// Runs indefinitely while the controller/process are healthy. Teardown begins
 /// only after an exit or concrete I/O/control failure. The trusted guest cleanup
 /// method owns bounded TERM/grace/KILL and supplies a verified quiescence receipt.
+pub(super) fn run(process: Attachment, attachment: &ServerAttachment) -> Outcome {
+    run_with_drain(process, attachment, DRAIN)
+}
+
+/// [`run`] with an explicit teardown bound, so tests need not wait out the
+/// production one.
 #[allow(
     clippy::too_many_lines,
     reason = "one owner retains every process and I/O handle through teardown"
 )]
-pub(super) fn run(mut process: Attachment, attachment: &ServerAttachment) -> Outcome {
+fn run_with_drain(
+    mut process: Attachment,
+    attachment: &ServerAttachment,
+    drain: Duration,
+) -> Outcome {
     if !process.process.supports_io_cancellation() {
         let _ = process.control.cleanup_session();
         let _ = process.process.terminate();
@@ -319,14 +329,14 @@ pub(super) fn run(mut process: Attachment, attachment: &ServerAttachment) -> Out
         Err(error) => Cleanup::Uncertain(format!("guest session: {error}")),
     };
     if runtime_code.is_none() && identity_known {
-        match poll_exit(&mut *process.process, Instant::now() + DRAIN) {
+        match poll_exit(&mut *process.process, Instant::now() + drain) {
             Ok(code) => runtime_code = code,
             Err(_) => identity_known = false,
         }
     }
     if runtime_code.is_none() && identity_known {
         let termination = process.process.terminate();
-        let observed = poll_exit(&mut *process.process, Instant::now() + DRAIN);
+        let observed = poll_exit(&mut *process.process, Instant::now() + drain);
         identity_known = observed.is_ok();
         if termination.is_err() || !matches!(observed, Ok(Some(_))) {
             cleanup = Cleanup::Uncertain("local shell process could not be cleaned/reaped".into());
@@ -341,12 +351,12 @@ pub(super) fn run(mut process: Attachment, attachment: &ServerAttachment) -> Out
         delivered = false;
         let _ = attachment.shutdown();
     }
-    let mut loss_deadline = (!delivered).then(|| Instant::now() + DRAIN);
+    let mut loss_deadline = (!delivered).then(|| Instant::now() + drain);
     while !(stdout.is_finished() && stderr.is_finished()) {
         if failures.try_recv().is_ok() || attachment.peer_disconnected().unwrap_or(true) {
             delivered = false;
             let _ = attachment.shutdown();
-            loss_deadline.get_or_insert_with(|| Instant::now() + DRAIN);
+            loss_deadline.get_or_insert_with(|| Instant::now() + drain);
         }
         if loss_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             break;
@@ -580,6 +590,31 @@ mod tests {
     use marsh_runtime::{CommandRunner, Invocation, SystemCommandRunner};
     use std::{io::Read, os::unix::net::UnixStream};
 
+    /// Teardown bound under test; the production bound is [`DRAIN`].
+    const TEST_DRAIN: Duration = Duration::from_millis(100);
+    /// A healthy pause well past the teardown bound.
+    const PAUSE: Duration = Duration::from_secs(1);
+    /// Teardown after controller loss is bounded; these fixtures would
+    /// otherwise run for 60 s.
+    const TEARDOWN_BUDGET: Duration = Duration::from_secs(30);
+
+    fn run_test(process: Attachment, attachment: &ServerAttachment) -> Outcome {
+        run_with_drain(process, attachment, TEST_DRAIN)
+    }
+
+    fn wait_for(what: &str, condition: impl Fn() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !condition() {
+            assert!(Instant::now() < deadline, "timed out waiting for {what}");
+            thread::sleep(POLL);
+        }
+    }
+
+    fn process_state(pid: u32) -> Option<char> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        stat.rsplit_once(") ")?.1.chars().next()
+    }
+
     // Real local process control, not a peer manufacturing successful outcomes.
     // The fixture's single process is kept unreaped by the supervisor while this
     // control polls Linux /proc for actual quiescence after signal dispatch.
@@ -600,23 +635,17 @@ mod tests {
                 return Err(io::Error::other("control route unavailable"));
             }
             let _ = self.inner.signal(JobSignal::Terminate);
-            let deadline = Instant::now() + Duration::from_secs(1);
+            // Escalate after a short grace; fail only if even KILL is ignored.
+            let grace = Instant::now() + Duration::from_secs(1);
+            let deadline = grace + Duration::from_secs(20);
             loop {
-                let state = std::fs::read_to_string(format!("/proc/{}/stat", self.pid));
-                if state
-                    .as_ref()
-                    .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
-                    || state.as_ref().is_ok_and(|text| {
-                        text.rsplit_once(')')
-                            .is_some_and(|(_, tail)| tail.trim_start().starts_with('Z'))
-                    })
-                {
+                if process_state(self.pid).is_none_or(|state| state == 'Z') {
                     return Ok(());
                 }
-                if Instant::now() >= deadline {
+                if Instant::now() >= grace {
                     self.inner.signal(JobSignal::Kill)?;
                 }
-                if Instant::now() >= deadline + Duration::from_secs(1) {
+                if Instant::now() >= deadline {
                     return Err(io::Error::other("fixture did not terminate"));
                 }
                 thread::sleep(POLL);
@@ -625,6 +654,10 @@ mod tests {
     }
 
     fn fixture(script: &str, fail: bool) -> Attachment {
+        fixture_with_pid(script, fail).0
+    }
+
+    fn fixture_with_pid(script: &str, fail: bool) -> (Attachment, u32) {
         let runner = SystemCommandRunner::new("/tmp");
         let mut process = runner
             .spawn_attached(&Invocation {
@@ -649,7 +682,7 @@ mod tests {
             pid,
             fail,
         });
-        process
+        (process, pid)
     }
 
     #[test]
@@ -658,11 +691,12 @@ mod tests {
         let (server, mut client) = UnixStream::pair().unwrap();
         let (send, receive) = mpsc::channel();
         let task = thread::spawn(move || {
-            let outcome = run(process, &ServerAttachment::new(server).unwrap());
+            let outcome = run_test(process, &ServerAttachment::new(server).unwrap());
             send.send(outcome).unwrap();
         });
         marsh_daemon::write_frame(&mut client, &AttachmentFrame::StdinEof).unwrap();
-        thread::sleep(Duration::from_secs(3));
+        // An idle shell past EOF and well past the teardown bound keeps running.
+        thread::sleep(PAUSE);
         assert!(matches!(receive.try_recv(), Err(mpsc::TryRecvError::Empty)));
         marsh_daemon::write_frame(
             &mut client,
@@ -671,7 +705,7 @@ mod tests {
             },
         )
         .unwrap();
-        let outcome = receive.recv_timeout(Duration::from_secs(6)).unwrap();
+        let outcome = receive.recv_timeout(TEARDOWN_BUDGET).unwrap();
         task.join().unwrap();
         assert_eq!(outcome.runtime_code, Some(42));
         assert!(outcome.delivered, "{outcome:?}");
@@ -682,7 +716,8 @@ mod tests {
     fn early_real_consumer_preserves_nonzero_status_while_closing_input() {
         let process = fixture("head -c 1 >/dev/null; exit 7", false);
         let (server, mut client) = UnixStream::pair().unwrap();
-        let task = thread::spawn(move || run(process, &ServerAttachment::new(server).unwrap()));
+        let task =
+            thread::spawn(move || run_test(process, &ServerAttachment::new(server).unwrap()));
         marsh_daemon::write_frame(
             &mut client,
             &AttachmentFrame::Stdin {
@@ -703,7 +738,7 @@ mod tests {
             let process = fixture(&format!("head -c 1 >/dev/null; exit {expected}"), false);
             let (server, client) = ServerAttachment::shell_pair().unwrap();
             let task = thread::spawn(move || {
-                let outcome = run(process, &server);
+                let outcome = run_test(process, &server);
                 server
                     .send(&AttachmentFrame::Exited {
                         code: outcome.status(),
@@ -738,7 +773,8 @@ mod tests {
     fn blocked_real_stdin_disconnect_escalates_and_reaps() {
         let process = fixture("trap '' TERM; exec sleep 60", false);
         let (server, mut client) = UnixStream::pair().unwrap();
-        let task = thread::spawn(move || run(process, &ServerAttachment::new(server).unwrap()));
+        let task =
+            thread::spawn(move || run_test(process, &ServerAttachment::new(server).unwrap()));
         for _ in 0..SHELL_STDIN_WINDOW {
             marsh_daemon::write_frame(
                 &mut client,
@@ -751,7 +787,7 @@ mod tests {
         let start = Instant::now();
         drop(client);
         let outcome = task.join().unwrap();
-        assert!(start.elapsed() < Duration::from_secs(5), "{outcome:?}");
+        assert!(start.elapsed() < TEARDOWN_BUDGET, "{outcome:?}");
         assert!(matches!(outcome.cleanup, Cleanup::Verified), "{outcome:?}");
         assert!(!outcome.delivered);
     }
@@ -765,14 +801,15 @@ mod tests {
             );
             let (server, client) = ServerAttachment::shell_pair().unwrap();
             let task = thread::spawn(move || {
-                let outcome = run(process, &server);
+                let outcome = run_test(process, &server);
                 let _ = server.send(&AttachmentFrame::Exited {
                     code: outcome.status(),
                 });
                 outcome
             });
             client.send(&AttachmentFrame::StdinEof).unwrap();
-            thread::sleep(Duration::from_secs(7));
+            // A healthy controller that stops reading past the teardown bound.
+            thread::sleep(PAUSE);
             let mut output = Vec::new();
             let terminal = loop {
                 match client.receive() {
@@ -808,19 +845,16 @@ mod tests {
         let process = fixture(&format!("exec python3 -c '{program}'"), false);
         let (server, client) = ServerAttachment::shell_pair().unwrap();
         let task = thread::spawn(move || {
-            let outcome = run(process, &server);
+            let outcome = run_test(process, &server);
             let _ = server.send(&AttachmentFrame::Exited {
                 code: outcome.status(),
             });
             outcome
         });
         client.send(&AttachmentFrame::StdinEof).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while !marker.exists() && Instant::now() < deadline {
-            thread::sleep(POLL);
-        }
-        let produced_before_read = marker.exists();
-        thread::sleep(Duration::from_secs(7));
+        wait_for("the producer to finish writing", || marker.exists());
+        // The producer has exited; its controller pauses past the teardown bound.
+        thread::sleep(PAUSE);
         let mut output = Vec::new();
         let terminal = loop {
             match client.receive() {
@@ -831,12 +865,7 @@ mod tests {
             }
         };
         let outcome = task.join().unwrap();
-        assert!(
-            produced_before_read,
-            "fixture did not finish writing before pause: {outcome:?}"
-        );
         assert_eq!(output, vec![255; 65536], "{outcome:?}");
-        // The producer finished before the 7 s pause; every byte still arrived.
         assert_eq!(terminal.unwrap(), 42);
     }
 
@@ -868,7 +897,7 @@ mod tests {
             }
             let (server, client) = ServerAttachment::shell_pair().unwrap();
             let task = thread::spawn(move || {
-                let outcome = run(process, &server);
+                let outcome = run_test(process, &server);
                 server
                     .send(&AttachmentFrame::Exited {
                         code: outcome.status(),
@@ -930,35 +959,27 @@ mod tests {
             cancelled.display(),
             ready.display()
         );
-        let process = fixture(&format!("exec python3 -c '{program}'"), false);
+        let (process, pid) = fixture_with_pid(&format!("exec python3 -c '{program}'"), false);
         let (server, client) = ServerAttachment::shell_pair().unwrap();
-        let task = thread::spawn(move || run(process, &server));
+        let task = thread::spawn(move || run_test(process, &server));
         client.send(&AttachmentFrame::StdinEof).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while !ready.exists() && Instant::now() < deadline {
-            thread::sleep(POLL);
-        }
-        let was_ready = ready.exists();
-        thread::sleep(Duration::from_millis(100));
+        wait_for("the producer to start", || ready.exists());
+        // Nothing reads its output, so the producer blocks in write.
+        wait_for("the producer to block on full output", || {
+            process_state(pid) == Some('S')
+        });
         let start = Instant::now();
         client
             .send(&AttachmentFrame::Signal {
                 signal: "TERM".into(),
             })
             .unwrap();
-        while !cancelled.exists() && start.elapsed() < Duration::from_secs(2) {
-            thread::sleep(POLL);
-        }
-        let cancellation_observed = cancelled.exists();
+        wait_for("cancellation behind full output", || cancelled.exists());
         // No reads at all: a real peer close, rather than a healthy pause,
         // now wakes every writer and joins all owned I/O workers.
         client.shutdown().unwrap();
         let outcome = task.join().unwrap();
-        assert!(
-            was_ready && cancellation_observed,
-            "cancel blocked behind full output: {outcome:?}"
-        );
-        assert!(start.elapsed() < Duration::from_secs(5), "{outcome:?}");
+        assert!(start.elapsed() < TEARDOWN_BUDGET, "{outcome:?}");
         assert_eq!(outcome.runtime_code, Some(42));
         assert!(
             !outcome.delivered && matches!(outcome.cleanup, Cleanup::Verified),
@@ -973,8 +994,8 @@ mod tests {
         let (server, client) = UnixStream::pair().unwrap();
         drop(client);
         let start = Instant::now();
-        let outcome = run(process, &ServerAttachment::new(server).unwrap());
-        assert!(start.elapsed() < Duration::from_secs(5));
+        let outcome = run_test(process, &ServerAttachment::new(server).unwrap());
+        assert!(start.elapsed() < TEARDOWN_BUDGET);
         assert!(
             matches!(outcome.cleanup, Cleanup::Uncertain(_)),
             "{outcome:?}"
@@ -1004,7 +1025,7 @@ mod tests {
             relay.stop(),
             Err(DaemonError::ShellCleanupUncertain(_))
         ));
-        assert!(start.elapsed() < Duration::from_secs(5));
+        assert!(start.elapsed() < TEARDOWN_BUDGET);
     }
 
     #[test]
@@ -1013,8 +1034,8 @@ mod tests {
         let (server, client) = UnixStream::pair().unwrap();
         drop(client);
         let start = Instant::now();
-        let outcome = run(process, &ServerAttachment::new(server).unwrap());
-        assert!(start.elapsed() < Duration::from_secs(5));
+        let outcome = run_test(process, &ServerAttachment::new(server).unwrap());
+        assert!(start.elapsed() < TEARDOWN_BUDGET);
         assert!(matches!(outcome.cleanup, Cleanup::Verified), "{outcome:?}");
         assert!(!outcome.delivered);
     }

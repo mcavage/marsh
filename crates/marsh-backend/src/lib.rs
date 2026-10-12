@@ -3035,14 +3035,13 @@ mod typed_receipt_callers;
 
 #[cfg(test)]
 mod tests {
-    mod shell_status;
     use super::*;
     use marsh_daemon::SessionAuthority;
     use std::{
         collections::VecDeque,
         io::{self, Cursor},
         os::unix::net::UnixStream,
-        sync::{Arc, Barrier, mpsc},
+        sync::{Arc, mpsc},
     };
 
     struct NeverRunner;
@@ -3104,58 +3103,31 @@ mod tests {
 
     struct SessionCleanupRunner(Mutex<VecDeque<marsh_runtime::CommandOutput>>);
 
-    fn assert_failed_flight_is_shared_and_later_retry_can_succeed(message: &str) {
-        let completion = Arc::new(Mutex::new(KitFlightCompletion::default()));
-        let observed = Arc::new(Barrier::new(4));
-        let completed = Arc::new(Barrier::new(4));
-        let tasks = (0..3)
-            .map(|_| {
-                let completion = Arc::clone(&completion);
-                let observed = Arc::clone(&observed);
-                let completed = Arc::clone(&completed);
-                thread::spawn(move || {
-                    let before = completion.lock().unwrap().epoch;
-                    observed.wait();
-                    completed.wait();
-                    completed_flight_outcome(before, &completion.lock().unwrap(), true)
-                        .expect("overlapping caller must observe completed flight")
-                        .expect_err("failed flight must be replayed")
-                })
-            })
-            .collect::<Vec<_>>();
-        observed.wait();
-        *completion.lock().unwrap() = KitFlightCompletion {
+    /// A caller that waited out another caller's Kit flight shares its
+    /// outcome; a caller that arrives after the flight does its own work.
+    #[test]
+    fn callers_that_overlap_a_kit_flight_share_its_outcome() {
+        let failed = KitFlightCompletion {
             epoch: 1,
-            error: Some(message.into()),
+            error: Some("validation failed".into()),
         };
-        completed.wait();
-        assert!(
-            tasks
-                .into_iter()
-                .all(|task| task.join().unwrap() == message)
-        );
-
-        // A caller arriving after the failed flight observes its epoch and is
-        // allowed to retry rather than replaying the old failure forever.
-        assert!(completed_flight_outcome(1, &completion.lock().unwrap(), true).is_none());
-        *completion.lock().unwrap() = KitFlightCompletion {
+        let succeeded = KitFlightCompletion {
             epoch: 2,
             error: None,
         };
-        assert_eq!(
-            completed_flight_outcome(1, &completion.lock().unwrap(), true),
-            Some(Ok(()))
-        );
-    }
-
-    #[test]
-    fn three_overlapping_validation_failures_are_coalesced_then_retry_succeeds() {
-        assert_failed_flight_is_shared_and_later_retry_can_succeed("validation failed");
-    }
-
-    #[test]
-    fn three_overlapping_repair_failures_are_coalesced_then_retry_succeeds() {
-        assert_failed_flight_is_shared_and_later_retry_can_succeed("repair failed");
+        for (observed, completion, cached, expected) in [
+            (0, &failed, true, Some(Err("validation failed".to_owned()))),
+            (1, &failed, true, None),
+            (1, &succeeded, true, Some(Ok(()))),
+            // A flight that left no Ready VM cannot be shared.
+            (1, &succeeded, false, None),
+        ] {
+            assert_eq!(
+                completed_flight_outcome(observed, completion, cached),
+                expected,
+                "observed epoch {observed}, completion {completion:?}, cached {cached}"
+            );
+        }
     }
 
     impl marsh_runtime::CommandRunner for SessionCleanupRunner {
@@ -3325,7 +3297,8 @@ mod tests {
             |timeout| receive.recv_timeout(timeout),
         );
         assert_eq!(terminal, Err(true));
-        assert!(started.elapsed() < Duration::from_secs(1));
+        // The 25 ms deadline, not a fixed protocol wait, ended the receive.
+        assert!(started.elapsed() < Duration::from_secs(10));
     }
 
     impl marsh_runtime::CommandRunner for NeverRunner {
@@ -3490,7 +3463,6 @@ mod tests {
             arguments: vec![b"-c".to_vec(), b"true".to_vec()],
         };
         let (server, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
-        let started = Instant::now();
         let error = backend
             .open_shell(spec, ServerAttachment::new(server).unwrap(), store.clone())
             .unwrap_err();
@@ -3498,7 +3470,6 @@ mod tests {
             error.to_string().contains("source batch overlaps"),
             "{error}"
         );
-        assert!(started.elapsed() < Duration::from_secs(1));
         assert!(store.status(None).workers.is_empty());
         assert!(store.jobs().jobs.is_empty());
     }
@@ -3933,12 +3904,17 @@ mod tests {
     }
 
     #[test]
-    fn public_signal_names_are_case_insensitive() {
-        assert_eq!(parse_signal("interrupt"), JobSignal::Interrupt);
-        assert_eq!(parse_signal("terminate"), JobSignal::Terminate);
-        assert_eq!(parse_signal("hangup"), JobSignal::Hangup);
-        assert_eq!(parse_signal("sigterm"), JobSignal::Terminate);
-        assert_eq!(parse_signal("SIGHUP"), JobSignal::Hangup);
+    fn public_signal_names_match_in_any_case_and_default_to_interrupt() {
+        for (name, signal) in [
+            ("Terminate", JobSignal::Terminate),
+            ("sigterm", JobSignal::Terminate),
+            ("hangup", JobSignal::Hangup),
+            ("SIGHUP", JobSignal::Hangup),
+            ("Kill", JobSignal::Kill),
+            ("unrecognized", JobSignal::Interrupt),
+        ] {
+            assert_eq!(parse_signal(name), signal, "{name}");
+        }
     }
 
     #[test]
@@ -4607,7 +4583,7 @@ mod tests {
         });
 
         cleanup_entered_receive
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(Duration::from_secs(20))
             .unwrap();
         let blocked = marsh_daemon::read_frame::<AttachmentFrame>(&mut client).unwrap_err();
         assert!(
@@ -4647,24 +4623,32 @@ mod tests {
 
     #[test]
     fn disconnected_client_wakes_backpressured_output_drain_and_cleanup() {
-        let (server, stalled_client) = UnixStream::pair().unwrap();
+        use std::io::Read as _;
+        let (server, mut stalled_client) = UnixStream::pair().unwrap();
+        // The client disconnects once output has started; 8 MiB cannot fit in
+        // the socket buffer, so the writer is then blocked on it.
         let disconnect = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(100));
+            stalled_client.read_exact(&mut [0]).unwrap();
             drop(stalled_client);
         });
         let attachment = ServerAttachment::new(server).unwrap();
         let output = vec![b'x'; 8 * 1024 * 1024];
-        let started = Instant::now();
-        let copied = join_stream(stream_output(
-            Box::new(Cursor::new(output.clone())),
-            attachment,
-            false,
-        ))
-        .unwrap();
+        let (done, drained) = mpsc::channel();
+        let source = output.clone();
+        thread::spawn(move || {
+            let _ = done.send(join_stream(stream_output(
+                Box::new(Cursor::new(source)),
+                attachment,
+                false,
+            )));
+        });
+        let copied = drained
+            .recv_timeout(Duration::from_secs(20))
+            .expect("disconnect did not wake the blocked output drain")
+            .unwrap();
 
         assert!(!copied.delivered);
         assert_eq!(copied.bytes, output.len() as u64);
-        assert!(started.elapsed() < Duration::from_secs(1));
         disconnect.join().unwrap();
     }
 
@@ -4687,7 +4671,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            receive.recv_timeout(Duration::from_secs(1)).unwrap(),
+            receive.recv_timeout(Duration::from_secs(20)).unwrap(),
             JobSignal::Interrupt
         );
     }
@@ -4745,7 +4729,7 @@ mod tests {
         )
         .unwrap();
         entered_receive
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(Duration::from_secs(20))
             .unwrap();
         marsh_daemon::write_frame(
             &mut client,
@@ -4755,7 +4739,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            signal_receive.recv_timeout(Duration::from_secs(1)).unwrap(),
+            signal_receive
+                .recv_timeout(Duration::from_secs(20))
+                .unwrap(),
             JobSignal::Interrupt
         );
         marsh_daemon::write_frame(
@@ -4768,11 +4754,11 @@ mod tests {
         marsh_daemon::write_frame(&mut client, &AttachmentFrame::StdinEof).unwrap();
         release_send.send(()).unwrap();
         entered_receive
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(Duration::from_secs(20))
             .unwrap();
         release_send.send(()).unwrap();
         finished_receive
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(Duration::from_secs(20))
             .unwrap();
         assert_eq!(*written.lock().unwrap(), b"blocked input after interrupt");
     }

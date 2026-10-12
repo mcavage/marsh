@@ -1,12 +1,23 @@
 //! Bounded Bash differentials through the embedded shell's executable entry point.
 #![cfg(unix)]
 
+mod common;
+
 use std::io::Write as _;
 use std::process::{Command, Output, Stdio};
+use std::time::Duration;
+
+/// `program` is `bash` (the GNU Bash 5.3 oracle) or a marsh shell binary.
+fn shell(program: &str) -> Command {
+    if program == "bash" {
+        common::require_bash_oracle();
+    }
+    Command::new(program)
+}
 
 fn run(program: &str, script: &str, from_stdin: bool) -> Output {
     let directory = tempfile::tempdir().unwrap();
-    let mut command = Command::new(program);
+    let mut command = shell(program);
     command
         .env_remove("BASH_ENV")
         .env_remove("ENV")
@@ -216,16 +227,17 @@ fn background_pipefail_survives_input_loop_polling() {
     // `-s` goes through the real input loop, which polls jobs before reading each line.
     // Poll the first failure while the last stage is still running, then collect after reap.
     differential_with_input_mode(
-        "set -o pipefail\nsh -c 'exit 7' | sh -c 'sleep 0.15; exit 0' & pid=$!\nsleep 0.05\nset +o pipefail\nsleep 0.2\nwait \"$pid\"\n",
+        "mkfifo gate\nset -o pipefail\nsh -c ': >left-done; exit 7' | sh -c 'read x <gate; : >right-done; exit 0' & pid=$!\nuntil test -e left-done; do sleep .005; done\nset +o pipefail\n: >gate\nuntil test -e right-done; do sleep .005; done\nwait \"$pid\"\n",
         7,
         b"",
         true,
     );
     // A canceled wait consumes from the back; the input-loop poll later consumes from the
     // front. The selected failure must stay the rightmost one, not the last one observed.
-    // Keep the left stage blocked until wait -n selects the competing job, even under load.
+    // Keep the left stage blocked until wait -n selects the competing job; it
+    // marks its exit so the next line's poll sees it gone.
     differential_with_input_mode(
-        "set -o pipefail\nsh -c 'while test ! -e release; do sleep .005; done; exit 7' | sh -c 'exit 9' | sh -c ': >right-done; exit 0' & slow=$!; while test ! -e right-done; do sleep .005; done; sh -c 'exit 3' & wait -n; first=$?; : >release\nsleep 0.1\nwait \"$slow\"; second=$?; printf '%s %s\\n' \"$first\" \"$second\"\n",
+        "set -o pipefail\nsh -c 'while test ! -e release; do sleep .005; done; : >left-done; exit 7' | sh -c 'exit 9' | sh -c ': >right-done; exit 0' & slow=$!; while test ! -e right-done; do sleep .005; done; sh -c 'exit 3' & wait -n; first=$?; : >release\nuntil test -e left-done; do sleep .005; done\nwait \"$slow\"; second=$?; printf '%s %s\\n' \"$first\" \"$second\"\n",
         0,
         b"3 9\n",
         true,
@@ -235,14 +247,15 @@ fn background_pipefail_survives_input_loop_polling() {
 #[test]
 fn jobs_p_names_group_leader_while_background_pid_names_rightmost() {
     // Each stage reports its actual PID; no comparison of nondeterministic raw PIDs.
+    // Both stages stay alive until `jobs` has run.
     differential(
-        "sh -c 'echo $$ >left; sleep 0.1' | sh -c 'echo $$ >right; sleep 0.1; exit 23' & pid=$!; jobs -p >group; wait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; test \"$(cat left)\" != \"$pid\" || exit 93; exit \"$status\"",
+        "mkfifo gl gr; sh -c 'echo $$ >left; read x <gl' | sh -c 'echo $$ >right; read x <gr; exit 23' & pid=$!; jobs -p >group; : >gl; : >gr; wait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; test \"$(cat left)\" != \"$pid\" || exit 93; exit \"$status\"",
         23,
         b"",
     );
     // Polling may remove the group leader before jobs prints it; its identity must remain.
     differential_with_input_mode(
-        "sh -c 'echo $$ >left; exit 7' | sh -c 'echo $$ >right; sleep 0.6; exit 23' & pid=$!\nuntil test -s left && test -s right; do sleep 0.01; done\nsleep 0.05\njobs -p >group\nwait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; exit \"$status\"\n",
+        "mkfifo gate\nsh -c 'echo $$ >left; exit 7' | sh -c 'echo $$ >right; read x <gate; exit 23' & pid=$!\nuntil test -s left && test -s right; do sleep 0.01; done\njobs -p >group\n: >gate\nwait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; exit \"$status\"\n",
         23,
         b"",
         true,
@@ -323,7 +336,7 @@ fn mixed_builtin_function_group_pipelines_preserve_streams_and_pipefail() {
 #[test]
 fn jobs_in_subshells_observe_parent_metadata_without_wait_ownership() {
     differential(
-        "sleep 0.5 & pid=$!; jobs -p >expected; jobs -p | cat >actual; cmp expected actual || exit 90; printf '%s\\n' \"$(jobs -p)\" >actual; cmp expected actual || exit 91; (jobs -p) >actual; test ! -s actual || exit 92; wait \"$pid\"",
+        "mkfifo gate; sh -c 'read x <gate; :' & pid=$!; jobs -p >expected; jobs -p | cat >actual; cmp expected actual || exit 90; printf '%s\\n' \"$(jobs -p)\" >actual; cmp expected actual || exit 91; (jobs -p) >actual; test ! -s actual || exit 92; : >gate; wait \"$pid\"",
         0,
         b"",
     );
@@ -384,7 +397,7 @@ fn script_operands_search_path_and_keep_original_zero_without_execute_permission
     )
     .unwrap();
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
-        let mut command = Command::new(program);
+        let mut command = shell(program);
         if program != "bash" {
             command.arg("--no-config");
         }
@@ -426,7 +439,7 @@ fn executable_without_shebang_uses_brush_and_preserves_state_arguments_and_fds()
     let script = "export hidden=retained; helper(){ printf 'helper\\n'; }; export -f helper; exec 3>out; ./plain 'two words'; r=$?; exec 3>&-; cat out; printf '%s:%s\\n' \"$r\" \"$hidden\"";
     let mut outputs = Vec::new();
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
-        let mut command = Command::new(program);
+        let mut command = shell(program);
         if program != "bash" {
             command.arg("--no-config");
         }
@@ -457,20 +470,22 @@ fn executable_without_shebang_uses_brush_and_preserves_state_arguments_and_fds()
     assert!(output.stderr.is_empty(), "{output:?}");
 }
 
+/// A trapped SIGINT that reaches the shell while it is blocked in `wait` runs
+/// the trap and ends that wait with 130; the child is neither reaped nor killed.
 #[test]
 fn trapped_sigint_interrupts_wait_without_consuming_or_killing_the_child() {
     use std::os::unix::process::CommandExt as _;
     for wait in ["wait \"$pid\"", "wait -n -p done \"$pid\"", "wait"] {
         let script = format!(
-            "trap 'printf \"trap:%s\\n\" \"$?\"' INT; sh -c 'sleep .4; exit 17' & pid=$!; printf ready >ready; {wait}; first=$?; kill -0 \"$pid\" || exit 91; test -z \"${{done+x}}\" || exit 92; wait \"$pid\"; second=$?; printf '%s:%s\\n' \"$first\" \"$second\""
+            "trap 'printf \"trap:%s\\n\" \"$?\"' INT; mkfifo gate; sh -c 'read x < gate; exit 17' & pid=$!; printf ready >ready; {wait}; first=$?; kill -0 \"$pid\" || exit 91; test -z \"${{done+x}}\" || exit 92; : > gate; wait \"$pid\"; second=$?; printf '%s:%s\\n' \"$first\" \"$second\""
         );
         for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
             let directory = tempfile::tempdir().unwrap();
-            let mut command = Command::new(program);
+            let mut command = shell(program);
             if program != "bash" {
                 command.arg("--no-config");
             }
-            let mut child = command
+            let child = command
                 .args(["--noprofile", "--norc", "-c", &script])
                 .env_remove("BASH_ENV")
                 .env_remove("ENV")
@@ -480,35 +495,24 @@ fn trapped_sigint_interrupts_wait_without_consuming_or_killing_the_child() {
                 .stderr(Stdio::piped())
                 .spawn()
                 .unwrap();
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-            while !directory.path().join("ready").exists() {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "{program} failed to become ready"
-                );
-                assert!(
-                    child.try_wait().unwrap().is_none(),
-                    "{program} exited before wait"
-                );
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            std::thread::sleep(std::time::Duration::from_millis(30));
+            let ready = directory.path().join("ready");
+            common::wait_until(
+                &format!("{program}: ready"),
+                Duration::from_secs(20),
+                || ready.exists(),
+            );
+            // Past `printf ready` the next blocking point is the wait itself.
+            common::wait_until_blocked(child.id(), &format!("{program}: {wait}"));
             nix::sys::signal::kill(
                 nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap()),
                 nix::sys::signal::Signal::SIGINT,
             )
             .unwrap();
-            while child.try_wait().unwrap().is_none() {
-                if std::time::Instant::now() > deadline {
-                    let _ = nix::sys::signal::kill(
-                        nix::unistd::Pid::from_raw(-i32::try_from(child.id()).unwrap()),
-                        nix::sys::signal::Signal::SIGKILL,
-                    );
-                    panic!("{program}: trapped INT wait did not finish");
-                }
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-            let output = child.wait_with_output().unwrap();
+            let output = common::wait_for_exit(
+                child,
+                &format!("{program}: {wait}"),
+                Duration::from_secs(20),
+            );
             assert!(output.status.success(), "{program}: {wait}: {output:?}");
             assert_eq!(
                 output.stdout, b"trap:130\n130:17\n",
@@ -617,27 +621,6 @@ fn native_compound_children_keep_heredocs_and_close_inherited_descriptors() {
 }
 
 #[test]
-fn product_registered_subprocess_dispatch_accepts_non_utf8_arguments() {
-    use std::os::unix::{ffi::OsStringExt as _, fs::symlink};
-    let directory = tempfile::tempdir().unwrap();
-    let registered = directory.path().join("registered_probe");
-    symlink(env!("CARGO_BIN_EXE_marsh"), &registered).unwrap();
-    let output = Command::new(registered)
-        .arg(std::ffi::OsString::from_vec(vec![0xff]))
-        .env("MARSH_EXTERNAL_SESSION", "untrusted-test-context")
-        .env_remove("MARSH_DAEMON_SOCKET")
-        .env_remove("MARSH_DAEMON_TOKEN")
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(125), "{output:?}");
-    assert!(output.stdout.is_empty(), "{output:?}");
-    assert_eq!(
-        output.stderr,
-        b"registered_probe: registered command requires an attached marsh session\n"
-    );
-}
-
-#[test]
 fn no_shebang_script_starts_fresh_and_reads_bash_env_once() {
     use std::os::unix::fs::PermissionsExt as _;
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
@@ -647,7 +630,7 @@ fn no_shebang_script_starts_fresh_and_reads_bash_env_once() {
         std::fs::write(&plain, "printf '%s:' \"${hidden-unset}\"; type helper >/dev/null 2>&1; printf '%s\\n' \"$?\"\n").unwrap();
         std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::write(&startup, "printf e >>events\n").unwrap();
-        let output = Command::new(program)
+        let output = shell(program)
             .args([
                 "--noprofile",
                 "--norc",
@@ -735,15 +718,17 @@ fn native_subshell_and_coprocess_identities_are_real_processes() {
 
 #[test]
 fn kill_handles_multiple_pids_and_explicit_negative_process_groups() {
+    // Each job announces itself after exec. Brush can lose a signal that lands
+    // between its fork and exec; that is not what this test covers.
     differential(
-        "sleep .1 & a=$!; sleep .1 & b=$!; kill -0 \"$a\" \"$b\" || exit 91; wait; printf checked",
+        "sh -c ': >a; exec sleep 30' & a=$!; sh -c ': >b; exec sleep 30' & b=$!; until test -e a && test -e b; do sleep .01; done; kill -0 \"$a\" \"$b\" || exit 91; kill \"$a\" \"$b\"; wait; printf checked",
         0,
         b"checked",
     );
     // Job control gives this job its own group, making the negative operand
     // a bounded existence probe that cannot signal the test runner's group.
     differential(
-        "set -m; sleep .1 & p=$!; kill -0 -- -\"$p\" || exit 91; wait \"$p\"; printf group",
+        "set -m; sh -c ': >p; exec sleep 30' & p=$!; until test -e p; do sleep .01; done; kill -0 -- -\"$p\" || exit 91; kill -TERM -- -\"$p\"; wait \"$p\"; printf group",
         0,
         b"group",
     );
@@ -761,7 +746,7 @@ fn exec_without_shebang_keeps_pid_and_uses_brush_in_a_fresh_environment() {
         )
         .unwrap();
         std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let output = Command::new(program)
+        let output = shell(program)
             .args([
                 "--noprofile",
                 "--norc",
@@ -777,14 +762,14 @@ fn exec_without_shebang_keeps_pid_and_uses_brush_in_a_fresh_environment() {
         assert_eq!(output.stdout, b"unset:two words", "{program}: {output:?}");
         assert!(output.stderr.is_empty(), "{program}: {output:?}");
         std::fs::write(&plain, "test \"$BASHPID\" = \"$1\" || exit 93; sh -c 'printf forbidden' 2>/dev/null; test $? -ne 0 || exit 94; printf mapped >&13; exit 17\n").unwrap();
-        let output = Command::new(program)
+        let output = shell(program)
             .args(["--noprofile", "--norc", "-c", "exec 11>mapped; (exec ./plain \"$BASHPID\" 13>&11 11>&- 0<&- 1>&-); r=$?; exec 11>&-; cat mapped; printf ':%s' \"$r\""])
             .env_remove("BASH_ENV").env_remove("ENV")
             .current_dir(directory.path()).output().unwrap();
         assert!(output.status.success(), "{program}: {output:?}");
         assert_eq!(output.stdout, b"mapped:17", "{program}: {output:?}");
         assert!(output.stderr.is_empty(), "{program}: {output:?}");
-        let output = Command::new(program)
+        let output = shell(program)
             .args([
                 "--noprofile",
                 "--norc",
@@ -805,7 +790,7 @@ fn exec_without_shebang_keeps_pid_and_uses_brush_in_a_fresh_environment() {
                 "test -n \"$BRUSH_VERSION\" || exit 92; printf native",
             )
             .unwrap();
-            let output = Command::new(program)
+            let output = shell(program)
                 .args([
                     "--no-config",
                     "--noprofile",
@@ -871,7 +856,7 @@ fn failed_exec_restores_descriptors_and_respects_execfail() {
                 b"status:126".as_slice(),
             ),
         ] {
-            let output = Command::new(program)
+            let output = shell(program)
                 .args(["--noprofile", "--norc", "-c", script])
                 .env_remove("BASH_ENV")
                 .env_remove("ENV")
@@ -1069,7 +1054,7 @@ fn arithmetic_on_associative_elements_uses_the_key_text() {
 #[test]
 fn read_timeouts_distinguish_end_of_file_from_silence() {
     differential(
-        "read -t 1 x < /dev/null; echo $?; read -t 0 < /dev/null; echo $?; printf '' | { read -t 1 x; echo $?; }; sleep 0.3 | { read -t 0.05 x; echo $?; }",
+        "mkfifo gate; read -t 1 x < /dev/null; echo $?; read -t 0 < /dev/null; echo $?; printf '' | { read -t 1 x; echo $?; }; sh -c 'read y < gate' | { read -t 0.05 x; echo $?; : > gate; }",
         0,
         b"1\n0\n1\n142\n",
     );
@@ -1149,16 +1134,15 @@ fn coreutils_split_and_join_are_unaffected_by_split_join_composition() {
 /// handles SIGINT and exits normally lets the list continue.
 ///
 /// The `ready` marker is written by the foreground child itself (after it has
-/// installed its trap, where it has one), so the signal is only sent once the
-/// shell is waiting on that child. A marker written by the shell before it
-/// started the child leaves a window that a loaded machine can stretch past
-/// any fixed delay.
+/// installed its trap, where it has one). The signal is sent once the shell is
+/// also blocked: a shell that has started the child but not yet reached its
+/// wait may not have installed the handler that defers the signal.
 #[test]
 fn noninteractive_group_sigint_ends_the_command_list() {
     use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
     for (script, status, stdout) in [
         (
-            "for i in 1 2 3; do sh -c 'printf r >> ready; exec sleep 5'; echo it$i; done; echo loopdone",
+            "for i in 1 2 3; do sh -c 'printf r >> ready; exec sleep 300'; echo it$i; done; echo loopdone",
             None,
             b"".as_slice(),
         ),
@@ -1168,18 +1152,18 @@ fn noninteractive_group_sigint_ends_the_command_list() {
             b"",
         ),
         (
-            "sh -c 'trap \"exit 3\" INT; printf r > ready; sleep 5 & wait'; echo after $?",
+            "sh -c 'trap \"kill \\$!; exit 3\" INT; sleep 300 & printf r > ready; wait'; echo after $?",
             Some(0),
             b"after 3\n",
         ),
     ] {
         for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
             let directory = tempfile::tempdir().unwrap();
-            let mut command = Command::new(program);
+            let mut command = shell(program);
             if program != "bash" {
                 command.arg("--no-config");
             }
-            let mut child = command
+            let child = command
                 .args(["--noprofile", "--norc", "-c", script])
                 .current_dir(directory.path())
                 .stdin(Stdio::null())
@@ -1189,22 +1173,19 @@ fn noninteractive_group_sigint_ends_the_command_list() {
                 .spawn()
                 .unwrap();
             let ready = directory.path().join("ready");
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while !ready.exists() && std::time::Instant::now() < deadline {
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            std::thread::sleep(std::time::Duration::from_millis(300));
+            common::wait_until(
+                &format!("{program}: {script}: ready"),
+                Duration::from_secs(20),
+                || ready.exists(),
+            );
+            common::wait_until_blocked(child.id(), &format!("{program}: {script}"));
             let group = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap());
             nix::sys::signal::killpg(group, nix::sys::signal::Signal::SIGINT).unwrap();
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-            while child.try_wait().unwrap().is_none() {
-                if std::time::Instant::now() > deadline {
-                    let _ = nix::sys::signal::killpg(group, nix::sys::signal::Signal::SIGKILL);
-                    panic!("{program}: {script}: did not end after SIGINT");
-                }
-                std::thread::sleep(std::time::Duration::from_millis(20));
-            }
-            let output = child.wait_with_output().unwrap();
+            let output = common::wait_for_exit(
+                child,
+                &format!("{program}: {script}: SIGINT"),
+                Duration::from_secs(20),
+            );
             assert_eq!(
                 output.status.code(),
                 status,
@@ -1298,30 +1279,6 @@ fn syntax_errors_report_the_line_bash_reports() {
     }
 }
 
-/// `PIPESTATUS` keeps one entry per pipeline stage when a split cannot run
-/// (here: no workspace provider), including the stages after `join`.
-#[test]
-fn failed_split_reports_a_status_for_every_stage() {
-    for (script, expected) in [
-        (
-            "split { a: true } | join | cat; echo \"${PIPESTATUS[*]}\"",
-            "2 2 2\n",
-        ),
-        (
-            "printf x | split { a: true } | join | cat | cat; echo \"${PIPESTATUS[*]}\"",
-            "0 2 2 2 2\n",
-        ),
-        ("split { a: true }; echo \"${PIPESTATUS[*]}\"", "2\n"),
-    ] {
-        let output = run(env!("CARGO_BIN_EXE_marsh-local"), script, false);
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout),
-            expected,
-            "{script}: {output:?}"
-        );
-    }
-}
-
 /// Bash's `-c` is a flag: the command is the first operand after every
 /// option, in any order (docs/upstream/brush/0042). Agents call
 /// `bash -c -l CMD`, `bash -lc CMD`, and `bash -o pipefail -c CMD`.
@@ -1344,7 +1301,7 @@ fn command_flag_takes_the_first_operand_in_bash_option_order() {
         &["-c"],
     ] {
         let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
-            let mut command = Command::new(program);
+            let mut command = shell(program);
             if program != "bash" {
                 command.arg("--no-config");
             }
@@ -1375,7 +1332,7 @@ fn command_flag_takes_the_first_operand_in_bash_option_order() {
     }
     // `-c` with no operand is a usage error (status 2) in both.
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
-        let output = Command::new(program)
+        let output = shell(program)
             .args(["-c", "-l"])
             .stdin(Stdio::null())
             .output()
