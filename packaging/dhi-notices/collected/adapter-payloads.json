@@ -4,9 +4,9 @@
     "codex-acp": {
       "base_agent": "codex",
       "root": "/opt/marsh/codex-acp",
-      "lock_sha256": "dbe12d298c40d65baba3b9415cadbbd7b2244eabe0ab4643692bc19b3d8111d2",
+      "lock_sha256": "804b0ea9ef3c8b14a53fc15b5b41b0e6106b1bc8f1d3c5c6bf30f5078e33839d",
       "notice_root": "/usr/local/share/licenses/marsh-codex-acp",
-      "selected_version": "0.156.1",
+      "selected_version": "0.160.1",
       "architectures": {
         "arm64": {
           "packages": [
@@ -14,12 +14,12 @@
               "alias": "@openai/codex",
               "root": "/opt/marsh/codex-acp/node_modules/@openai/codex",
               "package": "@openai/codex",
-              "version": "0.156.1",
+              "version": "0.160.1",
               "acquisition": {
-                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1.tgz",
-                "sha256": "08f128dd29bc659a62c16110dc4e8acad6858ba884a9b420631fbfa270b941d1",
+                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1.tgz",
+                "sha256": "d84454cfa82f61add78b3270073c6e254923e89657c7f0dd1a88cc5659b4e0c0",
                 "size": 4904,
-                "integrity": "sha512-nI1iVl/n2SO2lSvlwEsJx63zdSI4C4Me2gR7AG0OWMJiGSakz2tY2hx43E39Zq5aEoeB5bZjJXzp5Sqhog6vyA==",
+                "integrity": "sha512-f1yrJhwgimKQI1kYQlxdPJcFwkNZxZrbz7Hf89EAcnLqkQ7TiESzr2FgSZn13Ga5RuHjlVUfurzwq10wk9zw2g==",
                 "signature_verified": false
               },
               "payload_entries": [
@@ -60,7 +60,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex/package.json",
                   "type": "file",
-                  "sha256": "c3f16464dca0fe1269b17d02fe0997d1ca3a241c3a61da3d89ec13def0a66c6e",
+                  "sha256": "05d54db58bd6e525e69e770052b189970dc52f72457e5cc189bab0cbd70d11f8",
                   "size": 1082,
                   "mode": 420,
                   "uid": 0,
@@ -74,12 +74,12 @@
               "alias": "@openai/codex-linux-arm64",
               "root": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64",
               "package": "@openai/codex",
-              "version": "0.156.1-linux-arm64",
+              "version": "0.160.1-linux-arm64",
               "acquisition": {
-                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
-                "sha256": "3ca3c3a85e184594d0b665ea9028bc38c4ae89691e86edbeefd2c6f58979fcb4",
-                "size": 141660337,
-                "integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-arm64.tgz",
+                "sha256": "e1e536ddbb241503748fd86a5270c6d3db6f48054df0db6ca27e5a5f55773bed",
+                "size": 155715063,
+                "integrity": "sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==",
                 "signature_verified": false
               },
               "payload_entries": [
@@ -103,7 +103,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/package.json",
                   "type": "file",
-                  "sha256": "47414850442c39d9c72b3dbf60e36a265e3a64703d703db63e158b5250878ded",
+                  "sha256": "7329af2e8f8e1163b1c256df664cd9058ce987d87e22d3aa9c41748672818425",
                   "size": 515,
                   "mode": 420,
                   "uid": 0,
@@ -134,8 +134,8 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex",
                   "type": "file",
-                  "sha256": "876fe6bb5f7af7d1e4eda629be0d8ba042f6f24a7bb07475f6a995849f50c068",
-                  "size": 246724904,
+                  "sha256": "fbbaec80443919f86dd63648a0b62759cf6f1d0e09310602fde96885e0bceb3e",
+                  "size": 248966648,
                   "mode": 493,
                   "uid": 0,
                   "gid": 0,
@@ -144,8 +144,8 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex-code-mode-host",
                   "type": "file",
-                  "sha256": "b22553f5085d1b2ad5b1d5e935bb8974e2e76d925df1fc30fa83f67bfe216623",
-                  "size": 64562168,
+                  "sha256": "fbccde22982e3e679678e203a9c18eee8342fb04b096063d05159f1f80df4fd8",
+                  "size": 66921472,
                   "mode": 493,
                   "uid": 0,
                   "gid": 0,
@@ -154,7 +154,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-package.json",
                   "type": "file",
-                  "sha256": "fdf4bc3a553ea43ce7139c58b47eca383e4a7e42d2da341a366bd81f46312252",
+                  "sha256": "04a75768c790b6c5e07619700b3868992b87ed78a7c72827c1f5d404574552ba",
                   "size": 206,
                   "mode": 420,
                   "uid": 0,
@@ -188,7 +188,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/bwrap",
                   "type": "file",
-                  "sha256": "c6949b5053988498976467bd9972c5d3695ecaac64a5f2de09af20f579fb7e31",
+                  "sha256": "c547cbdc762a70ed216789ffaa4c6c0e7d2beabe32245a498f8e365a9fc8dab4",
                   "size": 529168,
                   "mode": 493,
                   "uid": 0,
@@ -222,8 +222,8 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
                   "type": "file",
-                  "sha256": "4b8199013c7026d89a261d88df148d152e1372541a59431f4a5155c71030ee51",
-                  "size": 12720272,
+                  "sha256": "9921c49e03ccbb3ed632bb2e1eca07cae246be0f2781d52a68b6a30435aaafc0",
+                  "size": 67057272,
                   "mode": 493,
                   "uid": 0,
                   "gid": 0,
@@ -246,7 +246,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
                   "type": "file",
-                  "sha256": "763f99404b0adde9dd07ae9b3db3640ce70e090384f877ab44c08f596e9ee5b2",
+                  "sha256": "c4aae0ec013af263e73c254dd224180a206b7aa3b463d6040841a315fcc0525c",
                   "size": 7264,
                   "mode": 493,
                   "uid": 0,
@@ -256,7 +256,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
                   "type": "file",
-                  "sha256": "438570eed71d9496c2be4000f7a8ed0472f606279459dd9f19cc737b2e1ad544",
+                  "sha256": "3a8f08bb3e69d0049c0d45c4624e9d3a332cd6858b19f7b0e17d11c0d84203cc",
                   "size": 42600,
                   "mode": 493,
                   "uid": 0,
@@ -266,7 +266,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
                   "type": "file",
-                  "sha256": "dabf9976f2c14b0e2848dfad9ff99eb8a291cea264d3e2743128f17a7d7abd75",
+                  "sha256": "7aa32522d5a35ea310aabb4d2e97026e40860d86cd5bf892de58128b4f576e9c",
                   "size": 36136,
                   "mode": 493,
                   "uid": 0,
@@ -276,7 +276,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
                   "type": "file",
-                  "sha256": "9b22e8b3438ed68717800bd456f60ea61b53a652854c3eafc03e7e053e6e73e9",
+                  "sha256": "8da844558982507e9bd90d7bb5c51941f7ae1f19b8e04873a9b776790747647a",
                   "size": 477024,
                   "mode": 493,
                   "uid": 0,
@@ -286,7 +286,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
                   "type": "file",
-                  "sha256": "e67ee37ca228912a99cdffb050e0d917a928b31d9ca7e0b01ba1e182e09641fe",
+                  "sha256": "daed5811e57b04ef308945868ab0507f27afabd72a443693270eaa99040d39c4",
                   "size": 72120,
                   "mode": 493,
                   "uid": 0,
@@ -296,7 +296,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
                   "type": "file",
-                  "sha256": "ecabf86cf61c8237e72da54052b311ba89d508051b1d4d3662338e843868f13f",
+                  "sha256": "cf8ad83b1b4e4c8a3685092b013d5a4891c1ccf7d5403e43d9c3671dd0ba8535",
                   "size": 771240,
                   "mode": 493,
                   "uid": 0,
@@ -306,7 +306,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
                   "type": "file",
-                  "sha256": "046061a30694971ffefca9bd36dc9924c691326862121959f40545c98836932e",
+                  "sha256": "072828238058770e54aa57b9309f40986c1b4d61ba7f68d83dadb6370c4ad136",
                   "size": 571648,
                   "mode": 493,
                   "uid": 0,
@@ -326,7 +326,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
                   "type": "file",
-                  "sha256": "dedccb01d00f16c0afb5b72983f817fc4b4050501ee81c393a71ae68f0447d44",
+                  "sha256": "93b8194fdbf9eec7d9c92277335e811c6129dd2bcced2e9415d36a361a9c0ad3",
                   "size": 2590176,
                   "mode": 493,
                   "uid": 0,
@@ -336,7 +336,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
                   "type": "file",
-                  "sha256": "8f27f73a124f9a30cd9056c76ddedee6e29b3bd979e413e4152484e6de5132dd",
+                  "sha256": "c228a06426b39bcd1bd728889888f53dbd52229f5f8bdd662b4c83030ca1246b",
                   "size": 1565504,
                   "mode": 493,
                   "uid": 0,
@@ -346,7 +346,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
                   "type": "file",
-                  "sha256": "28b7d1b1056244487c88017e36aeca003197592decd2ab8ef26f9c9e891105f6",
+                  "sha256": "b95fd690b873e26b17374241996d636cb2d127371ad923e25a1ae41b45f209ed",
                   "size": 16584,
                   "mode": 493,
                   "uid": 0,
@@ -356,7 +356,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
                   "type": "file",
-                  "sha256": "9d93a54989a5635474b73c17260359ac862bf68155899e2008c2c380d0366f62",
+                  "sha256": "fdcad50c0c3ab738abd8669b41dcd09f65238ee0dd6eb81e00487034f2cac596",
                   "size": 492608,
                   "mode": 493,
                   "uid": 0,
@@ -366,7 +366,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
                   "type": "file",
-                  "sha256": "7e1be9313180eafaa5d821a0c24df43aeae87ede23a112b06522f6616a7f19da",
+                  "sha256": "8c77302feea690047f84e23bfb48ebd0e5d9b30d628a86deeeaa22b90bb122d0",
                   "size": 33520,
                   "mode": 493,
                   "uid": 0,
@@ -376,7 +376,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
                   "type": "file",
-                  "sha256": "aa78a53fa6c6708a963ea41ad2df2a78ca4c682ffa14a57e74954ca4586ec30c",
+                  "sha256": "b7bbb0d5b9f9d582eba5f0f165dff5e536ca4905f16404e906bb3ec4c6c87d74",
                   "size": 111856,
                   "mode": 493,
                   "uid": 0,
@@ -386,7 +386,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
                   "type": "file",
-                  "sha256": "dca8348dcae61c2058d33ab5404ba3bf42aed4f298d02365cd955f4b5b922f29",
+                  "sha256": "da055afe662c76aef071eccadae3ed3343578528b0a2dff2be2cef8d00ba09fb",
                   "size": 594072,
                   "mode": 493,
                   "uid": 0,
@@ -396,7 +396,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
                   "type": "file",
-                  "sha256": "8acac0c7627bde2263a2dcf34cccd430329b367a98064b31430f24683fe3d08a",
+                  "sha256": "efa02ffb815a16503fc769a74c87b0f37f9c33a68a2aaf9f1f1799ea56b545e0",
                   "size": 570192,
                   "mode": 493,
                   "uid": 0,
@@ -406,7 +406,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
                   "type": "file",
-                  "sha256": "0ec79e1157df6b24e5499926d66684edd02c32a658ca8417ed2fee350c1e7c36",
+                  "sha256": "1258a1ab6007e182a69589de505762e91eeff02caf7cae6c704b941fcaafd8a4",
                   "size": 78152,
                   "mode": 493,
                   "uid": 0,
@@ -416,7 +416,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
                   "type": "file",
-                  "sha256": "a947442f2dc946b80ecdf3564ddebf380e60ff85a3f263e7d086e148a318be2f",
+                  "sha256": "2261da281881201e358736903e3ec87bed6040640d7f38969fa3bd18d2f5e96d",
                   "size": 341720,
                   "mode": 493,
                   "uid": 0,
@@ -426,7 +426,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
                   "type": "file",
-                  "sha256": "e162c52bed76624b24329b97da60b33652adeb941131e4c1ebc4adfbb59e7a75",
+                  "sha256": "fb44b3ffce077331fc883ae1cb8e822a957fd9291f7dfd5ed8962fdd31d93061",
                   "size": 1682744,
                   "mode": 493,
                   "uid": 0,
@@ -436,7 +436,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
                   "type": "file",
-                  "sha256": "50f0870cd4b2fc02634ebba963f68bfc22fd5213f045ad21fd567581fe776463",
+                  "sha256": "c2e180ba39f966c729f661cb48aab89092cbf6f1675ce247c3dfe1a3d6efb19c",
                   "size": 222344,
                   "mode": 493,
                   "uid": 0,
@@ -446,7 +446,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
                   "type": "file",
-                  "sha256": "e1dd6bea50363a77ce9c93cffa5baa0e247f1848ebcf57d85ad944f5c9adaef6",
+                  "sha256": "6228b09832d0c4423a35b99aab960cffbf93851acde2b44920a5474d9756a279",
                   "size": 274480,
                   "mode": 493,
                   "uid": 0,
@@ -456,7 +456,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
                   "type": "file",
-                  "sha256": "bc39c4a26fd2da51c2a28e8867f94b595d751bfd1c6e22d9d5492de093ab99fe",
+                  "sha256": "60313d07fcedac9af6f3c1d8d85140ab81e3dee55ca5224e11cb2ff5128137d9",
                   "size": 1049992,
                   "mode": 493,
                   "uid": 0,
@@ -476,7 +476,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
                   "type": "file",
-                  "sha256": "6ce0e40fffa257dca2034546744a75bfcd5b5ae1d79693b1a9d9a6e2a974644a",
+                  "sha256": "fca63951cdc42043425a54c49e3f65491144e0847924cbf37141f484c6025882",
                   "size": 499096,
                   "mode": 493,
                   "uid": 0,
@@ -583,7 +583,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/manifest.json",
                   "type": "file",
-                  "sha256": "c2a1506c00ee0a0c5e73925ed04c8339d77fe6165f1c9c206a7a0895c30a7d11",
+                  "sha256": "5aaa7b740b1e781d7d15887d376e711cbfb20b551ff2249e4ecfc60905b323fa",
                   "size": 4770,
                   "mode": 420,
                   "uid": 0,
@@ -593,7 +593,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/runtime.json",
                   "type": "file",
-                  "sha256": "302f3763713831a52759afe095c0c3217cc737edf297fb0d08457d40bbea3e77",
+                  "sha256": "eb4c90beab0cb248faca818e53cde8142ab678329a664800ec69adf8f4db9dc9",
                   "size": 14536,
                   "mode": 493,
                   "uid": 0,
@@ -639,57 +639,57 @@
                 {
                   "file": "texts/40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48.txt",
                   "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
-                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==",
                   "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/NOTICE.md"
                 },
                 {
                   "file": "texts/197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811.txt",
                   "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
-                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==",
                   "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md"
                 },
                 {
                   "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
                   "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
-                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==",
                   "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt"
                 },
                 {
                   "file": "texts/17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c.txt",
                   "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
-                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==",
                   "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt"
                 },
                 {
                   "file": "texts/01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt",
                   "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
-                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==",
                   "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt"
                 },
                 {
                   "file": "texts/d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5.txt",
                   "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
-                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==",
                   "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt"
                 },
                 {
                   "file": "texts/5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb.txt",
                   "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
-                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==",
                   "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt"
                 },
                 {
                   "file": "texts/e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2.txt",
                   "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-arm64.tgz",
-                  "package_integrity": "sha512-sTEHk31C12dqzJdjZ2u9KLFCXKL04KyCM+QheSjdQI8uzmVJS7aEF2/qAqFxXwk/jwMzC9u7IihfoIlAGR6YsA==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-arm64.tgz",
+                  "package_integrity": "sha512-JLyjBlmjPvwTaicHemw+y5xQSz3Uja2r7F/xkvS8gFufTA2g132Ak+0fo35xnJ/k2uc9fTtjm0LrsEGI78L6Ng==",
                   "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt"
                 }
               ]
@@ -707,32 +707,72 @@
           ],
           "required_notices": [
             {
-              "file": "provider-notices/codex-0.156.1-LICENSE",
+              "file": "provider-notices/codex-0.160.1-LICENSE",
               "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
             },
             {
-              "file": "provider-notices/codex-0.156.1-NOTICE",
+              "file": "provider-notices/codex-0.160.1-NOTICE",
               "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
             },
             {
-              "file": "provider-notices/codex-0.156.1-third_party-wezterm-LICENSE",
+              "file": "provider-notices/codex-0.160.1-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-codex-rs-vendor-bubblewrap-COPYING",
+              "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-docs-license.md",
+              "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-NOTICE.md",
+              "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-LGPL-2.1.txt",
+              "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-Opus.txt",
+              "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-PCRE2.md",
+              "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-libffi.txt",
+              "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-proxy-libintl.txt",
+              "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-sljit.txt",
+              "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-zlib.txt",
+              "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-wezterm-LICENSE",
               "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
-            },
-            {
-              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
-              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
-            },
-            {
-              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
-              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
-            },
-            {
-              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
-              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-            },
-            {
-              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
-              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
             },
             {
               "file": "texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt",
@@ -745,10 +785,6 @@
             {
               "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt",
               "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"
-            },
-            {
-              "file": "provider-notices/codex-0.155.1-codex-rs-vendor-bubblewrap-COPYING",
-              "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
             },
             {
               "file": "texts/40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48.txt",
@@ -790,12 +826,12 @@
               "alias": "@openai/codex",
               "root": "/opt/marsh/codex-acp/node_modules/@openai/codex",
               "package": "@openai/codex",
-              "version": "0.156.1",
+              "version": "0.160.1",
               "acquisition": {
-                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1.tgz",
-                "sha256": "08f128dd29bc659a62c16110dc4e8acad6858ba884a9b420631fbfa270b941d1",
+                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1.tgz",
+                "sha256": "d84454cfa82f61add78b3270073c6e254923e89657c7f0dd1a88cc5659b4e0c0",
                 "size": 4904,
-                "integrity": "sha512-nI1iVl/n2SO2lSvlwEsJx63zdSI4C4Me2gR7AG0OWMJiGSakz2tY2hx43E39Zq5aEoeB5bZjJXzp5Sqhog6vyA==",
+                "integrity": "sha512-f1yrJhwgimKQI1kYQlxdPJcFwkNZxZrbz7Hf89EAcnLqkQ7TiESzr2FgSZn13Ga5RuHjlVUfurzwq10wk9zw2g==",
                 "signature_verified": false
               },
               "payload_entries": [
@@ -836,7 +872,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex/package.json",
                   "type": "file",
-                  "sha256": "c3f16464dca0fe1269b17d02fe0997d1ca3a241c3a61da3d89ec13def0a66c6e",
+                  "sha256": "05d54db58bd6e525e69e770052b189970dc52f72457e5cc189bab0cbd70d11f8",
                   "size": 1082,
                   "mode": 420,
                   "uid": 0,
@@ -850,12 +886,12 @@
               "alias": "@openai/codex-linux-x64",
               "root": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64",
               "package": "@openai/codex",
-              "version": "0.156.1-linux-x64",
+              "version": "0.160.1-linux-x64",
               "acquisition": {
-                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
-                "sha256": "ded9840babeb511e79738ae708044ae489fbce50db7002b943b3195cf5ae6a25",
-                "size": 148522874,
-                "integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-x64.tgz",
+                "sha256": "dc9ebd133d3af19ccac4bd5515a5049005b8b05ef3bd558d257d44f32a94f758",
+                "size": 163294814,
+                "integrity": "sha512-sIDhqV+bsZKKVaVFVY5iB+pAzyOz2XRm3H1KXCsSJwGj5p98qnrT0Fweo1Hfe7WnyTp8mfBNdbVzUeO+mHYugA==",
                 "signature_verified": false
               },
               "payload_entries": [
@@ -879,7 +915,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/package.json",
                   "type": "file",
-                  "sha256": "482b103b451bf5c475f580638fca3cba1c33304b94013a8f16bf0a63ae294326",
+                  "sha256": "131c7afb8a1f1c9d4606cd0abc3a9f8ff182e162840ea7203bf553a79be33eff",
                   "size": 511,
                   "mode": 420,
                   "uid": 0,
@@ -910,8 +946,8 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
                   "type": "file",
-                  "sha256": "0b2e9301d6100dddda3b9d5c80ebaeaa3a2f1962388f2f36f6b96a9f08b1f33f",
-                  "size": 284479848,
+                  "sha256": "f34a4d2301892ae96c90097786bfe5dc269f187b6f69faf42a7b357b8c081e35",
+                  "size": 289166920,
                   "mode": 493,
                   "uid": 0,
                   "gid": 0,
@@ -920,8 +956,8 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
                   "type": "file",
-                  "sha256": "45ba654b0e145406f3316be4729b886980ce811aa2e3b6ed4e033dd41ab524f1",
-                  "size": 70603664,
+                  "sha256": "b33e8a5283f3c65c2a0aca6d43a59cfe850f624d8fa16992e3cad4fcc27c14e1",
+                  "size": 74077072,
                   "mode": 493,
                   "uid": 0,
                   "gid": 0,
@@ -930,7 +966,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-package.json",
                   "type": "file",
-                  "sha256": "6cf97f0c8999775e81c038429a31f28c406e077ecdbece52a9700e244bd2458f",
+                  "sha256": "a04a3cfb05f6738fc1e01678975cdae4c3a0859ff36f06ecfbf8392beee7f86c",
                   "size": 205,
                   "mode": 420,
                   "uid": 0,
@@ -998,8 +1034,8 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
                   "type": "file",
-                  "sha256": "30effeb02ea225194b537ea68baaa431562ed32322d921cd7010f48ddae4fcaf",
-                  "size": 12844040,
+                  "sha256": "4a55aa2085f8e66aaa9872b1ebaec4149247f5806aef17d57c4bc909e4d16505",
+                  "size": 64531016,
                   "mode": 493,
                   "uid": 0,
                   "gid": 0,
@@ -1022,7 +1058,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
                   "type": "file",
-                  "sha256": "cfe93cd0a751fb9e93987c43bd876399b8ff9cd5e6cd39573b61a80cb7788047",
+                  "sha256": "2646b2ab46674e09128f63bfb58f416bb622f3357a63ccb91d8674e68d2a1223",
                   "size": 6488,
                   "mode": 493,
                   "uid": 0,
@@ -1032,7 +1068,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
                   "type": "file",
-                  "sha256": "8c3db0d3971e02cf0ef326ed321e9aa0d0e3d37d7de62b9fc750361e4c1e0752",
+                  "sha256": "37d771eadef4166792176c105c5c86a7cc208923295bf595b544557daaa75317",
                   "size": 40928,
                   "mode": 493,
                   "uid": 0,
@@ -1042,7 +1078,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
                   "type": "file",
-                  "sha256": "53b40a0f5a9e5d6045f7b88b14c39466e3b5fd36096179c0b89b0fb3a3d8e1f2",
+                  "sha256": "6eda61f5c63bfa466ef5e327a2034ba53914eefb67a46c6990a441efc916d3b2",
                   "size": 35120,
                   "mode": 493,
                   "uid": 0,
@@ -1052,7 +1088,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
                   "type": "file",
-                  "sha256": "ff7b74ba854c321eb1064ea3eda8c9fce43d90363056db30306a0eeb855ec41b",
+                  "sha256": "8ebc31edf0b41bb12aaad82646dfff52c2cab5c7f5fd8787ed12be469e25ad37",
                   "size": 473176,
                   "mode": 493,
                   "uid": 0,
@@ -1062,7 +1098,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
                   "type": "file",
-                  "sha256": "30042da9945f3fe5ad6484a5ef3191ba27490fe4ba15d02adcdbc499e7261ae5",
+                  "sha256": "56fada956e68ef837b701842d0447e5bda26e875442cf401509bf6d902a0dcfd",
                   "size": 71992,
                   "mode": 493,
                   "uid": 0,
@@ -1072,7 +1108,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
                   "type": "file",
-                  "sha256": "61a414f521c80ce75bbe3ee3dbcf9779292f8b873a5e5bebaedd808936e0ce32",
+                  "sha256": "b916d45f805dd683474b4fc1138bf6be02dc7fedd6f8c2aef987da11631ed51c",
                   "size": 739744,
                   "mode": 493,
                   "uid": 0,
@@ -1082,7 +1118,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
                   "type": "file",
-                  "sha256": "855bb5f3c015d3e441e5532591e174090e82dd5718a52aa06d7610fd716dc8a3",
+                  "sha256": "06f6bc45bbbff1b7d940d18b3ff083ee70b6caee24ef35ebcd960a6e76fe71fa",
                   "size": 558104,
                   "mode": 493,
                   "uid": 0,
@@ -1102,7 +1138,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
                   "type": "file",
-                  "sha256": "c83568024e6047e78a481ab466bccbe80a10371331b77e9653c44c5cc1f29b94",
+                  "sha256": "bbe26ed6cf51923e00c5bb13599a66eff1d08ca56a9fb25221fe2d7110fa3704",
                   "size": 2307904,
                   "mode": 493,
                   "uid": 0,
@@ -1112,7 +1148,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
                   "type": "file",
-                  "sha256": "895a92f9216def15210e4fdcaa2c86e64c0c86218dbd4e4348613fd97bf12225",
+                  "sha256": "20994b31ff8856fc0d1417959b856e1d2f932837d98959d6ae427821b3103e14",
                   "size": 1480224,
                   "mode": 493,
                   "uid": 0,
@@ -1122,7 +1158,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
                   "type": "file",
-                  "sha256": "4df433663106bb5f0f05c85e60b1ae0bb9f2bef257108d8f25c88da73ac5e140",
+                  "sha256": "16acd2347c68e531912016d9263f99c36721077003a54957ed9dee6fb680c4fd",
                   "size": 15656,
                   "mode": 493,
                   "uid": 0,
@@ -1132,7 +1168,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
                   "type": "file",
-                  "sha256": "f7b512eb4488fa6545bcc5d7720f473e62a2b0d4a64a2cbdd5c35c76308c8521",
+                  "sha256": "cd5ac7e7811422ee62ac5e968b26691436c94105c537a40e7f31d45725147a90",
                   "size": 449600,
                   "mode": 493,
                   "uid": 0,
@@ -1142,7 +1178,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
                   "type": "file",
-                  "sha256": "6311fba78e2d78e7de8a6193868ebfaca6cf4569d6ada170e43d3746e8ba5091",
+                  "sha256": "9b6896e3a4fd95ae4297d000778088b7f1feb0a098a44e90a1f94b042ea7268e",
                   "size": 30128,
                   "mode": 493,
                   "uid": 0,
@@ -1152,7 +1188,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
                   "type": "file",
-                  "sha256": "0a48918115a0ec9e15bec444655628255b770ae3d36a65af85d8ae57628dd8c9",
+                  "sha256": "ed37774d99ed62ea4e6d74af97692b965feae704fa71169b2808cfd3c6c862a7",
                   "size": 105200,
                   "mode": 493,
                   "uid": 0,
@@ -1162,7 +1198,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
                   "type": "file",
-                  "sha256": "c82d018a23135c4a6286ef9e73caae2c7d80ec0bb44c8af7ce40ee0a012cbaa1",
+                  "sha256": "c7ba5593c2fa5785a621f04f95c66037cf000f5a28aa9ea41821bc9d0019a29f",
                   "size": 597832,
                   "mode": 493,
                   "uid": 0,
@@ -1172,7 +1208,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
                   "type": "file",
-                  "sha256": "c8a8476ae9bce3a5c6028713b8e4ead30e3031fe1a9998c1e8c6ab27c2433403",
+                  "sha256": "f7277672aea1fb2b3d3faaf9027267da31b5f3220ffd8ede94200a7bfa420c1d",
                   "size": 564592,
                   "mode": 493,
                   "uid": 0,
@@ -1182,7 +1218,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
                   "type": "file",
-                  "sha256": "9de4c50dc21e2ca71e9766f5f3fe1d0a630ffe11e49682db01569461a1bd2907",
+                  "sha256": "55e08152618026db734712f7599347a5c918206ffccfb4f8c77de0693120e966",
                   "size": 73856,
                   "mode": 493,
                   "uid": 0,
@@ -1192,7 +1228,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
                   "type": "file",
-                  "sha256": "5dda3dbd7054678efdae39098d6b983588a4632a417a714dd409589931c22be2",
+                  "sha256": "af8e6bce5d11f414ebf3d29b00204fe1c6c9bd41c6db203ee1c49ad0000d63ff",
                   "size": 316576,
                   "mode": 493,
                   "uid": 0,
@@ -1202,7 +1238,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
                   "type": "file",
-                  "sha256": "cee35177c67614e9fd186de09e02a3c445820a2db273a3ad89bef0fd3adeb6f2",
+                  "sha256": "2879fc2ce0af0d73e97a79305f1d3e48ce457ca6ae0fa842d9cb60036f23592f",
                   "size": 1548568,
                   "mode": 493,
                   "uid": 0,
@@ -1212,7 +1248,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
                   "type": "file",
-                  "sha256": "271c63e618833b535c48e204526348d94171ba8d52c49f95fed1288705aa11b1",
+                  "sha256": "1b5a5724f386bdfe4953d7875659b855801bdd56c888b65b2cccf68fd309d308",
                   "size": 209200,
                   "mode": 493,
                   "uid": 0,
@@ -1222,7 +1258,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
                   "type": "file",
-                  "sha256": "8cf3dbbdb2ee4cf5b624bead25a443ad77ab88d6ab8578730fa8377a7fe83686",
+                  "sha256": "511e2374d4faf0ed0624987c9c9fc076d88207e20b609b46bba9f5e70f2b7925",
                   "size": 268280,
                   "mode": 493,
                   "uid": 0,
@@ -1232,7 +1268,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
                   "type": "file",
-                  "sha256": "e089afc6dadf4a655fe3831657d7a1c885b977b4d0fa6b172f3ca820171e8586",
+                  "sha256": "0867ad6f4814f232855443da34e842a6b1e1c6d3e95576f8a891ea78bb739211",
                   "size": 975136,
                   "mode": 493,
                   "uid": 0,
@@ -1252,7 +1288,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
                   "type": "file",
-                  "sha256": "a6e3298c8af70ac76c0784d3ae8bbbbf7aad21b0e488315e61c379501d9b066d",
+                  "sha256": "8aa8e09d2b6716a4161d7168f9950f052ecf6369e07fd6164f18c4a196c08fc0",
                   "size": 565744,
                   "mode": 493,
                   "uid": 0,
@@ -1359,7 +1395,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/manifest.json",
                   "type": "file",
-                  "sha256": "e2df3a04efd5756a035b5792d35ca0da1049205c05b914c1992a4c97364f5782",
+                  "sha256": "404a7aec7659e95d588d85797b1987651674c24c9ba61d372566f42553f813fe",
                   "size": 4768,
                   "mode": 420,
                   "uid": 0,
@@ -1369,7 +1405,7 @@
                 {
                   "path": "/opt/marsh/codex-acp/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/runtime.json",
                   "type": "file",
-                  "sha256": "757c3211d6e11d402490d6434e9fd1c21256a2a6364f218753dca0c0bad506a8",
+                  "sha256": "9da3d02ddcb8fa5c1441983839653e76b5325640e33674bd0e456af869f339ba",
                   "size": 13941,
                   "mode": 493,
                   "uid": 0,
@@ -1415,57 +1451,57 @@
                 {
                   "file": "texts/40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48.txt",
                   "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
-                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-x64.tgz",
+                  "package_integrity": "sha512-sIDhqV+bsZKKVaVFVY5iB+pAzyOz2XRm3H1KXCsSJwGj5p98qnrT0Fweo1Hfe7WnyTp8mfBNdbVzUeO+mHYugA==",
                   "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/NOTICE.md"
                 },
                 {
                   "file": "texts/197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811.txt",
                   "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
-                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-x64.tgz",
+                  "package_integrity": "sha512-sIDhqV+bsZKKVaVFVY5iB+pAzyOz2XRm3H1KXCsSJwGj5p98qnrT0Fweo1Hfe7WnyTp8mfBNdbVzUeO+mHYugA==",
                   "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/PCRE2.md"
                 },
                 {
                   "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt",
                   "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
-                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-x64.tgz",
+                  "package_integrity": "sha512-sIDhqV+bsZKKVaVFVY5iB+pAzyOz2XRm3H1KXCsSJwGj5p98qnrT0Fweo1Hfe7WnyTp8mfBNdbVzUeO+mHYugA==",
                   "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/LGPL-2.1.txt"
                 },
                 {
                   "file": "texts/17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c.txt",
                   "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
-                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-x64.tgz",
+                  "package_integrity": "sha512-sIDhqV+bsZKKVaVFVY5iB+pAzyOz2XRm3H1KXCsSJwGj5p98qnrT0Fweo1Hfe7WnyTp8mfBNdbVzUeO+mHYugA==",
                   "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/libffi.txt"
                 },
                 {
                   "file": "texts/01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt",
                   "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
-                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-x64.tgz",
+                  "package_integrity": "sha512-sIDhqV+bsZKKVaVFVY5iB+pAzyOz2XRm3H1KXCsSJwGj5p98qnrT0Fweo1Hfe7WnyTp8mfBNdbVzUeO+mHYugA==",
                   "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/Opus.txt"
                 },
                 {
                   "file": "texts/d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5.txt",
                   "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
-                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-x64.tgz",
+                  "package_integrity": "sha512-sIDhqV+bsZKKVaVFVY5iB+pAzyOz2XRm3H1KXCsSJwGj5p98qnrT0Fweo1Hfe7WnyTp8mfBNdbVzUeO+mHYugA==",
                   "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/proxy-libintl.txt"
                 },
                 {
                   "file": "texts/5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb.txt",
                   "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
-                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-x64.tgz",
+                  "package_integrity": "sha512-sIDhqV+bsZKKVaVFVY5iB+pAzyOz2XRm3H1KXCsSJwGj5p98qnrT0Fweo1Hfe7WnyTp8mfBNdbVzUeO+mHYugA==",
                   "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/sljit.txt"
                 },
                 {
                   "file": "texts/e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2.txt",
                   "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
-                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.156.1-linux-x64.tgz",
-                  "package_integrity": "sha512-2ePo0wgOcnONKsuzp8vBjOmNY+IdsKaouaDDIdiKq9HOWNuV/GI22OeXft2A/1GaoL71ictO0/pLAsCEnQ6wew==",
+                  "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.160.1-linux-x64.tgz",
+                  "package_integrity": "sha512-sIDhqV+bsZKKVaVFVY5iB+pAzyOz2XRm3H1KXCsSJwGj5p98qnrT0Fweo1Hfe7WnyTp8mfBNdbVzUeO+mHYugA==",
                   "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/licenses/zlib.txt"
                 }
               ]
@@ -1483,32 +1519,72 @@
           ],
           "required_notices": [
             {
-              "file": "provider-notices/codex-0.156.1-LICENSE",
+              "file": "provider-notices/codex-0.160.1-LICENSE",
               "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
             },
             {
-              "file": "provider-notices/codex-0.156.1-NOTICE",
+              "file": "provider-notices/codex-0.160.1-NOTICE",
               "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
             },
             {
-              "file": "provider-notices/codex-0.156.1-third_party-wezterm-LICENSE",
+              "file": "provider-notices/codex-0.160.1-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-codex-rs-vendor-bubblewrap-COPYING",
+              "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-docs-license.md",
+              "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-NOTICE.md",
+              "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-LGPL-2.1.txt",
+              "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-Opus.txt",
+              "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-PCRE2.md",
+              "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-libffi.txt",
+              "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-proxy-libintl.txt",
+              "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-sljit.txt",
+              "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-voice-licenses-zlib.txt",
+              "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+            },
+            {
+              "file": "provider-notices/codex-0.160.1-third_party-wezterm-LICENSE",
               "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
-            },
-            {
-              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
-              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
-            },
-            {
-              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
-              "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
-            },
-            {
-              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
-              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-            },
-            {
-              "file": "provider-notices/codex-0.156.1-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
-              "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
             },
             {
               "file": "texts/d06fdf3ef9b1ec69d6b9e170b0a9516fbad3523261ff1668bde3bfea6e0ef5f5.txt",
@@ -1521,10 +1597,6 @@
             {
               "file": "texts/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt",
               "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f"
-            },
-            {
-              "file": "provider-notices/codex-0.155.1-codex-rs-vendor-bubblewrap-COPYING",
-              "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
             },
             {
               "file": "texts/40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48.txt",
