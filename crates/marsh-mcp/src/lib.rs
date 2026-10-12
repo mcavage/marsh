@@ -3785,6 +3785,41 @@ mod tests {
         (root, config)
     }
 
+    async fn wait_for_file(path: &Path) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        while !path.exists() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "timed out waiting for {}",
+                path.display()
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Waits for operation `id` to leave Queued/Running and returns its state.
+    async fn terminal_state(server: &HostMcp, id: &str) -> OperationState {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            let state = server.operations.lock().await.get(id).unwrap().state;
+            if !matches!(state, OperationState::Queued | OperationState::Running) {
+                return state;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "operation {id} still {state:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    fn operation_id(response: &ToolResponse) -> String {
+        response.data.as_ref().unwrap()["operation_id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
     #[test]
     fn validates_selections_and_result_selectors() {
         assert!(validate_selection("all").is_ok());
@@ -4758,26 +4793,13 @@ mod tests {
                 false,
             )
             .await;
-        let id = response.data.unwrap()["operation_id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        for _ in 0..100 {
-            let terminal = {
-                let operations = server.operations.lock().await;
-                matches!(
-                    operations.get(&id).unwrap().state,
-                    OperationState::Succeeded | OperationState::Failed
-                )
-            };
-            if terminal {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        let id = operation_id(&response);
+        assert_eq!(
+            terminal_state(&server, &id).await,
+            OperationState::Succeeded
+        );
         let operations = server.operations.lock().await;
         let operation = operations.get(&id).unwrap();
-        assert_eq!(operation.state, OperationState::Succeeded);
         assert!(String::from_utf8_lossy(&operation.stdout).contains("test/v1"));
     }
 
@@ -4796,21 +4818,23 @@ mod tests {
         assert_eq!(captured.len(), MAX_CAPTURE_BYTES);
     }
 
+    /// Cancellation interrupts the operation first; an operation that exits
+    /// on the interrupt is never sent the terminate that would follow.
     #[tokio::test]
-    async fn cancellation_interrupts_the_process_group_before_escalating() {
+    async fn cancellation_interrupts_first_and_stops_when_the_operation_exits() {
         let root = tempfile::tempdir().unwrap();
         let workspace = root.path().join("workspace");
         let home = root.path().join("home");
         let marsh = root.path().join("marsh");
-        let marker = root.path().join("interrupted");
+        let signals = root.path().join("signals");
         let ready = root.path().join("ready");
         fs::create_dir(&workspace).unwrap();
         executable(
             &marsh,
             &format!(
-                "#!/bin/sh\ntrap 'printf handled > {} ; exit 0' INT TERM\nprintf ready > {}\nwhile :; do :; done\n",
-                marker.display(),
-                ready.display()
+                "#!/bin/sh\ntrap 'printf INT >> {signals} ; exit 0' INT\ntrap 'printf TERM >> {signals} ; exit 0' TERM\nprintf ready > {ready}\nwhile :; do :; done\n",
+                signals = signals.display(),
+                ready = ready.display()
             ),
         );
         let sbx = supporting_executables(&marsh);
@@ -4831,23 +4855,15 @@ mod tests {
                 false,
             )
             .await;
-        let id = response.data.unwrap()["operation_id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        for _ in 0..100 {
-            if ready.exists() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(ready.exists());
+        let id = operation_id(&response);
+        // The script writes `ready` after installing both traps.
+        wait_for_file(&ready).await;
         server.shutdown_all().await.unwrap();
         assert_eq!(
             server.operations.lock().await.get(&id).unwrap().state,
             OperationState::CancellationUncertain
         );
-        assert_eq!(fs::read_to_string(marker).unwrap(), "handled");
+        assert_eq!(fs::read_to_string(signals).unwrap(), "INT");
     }
 
     #[tokio::test]
@@ -4875,59 +4891,60 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id().unwrap();
-        for _ in 0..100 {
-            if ready.exists() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(ready.exists());
+        wait_for_file(&ready).await;
         terminate_pipeline_process_group(pid, &mut child)
             .await
             .unwrap();
         assert_eq!(fs::read_to_string(signal).unwrap(), "TERM");
     }
 
+    /// A lifecycle operation is refused while another holds the scope and
+    /// admitted once that one has finished.
     #[tokio::test]
     async fn conflicting_lifecycle_operation_returns_busy() {
         let root = tempfile::tempdir().unwrap();
         let workspace = root.path().join("workspace");
         let home = root.path().join("home");
         let marsh = root.path().join("marsh");
-        let guard = root.path().join("lifecycle.guard");
+        let running = root.path().join("running");
+        let gate = root.path().join("gate");
         fs::create_dir(&workspace).unwrap();
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&gate)
+                .status()
+                .unwrap()
+                .success()
+        );
+        // Each run blocks until the test opens the gate for it.
         executable(
             &marsh,
             &format!(
-                "#!/bin/sh\nmkdir {} || exit 44\nsleep 0.15\nrmdir {}\n",
-                guard.display(),
-                guard.display()
+                "#!/bin/sh\n: > {running}\nread release < {gate}\nrm {running}\n",
+                running = running.display(),
+                gate = gate.display()
             ),
         );
+        let release = || {
+            let gate = gate.clone();
+            tokio::task::spawn_blocking(move || fs::write(gate, b"\n").unwrap())
+        };
         let sbx = supporting_executables(&marsh);
         let config = HostConfig::new(&workspace, &home, &marsh, &sbx, false).unwrap();
         let server = HostMcp::new(config.clone());
         let spec = CommandSpec {
             executable: config.marsh.clone(),
             arguments: vec![],
-            timeout: Duration::from_secs(2),
+            timeout: Duration::from_secs(30),
             home_identity: DirectoryIdentity::capture(&config.home).unwrap(),
             home: config.home.clone(),
         };
         let first = server
             .start_operation("default", "lifecycle-test", spec.clone(), Vec::new(), true)
             .await;
-        let first_id = first.data.unwrap()["operation_id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        for _ in 0..100 {
-            if guard.exists() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(guard.exists());
+        let first_id = operation_id(&first);
+        wait_for_file(&running).await;
+
         let conflict = server
             .start_operation("default", "lifecycle-test", spec.clone(), Vec::new(), true)
             .await;
@@ -4938,46 +4955,20 @@ mod tests {
                 .unwrap()
                 .contains("development scope is busy")
         );
-        for _ in 0..200 {
-            let complete = {
-                let operations = server.operations.lock().await;
-                operations.get(&first_id).unwrap().state == OperationState::Succeeded
-            };
-            if complete {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+
+        release().await.unwrap();
+        assert_eq!(
+            terminal_state(&server, &first_id).await,
+            OperationState::Succeeded
+        );
         let following = server
             .start_operation("default", "lifecycle-test", spec, Vec::new(), true)
             .await;
-        assert!(following.ok);
-        let following_id = following.data.unwrap()["operation_id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        for _ in 0..200 {
-            if server
-                .operations
-                .lock()
-                .await
-                .get(&following_id)
-                .unwrap()
-                .state
-                == OperationState::Succeeded
-            {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        assert!(following.ok, "{:?}", following.error);
+        let following_id = operation_id(&following);
+        release().await.unwrap();
         assert_eq!(
-            server
-                .operations
-                .lock()
-                .await
-                .get(&following_id)
-                .unwrap()
-                .state,
+            terminal_state(&server, &following_id).await,
             OperationState::Succeeded
         );
     }
@@ -5138,34 +5129,20 @@ mod tests {
 
         let response = server.start_scope_removal(&scope_id).await;
         assert!(response.ok);
-        let operation_id = response.data.unwrap()["operation_id"]
-            .as_str()
-            .unwrap()
-            .to_owned();
-        for _ in 0..200 {
-            let terminal = server
-                .operations
-                .lock()
-                .await
-                .get(&operation_id)
-                .is_some_and(|operation| operation.state == OperationState::Succeeded);
-            if terminal && !server.lifecycles.lock().await.contains_key(&scope_id) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-
+        let operation_id = operation_id(&response);
         assert_eq!(
-            server
-                .operations
-                .lock()
-                .await
-                .get(&operation_id)
-                .unwrap()
-                .state,
+            terminal_state(&server, &operation_id).await,
             OperationState::Succeeded
         );
-        assert!(!server.lifecycles.lock().await.contains_key(&scope_id));
+        // The task releases its lifecycle entry just after recording success.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+        while server.lifecycles.lock().await.contains_key(&scope_id) {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "lifecycle entry for {scope_id} was never released"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         assert!(!home.exists());
         assert_eq!(fs::read(external).unwrap(), b"preserved");
     }
