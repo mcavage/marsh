@@ -146,13 +146,7 @@ test-harness:
 	sh tests/kits/cli-adapters.sh
 	sh tests/kits/shell-adapter.sh
 	$(MAKE) --no-print-directory "$(PUBLISHER_VENV)/.ready"
-	@# The publisher tests that walk the full canonical checkout take most of
-	@# the time; they start first, three tests at a time.
-	"$(PUBLISHER_VENV)/bin/python" tests/parallel_unittest.py -j 3 -W error \
-		--first test_prepared_stale_actual_sources --first test_publication_receipt_binds \
-		--first test_long_checkout --first test_real_default4 --first test_umask077 \
-		--first test_prepared_receipt_tampering --first test_preparation_output_private \
-		tests/kits/test_publisher_cli.py
+	"$(PUBLISHER_VENV)/bin/python" tests/parallel_unittest.py -j 3 -W error tests/kits/test_publisher_cli.py
 
 # The publisher's one dependency, hash-pinned.
 $(PUBLISHER_VENV)/.ready: scripts/requirements-publish.txt

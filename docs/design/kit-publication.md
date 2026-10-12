@@ -241,30 +241,6 @@ explicitly refuses frontend subrequest flags. The APFS alias case is skipped on
 case-sensitive test volumes.
 Actual registry/nonroot image readability and stock-SBX remain separate host gates.
 
-Strong-provenance CLI tests additionally use a fresh tiny
-**official Rust 1.95** / real Cargo / `build-candidate.py` observation fixture,
-with a controlled image peer. They do not patch the verifier or adopt an old
-receipt. This proves consumer/protocol behavior, **not** that the peer's simulated
-image digest or ARM-named executable copies qualify a real image. The fixture
-uses an isolated offline dependency-free build, not workspace Cargo churn.
-
-When the actual current host image/build receipt is ready, run the maintained
-no-Docker proof/preparation caller (no historical or synthetic fallback):
-
-```sh
-python3 tests/kits/strong_provenance_uat.py \
-  --source-tree /canonical/current/candidate \
-  --shell-image /private/observed-export/shell-image \
-  --shell-build-receipt /private/host-control/build.json \
-  --evidence /private/new-strong-proof-evidence
-```
-
-It calls the real preparer, verifies the positive exact-path document, tests
-copied image/helper-only/symlink refusals without changing original artifacts or
-old output, then revalidates the original observed package. It invokes no Docker,
-registry, compiler, or SBX effects. A current final receipt is required;
-its absence is not permission to bless a historical image.
-
 ## Opt-in actual frontend regression
 
 On the authorized host with a local Docker Engine, run the maintained live test:
