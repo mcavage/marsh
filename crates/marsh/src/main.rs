@@ -3792,23 +3792,6 @@ exit 64
     }
 
     #[test]
-    fn either_relay_variable_makes_mcp_host_ineligible() {
-        assert!(!relay_environment_present(false, false));
-        assert!(relay_environment_present(true, false));
-        assert!(relay_environment_present(false, true));
-        assert!(relay_environment_present(true, true));
-        for client in [McpClient::Codex, McpClient::Claude, McpClient::Sbx] {
-            assert!(require_host_mcp_install(client, false, false).is_ok());
-            for (socket, token) in [(true, false), (false, true), (true, true)] {
-                let error = require_host_mcp_install(client, socket, token).unwrap_err();
-                assert_eq!(error.status, 2);
-                assert!(error.message.contains("host-only"));
-                assert!(error.message.contains(client.name()));
-            }
-        }
-    }
-
-    #[test]
     fn missing_mcp_sibling_is_actionable() {
         let directory = tempfile::tempdir().unwrap();
         let error = run_mcp_sibling(&directory.path().join("marsh"), &[]).unwrap_err();

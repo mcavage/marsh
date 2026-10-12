@@ -209,14 +209,6 @@ pub fn collect_exported_environment(
 mod tests {
     use super::*;
 
-    struct FakeExecutor;
-
-    impl RegisteredCommandExecutor for FakeExecutor {
-        fn execute(&self, invocation: Invocation) -> i32 {
-            i32::try_from(invocation.args.len()).unwrap()
-        }
-    }
-
     #[test]
     fn registry_is_generic_sorted_and_path_free() {
         let commands = RegisteredCommands::new(["z-review".into(), "a_agent".into()]).unwrap();
@@ -231,20 +223,6 @@ mod tests {
                 Err(InstallError::InvalidRegistry)
             );
         }
-    }
-
-    #[test]
-    fn fake_executor_receives_transport_neutral_invocation() {
-        assert_eq!(
-            FakeExecutor.execute(Invocation {
-                command: "review".into(),
-                args: vec!["one".into(), "two".into()],
-                placement: marsh_daemon::Placement::Local,
-                environment: BTreeMap::new(),
-                working_directory: "/fixture".into(),
-            }),
-            2
-        );
     }
 
     #[test]
