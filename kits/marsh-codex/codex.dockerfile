@@ -61,7 +61,7 @@ RUN test "$(command -v codex)" = /usr/local/bin/codex \
  && test "$(codex --version)" = "codex-cli ${CODEX_VERSION}" \
  && node --version
 # Provider legal texts are in the canonical marsh-dhi bundle above.
-# Final receipt binds the retained npm 0.159.2, the selected native overlay,
+# Final receipt binds the retained npm 0.162.0, the selected native overlay,
 # and the ACP adapter's selected native npm payload/notices.
 RUN python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --profile codex-kit --version "$CODEX_VERSION" --adapter codex-acp --receipt
 # v2's environment.variables, in the slot OCI already owns for static env.

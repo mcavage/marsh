@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "platform": "linux/amd64",
-  "image": "dhi.io/sbx-templates@sha256:76cf119e2fcfe9f0164bc2c39478b0cda39563fb2b7d4b0f7903d521f17e9b02",
+  "image": "dhi.io/sbx-templates@sha256:6258dc7d4b68631946420d5bf0a8f507a164211efecc430da25b13d4f149279e",
   "packages": [
     {
       "notices": [
@@ -198,7 +198,7 @@
     {
       "notices": [],
       "package": "containerd.io",
-      "version": "2.4.1-0",
+      "version": "2.4.1-3",
       "upstream_notices": [
         {
           "url": "https://raw.githubusercontent.com/containerd/containerd/f2551031d7276a770f65f98c9b52e57e7dad07e8/LICENSE",
@@ -246,7 +246,7 @@
         }
       ],
       "package": "cpp-14",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -258,7 +258,7 @@
         }
       ],
       "package": "cpp-14-x86-64-linux-gnu",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -378,15 +378,15 @@
         }
       ],
       "package": "dirmngr",
-      "version": "2.4.7-21+deb13u1+dhi3"
+      "version": "2.4.7-21+deb13u1+dhi4"
     },
     {
       "notices": [],
       "package": "docker-buildx-plugin",
-      "version": "0.37.1-2",
+      "version": "0.38.0-1",
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/docker/buildx/0b265a9f62db554fa9aba6dd19e1bd5704bc7d8a/LICENSE",
+          "url": "https://raw.githubusercontent.com/docker/buildx/0dbe87f36ed472fe36b6796c3f70b4210a731fc5/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -395,15 +395,15 @@
     {
       "notices": [],
       "package": "docker-ce",
-      "version": "5:29.8.1-0",
+      "version": "5:29.8.2-1",
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/moby/moby/464cd50c3d9e92877d56940ea160de6fca7bea23/LICENSE",
+          "url": "https://raw.githubusercontent.com/moby/moby/8af9fe3a36bab3e039862a2ab1cef1880c9b4d03/LICENSE",
           "sha256": "7c87873291f289713ac5df48b1f2010eb6963752bbd6b530416ab99fc37914a8",
           "file": "texts/7c87873291f289713ac5df48b1f2010eb6963752bbd6b530416ab99fc37914a8.txt"
         },
         {
-          "url": "https://raw.githubusercontent.com/moby/moby/464cd50c3d9e92877d56940ea160de6fca7bea23/NOTICE",
+          "url": "https://raw.githubusercontent.com/moby/moby/8af9fe3a36bab3e039862a2ab1cef1880c9b4d03/NOTICE",
           "sha256": "a249c4197359eee43031d16cecb172326f92ee7b6701af99dfe5c3e5b3d5eca9",
           "file": "texts/a249c4197359eee43031d16cecb172326f92ee7b6701af99dfe5c3e5b3d5eca9.txt"
         }
@@ -412,15 +412,15 @@
     {
       "notices": [],
       "package": "docker-ce-cli",
-      "version": "5:29.8.1-0",
+      "version": "5:29.9.0-0",
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/docker/cli/4a63305d74332de5ceba7fcbccbc3cbb7412f5ba/LICENSE",
+          "url": "https://raw.githubusercontent.com/docker/cli/f415da838bed6a0e12ca6cb86ba198fdac6beb9c/LICENSE",
           "sha256": "2d81ea060825006fc8f3fe28aa5dc0ffeb80faf325b612c955229157b8c10dc0",
           "file": "texts/2d81ea060825006fc8f3fe28aa5dc0ffeb80faf325b612c955229157b8c10dc0.txt"
         },
         {
-          "url": "https://raw.githubusercontent.com/docker/cli/4a63305d74332de5ceba7fcbccbc3cbb7412f5ba/NOTICE",
+          "url": "https://raw.githubusercontent.com/docker/cli/f415da838bed6a0e12ca6cb86ba198fdac6beb9c/NOTICE",
           "sha256": "a8c869fbda819afb8d80e0ac19bac52e766bc6c19cb38cf94f52d64c4be2aab6",
           "file": "texts/a8c869fbda819afb8d80e0ac19bac52e766bc6c19cb38cf94f52d64c4be2aab6.txt"
         }
@@ -429,15 +429,15 @@
     {
       "notices": [],
       "package": "docker-compose-plugin",
-      "version": "5.5.1-2",
+      "version": "5.6.0-3",
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/docker/compose/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de/LICENSE",
+          "url": "https://raw.githubusercontent.com/docker/compose/42f48072bbf92ee9b0e43f9fdf2008d03546e7ca/LICENSE",
           "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
           "file": "texts/58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd.txt"
         },
         {
-          "url": "https://raw.githubusercontent.com/docker/compose/5f94fb0aa42a2cd1248c6e6c7fafb87546b9c8de/NOTICE",
+          "url": "https://raw.githubusercontent.com/docker/compose/42f48072bbf92ee9b0e43f9fdf2008d03546e7ca/NOTICE",
           "sha256": "b7dca0a6b01fa7365e4892877a6321179ee343d72ee87a96cfc222141b99a1e6",
           "file": "texts/b7dca0a6b01fa7365e4892877a6321179ee343d72ee87a96cfc222141b99a1e6.txt"
         }
@@ -489,7 +489,7 @@
         }
       ],
       "package": "gcc-14",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -501,7 +501,7 @@
         }
       ],
       "package": "gcc-14-base",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -513,7 +513,7 @@
         }
       ],
       "package": "gcc-14-x86-64-linux-gnu",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -530,10 +530,10 @@
     {
       "notices": [],
       "package": "gh",
-      "version": "2.101.0-0",
+      "version": "2.102.0-2",
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/cli/cli/0cf1092493af067646fc5f3db9421c6a6ec9c938/LICENSE",
+          "url": "https://raw.githubusercontent.com/cli/cli/fc4b137cdef0a6bd28fd461b7cf9c84a5812a8cd/LICENSE",
           "sha256": "6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f",
           "file": "texts/6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f.txt"
         }
@@ -705,15 +705,15 @@
         }
       ],
       "package": "golang-1.26",
-      "version": "1.26.8-0",
+      "version": "1.26.9-0",
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/golang/go/c293dd49cbe25e1fe8d97d94a5cb618e7b6d831e/LICENSE",
+          "url": "https://raw.githubusercontent.com/golang/go/2ae494ef9fb90e0da0073c31800ba38870249994/LICENSE",
           "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
           "file": "texts/911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad.txt"
         },
         {
-          "url": "https://raw.githubusercontent.com/golang/go/c293dd49cbe25e1fe8d97d94a5cb618e7b6d831e/PATENTS",
+          "url": "https://raw.githubusercontent.com/golang/go/2ae494ef9fb90e0da0073c31800ba38870249994/PATENTS",
           "sha256": "96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc",
           "file": "texts/96f408bfae65bf137fc2525d3ecb030271c50c1e90799f87abf8846d8dd505cc.txt"
         }
@@ -722,7 +722,7 @@
     {
       "notices": [],
       "package": "golang-1.26-oci-config",
-      "version": "1.26.8-0"
+      "version": "1.26.9-0"
     },
     {
       "notices": [
@@ -734,7 +734,7 @@
         }
       ],
       "package": "gpg",
-      "version": "2.4.7-21+deb13u1+dhi3"
+      "version": "2.4.7-21+deb13u1+dhi4"
     },
     {
       "notices": [
@@ -746,7 +746,7 @@
         }
       ],
       "package": "gpg-agent",
-      "version": "2.4.7-21+deb13u1+dhi3"
+      "version": "2.4.7-21+deb13u1+dhi4"
     },
     {
       "notices": [
@@ -758,7 +758,7 @@
         }
       ],
       "package": "gpgconf",
-      "version": "2.4.7-21+deb13u1+dhi3"
+      "version": "2.4.7-21+deb13u1+dhi4"
     },
     {
       "notices": [
@@ -770,7 +770,7 @@
         }
       ],
       "package": "gpgsm",
-      "version": "2.4.7-21+deb13u1+dhi3"
+      "version": "2.4.7-21+deb13u1+dhi4"
     },
     {
       "notices": [
@@ -782,7 +782,7 @@
         }
       ],
       "package": "gpgv",
-      "version": "2.4.7-21+deb13u1+dhi3"
+      "version": "2.4.7-21+deb13u1+dhi4"
     },
     {
       "notices": [
@@ -962,7 +962,7 @@
         }
       ],
       "package": "libasan8",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -986,7 +986,7 @@
         }
       ],
       "package": "libatomic1",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -1010,7 +1010,7 @@
         }
       ],
       "package": "libaudit-common",
-      "version": "1:4.0.2-2+dhi1"
+      "version": "1:4.0.2-2+deb13u1+dhi0"
     },
     {
       "notices": [
@@ -1022,7 +1022,7 @@
         }
       ],
       "package": "libaudit1",
-      "version": "1:4.0.2-2+dhi1"
+      "version": "1:4.0.2-2+deb13u1+dhi0"
     },
     {
       "notices": [
@@ -1214,7 +1214,7 @@
         }
       ],
       "package": "libcc1-0",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -1370,7 +1370,7 @@
         }
       ],
       "package": "libexpat1",
-      "version": "2.8.3-1~deb13u1+dhi4"
+      "version": "2.8.3-1~deb13u1+dhi5"
     },
     {
       "notices": [
@@ -1418,7 +1418,7 @@
         }
       ],
       "package": "libgcc-14-dev",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -1430,7 +1430,7 @@
         }
       ],
       "package": "libgcc-s1",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -1442,7 +1442,7 @@
         }
       ],
       "package": "libgcrypt20",
-      "version": "1.11.0-7+dhi2"
+      "version": "1.11.0-7+deb13u1+dhi1"
     },
     {
       "notices": [
@@ -1502,7 +1502,7 @@
         }
       ],
       "package": "libgomp1",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -1550,7 +1550,7 @@
         }
       ],
       "package": "libgssapi-krb5-2",
-      "version": "1.21.3-5+dhi2"
+      "version": "1.21.3-5+deb13u1+dhi2"
     },
     {
       "notices": [
@@ -1574,7 +1574,7 @@
         }
       ],
       "package": "libhwasan0",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -1634,7 +1634,7 @@
         }
       ],
       "package": "libitm1",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -1706,7 +1706,7 @@
         }
       ],
       "package": "libk5crypto3",
-      "version": "1.21.3-5+dhi2"
+      "version": "1.21.3-5+deb13u1+dhi2"
     },
     {
       "notices": [
@@ -1730,7 +1730,7 @@
         }
       ],
       "package": "libkrb5-3",
-      "version": "1.21.3-5+dhi2"
+      "version": "1.21.3-5+deb13u1+dhi2"
     },
     {
       "notices": [
@@ -1742,7 +1742,7 @@
         }
       ],
       "package": "libkrb5support0",
-      "version": "1.21.3-5+dhi2"
+      "version": "1.21.3-5+deb13u1+dhi2"
     },
     {
       "notices": [
@@ -1814,7 +1814,7 @@
         }
       ],
       "package": "liblsan0",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -1850,7 +1850,7 @@
         }
       ],
       "package": "liblzma5",
-      "version": "5.8.1-1+dhi1"
+      "version": "5.8.1-1+deb13u2+dhi0"
     },
     {
       "notices": [
@@ -2210,7 +2210,7 @@
         }
       ],
       "package": "libpython-3.14",
-      "version": "3.14.7-2"
+      "version": "3.14.8-0"
     },
     {
       "notices": [
@@ -2222,7 +2222,7 @@
         }
       ],
       "package": "libpython-3.14-minimal",
-      "version": "3.14.7-2"
+      "version": "3.14.8-0"
     },
     {
       "notices": [
@@ -2234,7 +2234,7 @@
         }
       ],
       "package": "libpython-3.14-stdlib",
-      "version": "3.14.7-2"
+      "version": "3.14.8-0"
     },
     {
       "notices": [
@@ -2246,7 +2246,7 @@
         }
       ],
       "package": "libquadmath0",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -2438,7 +2438,7 @@
         }
       ],
       "package": "libstdc++6",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -2462,7 +2462,7 @@
         }
       ],
       "package": "libtasn1-6",
-      "version": "4.20.0-2+dhi1"
+      "version": "4.20.0-2+deb13u1+dhi0"
     },
     {
       "notices": [
@@ -2510,7 +2510,7 @@
         }
       ],
       "package": "libtsan2",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -2522,7 +2522,7 @@
         }
       ],
       "package": "libubsan1",
-      "version": "14.2.0-19+dhi3"
+      "version": "14.2.0-19+dhi5"
     },
     {
       "notices": [
@@ -3884,7 +3884,7 @@
         }
       ],
       "package": "python-3.14",
-      "version": "3.14.7-2"
+      "version": "3.14.8-0"
     },
     {
       "notices": [
@@ -3896,7 +3896,7 @@
         }
       ],
       "package": "python-3.14-minimal",
-      "version": "3.14.7-2"
+      "version": "3.14.8-0"
     },
     {
       "notices": [
@@ -4142,7 +4142,7 @@
         }
       ],
       "package": "python3-pip",
-      "version": "26.2.1-0"
+      "version": "26.2.1-2"
     },
     {
       "notices": [
@@ -4358,7 +4358,7 @@
         }
       ],
       "package": "python3-pip-whl",
-      "version": "26.2.1-0"
+      "version": "26.2.1-2"
     },
     {
       "notices": [
@@ -4521,7 +4521,7 @@
         }
       ],
       "package": "socat",
-      "version": "1.8.0.3-1+dhi0"
+      "version": "1.8.0.3-1+deb13u1+dhi0"
     },
     {
       "notices": [
@@ -4605,7 +4605,7 @@
         }
       ],
       "package": "unzip",
-      "version": "6.0-29+dhi1"
+      "version": "6.0-29+deb13u1+dhi1"
     },
     {
       "notices": [
@@ -4629,7 +4629,7 @@
         }
       ],
       "package": "uv",
-      "version": "0.12.21-0"
+      "version": "0.13.0-0"
     },
     {
       "notices": [
@@ -4708,42 +4708,42 @@
     {
       "path": "/usr/bin/containerd",
       "resolved": "/usr/bin/containerd",
-      "sha256": "21a317c926921d810783b93e79303548992222570599e79c06d82ee413e95d8f"
+      "sha256": "f796829543ab02ee3c4b35edf84a8c4360936e48e60bbc8ad7820112c8f3d39b"
     },
     {
       "path": "/usr/bin/containerd-shim-runc-v2",
       "resolved": "/usr/bin/containerd-shim-runc-v2",
-      "sha256": "631e50b645ec6c9fed9307cc13eff80b80a98547bfed45ca8d4778aaf8329c78"
+      "sha256": "f6fca0547c84c7a6104ac7c5bfd94c1e7cf47797c4b836e5b8cf9c505213da29"
     },
     {
       "path": "/usr/bin/ctr",
       "resolved": "/usr/bin/ctr",
-      "sha256": "996381d8f97dd3326f57e5d319bf9ff2ff49a3e9f3eef37ebeffa83f64bc21d2"
+      "sha256": "e3bd61825be638df5d3e8041a207ed2c3e1bec547efcbd5c0f28657516f30289"
     },
     {
       "path": "/usr/bin/docker",
       "resolved": "/usr/bin/docker",
-      "sha256": "4b2f5fcf2bce8fb7ef7b25bd2027ce21df9515bdaf898b60999df03343041701"
+      "sha256": "7c633f2a350391afebd2c0241f07c3518262e6bd7c225e54489fa23b32be892a"
     },
     {
       "path": "/usr/bin/dockerd",
       "resolved": "/usr/bin/dockerd",
-      "sha256": "1b14b839c5cf7d458fcb5967f1c999862ec30d9c96a65c7aeddc6bc7aa2895f1"
+      "sha256": "0b6bce750c4318e44a7e3460715cf9c9cae408b46d430af0268d73c07f49e2bc"
     },
     {
       "path": "/usr/bin/docker-proxy",
       "resolved": "/usr/bin/docker-proxy",
-      "sha256": "5a7ea0828993423aa7c88db97b29d426150c92ad6aaeb17ac789e19b587e735c"
+      "sha256": "34a16f0e83e57de71761ada9f04457974fd00223e19406fde059c71c62af3969"
     },
     {
       "path": "/usr/bin/gh",
       "resolved": "/usr/bin/gh",
-      "sha256": "90e3e4bab349f560e83db5bf3156c410a8bfe5f32ca6f8906a6307f6e1d17b61"
+      "sha256": "7c691cae72ac8b03c036e89d3b81b9788bbe7e5de7adfa9c47b54234cc218de2"
     },
     {
       "path": "/usr/bin/runc",
       "resolved": "/usr/bin/runc",
-      "sha256": "4e101d22ee439e1e07aea9145601022fea99c87a54d62d8396c5d757966d643f"
+      "sha256": "bb113572205e792241853420d25cf5b5316efb6b75373351e2f42f352b59d57c"
     },
     {
       "path": "/usr/bin/node",
@@ -4753,49 +4753,49 @@
     {
       "path": "/usr/lib/go/bin/go",
       "resolved": "/usr/lib/go/bin/go",
-      "sha256": "3d7fa9fed99df354b8295d3a3f23bad6c1006d6237ddbb2d0b71f6317bde3bbd"
+      "sha256": "dddb5b912207d4e32cb71022097c71621caa476e84971b41585d59ba8fb3ab29"
     },
     {
       "path": "/usr/libexec/docker/cli-plugins/docker-buildx",
       "resolved": "/usr/libexec/docker/cli-plugins/docker-buildx",
-      "sha256": "f9ac7a6121911b465c6e757cee140802f7d28b5366843607b281c9f09c077a45"
+      "sha256": "8f09c8d39bf7b667a366f1e3b19306bb943b434f8dcdd1dec841f147b1c15116"
     },
     {
       "path": "/usr/libexec/docker/cli-plugins/docker-compose",
       "resolved": "/usr/libexec/docker/cli-plugins/docker-compose",
-      "sha256": "72ff28c21df1473da0af17b8eed3782826214ba7437b16dce0976ef17b3d76ee"
+      "sha256": "d5edc299bec1d49e50ff0e1d3f72b90221bd657eee96f7300e5bddd71ce7e51c"
     }
   ],
   "equivalent_base_payloads": [
     {
-      "image": "dhi.io/sbx-templates@sha256:36fd3782db091cec28ddfcb28458fbc96ed540435b91d910c1a00b07ec50d5a2",
-      "platform_manifest": "sha256:76cf119e2fcfe9f0164bc2c39478b0cda39563fb2b7d4b0f7903d521f17e9b02",
-      "inventory_sha256": "ec5b4bd75fa4fbba6d2fcc996a0fbec89f60ccae42a07baba51974ab430ebb34",
+      "image": "dhi.io/sbx-templates@sha256:ff0fe56f7fbc14a969131c52d8e7233862a4810196fbc0e2d8d88441204081a9",
+      "platform_manifest": "sha256:6258dc7d4b68631946420d5bf0a8f507a164211efecc430da25b13d4f149279e",
+      "inventory_sha256": "ba0abdc843665a6fa7afbc07e45d17237005af843501d65b178f9e7c2fabb82e",
       "package_versions": 265,
       "binary_hashes": 12,
       "actual_notice_texts": 158,
       "scope": "Common installed AMD64 OS/runtime payload; agent identities indexed separately."
     },
     {
-      "image": "dhi.io/sbx-templates@sha256:13d7dbd08041284dbe5df67ec730a26f7b03dbd6fa994e143672979440426010",
-      "platform_manifest": "sha256:a48213d3843e3a6e07766f5f86706283b4a394cda572cbb91e841a7d76b20ce8",
-      "inventory_sha256": "ec5b4bd75fa4fbba6d2fcc996a0fbec89f60ccae42a07baba51974ab430ebb34",
+      "image": "dhi.io/sbx-templates@sha256:e3b7baee8a6f5f3805201b52b27c192e03603edbe1bea2d17d9399717777fd29",
+      "platform_manifest": "sha256:edb310d0058aef6036e4193597252ee7043ec5ebbb9a17fe7eca5aaf71c274c0",
+      "inventory_sha256": "ba0abdc843665a6fa7afbc07e45d17237005af843501d65b178f9e7c2fabb82e",
       "package_versions": 265,
       "binary_hashes": 12,
       "actual_notice_texts": 158,
       "scope": "Common installed AMD64 OS/runtime payload; agent identities indexed separately."
     },
     {
-      "image": "dhi.io/sbx-templates@sha256:0529fcace182dc3de0967bdb235ed3f8ca715f8eafc9f987a53a258ae3bf83f3",
-      "platform_manifest": "sha256:89fb49e29098933f2c3232b7fcea6a5f6ede5448a8d15eed140e1faa1f52e051",
-      "inventory_sha256": "ec5b4bd75fa4fbba6d2fcc996a0fbec89f60ccae42a07baba51974ab430ebb34",
+      "image": "dhi.io/sbx-templates@sha256:ca1bf06e604ca2d409c638fd8e3e9feecbbffe88432e9dd6d9b14ee3123ec4e6",
+      "platform_manifest": "sha256:738389219ae7f8dfa98bbd8812ff5a79abf044447ffb6bfb2df4246a3cbcc17a",
+      "inventory_sha256": "ba0abdc843665a6fa7afbc07e45d17237005af843501d65b178f9e7c2fabb82e",
       "package_versions": 265,
       "binary_hashes": 12,
       "actual_notice_texts": 158,
       "scope": "Common installed AMD64 OS/runtime payload; agent identities indexed separately."
     }
   ],
-  "go_module_inventory_sha256": "fc77d886ac0fb4ecf28884fddf684c18ce8f8fea73a43bdc9ea8d8038b8149cb",
+  "go_module_inventory_sha256": "f1c94d9433b7f28c61d2af7c5f675a4d5a05c87413c72e03c874dc6f4b49fa17",
   "go_module_versions_match_arm64": true,
   "shared_notice_evidence": "Actual AMD64 whole-filesystem file hashes and identical Python wheel archive hashes; exact-version upstream Go sources also used for ARM64."
 }

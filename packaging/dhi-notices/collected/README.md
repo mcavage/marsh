@@ -57,8 +57,8 @@ What each scope checks:
 - **Base:** installed package versions, common binary identities, the exact
   clipboard and Corepack variants, and maintained agent additions when present.
   Extra packages are reported, not counted as covered.
-- **Copied development agents:** Claude 2.1.285 at `/usr/local/bin/claude` and
-  the Codex 0.159.2 npm-global tree: bytes, type, mode, owner, link targets and
+- **Copied development agents:** Claude 2.1.296 at `/usr/local/bin/claude` and
+  the Codex 0.162.0 npm-global tree: bytes, type, mode, owner, link targets and
   tree equality.
 - **Native Kits:** the selected Claude 2.1.278 and Codex 0.155.1 hashes and
   their allowed mutations. The Codex recipe also checks `command -v codex` and

@@ -49,9 +49,9 @@
     "signature_verified": false
   },
   "claude-manifest": {
-    "url": "https://downloads.claude.ai/claude-code-releases/2.1.285/manifest.json",
-    "sha256": "ab45eee79e59db6c01147e19b83074df8773304d790f5553b03c2a495eaa8297",
-    "size": 2161,
+    "url": "https://downloads.claude.ai/claude-code-releases/2.1.296/manifest.json",
+    "sha256": "e50e872d91f3b7da2fb3d8d38505d709e0a90f48da1951dd51176930c8da8270",
+    "size": 1931,
     "integrity": null,
     "signature_verified": false
   },
@@ -479,35 +479,15 @@
   "ripgrep_license_election": "MIT alternative elected for ripgrep itself; UNLICENSE is not relied upon. Dependencies keep their own terms.",
   "codex-arm64-npm": [
     {
-      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.159.2.tgz",
-      "sha256": "cf1e5d7b6e317a4a1d36dbff2ebd9b3cf048ac98d06fcb6682c57248e023cad2",
-      "size": 4904,
-      "integrity": "sha512-SE13C3nZCYoVL569BdegoOl6vwjb7o2sXOo7ivwVzaVoY0cswwi0/6pIE0TyO/C0vIkQh3jslExitET7PBTfIg==",
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.162.0.tgz",
+      "sha256": "6cb67d6e7631af84f27580d8fe228ac437c34181d370dc5c5a5819e014c8c860",
+      "size": 4901,
+      "integrity": "sha512-qWWckMfknyVym1lD5y2rTwPJA2sgHkzePF2l/Uevss4hVpqbt23rMIHKNTrqECdnv82denylHWEzrAmDnCYNIw==",
       "signature_verified": false,
-      "members": [
-        {
-          "member": "package/bin/codex.js",
-          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/bin/codex.js",
-          "sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
-          "size": 8790
-        },
-        {
-          "member": "package/package.json",
-          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/package.json",
-          "sha256": "d4e69a623f79ede30c5abb2a4a4bef8b7ff71dbda1362ebe198676ab56113c15",
-          "size": 1082
-        },
-        {
-          "member": "package/README.md",
-          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/README.md",
-          "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
-          "size": 3334
-        }
-      ],
       "slsa_acquisition": {
-        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.159.2",
-        "sha256": "0574ca993bba7c4ec813baa53fff05815a9b877744b268a9d9bc4dd4287ea684",
-        "size": 14685,
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.162.0",
+        "sha256": "5840102e36ab66148684194665a67cd3357f1b077aa99054cccbe8ab15511e19",
+        "size": 14620,
         "integrity": null,
         "signature_verified": false
       },
@@ -515,9 +495,9 @@
         "_type": "https://in-toto.io/Statement/v1",
         "subject": [
           {
-            "name": "pkg:npm/%40openai/codex@0.159.2",
+            "name": "pkg:npm/%40openai/codex@0.162.0",
             "digest": {
-              "sha512": "484d770b79d9098a152f9ebd05d7a0a0e97abf08dbee8dac5cea3b8afc15cda56863472cc308b4ffaa481344f23bf0b4bc89108778ec944c62b444fb3c14df22"
+              "sha512": "a9659c90c7e49f25729b5943e72dab4f03c9036b201e4cde3c5da5fd47afb2ce21569a9bb76deb3081ca353aea102767bfcd9d7a7ca51d6133ac09839c260d23"
             }
           }
         ],
@@ -527,7 +507,7 @@
             "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
             "externalParameters": {
               "workflow": {
-                "ref": "refs/tags/rust-v0.159.2",
+                "ref": "refs/tags/rust-v0.162.0",
                 "repository": "https://github.com/openai/codex",
                 "path": ".github/workflows/rust-release.yml"
               }
@@ -541,9 +521,9 @@
             },
             "resolvedDependencies": [
               {
-                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.159.2",
+                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.162.0",
                 "digest": {
-                  "gitCommit": "ff6aec96948b70d94983af2641a6b67c94faeff5"
+                  "gitCommit": "c1382380de69521303b416720a52f42d51af6248"
                 }
               }
             ]
@@ -553,43 +533,118 @@
               "id": "https://github.com/actions/runner/github-hosted"
             },
             "metadata": {
-              "invocationId": "https://github.com/openai/codex/actions/runs/36642524844/attempts/1"
+              "invocationId": "https://github.com/openai/codex/actions/runs/37812662295/attempts/4"
             }
           }
         }
       },
-      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed"
+      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed",
+      "members": [
+        {
+          "member": "package/bin/codex.js",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/bin/codex.js",
+          "sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+          "size": 8790
+        },
+        {
+          "member": "package/package.json",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/package.json",
+          "sha256": "4c48deba216b641aa1f8229a9cc69f053d7798cde2d5d631b22bff7863012bbb",
+          "size": 1082
+        },
+        {
+          "member": "package/README.md",
+          "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/README.md",
+          "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
+          "size": 3334
+        }
+      ]
     },
     {
-      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.159.2-linux-arm64.tgz",
-      "sha256": "1c4756c2f67f1310ffb03234d61d540ad85916cef5383e46e0e7851f1721c142",
-      "size": 155020250,
-      "integrity": "sha512-Pm0W2PnFeTEqPx+AOIwgOVB4dBtY24cuD0tx1hjCor60CbSAT7WBPZVNUINSrTCDrMndvQC67p71ZEz+gmPPkA==",
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.162.0-linux-arm64.tgz",
+      "sha256": "00960f53400b083ebd2acc4529b2ce16d5baf96d9a93c366505513a1ed8aa558",
+      "size": 157897651,
+      "integrity": "sha512-6NYWwy09FsZ+/0Dz/bvV/yz3aFhkNzj86fSiux9Ax9VMBOID5nPdwd51OySm7fy8TMRud4fgJFELSi3Enc1s7Q==",
       "signature_verified": false,
+      "slsa_acquisition": {
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.162.0-linux-arm64",
+        "sha256": "e393cfa4be8ba01c341f74b869c05a3c7acd7557a427c755da820e934279c4d5",
+        "size": 14359,
+        "integrity": null,
+        "signature_verified": false
+      },
+      "slsa_statement": {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [
+          {
+            "name": "pkg:npm/%40openai/codex@0.162.0-linux-arm64",
+            "digest": {
+              "sha512": "e8d616c32d3d16c67eff40f3fdbbd5ff2cf76858643738fce9f4a2bb1f40c7d54c04e203e673ddc1de753b24a6edfcbc4cc46e7787e024510b4a2dc49dcd6ced"
+            }
+          }
+        ],
+        "predicateType": "https://slsa.dev/provenance/v1",
+        "predicate": {
+          "buildDefinition": {
+            "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
+            "externalParameters": {
+              "workflow": {
+                "ref": "refs/tags/rust-v0.162.0",
+                "repository": "https://github.com/openai/codex",
+                "path": ".github/workflows/rust-release.yml"
+              }
+            },
+            "internalParameters": {
+              "github": {
+                "event_name": "push",
+                "repository_id": "965415649",
+                "repository_owner_id": "14957082"
+              }
+            },
+            "resolvedDependencies": [
+              {
+                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.162.0",
+                "digest": {
+                  "gitCommit": "c1382380de69521303b416720a52f42d51af6248"
+                }
+              }
+            ]
+          },
+          "runDetails": {
+            "builder": {
+              "id": "https://github.com/actions/runner/github-hosted"
+            },
+            "metadata": {
+              "invocationId": "https://github.com/openai/codex/actions/runs/37812662295/attempts/4"
+            }
+          }
+        }
+      },
+      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed",
       "members": [
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/bwrap",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/bwrap",
-          "sha256": "c547cbdc762a70ed216789ffaa4c6c0e7d2beabe32245a498f8e365a9fc8dab4",
+          "sha256": "c6949b5053988498976467bd9972c5d3695ecaac64a5f2de09af20f579fb7e31",
           "size": 529168
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/bin/codex",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex",
-          "sha256": "113aa5d5952a6fd3950a88323219747d0c91978ebee948509a540c8a460e59a3",
-          "size": 247524632
+          "sha256": "7993e8a93e93611bdb9b1129c22dcb2036d52f5065f548aa841468cccf36046a",
+          "size": 254866040
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/bin/codex-code-mode-host",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/bin/codex-code-mode-host",
-          "sha256": "6979f2fea8cb1d5d72614abfe2f42b16727cdce2c356cc6af933157e732a7277",
-          "size": 66921472
+          "sha256": "9e07bc89524b6973b710396ca6dce060ba014ed14225a1a65c2d6200ccef132b",
+          "size": 66855936
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
-          "sha256": "028cce6a14b5f2c6dabe184183d1947ab708b8ddafad6863b9903cc9978b6095",
-          "size": 67057232
+          "sha256": "30f20abf7a4364ae897fc61808e5cfcb9d2b94b9e1188a32b0cde10ee70217ad",
+          "size": 67693904
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-path/rg",
@@ -606,91 +661,91 @@
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
-          "sha256": "234e9ef87e976e292fc842e9385a4c9dd7e5fe6531740904007d2655e8835074",
+          "sha256": "14a8e7c9f0f4ca2ff7f1446ab884515fa9b428ca88ee44df6936c09f2fd4e2e9",
           "size": 2590176
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
-          "sha256": "01da1f362d68b4ce4e948e36d4bad44f0b1c0dd662ea162c946d076599a3d8f3",
+          "sha256": "652cac0b849847e451d7c071387d9d8240b2a9b7e71afed34618a755c89d5459",
           "size": 1565504
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
-          "sha256": "747366160b22b78407ea1624395094c6f874802027a0f5e0a873c59930cf288a",
+          "sha256": "24d6f4218b2d68d248ff93e52ce20d490e5b8f66339719469da3fe0b99fcbe34",
           "size": 16584
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
-          "sha256": "0dd31d832cf0e4057570dc26e4ff5618b24cd4d279b02c34d6a0450f6599cbc7",
+          "sha256": "7f552b68db6f5b9385628683ab3bb790debf4abf84d45aafef6edfe3a68d17a7",
           "size": 492608
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
-          "sha256": "ed39c48d1a429c3213e1df7ca2543b67718ac23a0406f6bb7237a4fa32b823b3",
+          "sha256": "d2f3f24ba96d1cfda563f3be0e4d46194fc6a04b1568890a69430a741047d866",
           "size": 33520
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
-          "sha256": "c814926626cf6cba5fd805b56349dedd4bbb3c17603ca5f7b71d72d239a8d5f5",
+          "sha256": "255c1f5dc62521813ab4135926c85e69e6603c4d27fd1a56f80ec831bd8aedc0",
           "size": 111856
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
-          "sha256": "e659b727eca719ea5bf21f0f4277b05a9beca0fc49a2695323526e0704c02fd5",
+          "sha256": "73fc7ed809b86cf79d16e84e0b7671361087d9e6966ed78fbe623a3121dfb6c7",
           "size": 594072
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
-          "sha256": "93f4eb180b5c8bf95d54e9adfe5b397502d2ccccdc43100000803a9610bbf69d",
+          "sha256": "8b9d638a12a9a65463981384121a62571df58a15a56187e2d90808657b52caa6",
           "size": 570192
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
-          "sha256": "cd42e1a0a518d9cd4834526bb2fa3191a7ab3e19aecaba4eb63ffc08eb0f2994",
+          "sha256": "1b2cd07a914a6962646d67664552aaa2b2bd262c006291bc55d59bbf32160e55",
           "size": 78152
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
-          "sha256": "8adb2913de82cf400a56c98c0671857c140a2940b65df889936eddd313e90362",
+          "sha256": "95bb07f513a4985e30ca45ed3268b3c9b36cdcd26c5421b02f514d90e74e9a02",
           "size": 341720
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
-          "sha256": "f9c1a90a458355194524c41b22b083c244332fe61fe1b70ad955922cf501e11b",
+          "sha256": "0f0886d52e3bca283ac96a3237b91a0d82665d898590f9a0f5e5589a61b7bd71",
           "size": 1682744
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
-          "sha256": "e727766dd06347e408fc4c81e7401eecc1c47239de55c06b6237b610ad9ff260",
+          "sha256": "d2aa2d75c9691cfd1afc2408d5ec9e3bf4b5daccfad573ddebc1951ef4c0df34",
           "size": 222344
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
-          "sha256": "9e740b30edde1c8be8cc72c69a860a47e92f8969f580b41256cde6ee09262f0e",
+          "sha256": "c2b1976682f5cc6a15dc25523e55e7f1c48e31aa8bde540523e5c433620611a4",
           "size": 274480
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
-          "sha256": "5da004673b00bb2ec06501ca7bd650706c722e13b87ed7632ef5814329c9bda3",
+          "sha256": "f5966cbb908b84a4a25300b796e94b89658b22123219fdbf9f10e8dfb5fb8ee7",
           "size": 1049992
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
-          "sha256": "8b421c72204baa5282580503bc187875dd650299a0256750cdd9468703105a06",
+          "sha256": "fc3c8a63eb8e33c40de769a5ee346f0495dfef829188992b84cc8e44d19fe7a0",
           "size": 499096
         },
         {
@@ -720,25 +775,25 @@
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-package.json",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-package.json",
-          "sha256": "d408845280e8ffe021b53343eb51aeda5ce641b851682be2362c2ecf5e306da0",
+          "sha256": "db84f35cac5f161e334b40e8cd0b303cde64a8362851f5a5972ca47dbb21ad26",
           "size": 206
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/manifest.json",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/manifest.json",
-          "sha256": "06dee2a9e6b40c20ff34d255facc27042f2acd378f7c314dea60ce99adbcfbfb",
+          "sha256": "8ea5d115ef0dff0028821a8fccb804457a8d002cb56d4d49b8b8cd6fffa75483",
           "size": 4770
         },
         {
           "member": "package/package.json",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/package.json",
-          "sha256": "dd308d68cf5659e804b7409cb4851150ac58d4498f03a979446c22c1d22023f6",
+          "sha256": "50b1b9b1a5cc9900e0b3e11e0979fa9618d05bfcd6cd9179a6feddac2e73aeba",
           "size": 515
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/runtime.json",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/runtime.json",
-          "sha256": "0a21652e0af91c9b80d52d9c9ba5038214c7820919eb29d208609d86bd65dd95",
+          "sha256": "2afec5a0b2512ef375ca12652bf8644b90587b342c248353798301f1667f5776",
           "size": 14536
         },
         {
@@ -768,43 +823,43 @@
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
-          "sha256": "ee908e36f90ffad21b33466f8c8b5c7c5900ec0353def57aea43ea250ed06fee",
+          "sha256": "744fb71c7c6d3f0c251e1f9d3771cb7e8df255a8745adfb421b5ab3bcfc0959f",
           "size": 7264
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
-          "sha256": "f3f01582d621161aeb2508980bdc1999d91833a28a2d6c975c95dd9784055aef",
+          "sha256": "9c98cf4b281579d746006c6e77449b2f966eca22102f9ee83b2b0c588267a495",
           "size": 42600
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
-          "sha256": "dcdb224e78c8afdeb8633b6c4d6d529349468f82503b5a7c560d17d71067a2bc",
+          "sha256": "01bcbf3813624c8b305f96105aaf0a54929aa0e35116cd901857bb8eed3ce843",
           "size": 36136
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
-          "sha256": "0fdd8058ad1a07aee05d847525684c81fe7c703a287814fcabb4e1e522fcdd2e",
+          "sha256": "cc2e08e005c0cbf64a5abd6738f244d70055e3e7a46fbda436580a9efcbfc49a",
           "size": 477024
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
-          "sha256": "f5daa0745bd3b776c3d5000aefcc153f51c8827510a4df680049ddb757185227",
+          "sha256": "e82f58a17cda4b170fc9392c852165f2230f5b36db76f98a30934b4e54d750fd",
           "size": 72120
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
-          "sha256": "6d2b9fd22ce4d63a765fc4688734432786207dc9eb6d4cf3205d969ce6e801f3",
+          "sha256": "40aafc13ada5b67e691e7456d60c86df21ddeb2d5c07d4230cbf13e255d87ed7",
           "size": 771240
         },
         {
           "member": "package/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-arm64/vendor/aarch64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
-          "sha256": "62528cacb9ff20d84439d6e47795d8a5bc2a1421b002c8784a36629a0ae529fd",
+          "sha256": "7e38bb8cd6889aee486fc00aa27c043825324cc2de88270b9b8de1dd820500bb",
           "size": 571648
         },
         {
@@ -843,11 +898,20 @@
           "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
           "size": 1002
         }
-      ],
+      ]
+    }
+  ],
+  "codex-amd64-npm": [
+    {
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.162.0.tgz",
+      "sha256": "6cb67d6e7631af84f27580d8fe228ac437c34181d370dc5c5a5819e014c8c860",
+      "size": 4901,
+      "integrity": "sha512-qWWckMfknyVym1lD5y2rTwPJA2sgHkzePF2l/Uevss4hVpqbt23rMIHKNTrqECdnv82denylHWEzrAmDnCYNIw==",
+      "signature_verified": false,
       "slsa_acquisition": {
-        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.159.2-linux-arm64",
-        "sha256": "4f910afc7a39194e405dca67cca82acf98a4326e23210807cd6db155ffc139eb",
-        "size": 14813,
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.162.0",
+        "sha256": "5840102e36ab66148684194665a67cd3357f1b077aa99054cccbe8ab15511e19",
+        "size": 14620,
         "integrity": null,
         "signature_verified": false
       },
@@ -855,9 +919,9 @@
         "_type": "https://in-toto.io/Statement/v1",
         "subject": [
           {
-            "name": "pkg:npm/%40openai/codex@0.159.2-linux-arm64",
+            "name": "pkg:npm/%40openai/codex@0.162.0",
             "digest": {
-              "sha512": "3e6d16d8f9c579312a3f1f80388c20395078741b58db872e0f4b71d618c2a2beb409b4804fb5813d954d508352ad3083acc9ddbd00baee9ef5644cfe8263cf90"
+              "sha512": "a9659c90c7e49f25729b5943e72dab4f03c9036b201e4cde3c5da5fd47afb2ce21569a9bb76deb3081ca353aea102767bfcd9d7a7ca51d6133ac09839c260d23"
             }
           }
         ],
@@ -867,7 +931,7 @@
             "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
             "externalParameters": {
               "workflow": {
-                "ref": "refs/tags/rust-v0.159.2",
+                "ref": "refs/tags/rust-v0.162.0",
                 "repository": "https://github.com/openai/codex",
                 "path": ".github/workflows/rust-release.yml"
               }
@@ -881,9 +945,9 @@
             },
             "resolvedDependencies": [
               {
-                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.159.2",
+                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.162.0",
                 "digest": {
-                  "gitCommit": "ff6aec96948b70d94983af2641a6b67c94faeff5"
+                  "gitCommit": "c1382380de69521303b416720a52f42d51af6248"
                 }
               }
             ]
@@ -893,21 +957,12 @@
               "id": "https://github.com/actions/runner/github-hosted"
             },
             "metadata": {
-              "invocationId": "https://github.com/openai/codex/actions/runs/36642524844/attempts/1"
+              "invocationId": "https://github.com/openai/codex/actions/runs/37812662295/attempts/4"
             }
           }
         }
       },
-      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed"
-    }
-  ],
-  "codex-amd64-npm": [
-    {
-      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.159.2.tgz",
-      "sha256": "cf1e5d7b6e317a4a1d36dbff2ebd9b3cf048ac98d06fcb6682c57248e023cad2",
-      "size": 4904,
-      "integrity": "sha512-SE13C3nZCYoVL569BdegoOl6vwjb7o2sXOo7ivwVzaVoY0cswwi0/6pIE0TyO/C0vIkQh3jslExitET7PBTfIg==",
-      "signature_verified": false,
+      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed",
       "members": [
         {
           "member": "package/bin/codex.js",
@@ -918,7 +973,7 @@
         {
           "member": "package/package.json",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/package.json",
-          "sha256": "d4e69a623f79ede30c5abb2a4a4bef8b7ff71dbda1362ebe198676ab56113c15",
+          "sha256": "4c48deba216b641aa1f8229a9cc69f053d7798cde2d5d631b22bff7863012bbb",
           "size": 1082
         },
         {
@@ -927,11 +982,18 @@
           "sha256": "ba4e1f69ff48386e72a9c5e1edaf76aad64a475c2d51af79ccba6d1128261ba7",
           "size": 3334
         }
-      ],
+      ]
+    },
+    {
+      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.162.0-linux-x64.tgz",
+      "sha256": "dbd342e7ad896d53dbb505e926f1b82314b79a9d33e209b0b7616ced6b06c983",
+      "size": 165503686,
+      "integrity": "sha512-qHWp6oKpf456PqjberGN8avs8zChv2oS+UuDiqVFYAuDOhq6vBc1drh8jEsnR7dBX+zcw03PN5VLtePGlMcC3w==",
+      "signature_verified": false,
       "slsa_acquisition": {
-        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.159.2",
-        "sha256": "0574ca993bba7c4ec813baa53fff05815a9b877744b268a9d9bc4dd4287ea684",
-        "size": 14685,
+        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.162.0-linux-x64",
+        "sha256": "3a94315715407120ee554fc811a345c0e978f853de354b49d56bc61fc0e071d6",
+        "size": 14147,
         "integrity": null,
         "signature_verified": false
       },
@@ -939,9 +1001,9 @@
         "_type": "https://in-toto.io/Statement/v1",
         "subject": [
           {
-            "name": "pkg:npm/%40openai/codex@0.159.2",
+            "name": "pkg:npm/%40openai/codex@0.162.0-linux-x64",
             "digest": {
-              "sha512": "484d770b79d9098a152f9ebd05d7a0a0e97abf08dbee8dac5cea3b8afc15cda56863472cc308b4ffaa481344f23bf0b4bc89108778ec944c62b444fb3c14df22"
+              "sha512": "a875a9ea82a97f8e7a3ea8db7ab18df1abecf330a1bf6a12f94b838aa545600b833a1ababc173576b87c8c4b2747b7415fecdcc34dcf37954bb5e3c694c702df"
             }
           }
         ],
@@ -951,7 +1013,7 @@
             "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
             "externalParameters": {
               "workflow": {
-                "ref": "refs/tags/rust-v0.159.2",
+                "ref": "refs/tags/rust-v0.162.0",
                 "repository": "https://github.com/openai/codex",
                 "path": ".github/workflows/rust-release.yml"
               }
@@ -965,9 +1027,9 @@
             },
             "resolvedDependencies": [
               {
-                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.159.2",
+                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.162.0",
                 "digest": {
-                  "gitCommit": "ff6aec96948b70d94983af2641a6b67c94faeff5"
+                  "gitCommit": "c1382380de69521303b416720a52f42d51af6248"
                 }
               }
             ]
@@ -977,43 +1039,36 @@
               "id": "https://github.com/actions/runner/github-hosted"
             },
             "metadata": {
-              "invocationId": "https://github.com/openai/codex/actions/runs/36642524844/attempts/1"
+              "invocationId": "https://github.com/openai/codex/actions/runs/37812662295/attempts/4"
             }
           }
         }
       },
-      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed"
-    },
-    {
-      "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.159.2-linux-x64.tgz",
-      "sha256": "84a6b35fb45bdcb94cef9fcb329438045a8911f53876cc9a9a7e6f9bb1382eba",
-      "size": 162475310,
-      "integrity": "sha512-RrCZ1X52wpa1lOsXtCtSyhjOFdQPh7LH5Ccv8HsKmd/2UXbUwxXFqWXFK3JzatquUNGtW/TLox5Y7qVOGkV0/Q==",
-      "signature_verified": false,
+      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed",
       "members": [
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/bwrap",
-          "sha256": "77360cb751ccedc5971391444ac86a8a33c15b04d6b4a6fe45f5d25496e62c4c",
+          "sha256": "4e6022ae74b35d645c753d20f18910dca04f31b69b0ca16118393a343f644ac9",
           "size": 529776
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/bin/codex",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
-          "sha256": "1748767b230ebfc3d4ab7e4e254920d0c0ad9691fd8c11f190e7d44511a4a92e",
-          "size": 286754152
+          "sha256": "50ed828f357c655a3c82054d346cab8434f24901f14ec19b8267571bdd008b38",
+          "size": 294410952
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
-          "sha256": "5b2c075ac2380fa04d76d7313fbc044d29c8d0a0d0b9138415acd4610211ca03",
-          "size": 74068880
+          "sha256": "4c1984f440b743db476002c6364a31b2d8c437bebd628e9cb676d4742fcb1d8c",
+          "size": 74040208
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/bin/codex-voice-host",
-          "sha256": "ec657f62509489459849219047bf397f05c0a09c5d2f092a07c9edbdfb89c769",
-          "size": 64531104
+          "sha256": "597dc27c200d488244113b34ccbdc462ac83119fa5ce88b9952af365f0664d51",
+          "size": 65039440
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-path/rg",
@@ -1030,91 +1085,91 @@
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgio-2.0.so.0",
-          "sha256": "81d92399c8d3c4b97cfe8058750387a51d8dd03de408aa943a4c83fb74704f8d",
+          "sha256": "c17ebbfb59d69c4a0eb769008617c279a139ea232c9b6b3fbff6410d82b25a39",
           "size": 2307904
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libglib-2.0.so.0",
-          "sha256": "cfa99126563d2b434a239fcafaa91af531131da85c4afe5c2975d26a0486d765",
+          "sha256": "5ccc81fa4460c92cf2d1de7e3f43a9ff9c4f016aabc020fa7d207bfe91d20974",
           "size": 1480224
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgmodule-2.0.so.0",
-          "sha256": "14e6c565b48399a157a7c75a471c70f35b59959547ff31d9487ff9cecd0b4f5a",
+          "sha256": "a7ecb2eb0d9a418ced8b07fd3cfe1a83ec450f5d7b4a70e1a6be4928779d97b4",
           "size": 15656
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgobject-2.0.so.0",
-          "sha256": "4d60cc690456b854109d82443c6d80ca8d83224964fcba007a035379c2a103e6",
+          "sha256": "cad04e590d4b8fa08b28554937d862e8c8fbcfa3a481d840a24c652b5c294e6f",
           "size": 449600
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstallocators-1.0.so.0",
-          "sha256": "3a3b5a49b39f087c2d8a66057051b97d347db274edfdf0c220267ef56e87d1a9",
+          "sha256": "cd49677c7385ea2620dd58d71da212d38ad41973ff9703d6694ddf1328daca8d",
           "size": 30128
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstapp-1.0.so.0",
-          "sha256": "55a6d6f7ec47f97efa69f7a112e0e9bb20ae06a3cd8753eb37125d8dba6531d4",
+          "sha256": "ba52b21ce4241606126fb49f489f22f1c7e3dac88bdc0150d52f9a8fbbc8edf7",
           "size": 105200
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstaudio-1.0.so.0",
-          "sha256": "0d074b4119f64399f7c0ee5857dc62c2cdcf2b31af8378abbced2887b6b1c8d3",
+          "sha256": "72fccaf3fbc59764dd99aaae417c41940cc7950b1d2509d83237262b0c1a88d1",
           "size": 597832
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstbase-1.0.so.0",
-          "sha256": "5f4a20109b86120ed9327a48d80549ec98750c7dc08f9b8838886438962d6747",
+          "sha256": "31249a06e7ee55860dae7789783368708cf5aaec8d48569e213a2cf15043e78e",
           "size": 564592
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstnet-1.0.so.0",
-          "sha256": "770aae3497bf3128e92cfbb3fb7369be1263ed212c5b94bfe3fa0f55335c229b",
+          "sha256": "93b95f55a264ecad6f6645f1407dc6e108665b866a75a88b6377e3f023085614",
           "size": 73856
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstpbutils-1.0.so.0",
-          "sha256": "60a654b690be3da35418e75294bbf243a9e953c4905a194bdee5498f3d8558a1",
+          "sha256": "55c07b970af6a9a6f343c2f8b2b81915cd49e9ff4f0f5f9a9380d117e3f37bef",
           "size": 316576
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstreamer-1.0.so.0",
-          "sha256": "8fadf43bdb8e81b29662277ff42424fd8b9f998207f6bfe703b900a467478e7a",
+          "sha256": "25a04b1c546cfec21e87def3214ea5a9d211c28ab7f46b33e47b65b65a870458",
           "size": 1548568
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstrtp-1.0.so.0",
-          "sha256": "a48ef4b17b0bd22630dda672c4c9a81dc1fd4b32ca6d1a809c4de88796050d3d",
+          "sha256": "1eda7a035c6f700f56c1add482fd3a3c1a91cbb8dab8ed7541015a41a87377fe",
           "size": 209200
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgsttag-1.0.so.0",
-          "sha256": "4e1afca9a1bfe815ea0e18c4caeccee5923935ee277c9709957a98b62fb28615",
+          "sha256": "edf2e450593b4ab2e931f15b74dd264f9b39e02f5a967c4f8408e82ab580a1c6",
           "size": 268280
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libgstvideo-1.0.so.0",
-          "sha256": "6254a976661d2a3807071dd35dd70a47e7f4232c18dae3a722dc75e64d858c53",
+          "sha256": "7179d49e0b81722c3c788f063ccd975e0b8bdb4a3437b2aaf747e9cc267d8893",
           "size": 975136
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/libopus.so.0",
-          "sha256": "8596a3dc8e3f85ebf0649e45e649a584d4ea472c646bd0c0ce4bf0f76aeb72cd",
+          "sha256": "a8bf4d8a88d64cc977acba3818a974c8cd0b2964e8c493ffa4497a49bad353fa",
           "size": 565744
         },
         {
@@ -1144,25 +1199,25 @@
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-package.json",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-package.json",
-          "sha256": "6e812d1eecc3ffa0b339df730a53137d8ec1d1e2617d09c23878bd25e1a56845",
+          "sha256": "39ef565155440444dfa5af8cf6b1afb468e58b2252d422b78ed63d399b28f7b2",
           "size": 205
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/manifest.json",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/manifest.json",
-          "sha256": "f2cc6166e9ae10f623490a976b2b0f00eaa9d8aa10dad1b7bf1924116668664d",
+          "sha256": "9b036064ddfd56cf74fcc80f0dbd122a4911a69a95ac42b64851ecad699c2db8",
           "size": 4768
         },
         {
           "member": "package/package.json",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/package.json",
-          "sha256": "64bcf4ada80b1236fbc20de2a41f10cd91ede666e50350148a931e221eb5c25f",
+          "sha256": "a878d55bd292da1bf37a3b003afef7854939bfd693663fc967ca0fb922c751df",
           "size": 511
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/runtime.json",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/runtime.json",
-          "sha256": "3dbfc637044aab6a4bb1cbab0f3bf3fa55fa3c7c7f8470351ca8e9591f76dcc2",
+          "sha256": "6be57409bc91613d91783c418d8e9c28fdf95b9abf97365cb16d320ee563cc14",
           "size": 13941
         },
         {
@@ -1192,43 +1247,43 @@
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstapp.so",
-          "sha256": "05372bf869c2b4ce254eb596ecbe6dae7508b34c21994d2aa3bac534f01aae05",
+          "sha256": "d018a7e8094c445f7641b9cc125ef3893588ab1f915ccc2b77f99972d40a65d5",
           "size": 6488
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioconvert.so",
-          "sha256": "657f8d61ea52a663591f38f9e3ed9a6fb296de17c4f45fcf8a57c332a6e5bb5b",
+          "sha256": "2bcb7157d6e37bfc141027cbf859e0eb8cc794672b54dbce8bc65e4df36df631",
           "size": 40928
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstaudioresample.so",
-          "sha256": "fc2888cf80bcf2f44d613eb7f86bd9e0988a1cae21ee86c8a62a00f1c559456b",
+          "sha256": "58cc2c7e6497ed73b050f9eb30756b373d0088e442f40a9db3b63e0453367615",
           "size": 35120
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstcoreelements.so",
-          "sha256": "f946fbc9f37b4d775f2c52d45f68e61dddb8e9f824c3fddcc9ae046f8a8c1477",
+          "sha256": "a8222ce01d28a8125c80a263988777a9523f8bf5ea7316d083768eb0239cd2bd",
           "size": 473176
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstopus.so",
-          "sha256": "75af8aa18e6fbc14e2198c5334a17043a46027612b34cb482d912c3c5df8839d",
+          "sha256": "51a490bff8a4f27a068d4122b268d716950d2b6ad7f61fb871dffa18fa4da451",
           "size": 71992
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtp.so",
-          "sha256": "c58d49189b52d88910147bbbb3673700e927c518b3a7880e8b3a149fcccb062a",
+          "sha256": "7617ef3fa4df626528e6786181f2571b9f4572c4a9198f89864e3605fbc56451",
           "size": 739744
         },
         {
           "member": "package/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
           "path": "/usr/local/share/npm-global/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/codex-resources/voice/lib/gstreamer-1.0/libgstrtpmanager.so",
-          "sha256": "894f7c73a26d2360203f17bfe5e56095fa7333ac2abc403a7f1dc19a8ee9f3b2",
+          "sha256": "44187ad03891bde2c62a0693435d751e663eea5f670839b2fcb52e910c57b3a9",
           "size": 558104
         },
         {
@@ -1267,62 +1322,7 @@
           "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
           "size": 1002
         }
-      ],
-      "slsa_acquisition": {
-        "url": "https://registry.npmjs.org/-/npm/v1/attestations/@openai%2fcodex@0.159.2-linux-x64",
-        "sha256": "5fff08bfe2d54eb9f17120b2fc17e2d4093d2a4d026003c6d522a3c255983b63",
-        "size": 14865,
-        "integrity": null,
-        "signature_verified": false
-      },
-      "slsa_statement": {
-        "_type": "https://in-toto.io/Statement/v1",
-        "subject": [
-          {
-            "name": "pkg:npm/%40openai/codex@0.159.2-linux-x64",
-            "digest": {
-              "sha512": "46b099d57e76c296b594eb17b42b52ca18ce15d40f87b2c7e4272ff07b0a99dff65176d4c315c5a965c52b72736adaae50d1ad5bf4cba31e58eea54e1a4574fd"
-            }
-          }
-        ],
-        "predicateType": "https://slsa.dev/provenance/v1",
-        "predicate": {
-          "buildDefinition": {
-            "buildType": "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1",
-            "externalParameters": {
-              "workflow": {
-                "ref": "refs/tags/rust-v0.159.2",
-                "repository": "https://github.com/openai/codex",
-                "path": ".github/workflows/rust-release.yml"
-              }
-            },
-            "internalParameters": {
-              "github": {
-                "event_name": "push",
-                "repository_id": "965415649",
-                "repository_owner_id": "14957082"
-              }
-            },
-            "resolvedDependencies": [
-              {
-                "uri": "git+https://github.com/openai/codex@refs/tags/rust-v0.159.2",
-                "digest": {
-                  "gitCommit": "ff6aec96948b70d94983af2641a6b67c94faeff5"
-                }
-              }
-            ]
-          },
-          "runDetails": {
-            "builder": {
-              "id": "https://github.com/actions/runner/github-hosted"
-            },
-            "metadata": {
-              "invocationId": "https://github.com/openai/codex/actions/runs/36642524844/attempts/1"
-            }
-          }
-        }
-      },
-      "signature_verification": "NOT VERIFIED: decoded statement and subject checksum only; no trust-root/Rekor/Sigstore verifier was executed"
+      ]
     }
   ],
   "kit-arm64-codex": {
@@ -1392,5 +1392,12 @@
     "acquisition": "The Git blob ID above is computed from the retained LICENSE text.",
     "third_party_notices": "The THIRD-PARTY-NOTICES file referenced by the LICENSE is not published. The golang.org/x/sys v0.46.0 notice is collected separately for that dependency.",
     "spdx_reconciliation": "Completed using the public image's primary legal files, receipt SHA256 7a04cf1008303b0a5fd344f408958b1dcd8717bd096317a05c4fe25a8e85dfed. See clipboard-spdx-reconciliation.json: the proprietary declaration and full commit agree; the x/sys purl agrees with the v0.46.0 build information, but the vendor versionInfo/downloadLocation/SHA1 fields repeat the main repository commit. Vendor bytes are retained unchanged."
+  },
+  "claude-2.1.296-legal-archive": {
+    "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.296.tgz",
+    "sha256": "f6c375d51d4c22a7a850e185a0d7ddda85173f89dbbeb3262aa7971e3bd670b5",
+    "size": 29001,
+    "integrity": "sha512-OX/k/rpcthMqnFKOWcpNcbiLsMKtAjLOpQNJHlYiDCFUznWCIwdRTyl/p9SdHVrsrzZuPMCNqZjnpakIni6upw==",
+    "signature_verified": false
   }
 }

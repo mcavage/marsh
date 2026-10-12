@@ -7,27 +7,27 @@
   "images": [
     {
       "name": "shell",
-      "previous_index": "sha256:4fd0061fba3decdb0f238ef5924717ff357c922a4c63666a90897a888dc4d310",
-      "index": "dhi.io/sbx-templates@sha256:36fd3782db091cec28ddfcb28458fbc96ed540435b91d910c1a00b07ec50d5a2",
-      "platform_manifest": "sha256:b8ac98c0aa6e50044f9eb3d29e2bb60caaead4b83ab61f99533edd6924ce472f",
-      "source_image": "dhi.io/sbx-templates@sha256:377803715e8c1d90f520c59c52bc815f3f31e0c844d40e8dc85d8e2e64160e8e",
-      "source_attestation_sha256": "16d963b777b0433c7bc0665543adadd7da7f40e27518e9b7c9d64ef16fa50963"
+      "previous_index": "sha256:36fd3782db091cec28ddfcb28458fbc96ed540435b91d910c1a00b07ec50d5a2",
+      "index": "dhi.io/sbx-templates@sha256:ff0fe56f7fbc14a969131c52d8e7233862a4810196fbc0e2d8d88441204081a9",
+      "platform_manifest": "sha256:58b3c73771471ba6ad6a4b95a81f1c76c5bb60db316935b7eb05aa89aa3bddc1",
+      "source_image": "dhi.io/sbx-templates@sha256:6e9e93e9fe3d0b7d7be245dacbd19b9cb0124075b2e634c5c2b6b081d8d9fe1c",
+      "source_attestation_sha256": "6848b9185c49fea1f891c1dcedacb47b48cc0a0fc1a8502c394960313ead30bf"
     },
     {
       "name": "claude",
-      "previous_index": "sha256:492664da2ac39b2796802b2dbe2472b16e7e5c21781744f457af6d79f2a85d80",
-      "index": "dhi.io/sbx-templates@sha256:13d7dbd08041284dbe5df67ec730a26f7b03dbd6fa994e143672979440426010",
-      "platform_manifest": "sha256:eab35f07f5cf56d4411305fb71cb53d010aaa2cf4b16de0d244e819c6e0262e7",
-      "source_image": "dhi.io/sbx-templates@sha256:11d3d3ae0029980b6a4419536a2ab8bdbd57343c426294eb3a19a8f7876dc153",
-      "source_attestation_sha256": "28ad3edee84d31dd7638ced5002788fa7b23ebcd48504132f3070df459e649ed"
+      "previous_index": "sha256:13d7dbd08041284dbe5df67ec730a26f7b03dbd6fa994e143672979440426010",
+      "index": "dhi.io/sbx-templates@sha256:e3b7baee8a6f5f3805201b52b27c192e03603edbe1bea2d17d9399717777fd29",
+      "platform_manifest": "sha256:dad535b2fd6a65e04184eb93f602639b6e8fc0af796576df62eb7d7206e12f2b",
+      "source_image": "dhi.io/sbx-templates@sha256:fcf165dd65f916797621fb8da8dca28e7ba3211ff0a6ae8c14d43a2ac6bd52c6",
+      "source_attestation_sha256": "0393f262a87e41c6e7e9046d28cf0d06d6b2067066cfeadf36789944d960cce2"
     },
     {
       "name": "codex",
-      "previous_index": "sha256:439d5acdf4fcf22d4e94c916a132d3b629e8e803debded83993e68fdcfc1c578",
-      "index": "dhi.io/sbx-templates@sha256:0529fcace182dc3de0967bdb235ed3f8ca715f8eafc9f987a53a258ae3bf83f3",
-      "platform_manifest": "sha256:d1f3f25bbd128d4e2f81d721f2b7a680efb2b2b8c48187d0473948efa81bb64a",
-      "source_image": "dhi.io/sbx-templates@sha256:adb978133c6bf196d2e9b63204a856ddffd44b960c0f2ee58eb5905afed63668",
-      "source_attestation_sha256": "1be59a3445399d47a72a1c11381054dba95ea6a43b0f0bb5e7426edf82c15066"
+      "previous_index": "sha256:0529fcace182dc3de0967bdb235ed3f8ca715f8eafc9f987a53a258ae3bf83f3",
+      "index": "dhi.io/sbx-templates@sha256:ca1bf06e604ca2d409c638fd8e3e9feecbbffe88432e9dd6d9b14ee3123ec4e6",
+      "platform_manifest": "sha256:9c716e5529599656ce87df529974a409a19a14f05bbf6c0dfaecfebc18e37cfa",
+      "source_image": "dhi.io/sbx-templates@sha256:f9e7306e6be986f19105abf43d47460f61074461b92babf87f5ff7e8094bb9be",
+      "source_attestation_sha256": "ce20d7eecc28259ec349f190c514a4b25a1afe7628367a2f560ceb003578aa07"
     }
   ]
 }
