@@ -3546,7 +3546,7 @@ mod tests {
         let fake_sbx = fixture.path().join("sbx");
         std::fs::write(
             &fake_sbx,
-            "#!/bin/sh\nset -eu\nregistry=$0.registry\nlog=$0.log\nprintf '%s\\n' \"$*\" >>\"$log\"\nif [ \"$1\" = mcp ] && [ \"$2\" = rm ] && [ \"$3\" = --force ]; then if [ -f \"$registry\" ]; then rm \"$registry\"; exit 0; fi; printf 'error: MCP server \\\"%s\\\" not found\\n' \"$4\" >&2; exit 1; fi\nif [ \"$1\" = mcp ] && [ \"$2\" = add ]; then printf '%s\\n' \"$@\" >\"$registry\"; exit 0; fi\nexit 64\n",
+            "#!/bin/sh\nset -eu\nregistry=$0.registry\nlog=$0.log\nprintf '%s\\n' \"$*\" >>\"$log\"\nif [ \"$1\" = mcp ] && [ \"$2\" = rm ] && [ \"$3\" = --force ]; then if [ -f \"$registry\" ]; then rm \"$registry\"; exit 0; fi; printf 'error: MCP server \"%s\" not found\\n' \"$4\" >&2; exit 1; fi\nif [ \"$1\" = mcp ] && [ \"$2\" = add ]; then printf '%s\\n' \"$@\" >\"$registry\"; exit 0; fi\nexit 64\n",
         )
         .unwrap();
         make_executable(&fake_sbx);
@@ -3587,7 +3587,7 @@ mod tests {
         let fake_sbx = fixture.path().join("sbx");
         std::fs::write(
             &fake_sbx,
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >>\"$0.log\"\nprintf 'error: MCP server \\\"marsh-dev-test-old\\\" not found\\n' >&2\nexit 9\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >>\"$0.log\"\nprintf 'error: MCP server \"marsh-dev-test-old\" not found\\n' >&2\nexit 9\n",
         )
         .unwrap();
         make_executable(&fake_sbx);

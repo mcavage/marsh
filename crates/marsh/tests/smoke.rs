@@ -199,7 +199,7 @@ fn matches_bash_in_a_fresh_directory(script: &str, expected: &[u8]) {
             .process_group(0)
             .spawn()
             .unwrap();
-        common::wait_for_exit(child, script, Duration::from_secs(60))
+        common::wait_for_exit(child, script, Duration::from_mins(1))
     };
     let bash = run(isolated_command("bash"));
     assert!(bash.status.success(), "Bash: {bash:?}");
@@ -931,7 +931,7 @@ fn fanout_enforces_prefix_and_combined_output_bounds_before_delivery() {
         .process_group(0)
         .spawn()
         .unwrap();
-    let output = common::wait_for_exit(child, "over-limit fanout", Duration::from_secs(60));
+    let output = common::wait_for_exit(child, "over-limit fanout", Duration::from_mins(1));
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("combined output exceeds 16 MiB"));
