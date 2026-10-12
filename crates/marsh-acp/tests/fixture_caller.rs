@@ -174,6 +174,20 @@ impl DaemonBackend for Fixture {
     }
 }
 
+/// Every test process (cargo-nextest runs one per test) installs the same
+/// host script at this one path. Replace it atomically: rewriting it in place
+/// would let another process's daemon run a truncated host.
+fn install_host_fixture(host: &std::path::Path) {
+    let staged = host.with_file_name(format!("marsh.{}", std::process::id()));
+    fs::write(
+        &staged,
+        include_str!("../../../tests/acceptance/acp-fixture/host.py"),
+    )
+    .unwrap();
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::rename(&staged, host).unwrap();
+}
+
 struct Rig {
     server: Arc<Server>,
     client: Client,
@@ -222,14 +236,7 @@ impl Rig {
         // Substitute only stock registration. The grant and private host-to-
         // daemon preparation handshake still use their production paths.
         let host = std::env::current_exe().unwrap().with_file_name("marsh");
-        HOST_INIT.call_once(|| {
-            fs::write(
-                &host,
-                include_str!("../../../tests/acceptance/acp-fixture/host.py"),
-            )
-            .unwrap();
-            fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
-        });
+        HOST_INIT.call_once(|| install_host_fixture(&host));
         let stock = root.path().join("stock-sbx");
         fs::write(
             &stock,
