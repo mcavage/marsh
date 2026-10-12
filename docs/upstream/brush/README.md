@@ -493,6 +493,14 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   that way at 1.5 CPUs). Covered by
   `an_exited_job_is_reported_at_the_next_prompt_without_sigchld` (smoke,
   Linux): the shell starts with `SIGCHLD` blocked, so the relay never comes.
+- `0069` keeps what was typed while the shell waited for a cursor position
+  report that never came. crossterm parses every byte it reads during the
+  wait and holds the keys that are not the report; the plain line reader that
+  takes over for the session read the terminal itself, so those lines were
+  lost. The keys (characters, Tab, Enter) are now taken from crossterm's
+  queue, echoed, and read first. Covered by
+  `interactive_shell_survives_a_terminal_that_never_reports_the_cursor`,
+  which types its first line during the wait.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

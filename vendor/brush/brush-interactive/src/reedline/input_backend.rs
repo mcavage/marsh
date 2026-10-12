@@ -15,6 +15,9 @@ pub struct ReedlineInputBackend {
     plain: bool,
     /// Whether reedline has read a line in this session.
     answered: bool,
+    /// Text typed while reedline waited for the unanswered cursor position
+    /// query; the plain reader takes it before reading the terminal again.
+    typed_ahead: String,
 }
 
 const COMPLETION_MENU_NAME: &str = "completion_menu";
@@ -136,6 +139,7 @@ impl ReedlineInputBackend {
             reedline: Some(reedline),
             plain: false,
             answered: false,
+            typed_ahead: String::new(),
         })
     }
 }
@@ -173,7 +177,7 @@ impl InputBackend for ReedlineInputBackend {
         };
 
         if self.plain {
-            return read_plain_line(shell, &prompt);
+            return read_plain_line(shell, &prompt, &mut self.typed_ahead);
         }
 
         let mut attempt: u32 = 1;
@@ -227,7 +231,8 @@ impl InputBackend for ReedlineInputBackend {
                         "warning: the terminal did not answer a cursor position query; line editing is off for this session"
                     );
                     self.plain = true;
-                    return read_plain_line(shell, &prompt);
+                    self.typed_ahead = take_queued_keys();
+                    return read_plain_line(shell, &prompt, &mut self.typed_ahead);
                 }
                 Err(err) if attempt < MAX_READ_LINE_ATTEMPTS => {
                     attempt += 1;
@@ -433,9 +438,46 @@ fn is_cursor_position_timeout(err: &std::io::Error) -> bool {
 /// Reads one complete program a line at a time from the terminal in its
 /// ordinary (cooked) mode, showing the prompt and continuation prompt. Ctrl-C
 /// typed while reading is reported when the line ends, discarding it.
+/// Takes the keys crossterm read from the terminal while it waited for a
+/// cursor position report that never came. crossterm parses every byte it
+/// reads and holds the events that are not the report, so without this the
+/// lines typed during the wait were lost: the plain reader reads the terminal
+/// itself. Characters, Tab and Enter are kept as text; editing keys are not
+/// replayed.
+fn take_queued_keys() -> String {
+    use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+
+    let mut text = String::new();
+    while crossterm::event::poll(std::time::Duration::ZERO).unwrap_or(false) {
+        let Ok(Event::Key(key)) = crossterm::event::read() else {
+            continue;
+        };
+        if key.kind == KeyEventKind::Release {
+            continue;
+        }
+        match key.code {
+            KeyCode::Char('j' | 'm') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                text.push('\n');
+            }
+            KeyCode::Char(c)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                text.push(c);
+            }
+            KeyCode::Enter => text.push('\n'),
+            KeyCode::Tab => text.push('\t'),
+            _ => {}
+        }
+    }
+    text
+}
+
 fn read_plain_line(
     shell: &crate::ShellRef<impl brush_core::ShellExtensions>,
     prompt: &InteractivePrompt,
+    typed_ahead: &mut String,
 ) -> Result<ReadResult, ShellError> {
     use std::io::{BufRead as _, Write as _};
 
@@ -451,7 +493,20 @@ fn read_plain_line(
         stderr.flush()?;
 
         let mut line = String::new();
-        let read = std::io::stdin().lock().read_line(&mut line)?;
+        let read = if typed_ahead.is_empty() {
+            std::io::stdin().lock().read_line(&mut line)?
+        } else {
+            // Typed while the terminal was raw, so never echoed: show it as the
+            // terminal would have.
+            let end = typed_ahead.find('\n').map_or(typed_ahead.len(), |i| i + 1);
+            line = typed_ahead.drain(..end).collect();
+            write!(stderr, "{line}")?;
+            stderr.flush()?;
+            if !line.ends_with('\n') {
+                std::io::stdin().lock().read_line(&mut line)?;
+            }
+            line.len()
+        };
         #[cfg(unix)]
         if brush_core::traps::take_pending_interrupt() {
             writeln!(stderr)?;
