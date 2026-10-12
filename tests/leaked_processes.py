@@ -6,10 +6,11 @@ directory: marsh, marsh-local, marshd, test binaries, ...) or one whose
 environment carries MARSH_TEST_RUN=--token (set on the test runs and inherited
 by everything they spawn, GNU Bash included, unless a test clears the
 environment; macOS also hides the environment of its own platform binaries).
-It has leaked when nothing that predates the run (--since) owns it: every
-ancestor below init started during the run (a test, or a helper such as
-script(1) that a test started). A process under an older program (a concurrent
-harness under make, a user's terminal) is not this run's leak. Under a Linux
+It has leaked when it is orphaned: no ancestor below init predates the run
+(--since) or is this checker's own ancestor (make). Its ancestors are tests or
+helpers such as script(1) that a test started. A process under an older
+program (a user's terminal) or under make (a concurrent harness) is not this
+run's leak. Under a Linux
 subreaper other than init an orphan is not seen.
 
 The leak's whole orphaned tree is reported (helpers and descendants without
@@ -117,7 +118,7 @@ def leaked(test_bin: str, token: str, since: float) -> list[int]:
     def owned(pid: int) -> bool:
         ancestor = table[pid][0]
         while ancestor > 1 and ancestor in table:
-            if table[ancestor][1] < since:
+            if ancestor in mine or table[ancestor][1] < since:
                 return True
             ancestor = table[ancestor][0]
         return False
@@ -134,7 +135,11 @@ def leaked(test_bin: str, token: str, since: float) -> list[int]:
     while roots:
         pid = roots.pop()
         tree.add(pid)
-        roots.update(child for child, entry in table.items() if entry[0] == pid and child not in tree)
+        roots.update(
+            child
+            for child, entry in table.items()
+            if entry[0] == pid and child not in tree and child not in mine
+        )
     return sorted(pid for pid in tree if not table[pid][2])
 
 
