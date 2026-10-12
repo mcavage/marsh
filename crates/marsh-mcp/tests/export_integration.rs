@@ -17,7 +17,7 @@ use rmcp::{
 use serde_json::{Value, json};
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
+    os::{fd::AsRawFd as _, unix::fs::PermissionsExt},
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -534,6 +534,37 @@ async fn published_pipeline_passes_persisted_project_identity_to_host_child() {
             identity.inode
         ),
         "{result}"
+    );
+}
+
+/// A published pipeline's host marsh starts only while no descriptor is
+/// between creation and close-on-exec (macOS std), so it never inherits one.
+#[tokio::test]
+async fn published_pipeline_host_child_never_inherits_a_descriptor_being_created() {
+    let harness = TestHarness::new(Arc::new(TestKitBackend::new(vec![])));
+    fs::write(&harness.marsh, b"#!/bin/sh\nls /dev/fd | tr '\\n' ' '\n").unwrap();
+    let connection = harness.connect(pipeline_declaration(&harness)).await;
+    let (held, creating) = std::sync::mpsc::channel();
+    let creator = thread::spawn(move || {
+        marsh_runtime::with_host_descriptor_creation_excluded(|| {
+            let null = fs::File::open("/dev/null").unwrap();
+            let created = rustix::io::fcntl_dupfd_cloexec(&null, 200).unwrap();
+            rustix::io::fcntl_setfd(&created, rustix::io::FdFlags::empty()).unwrap();
+            held.send(created.as_raw_fd()).unwrap();
+            thread::sleep(Duration::from_secs(1));
+            rustix::io::fcntl_setfd(&created, rustix::io::FdFlags::CLOEXEC).unwrap();
+            created
+        })
+    });
+    let created = creating.recv().unwrap().to_string();
+    let response = connection.call(json!({})).await;
+    drop(creator.join().unwrap());
+    let result = structured(&response);
+    let descriptors = result["data"]["stdout"].as_str().unwrap();
+    assert!(!descriptors.is_empty(), "{result}");
+    assert!(
+        !descriptors.split_whitespace().any(|fd| fd == created),
+        "the pipeline's host marsh inherited descriptor {created}: {descriptors}"
     );
 }
 

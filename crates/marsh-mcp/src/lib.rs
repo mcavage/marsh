@@ -2721,8 +2721,9 @@ async fn run_bounded_cancel(
     for name in RELAY_ENV {
         command.env_remove(name);
     }
-    let mut child = command
-        .spawn()
+    // On macOS a descriptor (another command's pipe, a daemon connection)
+    // becomes close-on-exec only after creation; never spawn in between.
+    let mut child = marsh_runtime::with_host_descriptor_creation_excluded(|| command.spawn())
         .map_err(|error| format!("cannot start {}: {error}", spec.executable.display()))?;
     let pid = child
         .id()
@@ -3732,6 +3733,7 @@ fn now_ms() -> u128 {
 mod tests {
     use super::*;
     use std::io::Write;
+    use std::os::fd::AsRawFd as _;
     use tempfile::TempDir;
     use tokio::io::AsyncWriteExt;
 
@@ -4471,6 +4473,48 @@ mod tests {
         assert!(!INHERITED_ENV.contains(&"MARSH_SBX"));
         assert!(!INHERITED_ENV.contains(&"USER"));
         assert!(!INHERITED_ENV.contains(&"LOGNAME"));
+    }
+
+    /// On macOS std creates a pipe or socket and only then marks it
+    /// close-on-exec, inside the shared host fence. A host command started
+    /// in that window would hold the descriptor (another command's output
+    /// pipe, a daemon connection) for its whole life, so it must wait.
+    #[tokio::test]
+    async fn host_commands_never_inherit_a_descriptor_being_created() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        let home = root.path().join("home");
+        let marsh = root.path().join("marsh");
+        fs::create_dir(&workspace).unwrap();
+        executable(
+            &marsh,
+            "#!/bin/sh\nprintf '{\"fds\":\"%s\"}\\n' \"$(ls /dev/fd | tr '\\n' ' ')\"\n",
+        );
+        let sbx = supporting_executables(&marsh);
+        let server = HostMcp::new(HostConfig::new(&workspace, &home, &marsh, &sbx, false).unwrap());
+        let (held, creating) = std::sync::mpsc::channel();
+        let creator = std::thread::spawn(move || {
+            marsh_runtime::with_host_descriptor_creation_excluded(|| {
+                let null = fs::File::open("/dev/null").unwrap();
+                let created = rustix::io::fcntl_dupfd_cloexec(&null, 200).unwrap();
+                rustix::io::fcntl_setfd(&created, rustix::io::FdFlags::empty()).unwrap();
+                held.send(created.as_raw_fd()).unwrap();
+                std::thread::sleep(Duration::from_secs(1));
+                rustix::io::fcntl_setfd(&created, rustix::io::FdFlags::CLOEXEC).unwrap();
+                created
+            })
+        });
+        let created = creating.recv().unwrap().to_string();
+        let response = server
+            .run_json(&["status", "--json"], Duration::from_secs(10))
+            .await;
+        drop(creator.join().unwrap());
+        assert!(response.ok, "{:?}", response.error);
+        let descriptors = response.data.unwrap()["fds"].as_str().unwrap().to_owned();
+        assert!(
+            !descriptors.split_whitespace().any(|fd| fd == created),
+            "the host command inherited descriptor {created}: {descriptors}"
+        );
     }
 
     #[tokio::test]

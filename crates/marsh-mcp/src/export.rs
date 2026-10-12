@@ -820,8 +820,8 @@ impl ExportMcp {
                 )
                 .env("MARSH_MCP_EXPECTED_PROJECT_INO", expected.inode.to_string());
         }
-        let mut child = process
-            .spawn()
+        // Never between another descriptor's creation and close-on-exec (macOS).
+        let mut child = marsh_runtime::with_host_descriptor_creation_excluded(|| process.spawn())
             .map_err(|e| format!("cannot start marsh: {e}"))?;
         let pid = child.id().ok_or("marsh process has no ID")?;
         let mut input = child.stdin.take().ok_or("marsh stdin unavailable")?;
