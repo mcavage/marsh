@@ -27,7 +27,10 @@ tokio = { version = "1.48", features = ["io-std", "macros", "net", "process", "r
 tokio-util = { version = "0.7", features = ["codec"] }
 uuid = { version = "1.18", features = ["v4"] }
 marsh-daemon = { path = "../marsh-daemon" }
+marsh-runtime = { path = "../marsh-runtime" }
 
 [dev-dependencies]
+# Exercise the Mac host descriptor fence on Linux test callers as well.
+marsh-runtime = { path = "../marsh-runtime", features = ["test-support"] }
 rmcp = { version = "3.4", default-features = false, features = ["client", "server", "macros", "schemars", "transport-io"] }
 tempfile = "3.23"
