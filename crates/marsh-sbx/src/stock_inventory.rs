@@ -153,29 +153,42 @@ fn metadata_path(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    //! Rejections; every captured or derived listing decoding is covered by
+    //! `tests::stock_cli` against `tests/data/sbx`.
     use super::StockInventory;
 
-    #[test]
-    fn a_foreign_vm_with_a_missing_workspace_does_not_block_inventory() {
-        // Row shape from stock sbx 0.46 for a user's VM whose workspace was deleted.
-        let listing = br#"{"sandboxes":[{"name":"user-agent-project","id":"0F1E2D3C-4B5A-4978-8695-A4B3C2D1E0F9","agent":"claude","status":"running","last_used_at":"2026-10-05T16:27:18Z","workspaces":["/Users/someone/dev/project","/tmp/deleted"],"workspace_missing":true,"created_at":"2026-10-05T16:27:00Z"}]}"#;
-        let inventory = StockInventory::decode(listing).unwrap();
-        assert!(inventory.contains_uuid("0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9"));
-        let unknown = br#"{"sandboxes":[{"name":"user-agent-project","id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"running","surprise":1}]}"#;
-        assert!(StockInventory::decode(unknown).is_err());
+    const V047: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/sbx/v0.47.0/ls-json.stdout"
+    ));
+    const V047_DEV: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/sbx/v0.47-dev/ls-json.stdout"
+    ));
+
+    /// The first row of a real listing with one unknown key added.
+    fn with_unknown_key(listing: &[u8]) -> Vec<u8> {
+        let mut document: serde_json::Value = serde_json::from_slice(listing).unwrap();
+        let rows = match document.get_mut("sandboxes") {
+            Some(rows) => rows,
+            None => &mut document,
+        };
+        rows[0]["surprise"] = serde_json::json!(1);
+        serde_json::to_vec(&document).unwrap()
     }
 
     #[test]
-    fn bare_array_listing_from_newer_sbx_decodes_with_the_same_row_rules() {
-        // Row shape from a stock sbx nightly after v0.47.0, which drops the envelope.
-        let listing = br#"[{"name":"general","id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","agent":"shell","status":"stopped","last_used_at":"2026-10-09T07:00:00Z","created_at":"2026-10-01T07:00:00Z"}]"#;
-        let inventory = StockInventory::decode(listing).unwrap();
-        assert!(inventory.contains_uuid("0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9"));
+    fn a_row_with_an_unknown_key_is_rejected_in_either_envelope() {
+        for listing in [V047, V047_DEV] {
+            assert!(StockInventory::decode(listing).is_ok());
+            assert!(StockInventory::decode(&with_unknown_key(listing)).is_err());
+        }
+    }
+
+    #[test]
+    fn unknown_envelopes_are_rejected_and_an_empty_listing_is_not() {
         assert!(StockInventory::decode(b"[]").is_ok());
-        let detached = br#"[{"name":"scratch","id":"1a2b3c4d-4b5a-4978-8695-a4b3c2d1e0f9","agent":"shell","status":"running","detached":true,"last_used_at":"2026-10-09T07:00:00Z","created_at":"2026-10-01T07:00:00Z"}]"#;
-        assert!(StockInventory::decode(detached).is_ok());
-        let unknown = br#"[{"name":"general","id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"running","surprise":1}]"#;
-        assert!(StockInventory::decode(unknown).is_err());
+        assert!(StockInventory::decode(br#"{"sandboxes":[]}"#).is_ok());
         for envelope in [
             &br#"{"sandboxes":[],"next":null}"#[..],
             br#"{"vms":[]}"#,
@@ -183,5 +196,14 @@ mod tests {
         ] {
             assert!(StockInventory::decode(envelope).is_err());
         }
+    }
+
+    #[test]
+    fn duplicate_identities_are_rejected() {
+        let row = r#"{"name":"a","id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"running"}"#;
+        let renamed = row.replace("\"a\"", "\"b\"");
+        assert!(StockInventory::decode(format!("[{row},{renamed}]").as_bytes()).is_err());
+        let rekeyed = row.replace("0f1e2d3c", "1f1e2d3c");
+        assert!(StockInventory::decode(format!("[{row},{rekeyed}]").as_bytes()).is_err());
     }
 }

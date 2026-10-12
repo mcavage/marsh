@@ -1,0 +1,33 @@
+Either SRC or DST must be a sandbox path, written as SANDBOX:PATH.
+The other must be a local path. Copying between two sandboxes is not supported. Or — with --cloud — the cloud sandbox
+ID (sbx_*) or name from "sbx --cloud ls". Cloud transfers go through the Docker
+Sandboxes Cloud file API instead of the local sandboxd.
+
+When copying a directory, the directory itself is placed at the destination.
+If the destination path does not exist it is created; if it already exists
+as a directory, the source is placed inside it.
+
+Usage:
+  sbx cp [flags] SRC DST
+
+Examples:
+  # Copy a file from host to sandbox
+  sbx cp ./config.json my-sandbox:/home/user/
+
+  # Copy a file from sandbox to host
+  sbx cp my-sandbox:/home/user/output.log ./
+
+  # Copy a directory
+  sbx cp ./src/ my-sandbox:/home/user/src
+
+  # Copy to/from a cloud sandbox
+  sbx --cloud cp ./config.json sbx_abc:/workspace/config.json
+  sbx --cloud cp sbx_abc:/workspace/out.log ./
+
+Flags:
+  -L, --follow-link   Follow symbolic links in the source path
+  -h, --help          help for cp
+
+Global Flags:
+      --cloud   Dispatch to Docker Cloud Sandboxes API instead of local sandboxd (supported by a growing set of verbs — run 'sbx --cloud --help' for the current list)
+  -D, --debug   Enable debug logging

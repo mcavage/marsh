@@ -1,0 +1,12 @@
+Show a human-readable summary of a sandbox: its agent, kits, state, auth mode, workspace and mounts, network policy, secrets, published ports, and active sessions.
+
+Usage:
+  sbx inspect SANDBOX_NAME [flags]
+
+Flags:
+  -h, --help   help for inspect
+      --json   Output in JSON format
+
+Global Flags:
+      --cloud   Dispatch to Docker Cloud Sandboxes API instead of local sandboxd (supported by a growing set of verbs — run 'sbx --cloud --help' for the current list)
+  -D, --debug   Enable debug logging

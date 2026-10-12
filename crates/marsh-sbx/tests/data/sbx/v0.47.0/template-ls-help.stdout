@@ -1,0 +1,23 @@
+List all template images stored in the sandbox runtime's image store.
+
+Usage:
+  sbx template ls [flags]
+
+Aliases:
+  ls, list
+
+Examples:
+  # List all template images
+  sbx template ls
+
+  # Output in JSON format
+  sbx template ls --json
+
+Flags:
+  -h, --help    help for ls
+      --json    Output in JSON format
+  -q, --quiet   Only display template names
+
+Global Flags:
+      --cloud   Dispatch to Docker Cloud Sandboxes API instead of local sandboxd (supported by a growing set of verbs — run 'sbx --cloud --help' for the current list)
+  -D, --debug   Enable debug logging

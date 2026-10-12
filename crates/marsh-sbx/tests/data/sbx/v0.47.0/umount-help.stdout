@@ -1,0 +1,37 @@
+Remove MOUNT_SPEC from the sandbox.
+
+MOUNT_SPEC is HOST[:CTR_TARGET]. CTR_TARGET defaults to the host path —
+the same default `sbx mount` applies — so `sbx umount SANDBOX HOST` undoes
+`sbx mount SANDBOX HOST`. A mount created with an explicit CTR_TARGET
+must pass the same target back here to umount its bind.
+
+HOST may be absolute or relative; relative paths are resolved against the
+current working directory before submission, and ./.. segments are cleaned —
+so HOST resolves the same way it did at mount time as long as cwd matches.
+The host path need not still exist on disk: the allowlist is the source of
+truth, so a path that was deleted after mounting can still be revoked.
+
+For a stopped sandbox, removes the saved mount so it will not be restored
+on the next start. The sandbox does not need to be started first.
+
+If CTR_TARGET is neither mounted nor saved, the command fails without
+revoking access to HOST. Pass the target used when mounting. A successful
+unmount revokes access through every mount of the same HOST. Other mounts
+remain in place but lose access to that host path.
+
+Usage:
+  sbx umount SANDBOX MOUNT_SPEC [flags]
+
+Examples:
+  # Revoke the default mount (bound at the host path)
+  sbx umount my-sandbox /Users/me/extra-data
+
+  # Revoke and umount the bind at /workspace/data
+  sbx umount my-sandbox /Users/me/extra-data:/workspace/data
+
+Flags:
+  -h, --help   help for umount
+
+Global Flags:
+      --cloud   Dispatch to Docker Cloud Sandboxes API instead of local sandboxd (supported by a growing set of verbs — run 'sbx --cloud --help' for the current list)
+  -D, --debug   Enable debug logging

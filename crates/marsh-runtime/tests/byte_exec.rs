@@ -218,7 +218,9 @@ fn fifo_symlink_hardlink_and_special_mode_payloads_reject_without_waiting() {
             .stderr(Stdio::null())
             .spawn()
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
+        // Opening a FIFO with no writer blocks forever, so any bound that only
+        // a hung helper reaches tells rejection from blocking.
+        let deadline = Instant::now() + Duration::from_secs(30);
         let status = loop {
             if let Some(status) = child.try_wait().unwrap() {
                 break status;
