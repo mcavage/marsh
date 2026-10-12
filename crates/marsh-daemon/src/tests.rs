@@ -4395,9 +4395,12 @@ fn acp_daemon_caller_has_distinct_identity_controller_and_stop() {
             .updates
             .is_empty()
     });
-    assert_eq!(
-        client.acp_cancel(agent_id.clone(), first.clone()).unwrap(),
-        "Dispatched"
+    // The agent may confirm the cancel before the call returns: either phase is
+    // a delivered cancel, and the turn's stop reason below is the contract.
+    let phase = client.acp_cancel(agent_id.clone(), first.clone()).unwrap();
+    assert!(
+        matches!(phase.as_str(), "Dispatched" | "Confirmed"),
+        "{phase}"
     );
     acp.wait_status(&agent_id, &first, "held turn is cancelled", |status| {
         status.last_stop_reason == Some(marsh_acp::StopReason::Cancelled)
