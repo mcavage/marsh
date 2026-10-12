@@ -46,6 +46,8 @@ TEST_BIN = $(abspath $(TARGET_DIR))/debug
 PUBLISHER_VENV ?= $(abspath $(TARGET_DIR))/publisher-venv
 MODEL_FLAGS ?= --quick
 MODEL_CACHE ?= $(abspath $(TARGET_DIR))/tlc-cache
+TLA2TOOLS_JAR ?= $(abspath $(TARGET_DIR))/tla2tools-1.8.0.jar
+TLA2TOOLS_SHA256 := 7beec0f04818732a62fa193731711a99aa4f11279499b2360a7d156c519ea78d
 # The callers of the built binaries, #[ignore]d without them: the MCP load
 # callers (MARSH_LOAD_TEST_BIN, a built marsh beside marsh-mcp and marshd) and
 # the real-CLI ACP callers (MARSH_ACP_CALLER_BIN). Every #[ignore]d test is one.
@@ -174,8 +176,16 @@ $(PUBLISHER_VENV)/.ready: scripts/requirements-publish.txt
 
 # The TLA+ model (docs/model/README.md). `make test` runs the quick sweep with
 # verdicts cached by spec hash; MODEL_FLAGS= runs every config (make regress).
-test-model:
-	TLC_CACHE="$(MODEL_CACHE)" docs/model/check.sh $(MODEL_FLAGS)
+test-model: $(TLA2TOOLS_JAR)
+	TLA2TOOLS_JAR="$(TLA2TOOLS_JAR)" TLC_CACHE="$(MODEL_CACHE)" docs/model/check.sh $(MODEL_FLAGS)
+
+# The pinned TLA+ tools. v1.8.0 is TLA+'s rolling prerelease; the checksum pins
+# the build the model was last checked with: update both together.
+$(TLA2TOOLS_JAR):
+	@mkdir -p "$(dir $@)"
+	curl -fsSL -o "$@.tmp" https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+	@echo "$(TLA2TOOLS_SHA256)  $@.tmp" | { command -v sha256sum >/dev/null && sha256sum -c - || shasum -a 256 -c -; } >/dev/null
+	@mv "$@.tmp" "$@"
 
 mcp:
 	@test -x "$(MCP_BIN)" || { echo 'make mcp: install first with make install, or set MCP_BIN=/absolute/marsh-mcp'; exit 1; }
