@@ -1,4 +1,4 @@
-FROM dhi.io/sbx-templates:claude-code-docker@sha256:13d7dbd08041284dbe5df67ec730a26f7b03dbd6fa994e143672979440426010
+FROM dhi.io/sbx-templates:claude-code-docker@sha256:e3b7baee8a6f5f3805201b52b27c192e03603edbe1bea2d17d9399717777fd29
 ARG PI_VERSION
 USER root
 COPY image-repair /tmp/marsh-image-repair

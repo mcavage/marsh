@@ -1,5 +1,5 @@
 {
-  "image": "dhi.io/sbx-templates@sha256:b8ac98c0aa6e50044f9eb3d29e2bb60caaead4b83ab61f99533edd6924ce472f",
+  "image": "dhi.io/sbx-templates@sha256:58b3c73771471ba6ad6a4b95a81f1c76c5bb60db316935b7eb05aa89aa3bddc1",
   "scope": "Go dependency modules from actual compiled binary build information; main components and dynamic libraries indexed separately",
   "modules": [
     {
@@ -11,7 +11,7 @@
     },
     {
       "path": "charm.land/bubbletea/v2",
-      "version": "v2.0.9",
+      "version": "v2.0.10",
       "binaries": [
         "/usr/bin/gh"
       ]
@@ -77,8 +77,8 @@
       "version": "v1.0.2",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
         "/usr/bin/gh"
       ]
     },
@@ -86,7 +86,6 @@
       "path": "github.com/AlecAivazis/survey/v2",
       "version": "v2.3.7",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-compose",
         "/usr/bin/gh"
       ]
     },
@@ -113,7 +112,7 @@
     },
     {
       "path": "github.com/DefangLabs/secret-detector",
-      "version": "v0.0.0-20250403165618-22662109213e",
+      "version": "v0.0.0-20260916192156-3e28d7ed64df",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
@@ -143,8 +142,8 @@
       "path": "github.com/Masterminds/semver/v3",
       "version": "v3.4.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -174,8 +173,8 @@
       "version": "v1.4.1",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -196,8 +195,8 @@
       "path": "github.com/agext/levenshtein",
       "version": "v1.2.3",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -253,9 +252,9 @@
       "path": "github.com/asaskevich/govalidator",
       "version": "v0.0.0-20230301143203-a9d515a09cc2",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -269,8 +268,14 @@
       "path": "github.com/aws/aws-sdk-go-v2",
       "version": "v1.43.8",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2",
+      "version": "v1.47.0",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -284,48 +289,84 @@
       "path": "github.com/aws/aws-sdk-go-v2/config",
       "version": "v1.32.39",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2/config",
+      "version": "v1.33.4",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/aws/aws-sdk-go-v2/credentials",
       "version": "v1.19.38",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2/credentials",
+      "version": "v1.20.4",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
       "version": "v1.18.39",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2/feature/ec2/imds",
+      "version": "v1.20.0",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/aws/aws-sdk-go-v2/internal/configsources",
       "version": "v1.4.39",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2/internal/configsources",
+      "version": "v1.5.3",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
       "version": "v2.7.39",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2/internal/endpoints/v2",
+      "version": "v2.8.3",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/aws/aws-sdk-go-v2/internal/v4a",
       "version": "v1.4.40",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2/internal/v4a",
+      "version": "v1.5.3",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -339,23 +380,41 @@
       "path": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
       "version": "v1.13.18",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding",
+      "version": "v1.13.19",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
       "version": "v1.13.39",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2/service/internal/presigned-url",
+      "version": "v1.14.3",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2/service/signin",
+      "version": "v1.10.0",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/aws/aws-sdk-go-v2/service/signin",
       "version": "v1.5.8",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
       ]
     },
@@ -363,29 +422,40 @@
       "path": "github.com/aws/aws-sdk-go-v2/service/sso",
       "version": "v1.33.8",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2/service/sso",
+      "version": "v1.38.0",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
       "version": "v1.38.8",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/aws-sdk-go-v2/service/ssooidc",
+      "version": "v1.43.0",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/aws/aws-sdk-go-v2/service/sts",
       "version": "v1.45.8",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
       ]
     },
     {
-      "path": "github.com/aws/smithy-go",
-      "version": "v1.27.10",
+      "path": "github.com/aws/aws-sdk-go-v2/service/sts",
+      "version": "v1.50.0",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
@@ -395,6 +465,13 @@
       "version": "v1.28.1",
       "binaries": [
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/aws/smithy-go",
+      "version": "v1.28.2",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -416,8 +493,8 @@
       "version": "v1.0.1",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd"
       ]
     },
     {
@@ -431,9 +508,9 @@
       "path": "github.com/blang/semver",
       "version": "v3.5.1+incompatible",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -469,11 +546,11 @@
       "version": "v5.0.3",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -482,11 +559,11 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -595,8 +672,8 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/runc",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/runc"
       ]
     },
     {
@@ -645,8 +722,14 @@
       "path": "github.com/clipperhouse/uax29/v2",
       "version": "v2.2.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
+      ]
+    },
+    {
+      "path": "github.com/clipperhouse/uax29/v2",
+      "version": "v2.6.0",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -669,21 +752,15 @@
       "version": "v1.6.3",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/compose-spec/compose-go/v2",
-      "version": "v2.14.0",
-      "binaries": [
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/compose-spec/compose-go/v2",
-      "version": "v2.15.0",
+      "version": "v2.16.1",
       "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -725,9 +802,9 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
+        "/usr/bin/dockerd",
         "/usr/bin/runc",
         "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -735,9 +812,7 @@
       "path": "github.com/containerd/containerd/api",
       "version": "v1.11.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
+        "/usr/bin/dockerd"
       ]
     },
     {
@@ -746,19 +821,21 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
-        "/usr/bin/ctr"
+        "/usr/bin/ctr",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "github.com/containerd/containerd/v2",
-      "version": "v2.3.5",
+      "version": "v2.3.6",
       "binaries": [
         "/usr/bin/dockerd"
       ]
     },
     {
       "path": "github.com/containerd/containerd/v2",
-      "version": "v2.3.6",
+      "version": "v2.4.1",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
@@ -771,8 +848,8 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -783,9 +860,9 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -796,9 +873,9 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -854,22 +931,16 @@
     },
     {
       "path": "github.com/containerd/log",
-      "version": "v0.1.0",
-      "binaries": [
-        "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "github.com/containerd/log",
       "version": "v0.2.0",
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/bin/docker",
         "/usr/bin/docker-proxy",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -878,7 +949,9 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -903,9 +976,9 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -928,12 +1001,18 @@
     },
     {
       "path": "github.com/containerd/ttrpc",
+      "version": "v1.2.10",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
+      ]
+    },
+    {
+      "path": "github.com/containerd/ttrpc",
       "version": "v1.2.9",
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
@@ -945,8 +1024,8 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -1001,17 +1080,17 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/runc",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/runc"
       ]
     },
     {
       "path": "github.com/cyberphone/json-canonicalization",
       "version": "v0.0.0-20241213102144-19d51d7fe467",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -1040,17 +1119,17 @@
       "path": "github.com/digitorus/pkcs7",
       "version": "v0.0.0-20230818184609-3a137a874352",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/digitorus/timestamp",
       "version": "v0.0.0-20231217203849-220c5c2851b7",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -1073,11 +1152,11 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -1091,17 +1170,23 @@
       "path": "github.com/docker/cli",
       "version": "v29.7.2+incompatible",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
         "/usr/bin/gh"
+      ]
+    },
+    {
+      "path": "github.com/docker/cli",
+      "version": "v29.8.2+incompatible",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "github.com/docker/cli-docs-tool",
       "version": "v0.11.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/docker",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -1109,8 +1194,8 @@
       "path": "github.com/docker/distribution",
       "version": "v2.8.3+incompatible",
       "binaries": [
-        "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd"
       ]
     },
     {
@@ -1129,23 +1214,9 @@
     },
     {
       "path": "github.com/docker/docker-credential-helpers",
-      "version": "v0.9.8",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "github.com/docker/docker-credential-helpers",
       "version": "v0.9.9",
       "binaries": [
-        "/usr/bin/docker"
-      ]
-    },
-    {
-      "path": "github.com/docker/go-connections",
-      "version": "v0.7.0",
-      "binaries": [
+        "/usr/bin/docker",
         "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
@@ -1155,6 +1226,14 @@
       "version": "v0.8.1",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
+      ]
+    },
+    {
+      "path": "github.com/docker/go-connections",
+      "version": "v0.8.2",
+      "binaries": [
         "/usr/bin/docker"
       ]
     },
@@ -1163,8 +1242,8 @@
       "version": "v0.1.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd"
       ]
     },
     {
@@ -1172,8 +1251,8 @@
       "version": "v0.1.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd"
       ]
     },
     {
@@ -1183,10 +1262,10 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
+        "/usr/bin/docker",
+        "/usr/bin/dockerd",
         "/usr/bin/runc",
         "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
-        "/usr/bin/docker",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -1233,9 +1312,9 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -1264,24 +1343,17 @@
     },
     {
       "path": "github.com/fvbommel/sortorder",
-      "version": "v1.1.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "github.com/fvbommel/sortorder",
       "version": "v1.2.0",
       "binaries": [
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "github.com/fxamacker/cbor/v2",
       "version": "v2.9.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
       ]
     },
@@ -1290,7 +1362,8 @@
       "version": "v2.9.4",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/ctr"
+        "/usr/bin/ctr",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -1328,11 +1401,11 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -1341,18 +1414,11 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/analysis",
-      "version": "v0.25.2",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -1360,22 +1426,16 @@
       "version": "v0.25.5",
       "binaries": [
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/go-openapi/errors",
       "version": "v0.22.8",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/jsonpointer",
-      "version": "v0.23.1",
-      "binaries": [
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1384,13 +1444,7 @@
       "version": "v1.0.0",
       "binaries": [
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/jsonreference",
-      "version": "v0.21.6",
-      "binaries": [
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1399,13 +1453,7 @@
       "version": "v1.0.0",
       "binaries": [
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/loads",
-      "version": "v0.24.0",
-      "binaries": [
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1414,13 +1462,7 @@
       "version": "v0.25.0",
       "binaries": [
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/runtime",
-      "version": "v0.32.4",
-      "binaries": [
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1429,22 +1471,16 @@
       "version": "v0.33.0",
       "binaries": [
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/go-openapi/runtime/server-middleware",
       "version": "v0.30.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/spec",
-      "version": "v0.22.6",
-      "binaries": [
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1453,13 +1489,7 @@
       "version": "v0.22.9",
       "binaries": [
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/strfmt",
-      "version": "v0.26.4",
-      "binaries": [
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1468,14 +1498,14 @@
       "version": "v0.27.0",
       "binaries": [
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/go-openapi/swag",
       "version": "v0.26.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/gh"
       ]
     },
@@ -1483,13 +1513,7 @@
       "path": "github.com/go-openapi/swag",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/swag/cmdutils",
-      "version": "v0.26.1",
-      "binaries": [
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1504,13 +1528,7 @@
       "path": "github.com/go-openapi/swag/cmdutils",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/swag/conv",
-      "version": "v0.27.0",
-      "binaries": [
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1525,13 +1543,7 @@
       "path": "github.com/go-openapi/swag/conv",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/swag/fileutils",
-      "version": "v0.26.1",
-      "binaries": [
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1546,22 +1558,15 @@
       "path": "github.com/go-openapi/swag/fileutils",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/go-openapi/swag/jsonname",
       "version": "v0.26.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/swag/jsonutils",
-      "version": "v0.26.1",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -1575,13 +1580,7 @@
       "path": "github.com/go-openapi/swag/jsonutils",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/swag/loading",
-      "version": "v0.26.1",
-      "binaries": [
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1596,13 +1595,7 @@
       "path": "github.com/go-openapi/swag/loading",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/swag/mangling",
-      "version": "v0.26.1",
-      "binaries": [
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1617,13 +1610,7 @@
       "path": "github.com/go-openapi/swag/mangling",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/swag/netutils",
-      "version": "v0.26.1",
-      "binaries": [
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1638,7 +1625,8 @@
       "path": "github.com/go-openapi/swag/netutils",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -1652,13 +1640,7 @@
       "path": "github.com/go-openapi/swag/pools",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/swag/stringutils",
-      "version": "v0.26.1",
-      "binaries": [
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1673,13 +1655,7 @@
       "path": "github.com/go-openapi/swag/stringutils",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/swag/typeutils",
-      "version": "v0.27.0",
-      "binaries": [
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1694,13 +1670,7 @@
       "path": "github.com/go-openapi/swag/typeutils",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/swag/yamlutils",
-      "version": "v0.26.1",
-      "binaries": [
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1715,13 +1685,7 @@
       "path": "github.com/go-openapi/swag/yamlutils",
       "version": "v0.28.0",
       "binaries": [
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/go-openapi/validate",
-      "version": "v0.26.0",
-      "binaries": [
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -1730,18 +1694,19 @@
       "version": "v0.26.1",
       "binaries": [
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/go-viper/mapstructure/v2",
       "version": "v2.5.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -1764,16 +1729,21 @@
       "path": "github.com/godbus/dbus/v5",
       "version": "v5.2.2",
       "binaries": [
-        "/usr/bin/runc",
         "/usr/bin/dockerd",
         "/usr/bin/gh"
+      ]
+    },
+    {
+      "path": "github.com/godbus/dbus/v5",
+      "version": "v5.2.3",
+      "binaries": [
+        "/usr/bin/runc"
       ]
     },
     {
       "path": "github.com/gofrs/flock",
       "version": "v0.13.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
       ]
     },
@@ -1781,6 +1751,7 @@
       "path": "github.com/gofrs/flock",
       "version": "v0.13.1",
       "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -1788,8 +1759,8 @@
       "path": "github.com/gogo/protobuf",
       "version": "v1.3.2",
       "binaries": [
-        "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd"
       ]
     },
     {
@@ -1811,8 +1782,8 @@
       "path": "github.com/golang/protobuf",
       "version": "v1.5.4",
       "binaries": [
-        "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd"
       ]
     },
     {
@@ -1833,9 +1804,9 @@
       "path": "github.com/google/certificate-transparency-go",
       "version": "v1.3.3",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -1850,8 +1821,8 @@
       "path": "github.com/google/go-containerregistry",
       "version": "v0.21.7",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -1879,11 +1850,11 @@
       "path": "github.com/google/shlex",
       "version": "v0.0.0-20191202100458-e7afc7fbc510",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -1892,11 +1863,11 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -1924,8 +1895,8 @@
       "path": "github.com/gorilla/mux",
       "version": "v1.8.1",
       "binaries": [
-        "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd"
       ]
     },
     {
@@ -1967,7 +1938,6 @@
       "path": "github.com/grpc-ecosystem/grpc-gateway/v2",
       "version": "v2.29.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/gh"
       ]
     },
@@ -1976,8 +1946,9 @@
       "version": "v2.30.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -1985,8 +1956,7 @@
       "path": "github.com/hashicorp/errwrap",
       "version": "v1.1.0",
       "binaries": [
-        "/usr/bin/dockerd",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
+        "/usr/bin/dockerd"
       ]
     },
     {
@@ -2042,8 +2012,7 @@
       "path": "github.com/hashicorp/go-multierror",
       "version": "v1.1.1",
       "binaries": [
-        "/usr/bin/dockerd",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
+        "/usr/bin/dockerd"
       ]
     },
     {
@@ -2057,8 +2026,8 @@
       "path": "github.com/hashicorp/go-version",
       "version": "v1.9.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -2107,8 +2076,8 @@
       "path": "github.com/hiddeco/sshsig",
       "version": "v0.2.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -2122,20 +2091,20 @@
       "path": "github.com/in-toto/attestation",
       "version": "v1.2.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "github.com/in-toto/in-toto-golang",
       "version": "v0.11.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -2197,13 +2166,6 @@
       ]
     },
     {
-      "path": "github.com/jonboulle/clockwork",
-      "version": "v0.5.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
       "path": "github.com/json-iterator/go",
       "version": "v1.1.12",
       "binaries": [
@@ -2214,7 +2176,6 @@
       "path": "github.com/kballard/go-shellquote",
       "version": "v0.0.0-20180428030007-95032a82bc51",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-compose",
         "/usr/bin/gh"
       ]
     },
@@ -2230,22 +2191,22 @@
       "path": "github.com/klauspost/compress",
       "version": "v1.19.2",
       "binaries": [
-        "/usr/bin/dockerd",
-        "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
+        "/usr/bin/dockerd"
       ]
     },
     {
       "path": "github.com/klauspost/compress",
       "version": "v1.20.0",
       "binaries": [
-        "/usr/bin/gh"
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "github.com/klauspost/compress",
       "version": "v1.20.1",
       "binaries": [
+        "/usr/bin/docker",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -2266,7 +2227,7 @@
     },
     {
       "path": "github.com/lestrrat-go/dsig",
-      "version": "v1.0.0",
+      "version": "v1.2.1",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
@@ -2280,14 +2241,14 @@
     },
     {
       "path": "github.com/lestrrat-go/httprc/v3",
-      "version": "v3.0.2",
+      "version": "v3.0.5",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/lestrrat-go/jwx/v3",
-      "version": "v3.0.13",
+      "version": "v3.1.1",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
@@ -2308,13 +2269,6 @@
     },
     {
       "path": "github.com/mattn/go-colorable",
-      "version": "v0.1.14",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "github.com/mattn/go-colorable",
       "version": "v0.1.15",
       "binaries": [
         "/usr/bin/gh"
@@ -2322,24 +2276,9 @@
     },
     {
       "path": "github.com/mattn/go-isatty",
-      "version": "v0.0.20",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "github.com/mattn/go-isatty",
       "version": "v0.0.24",
       "binaries": [
         "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/mattn/go-runewidth",
-      "version": "v0.0.23",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -2353,19 +2292,33 @@
       "path": "github.com/mattn/go-runewidth",
       "version": "v0.0.29",
       "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
+      ]
+    },
+    {
+      "path": "github.com/mattn/go-runewidth",
+      "version": "v0.0.30",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-compose"
+      ]
+    },
+    {
+      "path": "github.com/mattn/go-runewidth",
+      "version": "v0.0.31",
+      "binaries": [
         "/usr/bin/docker"
       ]
     },
     {
       "path": "github.com/mattn/go-shellwords",
-      "version": "v1.0.12",
+      "version": "v1.0.13",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/mattn/go-shellwords",
-      "version": "v1.0.14",
+      "version": "v1.0.15",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
@@ -2394,13 +2347,6 @@
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
         "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "github.com/mgutz/ansi",
-      "version": "v0.0.0-20170206155736-9520e82c474b",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -2471,7 +2417,6 @@
       "path": "github.com/mitchellh/hashstructure/v2",
       "version": "v2.0.2",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/gh"
       ]
     },
@@ -2485,26 +2430,32 @@
     },
     {
       "path": "github.com/moby/buildkit",
-      "version": "v0.33.0",
+      "version": "v0.33.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-compose"
+      ]
+    },
+    {
+      "path": "github.com/moby/buildkit",
+      "version": "v0.34.0",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/moby/docker-image-spec",
       "version": "v1.3.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "github.com/moby/extensions",
-      "version": "v0.0.0-20260909112015-86305e92aa39",
+      "version": "v0.0.0-20260918151408-e4c23d866037",
       "binaries": [
         "/usr/bin/dockerd"
       ]
@@ -2520,8 +2471,8 @@
       "path": "github.com/moby/go-archive",
       "version": "v0.3.3",
       "binaries": [
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -2538,15 +2489,7 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "github.com/moby/moby/api",
-      "version": "v1.55.0",
-      "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
@@ -2556,26 +2499,34 @@
       "version": "v1.56.0",
       "binaries": [
         "/usr/bin/dockerd",
-        "/usr/bin/docker"
-      ]
-    },
-    {
-      "path": "github.com/moby/moby/client",
-      "version": "v0.5.0",
-      "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
-      "path": "github.com/moby/moby/client",
-      "version": "v0.5.1",
+      "path": "github.com/moby/moby/api",
+      "version": "v1.56.1",
       "binaries": [
+        "/usr/bin/docker",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "github.com/moby/moby/client",
       "version": "v0.6.0",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
+      ]
+    },
+    {
+      "path": "github.com/moby/moby/client",
+      "version": "v0.6.1",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-compose"
+      ]
+    },
+    {
+      "path": "github.com/moby/moby/client",
+      "version": "v0.6.2",
       "binaries": [
         "/usr/bin/docker"
       ]
@@ -2584,17 +2535,10 @@
       "path": "github.com/moby/patternmatcher",
       "version": "v0.6.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "github.com/moby/policy-helpers",
-      "version": "v0.0.0-20260901104222-dd6c5499c491",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -2605,8 +2549,15 @@
       ]
     },
     {
+      "path": "github.com/moby/policy-helpers",
+      "version": "v0.0.0-20261006174519-bd98f4747414",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
+      ]
+    },
+    {
       "path": "github.com/moby/profiles/apparmor",
-      "version": "v0.2.2-0.20260828104831-61eaf32614c7",
+      "version": "v0.2.2",
       "binaries": [
         "/usr/bin/dockerd"
       ]
@@ -2651,9 +2602,9 @@
       "path": "github.com/moby/sys/atomicwriter",
       "version": "v0.1.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -2661,8 +2612,8 @@
       "path": "github.com/moby/sys/capability",
       "version": "v0.4.0",
       "binaries": [
-        "/usr/bin/runc",
         "/usr/bin/docker",
+        "/usr/bin/runc",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -2680,9 +2631,9 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
+        "/usr/bin/dockerd",
         "/usr/bin/runc",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -2696,9 +2647,9 @@
       "path": "github.com/moby/sys/sequential",
       "version": "v0.7.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -2708,9 +2659,9 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -2719,16 +2670,9 @@
       "version": "v0.3.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "github.com/moby/sys/user",
-      "version": "v0.4.0",
-      "binaries": [
-        "/usr/bin/runc"
       ]
     },
     {
@@ -2737,15 +2681,9 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "github.com/moby/sys/userns",
-      "version": "v0.2.0",
-      "binaries": [
+        "/usr/bin/dockerd",
+        "/usr/bin/runc",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -2756,18 +2694,19 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/runc",
+        "/usr/bin/docker",
         "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/bin/runc",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "github.com/moby/term",
       "version": "v0.5.2",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -2789,8 +2728,8 @@
       "path": "github.com/morikuni/aec",
       "version": "v1.1.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/docker",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -2834,23 +2773,23 @@
       "version": "v0.0.0-20191010083416-a7dc8b61c822",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/bin/docker",
         "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/oklog/ulid/v2",
       "version": "v2.1.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/open-policy-agent/opa",
-      "version": "v1.14.1",
+      "version": "v1.19.0",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
@@ -2859,8 +2798,8 @@
       "path": "github.com/opencontainers/cgroups",
       "version": "v0.1.0",
       "binaries": [
-        "/usr/bin/runc",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/runc"
       ]
     },
     {
@@ -2870,11 +2809,11 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -2884,11 +2823,11 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -2898,8 +2837,8 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/runc",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/runc"
       ]
     },
     {
@@ -2928,8 +2867,14 @@
       "path": "github.com/package-url/packageurl-go",
       "version": "v0.1.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
+      ]
+    },
+    {
+      "path": "github.com/package-url/packageurl-go",
+      "version": "v0.1.7",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -2945,8 +2890,8 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -2960,26 +2905,26 @@
       "path": "github.com/pkg/browser",
       "version": "v0.0.0-20240102092130-5ac0b6a4141c",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/pkg/errors",
       "version": "v0.9.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "github.com/planetscale/vtprotobuf",
       "version": "v0.6.1-0.20240319094008-0393e58bdf10",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -3086,17 +3031,11 @@
     },
     {
       "path": "github.com/santhosh-tekuri/jsonschema/v6",
-      "version": "v6.0.1",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "github.com/santhosh-tekuri/jsonschema/v6",
       "version": "v6.0.3",
       "binaries": [
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -3117,10 +3056,10 @@
       "path": "github.com/secure-systems-lab/go-securesystemslib",
       "version": "v0.11.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -3134,10 +3073,10 @@
       "path": "github.com/shibumi/go-pathspec",
       "version": "v1.3.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -3165,8 +3104,8 @@
       "path": "github.com/sigstore/protobuf-specs",
       "version": "v0.5.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -3180,35 +3119,35 @@
       "path": "github.com/sigstore/rekor",
       "version": "v1.5.3",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/sigstore/rekor-tiles/v2",
       "version": "v2.3.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/sigstore/sigstore",
       "version": "v1.10.8",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/sigstore/sigstore-go",
       "version": "v1.2.2",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -3222,8 +3161,8 @@
       "path": "github.com/sigstore/timestamp-authority/v2",
       "version": "v2.1.2",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -3240,11 +3179,11 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/runc",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/bin/docker",
         "/usr/bin/docker-proxy",
         "/usr/bin/dockerd",
-        "/usr/bin/docker",
+        "/usr/bin/runc",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -3287,22 +3226,22 @@
       "path": "github.com/spf13/cobra",
       "version": "v1.10.2",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "github.com/spf13/pflag",
       "version": "v1.0.10",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -3347,9 +3286,9 @@
       "path": "github.com/theupdateframework/go-tuf/v2",
       "version": "v2.4.2",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -3377,16 +3316,16 @@
       "path": "github.com/tonistiigi/dchapes-mode",
       "version": "v0.0.0-20250318174251-73d941a28323",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/tonistiigi/fsutil",
       "version": "v0.0.0-20260819142231-83cac42c1c52",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -3408,8 +3347,8 @@
       "path": "github.com/tonistiigi/go-csvvalue",
       "version": "v0.0.0-20240814133006-030d3b2625d0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -3431,8 +3370,8 @@
       "path": "github.com/tonistiigi/units",
       "version": "v0.0.0-20180711220420-6950e57a87ea",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -3448,18 +3387,18 @@
       "path": "github.com/transparency-dev/formats",
       "version": "v0.1.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/transparency-dev/merkle",
       "version": "v0.0.2",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -3486,7 +3425,7 @@
     },
     {
       "path": "github.com/valyala/fastjson",
-      "version": "v1.6.7",
+      "version": "v1.6.10",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
@@ -3500,7 +3439,7 @@
     },
     {
       "path": "github.com/vektah/gqlparser/v2",
-      "version": "v2.5.32",
+      "version": "v2.5.36",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
@@ -3510,8 +3449,8 @@
       "version": "v1.3.1",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/runc",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/runc"
       ]
     },
     {
@@ -3519,8 +3458,8 @@
       "version": "v0.0.5",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/runc",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/runc"
       ]
     },
     {
@@ -3550,8 +3489,8 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -3594,9 +3533,9 @@
       "path": "github.com/youmark/pkcs8",
       "version": "v0.0.0-20240726163527-a2c0da244d78",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -3646,7 +3585,8 @@
       "version": "v1.5.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -3681,8 +3621,8 @@
       "path": "go.etcd.io/raft/v3",
       "version": "v3.6.0",
       "binaries": [
-        "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd"
       ]
     },
     {
@@ -3691,18 +3631,11 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
-      "version": "v0.70.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -3711,14 +3644,8 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "go.opentelemetry.io/contrib/instrumentation/net/http/httptrace/otelhttptrace",
-      "version": "v0.70.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -3726,14 +3653,8 @@
       "version": "v0.71.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
-      "version": "v0.70.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -3742,8 +3663,9 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -3763,43 +3685,30 @@
     },
     {
       "path": "go.opentelemetry.io/otel",
-      "version": "v1.45.0",
+      "version": "v1.46.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "go.opentelemetry.io/otel",
-      "version": "v1.46.0",
+      "version": "v1.47.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/ctr",
-        "/usr/bin/dockerd",
-        "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc",
-      "version": "v1.45.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
+        "/usr/bin/ctr"
       ]
     },
     {
       "path": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc",
       "version": "v1.46.0",
       "binaries": [
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp",
-      "version": "v1.45.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -3807,40 +3716,41 @@
       "version": "v1.46.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
-      "version": "v1.45.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
       "version": "v1.46.0",
       "binaries": [
-        "/usr/bin/containerd",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
+      ]
+    },
+    {
+      "path": "go.opentelemetry.io/otel/exporters/otlp/otlptrace",
+      "version": "v1.47.0",
+      "binaries": [
+        "/usr/bin/containerd"
       ]
     },
     {
       "path": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
       "version": "v1.45.0",
       "binaries": [
-        "/usr/bin/containerd",
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
+        "/usr/bin/containerd"
       ]
     },
     {
       "path": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc",
       "version": "v1.46.0",
       "binaries": [
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -3848,8 +3758,7 @@
       "path": "go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp",
       "version": "v1.45.0",
       "binaries": [
-        "/usr/bin/containerd",
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
+        "/usr/bin/containerd"
       ]
     },
     {
@@ -3857,6 +3766,7 @@
       "version": "v1.46.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -3868,6 +3778,14 @@
       ]
     },
     {
+      "path": "go.opentelemetry.io/otel/log",
+      "version": "v1.47.0",
+      "binaries": [
+        "/usr/bin/containerd",
+        "/usr/bin/ctr"
+      ]
+    },
+    {
       "path": "go.opentelemetry.io/otel/metric",
       "version": "v1.44.0",
       "binaries": [
@@ -3876,37 +3794,37 @@
     },
     {
       "path": "go.opentelemetry.io/otel/metric",
-      "version": "v1.45.0",
+      "version": "v1.46.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "go.opentelemetry.io/otel/metric",
-      "version": "v1.46.0",
+      "version": "v1.47.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/ctr",
-        "/usr/bin/dockerd",
-        "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "go.opentelemetry.io/otel/sdk",
-      "version": "v1.45.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
+        "/usr/bin/ctr"
       ]
     },
     {
       "path": "go.opentelemetry.io/otel/sdk",
       "version": "v1.46.0",
       "binaries": [
-        "/usr/bin/containerd",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
+      ]
+    },
+    {
+      "path": "go.opentelemetry.io/otel/sdk",
+      "version": "v1.47.0",
+      "binaries": [
+        "/usr/bin/containerd"
       ]
     },
     {
@@ -3918,17 +3836,11 @@
     },
     {
       "path": "go.opentelemetry.io/otel/sdk/metric",
-      "version": "v1.45.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
-      ]
-    },
-    {
-      "path": "go.opentelemetry.io/otel/sdk/metric",
       "version": "v1.46.0",
       "binaries": [
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -3941,20 +3853,20 @@
     },
     {
       "path": "go.opentelemetry.io/otel/trace",
-      "version": "v1.45.0",
+      "version": "v1.46.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "go.opentelemetry.io/otel/trace",
-      "version": "v1.46.0",
+      "version": "v1.47.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/ctr",
-        "/usr/bin/dockerd",
-        "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
+        "/usr/bin/ctr"
       ]
     },
     {
@@ -3962,9 +3874,9 @@
       "version": "v1.11.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -3995,8 +3907,8 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -4005,10 +3917,11 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -4027,26 +3940,19 @@
     },
     {
       "path": "golang.org/x/crypto",
-      "version": "v0.56.0",
+      "version": "v0.57.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "golang.org/x/crypto",
-      "version": "v0.57.0",
+      "version": "v0.58.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "golang.org/x/mod",
-      "version": "v0.40.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -4055,22 +3961,14 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "golang.org/x/net",
-      "version": "v0.56.0",
-      "binaries": [
-        "/usr/bin/runc"
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "golang.org/x/net",
       "version": "v0.58.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
         "/usr/bin/gh"
       ]
     },
@@ -4078,12 +3976,27 @@
       "path": "golang.org/x/net",
       "version": "v0.59.0",
       "binaries": [
+        "/usr/bin/docker-proxy",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
+      ]
+    },
+    {
+      "path": "golang.org/x/net",
+      "version": "v0.60.0",
+      "binaries": [
+        "/usr/bin/docker",
+        "/usr/bin/runc"
+      ]
+    },
+    {
+      "path": "golang.org/x/net",
+      "version": "v0.61.0",
+      "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/docker-proxy",
-        "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -4102,22 +4015,22 @@
     },
     {
       "path": "golang.org/x/sync",
-      "version": "v0.22.0",
+      "version": "v0.23.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
+        "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "golang.org/x/sync",
-      "version": "v0.23.0",
+      "version": "v0.24.0",
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/dockerd",
-        "/usr/bin/docker",
-        "/usr/bin/gh"
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -4129,30 +4042,22 @@
     },
     {
       "path": "golang.org/x/sys",
-      "version": "v0.47.0",
+      "version": "v0.48.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-compose"
+        "/usr/bin/docker",
+        "/usr/bin/docker-proxy",
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ]
     },
     {
       "path": "golang.org/x/sys",
-      "version": "v0.48.0",
+      "version": "v0.49.0",
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
         "/usr/bin/runc",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/docker-proxy",
-        "/usr/bin/dockerd",
-        "/usr/bin/docker",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "golang.org/x/term",
-      "version": "v0.45.0",
-      "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
@@ -4161,36 +4066,35 @@
       "path": "golang.org/x/term",
       "version": "v0.46.0",
       "binaries": [
-        "/usr/bin/containerd",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
-      "path": "golang.org/x/text",
-      "version": "v0.41.0",
+      "path": "golang.org/x/term",
+      "version": "v0.47.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
+        "/usr/bin/containerd"
       ]
     },
     {
       "path": "golang.org/x/text",
       "version": "v0.42.0",
       "binaries": [
-        "/usr/bin/containerd",
-        "/usr/bin/ctr",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
-      "path": "golang.org/x/time",
-      "version": "v0.15.0",
+      "path": "golang.org/x/text",
+      "version": "v0.43.0",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/bin/containerd",
+        "/usr/bin/ctr",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
@@ -4199,8 +4103,10 @@
       "version": "v0.16.0",
       "binaries": [
         "/usr/bin/containerd",
+        "/usr/bin/docker",
         "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -4226,23 +4132,17 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/api",
-      "version": "v0.0.0-20260803160001-6ac0973c030d",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
-      ]
-    },
-    {
-      "path": "google.golang.org/genproto/googleapis/api",
       "version": "v0.0.0-20260825221802-da73d73af1c5",
       "binaries": [
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
       "path": "google.golang.org/genproto/googleapis/api",
-      "version": "v0.0.0-20260921155816-b14227669459",
+      "version": "v0.0.0-20261005182115-fad411399dd8",
       "binaries": [
         "/usr/bin/containerd"
       ]
@@ -4256,27 +4156,21 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/rpc",
-      "version": "v0.0.0-20260803160001-6ac0973c030d",
+      "version": "v0.0.0-20260825221802-da73d73af1c5",
       "binaries": [
+        "/usr/bin/docker",
+        "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "google.golang.org/genproto/googleapis/rpc",
-      "version": "v0.0.0-20260825221802-da73d73af1c5",
-      "binaries": [
-        "/usr/bin/dockerd",
-        "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose"
-      ]
-    },
-    {
-      "path": "google.golang.org/genproto/googleapis/rpc",
-      "version": "v0.0.0-20260921155816-b14227669459",
+      "version": "v0.0.0-20261005182115-fad411399dd8",
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
-        "/usr/bin/ctr"
+        "/usr/bin/ctr",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -4286,11 +4180,23 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
+        "/usr/bin/dockerd",
         "/usr/bin/gh"
+      ]
+    },
+    {
+      "path": "google.golang.org/grpc",
+      "version": "v1.84.0",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
+      ]
+    },
+    {
+      "path": "google.golang.org/grpc",
+      "version": "v1.85.0-dev.0.20260825072537-93e31b48545e",
+      "binaries": [
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -4300,11 +4206,11 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd",
         "/usr/bin/docker",
-        "/usr/libexec/docker/cli-plugins/docker-compose",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh",
+        "/usr/libexec/docker/cli-plugins/docker-buildx",
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {
@@ -4320,8 +4226,8 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -4335,7 +4241,6 @@
       "path": "gopkg.in/yaml.v3",
       "version": "v3.0.1",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-compose",
         "/usr/bin/gh"
       ]
     },
@@ -4348,7 +4253,7 @@
     },
     {
       "path": "k8s.io/api",
-      "version": "v0.36.3",
+      "version": "v0.37.0",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
@@ -4357,7 +4262,6 @@
       "path": "k8s.io/apimachinery",
       "version": "v0.36.3",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd"
       ]
     },
@@ -4366,13 +4270,7 @@
       "version": "v0.37.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/ctr"
-      ]
-    },
-    {
-      "path": "k8s.io/client-go",
-      "version": "v0.36.3",
-      "binaries": [
+        "/usr/bin/ctr",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -4380,7 +4278,8 @@
       "path": "k8s.io/client-go",
       "version": "v0.37.0",
       "binaries": [
-        "/usr/bin/containerd"
+        "/usr/bin/containerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -4402,21 +4301,14 @@
       "version": "v2.140.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
         "/usr/bin/dockerd",
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "k8s.io/kube-openapi",
-      "version": "v0.0.0-20260319004828-5883c5ee87b9",
-      "binaries": [
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
-      "path": "k8s.io/streaming",
-      "version": "v0.36.3",
+      "path": "k8s.io/kube-openapi",
+      "version": "v0.0.0-20260721132016-d427ff9ee9ad",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
@@ -4425,13 +4317,7 @@
       "path": "k8s.io/streaming",
       "version": "v0.37.0",
       "binaries": [
-        "/usr/bin/containerd"
-      ]
-    },
-    {
-      "path": "k8s.io/utils",
-      "version": "v0.0.0-20260319190234-28399d86e0b5",
-      "binaries": [
+        "/usr/bin/containerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -4439,7 +4325,8 @@
       "path": "k8s.io/utils",
       "version": "v0.0.0-20260626114624-be93311217bd",
       "binaries": [
-        "/usr/bin/containerd"
+        "/usr/bin/containerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -4455,8 +4342,8 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -4468,7 +4355,7 @@
     },
     {
       "path": "sigs.k8s.io/structured-merge-diff/v6",
-      "version": "v6.3.3",
+      "version": "v6.4.2",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
@@ -4479,15 +4366,8 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/libexec/docker/cli-plugins/docker-buildx",
-        "/usr/bin/dockerd"
-      ]
-    },
-    {
-      "path": "tags.cncf.io/container-device-interface",
-      "version": "v1.1.0",
-      "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-compose"
+        "/usr/bin/dockerd",
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
@@ -4496,8 +4376,9 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
+        "/usr/bin/docker",
         "/usr/bin/dockerd",
-        "/usr/bin/docker"
+        "/usr/libexec/docker/cli-plugins/docker-compose"
       ]
     },
     {

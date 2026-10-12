@@ -174,7 +174,7 @@ README, retrieved with tarball integrity verification, alongside the unchanged
 native binary. Native Codex 0.155.1 carries its exact-release LICENSE, NOTICE,
 and bundled native notices. Codex ACP's separately locked npm release is 0.156.1
 and receives that release's notices. The development shell also retains notices
-for Claude 2.1.285 and Codex 0.159.2 copied from its maintained base stages.
+for Claude 2.1.296 and Codex 0.162.0 shipped by the maintained DHI templates.
 Their exact public-image binary and package hashes, verified Claude npm package
 integrity, and immutable Codex release commit are indexed in the common DHI
 notice collection. Native Kit overlays retain both their configured-version
@@ -233,16 +233,20 @@ The patched Zsh binary is now tied to `codex-zsh-v0.1.0`'s actual tag commit
 `891f1f4c8584a082fc4658cabd48f1a8b01354e0`, its workflow's upstream
 `77045ef899e53b9598bebc5a41db93a548a40ca6`, the exact LICENCE, patch,
 manifest and both archive/member hashes. This records modified-source identity,
-not a reproducible build. Both Codex 0.159.2 npm platform archives pass SHA512
+not a reproducible build. Both Codex 0.162.0 npm platform archives pass SHA512
 integrity and all member hashes match the observed payload. Their decoded SLSA
-statements identify `ff6aec96948b70d94983af2641a6b67c94faeff5`; **Sigstore
+statements identify `c1382380de69521303b416720a52f42d51af6248`; **Sigstore
 signatures/trust/transparency were not cryptographically verified**. Claude's
 exact native checksum manifests are recorded separately from npm legal texts.
 
 Available original Codex and ripgrep exact-release-lock Rust licence/NOTICE
 texts are collected, with immutable `.cargo_vcs_info`-commit supplements for
-omissions. The 1472/1485/1493-package locks for 0.159.2/0.155.1/0.156.1 are
-conservative supersets, not evidence that every package is linked.
+omissions. The 1472/1485/1493/1473-package locks for 0.159.2/0.155.1/0.156.1/0.162.0
+are conservative supersets, not evidence that every package is linked.
+`packaging/dhi-notices/add-codex-release.py --version V` records a further
+Codex release (exact-tag lock and source, the canonical collectors, provider
+legal files); `add-claude-release.py --version V` records a Claude Code
+release's npm legal files and native manifest and refuses a changed LICENSE.md.
 `primary-source-notices.json` supersedes the historical 23/22/23 gap counts:
 eighteen unique gaps now retain actual archived declarations and copyright
 headers with declared Apache-2.0 terms (or the explicitly permitted alternative).

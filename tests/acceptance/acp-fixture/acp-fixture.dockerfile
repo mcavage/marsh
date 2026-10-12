@@ -1,4 +1,4 @@
-FROM dhi.io/sbx-templates:claude-code-docker@sha256:492664da2ac39b2796802b2dbe2472b16e7e5c21781744f457af6d79f2a85d80
+FROM dhi.io/sbx-templates:claude-code-docker@sha256:e3b7baee8a6f5f3805201b52b27c192e03603edbe1bea2d17d9399717777fd29
 COPY --chmod=0755 agent.mjs /usr/local/bin/marsh-acp-fixture.mjs
 USER agent
 WORKDIR /home/agent/workspace

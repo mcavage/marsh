@@ -7,7 +7,7 @@
 # `claude install` to wire the symlink. That second step is a Bun runtime,
 # which aborts under QEMU when cross-building arm64, so the kit fetches
 # the platform binary directly into the layout install.sh would have left.
-FROM dhi.io/sbx-templates:claude-code-docker@sha256:13d7dbd08041284dbe5df67ec730a26f7b03dbd6fa994e143672979440426010
+FROM dhi.io/sbx-templates:claude-code-docker@sha256:e3b7baee8a6f5f3805201b52b27c192e03603edbe1bea2d17d9399717777fd29
 ARG CLAUDE_VERSION
 ARG TARGETARCH
 USER root

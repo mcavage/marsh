@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
-"""Read fixed maintained DHI agent payload identities without executing them."""
+"""Read fixed maintained DHI agent payload identities without executing them.
+
+The Claude version is the one versions/ entry the template ships, so a base
+repin needs no edit here.
+"""
 import hashlib,json,pathlib
-claude=pathlib.Path('/home/agent/.local/share/claude/versions/2.1.285');npm=pathlib.Path('/usr/local/share/npm-global/lib/node_modules/@openai')
+versions=pathlib.Path('/home/agent/.local/share/claude/versions');npm=pathlib.Path('/usr/local/share/npm-global/lib/node_modules/@openai')
 def sha(p):
  h=hashlib.sha256()
  with p.open('rb') as f:
   while chunk:=f.read(1024*1024):h.update(chunk)
  return h.hexdigest()
 files=[]
-if claude.is_file():files.append({'path':str(claude),'sha256':sha(claude),'size':claude.stat().st_size})
+if versions.is_dir():
+ shipped=sorted(versions.iterdir())
+ if len(shipped)!=1 or not shipped[0].is_file() or shipped[0].is_symlink():raise ValueError('expected exactly one maintained Claude version file')
+ claude=shipped[0];files.append({'path':str(claude),'sha256':sha(claude),'size':claude.stat().st_size})
 packages=[]
 if npm.is_dir():
  for p in npm.rglob('package.json'):
