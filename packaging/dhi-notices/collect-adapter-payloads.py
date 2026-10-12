@@ -9,20 +9,19 @@ from pathlib import Path, PurePosixPath
 from public_sources import acquire, members, private_output, read_input
 from notice_rules import notice_document
 
-# One Kit per agent: each ACP adapter's lock lives in its agent's Kit.
+# One Kit per agent: each ACP adapter's lock lives in its agent's Kit. The
+# selected version is the one that lock pins for the first listed package.
 ADAPTERS = {
     "codex-acp": {
         "kit": "marsh-codex",
         "root": "/opt/marsh/codex-acp",
         "base_agent": "codex",
-        "version": "0.156.1",
         "packages": ["@openai/codex", "@openai/codex-linux-{arch}"],
     },
     "claude-acp": {
         "kit": "marsh-claude",
         "root": "/opt/marsh/claude-acp",
         "base_agent": "claude",
-        "version": "0.3.274",
         "packages": [
             "@anthropic-ai/claude-agent-sdk",
             "@anthropic-ai/claude-agent-sdk-linux-{arch}",
@@ -55,6 +54,7 @@ def main():
         lock_path = args.source_root / "kits" / spec["kit"] / "package-lock.json"
         lock_bytes = read_input(lock_path)
         lock = json.loads(lock_bytes)
+        spec = dict(spec, version=lock["packages"]["node_modules/" + spec["packages"][0]]["version"])
         result = {
             "base_agent": spec["base_agent"],
             "root": spec["root"],
@@ -67,20 +67,26 @@ def main():
             packages = []
             required = []
             if adapter == "codex-acp":
-                required += [
+                # Provider notices for the selected release come from
+                # add-codex-release.py (provider-notices/codex-VERSION-*).
+                prefix = "codex-" + spec["version"] + "-"
+                provider = [
                     {"file": "provider-notices/" + r["file"], "sha256": r["sha256"]}
                     for r in providers["notices"]
-                    if r["file"].startswith("codex-0.156.1-")
+                    if r["file"].startswith(prefix)
                 ]
-                required += zsh["required_notices"] + rg["required_notices"]
-                # LGPL bubblewrap source text is byte-identical in the exact selected
-                # release source inventory; don't use a symlink's "COPYING" as grant.
-                required.append(
-                    {
-                        "file": "provider-notices/codex-0.155.1-codex-rs-vendor-bubblewrap-COPYING",
-                        "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c",
-                    }
-                )
+                if not provider:
+                    raise ValueError("no provider notices recorded for Codex " + spec["version"])
+                required += provider + zsh["required_notices"] + rg["required_notices"]
+                # LGPL bubblewrap source text is byte-identical in every reviewed
+                # release source; don't use a symlink's "COPYING" as grant.
+                if not any(r["file"].endswith("-codex-rs-vendor-bubblewrap-COPYING") for r in provider):
+                    required.append(
+                        {
+                            "file": "provider-notices/codex-0.155.1-codex-rs-vendor-bubblewrap-COPYING",
+                            "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c",
+                        }
+                    )
             for template in spec["packages"]:
                 alias = template.format(arch=npm_arch)
                 relative = "node_modules/" + alias
@@ -153,7 +159,7 @@ def main():
                                 "member": name,
                             }
                         )
-                if not package or not package["version"].startswith(spec["version"]):
+                if not package or package["version"] != locked["version"] or not package["version"].startswith(spec["version"]):
                     raise ValueError("unexpected locked package version")
                 directory = spec["root"] + "/" + relative
                 entries += [
