@@ -82,7 +82,7 @@ def main() -> int:
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--source-tree", type=Path, required=True)
     parser.add_argument("--source-revision", required=True)
-    parser.add_argument("--build-receipt", required=True)
+    parser.add_argument("--build-receipt", default=None, help="optional observed-build receipt")
     args = parser.parse_args()
     args.evidence.mkdir(parents=True, mode=0o700, exist_ok=True)
     identity = source_identity(args.source_tree.resolve(strict=True), args.source_revision)
@@ -118,6 +118,7 @@ def main() -> int:
                                  env=scope.environment, stdin=subprocess.DEVNULL, capture_output=True, timeout=180, start_new_session=True)
         assert created.returncode == 0, created.stderr.decode(errors="replace")
         sandbox_created = True
+        scope.extra_owned_names.add(sandbox)  # created directly by this harness
         script = f'''id=$(acp reserve fixture-session) || exit 31
 acp run --reservation "$id" fixture-session > .acp-run.out 2> .acp-run.err &
 run_pid=$!
@@ -309,6 +310,7 @@ printf ready > .acp-published-orphaned
             time.sleep(0.5)
         assert stopped.returncode == 0, stopped.stderr.decode(errors="replace")
         assert json.loads(stopped.stdout)["cleanup_complete"] is True, stopped.stdout
+        scope.stopped = True
         removed = host("acp", "remove-published", "codex", tool)
         assert removed.returncode == 0, removed.stderr.decode(errors="replace")
         report.update(outcome="passed", host_turn="fixture:first", child_turn="fixture:from-child",

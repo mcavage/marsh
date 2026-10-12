@@ -21,7 +21,7 @@ from jsonrpc_peer import JsonRpcPeer  # noqa: E402
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--build-receipt", type=pathlib.Path, required=True)
+    parser.add_argument("--build-receipt", type=pathlib.Path, default=None, help="optional observed-build receipt")
     parser.add_argument("--marsh", required=True)
     parser.add_argument("--sbx", required=True)
     parser.add_argument("--guest-artifacts", required=True)

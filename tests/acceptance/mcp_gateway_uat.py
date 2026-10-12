@@ -127,8 +127,6 @@ def main() -> int:
     parser.add_argument("--cancel-only", action="store_true", help="diagnose one stock Gateway cancellation")
     parser.add_argument("--cancel-semicolon", action="store_true", help="with --cancel-only, diagnose whether Brush executes a following command after interrupted sleep")
     parser.add_argument("--cancel-after-start", action="store_true", help="with --cancel-only, wait for a pipeline start marker before sending cancellation")
-    parser.add_argument("--core-only", action="store_true", help="deprecated; the core journey is the whole gate")
-    parser.add_argument("--real-home", action="store_true", help="deprecated; the login account HOME is always used")
     args = parser.parse_args()
     if (args.cancel_semicolon or args.cancel_after_start) and not args.cancel_only:
         parser.error("cancel diagnostic options require --cancel-only")

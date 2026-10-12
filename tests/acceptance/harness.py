@@ -1199,7 +1199,8 @@ class AcpScope(IsolatedScope):
 
     def cleanup_isolated_scope(self) -> list[str]:
         errors = []
-        if self.scope_started:
+        # After a deliberate `marsh stop` a status call would start a new daemon.
+        if self.scope_started and not getattr(self, "stopped", False):
             try:
                 self.public_status()  # include Kits created since the initial snapshot
             except Exception as error:

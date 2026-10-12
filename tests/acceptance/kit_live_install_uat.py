@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Install a published Kit after shell attach and invoke it in that same shell."""
+"""Install a Kit after shell attach (`marsh kit install`) and invoke it in that same shell.
+
+The scope starts with only the fixture Kit registered as `fixture`; the attached
+shell installs the same immutable fixture reference under a new name and runs
+it. Isolated MARSH_HOME/control scope; cleanup is `marsh stop` of that scope,
+then proof that its own VMs are gone and pre-existing VMs are unchanged.
+"""
 
 import argparse
 import json
@@ -12,14 +18,10 @@ import sys
 import time
 import traceback
 
-from provenance import (host_only_path, stock_cleanup_errors, stock_vm_names,
-                        verify_candidate)
-from harness import (CONTAINER, IMAGE, disposable_root, scoped_control_home,
-                 verify_container_deleted)
-
-
-SHELL_KIT = "docker.io/docker/sbx-kit-shell@sha256:367c9a4b3fd550f777e1d57cc53550afb4a1385055d79111acf6f996272ff6de"
-ALTERNATE_KIT = "docker.io/docker/sbx-kit-pi@sha256:7514ea9f2ce3613ea7e07cddf2aee3d8b598ef052ad68623603b20a332326a09"
+from harness import (CONTAINER, IMAGE, disposable_root, product_owned_vm_names, scoped_control_home,
+                     verify_container_deleted)
+from provenance import (candidate_arguments, host_only_path, stock_baseline, stock_cleanup_errors,
+                        stock_vm_names, verify_candidate)
 
 
 def read_until(process: subprocess.Popen[bytes], marker: bytes, timeout: int) -> bytes:
@@ -43,25 +45,24 @@ def send(process: subprocess.Popen[bytes], command: str, marker: str, timeout: i
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    candidate_arguments(parser)
     parser.add_argument("--marsh", type=Path, required=True)
-    parser.add_argument("--guest-artifacts", type=Path, required=True)
-    parser.add_argument("--build-receipt", type=Path, required=True)
     parser.add_argument("--source-tree", type=Path, required=True)
     parser.add_argument("--source-revision", required=True)
     parser.add_argument("--sbx", type=Path, required=True)
-    parser.add_argument("--initial-kit", default=SHELL_KIT)
-    parser.add_argument("--alternate-kit", default=ALTERNATE_KIT)
-    parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--kit", required=True, help="immutable fixture Kit OCI reference")
+    parser.add_argument("--evidence", type=Path, required=True, help="fresh evidence JSON file")
     args = parser.parse_args()
     marsh = args.marsh.resolve(strict=True)
     guest, receipt = verify_candidate(args, str(marsh))
     args.evidence = host_only_path(args.evidence, args.source_tree)
     if args.evidence.exists():
         parser.error("choose a fresh live Kit evidence file")
-    if not all(IMAGE.fullmatch(value) for value in (args.initial_kit, args.alternate_kit)):
-        parser.error("both Kits must use immutable OCI references")
+    if not IMAGE.fullmatch(args.kit):
+        parser.error("--kit must be an immutable OCI reference")
+    args.initial_kit = args.alternate_kit = args.kit
     sbx = args.sbx.resolve(strict=True)
-    stock_before = stock_vm_names(sbx)
+    stock_before = stock_baseline(sbx)
 
     root = disposable_root("marsh-kit-install-")
     project = root / "project"
@@ -70,8 +71,9 @@ def main() -> None:
     for directory in (project, home, control):
         directory.mkdir(mode=0o700)
     (home / "home").mkdir(mode=0o700)
-    registry = scoped_control_home(control, home) / "commands.json"
-    registry.write_text(json.dumps({"shell": args.initial_kit}) + "\n")
+    control_home = scoped_control_home(control, home)
+    registry = control_home / "commands.json"
+    registry.write_text(json.dumps({"fixture": args.initial_kit}) + "\n")
     registry.chmod(0o600)
     environment = {**os.environ,
                    "MARSH_HOME": str(home), "MARSH_CONTROL_HOME": str(control),
@@ -83,6 +85,7 @@ def main() -> None:
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
     )
     passed = False
+    owned: set[str] = set()
     output = bytearray()
     report = {"schema": "marsh.live-kit-install-uat/v1", "outcome": "failed",
               "verified_build_receipt": receipt, "stock_before": stock_before,
@@ -102,7 +105,7 @@ def main() -> None:
         assert b"INSTALL_EXIT:0" in output, output[-4000:]
         assert f"installed alternate from {args.alternate_kit}".encode() in output, output[-4000:]
         output.extend(send(process,
-                           "command -v alternate; alternate --version; printf 'INVOKE_EXIT:%s\\n' \"$?\"",
+                           "command -v alternate; alternate identity; printf 'INVOKE_EXIT:%s\\n' \"$?\"",
                            "INVOKE_EXIT:", 600))
         assert b"INVOKE_EXIT:0" in output, output[-4000:]
         assert b"/marsh-commands-" in output, output[-4000:]
@@ -114,6 +117,7 @@ def main() -> None:
         )
         workers = json.loads(status.stdout)["workers"]
         assert any(worker.get("kit_profile") == args.alternate_kit for worker in workers), workers
+        owned |= product_owned_vm_names(control_home)
         persisted = json.loads(registry.read_text())
         assert persisted["alternate"] == args.alternate_kit, persisted
         listed = subprocess.run([str(marsh), "jobs", "--json"], cwd=project,
@@ -146,6 +150,7 @@ def main() -> None:
             cleanup_errors.append(f"attached shell exited {process.returncode}")
         cleanup_complete = False
         try:
+            owned |= product_owned_vm_names(control_home)
             stopped = subprocess.run([str(marsh), "stop", "--json"], cwd=project,
                                      env=environment, capture_output=True, timeout=600)
             report["scope_stop"] = {"status": stopped.returncode,
@@ -159,7 +164,7 @@ def main() -> None:
         try:
             stock_after = stock_vm_names(sbx)
             report["stock_after"] = stock_after
-            cleanup_errors.extend(stock_cleanup_errors(stock_before, stock_after))
+            cleanup_errors.extend(stock_cleanup_errors(stock_before, stock_after, owned=owned))
             verify_candidate(args, str(marsh))
         except Exception as error:
             cleanup_errors.append(f"final independent verification failed: {error}")
