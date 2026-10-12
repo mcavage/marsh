@@ -12,8 +12,8 @@ implementation types.
 There are three ways to run the gate (`run.py` is the full gate; `smoke.py`
 is its fast subset, sharing the same scope harness, `harness.py`):
 
-- `make dev-smoke DEV_KIT=<fixture-ref>` runs the smoke subset against the
-  incremental `make dev` build in `target/`. It needs no build receipt and
+- `make regress ONLY=smoke` runs the smoke subset against the incremental
+  `make dev` build (`DEV_KIT` defaults to `make fixture-ref`'s reference). It needs no build receipt and
   is the everyday development check. Its evidence is useful but is not release
   evidence.
 - `make acceptance-smoke` builds a fresh candidate in a private directory
@@ -27,8 +27,8 @@ is skipped and the evidence records no receipt. The smoke subset covers
 prewarm, fresh registered-command containers, VM reuse, receipts, verified
 deletion, daemon sharing, natural paths, persistent home, streams, pipelines,
 background jobs, signals, fanout/collect, and results. It stops at the first
-failure. `make dev-split` runs the split/join observation (19) against the dev
-install.
+failure. `make regress ONLY=workspaces` runs the split/join scenarios against the
+dev install.
 
 The release and smoke targets use the fixture OCI reference from
 `target/kit-release/fixture-commands.json` (written by
@@ -247,8 +247,8 @@ make it; observations 19-21 are the scenario suites indexed at the end.
     Docker control.
 
 19. Daemon-owned workspaces (`workspaces_uat.py`, the W scenarios below, specified in
-    `docs/design/workspaces-acceptance.md`; run by `make dev-workspaces`,
-    `make dev-split`, and `make dev-acceptance`): `marsh split` / `join` /
+    `docs/design/workspaces-acceptance.md`; run by `make regress`;
+    one family: `make regress ONLY=workspaces`): `marsh split` / `join` /
     `splits` from host bash, sessions, and Kit jobs; each fork mirrors the
     user's `git status`; branch results appear only in `out/` as
     `git apply`-compatible patches; the user's tree and `.git` are never
@@ -258,7 +258,7 @@ make it; observations 19-21 are the scenario suites indexed at the end.
     mid-split (uncertain, untrusted, no replay).
 
 20. Nested processes (`processes_uat.py`, the P scenarios below, specified in
-    `docs/design/processes-acceptance.md`; run by `make dev-processes`): every Kit
+    `docs/design/processes-acceptance.md`; run by `make regress`; `ONLY=processes`): every Kit
     job's read-only `/run/marsh` (links, `job.json`, the job's own
     `context.md`, `cap.sock`), the image's own `bash`, `sh`, and `$SHELL`
     (no bash link), the entry rule (the own name runs once), image-provided names
@@ -273,7 +273,7 @@ make it; observations 19-21 are the scenario suites indexed at the end.
     PATH `bash` timing equal to `/bin/bash`.
 
 21. Shell choice (`shells_uat.py`, the S scenarios below, specified in
-    `docs/shells.md`; run by `make dev-shells`): for each of the shell VM's own
+    `docs/shells.md`; run by `make regress`; `ONLY=shells`): for each of the shell VM's own
     `bash` and `zsh`, the chosen shell runs, registered names are Kit jobs with
     verified cleanup, split/join and fanout/collect work, the user's rc file is
     honored with the session command directory first on PATH, Ctrl-C returns

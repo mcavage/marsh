@@ -213,6 +213,25 @@ class Plan:
                             [python, str(ACCEPTANCE / "mcp_load_uat.py"), "--marsh", str(self.marsh),
                              "--guest-artifacts", str(self.guest), *self.common(), "--kit", "fixture"],
                             190, ("regress",), ("mcp-registry",), ("mcp-registry",)))
+        suites.append(Suite("mcp-gateway", "mcp_gateway",
+                            [python, str(ACCEPTANCE / "mcp_gateway_uat.py"), "--marsh", str(self.marsh),
+                             "--guest-artifacts", str(self.guest), *self.common()],
+                            100, ("regress",), ("mcp-registry",), ("mcp-registry",)))
+        suites.append(Suite("kit-live-install", "kit_live_install",
+                            [python, str(ACCEPTANCE / "kit_live_install_uat.py"), "--marsh", str(self.marsh),
+                             *self.common(), "--kit", self.kit], 40, ("regress",)))
+        # Codex as an MCP/ACP host of published tools: needs a host `codex` CLI
+        # (isolated CODEX_HOME, no model calls).
+        codex = shutil.which("codex")
+        if codex:
+            candidate("published_codex_uat.py", "published-codex", 50, ("regress",), ["--codex", codex],
+                      ("mcp-registry",), ("mcp-registry",))
+            candidate("published_acp_uat.py", "published-acp", 60, ("regress",), ["--codex", codex],
+                      ("mcp-registry",), ("mcp-registry",))
+        else:
+            print("regress: published-codex and published-acp not scheduled: no `codex` on PATH", file=sys.stderr)
+        if sys.platform == "darwin":
+            candidate("shell_disconnect.py", "shell-disconnect", 150, ("regress",))
         suites.append(Suite("self-dev", "self_dev",
                             [python, str(ACCEPTANCE / "self_dev.py"), "--prefix", str(self.prefix),
                              "--sbx", self.sbx, "--kit", self.kit], 310, ("regress",), ("cpu-heavy",)))
@@ -384,8 +403,9 @@ def launch(suite: Suite, plan: Plan, environment: dict[str, str]) -> None:
     # check --source-revision against it, so bind each suite to HEAD at its start.
     if "--source-revision" in argv:
         argv[argv.index("--source-revision") + 1] = plan.head()
-    # Harness flag names differ: self_dev takes a file, the rest a directory.
-    evidence_arg = suite.evidence / "self-dev.json" if suite.family == "self_dev" else suite.evidence
+    # Harness flag names differ: self_dev and kit_live_install take a file, the rest a directory.
+    evidence_file = {"self_dev": "self-dev.json", "kit_live_install": "kit-live-install.json"}.get(suite.family)
+    evidence_arg = suite.evidence / evidence_file if evidence_file else suite.evidence
     argv += ["--evidence", str(evidence_arg)]
     if suite.family == "mcp_load":
         commands = suite.evidence / "fixture-commands.json"

@@ -17,7 +17,7 @@ packed-refs, object list, config, and hooks. It also reads `out/`
 artifacts, public JSON (`splits`, `status`, `jobs show`), and stock
 `sbx exec <owned vm> docker inspect`. Each run is isolated in its own
 MARSH_HOME and control home. Cleanup removes only VMs in its own ownership map
-whose stable IDs it has seen (run.py `IsolatedScopeCleanup`). Every subprocess
+whose stable IDs it has seen (`harness.py` `IsolatedScope`). Every subprocess
 has a timeout and is killed by process group. A preflight checks
 `marsh --help`, which needs no VM, then `splits --json`, `split --help`, and
 `join --help`. If the CLI is missing, it marks every scenario blocked before

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fast fail real-product acceptance smoke gate (`make dev-smoke`, regress `smoke`)."""
+"""Fast fail real-product acceptance smoke gate (regress `smoke`: `make regress ONLY=smoke`)."""
 
 from __future__ import annotations
 
