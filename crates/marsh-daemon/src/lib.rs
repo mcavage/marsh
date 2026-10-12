@@ -6601,3 +6601,5 @@ mod tests;
 
 #[cfg(test)]
 mod mcp_load_tests;
+#[cfg(test)]
+mod mcp_long_tests;
