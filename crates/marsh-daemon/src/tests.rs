@@ -4316,6 +4316,41 @@ fn acp_handoff_waits_for_release_and_prompt_admission() {
     drop(lease);
 }
 
+/// The daemon can be dropped while a turn still waits on its Kit: the Kit has
+/// not answered, or its exit has not yet reached the transport (macOS can
+/// delay that EOF by losing the bridge's shutdown wakeup). The drop must not
+/// wait for the turn to end.
+#[test]
+fn acp_daemon_drop_does_not_wait_for_an_active_turn() {
+    let acp = AcpFixture::new();
+    let (server, shell) = (Arc::clone(&acp.server), acp.first.clone());
+    let (id, _) = server
+        .acp
+        .start_reserved(
+            Arc::clone(&server.backend),
+            &server.store(),
+            "agent-session",
+            shell.clone(),
+            &Arc::new(AcpStartupAbort::default()),
+            None,
+        )
+        .unwrap();
+    server
+        .acp
+        .prompt_with_key(&id, &shell, &Uuid::new_v4().to_string(), "hold".into())
+        .unwrap();
+    wait_until("the held turn records its first update", || {
+        let status = server.acp.status(&id, &shell, 0, &server.store()).unwrap();
+        status.turn_active && !status.updates.is_empty()
+    });
+    // The fixture's drop is then the manager's last owner.
+    drop(server);
+    wait_until("connection handlers release the ACP manager", || {
+        Arc::strong_count(&acp.server.acp) == 1
+    });
+    returns("the daemon drops with a turn in flight", move || drop(acp));
+}
+
 #[test]
 fn acp_daemon_caller_has_distinct_identity_controller_and_stop() {
     let acp = AcpFixture::new();
