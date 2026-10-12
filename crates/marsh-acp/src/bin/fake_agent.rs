@@ -3,29 +3,17 @@
 use marsh_acp::protocol::{
     ACP_V1_PROTOCOL_VERSION, ContentBlock, InitializeResponse, JsonRpcError, JsonRpcMessage,
     JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, NewSessionResponse, PromptResponse,
-    RequestId, SessionNotification, SessionUpdate, StopReason, ToolCallStatus, ToolCallUpdate,
-    ToolKind,
+    SessionNotification, SessionUpdate, StopReason, ToolCallStatus, ToolCallUpdate, ToolKind,
 };
 use std::env;
 use std::io::{BufRead, Write};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
-use std::thread;
-use std::time::Duration;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mode = args.get(1).map_or("normal", String::as_str);
-
-    let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
 
-    let cancelled = Arc::new(AtomicBool::new(false));
-    let cancelled_clone = Arc::clone(&cancelled);
-
     if mode == "oversized-frame" {
-        // Send a frame larger than 1 MiB to trigger frame bound rejection
         let oversized = " ".repeat(1024 * 1024 + 100);
         let _ = writeln!(
             stdout,
@@ -35,42 +23,11 @@ fn main() {
         return;
     }
 
-    let (req_tx, req_rx) = mpsc::sync_channel::<JsonRpcRequest>(64);
-
-    // Dedicated reader thread to continuously read stdin and handle notifications (like session/cancel)
-    // without blocking during slow request handling.
-    thread::spawn(move || {
-        let mut reader = stdin.lock();
-        let mut line = String::new();
-        while let Ok(n) = reader.read_line(&mut line) {
-            if n == 0 {
-                break;
-            }
-
-            let trimmed = line.trim();
-            if !trimmed.is_empty()
-                && let Ok(msg) = serde_json::from_str::<JsonRpcMessage>(trimmed)
-            {
-                match msg {
-                    JsonRpcMessage::Request(req) => {
-                        if req_tx.send(req).is_err() {
-                            break;
-                        }
-                    }
-                    JsonRpcMessage::Notification(notif) => {
-                        if notif.method == "session/cancel" {
-                            cancelled_clone.store(true, Ordering::Release);
-                        }
-                    }
-                    JsonRpcMessage::Response(_) => {}
-                }
-            }
-            line.clear();
+    for line in std::io::stdin().lock().lines() {
+        let Ok(line) = line else { break };
+        if let Ok(JsonRpcMessage::Request(request)) = serde_json::from_str(line.trim()) {
+            handle_request(&request, mode, &mut stdout);
         }
-    });
-
-    while let Ok(req) = req_rx.recv() {
-        handle_request(&req, mode, &mut stdout, &cancelled);
     }
 }
 
@@ -90,131 +47,8 @@ fn send_notification(stdout: &mut std::io::Stdout, notif: &JsonRpcNotification) 
     }
 }
 
-fn send_request(stdout: &mut std::io::Stdout, req: &JsonRpcRequest) {
-    if let Ok(bytes) = serde_json::to_vec(req) {
-        let _ = stdout.write_all(&bytes);
-        let _ = stdout.write_all(b"\n");
-        let _ = stdout.flush();
-    }
-}
-
-#[allow(clippy::too_many_lines)]
-fn handle_prompt(
-    req: &JsonRpcRequest,
-    mode: &str,
-    stdout: &mut std::io::Stdout,
-    cancelled: &Arc<AtomicBool>,
-) {
+fn handle_prompt(req: &JsonRpcRequest, stdout: &mut std::io::Stdout) {
     let session_id = "sess-fake-001";
-
-    if mode == "attempt-host-exec" {
-        let term_req = JsonRpcRequest::new(
-            RequestId::Number(991),
-            "terminal/create",
-            Some(serde_json::json!({
-                "sessionId": session_id,
-                "command": "whoami"
-            })),
-        );
-        send_request(stdout, &term_req);
-
-        let fs_req = JsonRpcRequest::new(
-            RequestId::Number(992),
-            "fs/write_text_file",
-            Some(serde_json::json!({
-                "sessionId": session_id,
-                "path": "/etc/shadow",
-                "content": "hacked"
-            })),
-        );
-        send_request(stdout, &fs_req);
-    }
-
-    if mode == "request-permission" {
-        let perm_req = JsonRpcRequest::new(
-            RequestId::Number(993),
-            "session/request_permission",
-            Some(serde_json::json!({
-                "sessionId": session_id,
-                "toolCall": { "toolCallId": "tc-1" },
-                "options": [
-                    { "optionId": "opt-allow", "name": "Allow", "kind": "allow_once" },
-                    { "optionId": "opt-deny", "name": "Deny", "kind": "reject_once" }
-                ]
-            })),
-        );
-        send_request(stdout, &perm_req);
-    }
-
-    if mode == "permission-hang" {
-        let perm_req = JsonRpcRequest::new(
-            RequestId::Number(993),
-            "session/request_permission",
-            Some(serde_json::json!({
-                "sessionId": session_id,
-                "toolCall": { "toolCallId": "tc-1" },
-                "options": [
-                    { "optionId": "opt-allow", "name": "Allow", "kind": "allow_once" }
-                ]
-            })),
-        );
-        send_request(stdout, &perm_req);
-
-        for _ in 0..100 {
-            if cancelled.load(Ordering::Acquire) {
-                break;
-            }
-            thread::sleep(Duration::from_millis(30));
-        }
-
-        let resp_body = PromptResponse {
-            stop_reason: if cancelled.load(Ordering::Acquire) {
-                StopReason::Cancelled
-            } else {
-                StopReason::EndTurn
-            },
-        };
-        let resp = JsonRpcResponse::ok(req.id.clone(), serde_json::to_value(resp_body).unwrap());
-        send_response(stdout, &resp);
-        return;
-    }
-
-    if mode == "cancel-race-end-turn" {
-        for _ in 0..50 {
-            if cancelled.load(Ordering::Acquire) {
-                break;
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-
-        let resp_body = PromptResponse {
-            stop_reason: StopReason::EndTurn,
-        };
-        let resp = JsonRpcResponse::ok(req.id.clone(), serde_json::to_value(resp_body).unwrap());
-        send_response(stdout, &resp);
-        return;
-    }
-
-    if mode == "slow-cancel" {
-        for _ in 0..100 {
-            if cancelled.load(Ordering::Acquire) {
-                break;
-            }
-            thread::sleep(Duration::from_millis(30));
-        }
-
-        if cancelled.load(Ordering::Acquire) {
-            cancelled.store(false, Ordering::Release);
-            let resp_body = PromptResponse {
-                stop_reason: StopReason::Cancelled,
-            };
-            let resp =
-                JsonRpcResponse::ok(req.id.clone(), serde_json::to_value(resp_body).unwrap());
-            send_response(stdout, &resp);
-            return;
-        }
-    }
-
     let update_msg = SessionNotification {
         session_id: session_id.into(),
         update: SessionUpdate::AgentMessageChunk {
@@ -275,12 +109,7 @@ fn handle_prompt(
     send_response(stdout, &resp);
 }
 
-fn handle_request(
-    req: &JsonRpcRequest,
-    mode: &str,
-    stdout: &mut std::io::Stdout,
-    cancelled: &Arc<AtomicBool>,
-) {
+fn handle_request(req: &JsonRpcRequest, mode: &str, stdout: &mut std::io::Stdout) {
     match req.method.as_str() {
         "initialize" => {
             let mut caps = marsh_acp::protocol::AgentCapabilities::default();
@@ -330,7 +159,7 @@ fn handle_request(
             send_response(stdout, &resp);
         }
         "session/prompt" => {
-            handle_prompt(req, mode, stdout, cancelled);
+            handle_prompt(req, stdout);
         }
         "session/load" => {
             if let Some(params) = &req.params

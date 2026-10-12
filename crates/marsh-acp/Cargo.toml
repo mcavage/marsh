@@ -36,3 +36,4 @@ rmcp = { version = "3.4", default-features = false, features = ["client", "serve
 uuid = { version = "1", features = ["v4"] }
 marsh-acp = { path = ".", features = ["test-support"] }
 tempfile = "3"
+tokio = { version = "1.48", features = ["test-util"] }
