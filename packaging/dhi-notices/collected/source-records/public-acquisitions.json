@@ -1319,61 +1319,61 @@
     }
   ],
   "kit-arm64-codex": {
-    "url": "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-aarch64-unknown-linux-musl.tar.gz",
-    "sha256": "d6c7e62fbd688d52ee04f3929d0613705d32a920a42db7a139e366eaf1f4a2d7",
-    "size": 94309124,
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.162.1/codex-aarch64-unknown-linux-musl.tar.gz",
+    "sha256": "bf3ca2719f1143b1440fbd85c149379e696c782c50ad7991f8bfcec60b2600c1",
+    "size": 103595962,
     "integrity": null,
     "signature_verified": false,
     "members": [
       {
         "member": "codex-aarch64-unknown-linux-musl",
-        "sha256": "298d3d73d0bbc1367e58a370df5b6216fe30ce0a92e8b6b0afb0377a958dc335",
-        "size": 232726912,
+        "sha256": "071cbe8d821cf1b02b6d8ba6c8b7991b228fcb8519dcb68a37d31222bb8cabe5",
+        "size": 254866040,
         "mode": 493
       }
     ]
   },
   "kit-arm64-codex-code-mode-host": {
-    "url": "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz",
-    "sha256": "516f2ed76d4ae96c2074d3c08f4576ed1bdc5c3a97e26734d7319de8b6861683",
-    "size": 24355380,
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.162.1/codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz",
+    "sha256": "1395ce9367f8acd280674dff083edf25bf221d908b8351d5bd4f3fdde9181e9a",
+    "size": 26003900,
     "integrity": null,
     "signature_verified": false,
     "members": [
       {
         "member": "codex-code-mode-host-aarch64-unknown-linux-musl",
-        "sha256": "7348d1c1cee36270b5599da24ed431e1ac6372666a94bb09e09ef87d1bc9e3b8",
-        "size": 63381656,
+        "sha256": "f6477b0357a8cc2291d628962876ecb1a2beb872f71a1e2734363c81ff21700d",
+        "size": 66855936,
         "mode": 493
       }
     ]
   },
   "kit-amd64-codex": {
-    "url": "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-x86_64-unknown-linux-musl.tar.gz",
-    "sha256": "a0ef8b2debc3bf747e07b1a039354de31300ac0dcc2276498ba281470b5d9115",
-    "size": 101581479,
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.162.1/codex-x86_64-unknown-linux-musl.tar.gz",
+    "sha256": "86f268d81b898f3e144c5ecff2ad2fda2c5802e042d6195b72538fe0fa125057",
+    "size": 111350218,
     "integrity": null,
     "signature_verified": false,
     "members": [
       {
         "member": "codex-x86_64-unknown-linux-musl",
-        "sha256": "0753dfe1d8b87a52436deb13eb1c549661ef4c84fee2c5aa688385eebeccb761",
-        "size": 269273536,
+        "sha256": "628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1",
+        "size": 294415048,
         "mode": 493
       }
     ]
   },
   "kit-amd64-codex-code-mode-host": {
-    "url": "https://github.com/openai/codex/releases/download/rust-v0.155.1/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz",
-    "sha256": "9fd083743af55be818aceb351d371fb5136f5b6aa3938f167087373d27067b2d",
-    "size": 25727325,
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.162.1/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz",
+    "sha256": "458239ea45c1fc508d89695f180ab352f2834709a8a46929a4466f4f04399ada",
+    "size": 27500770,
     "integrity": null,
     "signature_verified": false,
     "members": [
       {
         "member": "codex-code-mode-host-x86_64-unknown-linux-musl",
-        "sha256": "210ab8ebaebf4bc1421d9e30339c858354ca35fa91e2f87f4c6204e5382f8a63",
-        "size": 69423168,
+        "sha256": "ec71830690a7c0024916ee0c99fbdc635bc6e747ff665ea4f03a8389bbcb6b30",
+        "size": 74036112,
         "mode": 493
       }
     ]
