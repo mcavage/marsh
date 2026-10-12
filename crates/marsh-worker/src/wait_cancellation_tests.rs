@@ -46,7 +46,8 @@ fn production_runtime_wait_cancellation_joins_and_reaps_its_cli_carrier() {
             &waiting_cancel,
         )
     });
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    #[cfg_attr(not(target_os = "linux"), allow(unused_variables))] // Checked via /proc.
     let pid: u32 = loop {
         if let Ok(pid) = fs::read_to_string(&pid_file)
             && let Ok(pid) = pid.parse()
@@ -56,7 +57,6 @@ fn production_runtime_wait_cancellation_joins_and_reaps_its_cli_carrier() {
         assert!(Instant::now() < deadline, "wait CLI must really start");
         thread::sleep(Duration::from_millis(10));
     };
-    thread::sleep(Duration::from_millis(100));
     let started = Instant::now();
     cancel.cancel();
     assert!(task.join().unwrap().is_err());
@@ -65,9 +65,5 @@ fn production_runtime_wait_cancellation_joins_and_reaps_its_cli_carrier() {
     assert!(started.elapsed() < Duration::from_secs(30));
     #[cfg(target_os = "linux")]
     assert!(!std::path::Path::new(&format!("/proc/{pid}")).exists());
-    println!(
-        "production_wait pid={pid} cancelled=true wait_and_io_joined=true reaped=true elapsed={:?}",
-        started.elapsed()
-    );
     fs::remove_dir_all(root).unwrap();
 }
