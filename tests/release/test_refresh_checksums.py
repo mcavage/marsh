@@ -2,6 +2,7 @@
 """scripts/refresh-agent-checksums.py against fake publishers, as Renovate runs it."""
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -60,8 +61,10 @@ class RefreshChecksums(unittest.TestCase):
             directory = self.root / "kits" / kit
             directory.mkdir(parents=True)
             source = (ROOT / "kits" / kit / descriptor).read_text()
-            current = {"marsh-claude": "2.1.278", "marsh-codex": "0.155.1"}[kit]
-            (directory / descriptor).write_text(source.replace(f'default: "{current}"', f'default: "{version}"', 1))
+            rewritten, count = re.subn(r'(?m)^(  version:\n    default: )"[^"]*"', rf'\g<1>"{version}"', source)
+            if count != 1:
+                raise AssertionError(f"kits/{kit}/{descriptor}: no args.version.default to rewrite")
+            (directory / descriptor).write_text(rewritten)
             shutil.copy(ROOT / "kits" / kit / "release-checksums.txt", directory)
 
     def run_script(self, *extra):
