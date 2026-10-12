@@ -227,7 +227,7 @@ fn background_pipefail_survives_input_loop_polling() {
     // `-s` goes through the real input loop, which polls jobs before reading each line.
     // Poll the first failure while the last stage is still running, then collect after reap.
     differential_with_input_mode(
-        "mkfifo gate\nset -o pipefail\nsh -c ': >left-done; exit 7' | sh -c 'read x <gate; : >right-done; exit 0' & pid=$!\nuntil test -e left-done; do sleep .005; done\nset +o pipefail\n: >gate\nuntil test -e right-done; do sleep .005; done\nwait \"$pid\"\n",
+        "mkfifo gate\nset -o pipefail\nsh -c ': >left-done; exit 7' | sh -c 'read x <gate; : >right-done; exit 0' & pid=$!\nuntil test -e left-done; do sleep .005; done\nset +o pipefail\necho >gate\nuntil test -e right-done; do sleep .005; done\nwait \"$pid\"\n",
         7,
         b"",
         true,
@@ -249,13 +249,13 @@ fn jobs_p_names_group_leader_while_background_pid_names_rightmost() {
     // Each stage reports its actual PID; no comparison of nondeterministic raw PIDs.
     // Both stages stay alive until `jobs` has run.
     differential(
-        "mkfifo gl gr; sh -c 'echo $$ >left; read x <gl' | sh -c 'echo $$ >right; read x <gr; exit 23' & pid=$!; jobs -p >group; : >gl; : >gr; wait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; test \"$(cat left)\" != \"$pid\" || exit 93; exit \"$status\"",
+        "mkfifo gl gr; sh -c 'echo $$ >left; read x <gl' | sh -c 'echo $$ >right; read x <gr; exit 23' & pid=$!; jobs -p >group; echo >gl; echo >gr; wait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; test \"$(cat left)\" != \"$pid\" || exit 93; exit \"$status\"",
         23,
         b"",
     );
     // Polling may remove the group leader before jobs prints it; its identity must remain.
     differential_with_input_mode(
-        "mkfifo gate\nsh -c 'echo $$ >left; exit 7' | sh -c 'echo $$ >right; read x <gate; exit 23' & pid=$!\nuntil test -s left && test -s right; do sleep 0.01; done\njobs -p >group\n: >gate\nwait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; exit \"$status\"\n",
+        "mkfifo gate\nsh -c 'echo $$ >left; exit 7' | sh -c 'echo $$ >right; read x <gate; exit 23' & pid=$!\nuntil test -s left && test -s right; do sleep 0.01; done\njobs -p >group\necho >gate\nwait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; exit \"$status\"\n",
         23,
         b"",
         true,
@@ -336,7 +336,7 @@ fn mixed_builtin_function_group_pipelines_preserve_streams_and_pipefail() {
 #[test]
 fn jobs_in_subshells_observe_parent_metadata_without_wait_ownership() {
     differential(
-        "mkfifo gate; sh -c 'read x <gate; :' & pid=$!; jobs -p >expected; jobs -p | cat >actual; cmp expected actual || exit 90; printf '%s\\n' \"$(jobs -p)\" >actual; cmp expected actual || exit 91; (jobs -p) >actual; test ! -s actual || exit 92; : >gate; wait \"$pid\"",
+        "mkfifo gate; sh -c 'read x <gate; :' & pid=$!; jobs -p >expected; jobs -p | cat >actual; cmp expected actual || exit 90; printf '%s\\n' \"$(jobs -p)\" >actual; cmp expected actual || exit 91; (jobs -p) >actual; test ! -s actual || exit 92; echo >gate; wait \"$pid\"",
         0,
         b"",
     );
@@ -477,7 +477,7 @@ fn trapped_sigint_interrupts_wait_without_consuming_or_killing_the_child() {
     use std::os::unix::process::CommandExt as _;
     for wait in ["wait \"$pid\"", "wait -n -p done \"$pid\"", "wait"] {
         let script = format!(
-            "trap 'printf \"trap:%s\\n\" \"$?\"' INT; mkfifo gate; sh -c 'read x < gate; exit 17' & pid=$!; printf ready >ready; {wait}; first=$?; kill -0 \"$pid\" || exit 91; test -z \"${{done+x}}\" || exit 92; : > gate; wait \"$pid\"; second=$?; printf '%s:%s\\n' \"$first\" \"$second\""
+            "trap 'printf \"trap:%s\\n\" \"$?\"' INT; mkfifo gate; sh -c 'read x < gate; exit 17' & pid=$!; printf ready >ready; {wait}; first=$?; kill -0 \"$pid\" || exit 91; test -z \"${{done+x}}\" || exit 92; echo >gate; wait \"$pid\"; second=$?; printf '%s:%s\\n' \"$first\" \"$second\""
         );
         for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
             let directory = tempfile::tempdir().unwrap();
@@ -725,10 +725,13 @@ fn kill_handles_multiple_pids_and_explicit_negative_process_groups() {
         0,
         b"checked",
     );
-    // Job control gives this job its own group, making the negative operand
-    // a bounded existence probe that cannot signal the test runner's group.
+    // The job leads its own group (and only then announces itself), making
+    // the negative operand a bounded probe that cannot signal the test
+    // runner's group. Not `set -m`: GNU Bash's own job launch races on macOS
+    // (parent and child both setpgid; the child's sometimes fails with EPERM
+    // and it prints "child setpgid ...: Operation not permitted").
     differential(
-        "set -m; sh -c ': >p; exec sleep 30' & p=$!; until test -e p; do sleep .01; done; kill -0 -- -\"$p\" || exit 91; kill -TERM -- -\"$p\"; wait \"$p\"; printf group",
+        "perl -e 'setpgrp(0, 0) or die; open(F, \">p\") or die; close(F); exec(\"sleep\", \"30\")' & p=$!; until test -e p; do sleep .01; done; kill -0 -- -\"$p\" || exit 91; kill -TERM -- -\"$p\"; wait \"$p\"; printf group",
         0,
         b"group",
     );
@@ -1054,7 +1057,7 @@ fn arithmetic_on_associative_elements_uses_the_key_text() {
 #[test]
 fn read_timeouts_distinguish_end_of_file_from_silence() {
     differential(
-        "mkfifo gate; read -t 1 x < /dev/null; echo $?; read -t 0 < /dev/null; echo $?; printf '' | { read -t 1 x; echo $?; }; sh -c 'read y < gate' | { read -t 0.05 x; echo $?; : > gate; }",
+        "mkfifo gate; read -t 1 x < /dev/null; echo $?; read -t 0 < /dev/null; echo $?; printf '' | { read -t 1 x; echo $?; }; sh -c 'read y < gate' | { read -t 0.05 x; echo $?; echo >gate; }",
         0,
         b"1\n0\n1\n142\n",
     );
@@ -1346,7 +1349,7 @@ fn command_flag_takes_the_first_operand_in_bash_option_order() {
 #[test]
 fn kill_double_dash_negative_operand_terminates_the_group() {
     differential(
-        "set -m; sh -c ': >p; exec sleep 30' & p=$!; until test -e p; do sleep .01; done; kill -- -\"$p\"; echo \"kill:$?\"; wait \"$p\"; echo \"wait:$?\"",
+        "perl -e 'setpgrp(0, 0) or die; open(F, \">p\") or die; close(F); exec(\"sleep\", \"30\")' & p=$!; until test -e p; do sleep .01; done; kill -- -\"$p\"; echo \"kill:$?\"; wait \"$p\"; echo \"wait:$?\"",
         0,
         b"kill:0\nwait:143\n",
     );
