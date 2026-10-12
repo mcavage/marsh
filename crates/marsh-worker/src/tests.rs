@@ -2436,7 +2436,11 @@ fn supervisor_cancels_container_when_controller_is_lost() {
         controls: VecDeque::from([Err(WorkerError::ControlClosed)]),
     };
     let container = ContainerId::parse("e".repeat(64)).unwrap();
-    let grace = Duration::from_millis(40);
+    // After the grace the supervisor kills, then waits one more grace for the
+    // runtime to report the exit before it gives up (SupervisionFailed). The
+    // window after the kill must outlast a loaded runner's scheduling, so the
+    // grace is generous: the test waits out one grace and nothing more.
+    let grace = Duration::from_millis(500);
     let started = Instant::now();
     let outcome = ThreadSupervisor {
         termination_grace: grace,
@@ -2505,10 +2509,12 @@ fn controller_loss_does_not_repeat_an_explicit_terminate() {
 #[cfg(target_os = "linux")]
 fn controller_loss_terminates_kills_and_verifies_container_cleanup() {
     let runtime = Arc::new(RecordingRuntime::default());
+    // The runtime has one grace after the kill to report the exit; keep it
+    // generous (see supervisor_cancels_container_when_controller_is_lost).
     let worker = worker(
         runtime.clone(),
         Arc::new(ThreadSupervisor {
-            termination_grace: Duration::from_millis(20),
+            termination_grace: Duration::from_millis(500),
         }),
     );
     let mut controls = LostAfterStart(runtime.clone());
