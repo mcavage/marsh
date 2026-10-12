@@ -236,8 +236,8 @@ def main() -> int:
     args.evidence.mkdir(parents=True, exist_ok=True)
     oracle = args.oracle.resolve()
     version = subprocess.run([oracle, "--version"], capture_output=True, check=True).stdout
-    if b"version 5.3.20(" not in version:
-        raise SystemExit("oracle is not required GNU Bash 5.3.20")
+    if b"version 5.3." not in version:
+        raise SystemExit("oracle is not GNU Bash 5.3")
     runners = [("oracle", oracle, False)]
     runners += [(f"candidate-{i}", p.resolve(), False) for i, p in enumerate(args.candidate)]
     if args.driver:

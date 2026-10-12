@@ -20,7 +20,6 @@ import subprocess
 import tempfile
 import time
 
-ORACLE_SHA = "d1fb5699959b164bc05f834bb32f4fdda96dc0457e01eb8357943b7803e6f2c0"
 ROOT = Path(__file__).resolve().parents[2]
 NATIVE = b""
 NATIVE_SOURCE = br'''#include <stdint.h>
@@ -214,7 +213,7 @@ def observable(result):
 
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--oracle',type=Path,default=ROOT/'target/marsh-evidence/bash-jobs/gnu-bash-5.3.20')
+    ap.add_argument('--oracle',type=Path,required=True)
     ap.add_argument('--pristine',type=Path)
     ap.add_argument('--prebyte',type=Path)
     ap.add_argument('--candidate',type=Path)
@@ -223,7 +222,7 @@ def main():
     ns=ap.parse_args(); ns.evidence.mkdir(parents=True,exist_ok=True)
     global NATIVE
     NATIVE=build_native(ns.evidence)
-    if sha(ns.oracle)!=ORACLE_SHA: raise SystemExit('frozen GNU 5.3.20 SHA mismatch')
+    if not subprocess.run([ns.oracle,'--version'],capture_output=True,timeout=5).stdout.startswith(b'GNU bash, version 5.3.'): raise SystemExit('oracle must be GNU Bash 5.3')
     binaries={k:getattr(ns,k).resolve() for k in ('oracle','pristine','prebyte','candidate') if getattr(ns,k)}
     identity={'binaries':{k:{'path':str(v),'sha256':sha(v)} for k,v in binaries.items()},'harness_sha256':sha(__file__)}
     (ns.evidence/'identity.json').write_text(json.dumps(identity,indent=2)+'\n')

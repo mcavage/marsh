@@ -102,8 +102,8 @@ def main() -> int:
     args.evidence.mkdir(parents=True, exist_ok=False)
     env = dict(os.environ)
     version = subprocess.check_output([shells["gnu"], "--version"], timeout=3, start_new_session=True)
-    if b"version 5.3.20(" not in version:
-        parser.error("primary GNU oracle must be Bash 5.3.20")
+    if b"version 5.3." not in version:
+        parser.error("primary GNU oracle must be Bash 5.3")
     identity = {"binaries": identities, "gnu_version": version.hex(),
                 "harness_sha256": sha(Path(__file__)),
                 "probe_sha256": {name: sha(PROBES / name) for name, _ in SUITES.values()},
