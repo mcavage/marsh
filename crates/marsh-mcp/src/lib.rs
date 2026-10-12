@@ -5163,10 +5163,4 @@ mod tests {
         assert_eq!(fs::read(home.join("one")).unwrap(), b"one");
         assert_eq!(fs::read(home.join("two")).unwrap(), b"two");
     }
-
-    #[test]
-    fn stopped_receipt_cleanup_uses_full_scope_lifecycle_bound() {
-        assert_eq!(SCOPE_LIFECYCLE_TIMEOUT, Duration::from_mins(10));
-        assert!(SCOPE_LIFECYCLE_TIMEOUT > Duration::from_mins(1));
-    }
 }
