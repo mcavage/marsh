@@ -67,7 +67,13 @@ ones that drive real `sbx` microVMs (only on a Mac, by hand).
 falling back to `cargo test`, so it runs exactly what CI runs. CI uses the
 nextest `ci` profile (`NEXTEST_PROFILE=ci`: no fail-fast). A test that runs
 longer than its slow timeout (`.config/nextest.toml`) is killed and reported
-by name. There are no retries.
+by name. There are no retries. After the tests, a process they started that is
+still running (from the test build directory, or carrying the run's
+`MARSH_TEST_RUN` marker) is printed and killed, and the run fails
+(`tests/leaked_processes.py`). A test that puts a child in its own process
+group or session (beyond nextest's group kill) spawns it through
+`common::spawn_group` / `common::wait_for_exit`, which kill that group when the
+test fails or the child overstays its budget.
 
 `make verify` and `make regress` run `tests/regress.py`, the one scheduler for
 sbx suites. Each suite gets its own scope and evidence directory, at most 3 run

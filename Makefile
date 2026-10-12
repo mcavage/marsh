@@ -55,6 +55,13 @@ BINARY_CALLERS := (package(marsh-mcp) & binary(mcp_load)) | (package(marsh-daemo
 	| (package(marsh-acp) & binary(fixture_caller))
 # The binary callers' host publications write under $HOME: give them their own.
 CALLER_HOME = $(abspath $(TARGET_DIR))/caller-home
+# Everything the Rust tests start inherits MARSH_TEST_RUN (unless a test clears
+# its environment). After the tests, an orphaned process still running from
+# $(TEST_BIN) or carrying this run's marker has leaked: it is printed and
+# killed, and the run fails.
+TEST_RUN_TOKEN := $(shell od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
+TEST_RUN_START := $(shell date +%s)
+LEAK_CHECK = $(PYTHON) tests/leaked_processes.py --bin "$(TEST_BIN)" --token "$(TEST_RUN_TOKEN)" --since $(TEST_RUN_START)
 # Export serving is a Mac host boundary, not a Linux contributor capability.
 MCP_TEST_FILES := test_stdio_protocol.py test_guest_export_boundary.py test_publication_cli.py \
 	$(if $(filter Darwin,$(shell uname -s)),test_export_stdio_protocol.py)
@@ -126,19 +133,24 @@ test: test-rust test-harness test-model
 # fails a hung test by name). nextest skips doctests, so cargo runs those.
 # Then the #[ignore]d binary callers and the ACP host caller, which drive the
 # built marsh, marsh-mcp and marshd binaries (no VM) with an isolated HOME.
+# Every step that runs tests is followed, pass or fail, by $(LEAK_CHECK).
 test-rust:
 	@$(CARGO) nextest --version >/dev/null 2>&1 || { echo 'make test: cargo-nextest is required: brew install cargo-nextest (or cargo install --locked cargo-nextest)' >&2; exit 1; }
 	$(CARGO) fmt --all -- --check
 	$(CARGO) clippy --workspace --all-targets --locked --target-dir "$(TARGET_DIR)" -- -D warnings
-	$(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" --profile "$(NEXTEST_PROFILE)"
+	MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" \
+		--profile "$(NEXTEST_PROFILE)" || { $(LEAK_CHECK); exit 1; }
+	$(LEAK_CHECK)
 	$(CARGO) test --workspace --doc --locked --target-dir "$(TARGET_DIR)"
 	$(CARGO) build --workspace --bins --locked --target-dir "$(TARGET_DIR)"
 	rm -rf "$(CALLER_HOME)" && mkdir -m 700 "$(CALLER_HOME)"
 	CARGO_HOME="$${CARGO_HOME:-$$HOME/.cargo}" RUSTUP_HOME="$${RUSTUP_HOME:-$$HOME/.rustup}" HOME="$(CALLER_HOME)" \
-		MARSH_LOAD_TEST_BIN="$(TEST_BIN)/marsh" MARSH_ACP_CALLER_BIN="$(TEST_BIN)/marsh" \
+		MARSH_LOAD_TEST_BIN="$(TEST_BIN)/marsh" MARSH_ACP_CALLER_BIN="$(TEST_BIN)/marsh" MARSH_TEST_RUN=$(TEST_RUN_TOKEN) \
 		$(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" \
-		--profile "$(NEXTEST_PROFILE)" --run-ignored only -E '$(BINARY_CALLERS)'
-	$(PYTHON) tests/acceptance/acp-fixture/typed_host_caller.py --marsh "$(TEST_BIN)/marsh"
+		--profile "$(NEXTEST_PROFILE)" --run-ignored only -E '$(BINARY_CALLERS)' || { $(LEAK_CHECK); exit 1; }
+	MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(PYTHON) tests/acceptance/acp-fixture/typed_host_caller.py \
+		--marsh "$(TEST_BIN)/marsh" || { $(LEAK_CHECK); exit 1; }
+	$(LEAK_CHECK)
 
 # Python and shell harnesses against the debug binaries: shipped-entrypoint
 # journeys (onboarding), MCP protocol callers, the Kit publisher, the

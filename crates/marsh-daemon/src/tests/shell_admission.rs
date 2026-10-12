@@ -41,7 +41,7 @@ impl DaemonBackend for Backend {
         _: DaemonStore,
     ) -> Result<(), DaemonError> {
         use std::os::unix::process::CommandExt as _;
-        let mut child = fenced(|| {
+        let mut child = Reaped(fenced(|| {
             Command::new("/usr/bin/python3")
                 .args(["-c", "import sys; sys.stdin.buffer.read(); sys.exit(42)"])
                 .stdin(Stdio::piped())
@@ -49,7 +49,7 @@ impl DaemonBackend for Backend {
                 .stderr(Stdio::null())
                 .process_group(0)
                 .spawn()
-        })?;
+        })?);
         self.starts.fetch_add(1, Ordering::Release);
         let delivery = (|| {
             attachment.send(&AttachmentFrame::ShellReady)?;
@@ -62,8 +62,8 @@ impl DaemonBackend for Backend {
             }
         })();
         // Closing its stdin ends the child; its real exit status is the outcome.
-        drop(child.stdin.take());
-        let actual = child.wait()?.code().unwrap_or(125);
+        drop(child.0.stdin.take());
+        let actual = child.0.wait()?.code().unwrap_or(125);
         self.actual_exit.store(actual, Ordering::Release);
         if self.uncertain {
             return Err(DaemonError::ShellCleanupUncertain(format!(
@@ -72,6 +72,17 @@ impl DaemonBackend for Backend {
         }
         delivery?;
         attachment.send(&AttachmentFrame::Exited { code: actual })
+    }
+}
+
+/// The fixture's shell process (alone in its own group), killed and reaped
+/// if `open_shell` unwinds before it has exited.
+struct Reaped(std::process::Child);
+
+impl Drop for Reaped {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
     }
 }
 
