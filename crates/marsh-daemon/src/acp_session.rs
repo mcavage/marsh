@@ -1410,10 +1410,13 @@ impl AcpSessionManager {
             }
         }
         // Four bounded 1 MiB values. Drain independently of the prompt result.
+        // An async task, not a blocking one: the client's turn state holds the
+        // sender until the turn ends, and dropping the runtime waits for every
+        // blocking task, so a turn still in flight would stall that drop.
         let (updates, mut receiver) = mpsc::channel::<serde_json::Value>(4);
         let turn_log = Arc::clone(&session.turn);
-        let collector = self.runtime.spawn_blocking(move || {
-            while let Some(value) = receiver.blocking_recv() {
+        let collector = self.runtime.spawn(async move {
+            while let Some(value) = receiver.recv().await {
                 let mut turn = turn_log
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
