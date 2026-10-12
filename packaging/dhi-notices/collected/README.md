@@ -64,7 +64,7 @@ What each scope checks:
   their allowed mutations. The Codex recipe also checks `command -v codex` and
   `codex --version` before the final receipt.
 - **ACP adapters:** SHA-512-checked public package members for codex-acp
-  0.156.1 and the Claude Agent SDK 0.3.293, with tree, mode, owner, link and
+  0.160.1 and the Claude Agent SDK 0.3.293, with tree, mode, owner, link and
   required-text checks. The SDK's own legal notice is retained as published.
 - **Other npm packages:** lock identity, installed package metadata and
   collected notice hashes. This does not cover every executable byte.

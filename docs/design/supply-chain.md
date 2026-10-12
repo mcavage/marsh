@@ -172,7 +172,7 @@ provenance signatures.
 Native Claude 2.1.296 carries the publisher's exact-version npm LICENSE and
 README, retrieved with tarball integrity verification, alongside the unchanged
 native binary. Native Codex 0.162.1 carries its exact-release LICENSE, NOTICE,
-and bundled native notices. Codex ACP's separately locked npm release is 0.156.1
+and bundled native notices. Codex ACP's separately locked npm release is 0.160.1
 and receives that release's notices. The development shell also retains notices
 for Claude 2.1.296 and Codex 0.162.0 shipped by the maintained DHI templates.
 Their exact public-image binary and package hashes, verified Claude npm package
@@ -240,10 +240,15 @@ statements identify `c1382380de69521303b416720a52f42d51af6248`; **Sigstore
 signatures/trust/transparency were not cryptographically verified**. Claude's
 exact native checksum manifests are recorded separately from npm legal texts.
 
+Codex 0.160.1's Linux `codex-voice-host` grew from 12.7 MB (0.156.1) to 67 MB
+because it now ships unstripped DWARF debug sections (54 MB); its code and data
+sections, dynamic libraries and voice runtime manifest are unchanged.
+
 Available original Codex and ripgrep exact-release-lock Rust licence/NOTICE
 texts are collected, with immutable `.cargo_vcs_info`-commit supplements for
-omissions. The 1472/1485/1493/1473/1473-package locks for
-0.159.2/0.155.1/0.156.1/0.162.0/0.162.1 are conservative supersets, not evidence that every package is linked.
+omissions. The 1472/1485/1493/1473/1473/1472-package locks for
+0.159.2/0.155.1/0.156.1/0.162.0/0.162.1/0.160.1 are conservative supersets, not
+evidence that every package is linked.
 `packaging/dhi-notices/add-codex-release.py --version V` records a further
 Codex release (exact-tag lock and source, the canonical collectors, provider
 legal files); `add-claude-release.py --version V` records a Claude Code
@@ -287,7 +292,7 @@ The final development gate must follow every mutation, including any agent
 The Codex Kit also puts `/usr/local/bin` first in its image PATH and invokes its
 selected native binary by absolute path, with a built-image lookup/version guard.
 Four npm recipes retain explicitly base-labelled early receipts and issue
-final scoped receipts after additions. ACP0.156.1 and Claude SDK 0.3.293 package
+final scoped receipts after additions. ACP 0.160.1 and Claude SDK 0.3.293 package
 members and required retained texts are independently bound to SHA512-checked
 public packages. Other npm coverage is metadata/notices only, not full-code approval.
 
