@@ -1,5 +1,7 @@
 import argparse,hashlib,json,os,pathlib,signal,subprocess,tempfile,time
-p=argparse.ArgumentParser();p.add_argument('--candidate');p.add_argument('--oracle',default='/opt/homebrew/bin/bash');p.add_argument('--case',action='append');p.add_argument('--out',required=True);a=p.parse_args()
+import bash_report
+p=argparse.ArgumentParser();p.add_argument('--candidate');p.add_argument('--oracle',default='/opt/homebrew/bin/bash');p.add_argument('--case',action='append');p.add_argument('--evidence',required=True);a=p.parse_args()
+evidence=pathlib.Path(a.evidence);evidence.mkdir(parents=True,exist_ok=True);observations=evidence/'observations.json'
 cases={
 'no-jobs':b'disown; printf "R:%s\\n" "$?"',
 'help':b'disown --help; printf "R:%s\\n" "$?"',
@@ -88,16 +90,20 @@ for label,binary in bins.items():
     except ProcessLookupError:pass
    rows.append({'descendant_receipts':descendant_receipts,'survivors':survivors,'label':label,'case':name,'status':child.returncode,'stdout_hex':out.hex(),'stderr_hex':err.hex(),'timeout':forced})
 result={'identities':{label:hashlib.sha256(pathlib.Path(binary).read_bytes()).hexdigest() for label,binary in bins.items()},'sources':{name:source.hex() for name,source in cases.items()},'rows':rows}
-pathlib.Path(a.out).write_text(json.dumps(result,indent=2)+'\n')
+observations.write_text(json.dumps(result,indent=2)+'\n')
 for r in rows:
  print(r['label'],r['case'],r['status'],bytes.fromhex(r['stdout_hex'])[:120],bytes.fromhex(r['stderr_hex'])[:160])
 
-failed=[]
+failed=[];verdicts={}
 for name in cases:
  selected={row['label']:row for row in rows if row['case']==name}
- if any(row['timeout'] or row['survivors'] for row in selected.values()):failed.append(name)
- elif a.candidate and any(selected['GNU'][field]!=selected['candidate'][field] for field in ('status','stdout_hex','stderr_hex')):failed.append(name)
+ gnu_valid=not (selected['GNU']['timeout'] or selected['GNU']['survivors'])
+ equal=not a.candidate or (not (selected['candidate']['timeout'] or selected['candidate']['survivors'])
+  and all(selected['GNU'][field]==selected['candidate'][field] for field in ('status','stdout_hex','stderr_hex')))
+ verdicts[name]=bash_report.verdict(gnu_valid,equal)
+ if verdicts[name]!=bash_report.MATCH:failed.append(name)
+bash_report.write(evidence,verdicts)
 result['summary']={'cases':len(cases),'exact':len(cases)-len(failed),'failed':failed}
-pathlib.Path(a.out).write_text(json.dumps(result,indent=2)+'\n')
+observations.write_text(json.dumps(result,indent=2)+'\n')
 print(json.dumps(result['summary']))
 raise SystemExit(bool(failed))

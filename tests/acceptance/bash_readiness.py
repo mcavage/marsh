@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Finite GNU comparisons for character-device input readiness and logical high FDs.
+"""Finite GNU comparisons for character-device input readiness and a high logical FD.
 
-Actual OS descriptor2048 coverage lives in the exact-production poll component
-probe; shell logical descriptor2048 need not map to the same OS descriptor.
+The high descriptor is 1000: GNU's `read -t 0` uses a fixed fd_set, so its
+result at 1024 and above is undefined and no oracle (bash-compatibility.md).
 """
 import argparse
 import hashlib
@@ -13,14 +13,16 @@ import subprocess
 import tempfile
 import time
 
+import bash_report
+
 CASES = {
     'stdin-null': None,
     'read-null': b'read -r x </dev/null; printf "R:%s:%s\\n" "$?" "$x"',
     'timed-null': b'read -r -t .02 x </dev/null; printf "R:%s:%s\\n" "$?" "$x"',
     'zero-delimiter': b'read -r -d "" -t 1 x </dev/zero; printf "R:%s:%s\\n" "$?" "$x"',
-    'high-null-ready': b'ulimit -n 4096; exec 2048</dev/null; read -t 0 -u 2048 x; printf "R:%s\\n" "$?"',
-    'high-zero-ready': b'ulimit -n 4096; exec 2048</dev/zero; read -t 0 -u 2048 x; printf "R:%s\\n" "$?"',
-    'high-closed': b'ulimit -n 4096; exec 2048</dev/null; exec 2048<&-; read -t 0 -u 2048 x; printf "R:%s\\n" "$?"',
+    'high-null-ready': b'ulimit -n 4096; exec 1000</dev/null; read -t 0 -u 1000 x; printf "R:%s\\n" "$?"',
+    'high-zero-ready': b'ulimit -n 4096; exec 1000</dev/zero; read -t 0 -u 1000 x; printf "R:%s\\n" "$?"',
+    'high-closed': b'ulimit -n 4096; exec 1000</dev/null; exec 1000<&-; read -t 0 -u 1000 x; printf "R:%s\\n" "$?"',
 }
 
 def main():
@@ -56,6 +58,7 @@ def main():
     summary={'total':len(rows),'exact':sum(row['exact'] for row in rows),'timeouts':sum(run['timeout'] for row in rows for run in row['runs'].values())}
     for name,value in [('identity',identity),('observations',rows),('summary',summary)]:
         (args.evidence/(name+'.json')).write_text(json.dumps(value,indent=2)+'\n')
+    bash_report.write(args.evidence,{row['case']:bash_report.verdict(not row['runs']['gnu']['timeout'],row['exact']) for row in rows})
     print(json.dumps(summary))
     return int(summary['exact']!=summary['total'] or summary['timeouts']!=0)
 

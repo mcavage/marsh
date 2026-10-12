@@ -77,13 +77,22 @@ Bash does, so a shell checking between commands never misses a delivered signal.
 Patch `0051` makes a forked child prove it can start a thread before it runs
 anything, replacing one that cannot (a fork that lands while another thread is
 starting leaves the child holding a lock nothing can release).
+Patches `0052`-`0067` came from classifying the Bash differential suites
+(`tests/acceptance/bash_suites.py`): `kill -- -PGID`, signals sent between
+fork and exec, line feeds typed ahead at the prompt, non-UTF-8 inherited
+environment entries, quoted `[[ =~ ]]` patterns, extended-glob `[[ == ]]`
+patterns, `${!:-word}`, `read -u` above 255, `read` field splitting, unknown
+`\D{}` prompt conversions, prompt directory names, PS4 without `xtrace`,
+field splitting of expansion results only, unexpanded braces in assignments,
+`"$*"` under an empty IFS, and empty smallest pattern removals.
 
 This directory contains only the runtime crate source, manifests, licenses,
 and build metadata needed by marsh. Upstream integration tests, snapshots,
 examples, benches, and development tooling are intentionally omitted. Each
 local delta is covered by focused tests in `crates/marsh/tests/smoke.rs` or,
-for `0010`, `0012`-`0016`, `0018`-`0032`, `0036`, `0038`, `0039`, and `0042`,
-`crates/marsh/tests/bash_audit.rs` (`0017`, `0036`, `0037`, `0040`, `0041`, `0043`, and `0044` are in `smoke.rs`; `0033` and `0034` are in `split_join.rs` and `bash_audit.rs`, with
+for `0010`, `0012`-`0016`, `0018`-`0032`, `0036`, `0038`, `0039`, `0042`,
+`0052`, `0053`, and `0055`-`0067`,
+`crates/marsh/tests/bash_audit.rs` (`0017`, `0036`, `0037`, `0040`, `0041`, `0043`, `0044`, and `0054` are in `smoke.rs`; `0033` and `0034` are in `split_join.rs` and `bash_audit.rs`, with
 parser cases in `brush-parser/src/parser/tests/composition.rs`). The earlier patch series was
 also checked against the full upstream compatibility suite
 before this source-only vendor snapshot was produced.

@@ -19,7 +19,9 @@ rows = []
 cases = {name: source for name, source in vectors.cases.items()
          if not name.startswith(('source-', 'startup-', 'admission-'))}
 cases.update({'only-nul-eof': b'\0' * 513, 'nul-between-units': b'printf A\n\0\0printf B\n'})
-for interactive in (False, True):
+# The noninteractive reader is bash_nul_input.py's stdin route; these are the
+# interactive backends reading the same vectors.
+for interactive in (True,):
     for backend in ('minimal', 'basic', 'reedline'):
         for name, raw in cases.items():
             for variant, source in (('raw', raw), ('without-nul', raw.replace(b'\0', b''))):

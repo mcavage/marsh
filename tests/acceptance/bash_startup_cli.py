@@ -3,12 +3,11 @@
 
 No shell implementation modules are imported. Supply explicit immutable executable
 paths, with the GNU oracle first; no executable is found through ambient PATH.
-Default oracle requirement is GNU 5.3.20. An older oracle can support investigation
-only with --oracle-version explicitly changed and is recorded as such.
+The oracle must be exactly --oracle-version (default 5.3.0, the release CI builds).
 
 Example:
   python3 tests/acceptance/bash_startup_cli.py \
-    --shell gnu=/absolute/bash-5.3.20 --shell pristine=/absolute/brush \
+    --shell gnu=/absolute/bash-5.3.0 --shell pristine=/absolute/brush \
     --shell candidate=/absolute/marsh-local --brush pristine --brush candidate \
     --evidence target/marsh-evidence/bash-startup/final --require-exact candidate
 
@@ -32,6 +31,8 @@ import subprocess
 import sys
 import tempfile
 import time
+
+import bash_report
 
 
 @dataclasses.dataclass
@@ -146,7 +147,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shell", action="append", required=True, metavar="LABEL=PATH")
     parser.add_argument("--brush", action="append", default=[], help="labels needing --no-config")
-    parser.add_argument("--oracle-version", default="5.3.20")
+    parser.add_argument("--oracle-version", default="5.3.0")
     parser.add_argument("--evidence", required=True, type=Path)
     parser.add_argument("--require-exact", action="append", default=[])
     parser.add_argument("--case", action="append", default=[], help="run only these case names")
@@ -228,12 +229,19 @@ def main() -> int:
             metadata[label][option.decode("ascii")] = result
     stable = all(digest(binary) == identities[label]["sha256"] for label, binary in binaries.items())
     manifest = {"oracle": oracle, "oracle_version_required": args.oracle_version,
-                "qualification_oracle": args.oracle_version == "5.3.20", "identities": identities,
+                "qualification_oracle": args.oracle_version == "5.3.0", "identities": identities,
                 "harness_sha256": digest(Path(__file__)), "platform": sys.platform,
                 "environment": {key.hex(): value.hex() for key, value in environment.items()},
                 "binary_stable": stable, "brush_metadata": metadata,
                 "count": len(records), "exact": {label: sum(r["exact"][label] for r in records) for label in binaries}}
     (evidence / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    if args.require_exact:
+        errors = [] if stable else ["a binary changed during the run"]
+        errors += [f"{label} {option}: unexpected help/version surface" for label, checks in metadata.items()
+                   for option, result in checks.items() if not result["surface_ok"]]
+        bash_report.write(evidence, {r["name"]: bash_report.verdict(not r["outputs"][oracle]["timed_out"],
+                                                                     r["exact"][args.require_exact[0]])
+                                     for r in records}, errors)
     shutil.rmtree(work)
     print(json.dumps({key: manifest[key] for key in ("count", "exact", "qualification_oracle")}, indent=2))
     return int(not stable or any(not r["exact"][label] for r in records for label in args.require_exact)

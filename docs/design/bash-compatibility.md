@@ -1,11 +1,12 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 49 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 34 fix Bash
+`vendor/brush/UPSTREAM_REVISION`) plus the 65 patches in
+[`docs/upstream/brush/`](../upstream/brush/README.md). 50 fix Bash
 compatibility: job control and job lines, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
-formats, startup files, and option order. The other 15 add marsh's registered
+formats, startup files, option order, field splitting, `read`, `[[ ]]`
+patterns, prompts, and input typed ahead at the prompt. The other 15 add marsh's registered
 commands, `split`/`join`, and `fanout`/`collect`.
 
 Bash is the test oracle. It is never a fallback and never the implementation.
@@ -47,9 +48,10 @@ One explicit oracle-version divergence is classified: command-substitution
 marsh's exact `127`; the parent's subsequent wait must still return its child
 status. Candidate failures are not normalized away.
 
-The current corpus has 38 differential test functions (all enabled), a split
-`PIPESTATUS` check, and 49 smoke journeys (47 on Linux, where two
-macOS `script(1)` job-control journeys are compiled out), run on macOS ARM64 with Rust
+The current corpus has 55 differential test functions (all enabled), a split
+`PIPESTATUS` check,
+and 53 smoke journeys (51 on Linux, where two macOS `script(1)` job-control
+journeys are compiled out), run on macOS ARM64 with Rust
 1.95.0 and GNU Bash 5.3 and in a Linux arm64 `rust:1.95-bookworm` container
 with GNU Bash 5.3.0 built from source. A test function may contain several distinct
 scripts. These counts describe the selected
@@ -177,60 +179,91 @@ resumption, matching the stable Mac GNU controls, and does not reproduce
 allocator contents. This classification does not waive the remaining ordinary
 input/history differences or turn these Linux rows into byte-exact passes.
 
-## Interactive input qualification
+## Differential suites
 
-`tests/acceptance/bash_readline_cli.py` exercises the public executable in owned
-PTY sessions and ordinary stdin/file/command modes. It records raw command
-streams, editable bytes and cursor positions, terminal traffic, exit status,
-completion callback counts, kernel-FD observations, and verified cleanup.
-GNU Bash 5.3.20 on Linux is the primary reference for this corpus. Mac runs
-record their actual GNU version (including 5.3.9); they are not relabeled as a
-newer reference or inferred from Linux results.
+`tests/acceptance/bash_suites.py` runs the VM-free differential suites
+(`tests/acceptance/bash_*.py`) against GNU Bash 5.3.0, the release CI builds
+(`make test-harness` runs it on Linux; macOS cannot create the suites'
+non-UTF-8 file names). Each suite drives the built `marsh-local` and GNU Bash
+through their command lines, stdin, scripts and real PTYs, compares stdout,
+stderr, status, file effects, terminal-visible state (`READLINE_LINE`/`POINT`,
+history files, callback counts) and cleanup case by case, and writes a verdict
+per case. The run fails on any mismatch not listed in
+`tests/acceptance/bash_divergences.json`, on a listed case that now matches
+(stale), on a case where GNU Bash fails the case's own expectation, and on any
+harness error. The IDs in that file are the ones below; each lists its cases
+by exact id.
 
-Reedline is a UTF8 UI, not the shell's value or source representation. Brush
-retains byte strings and uses its byte editor when the UI cannot represent a
-prompt, buffer, completion, binding or history item. Display-only caret/octal
-notation is never substituted into the command buffer. The normal UTF8 editor
-and the byte editor have different paint protocols; terminal transcripts are
-retained rather than normalized into purported byte-identical screens.
-In forced interactive mode on a pipe, the minimal reader echoes complete
-physical input lines. GNU Readline can instead horizontally scroll a long line
-and emit a carriage return plus `<` and its visible suffix. This concrete
-presentation difference is retained in the history-load and interactive
-call-stack fixtures; their command stdout/status/files are checked separately.
-It is not a reason to ignore missing prompts, missing input echo, extra exit
-announcements, or any command-data difference.
+PTY cases wait for observable conditions, never for time: a prompt or file,
+or the shell being idle (no unread typed input, no output arriving, and every
+thread of every process in its session blocked in a system call without a
+timeout, read from `/proc`). A shell that goes idle without reaching the
+awaited state fails at once; one generous 30-second budget per session bounds
+the rest. The whole run takes about a minute at 2 CPUs. Cases whose bytes are
+all ASCII run in the C locale only; GNU Bash 5.3.0 crashes on a few
+invalid-UTF-8 PS4 traces in a UTF-8 locale, and those run in the C locale
+only too.
 
-Raw keyboard transport probes explicitly configure GNU's `input-meta on` and
-`convert-meta off` where needed. C-locale Meta-key interpretation is not the
-same thing as preserving an eight-bit input stream. Those fixture settings are
-recorded, and do not establish complete inputrc/Readline-option support for the
-alternate editor.
+## Classified differential divergences
 
-The maintained Reedline dependency has an opt-in event handoff that retains the
-unprocessed input suffix when a completion or binding yields to the host.
-Completion functions must not be rerun merely to cross that boundary. Primary
-stdin readers follow the current shell FD0, including persistent `exec`
-redirections and closure; named script and `-c` sources remain separate from
-stdin. PS2 is expanded on an actual continuation read, not speculatively at
-PS1 or on every redisplay. These behaviors require the exact current candidate's
-caller evidence, strict checks and independent review; source presence or a GNU
-self-run is not a qualification receipt.
+Each entry is an observed difference from GNU Bash 5.3.0, reproduced by the
+listed suite cases. None is waived silently: BYTES and NUL are known bugs
+(data is rejected or changed), the rest are unimplemented or different
+behavior that needs more than a small Brush patch.
 
-Basic-editor feature coverage, screen-cell behavior, advanced keyboard
-protocols and history-navigation behavior must be assessed explicitly. They
-are not blanket inherited waivers and do not establish complete GNU Readline
-or Bash conformance. marsh/Brush identity and help remain truthful; the product
-does not claim to be GNU Bash.
+| ID | Difference from Bash | Scope | Reason |
+| --- | --- | --- | --- |
+| BYTES | **Known bug.** Brush's words, variables and input are UTF-8 text. A non-UTF-8 command-line argument or `-c` string panics (status 101); a script, sourced file or stdin with invalid UTF-8 is rejected ("failed to decode UTF-8"); `$(...)` of non-UTF-8 output is an error ("stream did not contain valid UTF-8"); `read`, `mapfile` and `read -N` re-encode each invalid byte as a Latin-1 character (`\xff` becomes `\xc3\xbf`) or drop it; `$'\377'`, `echo -e '\0377'` and prompt `\377` produce U+FFFD or U+00FF; inherited environment values and file names that are not UTF-8 are U+FFFD text inside the shell (patch `0055` passes unchanged inherited values on to commands) | Every suite case with invalid UTF-8 data | Byte-string values are a change to Brush's whole value model |
+| NUL | NUL bytes in shell input are kept as word characters (`pri\0ntf` is not `printf`, `\0printf` is a command name) and a script with a NUL in its first line runs instead of being refused as binary; `printf -v v 'a\0b'` keeps the bytes after the NUL; `\000` in a prompt is kept | `nul-input`, history-input `nul`, a few byte cases | Input handling would need to drop NULs at the reader and track binary files |
+| LOCALE | No locale model: in the C locale `?` and `${#v}` count characters, not bytes, case conversion changes non-ASCII letters, and `\u00e9` prints UTF-8; in UTF-8 Rust's full Unicode case mapping is used (`ß` upper-cases to `SS`, `ı`/`İ` differ) and `nocasematch` classes differ | Byte matcher and builtin cases with non-ASCII text | Brush text is Unicode regardless of `LC_ALL` |
+| REGEX | `[[ =~ ]]` uses fancy-regex: alternation is leftmost-first (`(a\|ab)` on `ab` captures `a`, POSIX takes `ab`); an invalid regex returns 1 with a log line instead of 2 with Bash's message, and clears `BASH_REMATCH` | `byte-matchers` `ere-*`, `regex` | A POSIX ERE engine is a large change |
+| EXTGLOB-GNU-OPTIMIZATION | GNU's matcher gives non-POSIX results for `*` followed by a nullable extglob (`[[ b == *@(\|a) ]]` fails, `${v#*@(\|a)}` removes the whole value); Brush matches by the pattern's language | `byte-matchers` `terminal-nullable-*` | GNU optimization artifacts; copying them is not ordinary behavior |
+| STARTUP-OPTIONS | Invocation options: `+x` short options other than `+o`/`+O`, `-a -B -E -h -T` and `-s` with `-c`, `-` and `+` terminators, invalid `-o`/`-O` names (Brush runs the command), bare `-o`/`-O` listings, and clap's error wording and statuses | `startup` | Brush's clap-based command line; agents use `-c`, `-l`, `-e`, `-o NAME` |
+| INTERACTIVE-WITHOUT-TERMINAL | `-i` without a terminal: Bash warns "cannot set terminal process group" and "no job control", keeps `m` out of `$-`, and echoes prompts and `exit` to stderr | `startup`, readline `exit-announcement-*` | Brush's minimal reader does not emulate Readline on a pipe |
+| DISOWN | `disown` is not implemented ("unimplemented built-in") | `disown` | Needs job-table and SIGHUP plumbing |
+| FUNSUB | Bash 5.3 `${ cmd; }` and `${\| cmd; }` are printed literally | `external-redirects` | New Bash 5.3 syntax |
+| REDIRECT-EXPANSION | An external command's redirection words are expanded by the shell, so `>"$((++i))"` and `>"${v:=x}"` change shell state and `{fd}>file` sets `fd`; Bash expands them in the forked child | `external-redirects` | Brush expands before spawning |
+| NAMED-FD-LIFETIME | `printf hi {fd}>out` closes `fd` after the builtin; Bash leaves it open | `external-redirects` | Redirection scopes |
+| POSIX-SPECIAL-ASSIGNMENT | `set -o posix; W=val :` does not keep `W` | `external-redirects` | Posix-mode special builtins |
+| COMPGEN | `compgen -f` expands `~`, `$HOME` and `\ ` in the word and prints absolute or unescaped names where Bash keeps the word's spelling; `'$(cmd)/'` completes in `/` (Bash: nothing); `compgen -A command` lists directory links and disabled builtins | `completion` | Completion generator differences |
+| TCK-GAPS | Upstream TCK selection: `builtin declare c=$v` splits; `declare 'b[]'` and `declare -aA` are accepted; `readonly -f`; `set` quotes empty values; `${!}` with `set -u`; empty `PATH` entries print `prog`, not `./prog`; `exec` keeps `_`; `${var@K}` arrays; `${!a[@]:-x}`; `$BASH` resolution; `shopt -o` column width; `local -`; associative array order; globstar through directory symlinks | `tck` | Individual Brush builtin gaps |
+| GLOBIGNORE | `GLOBIGNORE` is ignored | `tck` | Not implemented |
+| DIAGNOSTICS | Error wording (Brush's `error:` prefix, clap usage text, `command not found` format) and the status of some usage errors | Several | Brush's error formatter |
+| JOBS | Job-control builtins: `jobs -n` and `jobs SPEC` are unimplemented, `jobs -l` lists a pipeline on one line, a stopped job's status is 148 whatever the signal, finished jobs are listed `Running` until waited, signal names (`Terminated`) are not shown, `(wd: ...)` is missing, `bg` is unimplemented, `fg`/`bg` option errors | `jobs` | Brush's job table is partial |
+| TRAP-CHLD | A `CHLD` trap does not run | `regex` | Not implemented |
+| XTRACE | xtrace prints a quoted `[[ =~ ]]` operand as written (`"]"`), where Bash prints its quoted form (`\]`) | `regex` | Trace formatting |
+| PROMPT | Prompt strings get quote removal and brace expansion (`'"` and `{a,b}`), `\7`-style short octal escapes and `\001`/`\002` are treated differently, `\w` does not make control characters visible (`^A`), `strftime` conversions are chrono's (`%f`) | `prompt` | Brush's two-pass prompt expansion |
+| READ | `read` without `-r` treats a backslash-escaped IFS character as a delimiter; `read -t 0` at end of file reports ready; `read -n 1` from a terminal returns nothing for `^D` | `byte-builtins`, `readiness` | `read` builtin details |
+| PRINTF | `%b` drops the backslash of `\"`, `\c` in `%b` does not stop all output, empty arguments to numeric conversions are not errors | `byte-builtins` | `printf` details |
+| GETOPTS | `getopts` ignores `OPTIND` changes between calls | `byte-builtins` | Parser state kept outside `OPTIND` |
+| MAPFILE-CALLBACK | `mapfile -C`/`-c` are unimplemented | `byte-builtins` | Not implemented |
+| UNSET-READONLY | `unset a b` stops at a readonly `a` | `byte-builtins` | Error handling stops the builtin |
+| ECHO-XPG | `echo` under `xpg_echo` and posix mode handles options and escapes differently | `byte-builtins` | Not implemented |
+| SPARSE-NEGATIVE-INDEX | `a[-1]` on a sparse array counts from the element count, not the highest index | `bytes` | Array indexing |
+| HISTORY-NONINTERACTIVE | `history -r`/`history` refuse to run in a noninteractive shell | `bytes` | History is enabled only interactively |
+| READLINE-VARIABLES | `bind -x`: `READLINE_POINT` counts characters, not bytes; out-of-range and invalid points are handled differently; unsetting `READLINE_LINE`/`POINT` in the command, their values before and after a binding, and the line seen during a continuation (PS2) read differ; PS2 is expanded more often | `readline` | Reedline's editor model, not GNU Readline |
+| READLINE-BINDINGS | `bind` macros (`"\C-g":"text"`), `\C-x`-prefixed and hex/octal key spellings, and some raw keys are not supported | `readline` | Reedline keybinding model |
+| READLINE-COMPLETION | Programmable completion with `-o filenames`, `fullquote`, `noquote`: quoting of inserted names and when the function runs differ | `readline` | Reedline completion model |
+| HISTORY-MULTILINE | `cmdhist`/`lithist` storage of multi-line commands, comments and here documents differs | `readline` | History recording |
+| HISTORY-EXPANSION | History expansion (`!!`, `!x`, `:p`) inside double quotes, command substitutions, aliases and pastes, and its error/print-only status, differ | history-input `context-*`, `paste`, `policy` | Partial history expansion |
+| HISTVERIFY | `histverify` and `histreedit` are not implemented | history-input `edit` | Not implemented |
+| VERBOSE | `set -v` does not echo input lines | readline `verbose-*` | Not implemented |
+| STDIN-READAHEAD | A script read from stdin is read ahead, so `exec 0<file` or `exec 0<&-` inside it does not change what the shell reads next | readline `reader-*` | Buffered input reader |
+| HUP | SIGHUP at an interactive prompt neither runs the `EXIT` trap nor saves history | history-input `hup` | Signal handling at the prompt |
+| EOF-INCOMPLETE | End of input in the middle of a line of an interactive shell on a pipe: PROMPT_COMMAND and PS2 run a different number of times, and unterminated quotes are reported differently | history-input `eof` | Reader and diagnostics |
 
 ## Run focused comparisons
 
-Prerequisites: Rust 1.95.0, GNU Bash 5.x on `PATH`, a C linker and ordinary Unix
-utilities. No Docker, SBX, credentials or Cloud resources are needed.
+Prerequisites: Rust 1.95.0, GNU Bash 5.3 on `PATH` (5.3.0 for the suites), a C
+linker and ordinary Unix utilities. No Docker, SBX, credentials or Cloud
+resources are needed.
 
 ```sh
 cargo test --locked -p marsh --test bash_audit --test smoke
 cargo clippy --locked -p marsh --all-targets -- -D warnings
+cargo build --locked -p marsh --bins   # then, on Linux:
+python3 tests/acceptance/bash_suites.py --candidate target/debug/marsh-local \
+    --oracle "$(command -v bash)" --evidence "$(mktemp -d)"
 ```
 
 The [upstream patch record](../upstream/brush/README.md) identifies inherited

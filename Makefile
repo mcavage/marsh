@@ -139,10 +139,19 @@ test-rust:
 	$(PYTHON) tests/acceptance/acp-fixture/typed_host_caller.py --marsh "$(TEST_BIN)/marsh"
 
 # Python and shell harnesses against the debug binaries: shipped-entrypoint
-# journeys (onboarding), MCP protocol callers, the Kit publisher, and the
-# self-tests of the acceptance, perf and release tooling.
+# journeys (onboarding), MCP protocol callers, the Kit publisher, the
+# self-tests of the acceptance, perf and release tooling, and (Linux only) the
+# Bash differential suites against GNU Bash 5.3.0 on PATH, gated on
+# tests/acceptance/bash_divergences.json.
 test-harness:
 	$(CARGO) build --workspace --bins --locked --target-dir "$(TARGET_DIR)"
+	@if [ "$$(uname -s)" = Linux ]; then \
+		rm -rf "$(abspath $(TARGET_DIR))/bash-suites" && \
+		$(PYTHON) tests/acceptance/bash_suites.py --candidate "$(TEST_BIN)/marsh-local" \
+			--oracle "$$(command -v bash)" --evidence "$(abspath $(TARGET_DIR))/bash-suites"; \
+	else \
+		echo 'make test-harness: skipping the Bash differential suites (tests/acceptance/bash_suites.py): Linux only; macOS cannot create their non-UTF-8 file names'; \
+	fi
 	$(PYTHON) tests/acceptance/onboarding.py --marsh "$(TEST_BIN)/marsh" --shell "$(TEST_BIN)/marsh-local" \
 		--evidence "$(abspath $(TARGET_DIR))/onboarding.json"
 	MARSH_BINARY="$(TEST_BIN)/marsh" MARSH_MCP_BIN="$(TEST_BIN)/marsh-mcp" \

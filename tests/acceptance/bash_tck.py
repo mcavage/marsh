@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Exact public-CLI regression gate for core Bash completion repairs.
+"""Exact public-CLI differential over a selection of Brush's upstream TCK cases.
 
-Run with distinct candidate/GNU Bash 5.3 binaries (optionally a candidate source receipt).
-Fixtures retain their upstream group/index and annotations, but NO ignore_stdout,
-ignore_stderr, known_failure, whitespace, or status waivers are applied. Interactive
-cases belong to the separate owned-PTY suite. This is not release/stock qualification.
+Builtins (declare, command, type, hash, printf, readonly, set, unset), name
+references, PATH search, filename expansion, special parameters and parameter
+transformations, run through stdin against GNU Bash 5.3. Fixtures retain their
+upstream group/index and annotations, but NO ignore_stdout, ignore_stderr,
+known_failure, whitespace, or status waivers are applied. Interactive cases
+belong to the owned-PTY suites.
 """
 from __future__ import annotations
 
@@ -19,8 +21,10 @@ import subprocess
 import tempfile
 import time
 
+import bash_report
 
-FIXTURES = Path(__file__).with_name("fixtures") / "bash_core_completion.json"
+
+FIXTURES = Path(__file__).with_name("fixtures") / "bash_tck.json"
 
 
 def sha(path: Path) -> str:
@@ -137,6 +141,7 @@ def main() -> int:
     if args.source_manifest:
         (args.evidence / "source-manifest.json").write_bytes(args.source_manifest.read_bytes())
     passed = 0
+    verdicts = {}
     with tempfile.TemporaryDirectory(prefix="marsh-core-cli-") as directory:
         work = Path(directory) / "fixture"
         oracle_probe = run(binaries["oracle"], {"stdin": 'printf "%s" "$BASH_VERSION"\n'}, work)
@@ -154,10 +159,13 @@ def main() -> int:
                 if any(row["timeout"] for row in rows.values()):
                     differences.append("timeout")
                 passed += not differences
+                verdicts[f"{case['group']}#{case['index']}"] = bash_report.verdict(
+                    not rows["oracle"]["timeout"], not differences)
                 output.write(json.dumps({"case": case, "runs": rows, "differences": differences}) + "\n")
                 output.flush()
     stable = all(sha(binary) == identity["artifacts"][role]["sha256"] for role, binary in binaries.items())
     identity.update(total=len(cases), passed=passed, stable_binaries=stable)
+    bash_report.write(args.evidence, verdicts, [] if stable else ["a binary changed during the run"])
     (args.evidence / "identity.json").write_text(json.dumps(identity, indent=2))
     print(json.dumps({key: identity[key] for key in ("total", "passed", "stable_binaries")}))
     return 0 if passed == len(cases) and stable else 1

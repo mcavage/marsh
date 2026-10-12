@@ -9,6 +9,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+import bash_report
+
 
 CASES = {
     "tilde-directory": b"compgen -f -- '~/i' | /usr/bin/sort",
@@ -79,11 +81,11 @@ def run(binary, source, directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", required=True, type=Path)
-    parser.add_argument("--reference", required=True, type=Path)
+    parser.add_argument("--oracle", required=True, type=Path)
     parser.add_argument("--evidence", required=True, type=Path)
     args = parser.parse_args()
     binaries = {name: path.resolve(strict=True) for name, path in
-                {"candidate": args.candidate, "reference": args.reference}.items()}
+                {"candidate": args.candidate, "reference": args.oracle}.items()}
     report = {"artifact_sha256": {
         name: hashlib.sha256(path.read_bytes()).hexdigest()
         for name, path in binaries.items()
@@ -100,8 +102,10 @@ def main():
                 "passed": observations["candidate"] == observations["reference"],
             })
     report["passed"] = all(row["passed"] for row in report["cases"])
-    args.evidence.parent.mkdir(parents=True, exist_ok=True)
-    args.evidence.write_text(json.dumps(report, indent=2) + "\n")
+    args.evidence.mkdir(parents=True, exist_ok=True)
+    (args.evidence / "observations.json").write_text(json.dumps(report, indent=2) + "\n")
+    bash_report.write(args.evidence, {row["name"]: bash_report.verdict(True, row["passed"])
+                                      for row in report["cases"]})
     for row in report["cases"]:
         print(row["name"], "PASS" if row["passed"] else "FAIL")
     return 0 if report["passed"] else 1

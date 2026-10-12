@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 import time
 
+import bash_report
+
 CASES = [
     ("args-parent", b"v=before; /bin/echo \"${ v=after; printf hi; }\"; printf 'state:%s' \"$v\""),
     ("prefix-parent", b"v=before; W=${ v=after; printf val; } /usr/bin/printenv W; printf 'state:%s' \"$v\""),
@@ -70,10 +72,10 @@ def invoke(binary, source):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--candidate', required=True)
-    parser.add_argument('--gnu', required=True)
+    parser.add_argument('--oracle', required=True)
     parser.add_argument('--evidence', required=True)
     args = parser.parse_args()
-    candidate, gnu = pathlib.Path(args.candidate).resolve(), pathlib.Path(args.gnu).resolve()
+    candidate, gnu = pathlib.Path(args.candidate).resolve(), pathlib.Path(args.oracle).resolve()
     rows = []
     for name, source in CASES:
         expected, actual = invoke(gnu, source), invoke(candidate, source)
@@ -86,9 +88,10 @@ def main():
               'summary': {'total': len(rows), 'passed': sum(row['pass'] for row in rows),
                           'failed': [row['case'] for row in rows if not row['pass']]}}
     evidence = pathlib.Path(args.evidence)
-    assert not evidence.exists(), 'preserve prior evidence'
-    evidence.parent.mkdir(parents=True, exist_ok=True)
-    evidence.write_text(json.dumps(result, indent=2) + '\n')
+    evidence.mkdir(parents=True, exist_ok=True)
+    (evidence / 'observations.json').write_text(json.dumps(result, indent=2) + '\n')
+    bash_report.write(evidence, {row['case']: bash_report.verdict(not row['gnu']['forced'], row['pass'])
+                                 for row in rows})
     print(json.dumps(result['summary']))
     return int(any(not row['pass'] for row in rows))
 

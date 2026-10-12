@@ -3,7 +3,7 @@
 
 --candidate is a real shell. --driver is explicitly only supporting matcher
 coverage, not a shell qualification. No text decoding of payloads or filenames.
-Oracle must be GNU 5.3.20; every observation retains stdout/stderr/status/timing.
+Oracle must be GNU Bash 5.3; every observation retains stdout/stderr/status/timing.
 Each invocation has its own tracked session, timeout cleanup and survivor check.
 """
 from __future__ import annotations
@@ -18,6 +18,8 @@ import signal
 import subprocess
 import tempfile
 import time
+
+import bash_report
 
 
 @dataclasses.dataclass
@@ -67,6 +69,13 @@ class Case:
         raise ValueError(self.op)
 
 
+# Every ASCII byte, but only representatives of the high bytes: they all take
+# the same paths (one UTF-8 lead, continuation and invalid byte each, and the
+# bytes of U+FFFD), so the rest add run time and no distinct coverage.
+HIGH_BYTES = (0x80, 0xA9, 0xC3, 0xEF, 0xBD, 0xFE, 0xFF)
+SINGLE_BYTES = [*range(1, 128), *HIGH_BYTES]
+
+
 def corpus(full: bool) -> list[Case]:
     cases = []
     values = [b"", b"a", b"ab", b"abc", b"aaa", b"aba", b"aaab", b".a", b"\n", b"a\nb",
@@ -81,7 +90,7 @@ def corpus(full: bool) -> list[Case]:
             if not full and rng.randrange(5):
                 continue
             cases.append(Case(f"glob-predicate-{mode}-{i}", "match", value, [(False, pattern)], mode))
-        for byte in range(1, 256):
+        for byte in (range(1, 256) if full else SINGLE_BYTES):
             b = bytes([byte])
             # Quoted literal is essential for all metacharacter bytes, and must
             # distinguish every byte from the Unicode replacement character.
@@ -102,7 +111,7 @@ def corpus(full: bool) -> list[Case]:
                                (b"aa", b"(a)\\1"), (b"A", b"[[:lower:]]"),
                                (b"a", b"(\xff"), (b"a", b"\xff["), (b"a", b"[\xff-a]")]: 
             cases.append(Case(f"ere-{mode}-{value.hex()}-{pattern.hex()}", "regex", value, [(False, pattern)], mode))
-        for byte in range(1, 256):
+        for byte in (range(1, 256) if full else SINGLE_BYTES):
             cases.append(Case(f"ere-literal-all255-{mode}-{byte}", "regex", bytes([byte]), [(True, bytes([byte]))], mode))
         for value in (bytes(range(1, 256)), b"Stra\xc3\x9fe", b"\xc3\xa9\xff\xc3\x89", b"\xc3X\xfeY", b"\xc4\xb0\xc4\xb1", b"\xcf\x83\xcf\x82", b"\xe1\xba\x9e", b"\xf8\x88\x80\x80\x80a"):
             for kind in ("^^", ",,"):
@@ -253,6 +262,7 @@ def main() -> int:
     (args.evidence / "identity.json").write_text(json.dumps(identity, indent=2) + "\n")
     counts = {name: dict(total=0, exact=0, timeouts=0, survivors=0) for name, _, _ in runners}
     failures = []
+    verdicts = {}
     with tempfile.TemporaryDirectory(prefix="bash-byte-matchers-") as temporary:
         cwd = os.fsencode(temporary)
         if args.raw_cwd:
@@ -292,13 +302,17 @@ def main() -> int:
                     counts[name]["survivors"] += len(obs["survivors"])
                     if not obs["exact"]:
                         failures.append(dict(case=case.name, runner=name))
+                    if name == "oracle":
+                        oracle_valid = not obs["timeout"] and not obs["survivors"]
+                    elif name == "candidate-0":
+                        verdicts[case.name] = bash_report.verdict(oracle_valid, obs["exact"])
                     row["observations"][name] = obs
                 log.write(json.dumps(row) + "\n")
                 log.flush()
         after = effects(cwd)
         (args.evidence / "effects.json").write_text(json.dumps(dict(before=before, after=after, unchanged=before == after), indent=2) + "\n")
-        if before != after:
-            raise AssertionError("matching unexpectedly changed filesystem entries")
+        errors = [] if before == after else ["matching changed filesystem entries"]
+        bash_report.write(args.evidence, verdicts, errors)
     summary = dict(counts=counts, failures=failures)
     (args.evidence / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(counts, indent=2))

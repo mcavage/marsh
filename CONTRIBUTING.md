@@ -56,7 +56,7 @@ ones that drive real `sbx` microVMs (only on a Mac, by hand).
 |---|---|---|
 | `make test` | `test-rust`, `test-harness`, `test-model` (below); no VMs, no credentials | your machine; CI on Linux arm64 and macOS |
 | `make test-rust` | `cargo fmt --check`, clippy, every workspace test under `cargo-nextest` (one process per test), doctests, the `#[ignore]`d MCP load callers against the built binaries | CI on both |
-| `make test-harness` | onboarding journeys through the shipped binaries, MCP protocol callers, the Kit publisher, kit adapter scripts, self-tests of the acceptance/perf/release tooling | CI on both |
+| `make test-harness` | onboarding journeys through the shipped binaries, MCP protocol callers, the Kit publisher, kit adapter scripts, self-tests of the acceptance/perf/release tooling; on Linux, the Bash differential suites (`tests/acceptance/bash_suites.py`, GNU Bash 5.3.0) | CI on both (suites: Linux) |
 | `make test-model` | quick TLA+ sweep (Docker, or `TLC_RUNNER=java`) | CI's model job runs every config |
 | `make check` | fast real smoke of the installed dev product (~7 s warm) | Mac, after `make dev` |
 | `make verify` | `check` plus the highest-signal sbx suites (~3 min) | Mac, before you push |
@@ -132,6 +132,8 @@ and compare with Bash (see `crates/marsh/tests/bash_audit.rs`). Then fix it in
 Brush as a small patch: add it to `docs/upstream/brush/` in order, apply it
 under `vendor/brush/`, and describe it in the patch README. A general Bash fix
 should be one upstream Brush could take; marsh-specific behavior stays here.
+A suite mismatch you do not fix gets an entry in
+`tests/acceptance/bash_divergences.json` and `docs/design/bash-compatibility.md`.
 
 ### VMs, workers, and the model
 
