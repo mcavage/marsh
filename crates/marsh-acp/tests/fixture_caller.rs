@@ -954,9 +954,7 @@ fn concurrent_publications_have_one_name_owner_and_recover() {
     rig.client
         .acp_stop(second.clone(), rig.shell.clone())
         .unwrap();
-    lease
-        .set_read_timeout(Some(Duration::from_secs(3)))
-        .unwrap();
+    lease.set_read_timeout(Some(CONDITION_DEADLINE)).unwrap();
     let mut terminal = [0];
     lease.read_exact(&mut terminal).unwrap();
     assert_eq!(terminal, *b"T");
@@ -1489,7 +1487,7 @@ fn cli_scope_contention_rejects_before_second_agent_grant() {
                     "fixture",
                 ])
             });
-            let deadline = Instant::now() + Duration::from_secs(10);
+            let deadline = Instant::now() + CONDITION_DEADLINE;
             while rig.preparations.load(Ordering::SeqCst) == 0 {
                 assert!(
                     Instant::now() < deadline,
@@ -1794,7 +1792,7 @@ fn cli_stdin_permissions_reservations_and_publication_options() {
     let rows: serde_json::Value = serde_json::from_slice(&mine.stdout).unwrap();
     assert_eq!(rows[0]["owner_shell_session_id"], rig.shell.session_id);
     rig.prompt("permission");
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + CONDITION_DEADLINE;
     while rig.status(0).permissions.is_empty() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(5));
@@ -1913,7 +1911,7 @@ fn cli_stdin_permissions_reservations_and_publication_options() {
             .success()
     );
     assert!(invoke(&["stop", &rig.id], &[]).status.success());
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + CONDITION_DEADLINE;
     while rig.status(0).attachment.terminal.is_none() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(5));
@@ -1930,7 +1928,7 @@ fn cli_stdin_permissions_reservations_and_publication_options() {
     );
     thread::scope(|scope| {
         let run = scope.spawn(|| invoke(&["run", "--reservation", &id, "fixture"], &[]));
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + CONDITION_DEADLINE;
         loop {
             let ready = rig
                 .client
