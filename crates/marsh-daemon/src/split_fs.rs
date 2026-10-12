@@ -1293,12 +1293,14 @@ mod tests {
     //! descriptor-only access, the snapshot walker, and patches that
     //! reproduce a fork exactly under `git apply`.
     use super::*;
+    use crate::test_support::fenced;
     use std::fs;
     use std::os::unix::fs::{PermissionsExt as _, symlink};
     use std::process::Command;
 
     fn git(dir: &Path, args: &[&str]) -> std::process::Output {
-        Command::new("git")
+        let mut command = Command::new("git");
+        command
             .args([
                 "-c",
                 "user.name=t",
@@ -1310,9 +1312,16 @@ mod tests {
             .args(args)
             .current_dir(dir)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .output()
-            .unwrap()
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+        fenced(|| command.output()).unwrap()
+    }
+
+    fn copy_tree(from: &Path, to: &Path) {
+        assert!(
+            fenced(|| Command::new("cp").arg("-Rp").arg(from).arg(to).status())
+                .unwrap()
+                .success()
+        );
     }
 
     fn contents(root: &Path) -> BTreeMap<PathBuf, (u32, Vec<u8>)> {
@@ -1419,9 +1428,7 @@ mod tests {
         assert!(label.read("link", 1 << 20).is_err());
         let fifo = project.join(".marsh/split/s1/out/b/fifo");
         assert!(
-            Command::new("mkfifo")
-                .arg(&fifo)
-                .status()
+            fenced(|| Command::new("mkfifo").arg(&fifo).status())
                 .unwrap()
                 .success()
         );
@@ -1557,12 +1564,7 @@ mod tests {
         .unwrap();
         fs::write(split.base.join("mode"), "#!/bin/sh\n").unwrap();
         fs::write(split.base.join("same-size"), "aaaa\n").unwrap();
-        Command::new("cp")
-            .args(["-Rp"])
-            .arg(&split.base)
-            .arg(&split.fork)
-            .status()
-            .unwrap();
+        copy_tree(&split.base, &split.fork);
         for name in names {
             fs::write(split.fork.join(OsStr::from_bytes(name)), b"x\n").unwrap();
         }
@@ -1589,12 +1591,7 @@ mod tests {
         );
         assert!(files.windows(10).any(|w| w == b"\"new\\nline"));
         let applied = split.root.join("applied");
-        Command::new("cp")
-            .args(["-Rp"])
-            .arg(&split.base)
-            .arg(&applied)
-            .status()
-            .unwrap();
+        copy_tree(&split.base, &applied);
         let output = git(
             &applied,
             &[
@@ -1634,16 +1631,18 @@ mod tests {
             !plain.status.success(),
             "3way should need the store's preimage"
         );
-        let output = Command::new("git")
-            .args(["apply", "--3way", &patch.to_string_lossy()])
-            .current_dir(&user)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env(
-                "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-                split.root.join("store/objects"),
-            )
-            .output()
-            .unwrap();
+        let output = fenced(|| {
+            Command::new("git")
+                .args(["apply", "--3way", &patch.to_string_lossy()])
+                .current_dir(&user)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env(
+                    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                    split.root.join("store/objects"),
+                )
+                .output()
+        })
+        .unwrap();
         assert!(
             output.status.success(),
             "{}",
@@ -1665,12 +1664,7 @@ mod tests {
         for (path, bytes) in files {
             fs::write(split.base.join(path), bytes).unwrap();
         }
-        Command::new("cp")
-            .args(["-Rp"])
-            .arg(&split.base)
-            .arg(&split.fork)
-            .status()
-            .unwrap();
+        copy_tree(&split.base, &split.fork);
         fs::create_dir_all(split.fork.join("__pycache__")).unwrap();
         fs::write(split.fork.join("__pycache__/x.cpython-313.pyc"), b"\0pyc").unwrap();
         fs::create_dir_all(split.fork.join("src/__pycache__")).unwrap();

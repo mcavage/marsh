@@ -114,12 +114,8 @@ impl CwdServer {
             body["working_directory"] = cwd;
         }
         let mut stream = UnixStream::connect(&self.client.paths.socket).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-        stream
-            .set_write_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
+        stream.set_read_timeout(Some(PATIENCE)).unwrap();
+        stream.set_write_timeout(Some(PATIENCE)).unwrap();
         write_frame(
             &mut stream,
             &Envelope {

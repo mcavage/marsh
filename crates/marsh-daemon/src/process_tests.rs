@@ -4,6 +4,7 @@
 //! a forged relay parent).
 
 use super::*;
+use crate::test_support::reopen;
 use crate::{
     AuthenticationScope, CleanupState, Client, ErrorCode, ExitStatus, NewJob, PublicRequest,
     Server, SessionAuthority, TimingReport, authorize_request_session,
@@ -105,7 +106,7 @@ fn pool_holds_uncertain_slots_across_restart_until_reset() {
     // after a daemon restart, until a successful reset of its Kit.
     let home = tempfile::tempdir().unwrap();
     {
-        let store = DaemonStore::new(home.path());
+        let store = reopen(home.path()).unwrap();
         let session = session(&store, home.path());
         let jobs = (0..8)
             .map(|_| launch(&store, &session, None, "fixture", view(), false).unwrap())
@@ -124,7 +125,7 @@ fn pool_holds_uncertain_slots_across_restart_until_reset() {
         launch(&store, &session, None, "fixture", view(), false).unwrap();
     }
     // Restart: every unfinished job is uncertain and holds a slot.
-    let store = reopen(home.path());
+    let store = reopen(home.path()).unwrap();
     assert_eq!(store.process_counts().held, 8);
     store.release_process_slots(&["shell".to_owned()]);
     assert_eq!(store.process_counts().held, 8);
@@ -132,25 +133,13 @@ fn pool_holds_uncertain_slots_across_restart_until_reset() {
     assert_eq!(store.process_counts().held, 0);
     drop(store);
     // The reset is durable.
-    assert_eq!(reopen(home.path()).process_counts().held, 0);
-}
-
-/// A restarted store. Another test's fork may briefly hold a duplicate of
-/// the dropped store's journal lock (until its exec closes it).
-fn reopen(home: &Path) -> DaemonStore {
-    for _ in 0..100 {
-        if let Ok(store) = DaemonStore::open(home) {
-            return store;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    DaemonStore::new(home)
+    assert_eq!(reopen(home.path()).unwrap().process_counts().held, 0);
 }
 
 #[test]
 fn depth_fan_out_and_parent_liveness() {
     let home = tempfile::tempdir().unwrap();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = session(&store, home.path());
     // noDepth: a root is depth 1; depth 5 is refused.
     let mut chain = vec![launch(&store, &session, None, "claude", view(), false).unwrap()];
@@ -181,7 +170,7 @@ fn depth_fan_out_and_parent_liveness() {
 fn refused_launches_count_toward_the_tree_total() {
     // noTotal: 64 launches per tree, refusals included.
     let home = tempfile::tempdir().unwrap();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = session(&store, home.path());
     let root = launch(&store, &session, None, "claude", view(), false).unwrap();
     for _ in 0..63 {
@@ -201,7 +190,7 @@ fn refused_launches_count_toward_the_tree_total() {
 fn same_kit_chain_counts_consecutive_steps_and_stops_at_a_branch() {
     // noSameKit: claude -> claude is allowed, a third claude is refused.
     let home = tempfile::tempdir().unwrap();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = session(&store, home.path());
     let root = launch(&store, &session, None, "claude", view(), false).unwrap();
     let second = child(&store, &session, &root, "claude").unwrap();
@@ -274,7 +263,7 @@ fn a_child_view_is_the_parents_and_never_wider() {
 fn a_relay_cannot_name_a_parent_job() {
     // A forged parent would borrow another tree's view and spawn set.
     let home = tempfile::tempdir().unwrap();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = session(&store, home.path());
     let token = store.issue_relay_token(&session).unwrap();
     let request = |parent: &str| {
@@ -377,7 +366,7 @@ fn a_tree_cancel_signals_every_descendant_at_once_and_ends_them_cancelled() {
     // CancelPropagates (s8): one cancel reaches every level now, not one
     // level per grace; nothing new starts under it; each ends `cancelled`.
     let home = tempfile::tempdir().unwrap();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = session(&store, home.path());
     let root = launch(&store, &session, None, "claude", view(), false).unwrap();
     let middle = child(&store, &session, &root, "shell").unwrap();
@@ -421,7 +410,7 @@ fn tree_kit_vm_cap_counts_distinct_live_kits() {
     // docs/design/processes.md s6: at most 4 distinct Kit VMs live in one tree; a Kit
     // already live in the tree (an alias, a second call) costs nothing.
     let home = tempfile::tempdir().unwrap();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = session(&store, home.path());
     let root = launch(&store, &session, None, "fixture", view(), false).unwrap();
     let middle = child(&store, &session, &root, "claude").unwrap();
@@ -466,7 +455,7 @@ fn tree_kit_vm_cap_counts_distinct_live_kits() {
 #[test]
 fn tree_kit_vm_cap_follows_the_daemon_setting() {
     let home = tempfile::tempdir().unwrap();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     store.lock().job_defaults = Some(
         crate::JobDefaults::from_environment(|name| {
             (name == "MARSH_TREE_KIT_VMS").then(|| "1".into())
@@ -495,7 +484,7 @@ fn child_wall_time_ends_by_its_parents_deadline() {
     // docs/design/processes.md s6: wall = min(the Kit's own limit, the parent's
     // remaining time); a parent with too little left starts nothing.
     let home = tempfile::tempdir().unwrap();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = session(&store, home.path());
     let root = launch(&store, &session, None, "fixture", view(), false).unwrap();
     assert_eq!(store.set_job_deadline(&root, 30), (30, false));
@@ -539,7 +528,7 @@ fn a_shell_branch_kit_job_and_its_children_hang_under_the_split() {
     // so no fork mount names it) is the branch's child; its own children
     // follow; the forest draws the split in the creating session.
     let home = tempfile::tempdir().unwrap();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let creator = session(&store, home.path());
     let branch = session(&store, home.path());
     store.mark_branch_session(&branch, "1a2b3c4d5e6f", "fix");
@@ -613,7 +602,7 @@ fn a_fanout_in_a_shell_branch_is_drawn_as_a_fanout_node_in_that_branch() {
     // fanout's jobs run in the branch's session; the tree draws them under
     // one fanout node inside the branch, after the branch's other jobs.
     let home = tempfile::tempdir().unwrap();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let branch = session(&store, home.path());
     store.mark_branch_session(&branch, "1a2b3c4d5e6f", "review");
     let before = launch(&store, &branch, None, "fixture", view(), false).unwrap();

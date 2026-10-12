@@ -5107,7 +5107,11 @@ impl Client {
     }
 
     fn shutdown_resident_after_probe(&self) -> Result<(), DaemonError> {
-        let deadline = Instant::now() + RESIDENT_SHUTDOWN_RETRY_TIMEOUT;
+        self.shutdown_resident_after_probe_within(RESIDENT_SHUTDOWN_RETRY_TIMEOUT)
+    }
+
+    fn shutdown_resident_after_probe_within(&self, retry: Duration) -> Result<(), DaemonError> {
+        let deadline = Instant::now() + retry;
         loop {
             let reply = self.request(PublicRequest::Shutdown)?;
             match reply {
@@ -6590,6 +6594,8 @@ pub enum DaemonError {
 
 #[cfg(test)]
 extern crate self as marsh_daemon;
+#[cfg(test)]
+mod test_support;
 #[cfg(test)]
 mod tests;
 
