@@ -3789,10 +3789,22 @@ impl ConnectionHandler {
                 };
                 // The owner exists before ACK: failure here cannot orphan a
                 // registration or retire a duplicate request's live generation.
-                write_frame(&mut stream, &PublicReply::ShellAccepted)?;
-                stream.set_read_timeout(None)?;
-                stream.set_write_timeout(None)?;
-                let attachment = ServerAttachment::new(stream)?;
+                let accepted = (|| {
+                    write_frame(&mut stream, &PublicReply::ShellAccepted)?;
+                    stream.set_read_timeout(None)?;
+                    stream.set_write_timeout(None)?;
+                    ServerAttachment::new(stream)
+                })();
+                let attachment = match accepted {
+                    Ok(attachment) => attachment,
+                    Err(error) => {
+                        // The shell ends unstarted (its client is gone), so it
+                        // also gives up the ACP controller it holds.
+                        drop(owner);
+                        self.acp.detach_shell(&session_id);
+                        return Err(error);
+                    }
+                };
                 owner.started();
                 let outcome = self
                     .backend
