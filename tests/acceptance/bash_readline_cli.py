@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Byte-exact public CLI/real PTY readline differential, never a Bash implementation.
 
-First --shell is GNU oracle (default required version 5.3.20). Linux 5.3.0
---oracle-version override is supporting investigation ONLY. All observed bytes,
+First --shell is the GNU oracle, exactly --oracle-version (default 5.3.0, the
+release CI builds). All observed bytes,
 PTY control traffic, deadlines, statuses, effects and cleanup are retained.
 PTY paints differ between editors: compare command streams/buffer observations
 exactly, assert prompt payload/marker invariants separately, retain paints raw.
@@ -16,6 +16,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import pty
 import select
 import signal
@@ -32,15 +33,88 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def processes():
-    # Inspection only. Never signal by name or probe an unowned process/group.
-    out = subprocess.run(["ps", "-axo", "pid=,ppid=,pgid="], capture_output=True,
-                         check=True, timeout=3).stdout
-    return [tuple(map(int, line.split())) for line in out.splitlines() if line.strip()]
+def session_members(session):
+    """Every process in `session` (each harness shell leads its own), from /proc."""
+    members = []
+    for entry in os.scandir("/proc"):
+        if not entry.name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry.name}/stat", "rb") as stat:
+                fields = stat.read().rsplit(b")", 1)[1].split()
+        except OSError:
+            continue
+        # After "pid (comm)": state ppid pgrp session ...
+        if int(fields[3]) == session:
+            members.append((int(entry.name), int(fields[1]), int(fields[2]), fields[0].decode()))
+    return members
+
+
+# Blocking system calls whose wait can end on its own (a timeout argument), by
+# architecture: number -> index of the timeout argument, or None if always timed.
+# A thread in one of these is not idle; poll/select/epoll/futex waits without a
+# timeout, read and wait4 are.
+TIMED_CALLS = {
+    "aarch64": {73: 2, 72: 4, 22: 3, 441: 3, 98: 3, 101: None, 115: None},
+    "x86_64": {7: 2, 271: 2, 23: 4, 270: 4, 232: 3, 281: 3, 441: 3, 202: 3, 35: None, 230: None},
+}[platform.machine()]
+FUTEX_WAIT_OPS = {0, 9}  # FUTEX_WAIT, FUTEX_WAIT_BITSET (without flags)
+
+
+def waiting_untimed(pid, task):
+    """Whether thread `task` of `pid` is blocked in a system call that only an
+    event (input, a child, another thread) can end."""
+    try:
+        with open(f"/proc/{pid}/task/{task}/syscall") as calls:
+            fields = calls.read().split()
+    except OSError:
+        return False
+    if not fields or fields[0] in ("running", "-1"):
+        return False
+    number, args = int(fields[0]), [int(value, 16) for value in fields[1:7]]
+    if number not in TIMED_CALLS:
+        return True
+    index = TIMED_CALLS[number]
+    if index is None:
+        return False
+    if number in (98, 202) and (args[1] & 0x7F) not in FUTEX_WAIT_OPS:
+        return True
+    timeout = args[index]
+    if number in (7, 22, 232, 281):  # millisecond integers; -1 waits forever
+        return timeout & 0xFFFFFFFF == 0xFFFFFFFF
+    return timeout == 0  # a null timeout pointer waits forever
+
+
+def all_waiting(pid):
+    """Whether every thread of `pid` waits for an event with no timeout."""
+    try:
+        tasks = os.listdir(f"/proc/{pid}/task")
+    except OSError:
+        return True
+    for task in tasks:
+        try:
+            with open(f"/proc/{pid}/task/{task}/stat", "rb") as stat:
+                state = stat.read().rsplit(b")", 1)[1].split()[0]
+        except OSError:
+            continue
+        if state in (b"Z", b"X", b"T", b"t"):
+            continue
+        if state != b"S" or not waiting_untimed(pid, task):
+            return False
+    return True
 
 
 def terminal():
     fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+
+
+# Consecutive idle observations (10 ms apart) after which a shell that has
+# not reached the awaited state is taken not to get there.
+IDLE_CHECKS = 10
+
+# One generous budget per owned shell session: every wait below is for an
+# observable condition, so the budget only bounds a shell that never gets there.
+SESSION_BUDGET = 30
 
 
 class Owned:
@@ -52,13 +126,14 @@ class Owned:
             os.close(fd)
             env[b"HISTFILE"] = os.fsencode(history)
         self.master = None
+        self.slave = None
         self.raw = bytearray()
         self.steps = []
         self.groups = set()
         self.pids = set()
         self.timed_out = False
         self.forced = False
-        self.deadline = time.monotonic() + 12
+        self.deadline = time.monotonic() + SESSION_BUDGET
         slave = None
         if tty:
             self.master, slave = pty.openpty()
@@ -70,26 +145,29 @@ class Owned:
         self.pids.add(self.child.pid)
         self.groups.add(self.child.pid)
         if slave is not None:
+            # A second, non-controlling descriptor on the terminal, only to see
+            # how much typed input the shell has not read yet.
+            self.slave = os.open(os.ttyname(slave), os.O_RDONLY | os.O_NOCTTY)
             os.close(slave)
             os.set_blocking(self.master, False)
-        self.track()
 
     def track(self):
-        rows = processes()
-        changed = True
-        while changed:
-            changed = False
-            for pid, ppid, pgid in rows:
-                if (ppid in self.pids or pgid in self.groups) and pid not in self.pids:
-                    self.pids.add(pid)
-                    self.groups.add(pgid)
-                    changed = True
-        return [row for row in rows if row[0] in self.pids or row[2] in self.groups]
+        rows = session_members(self.child.pid)
+        for pid, _, pgid, _ in rows:
+            self.pids.add(pid)
+            self.groups.add(pgid)
+        return [row for row in rows if row[3] != "Z"]
 
-    def pump(self, duration=0.04):
+    def check_deadline(self):
         if time.monotonic() > self.deadline:
             self.timed_out = True
-            raise TimeoutError("owned PTY deadline")
+            raise TimeoutError("owned shell session budget exhausted")
+
+    def pump(self, duration=0.04):
+        self.check_deadline()
+        if self.master is None:
+            time.sleep(duration)
+            return
         if select.select([self.master], [], [], duration)[0]:
             try:
                 data = os.read(self.master, 65536)
@@ -104,28 +182,79 @@ class Owned:
             # Answer actual terminal cursor requests, retain both directions.
             for _ in range(bytes(self.raw[start:]).count(b"\x1b[6n")):
                 self.send(b"\x1b[1;1R", "cursor-report")
-        self.track()
 
     def send(self, data, reason="input"):
         os.write(self.master, data)
         self.steps.append({"sent": data.hex(), "reason": reason, "pty_offset": len(self.raw)})
 
     def wait(self, predicate):
+        """Waits for `predicate`. A shell that has gone idle (see `settle`)
+        without it will not get there on its own, so that fails at once."""
+        idle = 0
         while not predicate():
-            self.pump()
-            if self.child.poll() is not None:
+            before = len(self.raw)
+            self.pump(.01)
+            if self.child.poll() is not None and not predicate():
                 raise RuntimeError("shell exited before handshake")
+            idle = idle + 1 if len(self.raw) == before and self.idle() else 0
+            if idle >= IDLE_CHECKS and not predicate():
+                raise RuntimeError("shell went idle before handshake: " + self.describe())
+
+    def unread_input(self):
+        # The terminal's input queue, or the input pipe (Linux reports a pipe's
+        # unread bytes on either end).
+        if self.slave is not None:
+            fd = self.slave
+        elif self.child.stdin is not None and not self.child.stdin.closed:
+            fd = self.child.stdin.fileno()
+        else:
+            return 0
+        count = fcntl.ioctl(fd, termios.FIONREAD, b"\0\0\0\0")
+        return int.from_bytes(count, "little")
+
+    def idle(self):
+        if self.child.poll() is not None:
+            return True
+        return self.unread_input() == 0 and all(
+            all_waiting(pid) for pid, _, _, state in session_members(self.child.pid) if state != "Z")
+
+    def describe(self):
+        """Each session thread's state and system call, for a failure message."""
+        threads = []
+        for pid, _, _, _ in session_members(self.child.pid):
+            for task in os.listdir(f"/proc/{pid}/task") if os.path.isdir(f"/proc/{pid}/task") else []:
+                try:
+                    state = Path(f"/proc/{pid}/task/{task}/stat").read_bytes().rsplit(b")", 1)[1].split()[0]
+                    call = Path(f"/proc/{pid}/task/{task}/syscall").read_text().split()[:5]
+                except OSError:
+                    continue
+                threads.append(f"{pid}/{task}:{state.decode()}:{' '.join(call)}")
+        return "; ".join(threads)
 
     def settle(self):
-        end = time.monotonic() + .15
-        while time.monotonic() < end:
-            self.pump(.02)
+        """Waits until the shell has read everything typed, nothing in its
+        session is running, and no output is arriving: twice in a row."""
+        quiet = 0
+        while quiet < 2:
+            before = len(self.raw)
+            self.pump(.01)
+            quiet = quiet + 1 if len(self.raw) == before and self.idle() else 0
 
     def finish(self):
+        idle = 0
         while self.child.poll() is None:
-            self.pump()
+            before = len(self.raw)
+            self.pump(.01)
+            idle = idle + 1 if len(self.raw) == before and self.idle() else 0
+            if idle >= IDLE_CHECKS and self.child.poll() is None:
+                raise RuntimeError("shell went idle instead of exiting: " + self.describe())
         self.child.wait(timeout=1)
-        self.settle()
+        # Drain what the shell wrote before it exited.
+        while self.master is not None and select.select([self.master], [], [], 0)[0]:
+            before = len(self.raw)
+            self.pump(0)
+            if len(self.raw) == before:
+                break
 
     def close(self):
         rows = self.track()
@@ -142,13 +271,15 @@ class Owned:
                     except ProcessLookupError:
                         pass
         self.child.wait(timeout=3)
-        end = time.monotonic() + 2
+        end = time.monotonic() + 5
         remaining = self.track()
         while remaining and time.monotonic() < end:
             time.sleep(.02)
             remaining = self.track()
         if self.master is not None:
             os.close(self.master)
+        if self.slave is not None:
+            os.close(self.slave)
         return {"pid": self.child.pid, "pgids": sorted(self.groups), "pids": sorted(self.pids),
                 "remaining": remaining, "forced": self.forced, "clean": not remaining and not self.forced}
 
@@ -638,7 +769,8 @@ def run_exit_case(binary, brush, case, locale, work):
             error = str(exc); child.timed_out |= isinstance(exc, (TimeoutError, subprocess.TimeoutExpired))
         finally:
             cleanup = child.close()
-        count = bytes(child.raw).count(b"\r\nexit\r\n")
+        # Announced exactly once; the line before it is editor painting.
+        count = bytes(child.raw).count(b"exit\r\n")
         return {"status": child.child.returncode, "stdout": "", "stderr": "", "observed": str(count).encode().hex(),
                 "semantic_valid": count == 1, "pty": bytes(child.raw).hex(), "steps": child.steps, "cleanup": cleanup,
                 "error": error, "timed_out": child.timed_out, "argv": [a.hex() for a in args],
@@ -851,6 +983,22 @@ def run(binary, brush, case, locale, work):
             "renderer_markers_absent": b"\x01" not in child.raw and b"\x02" not in child.raw}
 
 
+def ascii_only(case):
+    def ascii(value):
+        if isinstance(value, bytes):
+            # Escapes such as \377 or \xff spell non-ASCII bytes in ASCII source.
+            return value.isascii() and not re.search(rb"\\([0-7]{3}|x[0-9a-fA-F]|[uU][0-9a-fA-F])", value)
+        if isinstance(value, str):
+            return value.isascii()
+        if isinstance(value, (list, tuple)):
+            return all(ascii(item) for item in value)
+        return True
+    # These runners add raw bytes of their own (prompts, bound command source).
+    implicit = (case.get("raw") or case.get("basic") or (case.get("binding") and "macro" not in case)
+                or (case.get("noninteractive") and not case.get("ascii")))
+    return not implicit and all(ascii(value) for value in case.values())
+
+
 def signature(result):
     return {key: result.get(key) for key in ("status", "stdout", "stderr", "observed", "bindings_listing", "completion_calls", "fd_probe", "exit_effects")}
 
@@ -862,10 +1010,11 @@ def healthy(result):
 
 
 def main():
+    import bash_report  # here: the history-input probes load this module for Owned
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shell", action="append", required=True, metavar="LABEL=PATH")
     parser.add_argument("--brush", action="append", default=[])
-    parser.add_argument("--oracle-version", default="5.3.20")
+    parser.add_argument("--oracle-version", default="5.3.0")
     parser.add_argument("--utf8-locale", default="en_US.UTF-8" if platform.system() == "Darwin" else "C.utf8")
     parser.add_argument("--case", action="append", default=[])
     parser.add_argument("--binding-only", action="store_true")
@@ -877,7 +1026,9 @@ def main():
     parser.add_argument("--exit-only", action="store_true")
     parser.add_argument("--require-exact", action="append", default=[])
     parser.add_argument("--evidence", required=True, type=Path)
+    parser.add_argument("--shard", default="0/1", help="K/N: run every Nth case from the Kth")
     args = parser.parse_args()
+    shard, shards = map(int, args.shard.split("/"))
     binaries = {label: Path(path).resolve(strict=True) for label, path in (s.split("=", 1) for s in args.shell)}
     oracle = next(iter(binaries))
     if not set(args.brush + args.require_exact).issubset(binaries):
@@ -900,8 +1051,8 @@ def main():
     locale_probe = subprocess.run(["/usr/bin/locale", "charmap"], capture_output=True, timeout=3,
                                   env={"LC_ALL": args.utf8_locale}, start_new_session=True)
     identity = {"host": platform.platform(), "oracle_version": args.oracle_version,
-                "support_only": args.oracle_version != "5.3.20",
-                "oracle_policy": "Linux GNU5.3.20 primary; Mac version recorded explicitly (5.3.9 supporting)", "harness_sha256": sha(__file__),
+                "support_only": args.oracle_version != "5.3.0",
+                "oracle_policy": "exact GNU Bash --oracle-version (5.3.0, the release CI builds)", "harness_sha256": sha(__file__),
                 "root_lock_sha256": sha(Path(__file__).resolve().parents[2] / "Cargo.lock"),
                 "version_stdout": version_out.hex(), "version_stderr": version_err.hex(),
                 "version_status": version.child.returncode, "version_cleanup": version_cleanup,
@@ -935,11 +1086,15 @@ def main():
         selected = [case for case in selected if case["name"] in args.case]
         if len(selected) != len(set(args.case)):
             parser.error("unknown case filter")
+    selected = selected[shard::shards]
     failures = []
+    verdicts = {}
     counts = {label: 0 for label in binaries}
     with (args.evidence / "observations.jsonl").open("w") as log:
         for locale in (b"C", args.utf8_locale.encode()):
             for case in selected:
+                if locale != b"C" and ascii_only(case):
+                    continue  # the locale cannot change an ASCII-only case's bytes
                 results = {}
                 for label, binary in binaries.items():
                     with tempfile.TemporaryDirectory(prefix="marsh-readline-") as tmp:
@@ -952,11 +1107,16 @@ def main():
                 record = {"case": case["name"], "locale": locale.decode("ascii"), "results": results, "exact": exact}
                 log.write(json.dumps(record)+"\n")
                 log.flush()
+                if args.require_exact:
+                    verdicts[f"{case['name']}@{locale.decode('ascii')}"] = bash_report.verdict(
+                        healthy(gold), exact[args.require_exact[0]])
                 if not healthy(gold) or any(not exact[label] for label in args.require_exact):
                     failures.append([case["name"], locale.decode("ascii")])
     summary = {"observations_per_shell": len(selected)*2, "exact": counts, "failures": failures,
                "support_only": identity["support_only"], "qualified": False}
     (args.evidence / "summary.json").write_text(json.dumps(summary, indent=2)+"\n")
+    if args.require_exact:
+        bash_report.write(args.evidence, verdicts)
     print(json.dumps(summary))
     return int(bool(failures))
 

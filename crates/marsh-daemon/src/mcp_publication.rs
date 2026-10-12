@@ -383,6 +383,8 @@ pub enum PublicationHostEvent {
 // Host publish may inspect, add, load, then roll back a stock registration.
 // Each constituent stock command has a 60-second limit plus bounded drain.
 const HOST_COMMAND_TIMEOUT: Duration = Duration::from_mins(5);
+/// How long a publication waits for another operation's scope admission.
+const SCOPE_ADMISSION_WAIT: Duration = Duration::from_secs(30);
 const OUTPUT_LIMIT: usize = 8 * 1024;
 type PublicationLocks = Arc<Mutex<BTreeMap<(String, String), Weak<Mutex<()>>>>>;
 type PublicationFences = Arc<Mutex<BTreeMap<String, (Arc<fs::File>, String)>>>;
@@ -421,6 +423,8 @@ pub(super) struct McpHostControl {
     /// This daemon's control directory, where default publications are
     /// recorded (`mcp_defaults`). `None` disables default recording.
     defaults_home: Option<PathBuf>,
+    host_command_budget: Duration,
+    scope_admission_wait: Duration,
     publication_locks: PublicationLocks,
     publication_fences: PublicationFences,
 }
@@ -438,6 +442,8 @@ impl McpHostControl {
             host_home,
             scope_root,
             defaults_home: None,
+            host_command_budget: HOST_COMMAND_TIMEOUT,
+            scope_admission_wait: SCOPE_ADMISSION_WAIT,
             publication_locks: Arc::new(Mutex::new(BTreeMap::new())),
             publication_fences: Arc::new(Mutex::new(BTreeMap::new())),
         }
@@ -446,6 +452,21 @@ impl McpHostControl {
     #[must_use]
     pub fn with_defaults_home(mut self, control_home: PathBuf) -> Self {
         self.defaults_home = Some(control_home);
+        self
+    }
+
+    /// Replace the five-minute host publication budget (time outside Kit
+    /// preparation and supervised stock calls).
+    #[must_use]
+    pub fn with_host_command_budget(mut self, budget: Duration) -> Self {
+        self.host_command_budget = budget;
+        self
+    }
+
+    /// Replace the 30-second wait for another operation's scope admission.
+    #[must_use]
+    pub fn with_scope_admission_wait(mut self, wait: Duration) -> Self {
+        self.scope_admission_wait = wait;
         self
     }
 
@@ -559,7 +580,7 @@ impl McpHostControl {
         {
             return Err("publication admission lock must be an owner-only real file".into());
         }
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let deadline = Instant::now() + self.scope_admission_wait;
         loop {
             match file.try_lock() {
                 Ok(()) => break,
@@ -1005,7 +1026,7 @@ impl McpHostControl {
                 }
             }
         });
-        let mut deadline = Instant::now() + HOST_COMMAND_TIMEOUT;
+        let mut deadline = Instant::now() + self.host_command_budget;
         let mut outcome = None;
         let mut commit_started = false;
         let mut preparation_started = false;

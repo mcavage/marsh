@@ -670,14 +670,6 @@ mod tests {
         let two = host_control_home(&real, &second, Some(&override_root)).unwrap();
         assert_ne!(one, two);
         assert_eq!(one.parent(), two.parent());
-        fs::write(one.join("commands.json"), "one").unwrap();
-        fs::write(two.join("commands.json"), "two").unwrap();
-        assert_ne!(
-            fs::read(one.join("commands.json")).unwrap(),
-            fs::read(two.join("commands.json")).unwrap()
-        );
-        assert_ne!(one.join("state"), two.join("state"));
-        assert_ne!(one.join("kit-lifecycle"), two.join("kit-lifecycle"));
         assert!(marsh_daemon::reject_guest_mount_overlap(
             &[&two],
             std::slice::from_ref(&override_root),

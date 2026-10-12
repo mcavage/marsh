@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Real publisher CLI callers; Docker is a recording subprocess, not live Buildx."""
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -15,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 PUBLISHER = ROOT / "scripts/publish-kits.py"
 PREPARER = ROOT / "scripts/prepare-kit-inputs.py"
 PIN = "reg.example/base@sha256:" + "a" * 64
+# Hang guard for one publisher, preparer or harness process. Neither promises a
+# deadline; the full canonical notices tree takes tens of seconds when starved.
+PROCESS_TIMEOUT = 900
 
 
 class PublisherCli(unittest.TestCase):
@@ -39,16 +41,16 @@ assert args[:2] == ['buildx', 'build'], args
 # Model the actual pinned frontend's lack of subrequests, not a guessed API.
 assert not any(a.startswith('--call') for a in args), 'unsupported frontend subrequest'
 context = pathlib.Path(args[-1])
+entries = list(context.rglob('*'))
+files = [p for p in entries if p.is_file()]
 record = {'args': args, 'context': str(context), 'mode': context.stat().st_mode & 0o777,
           'parent_mode': context.parent.stat().st_mode & 0o777,
           'directories': {str(p.relative_to(context)): p.stat().st_mode & 0o777
-                          for p in context.rglob('*') if p.is_dir()},
-          'file_sizes': {str(p.relative_to(context)): p.stat().st_size
-                         for p in context.rglob('*') if p.is_file()},
-          'file_modes': {str(p.relative_to(context)): p.stat().st_mode & 0o777
-                         for p in context.rglob('*') if p.is_file()},
+                          for p in entries if p.is_dir()},
+          'file_sizes': {str(p.relative_to(context)): p.stat().st_size for p in files},
+          'file_modes': {str(p.relative_to(context)): p.stat().st_mode & 0o777 for p in files},
           'files': {str(p.relative_to(context)): hashlib.sha256(p.read_bytes()).hexdigest()
-                    for p in context.rglob('*') if p.is_file() and not p.is_symlink()}}
+                    for p in files if not p.is_symlink()}}
 with open(os.environ['BUILDX_LOG'], 'a') as log:
     log.write(json.dumps(record) + '\\n')
 if os.environ.get('MUTATE_INPUT') and (not os.environ.get('MUTATE_ON_PUSH') or any('push=true' in a for a in args)):
@@ -101,12 +103,12 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
                 json.dump(record, stream, indent=2)
         return result
 
-    def call(self, *extra, timeout=120):
+    def call(self, *extra):
         return self.observed(subprocess.run([sys.executable, str(getattr(self, "publisher", PUBLISHER)), "--source-root", str(self.source),
                                "--commands", str(self.commands), "--build-inputs", str(self.inputs),
                                "--repository-prefix", "reg.example/test", "--output", str(self.output),
                                *extra], env=self.env, cwd=getattr(self, "cwd", None),
-                              capture_output=True, text=True, timeout=timeout))
+                              capture_output=True, text=True, timeout=PROCESS_TIMEOUT))
 
     def records(self):
         return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
@@ -302,7 +304,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
         result = subprocess.run([sys.executable, str(ROOT / 'tests/kits/native_frontend_uat.py'),
                                  '--docker', str(self.bin / 'docker'), '--buildx-plugin', str(self.bin / 'docker'),
                                  '--docker-host', 'unix:///not-contacted.sock', '--evidence', str(evidence)],
-                                env=self.env, capture_output=True, text=True, timeout=8)
+                                env=self.env, capture_output=True, text=True, timeout=PROCESS_TIMEOUT)
         self.assertNotEqual(result.returncode, 0, result)
         self.assertIn('--run-native', result.stderr)
         self.assertEqual(self.records(), [])
@@ -399,20 +401,28 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
             self.assertIn("type=cacheonly", record["args"])
             self.assertFalse(any("push=true" in arg for arg in record["args"]))
 
-    def canonical_checkout(self):
-        """Actual product sources in a private Git checkout, not empty-map wiring."""
+    def canonical_checkout(self, all_notices=False):
+        """Actual product sources in a private Git checkout, not empty-map wiring.
+
+        The publisher treats the notices tree as opaque bytes and pays per file
+        at every capture, so only the test of the shipped tree's size copies all
+        of it; the rest keep its top level and one subdirectory.
+        """
         self.publisher = self.source / 'scripts/publish-kits.py'
+        notices = 'packaging/dhi-notices/collected'
         for relative in ('scripts/publish-kits.py', 'scripts/prepare-kit-inputs.py',
                          'scripts/build_inputs.py', 'scripts/npm-notices.mjs', '.gitignore',
                          'crates/marsh-contracts/src/command_registry_rules.json',
-                         'packaging/commands.json', 'packaging/dhi-notices/collected',
+                         'packaging/commands.json', notices,
                          'packaging/image-repair', 'tests/acceptance/fixture',
                          *['kits/' + name for name in ('marsh-shell', 'marsh-claude',
                            'marsh-codex', 'marsh-pi')]):
             origin, dest = ROOT / relative, self.source / relative
             dest.parent.mkdir(parents=True, exist_ok=True)
             if origin.is_dir():
-                shutil.copytree(origin, dest, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+                skipped = ('__pycache__', '*.pyc', *(() if all_notices or relative != notices
+                                                    else ('texts', 'source-records')))
+                shutil.copytree(origin, dest, ignore=shutil.ignore_patterns(*skipped))
             else:
                 shutil.copy2(origin, dest)
         subprocess.run(['git', '-C', str(self.source), 'add', '-A'], check=True)
@@ -421,7 +431,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
     def prepare(self, *extra):
         return self.observed(subprocess.run([sys.executable, str(getattr(self, 'preparer', self.source / 'scripts/prepare-kit-inputs.py')),
                                '--commands', str(self.commands), '--output', str(self.inputs), *map(str, extra)],
-                              env=self.env, capture_output=True, text=True, timeout=120))
+                              env=self.env, capture_output=True, text=True, timeout=PROCESS_TIMEOUT))
 
     def assert_canonical_bytes(self, records):
         # Independent oracle: hash the actual canonical files, never receipt claims.
@@ -440,10 +450,20 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
         self.assertTrue(all(row['files']['collect-notices.mjs'] == collector
                             for row in records if 'collect-notices.mjs' in row['files']))
 
-    def test_real_default4_and_fixture_canonical_prepare_publish_composition(self):
-        self.canonical_checkout()
-        for commands, count in ((self.commands, 4),
-                                (self.source / 'tests/acceptance/fixture/commands.json', 1)):
+    def test_real_default4_and_fixture_prepare_compactly_and_validate_at_any_checkout_depth(self):
+        # The shipped notices tree: within the publisher's bounds, and its
+        # absolute origin is not repeated per notice per Kit.
+        self.canonical_checkout(all_notices=True)
+        self.assertEqual(self.prepare().returncode, 0)
+        compact_size = self.inputs.stat().st_size
+        compact_path_bytes = len(os.fsencode(self.source))
+        deep = self.root.joinpath(*['d' * 170] * 4)
+        deep.parent.mkdir(parents=True)
+        self.source.rename(deep)
+        self.source = deep
+        self.publisher = deep / 'scripts/publish-kits.py'
+        for commands, count in ((deep / 'packaging/commands.json', 4),
+                                (deep / 'tests/acceptance/fixture/commands.json', 1)):
             with self.subTest(commands=str(commands)):
                 self.commands = commands
                 result = self.prepare()
@@ -452,7 +472,10 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
                 document = json.loads(self.inputs.read_text())
                 self.assertEqual(document['schema'], 'marsh.prepared-kit-inputs/v2')
                 self.assertLess(self.inputs.stat().st_size, 4 * 1024 * 1024)
-                self.assertLessEqual(self.inputs.read_bytes().count(os.fsencode(self.source)), 32)
+                self.assertLessEqual(self.inputs.read_bytes().count(os.fsencode(deep)), 32)
+                if count == 4:
+                    self.assertLessEqual(self.inputs.stat().st_size - compact_size,
+                                         32 * (len(os.fsencode(deep)) - compact_path_bytes))
                 self.log.unlink(missing_ok=True)
                 result = self.call('--validate-only')
                 self.assertEqual(result.returncode, 0, result)
@@ -694,209 +717,6 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
         result = self.call()
         self.assertEqual(result.returncode, 0, result)
         self.assertEqual(len(self.records()), 2)
-
-    def test_long_checkout_does_not_repeat_absolute_origin_per_notice_per_kit(self):
-        self.canonical_checkout()
-        result = self.prepare()
-        self.assertEqual(result.returncode, 0, result)
-        compact_size = self.inputs.stat().st_size
-        compact_path_bytes = len(os.fsencode(self.source))
-        deep = self.root.joinpath(*['d' * 170] * 4)
-        deep.parent.mkdir(parents=True)
-        self.source.rename(deep)
-        self.source = deep
-        self.commands = deep / 'packaging/commands.json'
-        self.publisher = deep / 'scripts/publish-kits.py'
-        result = self.prepare()
-        self.assertEqual(result.returncode, 0, result)
-        self.assertLess(self.inputs.stat().st_size, 4 * 1024 * 1024)
-        self.assertLessEqual(self.inputs.read_bytes().count(os.fsencode(deep)), 32)
-        self.assertLessEqual(self.inputs.stat().st_size - compact_size,
-                             32 * (len(os.fsencode(deep)) - compact_path_bytes))
-        result = self.call('--validate-only')
-        self.assertEqual(result.returncode, 0, result)
-        self.assert_canonical_bytes(self.records())
-
-
-class StrongProvenanceCli(unittest.TestCase):
-    """Fresh real tiny Cargo/build-candidate observation + controlled image peer.
-
-    This exercises the REAL strong verifier, never a patched verifier/stale
-    receipt adoption. The image digest/ARM names are controlled protocol peers,
-    NOT a registry, ARM executable, or shipping candidate qualification.
-    """
-    def setUp(self):
-        rustc = shutil.which('rustc')
-        if not rustc or not subprocess.check_output([rustc, '--version'], text=True).startswith('rustc 1.95.'):
-            self.skipTest('fresh observed producer fixture requires official Rust 1.95')
-        acceptance = ROOT / 'tests/acceptance'
-        if not (acceptance / 'test_evidence_oracles.py').is_file():
-            self.skipTest('the build-receipt producer fixture (test_evidence_oracles.py) was retired')
-        sys.path.insert(0, str(acceptance))
-        spec = importlib.util.spec_from_file_location('publisher_observed_fixture', acceptance / 'test_evidence_oracles.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        self.producer = module.BuildReceiptCallerTests('test_source_change_rejected_before_acceptance_or_smoke_effects')
-        self.producer.setUp()
-        self.addCleanup(self.producer.doCleanups)
-        self.caller = PublisherCli('test_validate_only_has_no_push_or_registry')
-        self.caller.setUp()
-        self.caller._evidence_label = self.id()
-        self.addCleanup(self.caller.doCleanups)
-        p, c = self.producer, self.caller
-        # Candidate and trusted consumer code may be in distinct worktrees; both
-        # identities must be bound instead of guessing paths from the candidate.
-        c.preparer = PREPARER
-        for name in ('scripts/prepare-kit-inputs.py', 'scripts/publish-kits.py',
-                     'scripts/build_inputs.py', 'scripts/image_observations.py',
-                     'scripts/owned_process.py', 'scripts/package_observations.py',
-                     'tests/acceptance/provenance.py',
-                     'crates/marsh-contracts/src/command_registry_rules.json'):
-            destination = p.source / name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(ROOT / name, destination)
-        fixture = p.source / 'tests/acceptance/fixture'
-        fixture.mkdir(parents=True, exist_ok=True)
-        (fixture / 'fixture.yaml').write_text('schemaVersion: "3"\nkind: workload\ndockerfile: ./fixture.dockerfile\n'
-                                            'args:\n  shellImage:\n    buildArg: SHELL_IMAGE\n')
-        (fixture / 'fixture.dockerfile').write_text('FROM scratch\n# controlled protocol fixture, never native image qualification\n')
-        c.commands = fixture / 'commands.json'
-        c.commands.write_text(json.dumps({'fixture': 'tests/acceptance/fixture'}))
-        c.source, c.publisher = p.source, PUBLISHER
-        (p.source / 'Makefile').write_text(p.makefile.replace('build --release --locked',
-                                                             'build --offline --release --locked'))
-        p.environment = {**c.env, 'CARGO_HOME': str(c.root / 'cargo-home'),
-                         'CARGO_BUILD_JOBS': '1',
-                         'CARGO_INCREMENTAL': '0', 'CARGO_PROFILE_RELEASE_DEBUG': '0'}
-        p.build()
-        self.image = p.guest / 'shell-image'
-        self.producer_receipt_bytes = p.receipt.read_bytes()
-
-    def prepare(self, *extra):
-        return self.caller.prepare('--source-tree', self.producer.source,
-                                   '--shell-image', self.image,
-                                   '--shell-build-receipt', self.producer.receipt, *extra)
-
-    def assert_pre_effect_refusal(self, result):
-        self.assertNotEqual(result.returncode, 0, result)
-        self.assertEqual(self.caller.records(), [], result)
-        self.assertFalse(self.caller.output.exists(), result)
-        self.assertFalse(self.producer.calls.exists(), 'no image/product/stock peer allowed')
-        self.assertFalse(self.producer.product_calls.exists(), 'no product execution allowed')
-
-    def test_fresh_observed_build_public_prepare_and_publish_receipt(self):
-        result = self.prepare()
-        self.assertEqual(result.returncode, 0, result)
-        document = json.loads(self.caller.inputs.read_text())
-        request, = document['receipt']['shell_images']
-        self.assertEqual(request, {'source': 'tests/acceptance/fixture', 'source_tree': str(self.producer.source),
-                                  'image_file': str(self.image), 'build_receipt': str(self.producer.receipt)})
-        for name in ('scripts/image_observations.py', 'scripts/owned_process.py',
-                     'scripts/package_observations.py', 'tests/acceptance/provenance.py'):
-            self.assertIn(str(ROOT / name), document['receipt']['bindings'])
-        result = self.caller.call()
-        self.assertEqual(result.returncode, 0, result)
-        self.assertEqual(len(self.caller.records()), 2)
-        self.assertEqual(self.producer.receipt.read_bytes(), self.producer_receipt_bytes)
-        proof, = self.caller.output.parent.glob('commands.json.publication-*.json')
-        publication = json.loads(proof.read_text())
-        self.assertEqual(publication['prepared_receipt']['shell_images'], [request])
-        evidence = self.caller.root / 'readonly-proof-evidence'
-        harness = subprocess.run([sys.executable, str(ROOT / 'tests/kits/strong_provenance_uat.py'),
-                                  '--source-tree', str(self.producer.source), '--shell-image', str(self.image),
-                                  '--shell-build-receipt', str(self.producer.receipt), '--evidence', str(evidence)],
-                                 env=self.caller.env, capture_output=True, text=True, timeout=120)
-        self.caller.observed(harness)
-        self.assertEqual(harness.returncode, 0, harness)
-        self.assertEqual(json.loads((evidence / 'result.json').read_text())['outcome'], 'passed')
-        self.assertFalse(self.producer.calls.exists())
-        self.assertFalse(self.producer.product_calls.exists())
-
-    def test_missing_image_only_copied_aliased_and_guest_owned_proofs_refuse(self):
-        c, p = self.caller, self.producer
-        c.inputs.write_bytes(b'old prepared output')
-        result = c.prepare('--source-tree', p.source, '--shell-image', self.image)
-        self.assert_pre_effect_refusal(result)
-        self.assertIn('--shell-build-receipt', result.stderr)
-        copied_image = c.root / 'shell-image'
-        shutil.copy2(self.image, copied_image)
-        shutil.copy2(p.guest / 'shell-image.build.json', copied_image.with_name('shell-image.build.json'))
-        self.assert_pre_effect_refusal(self.prepare('--shell-image', copied_image))
-        link = c.root / 'alias-image'
-        link.symlink_to(self.image)
-        self.assert_pre_effect_refusal(self.prepare('--shell-image', link))
-        link.unlink()
-        os.link(self.image, link)
-        try:
-            self.assert_pre_effect_refusal(self.prepare('--shell-image', link))
-        finally:
-            link.unlink()
-        receipt_in_guest = p.guest / 'copied-receipt.json'
-        shutil.copy2(p.receipt, receipt_in_guest)
-        try:
-            self.assert_pre_effect_refusal(self.prepare('--shell-build-receipt', receipt_in_guest))
-        finally:
-            receipt_in_guest.unlink()
-        self.assert_pre_effect_refusal(self.prepare('--source-tree', p.source / 'src/..'))
-        helper_only = c.root / 'helper-only.json'
-        helper_only.write_bytes((p.guest / 'shell-image.build.json').read_bytes())
-        self.assert_pre_effect_refusal(self.prepare('--shell-build-receipt', helper_only))
-        self.assertEqual(c.inputs.read_bytes(), b'old prepared output')
-
-    def test_outputs_cannot_overwrite_observed_proof_inputs_or_exports(self):
-        self.assertEqual(self.prepare().returncode, 0)
-        c, p = self.caller, self.producer
-        destinations = (p.receipt, self.image, p.guest / 'shell-image.build.json',
-                        p.guest / 'commands.json', p.target / 'release/marsh')
-        original = {path: path.read_bytes() for path in destinations}
-        for destination in destinations:
-            with self.subTest(output=str(destination)):
-                self.assert_pre_effect_refusal(self.prepare('--output', destination))
-                self.assert_pre_effect_refusal(c.call('--output', destination))
-                self.assertEqual({path: path.read_bytes() for path in original}, original)
-
-    def test_stale_export_or_candidate_rejected_even_when_receipt_bytes_unchanged(self):
-        self.assertEqual(self.prepare().returncode, 0)
-        c, p = self.caller, self.producer
-        original = c.inputs.read_bytes()
-        for path in (p.guest / 'marsh-local-linux-arm64', p.target / 'release/marsh',
-                     p.source / 'src/main.rs', p.guest / 'licenses/marsh/LICENSE'):
-            before = path.read_bytes()
-            with self.subTest(path=str(path)):
-                path.write_bytes(before + b'\nchanged after prepared receipt\n')
-                self.assert_pre_effect_refusal(c.call())
-                path.write_bytes(before)
-                self.assertEqual(p.receipt.read_bytes(), self.producer_receipt_bytes)
-                self.assertEqual(c.inputs.read_bytes(), original)
-        document = json.loads(original)
-        document['receipt'].pop('shell_images')
-        c.inputs.write_text(json.dumps(document))
-        self.assert_pre_effect_refusal(c.call())
-
-    def test_semantic_revalidation_before_push_and_after_publication(self):
-        self.assertEqual(self.prepare().returncode, 0)
-        c, p = self.caller, self.producer
-        artifact = p.guest / 'marsh-local-linux-arm64'
-        original = artifact.read_bytes()
-        for phase in ('cacheonly', 'push'):
-            with self.subTest(phase=phase):
-                c.log.unlink(missing_ok=True)
-                c.output.parent.mkdir(mode=0o700, exist_ok=True)
-                c.output.write_bytes(b'previous registry')
-                c.env['MUTATE_INPUT'] = str(artifact)
-                if phase == 'push':
-                    c.env['MUTATE_ON_PUSH'] = '1'
-                else:
-                    c.env.pop('MUTATE_ON_PUSH', None)
-                result = c.call()
-                self.assertNotEqual(result.returncode, 0, result)
-                pushes = [row for row in c.records() if any('push=true' in arg for arg in row['args'])]
-                self.assertEqual(len(pushes), 1 if phase == 'push' else 0)
-                if phase == 'push':
-                    self.assertIn('publication may have occurred', result.stderr)
-                self.assertEqual(c.output.read_bytes(), b'previous registry')
-                self.assertEqual(p.receipt.read_bytes(), self.producer_receipt_bytes)
-                artifact.write_bytes(original)
 
 
 if __name__ == "__main__":

@@ -79,6 +79,70 @@ pub(crate) async fn await_term() -> Result<(), error::Error> {
     Ok(())
 }
 
+/// Blocks every signal in the calling thread until dropped, around a `fork`.
+///
+/// A forked child starts with the shell's handlers, so a signal sent to it
+/// before it restores default dispositions would run the shell's handler there
+/// and be lost (`sleep 3 & kill $!` could leave `sleep` running). Blocked, the
+/// signal stays pending until the child has restored them and its mask.
+pub(crate) struct BlockedForFork {
+    previous: libc::sigset_t,
+}
+
+impl BlockedForFork {
+    pub(crate) fn new() -> Self {
+        // SAFETY: sigfillset/pthread_sigmask only write the provided sets.
+        unsafe {
+            let mut all: libc::sigset_t = std::mem::zeroed();
+            let mut previous: libc::sigset_t = std::mem::zeroed();
+            libc::sigfillset(&raw mut all);
+            libc::pthread_sigmask(libc::SIG_BLOCK, &raw const all, &raw mut previous);
+            Self { previous }
+        }
+    }
+
+    /// The calling thread's mask before blocking, which the child restores.
+    pub(crate) const fn previous(&self) -> libc::sigset_t {
+        self.previous
+    }
+}
+
+impl Drop for BlockedForFork {
+    fn drop(&mut self) {
+        // SAFETY: restores the mask saved by `new` in this same thread.
+        unsafe {
+            libc::pthread_sigmask(
+                libc::SIG_SETMASK,
+                &raw const self.previous,
+                std::ptr::null_mut(),
+            )
+        };
+    }
+}
+
+/// In a forked child about to exec: gives every caught signal its default
+/// action, then restores `previous` (see [`BlockedForFork`]), so a signal that
+/// arrived since the fork takes effect as it would on the executed program.
+/// Only async-signal-safe calls.
+pub(crate) fn restore_defaults_after_fork(previous: &libc::sigset_t) {
+    // SAFETY: sigaction queries and installs SIG_DFL only; pthread_sigmask
+    // installs the saved mask.
+    unsafe {
+        for signal in 1..65 {
+            let mut current: libc::sigaction = std::mem::zeroed();
+            if libc::sigaction(signal, std::ptr::null(), &raw mut current) == 0
+                && current.sa_sigaction != libc::SIG_DFL
+                && current.sa_sigaction != libc::SIG_IGN
+            {
+                let mut default: libc::sigaction = std::mem::zeroed();
+                default.sa_sigaction = libc::SIG_DFL;
+                libc::sigaction(signal, &raw const default, std::ptr::null_mut());
+            }
+        }
+        libc::pthread_sigmask(libc::SIG_SETMASK, previous, std::ptr::null_mut());
+    }
+}
+
 pub(crate) fn mask_sigttou() -> Result<(), error::Error> {
     let ignore = nix::sys::signal::SigAction::new(
         nix::sys::signal::SigHandler::SigIgn,

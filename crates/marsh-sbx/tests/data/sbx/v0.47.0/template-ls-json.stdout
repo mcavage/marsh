@@ -1,0 +1,52 @@
+{
+  "images": [
+    {
+      "id": "549730947ed8",
+      "repository": "docker.io/docker/sandbox-templates",
+      "tag": "claude-code-docker",
+      "flavor": "claude-code-docker",
+      "created_at": "2026-09-23T18:15:37Z",
+      "size": 920132475
+    },
+    {
+      "id": "8b4cd0a46c8b",
+      "repository": "docker.io/docker/sandbox-templates",
+      "tag": "codex-docker",
+      "flavor": "codex-docker",
+      "created_at": "2026-08-26T13:20:01Z",
+      "size": 1267871099
+    },
+    {
+      "id": "1560168ac5fb",
+      "repository": "docker.io/docker/sandbox-templates",
+      "tag": "shell-docker",
+      "flavor": "shell-docker",
+      "created_at": "2026-09-23T18:14:24Z",
+      "size": 583004114
+    },
+    {
+      "id": "e95868ce40b3",
+      "repository": "docker.io/library/marsh-shell-local",
+      "tag": "sha256-11fa0ea9e452bd363fab534e670acdf48109e6270a03143ebccae920b6e2946a",
+      "flavor": "shell",
+      "created_at": "2026-10-08T03:44:32Z",
+      "size": 528426629
+    },
+    {
+      "id": "c093f6aa251b",
+      "repository": "docker.io/library/marsh-shell-local",
+      "tag": "sha256-2f4997bee1ccb92a49cb66561774f79fb03c80bd29fc6369e0d41a7e25a5ade7",
+      "flavor": "shell",
+      "created_at": "2026-10-07T02:24:14Z",
+      "size": 1066573798
+    },
+    {
+      "id": "dbb3dd5cc770",
+      "repository": "docker.io/library/sbx-kit-src",
+      "tag": "acp-fixture-16d3b5dec411",
+      "flavor": "claude-code",
+      "created_at": "2026-10-06T21:18:18Z",
+      "size": 575422296
+    }
+  ]
+}

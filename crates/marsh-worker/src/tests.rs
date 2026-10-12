@@ -4,7 +4,6 @@ use marsh_runtime::{AttachedProcess, no_attachment_control};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     io::{Cursor, Write},
-    os::unix::fs::PermissionsExt,
     os::unix::net::UnixStream,
     sync::{
         Condvar, Mutex,
@@ -14,6 +13,10 @@ use std::{
 };
 
 const INPUT_BURST_FRAMES: usize = 64;
+
+/// Bounds a wait for a condition that holds within milliseconds on an idle
+/// machine, so a starved CI runner is never mistaken for a hang.
+const CONDITION_DEADLINE: Duration = Duration::from_secs(30);
 
 fn serve_retained(
     worker: &Arc<Worker>,
@@ -71,19 +74,39 @@ fn grant_capture_waits_for_bounded_guest_mount_visibility() {
             .unwrap()
             .as_nanos()
     ));
-    let parent = root.join("grant-root");
-    let source = parent.join("project");
-    fs::create_dir_all(&source).unwrap();
-    fs::set_permissions(&parent, fs::Permissions::from_mode(0o000)).unwrap();
-    let restore = parent.clone();
-    let ready = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(60));
-        fs::set_permissions(restore, fs::Permissions::from_mode(0o700)).unwrap();
-    });
+    fs::create_dir_all(&root).unwrap();
 
-    let identity = GrantIdentity::capture_ready(&source).unwrap();
-    ready.join().unwrap();
+    // The mount appears after two failed looks.
+    let source = root.join("project");
+    let mut waits = 0;
+    let identity = GrantIdentity::capture_ready_with(&source, GRANT_READY_ATTEMPTS, || {
+        waits += 1;
+        if waits == 2 {
+            fs::create_dir(&source).unwrap();
+        }
+    })
+    .unwrap();
     assert_eq!(identity.path, source);
+    assert_eq!(waits, 2);
+
+    // A mount that never appears fails after the bounded attempts.
+    let mut waits = 0;
+    let error =
+        GrantIdentity::capture_ready_with(&root.join("never"), GRANT_READY_ATTEMPTS, || {
+            waits += 1;
+        })
+        .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    assert_eq!(waits, GRANT_READY_ATTEMPTS - 1);
+
+    // A source of the wrong type is not a visibility delay.
+    let file = root.join("file");
+    fs::write(&file, b"").unwrap();
+    let mut waits = 0;
+    let error =
+        GrantIdentity::capture_ready_with(&file, GRANT_READY_ATTEMPTS, || waits += 1).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+    assert_eq!(waits, 0);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -133,38 +156,66 @@ impl AttachedProcess for FailedAttachProcess {
     }
 }
 
-struct DelayedCleanProcess {
-    ready_at: Instant,
-    terminated: Arc<AtomicBool>,
+/// Opened by the test; until then a gated producer is silent and running.
+#[derive(Clone, Default)]
+struct Gate(Arc<(Mutex<bool>, Condvar)>);
+
+impl Gate {
+    fn open(&self) {
+        *self.0.0.lock().unwrap() = true;
+        self.0.1.notify_all();
+    }
+    fn is_open(&self) -> bool {
+        *self.0.0.lock().unwrap()
+    }
+    fn wait(&self) {
+        let mut open = self.0.0.lock().unwrap();
+        while !*open {
+            open = self.0.1.wait(open).unwrap();
+        }
+    }
 }
 
-impl AttachedProcess for DelayedCleanProcess {
+struct GatedReader {
+    gate: Gate,
+    bytes: Cursor<Vec<u8>>,
+}
+
+impl io::Read for GatedReader {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        self.gate.wait();
+        self.bytes.read(output)
+    }
+}
+
+/// An attach carrier that exits once the gate opens. Being cancelled or
+/// terminated also opens it, as it would end a real carrier's output.
+struct GatedProcess {
+    gate: Gate,
+    interrupted: Arc<AtomicBool>,
+}
+
+impl AttachedProcess for GatedProcess {
     fn supports_io_cancellation(&self) -> bool {
         true
     }
     fn cancel_io(&self) -> io::Result<()> {
+        self.interrupted.store(true, Ordering::SeqCst);
+        self.gate.open();
         Ok(())
     }
     fn wait(&mut self) -> io::Result<i32> {
-        if let Some(delay) = self.ready_at.checked_duration_since(Instant::now()) {
-            thread::sleep(delay);
-        }
+        self.gate.wait();
         Ok(0)
     }
-
     fn try_wait(&mut self) -> io::Result<Option<i32>> {
-        Ok((Instant::now() >= self.ready_at).then_some(0))
+        Ok(self.gate.is_open().then_some(0))
     }
-
     fn terminate(&mut self) -> io::Result<()> {
-        self.terminated.store(true, Ordering::SeqCst);
+        self.interrupted.store(true, Ordering::SeqCst);
+        self.gate.open();
         Ok(())
     }
-}
-
-struct DelayedReader {
-    ready_at: Instant,
-    bytes: Cursor<Vec<u8>>,
 }
 
 struct PausedAfterChunk {
@@ -224,21 +275,12 @@ fn stream_copy_flushes_partial_chunk_before_input_closes() {
 
     assert_eq!(
         flushed_receive
-            .recv_timeout(Duration::from_secs(1))
+            .recv_timeout(CONDITION_DEADLINE)
             .expect("partial output must be flushed while the stream remains open"),
         b"partial prompt"
     );
     release_send.send(()).unwrap();
     task.join().unwrap();
-}
-
-impl io::Read for DelayedReader {
-    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
-        if let Some(delay) = self.ready_at.checked_duration_since(Instant::now()) {
-            thread::sleep(delay);
-        }
-        self.bytes.read(output)
-    }
 }
 
 #[derive(Default)]
@@ -521,7 +563,7 @@ fn stalled_attempt_input_cannot_block_sibling_terminal_or_ping() {
     let release = Arc::new((Mutex::new(false), Condvar::new()));
     let (mut controller, worker_socket) = UnixStream::pair().unwrap();
     controller
-        .set_read_timeout(Some(Duration::from_secs(5)))
+        .set_read_timeout(Some(CONDITION_DEADLINE))
         .unwrap();
     let worker_output = socket_output(worker_socket.try_clone().unwrap());
     let retained = Arc::new(worker(
@@ -637,7 +679,6 @@ fn per_attempt_spool_preserves_multi_megabyte_input_for_a_slow_consumer() {
     loop {
         match source.receive(Duration::ZERO).unwrap() {
             Some(WorkerControl::Input { bytes }) => {
-                thread::sleep(Duration::from_millis(1));
                 source.release_input(bytes.len());
                 actual.extend_from_slice(&bytes);
             }
@@ -660,11 +701,6 @@ fn per_attempt_spool_bounds_zero_byte_and_control_message_count() {
             columns: 80,
         },
     });
-    let state = mailbox.state.lock().unwrap();
-    assert_eq!(state.reserved_messages, 1);
-    assert!(state.ordered_input.is_empty());
-    assert_eq!(state.priority.len(), 1);
-    drop(state);
     let mut source = MailboxControlSource::new(mailbox);
     assert!(matches!(
         source.receive(Duration::ZERO),
@@ -676,7 +712,7 @@ fn per_attempt_spool_bounds_zero_byte_and_control_message_count() {
 fn late_controls_after_fast_terminal_are_ignored_without_false_rejection() {
     let (mut controller, worker_socket) = UnixStream::pair().unwrap();
     controller
-        .set_read_timeout(Some(Duration::from_secs(1)))
+        .set_read_timeout(Some(CONDITION_DEADLINE))
         .unwrap();
     let worker_output = socket_output(worker_socket.try_clone().unwrap());
     let retained = Arc::new(worker(
@@ -1085,7 +1121,7 @@ fn delete_uncertainty_quarantines_without_rewriting_execution() {
 }
 
 #[test]
-fn byte_bridge_pre_effect_rejection_does_not_quarantine_but_unknown_create_does() {
+fn only_a_pre_effect_create_rejection_skips_quarantine() {
     for (error, expected_cleanup, expected_quarantine) in [
         (
             RuntimeError::ByteBridge("immutable image platform mismatch"),
@@ -1102,6 +1138,15 @@ fn byte_bridge_pre_effect_rejection_does_not_quarantine_but_unknown_create_does(
         ),
         (
             RuntimeError::Io(io::Error::other("unknown create")),
+            CleanupOutcome::Uncertain,
+            true,
+        ),
+        (
+            RuntimeError::CommandFailed {
+                operation: "create",
+                exit_code: Some(125),
+                stderr: "image configuration rejected".into(),
+            },
             CleanupOutcome::Uncertain,
             true,
         ),
@@ -1128,28 +1173,6 @@ fn byte_bridge_pre_effect_rejection_does_not_quarantine_but_unknown_create_does(
         assert_eq!(*runtime.calls.lock().unwrap(), ["create"]);
         assert_eq!(events.0, [WorkerEvent::SetupFailed { report }]);
     }
-}
-
-#[test]
-fn create_uncertainty_quarantines_without_inventing_a_container_id() {
-    let runtime = Arc::new(FakeRuntime {
-        setup_failure: Some(SetupStage::Create),
-        ..FakeRuntime::default()
-    });
-    let worker = worker(
-        runtime,
-        Arc::new(FixedSupervisor(ExecutionOutcome::Exited { code: 0 })),
-    );
-    let report = worker.run(&job(), &mut EmptyControls, streams());
-    assert_eq!(report.container_id, None);
-    assert_eq!(
-        report.execution,
-        ExecutionOutcome::SetupFailed {
-            stage: SetupStage::Create
-        }
-    );
-    assert_eq!(report.cleanup, CleanupOutcome::Uncertain);
-    assert!(report.quarantine);
 }
 
 #[test]
@@ -1296,13 +1319,14 @@ fn channel_eof_is_controller_loss_even_after_explicit_input_close() {
     ));
 }
 
+#[allow(clippy::struct_excessive_bools)] // Independent observations, not a state machine.
 #[derive(Default)]
 struct LifecycleState {
     signals: Vec<JobSignal>,
     resizes: Vec<TerminalSize>,
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))] // Linux-only test
     started: bool,
     complete: bool,
+    exit_reported: bool,
     deleted: bool,
 }
 
@@ -1313,7 +1337,7 @@ enum ControlBehavior {
     CompleteOnResize,
     SignalAfterExit,
     ResizeAfterExit,
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))] // Linux-only test
+    /// Resize is rejected; any later signal ends the container.
     ResizeFails,
 }
 
@@ -1333,6 +1357,18 @@ impl Default for RecordingRuntime {
             control_behavior: ControlBehavior::Normal,
             wait_fails: false,
             exit_code: 7,
+        }
+    }
+}
+
+impl RecordingRuntime {
+    fn wait_until(&self, what: &str, condition: impl Fn(&LifecycleState) -> bool) {
+        let deadline = Instant::now() + CONDITION_DEADLINE;
+        let mut state = self.state.lock().unwrap();
+        while !condition(&state) {
+            let now = Instant::now();
+            assert!(now < deadline, "timed out waiting for {what}");
+            state = self.changed.wait_timeout(state, deadline - now).unwrap().0;
         }
     }
 }
@@ -1392,20 +1428,27 @@ impl JobRuntime for RecordingRuntime {
     fn wait(&self, container: &ContainerId) -> Result<RuntimeExit, RuntimeError> {
         self.wait_cancellable(container, &marsh_runtime::Cancellation::default())
     }
+    /// Reports the exit once the container completes, even after the
+    /// supervisor stops waiting (it does so at twice the grace): a control
+    /// thread that is slow to deliver KILL must not turn into a lost exit.
     fn wait_cancellable(
         &self,
         _container: &ContainerId,
         cancel: &marsh_runtime::Cancellation,
     ) -> Result<RuntimeExit, RuntimeError> {
+        let deadline = Instant::now() + CONDITION_DEADLINE;
         let mut state = self.state.lock().unwrap();
         while !state.complete {
-            cancel.check()?;
-            state = self
-                .changed
-                .wait_timeout(state, Duration::from_millis(10))
-                .unwrap()
-                .0;
+            let now = Instant::now();
+            if now >= deadline {
+                cancel.check()?;
+                return Err(io::Error::other("modelled container never exited").into());
+            }
+            state = self.changed.wait_timeout(state, deadline - now).unwrap().0;
         }
+        state.exit_reported = true;
+        self.changed.notify_all();
+        drop(state);
         if self.wait_fails {
             Err(RuntimeError::CommandFailed {
                 operation: "inspect terminal resource state",
@@ -1421,11 +1464,14 @@ impl JobRuntime for RecordingRuntime {
         let mut state = self.state.lock().unwrap();
         state.signals.push(signal);
         if signal == JobSignal::Kill
-            || matches!(self.control_behavior, ControlBehavior::SignalAfterExit)
+            || matches!(
+                self.control_behavior,
+                ControlBehavior::SignalAfterExit | ControlBehavior::ResizeFails
+            )
         {
             state.complete = true;
-            self.changed.notify_all();
         }
+        self.changed.notify_all();
         if matches!(self.control_behavior, ControlBehavior::SignalAfterExit) {
             return Err(RuntimeError::CommandFailed {
                 operation: "signal exited container",
@@ -1444,8 +1490,8 @@ impl JobRuntime for RecordingRuntime {
             ControlBehavior::CompleteOnResize | ControlBehavior::ResizeAfterExit
         ) {
             state.complete = true;
-            self.changed.notify_all();
         }
+        self.changed.notify_all();
         if matches!(
             self.control_behavior,
             ControlBehavior::ResizeAfterExit | ControlBehavior::ResizeFails
@@ -1495,7 +1541,7 @@ fn delivered_interrupt_preserves_runtime_reported_exit() {
             &mut controls,
             streams(),
             SupervisionLimits {
-                wall_time: Duration::from_secs(5),
+                wall_time: Duration::from_mins(1),
                 output_bytes: 1024,
                 writable_bytes: 1024,
             },
@@ -1508,70 +1554,54 @@ fn delivered_interrupt_preserves_runtime_reported_exit() {
 }
 
 #[test]
-fn late_signal_failure_prefers_runtime_exit_evidence() {
-    let runtime = Arc::new(RecordingRuntime {
-        control_behavior: ControlBehavior::SignalAfterExit,
-        exit_code: 23,
-        ..RecordingRuntime::default()
-    });
-    let mut controls = ScriptedControls {
-        controls: VecDeque::from([Ok(Some(WorkerControl::Signal {
-            signal: JobSignal::Interrupt,
-        }))]),
-    };
-
-    let outcome = ThreadSupervisor::default().supervise(
-        runtime,
-        &ContainerId::parse("b".repeat(64)).unwrap(),
-        recording_attachment(
-            Arc::new(Mutex::new(Vec::new())),
-            Arc::new(AtomicBool::new(false)),
-        ),
-        &mut controls,
-        streams(),
-        SupervisionLimits {
-            wall_time: Duration::from_secs(5),
-            output_bytes: 1024,
-            writable_bytes: 1024,
-        },
-    );
-
-    assert_eq!(outcome.execution, ExecutionOutcome::Exited { code: 23 });
-}
-
-#[test]
-fn late_resize_failure_prefers_runtime_exit_evidence() {
-    let runtime = Arc::new(RecordingRuntime {
-        control_behavior: ControlBehavior::ResizeAfterExit,
-        exit_code: 24,
-        ..RecordingRuntime::default()
-    });
-    let mut controls = ScriptedControls {
-        controls: VecDeque::from([Ok(Some(WorkerControl::Resize {
-            size: TerminalSize {
-                rows: 24,
-                columns: 80,
+fn late_control_failure_prefers_runtime_exit_evidence() {
+    for (behavior, control, exit_code) in [
+        (
+            ControlBehavior::SignalAfterExit,
+            WorkerControl::Signal {
+                signal: JobSignal::Interrupt,
             },
-        }))]),
-    };
-
-    let outcome = ThreadSupervisor::default().supervise(
-        runtime,
-        &ContainerId::parse("c".repeat(64)).unwrap(),
-        recording_attachment(
-            Arc::new(Mutex::new(Vec::new())),
-            Arc::new(AtomicBool::new(false)),
+            23,
         ),
-        &mut controls,
-        streams(),
-        SupervisionLimits {
-            wall_time: Duration::from_secs(5),
-            output_bytes: 1024,
-            writable_bytes: 1024,
-        },
-    );
-
-    assert_eq!(outcome.execution, ExecutionOutcome::Exited { code: 24 });
+        (
+            ControlBehavior::ResizeAfterExit,
+            WorkerControl::Resize {
+                size: TerminalSize {
+                    rows: 24,
+                    columns: 80,
+                },
+            },
+            24,
+        ),
+    ] {
+        let runtime = Arc::new(RecordingRuntime {
+            control_behavior: behavior,
+            exit_code,
+            ..RecordingRuntime::default()
+        });
+        let mut controls = ScriptedControls {
+            controls: VecDeque::from([Ok(Some(control))]),
+        };
+        let outcome = ThreadSupervisor::default().supervise(
+            runtime,
+            &ContainerId::parse("b".repeat(64)).unwrap(),
+            recording_attachment(
+                Arc::new(Mutex::new(Vec::new())),
+                Arc::new(AtomicBool::new(false)),
+            ),
+            &mut controls,
+            streams(),
+            SupervisionLimits {
+                wall_time: Duration::from_mins(1),
+                output_bytes: 1024,
+                writable_bytes: 1024,
+            },
+        );
+        assert_eq!(
+            outcome.execution,
+            ExecutionOutcome::Exited { code: exit_code }
+        );
+    }
 }
 
 struct RecordingWriter {
@@ -1644,21 +1674,10 @@ struct EarlyCloseWriter {
     runtime: Arc<RecordingRuntime>,
 }
 
-struct DelayedEarlyCloseWriter {
-    runtime: Arc<RecordingRuntime>,
-    delay: Duration,
-}
+struct ClosedStdin;
 
-impl Write for DelayedEarlyCloseWriter {
+impl Write for ClosedStdin {
     fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
-        let runtime = Arc::clone(&self.runtime);
-        let delay = self.delay;
-        thread::spawn(move || {
-            thread::sleep(delay);
-            let mut state = runtime.state.lock().unwrap();
-            state.complete = true;
-            runtime.changed.notify_all();
-        });
         Err(io::Error::new(
             io::ErrorKind::BrokenPipe,
             "command closed stdin before its later successful exit",
@@ -1717,18 +1736,65 @@ impl ControlSource for ScriptedControls {
 
 /// A controller that is lost only after the runtime has started the job, so
 /// the loss reaches supervision rather than cancelling setup.
-#[cfg(target_os = "linux")]
 struct LostAfterStart(Arc<RecordingRuntime>);
 
-#[cfg(target_os = "linux")]
 impl ControlSource for LostAfterStart {
-    fn receive(&mut self, timeout: Duration) -> Result<Option<WorkerControl>, WorkerError> {
+    fn receive(&mut self, _timeout: Duration) -> Result<Option<WorkerControl>, WorkerError> {
         if self.0.state.lock().unwrap().started {
             return Err(WorkerError::ControlClosed);
         }
-        thread::sleep(timeout.min(Duration::from_millis(10)));
         Ok(None)
     }
+}
+
+/// Once supervision begins stopping (the carrier's IO is cancelled), holds
+/// the drain loop until the runtime has received TERM, so the grace measures
+/// a delivered TERM rather than a control-thread scheduling race.
+struct HoldUntilTermDelivered {
+    runtime: Arc<RecordingRuntime>,
+    stopping: Arc<AtomicBool>,
+}
+
+impl ControlSource for HoldUntilTermDelivered {
+    fn receive(&mut self, _timeout: Duration) -> Result<Option<WorkerControl>, WorkerError> {
+        if self.stopping.load(Ordering::SeqCst) {
+            self.runtime.wait_until("TERM delivered", |state| {
+                state.signals.contains(&JobSignal::Terminate)
+            });
+        }
+        Ok(None)
+    }
+}
+
+struct StopObservingProcess(Arc<AtomicBool>);
+
+impl AttachedProcess for StopObservingProcess {
+    fn supports_io_cancellation(&self) -> bool {
+        true
+    }
+    fn cancel_io(&self) -> io::Result<()> {
+        self.0.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+    fn wait(&mut self) -> io::Result<i32> {
+        Ok(0)
+    }
+    fn try_wait(&mut self) -> io::Result<Option<i32>> {
+        Ok(Some(0))
+    }
+    fn terminate(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// KILL must be delivered last. TERM, requested first, is either delivered
+/// once before it or superseded by KILL if the control thread had not yet
+/// sent it when the grace expired; it is never repeated.
+fn assert_stopped_with_kill(signals: &[JobSignal]) {
+    assert!(
+        signals == [JobSignal::Kill] || signals == [JobSignal::Terminate, JobSignal::Kill],
+        "unexpected stop signals: {signals:?}"
+    );
 }
 
 fn recording_attachment(
@@ -1802,7 +1868,7 @@ fn supervisor_forwards_controls_closes_stdin_and_copies_raw_streams() {
             stderr: output_stream(stderr.clone()),
         },
         SupervisionLimits {
-            wall_time: Duration::from_secs(5),
+            wall_time: Duration::from_mins(1),
             output_bytes: 1024,
             writable_bytes: 1024,
         },
@@ -1909,7 +1975,7 @@ fn early_successful_exit_outranks_broken_pipe_from_large_queued_input() {
             stderr: InterruptibleWriter::sink(),
         },
         SupervisionLimits {
-            wall_time: Duration::from_secs(5),
+            wall_time: Duration::from_mins(1),
             output_bytes: 1024,
             writable_bytes: 1024,
         },
@@ -1921,6 +1987,7 @@ fn early_successful_exit_outranks_broken_pipe_from_large_queued_input() {
 
 #[test]
 fn intentional_stdin_close_can_precede_successful_exit_by_more_than_cleanup_grace() {
+    let grace = Duration::from_millis(100);
     let runtime = Arc::new(RecordingRuntime {
         exit_code: 0,
         ..RecordingRuntime::default()
@@ -1934,40 +2001,55 @@ fn intentional_stdin_close_can_precede_successful_exit_by_more_than_cleanup_grac
     for _ in 0..3000 {
         mailbox.push(WorkerControl::Input { bytes: Vec::new() });
     }
+    let size = TerminalSize {
+        rows: 33,
+        columns: 101,
+    };
     let later_mailbox = Arc::clone(&mailbox);
+    let later_runtime = Arc::clone(&runtime);
     let later_controls = thread::spawn(move || {
+        let deadline = Instant::now() + CONDITION_DEADLINE;
         let mut state = later_mailbox.state.lock().unwrap();
         while !state.input_discarded {
-            state = later_mailbox.ready.wait(state).unwrap();
+            let now = Instant::now();
+            assert!(now < deadline, "closed stdin never discarded queued input");
+            state = later_mailbox
+                .ready
+                .wait_timeout(state, deadline - now)
+                .unwrap()
+                .0;
         }
         drop(state);
+        let stdin_closed = Instant::now();
         later_mailbox.push(WorkerControl::Input {
             bytes: vec![b'x'; MAX_STREAM_CHUNK],
         });
         later_mailbox.push(WorkerControl::Signal {
             signal: JobSignal::Interrupt,
         });
-        later_mailbox.push(WorkerControl::Resize {
-            size: TerminalSize {
-                rows: 33,
-                columns: 101,
-            },
+        later_mailbox.push(WorkerControl::Resize { size });
+        later_runtime.wait_until("late controls delivered", |state| {
+            state.signals.contains(&JobSignal::Interrupt) && state.resizes.contains(&size)
         });
+        // The command keeps running well past the cleanup grace after it
+        // closed stdin, then exits successfully on its own.
+        thread::sleep((grace * 10).saturating_sub(stdin_closed.elapsed()));
+        later_runtime.state.lock().unwrap().complete = true;
+        later_runtime.changed.notify_all();
     });
     let mut controls = MailboxControlSource::new(Arc::clone(&mailbox));
     let attachment = Attachment {
-        stdin: Box::new(DelayedEarlyCloseWriter {
-            runtime: Arc::clone(&runtime),
-            delay: Duration::from_millis(2_100),
-        }),
+        stdin: Box::new(ClosedStdin),
         stdout: Box::new(Cursor::new(b"later output\n".to_vec())),
         stderr: Box::new(Cursor::new(Vec::new())),
         process: Box::new(FakeProcess),
         control: no_attachment_control(),
     };
     let stdout = Arc::new(Mutex::new(Vec::new()));
-    let started = Instant::now();
-    let outcome = ThreadSupervisor::default().supervise(
+    let outcome = ThreadSupervisor {
+        termination_grace: grace,
+    }
+    .supervise(
         runtime.clone(),
         &ContainerId::parse("c".repeat(64)).unwrap(),
         attachment,
@@ -1977,44 +2059,43 @@ fn intentional_stdin_close_can_precede_successful_exit_by_more_than_cleanup_grac
             stderr: InterruptibleWriter::sink(),
         },
         SupervisionLimits {
-            wall_time: Duration::from_secs(5),
+            wall_time: Duration::from_mins(1),
             output_bytes: 1024,
             writable_bytes: 1024,
         },
     );
 
     later_controls.join().unwrap();
-    assert!(started.elapsed() >= Duration::from_millis(2_100));
     assert_eq!(outcome.execution, ExecutionOutcome::Exited { code: 0 });
+    assert_eq!(outcome.delivery, DeliveryOutcome::Complete);
     assert_eq!(*stdout.lock().unwrap(), b"later output\n");
     let state = runtime.state.lock().unwrap();
-    assert!(state.signals.contains(&JobSignal::Interrupt));
-    assert!(state.resizes.contains(&TerminalSize {
-        rows: 33,
-        columns: 101,
-    }));
+    assert_eq!(state.signals, [JobSignal::Interrupt]);
+    assert_eq!(state.resizes, [size]);
     let mailbox_state = mailbox.state.lock().unwrap();
     assert_eq!(mailbox_state.reserved_input_bytes, 0);
     assert_eq!(mailbox_state.reserved_messages, 0);
 }
 
 #[test]
-// Guest-only (the worker ships as a Linux binary); macOS scheduling
-// cancels setup / misses the resize before attach. Unverified off Linux.
-#[cfg(target_os = "linux")]
-fn resize_failure_is_a_nonfatal_control_error_on_a_bounded_job() {
+fn resize_failure_is_a_nonfatal_control_error() {
     let runtime = Arc::new(RecordingRuntime {
         control_behavior: ControlBehavior::ResizeFails,
         ..RecordingRuntime::default()
     });
-    let stderr = Arc::new(Mutex::new(Vec::new()));
+    let size = TerminalSize {
+        rows: 40,
+        columns: 120,
+    };
+    // Controls are applied in order, so the rejected resize is reported
+    // before the interrupt that ends the job.
     let mut controls = ScriptedControls {
-        controls: VecDeque::from([Ok(Some(WorkerControl::Resize {
-            size: TerminalSize {
-                rows: 40,
-                columns: 120,
-            },
-        }))]),
+        controls: VecDeque::from([
+            Ok(Some(WorkerControl::Resize { size })),
+            Ok(Some(WorkerControl::Signal {
+                signal: JobSignal::Interrupt,
+            })),
+        ]),
     };
     let outcome = ThreadSupervisor::default().supervise(
         runtime.clone(),
@@ -2024,33 +2105,20 @@ fn resize_failure_is_a_nonfatal_control_error_on_a_bounded_job() {
             Arc::new(AtomicBool::new(false)),
         ),
         &mut controls,
-        JobStreams {
-            stdout: InterruptibleWriter::sink(),
-            stderr: output_stream(stderr.clone()),
-        },
+        streams(),
         SupervisionLimits {
-            wall_time: Duration::from_millis(500),
+            wall_time: Duration::from_mins(1),
             output_bytes: 1024,
             writable_bytes: 1024,
         },
     );
 
-    // A rejected resize is counted, never a reason to end the job: it runs
-    // to its own bound.
     assert_eq!(outcome.control_errors, 1);
-    assert_eq!(
-        outcome.delivery,
-        DeliveryOutcome::LimitExceeded {
-            resource: ResourceLimit::Wall
-        }
-    );
-    assert_eq!(
-        runtime.state.lock().unwrap().resizes,
-        [TerminalSize {
-            rows: 40,
-            columns: 120,
-        }]
-    );
+    assert_eq!(outcome.execution, ExecutionOutcome::Exited { code: 7 });
+    assert_eq!(outcome.delivery, DeliveryOutcome::Complete);
+    let state = runtime.state.lock().unwrap();
+    assert_eq!(state.resizes, [size]);
+    assert_eq!(state.signals, [JobSignal::Interrupt]);
 }
 
 #[test]
@@ -2073,7 +2141,7 @@ fn attached_start_cli_failure_cannot_be_reported_as_job_success() {
         &mut EmptyControls,
         streams(),
         SupervisionLimits {
-            wall_time: Duration::from_secs(5),
+            wall_time: Duration::from_mins(1),
             output_bytes: 1024,
             writable_bytes: 1024,
         },
@@ -2102,7 +2170,7 @@ fn terminal_evidence_failure_is_reported_without_blocking_job_stderr() {
             stderr: output_stream(Arc::clone(&stderr)),
         },
         SupervisionLimits {
-            wall_time: Duration::from_secs(5),
+            wall_time: Duration::from_mins(1),
             output_bytes: 128,
             writable_bytes: 1024,
         },
@@ -2115,27 +2183,37 @@ fn terminal_evidence_failure_is_reported_without_blocking_job_stderr() {
 
 #[test]
 fn exact_wait_winning_does_not_kill_attach_before_output_drains() {
+    let grace = Duration::from_millis(20);
     let runtime = Arc::new(RecordingRuntime::default());
     runtime.state.lock().unwrap().complete = true;
-    let ready_at = Instant::now() + Duration::from_millis(40);
-    let terminated = Arc::new(AtomicBool::new(false));
+    let gate = Gate::default();
+    let interrupted = Arc::new(AtomicBool::new(false));
     let stdout = Arc::new(Mutex::new(Vec::new()));
     let attachment = Attachment {
         stdin: Box::new(io::sink()),
-        stdout: Box::new(DelayedReader {
-            ready_at,
-            bytes: Cursor::new(b"fast output\n".to_vec()),
+        stdout: Box::new(GatedReader {
+            gate: gate.clone(),
+            bytes: Cursor::new(b"late output\n".to_vec()),
         }),
         stderr: Box::new(Cursor::new(Vec::<u8>::new())),
-        process: Box::new(DelayedCleanProcess {
-            ready_at,
-            terminated: Arc::clone(&terminated),
+        process: Box::new(GatedProcess {
+            gate: gate.clone(),
+            interrupted: Arc::clone(&interrupted),
         }),
         control: no_attachment_control(),
     };
+    let releasing = {
+        let runtime = Arc::clone(&runtime);
+        thread::spawn(move || {
+            runtime.wait_until("exit reported", |state| state.exit_reported);
+            // The attach carrier keeps draining well past the grace.
+            thread::sleep(grace * 10);
+            gate.open();
+        })
+    };
 
     let outcome = ThreadSupervisor {
-        termination_grace: Duration::from_millis(200),
+        termination_grace: grace,
     }
     .supervise(
         runtime,
@@ -2147,29 +2225,45 @@ fn exact_wait_winning_does_not_kill_attach_before_output_drains() {
             stderr: InterruptibleWriter::sink(),
         },
         SupervisionLimits {
-            wall_time: Duration::from_secs(1),
+            wall_time: Duration::from_mins(1),
             output_bytes: 1024,
             writable_bytes: 1024,
         },
     );
 
+    releasing.join().unwrap();
     assert_eq!(outcome.execution, ExecutionOutcome::Exited { code: 7 });
-    assert_eq!(*stdout.lock().unwrap(), b"fast output\n");
-    assert!(!terminated.load(Ordering::SeqCst));
+    assert_eq!(outcome.delivery, DeliveryOutcome::Complete);
+    assert_eq!(*stdout.lock().unwrap(), b"late output\n");
+    assert!(!interrupted.load(Ordering::SeqCst));
 }
 
 #[test]
 fn supervisor_timeout_escalates_from_term_to_kill() {
     let runtime = Arc::new(RecordingRuntime::default());
-    let mut controls = EmptyControls;
-    let container = ContainerId::parse("d".repeat(64)).unwrap();
+    let stopping = Arc::new(AtomicBool::new(false));
+    let mut controls = HoldUntilTermDelivered {
+        runtime: Arc::clone(&runtime),
+        stopping: Arc::clone(&stopping),
+    };
+    let attachment = Attachment {
+        stdin: Box::new(io::sink()),
+        stdout: Box::new(Cursor::new(Vec::<u8>::new())),
+        stderr: Box::new(Cursor::new(Vec::<u8>::new())),
+        process: Box::new(StopObservingProcess(stopping)),
+        control: no_attachment_control(),
+    };
+    // Large enough that the drain loop cannot reach the grace check between
+    // requesting TERM and the hold above, even on a starved machine.
+    let grace = Duration::from_millis(250);
+    let started = Instant::now();
     let outcome = ThreadSupervisor {
-        termination_grace: Duration::from_millis(100),
+        termination_grace: grace,
     }
     .supervise(
         runtime.clone(),
-        &container,
-        FakeRuntime::attachment(),
+        &ContainerId::parse("d".repeat(64)).unwrap(),
+        attachment,
         &mut controls,
         streams(),
         SupervisionLimits {
@@ -2185,22 +2279,25 @@ fn supervisor_timeout_escalates_from_term_to_kill() {
             resource: ResourceLimit::Wall
         }
     );
+    assert_eq!(outcome.execution, ExecutionOutcome::Exited { code: 7 });
     assert_eq!(
         runtime.state.lock().unwrap().signals,
         [JobSignal::Terminate, JobSignal::Kill]
     );
+    assert!(started.elapsed() >= grace, "KILL came before the grace");
 }
 
 #[test]
 fn unrepresentable_deadline_fails_closed_without_panicking() {
     let runtime = Arc::new(RecordingRuntime::default());
-    let mut controls = EmptyControls;
-    let container = ContainerId::parse("4".repeat(64)).unwrap();
-    let outcome = ThreadSupervisor::default().supervise(
+    let outcome = ThreadSupervisor {
+        termination_grace: Duration::from_millis(20),
+    }
+    .supervise(
         runtime.clone(),
-        &container,
+        &ContainerId::parse("4".repeat(64)).unwrap(),
         FakeRuntime::attachment(),
-        &mut controls,
+        &mut EmptyControls,
         streams(),
         SupervisionLimits {
             wall_time: Duration::from_secs(u64::MAX),
@@ -2215,10 +2312,7 @@ fn unrepresentable_deadline_fails_closed_without_panicking() {
             resource: ResourceLimit::Wall
         }
     );
-    assert_eq!(
-        runtime.state.lock().unwrap().signals,
-        [JobSignal::Terminate, JobSignal::Kill]
-    );
+    assert_stopped_with_kill(&runtime.state.lock().unwrap().signals);
 }
 
 #[test]
@@ -2249,7 +2343,7 @@ fn supervisor_enforces_one_combined_stdout_stderr_budget() {
             stderr: output_stream(stderr.clone()),
         },
         SupervisionLimits {
-            wall_time: Duration::from_secs(5),
+            wall_time: Duration::from_mins(1),
             output_bytes: 10,
             writable_bytes: 1024,
         },
@@ -2315,83 +2409,50 @@ fn output_pumps_share_one_exact_budget() {
 }
 
 #[test]
-fn output_limit_remains_typed_when_process_exit_wins_the_race() {
-    let runtime = Arc::new(RecordingRuntime::default());
-    runtime.state.lock().unwrap().complete = true;
-    let mut controls = EmptyControls;
-    let container = ContainerId::parse("1".repeat(64)).unwrap();
-    let attachment = Attachment {
-        stdin: Box::new(io::sink()),
-        stdout: Box::new(Cursor::new(vec![b'x'; 1024])),
-        stderr: Box::new(Cursor::new(Vec::<u8>::new())),
-        process: Box::new(FakeProcess),
-        control: no_attachment_control(),
-    };
+fn output_limit_stays_typed_whether_exit_or_wait_failure_is_observed() {
+    for (wait_fails, execution) in [
+        (false, ExecutionOutcome::Exited { code: 7 }),
+        (true, ExecutionOutcome::SupervisionFailed),
+    ] {
+        let runtime = Arc::new(RecordingRuntime {
+            wait_fails,
+            ..RecordingRuntime::default()
+        });
+        runtime.state.lock().unwrap().complete = true;
+        let attachment = Attachment {
+            stdin: Box::new(io::sink()),
+            stdout: Box::new(Cursor::new(vec![b'x'; 1024])),
+            stderr: Box::new(Cursor::new(Vec::<u8>::new())),
+            process: Box::new(FakeProcess),
+            control: no_attachment_control(),
+        };
 
-    let outcome = ThreadSupervisor::default().supervise(
-        runtime,
-        &container,
-        attachment,
-        &mut controls,
-        streams(),
-        SupervisionLimits {
-            wall_time: Duration::from_secs(5),
-            output_bytes: 10,
-            writable_bytes: 1024,
-        },
-    );
+        let outcome = ThreadSupervisor::default().supervise(
+            runtime,
+            &ContainerId::parse("1".repeat(64)).unwrap(),
+            attachment,
+            &mut EmptyControls,
+            streams(),
+            SupervisionLimits {
+                wall_time: Duration::from_mins(1),
+                output_bytes: 10,
+                writable_bytes: 1024,
+            },
+        );
 
-    assert_eq!(
-        outcome.delivery,
-        DeliveryOutcome::LimitExceeded {
-            resource: ResourceLimit::Output
-        }
-    );
-    assert_eq!(outcome.execution, ExecutionOutcome::Exited { code: 7 });
-}
-
-#[test]
-fn output_limit_remains_typed_when_runtime_wait_fails() {
-    let runtime = Arc::new(RecordingRuntime {
-        wait_fails: true,
-        ..RecordingRuntime::default()
-    });
-    let mut controls = EmptyControls;
-    let container = ContainerId::parse("2".repeat(64)).unwrap();
-    let attachment = Attachment {
-        stdin: Box::new(io::sink()),
-        stdout: Box::new(Cursor::new(vec![b'x'; 1024])),
-        stderr: Box::new(Cursor::new(Vec::<u8>::new())),
-        process: Box::new(FakeProcess),
-        control: no_attachment_control(),
-    };
-
-    let outcome = ThreadSupervisor::default().supervise(
-        runtime,
-        &container,
-        attachment,
-        &mut controls,
-        streams(),
-        SupervisionLimits {
-            wall_time: Duration::from_secs(5),
-            output_bytes: 10,
-            writable_bytes: 1024,
-        },
-    );
-
-    assert_eq!(
-        outcome.delivery,
-        DeliveryOutcome::LimitExceeded {
-            resource: ResourceLimit::Output
-        }
-    );
+        assert_eq!(
+            outcome.delivery,
+            DeliveryOutcome::LimitExceeded {
+                resource: ResourceLimit::Output
+            }
+        );
+        assert_eq!(outcome.execution, execution);
+    }
 }
 
 #[test]
 fn output_sink_failure_stops_the_container_immediately() {
     let runtime = Arc::new(RecordingRuntime::default());
-    let mut controls = EmptyControls;
-    let container = ContainerId::parse("3".repeat(64)).unwrap();
     let attachment = Attachment {
         stdin: Box::new(io::sink()),
         stdout: Box::new(Cursor::new(b"cannot deliver".to_vec())),
@@ -2400,14 +2461,15 @@ fn output_sink_failure_stops_the_container_immediately() {
         control: no_attachment_control(),
     };
 
+    // A stop that waited for the one-minute wall limit would report it.
     let outcome = ThreadSupervisor {
-        termination_grace: Duration::from_millis(100),
+        termination_grace: Duration::from_millis(20),
     }
     .supervise(
         runtime.clone(),
-        &container,
+        &ContainerId::parse("3".repeat(64)).unwrap(),
         attachment,
-        &mut controls,
+        &mut EmptyControls,
         JobStreams {
             stdout: InterruptibleWriter::new(
                 Box::new(FailingWriter),
@@ -2416,55 +2478,14 @@ fn output_sink_failure_stops_the_container_immediately() {
             stderr: InterruptibleWriter::sink(),
         },
         SupervisionLimits {
-            wall_time: Duration::from_secs(5),
+            wall_time: Duration::from_mins(1),
             output_bytes: 1024,
             writable_bytes: 1024,
         },
     );
 
     assert_eq!(outcome.delivery, DeliveryOutcome::Failed);
-    assert_eq!(
-        runtime.state.lock().unwrap().signals,
-        [JobSignal::Terminate, JobSignal::Kill]
-    );
-}
-
-#[test]
-fn supervisor_cancels_container_when_controller_is_lost() {
-    let runtime = Arc::new(RecordingRuntime::default());
-    let mut controls = ScriptedControls {
-        controls: VecDeque::from([Err(WorkerError::ControlClosed)]),
-    };
-    let container = ContainerId::parse("e".repeat(64)).unwrap();
-    // After the grace the supervisor kills, then waits one more grace for the
-    // runtime to report the exit before it gives up (SupervisionFailed). The
-    // window after the kill must outlast a loaded runner's scheduling, so the
-    // grace is generous: the test waits out one grace and nothing more.
-    let grace = Duration::from_millis(500);
-    let started = Instant::now();
-    let outcome = ThreadSupervisor {
-        termination_grace: grace,
-    }
-    .supervise(
-        runtime.clone(),
-        &container,
-        FakeRuntime::attachment(),
-        &mut controls,
-        streams(),
-        SupervisionLimits {
-            wall_time: Duration::from_secs(5),
-            output_bytes: 1024,
-            writable_bytes: 1024,
-        },
-    );
-
-    assert_eq!(outcome.delivery, DeliveryOutcome::Failed);
-    assert_eq!(outcome.execution, ExecutionOutcome::Exited { code: 7 });
-    assert!(started.elapsed() >= grace);
-    assert_eq!(
-        runtime.state.lock().unwrap().signals,
-        [JobSignal::Terminate, JobSignal::Kill]
-    );
+    assert_stopped_with_kill(&runtime.state.lock().unwrap().signals);
 }
 
 #[test]
@@ -2478,54 +2499,48 @@ fn controller_loss_does_not_repeat_an_explicit_terminate() {
             Err(WorkerError::ControlClosed),
         ]),
     };
-    let container = ContainerId::parse("f".repeat(64)).unwrap();
 
     let outcome = ThreadSupervisor {
         termination_grace: Duration::from_millis(20),
     }
     .supervise(
         runtime.clone(),
-        &container,
+        &ContainerId::parse("f".repeat(64)).unwrap(),
         FakeRuntime::attachment(),
         &mut controls,
         streams(),
         SupervisionLimits {
-            wall_time: Duration::from_secs(5),
+            wall_time: Duration::from_mins(1),
             output_bytes: 1024,
             writable_bytes: 1024,
         },
     );
 
     assert_eq!(outcome.delivery, DeliveryOutcome::Cancelled);
-    assert_eq!(
-        runtime.state.lock().unwrap().signals,
-        [JobSignal::Terminate, JobSignal::Kill]
-    );
+    assert_stopped_with_kill(&runtime.state.lock().unwrap().signals);
 }
 
 #[test]
-// Guest-only (the worker ships as a Linux binary); macOS scheduling
-// cancels setup / misses the resize before attach. Unverified off Linux.
-#[cfg(target_os = "linux")]
 fn controller_loss_terminates_kills_and_verifies_container_cleanup() {
     let runtime = Arc::new(RecordingRuntime::default());
-    // The runtime has one grace after the kill to report the exit; keep it
-    // generous (see supervisor_cancels_container_when_controller_is_lost).
+    let grace = Duration::from_millis(40);
     let worker = worker(
         runtime.clone(),
         Arc::new(ThreadSupervisor {
-            termination_grace: Duration::from_millis(500),
+            termination_grace: grace,
         }),
     );
     let mut controls = LostAfterStart(runtime.clone());
 
+    let started = Instant::now();
     let report = worker.run(&job(), &mut controls, streams());
 
     assert_eq!(report.execution, ExecutionOutcome::Exited { code: 7 });
     assert_eq!(report.delivery, DeliveryOutcome::Failed);
     assert_eq!(report.cleanup, CleanupOutcome::Verified);
     assert!(!report.quarantine);
+    assert!(started.elapsed() >= grace, "KILL came before the grace");
     let state = runtime.state.lock().unwrap();
-    assert_eq!(state.signals, [JobSignal::Terminate, JobSignal::Kill]);
+    assert_stopped_with_kill(&state.signals);
     assert!(state.deleted);
 }

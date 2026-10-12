@@ -40,44 +40,58 @@ KIT_REPOSITORY_NAME_PREFIX ?=
 KIT_TAG ?=
 FORMULA_CHANNEL ?= stable
 GITHUB_REPOSITORY ?= mcavage/marsh
+# make test (CI runs the same targets with NEXTEST_PROFILE=ci).
+NEXTEST_PROFILE ?= default
+TEST_BIN = $(abspath $(TARGET_DIR))/debug
+PUBLISHER_VENV ?= $(abspath $(TARGET_DIR))/publisher-venv
+MODEL_FLAGS ?= --quick
+MODEL_CACHE ?= $(abspath $(TARGET_DIR))/tlc-cache
+TLA2TOOLS_JAR ?= $(abspath $(TARGET_DIR))/tla2tools-1.8.0.jar
+TLA2TOOLS_SHA256 := 7beec0f04818732a62fa193731711a99aa4f11279499b2360a7d156c519ea78d
+# The callers of the built binaries, #[ignore]d without them: the MCP load
+# callers (MARSH_LOAD_TEST_BIN, a built marsh beside marsh-mcp and marshd) and
+# the real-CLI ACP callers (MARSH_ACP_CALLER_BIN). Every #[ignore]d test is one.
+BINARY_CALLERS := (package(marsh-mcp) & binary(mcp_load)) | (package(marsh-daemon) & test(/^mcp_load_tests::/)) \
+	| (package(marsh-acp) & binary(fixture_caller))
+# The binary callers' host publications write under $HOME: give them their own.
+CALLER_HOME = $(abspath $(TARGET_DIR))/caller-home
 # Export serving is a Mac host boundary, not a Linux contributor capability.
-# Publication CLI runs once in mcp-load-callers, not again in discovery.
-MCP_TEST_FILES := $(filter-out test_publication_cli.py,$(if $(filter Darwin,$(shell uname -s)),$(notdir $(wildcard tests/mcp/test_*.py)),test_stdio_protocol.py test_guest_export_boundary.py))
+MCP_TEST_FILES := test_stdio_protocol.py test_guest_export_boundary.py test_publication_cli.py \
+	$(if $(filter Darwin,$(shell uname -s)),test_export_stdio_protocol.py)
 
-.PHONY: help build build-host build-linux prepare-shell-image test onboarding mcp mcp-test kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf dev-check verify-static man site site-check dist dist-local fixture-ref formula
+.PHONY: help build build-host build-linux prepare-shell-image test test-rust test-harness test-model mcp kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf man site site-check dist dist-local fixture-ref formula
 
 help:
 	@printf '%s\n' \
+		'Tests (CONTRIBUTING.md):' \
+		'make test              The VM-free gate CI runs: test-rust, test-harness, test-model' \
+		'make test-rust         fmt, clippy, every workspace test (cargo-nextest), doctests, MCP load callers' \
+		'make test-harness      Python/shell harnesses: onboarding, MCP callers, publisher, tool self-tests' \
+		'make test-model        Quick TLA+ sweep (MODEL_FLAGS= for every config)' \
+		'make check [DEV_KIT=ref]  Mac: fast real smoke of the installed dev product (warm scope in target/check)' \
+		'make check-reset       Mac: stop the make check scope and delete target/check' \
+		'make verify [DEV_KIT=ref]  Mac, before pushing: check + the highest-signal sbx suites, concurrently' \
+		'make regress [DEV_KIT=ref]  Mac, before a release: every sbx suite, then make test with the full model' \
+		'                        ONLY=/SKIP= suites, families or scenario ids; REGRESS_JOBS=1 one at a time' \
+		'make acceptance        Build a fresh candidate and run the full local-v3 stock-SBX gate (release run)' \
+		'make acceptance-smoke  Build a fresh candidate and run the stock-SBX smoke gate' \
+		'make perf              Measure the assembled warm registered-command path' \
+		'' \
+		'Build and install:' \
+		'make dev               Build everything (host, guest, images, Kits) and install the dev product in $$(DEV_PREFIX)' \
 		'make build             Build artifacts and import the repaired shell locally (no push)' \
 		'make prepare-shell-image  Prepare locally; SHELL_IMAGE_REPOSITORY opts into publication' \
-		'make test              Run format, lint, and workspace tests' \
-		'make verify-static     Fast VM-free gate: fmt, clippy, all Rust tests (nextest if installed), quick TLA+ sweep' \
-		'make onboarding        Run credential-free production shell journeys' \
-		'make mcp               Run installed host stdio MCP server for this workspace' \
-		'make mcp-test          Run the host MCP server tests' \
 		'make install           Install marsh (SBX remains Homebrew-managed)' \
 		'make uninstall         Remove installed marsh files under PREFIX; preserve user state' \
+		'make mcp               Run installed host stdio MCP server for this workspace' \
 		'make kits              Validate native Kit v3 source with Buildx' \
 		'make kit-publish KIT_REPOSITORY_PREFIX=registry/repository  Publish Kits and pin their digests' \
 		'make kit-publish-fixture KIT_REPOSITORY_PREFIX=registry/repository  Publish acceptance fixture' \
-		'make dev-check         Run focused checks in a Linux contributor or development shell' \
+		'make fixture-ref       Fetch the published acceptance fixture ref into $$(FIXTURE_REF_FILE)' \
 		'make man               Render man pages into $$(MAN_DIR)' \
 		'make site              Build the runmar.sh site into $$(SITE_DIR) and check its links' \
+		'make site-check        make site, plus every relative link in tracked Markdown' \
 		'make dist              Package a release tarball (needs pinned KIT_COMMANDS and shell-image)' \
-		'make fixture-ref       Fetch the published acceptance fixture ref into $$(FIXTURE_REF_FILE)' \
-		'make acceptance        Run the full local-v3 stock-SBX gate' \
-		'make acceptance-smoke  Run the assembled stock-SBX smoke gate' \
-		'make perf              Measure the assembled warm registered-command path' \
-		'make dev               Build everything (host, guest, images, Kits) and install the dev product in $$(DEV_PREFIX)' \
-		'make check [DEV_KIT=ref]  Fast real smoke of the installed dev product (warm scope in target/check)' \
-		'make check-reset       Stop the make check scope and delete target/check' \
-		'make verify [DEV_KIT=ref]  Pre-push gate: check + the highest-signal sbx suites, concurrently' \
-		'make regress [DEV_KIT=ref]  Every sbx-backed suite, concurrently, then the host suites (before a release)' \
-		'make regress-serial [DEV_KIT=ref]  The same suites strictly one at a time (debugging)' \
-		'make dev-smoke [DEV_KIT=ref]  Run the acceptance smoke against the installed dev product (no receipt)' \
-		'make dev-acceptance DEV_KIT=ref  Run the full acceptance gate against the installed dev product' \
-		'make dev-split DEV_KIT=ref  Run the split/join observation against the installed dev product' \
-		'make dev-processes DEV_KIT=ref  Run the nested-process acceptance against the installed dev product' \
 		'make dev-inner         Inside marsh --dev: build a Linux candidate into $$MARSH_DEV_SCRATCH/artifacts' \
 		'make dev-inner-run CMD=...  Inside marsh --dev: run the inner candidate via the broker'
 
@@ -103,52 +117,81 @@ prepare-shell-image:
 		$(if $(SHELL_IMAGE_REPOSITORY),--repository "$(SHELL_IMAGE_REPOSITORY)",) --output "$(GUEST_ARTIFACTS)/shell-image" \
 		$(if $(filter 1,$(SHELL_IMAGE_INSECURE_REGISTRY)),--insecure-registry,)
 
-test:
+# `make test` is the VM-free gate, and CI runs these same targets
+# (.github/workflows/ci.yml): test-rust and test-harness on Linux and macOS,
+# the model in its own job. Nothing here starts a VM or needs credentials.
+test: test-rust test-harness test-model
+
+# Every workspace test, one process per test (cargo-nextest; .config/nextest.toml
+# fails a hung test by name). nextest skips doctests, so cargo runs those.
+# Then the #[ignore]d binary callers and the ACP host caller, which drive the
+# built marsh, marsh-mcp and marshd binaries (no VM) with an isolated HOME.
+test-rust:
+	@$(CARGO) nextest --version >/dev/null 2>&1 || { echo 'make test: cargo-nextest is required: brew install cargo-nextest (or cargo install --locked cargo-nextest)' >&2; exit 1; }
 	$(CARGO) fmt --all -- --check
 	$(CARGO) clippy --workspace --all-targets --locked --target-dir "$(TARGET_DIR)" -- -D warnings
-	$(CARGO) test --workspace --locked --target-dir "$(TARGET_DIR)"
-	$(CARGO) build --workspace --locked --target-dir "$(TARGET_DIR)"
+	$(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" --profile "$(NEXTEST_PROFILE)"
+	$(CARGO) test --workspace --doc --locked --target-dir "$(TARGET_DIR)"
+	$(CARGO) build --workspace --bins --locked --target-dir "$(TARGET_DIR)"
+	rm -rf "$(CALLER_HOME)" && mkdir -m 700 "$(CALLER_HOME)"
+	CARGO_HOME="$${CARGO_HOME:-$$HOME/.cargo}" RUSTUP_HOME="$${RUSTUP_HOME:-$$HOME/.rustup}" HOME="$(CALLER_HOME)" \
+		MARSH_LOAD_TEST_BIN="$(TEST_BIN)/marsh" MARSH_ACP_CALLER_BIN="$(TEST_BIN)/marsh" \
+		$(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" \
+		--profile "$(NEXTEST_PROFILE)" --run-ignored only -E '$(BINARY_CALLERS)'
+	$(PYTHON) tests/acceptance/acp-fixture/typed_host_caller.py --marsh "$(TEST_BIN)/marsh"
+
+# Python and shell harnesses against the debug binaries: shipped-entrypoint
+# journeys (onboarding), MCP protocol callers, the Kit publisher, the
+# self-tests of the acceptance, perf and release tooling, and (Linux only) the
+# Bash differential suites against GNU Bash 5.3.0 on PATH, gated on
+# tests/acceptance/bash_divergences.json.
+test-harness:
+	$(CARGO) build --workspace --bins --locked --target-dir "$(TARGET_DIR)"
+	@if [ "$$(uname -s)" = Linux ]; then \
+		rm -rf "$(abspath $(TARGET_DIR))/bash-suites" && \
+		$(PYTHON) tests/acceptance/bash_suites.py --candidate "$(TEST_BIN)/marsh-local" \
+			--oracle "$$(command -v bash)" --evidence "$(abspath $(TARGET_DIR))/bash-suites"; \
+	else \
+		echo 'make test-harness: skipping the Bash differential suites (tests/acceptance/bash_suites.py): Linux only; macOS cannot create their non-UTF-8 file names'; \
+	fi
+	$(PYTHON) tests/acceptance/onboarding.py --marsh "$(TEST_BIN)/marsh" --shell "$(TEST_BIN)/marsh-local" \
+		--evidence "$(abspath $(TARGET_DIR))/onboarding.json"
+	MARSH_BINARY="$(TEST_BIN)/marsh" MARSH_MCP_BIN="$(TEST_BIN)/marsh-mcp" \
+		$(PYTHON) tests/parallel_unittest.py -j 3 -W error $(addprefix tests/mcp/,$(MCP_TEST_FILES))
+	$(PYTHON) -W error -m unittest discover -s tests/acceptance -p 'test_*.py'
+	$(PYTHON) -W error -m unittest discover -s tests/release -p 'test_*.py'
+	$(PYTHON) -m unittest discover -s tests/perf -p 'test_*.py'
 	sh tests/kits/selected-home.sh
 	sh tests/kits/cli-adapters.sh
 	sh tests/kits/shell-adapter.sh
-	$(PYTHON) -m unittest discover -s tests/acceptance -p 'test_*.py'
-	$(PYTHON) -m unittest discover -s tests/perf -p 'test_*.py'
-	$(MAKE) mcp-load-callers
-	@set -eu; for suite in $(MCP_TEST_FILES); do \
-		MARSH_BINARY="$(abspath $(TARGET_DIR))/mcp-callers/bin/marsh" MARSH_MCP_BIN="$(abspath $(TARGET_DIR))/mcp-callers/bin/marsh-mcp" \
-		$(PYTHON) -m unittest discover -s tests/mcp -p "$$suite"; \
-	done
+	$(MAKE) --no-print-directory "$(PUBLISHER_VENV)/.ready"
+	"$(PUBLISHER_VENV)/bin/python" tests/parallel_unittest.py -j 3 -W error tests/kits/test_publisher_cli.py
 
-# scripts/verify-static.sh: fmt, clippy, tests and the quick TLA+ sweep, no VMs.
-verify-static:
-	@TARGET_DIR="$(TARGET_DIR)" CARGO="$(CARGO)" sh scripts/verify-static.sh
+# The publisher's one dependency, hash-pinned.
+$(PUBLISHER_VENV)/.ready: scripts/requirements-publish.txt
+	rm -rf "$(PUBLISHER_VENV)"
+	$(PYTHON) -m venv "$(PUBLISHER_VENV)"
+	"$(PUBLISHER_VENV)/bin/python" -m pip install --quiet --require-hashes --no-deps --only-binary=:all: -r scripts/requirements-publish.txt
+	@touch "$@"
+
+# The TLA+ model (docs/model/README.md). `make test` runs the quick sweep with
+# verdicts cached by spec hash; MODEL_FLAGS= runs every config (make regress).
+test-model: $(TLA2TOOLS_JAR)
+	TLA2TOOLS_JAR="$(TLA2TOOLS_JAR)" TLC_CACHE="$(MODEL_CACHE)" docs/model/check.sh $(MODEL_FLAGS)
+
+# The pinned TLA+ tools. v1.8.0 is TLA+'s rolling prerelease; the checksum pins
+# the build the model was last checked with: update both together.
+$(TLA2TOOLS_JAR):
+	@mkdir -p "$(dir $@)"
+	curl -fsSL -o "$@.tmp" https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+	@echo "$(TLA2TOOLS_SHA256)  $@.tmp" | { command -v sha256sum >/dev/null && sha256sum -c - || shasum -a 256 -c -; } >/dev/null
+	@mv "$@.tmp" "$@"
 
 mcp:
 	@test -x "$(MCP_BIN)" || { echo 'make mcp: install first with make install, or set MCP_BIN=/absolute/marsh-mcp'; exit 1; }
 	@test -x "$(MCP_MARSH)" || { echo 'make mcp: install marsh outside this checkout, or set MCP_MARSH=/absolute/marsh'; exit 1; }
 	@test -x "$(SBX_EXECUTABLE)" || { echo 'make mcp: install stock SBX v0.45.0 or newer on PATH, or set MARSH_SBX=/absolute/sbx'; exit 1; }
 	@exec "$(MCP_BIN)" serve --workspace "$(CURDIR)" --marsh "$(MCP_MARSH)" --sbx "$(SBX_EXECUTABLE)"
-
-onboarding:
-	$(CARGO) build --locked -p marsh --bin marsh --bin marsh-local --target-dir "$(TARGET_DIR)"
-	$(PYTHON) tests/acceptance/onboarding.py \
-		--marsh "$(abspath $(TARGET_DIR))/debug/marsh" \
-		--shell "$(abspath $(TARGET_DIR))/debug/marsh-local"
-
-.PHONY: mcp-load-callers
-MCP_TEST_EVIDENCE ?= $(abspath $(TARGET_DIR))/mcp-test-evidence
-mcp-load-callers:
-	$(PYTHON) tests/mcp/run_publication_callers.py --cargo "$(CARGO)" \
-		--target-dir "$(TARGET_DIR)" --evidence "$(MCP_TEST_EVIDENCE)" $(if $(MCP_FRESH),--fresh,) $(if $(MCP_LONG_PREPARE),--long-prepare,) $(if $(MCP_LONG_ROLLBACK),--long-rollback,) $(if $(MCP_ACP_CALLERS),--acp,)
-
-mcp-test:
-	$(CARGO) test -p marsh-mcp --locked --target-dir "$(TARGET_DIR)"
-	$(MAKE) mcp-load-callers
-	@printf '%s\n' 'MCP caller profile: $(MCP_TEST_FILES) (Mac exporter startup is not qualified on Linux)'
-	@set -eu; for suite in $(MCP_TEST_FILES); do \
-		MARSH_BINARY="$(abspath $(TARGET_DIR))/mcp-callers/bin/marsh" MARSH_MCP_BIN="$(abspath $(TARGET_DIR))/mcp-callers/bin/marsh-mcp" \
-		$(PYTHON) -m unittest discover -s tests/mcp -p "$$suite"; \
-	done
 
 kits:
 	$(PYTHON) scripts/prepare-kit-inputs.py --commands "$(KIT_COMMANDS)" --output "$(KIT_PREPARED_INPUTS)" \
@@ -176,13 +219,8 @@ kit-publish-fixture:
 		$(if $(KIT_REPOSITORY_NAME_PREFIX),--repository-name-prefix "$(KIT_REPOSITORY_NAME_PREFIX)",) \
 		--commands tests/acceptance/fixture/commands.json --build-inputs "$(KIT_FIXTURE_INPUTS)" --output "$(KIT_FIXTURE_COMMANDS)"
 
-dev-check:
-	@case "$$(uname -s)" in Linux) ;; *) echo 'make dev-check: run in a Linux contributor or development shell'; exit 1;; esac
-	@sh scripts/bootstrap-rust-guest.sh -- $(CARGO) fmt --all -- --check
-	@sh scripts/bootstrap-rust-guest.sh -- $(CARGO) test --locked -p marsh --test smoke executes_an_ordinary_command_with_exact_streams_and_status -- --exact
-
 install-preflight:
-	@test "$$(uname -s)" = Darwin -a "$$(uname -m)" = arm64 || { echo 'make install: the host product requires an ARM64 Mac; Linux contributors can use make onboarding or make build-host' >&2; exit 1; }
+	@test "$$(uname -s)" = Darwin -a "$$(uname -m)" = arm64 || { echo 'make install: the host product requires an ARM64 Mac; Linux contributors can use make test or make build-host' >&2; exit 1; }
 
 install: install-preflight
 	$(MAKE) build
@@ -350,9 +388,6 @@ DEV_GUEST ?= target/libexec/marsh
 DEV_JOBS ?= 8
 DEV_PARALLEL ?= 5
 DEV_CACHE_ID ?= marsh-dev-$(shell pwd -P | cksum | cut -d' ' -f1)
-# Evidence must be outside the mounted project and free of symlinks (/var -> /private/var).
-DEV_SMOKE_EVIDENCE ?= $(shell cd "$${TMPDIR:-/tmp}" && pwd -P)/marsh-dev-smoke-$(shell id -u)
-DEV_ACCEPTANCE_EVIDENCE ?= $(shell cd "$${TMPDIR:-/tmp}" && pwd -P)/marsh-dev-acceptance-$(shell id -u)
 DEV_KIT ?= $(ACCEPTANCE_KIT)
 DEV_SUPPORT_SCRIPTS := $(addprefix scripts/,prepare-shell-image.py build_inputs.py image_observations.py owned_process.py stock_sdk.py)
 DEV_CANONICAL_INPUTS := $(shell find packaging/image-repair packaging/dhi-notices/collected -type f 2>/dev/null)
@@ -361,7 +396,7 @@ DEV_SHELL_IMAGE_INPUTS := packaging/shell-image packaging/shell/Dockerfile $(DEV
 DEV_KIT_INPUTS := $(KIT_COMMANDS) scripts/stage-kits.py scripts/publish-kits.py scripts/npm-notices.mjs \
 	$(DEV_CANONICAL_INPUTS) $(wildcard $(shell git ls-files kits 2>/dev/null))
 
-.PHONY: dev dev-artifacts dev-host dev-guest dev-install dev-kit-images dev-smoke dev-acceptance
+.PHONY: dev dev-artifacts dev-host dev-guest dev-install dev-kit-images
 dev:
 	@$(MAKE) --no-print-directory -j$(DEV_PARALLEL) dev-artifacts
 	@$(MAKE) --no-print-directory dev-install
@@ -413,69 +448,16 @@ DEV_KIT_IMAGES ?= 1
 dev-kit-images:
 	@if [ "$(DEV_KIT_IMAGES)" = 1 ]; then "$(DEV_PREFIX)/bin/marshd" --prebuild-kit-images "$(DEV_PREFIX)/libexec/marsh"; fi
 
-dev-smoke: dev
-	@test -n "$(DEV_KIT)" || { echo 'make dev-smoke: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
-	@mkdir -p "$(DEV_SMOKE_EVIDENCE)" && chmod 700 "$(DEV_SMOKE_EVIDENCE)"
-	$(PYTHON) tests/acceptance/smoke.py --marsh "$(DEV_PREFIX)/bin/marsh" \
-		--guest-artifacts "$(DEV_PREFIX)/libexec/marsh" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)" \
-		--evidence "$(DEV_SMOKE_EVIDENCE)" --source-revision "$(SOURCE_REVISION)" --source-tree "$(CURDIR)"
-
-# The full observation gate against the installed dev product (no receipt).
-dev-acceptance: dev
-	@test -n "$(DEV_KIT)" || { echo 'make dev-acceptance: set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
-	@mkdir -p "$(DEV_ACCEPTANCE_EVIDENCE)" && chmod 700 "$(DEV_ACCEPTANCE_EVIDENCE)"
-	$(PYTHON) tests/acceptance/run.py --marsh "$(DEV_PREFIX)/bin/marsh" \
-		--guest-artifacts "$(DEV_PREFIX)/libexec/marsh" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)" \
-		--evidence "$(DEV_ACCEPTANCE_EVIDENCE)" --source-revision "$(SOURCE_REVISION)" --source-tree "$(CURDIR)"
-	@$(MAKE) --no-print-directory dev-split-run
-
-# split/join observation (CONTRACT 19): the workspaces harness against the
-# installed dev product (DEV_KIT needs the fixture's `pipeline` mode).
-.PHONY: dev-split dev-split-run
-dev-split: dev
-	@$(MAKE) --no-print-directory dev-split-run
-
-dev-split-run:
-	@$(MAKE) --no-print-directory dev-workspaces
-
-# Daemon-owned workspaces (docs/design/workspaces-acceptance.md) against the installed
-# dev product. DEV_KIT may be an OCI ref or tests/acceptance/fixture (nested
-# scenarios need its `pipeline` mode). ONLY=W01-plain-bash selects one scenario.
-DEV_WORKSPACES_EVIDENCE ?= $(shell cd "$${TMPDIR:-/tmp}" && pwd -P)/marsh-dev-workspaces-$(shell id -u)
-.PHONY: dev-workspaces
-dev-workspaces:
-	@test -n "$(DEV_KIT)" || { echo 'make dev-workspaces: set DEV_KIT to a fixture Kit (OCI ref or tests/acceptance/fixture)'; exit 1; }
-	@mkdir -p "$(DEV_WORKSPACES_EVIDENCE)" && chmod 700 "$(DEV_WORKSPACES_EVIDENCE)"
-	$(PYTHON) tests/acceptance/workspaces_uat.py --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" \
-		--kit "$(DEV_KIT)" --evidence "$(DEV_WORKSPACES_EVIDENCE)" --source-revision "$(SOURCE_REVISION)" \
-		--source-tree "$(CURDIR)" $(foreach s,$(ONLY),--only $(s))
-
-# Nested processes (docs/design/processes-acceptance.md) against the installed dev
-# product. DEV_KIT may be an OCI ref or tests/acceptance/fixture (the scenarios
-# need its exec/bench/cap-flood modes). ONLY=P02-self-spawn-bash-c selects one.
-DEV_PROCESSES_EVIDENCE ?= $(shell cd "$${TMPDIR:-/tmp}" && pwd -P)/marsh-dev-processes-$(shell id -u)
-.PHONY: dev-processes
-dev-processes:
-	@test -n "$(DEV_KIT)" || { echo 'make dev-processes: set DEV_KIT to a fixture Kit (OCI ref or tests/acceptance/fixture)'; exit 1; }
-	@mkdir -p "$(DEV_PROCESSES_EVIDENCE)" && chmod 700 "$(DEV_PROCESSES_EVIDENCE)"
-	$(PYTHON) tests/acceptance/processes_uat.py --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" \
-		--kit "$(DEV_KIT)" --evidence "$(DEV_PROCESSES_EVIDENCE)" --source-revision "$(SOURCE_REVISION)" \
-		--source-tree "$(CURDIR)" $(foreach s,$(ONLY),--only $(s))
-
-# Shell choice (docs/shells.md: --shell bash|zsh) against the installed dev
-# product. ONLY=S03-split-join selects one scenario; SHELLS=zsh one shell.
-DEV_SHELLS_EVIDENCE ?= $(shell cd "$${TMPDIR:-/tmp}" && pwd -P)/marsh-dev-shells-$(shell id -u)
-.PHONY: dev-shells
-dev-shells:
-	@test -n "$(DEV_KIT)" || { echo 'make dev-shells: set DEV_KIT to a fixture Kit (OCI ref or tests/acceptance/fixture)'; exit 1; }
-	@mkdir -p "$(DEV_SHELLS_EVIDENCE)" && chmod 700 "$(DEV_SHELLS_EVIDENCE)"
-	$(PYTHON) tests/acceptance/shells_uat.py --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" \
-		--kit "$(DEV_KIT)" --evidence "$(DEV_SHELLS_EVIDENCE)" --source-revision "$(SOURCE_REVISION)" \
-		--source-tree "$(CURDIR)" $(foreach s,$(ONLY),--only $(s)) $(foreach s,$(SHELLS),--shell $(s))
-
-# Fast real smoke (tests/check.py): one persistent isolated scope in
-# target/check whose daemon and VMs stay warm between runs. Run after make dev.
-.PHONY: check check-reset regress regress-serial regress-host verify
+# The sbx-backed tiers (CONTRIBUTING.md), all on a Mac against the installed
+# dev product: `make check` (seconds), `make verify` (the pre-push gate,
+# minutes), `make regress` (every sbx-backed suite, then make test with the
+# full model). tests/regress.py is the one scheduler: isolated scopes, bounded
+# adaptive concurrency (REGRESS_JOBS=1 runs one suite at a time), per-suite
+# logs in target/regress/. ONLY= / SKIP= take suite names, families, or
+# scenario ids (ONLY=smoke, ONLY=workspaces, ONLY=W01-plain-bash,P02-self-spawn-bash-c;
+# python3 tests/regress.py --list --kit REF). With ONLY, make regress runs just
+# those suites. VERIFY_DEPS= skips the incremental `make dev` rebuild.
+.PHONY: check check-reset regress verify
 check:
 	@test -n "$(DEV_KIT)" || { echo 'make check: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
 	@$(PYTHON) tests/check.py --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)"
@@ -483,48 +465,18 @@ check:
 check-reset:
 	@$(PYTHON) tests/check.py --reset --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)"
 
-# Three tiers (CONTRIBUTING.md): `make check` (seconds), `make verify` (the
-# pre-push gate, minutes), `make regress` (every sbx-backed suite, concurrently).
-# tests/regress.py runs the same harnesses as regress-serial with isolated
-# scopes, bounded adaptive concurrency, and per-suite logs in target/regress/.
-# VERIFY_DEPS= skips the incremental `make dev` rebuild.
 VERIFY_DEPS ?= dev
 REGRESS_JOBS ?= 3
+REGRESS = $(PYTHON) tests/regress.py --jobs $(REGRESS_JOBS) --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" \
+	--kit "$(DEV_KIT)" $(foreach s,$(ONLY),--only $(s)) $(foreach s,$(SKIP),--skip $(s))
 verify: $(VERIFY_DEPS)
 	@test -n "$(DEV_KIT)" || { echo 'make verify: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
-	$(PYTHON) tests/regress.py --tier verify --jobs $(REGRESS_JOBS) --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)" $(foreach s,$(ONLY),--only $(s)) $(foreach s,$(SKIP),--skip $(s))
+	$(REGRESS) --tier verify
 
 regress: $(VERIFY_DEPS)
 	@test -n "$(DEV_KIT)" || { echo 'make regress: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
-	$(PYTHON) tests/regress.py --tier regress --jobs $(REGRESS_JOBS) --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)" $(foreach s,$(ONLY),--only $(s)) $(foreach s,$(SKIP),--skip $(s))
-	@$(MAKE) --no-print-directory regress-host
-
-# The non-sbx steps of a release run.
-regress-host:
-	$(MAKE) --no-print-directory mcp-test
-	$(CARGO) test --workspace --locked --target-dir "$(TARGET_DIR)"
-	docs/model/check.sh
-
-# Every existing suite, sequentially, against the dev product (slow; for debugging).
-REGRESS_EVIDENCE ?= $(shell cd "$${TMPDIR:-/tmp}" && pwd -P)/marsh-regress-$(shell id -u)
-regress-serial:
-	@test -n "$(DEV_KIT)" || { echo 'make regress: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
-	@mkdir -p "$(REGRESS_EVIDENCE)" && chmod 700 "$(REGRESS_EVIDENCE)"
-	@printf '{"fixture": "%s"}\n' "$(DEV_KIT)" > "$(REGRESS_EVIDENCE)/fixture-commands.json"
-	$(MAKE) --no-print-directory dev-smoke
-	$(MAKE) --no-print-directory dev-acceptance
-	$(MAKE) --no-print-directory dev-processes
-	$(MAKE) --no-print-directory dev-shells
-	$(PYTHON) tests/acceptance/acp_uat.py --marsh "$(DEV_PREFIX)/bin/marsh" --guest-artifacts "$(DEV_PREFIX)/libexec/marsh" \
-		--sbx "$(SBX_EXECUTABLE)" --evidence "$(REGRESS_EVIDENCE)/acp" --source-revision "$(SOURCE_REVISION)" --source-tree "$(CURDIR)"
-	$(PYTHON) tests/acceptance/mcp_load_uat.py --marsh "$(DEV_PREFIX)/bin/marsh" --guest-artifacts "$(DEV_PREFIX)/libexec/marsh" \
-		--sbx "$(SBX_EXECUTABLE)" --kit fixture --commands "$(REGRESS_EVIDENCE)/fixture-commands.json" \
-		--evidence "$(REGRESS_EVIDENCE)/mcp-load" --source-revision "$(SOURCE_REVISION)" --source-tree "$(CURDIR)"
-	$(PYTHON) tests/acceptance/self_dev.py --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)" \
-		--evidence "$(REGRESS_EVIDENCE)/self-dev"
-	$(MAKE) --no-print-directory mcp-test
-	$(CARGO) test --workspace --locked --target-dir "$(TARGET_DIR)"
-	docs/model/check.sh
+	$(REGRESS) --tier regress
+	$(if $(ONLY),,$(MAKE) --no-print-directory test MODEL_FLAGS= MODEL_CACHE=)
 
 .PHONY: dev-inner dev-inner-run dev-inner-stop
 

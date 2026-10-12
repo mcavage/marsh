@@ -320,23 +320,38 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_lookup() {
-        let mut reg = AgentRegistry::new();
-        let decl = AgentAdapterDeclaration {
+    fn plain_cli_commands_are_never_resolved_or_declared_as_acp() {
+        let registry = AgentRegistry::from_json_str(
+            r#"[{"schema_version":1,"name":"claude-session","protocol":"acp_v1","command":"claude-workload","workload_digest":"sha256:1111","required_capabilities":["loadSession"]}]"#,
+        )
+        .unwrap();
+        let declaration = registry.resolve_acp("claude-session").unwrap();
+        assert_eq!(declaration.command, "claude-workload");
+        assert_eq!(declaration.protocol, AgentProtocol::AcpV1);
+        assert!(registry.resolve_acp("unknown").is_err());
+        match registry.resolve_acp("claude") {
+            Err(AgentError::UnsupportedProtocol { command, reason }) => {
+                assert_eq!(command, "claude");
+                assert!(reason.contains("plain 'claude' is a native CLI command"));
+            }
+            other => panic!("plain claude resolved as ACP: {other:?}"),
+        }
+        let declared = AgentAdapterDeclaration {
             schema_version: 1,
-            name: "claude-session".into(),
+            name: "claude".into(),
             protocol: AgentProtocol::AcpV1,
-            command: "claude-workload".into(),
-            workload_digest: "sha256:1234".into(),
+            command: "claude-kit".into(),
+            workload_digest: "sha256:2222".into(),
             required_capabilities: vec![],
             arguments: vec![],
             description: None,
         };
-        reg.register(decl).unwrap();
-
-        assert!(reg.resolve_acp("claude-session").is_ok());
-        assert!(reg.resolve_acp("unknown").is_err());
-        // Claude CLI is never resolved as ACP
-        assert!(reg.resolve_acp("claude").is_err());
+        match declared.validate() {
+            Err(AgentError::UnsupportedProtocol { command, reason }) => {
+                assert_eq!(command, "claude");
+                assert!(reason.contains("plain 'claude' CLI does not speak ACP"));
+            }
+            other => panic!("plain claude declared as ACP: {other:?}"),
+        }
     }
 }

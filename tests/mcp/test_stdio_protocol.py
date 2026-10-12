@@ -13,22 +13,21 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import queue
 import shutil
 import signal
 import stat
 import subprocess
 import tempfile
-import threading
 import time
 import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
 from binary_preflight import required_binary
+from jsonrpc_peer import PROTOCOL_VERSION, WAIT_TIMEOUT, JsonRpcPeer
 
 MCP_BINARY = required_binary("MARSH_MCP_BIN")
-PROTOCOL_VERSION = "2025-06-18"
+TERMINAL = {"succeeded", "failed", "cancellation_uncertain"}
 TOOLS = {
     "doctor",
     "status",
@@ -93,7 +92,8 @@ case "${1-}" in
     fi
     ;;
   --load)
-    if [ -f "$MARSH_HOME/.slow-prewarm" ]; then sleep 1; fi
+    # Held until the test releases it (or its home is deleted).
+    while [ -f "$MARSH_HOME/.hold-prewarm" ] && [ -d "$MARSH_HOME" ]; do sleep 0.01; done
     printf 'prewarm %s\n' "${2-}"
     ;;
   workers)
@@ -147,121 +147,6 @@ case "${1-}" in
     ;;
 esac
 '''
-
-
-class JsonRpcPeer:
-    """Small real stdio client; responses may arrive out of order."""
-
-    def __init__(self, command: list[str], env: dict[str, str]):
-        self.process = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env,
-            cwd=ROOT,
-            bufsize=0,
-        )
-        assert self.process.stdin is not None
-        assert self.process.stdout is not None
-        assert self.process.stderr is not None
-        self._stdin = self.process.stdin
-        self._lines: queue.Queue[object] = queue.Queue()
-        self._pending: dict[object, dict] = {}
-        self._next_id = 1
-        self._lock = threading.Lock()
-        self._reader = threading.Thread(target=self._read_stdout, daemon=True)
-        self._reader.start()
-        self._stderr_reader = threading.Thread(
-            target=self._read_stderr, args=(self.process.stderr,), daemon=True
-        )
-        self._stderr_reader.start()
-
-    def _read_stdout(self) -> None:
-        assert self.process.stdout is not None
-        for line in iter(self.process.stdout.readline, b""):
-            try:
-                value = json.loads(line)
-            except json.JSONDecodeError as error:
-                self._lines.put(AssertionError(f"non-JSON stdout from MCP server: {line!r}: {error}"))
-                continue
-            self._lines.put(value)
-        self._lines.put(EOFError("MCP server closed stdout"))
-
-    def _read_stderr(self, stream) -> None:
-        self.stderr = stream.read().decode("utf-8", "replace")
-
-    def notify(self, method: str, params: dict | None = None) -> None:
-        message = {"jsonrpc": "2.0", "method": method}
-        if params is not None:
-            message["params"] = params
-        self._write(message)
-
-    def request(self, method: str, params: dict | None = None, timeout: float = 15.0) -> dict:
-        with self._lock:
-            request_id = self._next_id
-            self._next_id += 1
-        message = {"jsonrpc": "2.0", "id": request_id, "method": method}
-        if params is not None:
-            message["params"] = params
-        self._write(message)
-        if request_id in self._pending:
-            return self._pending.pop(request_id)
-        deadline = time.monotonic() + timeout
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                self.fail(f"timed out waiting for JSON-RPC response {request_id}")
-            try:
-                item = self._lines.get(timeout=remaining)
-            except queue.Empty:
-                self.fail(f"timed out waiting for JSON-RPC response {request_id}")
-            if isinstance(item, BaseException):
-                self.fail(str(item))
-            if item.get("id") == request_id:
-                return item
-            if "id" in item:
-                self._pending[item["id"]] = item
-
-    def _write(self, message: dict) -> None:
-        self._stdin.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
-        self._stdin.flush()
-
-    def initialize(self) -> dict:
-        response = self.request(
-            "initialize",
-            {
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "marsh-mcp-black-box", "version": "1"},
-            },
-        )
-        self.notify("notifications/initialized", {})
-        return response
-
-    def fail(self, message: str) -> None:
-        self.close()
-        raise AssertionError(message)
-
-    def close(self) -> None:
-        if self.process.poll() is None:
-            try:
-                self._stdin.close()
-            except OSError:
-                pass
-            try:
-                self.process.terminate()
-                self.process.wait(timeout=2)
-            except (subprocess.TimeoutExpired, OSError):
-                self.process.kill()
-                self.process.wait(timeout=2)
-        try:
-            self._stdin.close()
-        except (OSError, ValueError):
-            pass
-        for stream in (self.process.stdout, self.process.stderr):
-            if stream is not None:
-                stream.close()
 
 
 class HostMcpBlackBoxTests(unittest.TestCase):
@@ -349,17 +234,41 @@ class HostMcpBlackBoxTests(unittest.TestCase):
         self.assertIn("structuredContent", result, result)
         return result["structuredContent"]
 
-    def wait_for_operation(self, operation_id: str, timeout: float = 4.0) -> dict:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            result = self.structured(
-                self.call("operation_get", {"operation_id": operation_id})
-            )
-            state = result["data"]["state"]
-            if state in {"succeeded", "failed", "cancellation_uncertain"}:
-                return result["data"]
+    def wait_for_operation(self, operation_id: str, peer: JsonRpcPeer | None = None) -> dict:
+        peer = peer or self.peer
+        deadline = time.monotonic() + WAIT_TIMEOUT
+        while True:
+            data = peer.request(
+                "tools/call",
+                {"name": "operation_get", "arguments": {"operation_id": operation_id}},
+            )["result"]["structuredContent"]["data"]
+            if data["state"] in TERMINAL:
+                return data
+            if time.monotonic() > deadline:
+                self.fail(
+                    f"operation {operation_id} not terminal within {WAIT_TIMEOUT:g}s "
+                    f"(last state {data['state']})"
+                )
             time.sleep(0.02)
-        self.fail(f"operation {operation_id} did not become terminal")
+
+    def wait_until(self, condition, awaited: str) -> None:
+        deadline = time.monotonic() + WAIT_TIMEOUT
+        while not condition():
+            if time.monotonic() > deadline:
+                self.fail(f"{awaited} not observed within {WAIT_TIMEOUT:g}s")
+            time.sleep(0.01)
+
+    def run_cli(self, command: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            command,
+            cwd=ROOT,
+            env=self.environment,
+            input="",
+            text=True,
+            capture_output=True,
+            timeout=WAIT_TIMEOUT,
+            check=False,
+        )
 
     def log_text(self) -> str:
         return self.log.read_text(encoding="utf-8") if self.log.exists() else ""
@@ -427,14 +336,7 @@ class HostMcpBlackBoxTests(unittest.TestCase):
     def test_resident_broker_shares_scopes_and_replaces_only_when_idle(self) -> None:
         # The broker endpoint lives under the fixed /tmp root, not tempdir.
         self.addCleanup(shutil.rmtree, self.broker_state_dir(), ignore_errors=True)
-        started = subprocess.run(
-            self.broker_args("broker-start"),
-            env=self.environment,
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        started = self.run_cli(self.broker_args("broker-start"))
         self.assertEqual(started.returncode, 0, started.stderr)
         first_pid = int((self.broker_state_dir() / "broker.pid").read_text())
         first = JsonRpcPeer(self.broker_args("connect"), self.environment)
@@ -458,23 +360,10 @@ class HostMcpBlackBoxTests(unittest.TestCase):
             self.assertFalse(hidden["ok"])
             self.assertIn("this MCP session", hidden["error"])
 
-            deadline = time.monotonic() + 5
-            while True:
-                owned = first.request(
-                    "tools/call",
-                    {
-                        "name": "operation_get",
-                        "arguments": {"operation_id": created["operation_id"]},
-                    },
-                )["result"]["structuredContent"]
-                if owned["data"]["state"] in {
-                    "succeeded",
-                    "failed",
-                    "cancellation_uncertain",
-                }:
-                    break
-                self.assertLess(time.monotonic(), deadline)
-                time.sleep(0.02)
+            self.assertEqual(
+                self.wait_for_operation(created["operation_id"], peer=first)["state"],
+                "succeeded",
+            )
             scopes = second.request(
                 "tools/call", {"name": "scope_list", "arguments": {}}
             )["result"]["structuredContent"]
@@ -484,25 +373,11 @@ class HostMcpBlackBoxTests(unittest.TestCase):
                 {scope["scope_id"] for scope in scopes["data"]["scopes"]},
             )
 
-            busy = subprocess.run(
-                self.broker_args("broker-stop"),
-                env=self.environment,
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
+            busy = self.run_cli(self.broker_args("broker-stop"))
             self.assertNotEqual(busy.returncode, 0)
             self.assertIn("attached sessions", busy.stderr)
 
-            mismatched = subprocess.run(
-                self.broker_args("broker-start") + ["--allow-full-sbx-control"],
-                env=self.environment,
-                cwd=ROOT,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
+            mismatched = self.run_cli(self.broker_args("broker-start") + ["--allow-full-sbx-control"])
             self.assertNotEqual(mismatched.returncode, 0)
             self.assertIn("attached sessions", mismatched.stderr)
             first.close()
@@ -519,14 +394,7 @@ class HostMcpBlackBoxTests(unittest.TestCase):
         # could not replace a busy broker.
         with self.fake_sbx.open("a", encoding="utf-8") as stream:
             stream.write("# replacement identity\n")
-        replaced = subprocess.run(
-            self.broker_args("broker-start"),
-            env=self.environment,
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        replaced = self.run_cli(self.broker_args("broker-start"))
         self.assertEqual(replaced.returncode, 0, replaced.stderr)
         second_pid = int((self.broker_state_dir() / "broker.pid").read_text())
         self.assertNotEqual(first_pid, second_pid)
@@ -535,26 +403,28 @@ class HostMcpBlackBoxTests(unittest.TestCase):
         lost.initialize()
         try:
             os.kill(second_pid, signal.SIGKILL)
-            deadline = time.monotonic() + 3
-            while True:
+
+            def broker_gone() -> bool:
+                # The orphaned broker stays a zombie where nothing reaps it
+                # (a container without an init); a zombie has exited.
                 try:
                     os.kill(second_pid, 0)
                 except ProcessLookupError:
-                    break
-                self.assertLess(time.monotonic(), deadline)
-                time.sleep(0.02)
-            with self.assertRaises((AssertionError, BrokenPipeError)):
-                lost.request("tools/list", {}, timeout=5)
+                    return True
+                state = subprocess.run(
+                    ["ps", "-o", "stat=", "-p", str(second_pid)],
+                    capture_output=True, text=True, timeout=WAIT_TIMEOUT,
+                ).stdout.strip()
+                return state == "" or state.startswith("Z")
+
+            self.wait_until(broker_gone, f"exit of killed broker {second_pid}")
+            # The client learns of the loss when it next forwards a request.
+            with self.assertRaises((EOFError, BrokenPipeError)):
+                lost.request("tools/list", {})
+            lost.process.wait(timeout=WAIT_TIMEOUT)
         finally:
             lost.close()
-        restarted = subprocess.run(
-            self.broker_args("broker-start"),
-            env=self.environment,
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+        restarted = self.run_cli(self.broker_args("broker-start"))
         self.assertEqual(restarted.returncode, 0, restarted.stderr)
         fresh = JsonRpcPeer(self.broker_args("connect"), self.environment)
         try:
@@ -565,14 +435,7 @@ class HostMcpBlackBoxTests(unittest.TestCase):
             )
         finally:
             fresh.close()
-        stopped = subprocess.run(
-            self.broker_args("broker-stop"),
-            env=self.environment,
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
+        stopped = self.run_cli(self.broker_args("broker-stop"))
         self.assertEqual(stopped.returncode, 0, stopped.stderr)
         self.assertFalse((self.broker_state_dir() / "broker.sock").exists())
 
@@ -607,27 +470,26 @@ class HostMcpBlackBoxTests(unittest.TestCase):
         )
         self.assertEqual(shown["data"]["schema"], "marsh.result/v1")
 
-        (scope_home / ".slow-prewarm").touch()
+        (scope_home / ".hold-prewarm").touch()
         prewarm = self.structured(
             self.call(
                 "scope_prewarm", {"scope_id": scope_id, "selection": "all"}
             )
         )["data"]
-        started_at = time.monotonic()
-        while "argv1=--load" not in self.log_text():
-            self.assertLess(time.monotonic() - started_at, 1.0)
-            time.sleep(0.01)
+        self.wait_until(lambda: "argv1=--load" in self.log_text(), "prewarm reaching marsh --load")
         # Read-only inspection is admitted while the same scope is prewarming.
         during = self.structured(
             self.call("scope_results_list", {"scope_id": scope_id})
         )
         self.assertTrue(during["ok"])
-        self.assertLess(time.monotonic() - started_at, 0.8)
+        held = self.structured(
+            self.call("operation_get", {"operation_id": prewarm["operation_id"]})
+        )["data"]
+        self.assertNotIn(held["state"], TERMINAL)
+        (scope_home / ".hold-prewarm").unlink()
         self.assertEqual(
-            self.wait_for_operation(prewarm["operation_id"], timeout=3)["state"],
-            "succeeded",
+            self.wait_for_operation(prewarm["operation_id"])["state"], "succeeded"
         )
-        (scope_home / ".slow-prewarm").unlink()
 
         reset = self.structured(
             self.call(
@@ -642,7 +504,7 @@ class HostMcpBlackBoxTests(unittest.TestCase):
             "data"
         ]
         self.assertEqual(
-            self.wait_for_operation(stopped["operation_id"], timeout=3)["state"],
+            self.wait_for_operation(stopped["operation_id"])["state"],
             "succeeded",
         )
         receipts = self.structured(
@@ -765,7 +627,7 @@ class HostMcpBlackBoxTests(unittest.TestCase):
 
     def test_maximum_captured_output_fits_bounded_stdio_frame(self) -> None:
         queued = self.structured(
-            self.call("shell_run", {"command": "max-output", "timeout_ms": 5000})
+            self.call("shell_run", {"command": "max-output", "timeout_ms": 900000})
         )
         operation_id = queued["data"]["operation_id"]
         self.assertEqual(self.wait_for_operation(operation_id)["state"], "succeeded")
@@ -853,18 +715,7 @@ class HostMcpBlackBoxTests(unittest.TestCase):
             "--sbx",
             str(self.fake_sbx),
         ]
-        started_at = time.monotonic()
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            env=self.environment,
-            input="",
-            text=True,
-            capture_output=True,
-            timeout=3,
-            check=False,
-        )
-        self.assertLess(time.monotonic() - started_at, 2.5)
+        completed = self.run_cli(command)
         self.assertNotEqual(completed.returncode, 0)
         self.assertEqual(completed.stdout, "")
         self.assertIn("already controlled", completed.stderr.lower())
@@ -876,7 +727,7 @@ class HostMcpBlackBoxTests(unittest.TestCase):
         )
 
     def test_dynamic_scopes_have_isolated_managed_homes_and_exact_routing(self) -> None:
-        """Two agent scopes never share their daemon/VM pool or selected home."""
+        """Each scope's commands run with its own selected home."""
         self.use_managed_scopes()
         managed_root = self.managed_root()
 
@@ -1231,15 +1082,7 @@ class HostMcpBlackBoxTests(unittest.TestCase):
         other_workspace.mkdir()
         second_command = first_command.copy()
         second_command[second_command.index(str(self.workspace))] = str(other_workspace)
-        completed = subprocess.run(
-            second_command,
-            input="",
-            text=True,
-            capture_output=True,
-            env=self.environment,
-            timeout=3,
-            check=False,
-        )
+        completed = self.run_cli(second_command)
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("bound to a different canonical workspace identity", completed.stderr)
         self.assertFalse((scope_root / "default").exists())
@@ -1259,16 +1102,7 @@ class HostMcpBlackBoxTests(unittest.TestCase):
             "--sbx",
             str(self.fake_sbx),
         ]
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            env=self.environment,
-            input="",
-            text=True,
-            capture_output=True,
-            timeout=3,
-            check=False,
-        )
+        completed = self.run_cli(command)
         self.assertNotEqual(completed.returncode, 0)
         self.assertEqual(completed.stdout, "")
         self.assertIn("guest-writable marsh home", completed.stderr.lower())
@@ -1288,16 +1122,7 @@ class HostMcpBlackBoxTests(unittest.TestCase):
             "--sbx",
             str(self.fake_sbx),
         ]
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            env=self.environment,
-            input="",
-            text=True,
-            capture_output=True,
-            timeout=3,
-            check=False,
-        )
+        completed = self.run_cli(command)
         self.assertNotEqual(completed.returncode, 0)
         self.assertEqual(completed.stdout, "")
         self.assertIn("must not overlap", completed.stderr.lower())
@@ -1794,16 +1619,7 @@ class HostMcpBlackBoxTests(unittest.TestCase):
             "--sbx",
             str(self.fake_sbx),
         ]
-        completed = subprocess.run(
-            command,
-            cwd=ROOT,
-            env=self.environment,
-            input="",
-            text=True,
-            capture_output=True,
-            timeout=3,
-            check=False,
-        )
+        completed = self.run_cli(command)
         self.assertNotEqual(completed.returncode, 0)
         self.assertEqual(completed.stdout, "")
         self.assertIn("cannot canonicalize workspace", completed.stderr)

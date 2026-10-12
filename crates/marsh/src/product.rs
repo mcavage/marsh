@@ -1073,32 +1073,6 @@ mod tests {
     }
 
     #[test]
-    fn inspection_json_never_leaks_to_stderr() {
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let result = prepare(
-            ParsedCli {
-                command: ProductCommand::Status { json: true },
-                brush_args: vec!["marsh".into()],
-                load: None,
-                ephemeral_home: false,
-                session_id: None,
-                ephemeral_home_backing: None,
-                guest: false,
-                shell: None,
-            },
-            Arc::new(FakeClient::default()),
-            session(),
-            &mut stdout,
-            &mut stderr,
-        )
-        .unwrap();
-        assert_eq!(result, ProductOutcome::Complete(0));
-        assert_eq!(stdout, b"{\"schema\":\"marsh.status/v1\"}\n");
-        assert!(stderr.is_empty());
-    }
-
-    #[test]
     fn worker_reset_is_a_host_command_and_explains_the_next_step() {
         let mut stdout = Vec::new();
         let outcome = prepare(

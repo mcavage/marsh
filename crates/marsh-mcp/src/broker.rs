@@ -21,8 +21,8 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{UnixListener, UnixStream},
+    io::{AsyncReadExt, AsyncWriteExt, unix::AsyncFd},
+    net::UnixStream,
     sync::{Notify, Semaphore},
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
@@ -269,8 +269,16 @@ pub async fn broker_run(options: BrokerOptions) -> Result<(), String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(format!("cannot remove stale broker socket: {error}")),
     }
-    let listener = UnixListener::bind(&endpoint)
-        .map_err(|error| format!("cannot bind resident MCP broker socket: {error}"))?;
+    // Created, like each accepted connection, inside the host descriptor
+    // fence: sessions spawn host commands concurrently (see accept_fenced).
+    let listener = marsh_runtime::with_host_descriptor_creation_excluded(|| {
+        std::os::unix::net::UnixListener::bind(&endpoint)
+    })
+    .and_then(|listener| {
+        listener.set_nonblocking(true)?;
+        AsyncFd::new(listener)
+    })
+    .map_err(|error| format!("cannot bind resident MCP broker socket: {error}"))?;
     fs::set_permissions(&endpoint, fs::Permissions::from_mode(0o600))
         .map_err(|error| format!("cannot protect resident MCP broker socket: {error}"))?;
     write_owner_file(
@@ -288,11 +296,11 @@ pub async fn broker_run(options: BrokerOptions) -> Result<(), String> {
     };
     loop {
         let accepted = tokio::select! {
-            accepted = listener.accept() => Some(accepted),
+            accepted = accept_fenced(&listener) => Some(accepted),
             () = context.shutdown.notified() => None,
         };
         let Some(accepted) = accepted else { break };
-        let (stream, _) =
+        let stream =
             accepted.map_err(|error| format!("resident MCP broker accept failed: {error}"))?;
         let permit = Arc::clone(&connection_permits).try_acquire_owned();
         let session = server.new_session();
@@ -326,6 +334,24 @@ pub async fn broker_run(options: BrokerOptions) -> Result<(), String> {
     remove_owner_file(&endpoint)?;
     remove_owner_file(&options.pid_path())?;
     Ok(())
+}
+
+/// Accept one connection inside the host descriptor fence. On macOS an
+/// accepted socket becomes close-on-exec only after `accept`; a host command
+/// a session spawned in between would hold the connection open for its life.
+async fn accept_fenced(
+    listener: &AsyncFd<std::os::unix::net::UnixListener>,
+) -> std::io::Result<UnixStream> {
+    loop {
+        let mut ready = listener.readable().await?;
+        if let Ok(accepted) =
+            ready.try_io(|listener| marsh_runtime::accept_unix(listener.get_ref()))
+        {
+            let stream = accepted?;
+            stream.set_nonblocking(true)?;
+            return UnixStream::from_std(stream);
+        }
+    }
 }
 
 /// Proxy one bounded stdio MCP transport to the authenticated broker.
@@ -848,6 +874,7 @@ fn remove_owner_file(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::net::UnixListener;
 
     struct RemoveOnDrop(PathBuf);
 
@@ -1000,6 +1027,62 @@ mod tests {
                 .await
                 .is_err(),
             "identity hashing failure opened a socket before the handshake was ready"
+        );
+    }
+
+    /// The broker's sessions spawn host commands. On macOS a socket becomes
+    /// close-on-exec only after it is created, inside the shared host fence;
+    /// the broker must not accept a connection while that fence is held, or
+    /// a concurrently spawned command could hold the connection for its life.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn broker_accepts_no_connection_while_a_descriptor_is_being_created() {
+        let root = tempfile::tempdir().unwrap();
+        let workspace = root.path().join("workspace");
+        let scope_root = root.path().join("scope");
+        fs::create_dir(&workspace).unwrap();
+        for name in ["marsh", "marshd", "sbx"] {
+            let path = root.path().join(name);
+            fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let options = BrokerOptions {
+            workspace,
+            home: scope_root.join("default"),
+            scope_root,
+            marsh: root.path().join("marsh"),
+            sbx: root.path().join("sbx"),
+            allow_full_sbx_control: false,
+        };
+        let _endpoint_root = RemoveOnDrop(options.endpoint().parent().unwrap().to_path_buf());
+        let broker = tokio::spawn(broker_run(options.clone()));
+        let ready = tokio::time::Instant::now() + START_TIMEOUT;
+        while !options.endpoint().exists() {
+            assert!(tokio::time::Instant::now() < ready, "broker never listened");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let token = load_token(&options.token_path()).unwrap();
+        let released = Arc::new(AtomicBool::new(false));
+        let (held, holding) = std::sync::mpsc::channel();
+        let creator = {
+            let released = Arc::clone(&released);
+            std::thread::spawn(move || {
+                marsh_runtime::with_host_descriptor_creation_excluded(|| {
+                    held.send(()).unwrap();
+                    std::thread::sleep(Duration::from_secs(1));
+                    released.store(true, Ordering::Release);
+                });
+            })
+        };
+        holding.recv().unwrap();
+        let probe = connect_handshake(&options, &token, HandshakePurpose::Probe).await;
+        let accepted_after_release = released.load(Ordering::Acquire);
+        creator.join().unwrap();
+        drop(probe.unwrap());
+        broker_stop(options).await.unwrap();
+        broker.await.unwrap().unwrap();
+        assert!(
+            accepted_after_release,
+            "the broker accepted a connection while a descriptor was being created"
         );
     }
 

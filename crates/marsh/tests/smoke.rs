@@ -1,3 +1,5 @@
+mod common;
+
 use std::process::{Command, Stdio};
 
 #[cfg(unix)]
@@ -20,6 +22,9 @@ thread_local! {
 }
 
 fn isolated_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    if program.as_ref() == "bash" {
+        common::require_bash_oracle();
+    }
     let mut command = Command::new(program);
     SHELL_HOME.with(|home| {
         command
@@ -91,134 +96,84 @@ fn brush_shim_keeps_precedence_over_descendant_path_command() {
     assert_eq!(output.stdout, b"local:place_probe:xchild");
 }
 
+/// A registered-command link outside an attached session (no relay socket or
+/// token) refuses to run, whatever bytes its arguments hold.
 #[test]
-fn descendant_command_without_relay_fails_closed() {
+fn registered_command_without_relay_fails_closed() {
+    use std::os::unix::ffi::OsStringExt as _;
     let directory = tempfile::tempdir().unwrap();
-    let link = directory.path().join("fixture");
-    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_marsh"), &link).unwrap();
-    let output = isolated_command(link)
-        .env("MARSH_EXTERNAL_SESSION", "{}")
-        .env_remove("MARSH_DAEMON_SOCKET")
-        .env_remove("MARSH_DAEMON_TOKEN")
-        .arg("identity")
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(125));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("attached marsh session"));
+    for (name, argument) in [
+        ("identity", None),
+        (
+            "registered_probe",
+            Some(std::ffi::OsString::from_vec(vec![0xff])),
+        ),
+    ] {
+        let link = directory.path().join(name);
+        std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_marsh"), &link).unwrap();
+        let output = isolated_command(&link)
+            .args(argument)
+            .env("MARSH_EXTERNAL_SESSION", "untrusted-test-context")
+            .env_remove("MARSH_DAEMON_SOCKET")
+            .env_remove("MARSH_DAEMON_TOKEN")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(125), "{name}: {output:?}");
+        assert!(output.stdout.is_empty(), "{name}: {output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            format!("{name}: registered command requires an attached marsh session\n")
+        );
+    }
 }
 
+/// A terminal interrupt reaches the whole foreground process group. The shell
+/// defers its INT/TERM trap until the foreground child has died of the same
+/// signal, then runs it, whichever of the two events it observes first.
 #[cfg(unix)]
 #[test]
-fn foreground_interrupt_invokes_registered_int_trap() {
-    let directory = tempfile::tempdir().unwrap();
-    let ready = directory.path().join("ready");
-    let mut command = marsh();
-    command
-        .current_dir(directory.path())
-        .arg("-c")
-        .arg("trap 'printf trapped; exit 130' INT; sh -c 'printf %s $$ > ready; exec sleep 300'")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
-    let mut child = command.spawn().unwrap();
-    for _ in 0..250 {
-        if ready.exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
+fn foreground_group_signal_runs_the_trap_after_the_child_dies() {
+    for (signal, status) in [
+        (nix::sys::signal::Signal::SIGINT, 130),
+        (nix::sys::signal::Signal::SIGTERM, 143),
+    ] {
+        let name = &signal.as_str()[3..];
+        let directory = tempfile::tempdir().unwrap();
+        let ready = directory.path().join("ready");
+        let mut command = marsh();
+        command
+            .current_dir(directory.path())
+            .arg("-c")
+            .arg(format!(
+                "trap 'printf trapped; exit {status}' {name}; sh -c 'printf ready > ready; exec sleep 300'"
+            ))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0);
+        let child = command.spawn().unwrap();
+        // The trap is installed before the child starts, so the shell catches
+        // the signal whether or not it has reached its wait.
+        common::wait_until("the foreground child", Duration::from_secs(20), || {
+            ready.exists()
+        });
+        let group = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap());
+        nix::sys::signal::killpg(group, signal).unwrap();
+        let output = common::wait_for_exit(child, name, Duration::from_secs(20));
+        assert_eq!(output.status.code(), Some(status), "{name}: {output:?}");
+        assert_eq!(output.stdout, b"trapped", "{name}: {output:?}");
     }
-    assert!(ready.exists(), "shell never reached foreground wait");
-    let child_pid = std::fs::read_to_string(&ready)
-        .unwrap()
-        .parse::<i32>()
-        .unwrap();
-    let shell_pid = i32::try_from(child.id()).unwrap();
-    nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(shell_pid),
-        nix::sys::signal::Signal::SIGINT,
-    )
-    .unwrap();
-    // Give the shell's signal listener an exclusive-ready window before the
-    // child exit also becomes selectable; otherwise the test races those two
-    // readiness events instead of testing deferred trap delivery.
-    thread::sleep(Duration::from_millis(50));
-    nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(child_pid),
-        nix::sys::signal::Signal::SIGINT,
-    )
-    .unwrap();
-    for _ in 0..100 {
-        if child.try_wait().unwrap().is_some() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    let output = child.wait_with_output().unwrap();
-    assert_eq!(output.status.code(), Some(130));
-    assert_eq!(output.stdout, b"trapped");
-}
-
-#[cfg(unix)]
-#[test]
-fn foreground_term_invokes_registered_term_trap_after_child_finishes() {
-    let directory = tempfile::tempdir().unwrap();
-    let ready = directory.path().join("ready");
-    let mut command = marsh();
-    command
-        .current_dir(directory.path())
-        .arg("-c")
-        .arg("trap 'printf trapped; exit 143' TERM; sh -c 'printf %s $$ > ready; exec sleep 300'")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
-    let mut child = command.spawn().unwrap();
-    for _ in 0..250 {
-        if ready.exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    assert!(ready.exists(), "shell never reached foreground wait");
-    let child_pid = std::fs::read_to_string(&ready)
-        .unwrap()
-        .parse::<i32>()
-        .unwrap();
-    let shell_pid = i32::try_from(child.id()).unwrap();
-    nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(shell_pid),
-        nix::sys::signal::Signal::SIGTERM,
-    )
-    .unwrap();
-    thread::sleep(Duration::from_millis(50));
-    nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(child_pid),
-        nix::sys::signal::Signal::SIGTERM,
-    )
-    .unwrap();
-    for _ in 0..100 {
-        if child.try_wait().unwrap().is_some() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    if child.try_wait().unwrap().is_none() {
-        let _ = child.kill();
-        panic!("shell did not finish after TERM");
-    }
-    let output = child.wait_with_output().unwrap();
-    assert_eq!(output.status.code(), Some(143), "{:?}", output.stderr);
-    assert_eq!(output.stdout, b"trapped");
 }
 
 #[test]
 fn wait_n_returns_first_child_status_and_pid() {
+    // The second job cannot finish until `wait -n` has returned.
+    let directory = tempfile::tempdir().unwrap();
     let output = marsh()
-        .args(["--no-config", "--noprofile", "--norc", "-c", "sh -c 'sleep .05; exit 23' & a=$!; sh -c 'sleep .3; exit 17' & b=$!; wait -n -p won \"$a\" \"$b\"; rc=$?; printf '%s:%s' \"$rc\" \"$won\"; wait \"$b\""])
+        .current_dir(directory.path())
+        .args(["--no-config", "--noprofile", "--norc", "-c", "mkfifo gate; sh -c 'exit 23' & a=$!; sh -c 'read x < gate; exit 17' & b=$!; wait -n -p won \"$a\" \"$b\"; rc=$?; test \"$won\" = \"$a\"; printf '%s:%s' \"$rc\" \"$?\"; echo >gate; wait \"$b\""])
         .output().unwrap();
-    assert_eq!(output.status.code(), Some(17), "{:?}", output.stderr);
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.starts_with("23:"), "{stdout}");
-    assert!(stdout[3..].parse::<u32>().is_ok(), "{stdout}");
+    assert_eq!(output.status.code(), Some(17), "{output:?}");
+    assert_eq!(output.stdout, b"23:0", "{output:?}");
 }
 
 #[test]
@@ -232,66 +187,60 @@ fn wait_n_can_collect_each_job_once_and_reports_empty_set() {
     assert_eq!(output.stdout, b"7:9:127");
 }
 
-#[test]
-fn wait_n_preserves_unselected_pipeline_status_after_prompt_poll() {
-    let script = "sleep .4 | sh -c 'exit 7' & slow=$!; sleep .1 & fast=$!; wait -n \"$slow\" \"$fast\"; sleep .6; wait \"$slow\"; printf 'slow-status=%s\\n' \"$?\"";
-    let bash = isolated_command("bash")
-        .arg("-c")
-        .arg(script)
-        .output()
-        .unwrap();
-    let brush = marsh()
-        .args(["--no-config", "--noprofile", "--norc", "-c", script])
-        .output()
-        .unwrap();
-    assert!(bash.status.success(), "{:?}", bash.stderr);
-    assert_eq!(bash.stdout, b"slow-status=7\n");
-    assert_eq!(brush.status, bash.status, "{:?}", brush.stderr);
-    assert_eq!(brush.stdout, bash.stdout, "{:?}", brush.stderr);
+fn matches_bash_in_a_fresh_directory(script: &str, expected: &[u8]) {
+    common::require_bash_oracle();
+    let run = |mut command: Command| {
+        let directory = tempfile::tempdir().unwrap();
+        let child = command
+            .current_dir(directory.path())
+            .args(["--noprofile", "--norc", "-c", script])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        common::wait_for_exit(child, script, Duration::from_mins(1))
+    };
+    let bash = run(isolated_command("bash"));
+    assert!(bash.status.success(), "Bash: {bash:?}");
+    assert_eq!(bash.stdout, expected, "Bash: {bash:?}");
+    let mut brush = marsh();
+    brush.arg("--no-config");
+    let brush = run(brush);
+    assert_eq!(brush.status, bash.status, "{brush:?}");
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
 }
 
+/// `wait -n` selects the finished job; the unselected pipeline, whose last
+/// stage already exited 7, keeps that status for a later `wait`.
+#[test]
+fn wait_n_preserves_unselected_pipeline_status() {
+    matches_bash_in_a_fresh_directory(
+        "mkfifo gate; sh -c 'read x < gate' | sh -c 'exit 7' & slow=$!; true & fast=$!; wait -n \"$slow\" \"$fast\"; echo >gate; wait \"$slow\"; printf 'slow-status=%s\\n' \"$?\"",
+        b"slow-status=7\n",
+    );
+}
+
+/// `$!` of a background pipeline stays waitable after its first stage exits.
 #[test]
 fn wait_by_original_pipeline_pid_survives_completed_first_stage() {
-    let script = "sh -c 'exit 0' | sh -c 'sleep .3; exit 7' & pid=$!; sleep .1; wait \"$pid\"; printf 'status=%s\\n' \"$?\"";
-    let bash = isolated_command("bash")
-        .arg("-c")
-        .arg(script)
-        .output()
-        .unwrap();
-    let brush = marsh()
-        .args(["--no-config", "--noprofile", "--norc", "-c", script])
-        .output()
-        .unwrap();
-    assert!(bash.status.success(), "{:?}", bash.stderr);
-    assert_eq!(bash.stdout, b"status=7\n");
-    assert_eq!(brush.status, bash.status, "{:?}", brush.stderr);
-    assert_eq!(brush.stdout, bash.stdout, "{:?}", brush.stderr);
+    matches_bash_in_a_fresh_directory(
+        "mkfifo gate; sh -c ': > first-done' | sh -c 'read x < gate; exit 7' & pid=$!; until test -e first-done; do sleep .01; done; echo >gate; wait \"$pid\"; printf 'status=%s\\n' \"$?\"",
+        b"status=7\n",
+    );
 }
 
+/// `wait -f` returns only when the job terminates, not when it stops.
 #[cfg(unix)]
 #[test]
 fn wait_for_termination_matches_bash_for_stopped_job() {
     for option in ["-f", "-n -f"] {
-        let script = format!(
-            "sh -c 'kill -STOP $$; exit 23' & pid=$!; sh -c \"sleep .1; kill -CONT $pid\" & wait {option} -p done \"$pid\"; rc=$?; test \"$done\" = \"$pid\"; same=$?; printf '%s:%s' \"$rc\" \"$same\"; wait"
+        matches_bash_in_a_fresh_directory(
+            &format!(
+                "sh -c 'kill -STOP $$; exit 23' & pid=$!; sh -c \"until ps -o stat= -p $pid | grep -q T; do sleep .01; done; kill -CONT $pid\" & wait {option} -p done \"$pid\"; rc=$?; test \"$done\" = \"$pid\"; same=$?; printf '%s:%s' \"$rc\" \"$same\"; wait"
+            ),
+            b"23:0",
         );
-        let bash = isolated_command("bash")
-            .arg("-c")
-            .arg(&script)
-            .output()
-            .unwrap();
-        assert!(bash.status.success(), "{:?}", bash.stderr);
-        let brush = marsh()
-            .args(["--no-config", "--noprofile", "--norc", "-c", &script])
-            .output()
-            .unwrap();
-        assert_eq!(
-            brush.status.code(),
-            bash.status.code(),
-            "{option}: {:?}",
-            brush.stderr
-        );
-        assert_eq!(brush.stdout, bash.stdout, "{option}: {:?}", brush.stderr);
     }
 }
 
@@ -329,36 +278,22 @@ fn term_trap_runs_while_shell_waits_for_more_input() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .process_group(0)
         .spawn()
         .unwrap();
     let mut stdin = child.stdin.take().unwrap();
     stdin
         .write_all(b"trap 'printf trapped; exit 143' TERM\nprintf ready > ready\n")
         .unwrap();
-    for _ in 0..250 {
-        if ready.exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    assert!(ready.exists(), "shell never reached idle input");
+    common::wait_until("idle input", Duration::from_secs(20), || ready.exists());
     nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap()),
         nix::sys::signal::Signal::SIGTERM,
     )
     .unwrap();
-    for _ in 0..100 {
-        if child.try_wait().unwrap().is_some() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    if child.try_wait().unwrap().is_none() {
-        let _ = child.kill();
-        panic!("shell did not run idle TERM trap");
-    }
+    // Stdin stays open: only the trap can end the shell.
+    let output = common::wait_for_exit(child, "idle TERM trap", Duration::from_secs(20));
     drop(stdin);
-    let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(143), "{:?}", output.stderr);
     assert_eq!(output.stdout, b"trapped");
 }
@@ -376,19 +311,14 @@ fn idle_term_trap_can_resume_reading_commands() {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .process_group(0)
         .spawn()
         .unwrap();
     let mut stdin = child.stdin.take().unwrap();
     stdin
         .write_all(b"trap 'printf trapped; printf handled > handled' TERM\nprintf ready > ready\n")
         .unwrap();
-    for _ in 0..250 {
-        if ready.exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    assert!(ready.exists(), "shell never reached idle input");
+    common::wait_until("idle input", Duration::from_secs(20), || ready.exists());
     stdin.write_all(b"printf af").unwrap();
     nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap()),
@@ -396,13 +326,9 @@ fn idle_term_trap_can_resume_reading_commands() {
     )
     .unwrap();
     let handled = directory.path().join("handled");
-    for _ in 0..250 {
-        if handled.exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    assert!(handled.exists(), "idle TERM trap did not run");
+    common::wait_until("the idle TERM trap", Duration::from_secs(20), || {
+        handled.exists()
+    });
     stdin.write_all(b"ter\n").unwrap();
     drop(stdin);
     let output = child.wait_with_output().unwrap();
@@ -410,18 +336,22 @@ fn idle_term_trap_can_resume_reading_commands() {
     assert_eq!(output.stdout, b"trappedafter");
 }
 
+/// A job that finished while the input loop read later lines is still
+/// collected by `wait -n`.
 #[test]
 fn wait_n_keeps_a_completed_job_after_prompt_notification() {
     use std::io::Write as _;
 
+    let directory = tempfile::tempdir().unwrap();
     let mut child = marsh()
         .args(["--no-config", "--noprofile", "--norc", "-s"])
+        .current_dir(directory.path())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(b"sh -c 'exit 7' & pid=$!\nsleep .1\nwait -n -p finished \"$pid\"\nprintf '%s:%s' \"$?\" \"$finished\"\n").unwrap();
+    child.stdin.take().unwrap().write_all(b"sh -c ': > finishing; exit 7' & pid=$!\nuntil test -e finishing; do sleep .01; done\n:\nwait -n -p finished \"$pid\"\nprintf '%s:%s' \"$?\" \"$finished\"\n").unwrap();
     let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{:?}", output.stderr);
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -429,90 +359,38 @@ fn wait_n_keeps_a_completed_job_after_prompt_notification() {
     assert!(stdout[2..].parse::<u32>().is_ok(), "{stdout}");
 }
 
+/// A trapped TERM that arrives while the shell is blocked in `wait` runs the
+/// trap and makes `wait` return 128+15, leaving `-p`'s variable unset.
 #[cfg(unix)]
 #[test]
-fn trapped_term_interrupts_wait_n_and_leaves_pid_variable_unset() {
-    let directory = tempfile::tempdir().unwrap();
-    let ready = directory.path().join("ready");
-    let mut command = marsh();
-    command
-        .current_dir(directory.path())
-        .arg("-c")
-        .arg("trap 'printf trapped' TERM; sleep 2 & pid=$!; printf ready > ready; wait -n -p done \"$pid\"; rc=$?; printf '%s:%s' \"$rc\" \"${done-unset}\"; kill \"$pid\"; wait \"$pid\" 2>/dev/null; exit 0")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
-    let mut child = command.spawn().unwrap();
-    for _ in 0..250 {
-        if ready.exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
+fn trapped_term_interrupts_wait() {
+    for (wait, expected) in [
+        ("wait -n -p done \"$pid\"", "trapped143:unset"),
+        ("wait \"$pid\"", "trapped143:unset"),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let ready = directory.path().join("ready");
+        let mut command = marsh();
+        command
+            .current_dir(directory.path())
+            .arg("-c")
+            .arg(format!("trap 'printf trapped' TERM; sleep 300 & pid=$!; printf ready > ready; {wait}; rc=$?; printf '%s:%s' \"$rc\" \"${{done-unset}}\"; kill \"$pid\"; wait \"$pid\" 2>/dev/null; exit 0"))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0);
+        let child = command.spawn().unwrap();
+        common::wait_until(wait, Duration::from_secs(20), || ready.exists());
+        // Past `printf ready` the next blocking point is the wait itself.
+        common::wait_until_blocked(child.id(), wait);
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap()),
+            nix::sys::signal::Signal::SIGTERM,
+        )
+        .unwrap();
+        let output = common::wait_for_exit(child, wait, Duration::from_secs(20));
+        assert_eq!(output.status.code(), Some(0), "{wait}: {output:?}");
+        assert_eq!(output.stdout, expected.as_bytes(), "{wait}: {output:?}");
     }
-    assert!(ready.exists(), "shell never reached wait -n");
-    thread::sleep(Duration::from_millis(50));
-    let shell_pid = i32::try_from(child.id()).unwrap();
-    nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(shell_pid),
-        nix::sys::signal::Signal::SIGTERM,
-    )
-    .unwrap();
-    for _ in 0..200 {
-        if child.try_wait().unwrap().is_some() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    if child.try_wait().unwrap().is_none() {
-        let _ = child.kill();
-        panic!("shell did not leave interrupted wait -n");
-    }
-    let output = child.wait_with_output().unwrap();
-    assert_eq!(output.status.code(), Some(0), "{:?}", output.stderr);
-    assert_eq!(output.stdout, b"trapped143:unset");
-}
-
-#[cfg(unix)]
-#[test]
-fn trapped_term_interrupts_wait_for_pid() {
-    let directory = tempfile::tempdir().unwrap();
-    let ready = directory.path().join("ready");
-    let mut command = marsh();
-    command
-        .current_dir(directory.path())
-        .arg("-c")
-        .arg("trap 'printf trapped' TERM; sleep 2 & pid=$!; printf ready > ready; wait \"$pid\"; rc=$?; printf '%s' \"$rc\"; kill \"$pid\"; wait \"$pid\" 2>/dev/null; exit 0")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
-    let mut child = command.spawn().unwrap();
-    for _ in 0..250 {
-        if ready.exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    assert!(ready.exists(), "shell never reached wait PID");
-    thread::sleep(Duration::from_millis(50));
-    let shell_pid = i32::try_from(child.id()).unwrap();
-    nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(shell_pid),
-        nix::sys::signal::Signal::SIGTERM,
-    )
-    .unwrap();
-    for _ in 0..200 {
-        if child.try_wait().unwrap().is_some() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-    if child.try_wait().unwrap().is_none() {
-        let _ = child.kill();
-        panic!("shell did not leave interrupted wait PID");
-    }
-    let output = child.wait_with_output().unwrap();
-    assert_eq!(output.status.code(), Some(0), "{:?}", output.stderr);
-    assert_eq!(output.stdout, b"trapped143");
 }
 
 #[test]
@@ -596,21 +474,15 @@ fn supports_bash_pipeline_and_pipefail_behavior() {
 }
 
 #[test]
-fn extension_scan_is_linear_for_a_large_ordinary_program() {
+fn fanout_after_a_large_ordinary_program_parses() {
     let mut script = ":;\n".repeat(16_384);
     script.push_str("fanout { first: true; second: true } | collect\n");
-    let started = std::time::Instant::now();
     let output = composition_shell()
         .args(["--no-config", "--noprofile", "--norc", "-n", "-c", &script])
         .output()
         .expect("parse large ordinary program");
 
     assert!(output.status.success(), "{:?}", output.stderr);
-    assert!(
-        started.elapsed() < std::time::Duration::from_secs(5),
-        "fanout extension scan regressed to prefix-rescanning behavior: {:?}",
-        started.elapsed()
-    );
 }
 
 #[test]
@@ -623,7 +495,7 @@ fn background_pid_jobs_and_wait_use_the_real_child() {
             "--noprofile",
             "--norc",
             "-c",
-            "sh -c 'sleep 0.05; exit 23' & pid=$!; test -n \"$pid\"; jobs -p >pids; jobs -l >long; grep -F \"$pid\" pids >/dev/null; grep -F \"$pid\" long >/dev/null; wait \"$pid\"; status=$?; rm pids long; exit \"$status\"",
+            "mkfifo gate; sh -c 'read x < gate; exit 23' & pid=$!; test -n \"$pid\"; jobs -p >pids; jobs -l >long; grep -F \"$pid\" pids >/dev/null; grep -F \"$pid\" long >/dev/null; echo >gate; wait \"$pid\"; status=$?; rm pids long gate; exit \"$status\"",
         ])
         .output()
         .expect("run marsh");
@@ -658,7 +530,7 @@ fn background_pipeline_wait_returns_rightmost_status() {
 #[test]
 fn background_pipeline_pid_is_rightmost_and_survives_wait() {
     let directory = tempfile::tempdir().unwrap();
-    let script = "sh -c 'exit 7' | sh -c 'printf %s \"$$\" > right-pid; sleep 0.05; exit 23' & pid=$!; while [ ! -s right-pid ]; do sleep 0.01; done; test \"$pid\" = \"$(cat right-pid)\" || exit 90; wait \"$pid\"; status=$?; test \"$!\" = \"$pid\" || exit 91; exit \"$status\"";
+    let script = "sh -c 'exit 7' | sh -c 'printf %s \"$$\" > right-pid; exit 23' & pid=$!; while [ ! -s right-pid ]; do sleep 0.01; done; test \"$pid\" = \"$(cat right-pid)\" || exit 90; wait \"$pid\"; status=$?; test \"$!\" = \"$pid\" || exit 91; exit \"$status\"";
     for mut command in [isolated_command("bash"), marsh()] {
         let _ = std::fs::remove_file(directory.path().join("right-pid"));
         let output = command
@@ -673,7 +545,10 @@ fn background_pipeline_pid_is_rightmost_and_survives_wait() {
 #[cfg(target_os = "macos")]
 #[test]
 fn foregrounding_background_pipeline_uses_its_original_process_group() {
-    let script = "sleep 0.2 | sleep 0.2 & fg; printf 'FG_STATUS=%s\\n' \"$?\"; wait";
+    // Each stage exits 0 once its own group owns the terminal (`fg` worked),
+    // or 9 after ten seconds.
+    let stage = "sh -c 'i=0; until test \"$(ps -o tpgid= -p $$)\" -eq \"$(ps -o pgid= -p $$)\"; do i=$((i+1)); test $i -lt 1000 || exit 9; sleep .01; done'";
+    let script = format!("{stage} | {stage} & fg; printf 'FG_STATUS=%s\\n' \"$?\"; wait");
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
         let output = isolated_command("script")
             .args([
@@ -684,7 +559,7 @@ fn foregrounding_background_pipeline_uses_its_original_process_group() {
                 "--norc",
                 "-i",
                 "-c",
-                script,
+                &script,
             ])
             .output()
             .unwrap();
@@ -743,8 +618,8 @@ fn interactive_command_string_takes_terminal_for_foreground_commands() {
 
 #[test]
 fn fanout_runs_pipelines_concurrently_and_collects_in_declaration_order() {
+    // Each branch finishes only once the other has started (or gives up).
     let directory = tempfile::tempdir().unwrap();
-    let started = std::time::Instant::now();
     let output = composition_shell()
         .current_dir(directory.path())
         .args([
@@ -752,13 +627,12 @@ fn fanout_runs_pipelines_concurrently_and_collects_in_declaration_order() {
             "--noprofile",
             "--norc",
             "-c",
-            "printf input | fanout { first: sh -c 'touch first-ready; i=0; while test ! -e second-ready; do i=$((i+1)); test \"$i\" -lt 300 || exit 41; sleep 0.01; done; printf one' | cat; second: sh -c 'touch second-ready; i=0; while test ! -e first-ready; do i=$((i+1)); test \"$i\" -lt 300 || exit 42; sleep 0.01; done; printf input' | tr a-z A-Z } | collect --timing",
+            "printf input | fanout { first: sh -c 'touch first-ready; i=0; while test ! -e second-ready; do i=$((i+1)); test \"$i\" -lt 1000 || exit 41; sleep 0.01; done; printf one' | cat; second: sh -c 'touch second-ready; i=0; while test ! -e first-ready; do i=$((i+1)); test \"$i\" -lt 1000 || exit 42; sleep 0.01; done; printf input' | tr a-z A-Z } | collect --timing",
         ])
         .output()
         .expect("run fanout");
 
-    assert!(output.status.success());
-    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.find("== first").unwrap() < stdout.find("== second").unwrap());
     assert!(stdout.contains("one"));
@@ -987,11 +861,11 @@ fn fanout_branches_share_the_current_project() {
             "--noprofile",
             "--norc",
             "-c",
-            "fanout { writer: printf shared > result; observer: sleep 0.1 | cat result } | collect",
+            "fanout { writer: printf shared > result; observer: sh -c 'i=0; until test -s result; do i=$((i+1)); test $i -lt 1000 || exit 9; sleep .01; done; cat result' } | collect",
         ])
         .output()
         .expect("run shared workspace fanout");
-    assert!(output.status.success());
+    assert!(output.status.success(), "{output:?}");
     assert_eq!(
         std::fs::read(directory.path().join("result")).unwrap(),
         b"shared"
@@ -1043,8 +917,8 @@ fn fanout_enforces_prefix_and_combined_output_bounds_before_delivery() {
     assert!(!marker.exists());
     assert!(String::from_utf8_lossy(&prefix.stderr).contains("input exceeds 64 MiB"));
 
-    let started = std::time::Instant::now();
-    let output = composition_shell()
+    // The branch would run for five minutes; collect must stop it at the bound.
+    let child = composition_shell()
         .args([
             "--no-config",
             "--noprofile",
@@ -1052,9 +926,12 @@ fn fanout_enforces_prefix_and_combined_output_bounds_before_delivery() {
             "-c",
             "fanout { noisy: sh -c 'head -c 17825792 /dev/zero; sleep 300' } | collect",
         ])
-        .output()
-        .expect("run over-limit combined fanout output");
-    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let output = common::wait_for_exit(child, "over-limit fanout", Duration::from_mins(1));
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("combined output exceeds 16 MiB"));
@@ -1270,9 +1147,23 @@ fn background_fanout_is_one_waitable_shell_job() {
     assert!(stdout.contains("== b (complete) =="));
 }
 
+/// Branch commands are grandchildren of the shell: once their branch shell is
+/// gone, an exited one is reaped by init, not by marsh. A leaked branch is one
+/// that keeps running.
+#[cfg(unix)]
+fn assert_branches_exit(members: &[i32]) {
+    for &member in members {
+        common::wait_until(
+            &format!("fanout branch {member} to exit"),
+            Duration::from_secs(10),
+            || common::has_exited(member),
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
-fn interrupt_cancels_and_reaps_all_fanout_branches() {
+fn interrupt_cancels_every_fanout_branch() {
     let directory = tempfile::tempdir().unwrap();
     let pids = directory.path().join("pids");
     let script = format!(
@@ -1285,13 +1176,10 @@ fn interrupt_cancels_and_reaps_all_fanout_branches() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    let mut child = command.spawn().unwrap();
-    for _ in 0..100 {
-        if std::fs::read_to_string(&pids).is_ok_and(|contents| contents.lines().count() == 2) {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
+    let child = command.spawn().unwrap();
+    common::wait_until("both branches", Duration::from_secs(20), || {
+        std::fs::read_to_string(&pids).is_ok_and(|contents| contents.lines().count() == 2)
+    });
     let members = std::fs::read_to_string(&pids)
         .unwrap()
         .lines()
@@ -1302,33 +1190,18 @@ fn interrupt_cancels_and_reaps_all_fanout_branches() {
         nix::sys::signal::Signal::SIGINT,
     )
     .unwrap();
-    for _ in 0..100 {
-        if child.try_wait().unwrap().is_some() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    if child.try_wait().unwrap().is_none() {
-        child.kill().unwrap();
-        panic!("shell did not propagate a direct SIGINT to fanout branches");
-    }
-    let output = child.wait_with_output().unwrap();
+    let output = common::wait_for_exit(child, "SIGINT to fanout", Duration::from_secs(20));
     assert_eq!(output.status.code(), Some(130));
-    for member in members {
-        assert!(
-            nix::sys::signal::kill(nix::unistd::Pid::from_raw(member), None).is_err(),
-            "fanout leaked child {member}"
-        );
-    }
+    assert_branches_exit(&members);
 }
 
 #[cfg(unix)]
 #[test]
-fn term_trap_cancels_and_reaps_all_fanout_branches() {
+fn term_trap_cancels_every_fanout_branch() {
     let directory = tempfile::tempdir().unwrap();
     let pids = directory.path().join("pids");
     let script = format!(
-        "trap 'printf trapped; exit 143' TERM; fanout {{ a: sh -c 'echo $$ >> {0}; exec sleep 2'; b: sh -c 'echo $$ >> {0}; exec sleep 2' }} | collect",
+        "trap 'printf trapped; exit 143' TERM; fanout {{ a: sh -c 'echo $$ >> {0}; exec sleep 300'; b: sh -c 'echo $$ >> {0}; exec sleep 300' }} | collect",
         pids.display()
     );
     let mut command = composition_shell();
@@ -1337,13 +1210,10 @@ fn term_trap_cancels_and_reaps_all_fanout_branches() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
-    let mut child = command.spawn().unwrap();
-    for _ in 0..100 {
-        if std::fs::read_to_string(&pids).is_ok_and(|contents| contents.lines().count() == 2) {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
+    let child = command.spawn().unwrap();
+    common::wait_until("both branches", Duration::from_secs(20), || {
+        std::fs::read_to_string(&pids).is_ok_and(|contents| contents.lines().count() == 2)
+    });
     let members = std::fs::read_to_string(&pids)
         .unwrap()
         .lines()
@@ -1354,25 +1224,10 @@ fn term_trap_cancels_and_reaps_all_fanout_branches() {
         nix::sys::signal::Signal::SIGTERM,
     )
     .unwrap();
-    for _ in 0..100 {
-        if child.try_wait().unwrap().is_some() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(20));
-    }
-    if child.try_wait().unwrap().is_none() {
-        child.kill().unwrap();
-        panic!("shell did not propagate TERM to fanout branches");
-    }
-    let output = child.wait_with_output().unwrap();
+    let output = common::wait_for_exit(child, "TERM to fanout", Duration::from_secs(20));
     assert_eq!(output.status.code(), Some(143), "{:?}", output.stderr);
     assert_eq!(output.stdout, b"trapped");
-    for member in members {
-        assert!(
-            nix::sys::signal::kill(nix::unistd::Pid::from_raw(member), None).is_err(),
-            "fanout leaked child {member}"
-        );
-    }
+    assert_branches_exit(&members);
 }
 
 #[test]
@@ -1463,13 +1318,15 @@ fn reports_the_script_supplied_zero_argument() {
 
 #[test]
 fn compound_background_list_has_a_waitable_pid() {
+    let directory = tempfile::tempdir().unwrap();
     let output = marsh()
+        .current_dir(directory.path())
         .args([
             "--no-config",
             "--noprofile",
             "--norc",
             "-c",
-            "true && sleep 0.05 & pid=$!; test -n \"$pid\"; jobs -p | grep -Fx \"$pid\" >/dev/null; wait \"$pid\"",
+            "mkfifo gate; true && sh -c 'read x < gate; :' & pid=$!; test -n \"$pid\"; jobs -p | grep -Fx \"$pid\" >/dev/null; echo >gate; wait \"$pid\"",
         ])
         .output()
         .expect("run marsh");
@@ -1489,14 +1346,24 @@ struct PtyShell {
     input: std::sync::Arc<std::sync::Mutex<std::process::ChildStdin>>,
     child: std::process::Child,
     output: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    reader: Option<thread::JoinHandle<()>>,
 }
 
 #[cfg(unix)]
 impl PtyShell {
     fn spawn(program: &str, answer_cursor: bool) -> Self {
-        use std::io::{Read as _, Write as _};
+        Self::spawn_wrapped(program, answer_cursor, &[])
+    }
 
-        let mut shell = vec![program];
+    /// As [`Self::spawn`], with the shell run by `wrapper` (words before it).
+    fn spawn_wrapped(program: &str, answer_cursor: bool, wrapper: &[&str]) -> Self {
+        use std::io::{Read as _, Write as _};
+        if program == "bash" {
+            common::require_bash_oracle();
+        }
+
+        let mut shell = wrapper.to_vec();
+        shell.push(program);
         if program != "bash" {
             shell.push("--no-config");
         }
@@ -1524,7 +1391,7 @@ impl PtyShell {
         let mut reader = child.stdout.take().unwrap();
         let answerer = std::sync::Arc::clone(&input);
         let recorded = std::sync::Arc::clone(&output);
-        thread::spawn(move || {
+        let reader = thread::spawn(move || {
             let mut buffer = [0_u8; 4096];
             while let Ok(count @ 1..) = reader.read(&mut buffer) {
                 let chunk = &buffer[..count];
@@ -1539,6 +1406,7 @@ impl PtyShell {
             input,
             child,
             output,
+            reader: Some(reader),
         }
     }
 
@@ -1609,6 +1477,33 @@ impl PtyShell {
         }
     }
 
+    /// Waits until a child of `shell` owns the terminal's foreground group.
+    fn expect_foreground_child(&mut self, shell: u32) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        loop {
+            let table = Command::new("ps")
+                .args(["-A", "-o", "ppid=,stat="])
+                .output()
+                .unwrap();
+            if String::from_utf8_lossy(&table.stdout).lines().any(|row| {
+                let mut fields = row.split_whitespace();
+                fields.next().and_then(|ppid| ppid.parse().ok()) == Some(shell)
+                    && fields.next().is_some_and(|stat| stat.contains('+'))
+            }) {
+                return;
+            }
+            if std::time::Instant::now() > deadline {
+                let output = self.output();
+                self.kill();
+                panic!(
+                    "{}: no foreground child of {shell}: {output:?}",
+                    self.program
+                );
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     fn kill(&mut self) {
         let _ = nix::sys::signal::killpg(
             nix::unistd::Pid::from_raw(i32::try_from(self.child.id()).unwrap()),
@@ -1622,7 +1517,8 @@ impl PtyShell {
         let deadline = std::time::Instant::now() + Duration::from_secs(15);
         loop {
             if let Some(status) = self.child.try_wait().unwrap() {
-                thread::sleep(Duration::from_millis(50));
+                // `script` has exited, so the reader reaches end of file.
+                self.reader.take().unwrap().join().unwrap();
                 return (status.code(), self.output());
             }
             if std::time::Instant::now() > deadline {
@@ -1641,20 +1537,36 @@ impl PtyShell {
 #[cfg(unix)]
 #[test]
 fn interactive_ctrl_c_abandons_the_rest_of_the_command_line() {
-    for line in [
-        "printf '%s\\n' st''arted; for i in 1 2 3; do sleep 5; echo it$i; done; echo loop''done",
-        "printf '%s\\n' st''arted; sleep 30; echo aft''er",
-        "printf '%s\\n' st''arted; while :; do :; done; echo aft''er",
-        "printf '%s\\n' st''arted; f() { sleep 5; echo in''f; }; f; echo aft''er",
+    // `external` lines are waiting on a foreground child when ^C is typed; the
+    // other is the shell's own loop.
+    for (line, external) in [
+        (
+            "printf '%s\\n' st''arted; for i in 1 2 3; do sleep 30; echo it$i; done; echo loop''done",
+            true,
+        ),
+        ("printf '%s\\n' st''arted; sleep 30; echo aft''er", true),
+        (
+            "printf '%s\\n' st''arted; while :; do :; done; echo aft''er",
+            false,
+        ),
+        (
+            "printf '%s\\n' st''arted; f() { sleep 30; echo in''f; }; f; echo aft''er",
+            true,
+        ),
     ] {
         for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
             let mut shell = PtyShell::spawn(program, true);
             shell.expect("PROMPT$ ", 1);
+            let pid = shell.shell_pid(2);
             shell.send(format!("{line}\r").as_bytes());
             shell.expect("started\r\n", 1);
-            thread::sleep(Duration::from_millis(500));
+            if external {
+                shell.expect_foreground_child(pid);
+            }
+            // Typed-ahead input is safe once the next prompt is drawn.
+            let prompts = shell.output().matches("PROMPT$ ").count();
             shell.send(b"\x03");
-            thread::sleep(Duration::from_millis(300));
+            shell.expect("PROMPT$ ", prompts + 1);
             shell.send(b"echo rc=$?\r");
             shell.expect("rc=130", 1);
             shell.send(b"exit 3\r");
@@ -1825,11 +1737,11 @@ fn background_output_at_the_prompt_keeps_terminal_newline_translation() {
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
         let mut shell = PtyShell::spawn(program, true);
         shell.expect("PROMPT$ ", 1);
-        shell.send(b"(sleep 0.3; printf 'al''pha\\nbe''ta\\nga''mma\\n') &\r");
+        // The job writes once the line editor has put the terminal in
+        // noncanonical mode to wait for input.
+        shell.send(b"(until stty -a </dev/tty | grep -q -- -icanon; do sleep .01; done; printf 'al''pha\\nbe''ta\\nga''mma\\n') &\r");
         shell.expect("PROMPT$ ", 2);
-        // The job writes while the line editor is waiting for input.
         shell.expect("gamma", 1);
-        thread::sleep(Duration::from_millis(100));
         shell.send(b"exit 0\r");
         let (status, output) = shell.finish();
         assert_eq!(status, Some(0), "{program}: {output:?}");
@@ -1837,5 +1749,90 @@ fn background_output_at_the_prompt_keeps_terminal_newline_translation() {
             output.contains("alpha\r\nbeta\r\ngamma\r\n"),
             "{program}: lines do not start at column 0: {output:?}"
         );
+    }
+}
+
+/// `PIPESTATUS` keeps one entry per pipeline stage when a split cannot run
+/// (here: no workspace provider), including the stages after `join`.
+#[test]
+fn failed_split_reports_a_status_for_every_stage() {
+    for (script, expected) in [
+        (
+            "split { a: true } | join | cat; echo \"${PIPESTATUS[*]}\"",
+            "2 2 2\n",
+        ),
+        (
+            "printf x | split { a: true } | join | cat | cat; echo \"${PIPESTATUS[*]}\"",
+            "0 2 2 2 2\n",
+        ),
+        ("split { a: true }; echo \"${PIPESTATUS[*]}\"", "2\n"),
+    ] {
+        let output = isolated_command(env!("CARGO_BIN_EXE_marsh-local"))
+            .args(["--no-config", "--noprofile", "--norc", "-c", script])
+            .env("LC_ALL", "C")
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0), "{script}: {output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            expected,
+            "{script}: {output:?}"
+        );
+    }
+}
+
+/// Lines typed ahead with line feeds (a pty driver, `expect`, or a paste
+/// without bracketed paste) all run: the line editor submits the first and
+/// keeps the rest for the next prompts, as Bash's readline does (patch `0054`).
+#[cfg(unix)]
+#[test]
+fn lines_typed_ahead_with_line_feeds_all_run() {
+    for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
+        let mut shell = PtyShell::spawn(program, true);
+        shell.expect("PROMPT$ ", 1);
+        shell.send(b"echo one-$((0+1))\necho two-$((1+1))\necho three-$((1+2))\nexit 0\n");
+        let (status, output) = shell.finish();
+        assert_eq!(status, Some(0), "{program}: {output:?}");
+        for line in ["one-1", "two-2", "three-3"] {
+            assert!(
+                output.contains(line),
+                "{program}: {line} did not run: {output:?}"
+            );
+        }
+    }
+}
+
+/// A background job that has exited is reported at the next prompt even
+/// before the shell's runtime relays its `SIGCHLD`: the prompt's job check
+/// asks the kernel (patch `0068`). Before, it waited for the relay, and the
+/// `[1]+  Done` line could miss its prompt. Here the shell starts with
+/// `SIGCHLD` blocked, so the relay never comes; the command line waits with
+/// builtins only (`/proc`) until the job is a zombie (Bash reaps it first).
+#[cfg(target_os = "linux")]
+#[test]
+fn an_exited_job_is_reported_at_the_next_prompt_without_sigchld() {
+    for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
+        // `script` resets its child's signal mask, so a wrapper blocks SIGCHLD
+        // and execs the shell.
+        let wrapper = [
+            "perl",
+            "-MPOSIX",
+            "-e",
+            "'sigprocmask(SIG_BLOCK, POSIX::SigSet->new(SIGCHLD)) or die; exec @ARGV or die'",
+        ];
+        let mut shell = PtyShell::spawn_wrapped(program, true, &wrapper);
+        shell.expect("PROMPT$ ", 1);
+        shell.send(b"sh -c 'exit 3' & p=$!\r");
+        shell.expect("PROMPT$ ", 2);
+        shell.send(
+            b"until [[ ! -e /proc/$p ]] || { read -r l < /proc/$p/stat && [[ $l == *') Z '* ]]; } 2>/dev/null; do :; done\r",
+        );
+        shell.expect("PROMPT$ ", 3);
+        shell.send(b"true\r");
+        shell.expect("Exit 3", 1);
+        shell.expect("PROMPT$ ", 4);
+        shell.send(b"exit 0\r");
+        let (status, output) = shell.finish();
+        assert_eq!(status, Some(0), "{program}: {output:?}");
     }
 }

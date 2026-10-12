@@ -39,10 +39,11 @@ flight recorder was removed; `marsh results` (structural receipts) is the job re
 make dev                              # build everything; install ~/.marsh-dev
 ~/.marsh-dev/bin/marsh --dev -c pi-dev  # develop marsh from marsh with Pi
 make fixture-ref                      # once: published fixture ref -> target/fixture-ref
-make dev-smoke                        # acceptance smoke against the dev install (or DEV_KIT=<ref>)
+make test                             # VM-free gate, the same targets CI runs (needs cargo-nextest)
 make dev && make check                # the loop: fast real smoke, warm scope in target/check
 make verify                           # before pushing: check + high-signal suites, concurrent (tests/regress.py)
-make regress                          # every sbx-backed suite, concurrent, before release (regress-serial: one at a time)
+make regress                          # every sbx-backed suite, then make test with the full model, before release
+make regress ONLY=smoke               # one suite, family, or scenario id (W01-...); REGRESS_JOBS=1 serializes
 python3 tests/perf/warm.py --marsh ~/.marsh-dev/bin/marsh \
   --guest-artifacts ~/.marsh-dev/libexec/marsh --kit <fixture-ref>
 ```
@@ -50,10 +51,9 @@ python3 tests/perf/warm.py --marsh ~/.marsh-dev/bin/marsh \
 ## Gates
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-make dev-smoke
-docs/model/check.sh                   # when cross-component state changes
+make test                             # fmt, clippy, every workspace test, harnesses, quick model
+make verify                           # on a Mac, against the dev install
+make test-model MODEL_FLAGS=          # every TLA+ config, when cross-component state changes
 ```
 
 Add focused tests for the crate you changed. Avoid whole-workspace test churn.

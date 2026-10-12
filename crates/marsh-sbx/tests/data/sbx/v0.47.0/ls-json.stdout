@@ -1,0 +1,112 @@
+{
+  "sandboxes": [
+    {
+      "name": "marsh-k-3ln3tz46",
+      "id": "1e54f5e8-d79e-4a2f-b6c7-7b8b5e8d10d4",
+      "agent": "marsh-fixture",
+      "status": "stopped",
+      "last_used_at": "2026-10-09T17:10:11.469243Z",
+      "workspaces": [
+        "/Users/alice/dev/sbxsh/target/check/control/c333588d7362a7b3f46431ab84015d96ca543afc875a42bae3b56678b37f77dd/kit-lifecycle/fc3af48042c524f48d7112b0b06b19f0c0ed3481932151698ebdd6603be8aa04"
+      ],
+      "created_at": "2026-10-09T04:34:22Z",
+      "workspace_missing": true
+    },
+    {
+      "name": "marsh-k-d03mf53q",
+      "id": "c6120943-ebdc-4261-ac2e-4b9fdbcb6396",
+      "agent": "marsh-claude",
+      "status": "running",
+      "last_used_at": "2026-10-11T22:59:38.686738Z",
+      "workspaces": [
+        "/Users/alice/Library/Application Support/marsh/control/8b845f53ba8f4323842d6127d87cbeaa9f3ffa8640cd4f1bc9ac110644a87a54/kit-lifecycle/70e848538f0fb501a71e7ba1a9ce945b1c234042518de9de9edbbf7c47eb4c15"
+      ],
+      "created_at": "2026-10-11T22:59:26Z"
+    },
+    {
+      "name": "marsh-k-d7exj9m0",
+      "id": "eed713ae-2e61-4d2f-856f-ec72cb851b7d",
+      "agent": "marsh-pi",
+      "status": "running",
+      "last_used_at": "2026-10-11T23:00:18.707109Z",
+      "workspaces": [
+        "/Users/alice/Library/Application Support/marsh/control/8b845f53ba8f4323842d6127d87cbeaa9f3ffa8640cd4f1bc9ac110644a87a54/kit-lifecycle/60b212ed375465cc7f68a2c6b90ae060619a893cd23e4cbdbe8c2f442987d436"
+      ],
+      "created_at": "2026-10-11T23:00:06Z"
+    },
+    {
+      "name": "marsh-k-krwmr5q0",
+      "id": "2ff9eb66-e2e7-4dcb-97d6-4bb89f628d02",
+      "agent": "marsh-claude",
+      "status": "stopped",
+      "last_used_at": "2026-10-11T17:28:37.373787Z",
+      "workspaces": [
+        "/Users/alice/Library/Application Support/marsh/control/8b845f53ba8f4323842d6127d87cbeaa9f3ffa8640cd4f1bc9ac110644a87a54/kit-lifecycle/34306b44d6afd16b30f7ce7facd1882984e087f48c26f382e94d46a0abcd6313"
+      ],
+      "created_at": "2026-10-09T17:12:57Z"
+    },
+    {
+      "name": "marsh-k-mwpsym6y",
+      "id": "dde17b8a-e365-447e-9399-fde1b5456541",
+      "agent": "acp-fixture",
+      "status": "stopped",
+      "last_used_at": "2026-10-09T17:10:11.46933Z",
+      "workspaces": [
+        "/Users/alice/dev/sbxsh/target/check/control/c333588d7362a7b3f46431ab84015d96ca543afc875a42bae3b56678b37f77dd/kit-lifecycle/751d9257b8022796595568e7113e8b0d9e31ffbd2aa4dc67e33ec244169ad43e"
+      ],
+      "created_at": "2026-10-09T04:34:47Z",
+      "workspace_missing": true
+    },
+    {
+      "name": "marsh-s-7ipver2j",
+      "id": "56a4eccf-ec72-4ccc-8678-8994b272772f",
+      "agent": "shell",
+      "status": "stopped",
+      "last_used_at": "2026-10-11T17:28:39.031572Z",
+      "created_at": "2026-10-09T17:12:47Z"
+    },
+    {
+      "name": "marsh-s-fkv2gyhm",
+      "id": "2db15543-55ca-4b08-8a3e-38f352ffe29a",
+      "agent": "shell",
+      "status": "running",
+      "last_used_at": "2026-10-11T22:58:37.25171Z",
+      "created_at": "2026-10-11T22:58:15Z"
+    },
+    {
+      "name": "marsh-s-tnk1t3u4",
+      "id": "09f0b509-489b-4bf6-9713-21a5a2ed681d",
+      "agent": "shell",
+      "status": "stopped",
+      "last_used_at": "2026-10-09T17:10:11.469264Z",
+      "created_at": "2026-10-09T04:34:21Z"
+    },
+    {
+      "name": "pix-c084f19e1bacb49f-runmylife-b9fccda4",
+      "id": "eff28f83-fdd9-4f15-8d9c-147c0ad1c5fa",
+      "agent": "pix",
+      "status": "stopped",
+      "last_used_at": "2026-10-07T23:50:58.821145Z",
+      "workspaces": [
+        "/Users/alice/dev/runmylife",
+        "/Users/alice/.pix/context",
+        "/Users/alice/.pix/envs/team/skills"
+      ],
+      "created_at": "2026-10-02T17:43:17Z"
+    },
+    {
+      "name": "pix-d37124dc4913cd9f-sbx2-1efcd8d0",
+      "id": "bafbb0a8-5ec7-446c-824e-c0127d42298f",
+      "agent": "pix",
+      "status": "stopped",
+      "last_used_at": "2026-10-07T23:51:02.319464Z",
+      "workspaces": [
+        "/Users/alice/dev/sbx2",
+        "/tmp/pix3/context",
+        "/Users/alice/dev/gm-pix-pack/skills"
+      ],
+      "created_at": "2026-10-05T16:27:16Z",
+      "workspace_missing": true
+    }
+  ]
+}

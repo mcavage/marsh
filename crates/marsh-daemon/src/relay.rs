@@ -32,6 +32,11 @@ const MAX_RELAY_CONNECTIONS: usize = 16;
 // At most 1 MiB per connection, including an in-progress write. A stalled
 // recipient must not hold the tunnel reader or the shared connection map.
 const MAX_PENDING_CHUNKS: usize = 64;
+// macOS can leave a thread blocked in `read` on a Unix socket after a
+// `shutdown` of either end (a lost wakeup; data and a full close always wake
+// it). Readers therefore wake this often to re-check, instead of relying on
+// the peer's half-close or the relay's own abort to interrupt them.
+const READ_WAKE: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -136,6 +141,13 @@ impl SendWindow {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.1 = true;
         self.changed.notify_all();
+    }
+
+    fn closed(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .1
     }
 }
 
@@ -272,7 +284,7 @@ where
                     }
                     continue;
                 }
-                let Ok(stream) = UnixStream::connect(daemon_socket) else {
+                let Ok(stream) = marsh_runtime::connect_unix(daemon_socket) else {
                     if let Err(error) = send(&tunnel, &TunnelFrame::Close { connection }) {
                         break Err(error);
                     }
@@ -511,7 +523,24 @@ where
             if !source.send_window.acquire() {
                 return;
             }
-            match source.stream.read(&mut buffer) {
+            let read = loop {
+                match source.stream.read(&mut buffer) {
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::WouldBlock
+                                | std::io::ErrorKind::TimedOut
+                                | std::io::ErrorKind::Interrupted
+                        ) =>
+                    {
+                        if source.send_window.closed() {
+                            return;
+                        }
+                    }
+                    read => break read,
+                }
+            };
+            match read {
                 Ok(0) => {
                     // A zero-byte socket write changes no protocol bytes and
                     // distinguishes a peer that closed both directions from
@@ -733,6 +762,12 @@ fn register_connection<W: Write + Send + 'static>(
 ) -> Result<ConnectionReader, DaemonError> {
     let identity = Arc::new(());
     let send_window = Arc::new(SendWindow::new());
+    // EINVAL (macOS): the peer has already closed, so reads cannot block.
+    if let Err(error) = stream.set_read_timeout(Some(READ_WAKE))
+        && error.raw_os_error() != Some(rustix::io::Errno::INVAL.raw_os_error())
+    {
+        return Err(error.into());
+    }
     let reader = ConnectionReader {
         stream: stream.try_clone()?,
         identity: Arc::clone(&identity),
@@ -862,6 +897,7 @@ fn parent(path: &Path) -> Result<&Path, DaemonError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{PATIENCE, read_to_end, recv, socket_pair, wait_until};
     use crate::{
         AttachmentFrame, Client, DaemonBackend, DaemonStore, ExecuteSpec, LoadSelection,
         PreparationProgress, PreparationResult, PublicReply, PublicRequest, Server,
@@ -910,19 +946,27 @@ mod tests {
     }
 
     /// Bound a relay join so a protocol regression fails instead of hanging.
-    fn join_within(
-        handle: thread::JoinHandle<Result<(), DaemonError>>,
-        limit: Duration,
-    ) -> Result<(), DaemonError> {
-        let deadline = Instant::now() + limit;
-        while !handle.is_finished() {
-            assert!(
-                Instant::now() < deadline,
-                "host relay did not stop within {limit:?}"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
+    fn join_within(handle: thread::JoinHandle<Result<(), DaemonError>>) -> Result<(), DaemonError> {
+        wait_until("the host relay stops", || handle.is_finished());
         handle.join().unwrap()
+    }
+
+    /// The relay's next connection to the daemon socket; `None` if it never
+    /// arrives (the relay refused the guest instead).
+    fn accept_next(listener: &UnixListener) -> Option<UnixStream> {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            match listener.accept() {
+                Ok((peer, _)) => return Some(peer),
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(_) => return None,
+            }
+        }
     }
 
     #[test]
@@ -948,9 +992,7 @@ mod tests {
             &socket,
             "a".repeat(64),
         );
-        let mut peers = accepted_receive
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
+        let mut peers = recv(&accepted_receive, "daemon connections accepted");
         let all_closed = peers.iter_mut().all(|peer| {
             peer.set_nonblocking(true).unwrap();
             matches!(peer.read(&mut [0_u8; 1]), Ok(0))
@@ -979,10 +1021,8 @@ mod tests {
             accepted_send.send(()).unwrap();
             release_receive.recv().unwrap();
         });
-        let (host, mut guest) = UnixStream::pair().unwrap();
-        guest
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
+        let (host, mut guest) = socket_pair();
+        guest.set_read_timeout(Some(PATIENCE)).unwrap();
         let host_reader = host.try_clone().unwrap();
         let relay = thread::spawn(move || run_host(host_reader, host, &socket, "a".repeat(64)));
         assert!(matches!(
@@ -993,9 +1033,7 @@ mod tests {
         for connection in 1..=MAX_RELAY_CONNECTIONS as u64 + 1 {
             write_frame(&mut guest, &TunnelFrame::Open { connection }).unwrap();
         }
-        accepted_receive
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap();
+        recv(&accepted_receive, "daemon connections accepted");
         assert_eq!(
             read_frame::<TunnelFrame>(&mut guest).unwrap(),
             TunnelFrame::Close {
@@ -1006,7 +1044,7 @@ mod tests {
         write_frame(&mut guest, &TunnelFrame::Shutdown).unwrap();
         write_frame(&mut guest, &TunnelFrame::Cleaned).unwrap();
         release_send.send(()).unwrap();
-        join_within(relay, Duration::from_secs(10)).unwrap();
+        join_within(relay).unwrap();
         acceptor.join().unwrap();
     }
 
@@ -1015,13 +1053,9 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let socket = directory.path().join("daemon.sock");
         let listener = UnixListener::bind(&socket).unwrap();
-        let (host, mut guest) = UnixStream::pair().unwrap();
-        guest
-            .set_read_timeout(Some(Duration::from_secs(30)))
-            .unwrap();
-        guest
-            .set_write_timeout(Some(Duration::from_secs(30)))
-            .unwrap();
+        let (host, mut guest) = socket_pair();
+        guest.set_read_timeout(Some(PATIENCE)).unwrap();
+        guest.set_write_timeout(Some(PATIENCE)).unwrap();
         let host_reader = host.try_clone().unwrap();
         let relay = thread::spawn(move || run_host(host_reader, host, &socket, "a".repeat(64)));
         assert!(matches!(
@@ -1035,9 +1069,7 @@ mod tests {
         // A permanently blocked sibling never gets its bytes, so these bounds only
         // need to outlast a starved machine, not to be tight.
         let mut sibling = listener.accept().unwrap().0;
-        sibling
-            .set_read_timeout(Some(Duration::from_secs(30)))
-            .unwrap();
+        sibling.set_read_timeout(Some(PATIENCE)).unwrap();
         let sender = thread::spawn(move || {
             for _ in 0..256 {
                 write_frame(
@@ -1066,7 +1098,7 @@ mod tests {
         let mut guest = sender.join().unwrap().unwrap();
         write_frame(&mut guest, &TunnelFrame::Shutdown).unwrap();
         write_frame(&mut guest, &TunnelFrame::Cleaned).unwrap();
-        join_within(relay, Duration::from_secs(30)).unwrap();
+        join_within(relay).unwrap();
         sibling_result.unwrap();
         assert_eq!(&actual, b"sibling");
     }
@@ -1076,13 +1108,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let socket = root.path().join("daemon.sock");
         let listener = UnixListener::bind(&socket).unwrap();
-        let (host, mut guest) = UnixStream::pair().unwrap();
-        guest
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-        guest
-            .set_write_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
+        let (host, mut guest) = socket_pair();
+        guest.set_read_timeout(Some(PATIENCE)).unwrap();
+        guest.set_write_timeout(Some(PATIENCE)).unwrap();
         let control = guest.try_clone().unwrap();
         let host_reader = host.try_clone().unwrap();
         let relay = thread::spawn(move || run_host(host_reader, host, &socket, "a".repeat(64)));
@@ -1090,6 +1118,10 @@ mod tests {
             read_frame::<TunnelFrame>(&mut guest).unwrap(),
             TunnelFrame::Initialize { .. }
         ));
+        // Drain the relay's frames (credits, closes) as a real guest does; an
+        // undrained tunnel would eventually block the relay's writers.
+        let mut frames = guest.try_clone().unwrap();
+        let drain = thread::spawn(move || while read_frame::<TunnelFrame>(&mut frames).is_ok() {});
         write_frame(&mut guest, &TunnelFrame::Ready).unwrap();
         write_frame(&mut guest, &TunnelFrame::Open { connection: 1 }).unwrap();
         let mut stalled = listener.accept().unwrap().0;
@@ -1109,16 +1141,11 @@ mod tests {
         write_frame(&mut guest, &TunnelFrame::Close { connection: 1 }).unwrap();
         write_frame(&mut guest, &TunnelFrame::Open { connection: 1 }).unwrap();
         let mut replacement = listener.accept().unwrap().0;
-        replacement
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
+        replacement.set_read_timeout(Some(PATIENCE)).unwrap();
         // Portable disconnect proof: the abandoned peer reaches EOF before the
         // queued megabyte arrives. (macOS accepts writes after a peer's
         // SHUT_RD, so a failed write is not a portable observation.)
-        // macOS rejects setsockopt (EINVAL) once the peer has fully closed.
-        let _ = stalled.set_read_timeout(Some(Duration::from_secs(3)));
-        let mut abandoned_bytes = Vec::new();
-        let abandoned = stalled.read_to_end(&mut abandoned_bytes);
+        let abandoned = read_to_end(&mut stalled);
         write_frame(
             &mut guest,
             &TunnelFrame::Data {
@@ -1128,18 +1155,17 @@ mod tests {
         )
         .unwrap();
         write_frame(&mut guest, &TunnelFrame::Eof { connection: 1 }).unwrap();
-        let mut received = Vec::new();
-        let delivered = replacement.read_to_end(&mut received);
+        let delivered = read_to_end(&mut replacement);
         // Always release blocked writers before assertions, including with
         // the previous implementation that queued Close behind the data.
         control.shutdown(Shutdown::Both).unwrap();
         relay.join().unwrap().unwrap();
+        drain.join().unwrap();
         assert!(
-            abandoned.is_ok() && abandoned_bytes.len() < MAX_PENDING_CHUNKS * CHUNK_BYTES,
+            abandoned.is_ok_and(|bytes| bytes.len() < MAX_PENDING_CHUNKS * CHUNK_BYTES),
             "Close left the abandoned socket connected or delivered all queued data"
         );
-        delivered.unwrap();
-        assert_eq!(received, b"replacement");
+        assert_eq!(delivered.unwrap(), b"replacement");
     }
 
     #[test]
@@ -1148,10 +1174,8 @@ mod tests {
         let socket = root.path().join("daemon.sock");
         let listener = UnixListener::bind(&socket).unwrap();
         listener.set_nonblocking(true).unwrap();
-        let (host, mut guest) = UnixStream::pair().unwrap();
-        guest
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
+        let (host, mut guest) = socket_pair();
+        guest.set_read_timeout(Some(PATIENCE)).unwrap();
         let control = guest.try_clone().unwrap();
         let host_reader = host.try_clone().unwrap();
         let relay = thread::spawn(move || run_host(host_reader, host, &socket, "a".repeat(64)));
@@ -1163,20 +1187,9 @@ mod tests {
         let mut completed = 0;
         for connection in 1..=MAX_RELAY_CONNECTIONS as u64 * 2 {
             write_frame(&mut guest, &TunnelFrame::Open { connection }).unwrap();
-            let deadline = Instant::now() + Duration::from_millis(300);
-            let peer = loop {
-                match listener.accept() {
-                    Ok((peer, _)) => break Some(peer),
-                    Err(error)
-                        if error.kind() == std::io::ErrorKind::WouldBlock
-                            && Instant::now() < deadline =>
-                    {
-                        thread::sleep(Duration::from_millis(1));
-                    }
-                    _ => break None,
-                }
+            let Some(peer) = accept_next(&listener) else {
+                break;
             };
-            let Some(peer) = peer else { break };
             // Emulates daemon handshake expiry: the guest keeps its sending
             // side open, but the daemon drops the whole socket without a reply.
             drop(peer);
@@ -1213,7 +1226,7 @@ mod tests {
             let listener = UnixListener::bind(&daemon_socket).unwrap();
             let socket = root.path().join("session/socket");
             let token = root.path().join("session/token");
-            let (host_stream, guest_stream) = UnixStream::pair().unwrap();
+            let (host_stream, guest_stream) = socket_pair();
             let control = host_stream.try_clone().unwrap();
             let host_reader = host_stream.try_clone().unwrap();
             let guest_reader = guest_stream.try_clone().unwrap();
@@ -1232,10 +1245,7 @@ mod tests {
             let guest_socket = socket.clone();
             let guest =
                 thread::spawn(move || run_guest(guest_reader, guest_stream, &guest_socket, &token));
-            received
-                .recv_timeout(Duration::from_secs(3))
-                .unwrap()
-                .unwrap();
+            recv(&received, "relay readiness").unwrap();
             Self {
                 _root: root,
                 socket,
@@ -1250,12 +1260,8 @@ mod tests {
             let guest = UnixStream::connect(&self.socket).unwrap();
             let host = self.listener.accept().unwrap().0;
             for stream in [&guest, &host] {
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(5)))
-                    .unwrap();
-                stream
-                    .set_write_timeout(Some(Duration::from_secs(5)))
-                    .unwrap();
+                stream.set_read_timeout(Some(PATIENCE)).unwrap();
+                stream.set_write_timeout(Some(PATIENCE)).unwrap();
             }
             (guest, host)
         }
@@ -1277,33 +1283,18 @@ mod tests {
         let mut complete_responses = true;
         for _ in 0..MAX_RELAY_CONNECTIONS * 2 {
             let mut guest = UnixStream::connect(&relays.socket).unwrap();
-            guest
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
-            let deadline = Instant::now() + Duration::from_millis(300);
-            let peer = loop {
-                match relays.listener.accept() {
-                    Ok((peer, _)) => break Some(peer),
-                    Err(error)
-                        if error.kind() == std::io::ErrorKind::WouldBlock
-                            && Instant::now() < deadline =>
-                    {
-                        thread::sleep(Duration::from_millis(1));
-                    }
-                    _ => break None,
-                }
+            guest.set_read_timeout(Some(PATIENCE)).unwrap();
+            let Some(mut peer) = accept_next(&relays.listener) else {
+                break;
             };
-            let Some(mut peer) = peer else { break };
             peer.set_nonblocking(false).unwrap();
-            peer.set_write_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
+            peer.set_write_timeout(Some(PATIENCE)).unwrap();
             peer.write_all(&expected).unwrap();
             drop(peer);
             // Let full-close reach the guest while its final bytes remain
             // queued behind an intentionally unread socket buffer.
             thread::sleep(Duration::from_millis(25));
-            let mut response = Vec::new();
-            if guest.read_to_end(&mut response).is_err() || response != expected {
+            if read_to_end(&mut guest).ok().as_ref() != Some(&expected) {
                 complete_responses = false;
                 break;
             }
@@ -1346,19 +1337,13 @@ mod tests {
         let (mut sibling, mut server) = relays.connect();
         sibling.write_all(b"request").unwrap();
         sibling.shutdown(Shutdown::Write).unwrap();
-        let mut request = Vec::new();
-        let sibling_request = server.read_to_end(&mut request);
+        let sibling_request = read_to_end(&mut server);
         let sibling_reply = server
             .write_all(b"response")
             .and_then(|()| server.shutdown(Shutdown::Write));
-        let mut reply = Vec::new();
-        let sibling_read = sibling.read_to_end(&mut reply);
-        let mut actual = Vec::new();
-        let slow_read = slow_client.read_to_end(&mut actual);
-        let written = match early {
-            Ok(result) => Ok(result),
-            Err(_) => received.recv_timeout(Duration::from_secs(5)),
-        };
+        let sibling_read = read_to_end(&mut sibling);
+        let slow_read = read_to_end(&mut slow_client);
+        let written = early.unwrap_or_else(|_| recv(&received, "producer finishes"));
         // Release transport and every blocked credit/socket waiter before
         // asserting so a regression cannot strand either relay in the test.
         relays.stop();
@@ -1367,14 +1352,11 @@ mod tests {
             was_waiting,
             "slow recipient did not backpressure its producer"
         );
-        sibling_request.unwrap();
+        assert_eq!(sibling_request.unwrap(), b"request");
         sibling_reply.unwrap();
-        sibling_read.unwrap();
-        assert_eq!(request, b"request");
-        assert_eq!(reply, b"response");
-        written.unwrap().unwrap();
-        slow_read.unwrap();
-        assert_eq!(actual, expected);
+        assert_eq!(sibling_read.unwrap(), b"response");
+        written.unwrap();
+        assert_eq!(slow_read.unwrap(), expected);
     }
 
     #[test]
@@ -1391,16 +1373,10 @@ mod tests {
         let early = received.try_recv();
         let was_waiting = matches!(early, Err(mpsc::TryRecvError::Empty));
         relays.stop();
-        let result = match early {
-            Ok(result) => Ok(result),
-            Err(_) => received.recv_timeout(Duration::from_secs(2)),
-        };
+        let result = early.unwrap_or_else(|_| recv(&received, "producer wakes"));
         writer.join().unwrap();
         assert!(was_waiting, "producer did not wait for remote credit");
-        assert!(
-            result.unwrap().is_err(),
-            "teardown did not wake the blocked source"
-        );
+        assert!(result.is_err(), "teardown did not wake the blocked source");
     }
 
     #[test]
@@ -1410,8 +1386,8 @@ mod tests {
         let runtime = base.path().join("session");
         let socket = runtime.join("socket");
         let token = runtime.join("token");
-        let (guest, mut host) = UnixStream::pair().unwrap();
-        host.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let (guest, mut host) = socket_pair();
+        host.set_read_timeout(Some(PATIENCE)).unwrap();
         let guest_reader = guest.try_clone().unwrap();
         let relay_socket = socket.clone();
         let relay = thread::spawn(move || run_guest(guest_reader, guest, &relay_socket, &token));
@@ -1430,9 +1406,7 @@ mod tests {
         };
         assert_eq!(ready, TunnelFrame::Ready);
         let mut client = UnixStream::connect(&socket).unwrap();
-        client
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
+        client.set_read_timeout(Some(PATIENCE)).unwrap();
         let TunnelFrame::Open { connection } = read_frame(&mut host).unwrap() else {
             panic!("missing client open")
         };
@@ -1458,12 +1432,10 @@ mod tests {
         )
         .unwrap();
         write_frame(&mut host, &TunnelFrame::Eof { connection }).unwrap();
-        let mut response = Vec::new();
-        let received = client.read_to_end(&mut response);
+        let received = read_to_end(&mut client);
         write_frame(&mut host, &TunnelFrame::Shutdown).unwrap();
         relay.join().unwrap().unwrap();
-        received.unwrap();
-        assert_eq!(response, b"response");
+        assert_eq!(received.unwrap(), b"response");
     }
 
     #[test]
@@ -1507,7 +1479,7 @@ mod tests {
     fn completed_relay_readers_preserve_the_response_direction_until_remote_eof() {
         let connections: Connections = Arc::default();
         for connection in 1..=64 {
-            let (stream, peer) = UnixStream::pair().unwrap();
+            let (stream, peer) = socket_pair();
             let tunnel = Arc::new(Mutex::new(Vec::new()));
             let reader = register_connection(connection, stream, &connections, &tunnel).unwrap();
             let task = spawn_reader(
@@ -1517,6 +1489,7 @@ mod tests {
                 Arc::clone(&tunnel),
             );
             peer.shutdown(Shutdown::Write).unwrap();
+            wait_until("the reader sees the peer's EOF", || task.is_finished());
             task.join().unwrap();
             assert_eq!(connections.lock().unwrap().len(), 1);
 
@@ -1532,7 +1505,7 @@ mod tests {
     #[test]
     fn failed_open_frame_releases_the_unannounced_guest_connection() {
         let connections: Connections = Arc::default();
-        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let (stream, mut peer) = socket_pair();
         let tunnel = Arc::new(Mutex::new(RejectWrites));
 
         assert!(register_guest_connection(1, stream, &connections, &tunnel).is_err());
@@ -1544,7 +1517,7 @@ mod tests {
     #[test]
     fn failed_data_frame_releases_the_tracked_connection() {
         let connections: Connections = Arc::default();
-        let (stream, mut peer) = UnixStream::pair().unwrap();
+        let (stream, mut peer) = socket_pair();
         let tunnel = Arc::new(Mutex::new(RejectWrites));
         let reader = register_connection(1, stream, &connections, &tunnel).unwrap();
         let task = spawn_reader(1, reader, Arc::clone(&connections), tunnel);
@@ -1553,7 +1526,7 @@ mod tests {
         task.join().unwrap();
         assert!(connections.lock().unwrap().is_empty());
         // Portable close observation (macOS may accept writes after SHUT_RD).
-        let _ = peer.set_read_timeout(Some(Duration::from_secs(2)));
+        let _ = peer.set_read_timeout(Some(PATIENCE));
         assert_eq!(peer.read(&mut [0_u8; 1]).unwrap(), 0);
     }
 
@@ -1569,12 +1542,7 @@ mod tests {
         );
 
         assert!(result.is_err());
-        assert!(
-            receive
-                .recv_timeout(Duration::from_millis(100))
-                .unwrap()
-                .is_err()
-        );
+        assert!(receive.try_recv().unwrap().is_err());
     }
 
     #[derive(Debug)]
@@ -1691,7 +1659,7 @@ mod tests {
         let runtime = runtime_base.join("session");
         let socket = runtime.join("daemon.sock");
         let token_path = runtime.join("daemon.token");
-        let (host_tunnel, guest_tunnel) = UnixStream::pair().unwrap();
+        let (host_tunnel, guest_tunnel) = socket_pair();
         let host_control = host_tunnel.try_clone().unwrap();
         let (ready_send, ready_receive) = mpsc::channel();
         let host_task = {
@@ -1712,15 +1680,8 @@ mod tests {
             })
         };
 
-        ready_receive
-            .recv_timeout(Duration::from_secs(2))
-            .unwrap()
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while !socket.exists() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(5));
-        }
-        assert!(socket.exists());
+        recv(&ready_receive, "relay readiness").unwrap();
+        wait_until("the guest relay socket appears", || socket.exists());
         let client = Client::connect_relay(&socket, &token_path).unwrap();
         let daemon_id = server.store().daemon_id();
         let build_identity = server.build_identity.clone();

@@ -1,0 +1,13 @@
+diff --git a/brush-builtins/src/read.rs b/brush-builtins/src/read.rs
+index fc8edf6..ed0c3a8 100644
+--- a/brush-builtins/src/read.rs
++++ b/brush-builtins/src/read.rs
+@@ -71,7 +71,7 @@ pub(crate) struct ReadCommand {
+ 
+     /// File descriptor to read from instead of stdin.
+     #[clap(short = 'u', name = "FD")]
+-    fd_num_to_read: Option<u8>,
++    fd_num_to_read: Option<brush_core::ShellFd>,
+ 
+     /// Optionally, names of variables to receive read input.
+     variable_names: Vec<String>,

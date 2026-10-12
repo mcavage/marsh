@@ -20,7 +20,7 @@ from typing import Any
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "acceptance"))
 from provenance import (candidate_arguments, host_only_path, stock_cleanup_errors,
                         stock_vm_names, verify_candidate)
-from run import CONTAINER, IMAGE, verify_container_deleted
+from harness import CONTAINER, IMAGE, verify_container_deleted
 
 
 PHASES = (

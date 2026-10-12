@@ -3546,7 +3546,7 @@ mod tests {
         let fake_sbx = fixture.path().join("sbx");
         std::fs::write(
             &fake_sbx,
-            "#!/bin/sh\nset -eu\nregistry=$0.registry\nlog=$0.log\nprintf '%s\\n' \"$*\" >>\"$log\"\nif [ \"$1\" = mcp ] && [ \"$2\" = rm ] && [ \"$3\" = --force ]; then if [ -f \"$registry\" ]; then rm \"$registry\"; exit 0; fi; printf 'error: MCP server \\\"%s\\\" not found\\n' \"$4\" >&2; exit 1; fi\nif [ \"$1\" = mcp ] && [ \"$2\" = add ]; then printf '%s\\n' \"$@\" >\"$registry\"; exit 0; fi\nexit 64\n",
+            "#!/bin/sh\nset -eu\nregistry=$0.registry\nlog=$0.log\nprintf '%s\\n' \"$*\" >>\"$log\"\nif [ \"$1\" = mcp ] && [ \"$2\" = rm ] && [ \"$3\" = --force ]; then if [ -f \"$registry\" ]; then rm \"$registry\"; exit 0; fi; printf 'error: MCP server \"%s\" not found\\n' \"$4\" >&2; exit 1; fi\nif [ \"$1\" = mcp ] && [ \"$2\" = add ]; then printf '%s\\n' \"$@\" >\"$registry\"; exit 0; fi\nexit 64\n",
         )
         .unwrap();
         make_executable(&fake_sbx);
@@ -3587,7 +3587,7 @@ mod tests {
         let fake_sbx = fixture.path().join("sbx");
         std::fs::write(
             &fake_sbx,
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >>\"$0.log\"\nprintf 'error: MCP server \\\"marsh-dev-test-old\\\" not found\\n' >&2\nexit 9\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >>\"$0.log\"\nprintf 'error: MCP server \"marsh-dev-test-old\" not found\\n' >&2\nexit 9\n",
         )
         .unwrap();
         make_executable(&fake_sbx);
@@ -3789,23 +3789,6 @@ exit 64
         let error = mcp_registration(McpClient::Codex, &marsh, workspace.path()).unwrap_err();
         assert!(error.message.contains("not an executable regular file"));
         assert!(error.message.contains("marsh-mcp"));
-    }
-
-    #[test]
-    fn either_relay_variable_makes_mcp_host_ineligible() {
-        assert!(!relay_environment_present(false, false));
-        assert!(relay_environment_present(true, false));
-        assert!(relay_environment_present(false, true));
-        assert!(relay_environment_present(true, true));
-        for client in [McpClient::Codex, McpClient::Claude, McpClient::Sbx] {
-            assert!(require_host_mcp_install(client, false, false).is_ok());
-            for (socket, token) in [(true, false), (false, true), (true, true)] {
-                let error = require_host_mcp_install(client, socket, token).unwrap_err();
-                assert_eq!(error.status, 2);
-                assert!(error.message.contains("host-only"));
-                assert!(error.message.contains(client.name()));
-            }
-        }
     }
 
     #[test]

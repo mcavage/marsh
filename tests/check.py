@@ -35,9 +35,11 @@ from typing import Any, Callable
 ACCEPTANCE = pathlib.Path(__file__).resolve().parent / "acceptance"
 sys.path.insert(0, str(ACCEPTANCE))
 
-from run import product_owned_vm_names, resolve_executable, verify_container_deleted  # noqa: E402
+from harness import (Fail as Failure, daemon_endpoint_paths, product_owned_vm_names, require,  # noqa: E402
+                     resolve_executable, text, verify_container_deleted)
 from provenance import stock_vm_inventory  # noqa: E402
-from mcp_gateway_uat import gateway_call, gateway_data, wait_until  # noqa: E402
+from harness import wait_until  # noqa: E402
+from mcp_harness import gateway_call, gateway_data  # noqa: E402
 
 CHECKOUT = pathlib.Path(__file__).resolve().parents[1]
 ROOT = CHECKOUT / "target" / "check"
@@ -55,19 +57,6 @@ def digest(path: pathlib.Path) -> str:
         for block in iter(lambda: handle.read(1 << 20), b""):
             hasher.update(block)
     return hasher.hexdigest()
-
-
-class Failure(AssertionError):
-    pass
-
-
-def require(condition: object, message: str) -> None:
-    if not condition:
-        raise Failure(message)
-
-
-def text(value: bytes) -> str:
-    return value.decode(errors="replace")
 
 
 class Scope:
@@ -132,9 +121,7 @@ class Scope:
         # `marsh status` starts a daemon; only the endpoint shows a live one.
         if not self.home.exists():
             return False
-        canonical = self.home.resolve(strict=True)
-        scope = hashlib.sha256(os.fsencode(canonical)).hexdigest()[:16]
-        return (pathlib.Path("/tmp") / f"marsh-{os.getuid()}" / scope / "s").exists()
+        return daemon_endpoint_paths(self.home)[0].exists()
 
     def stop(self) -> list[str]:
         """`marsh stop` for this scope, then prove its VMs are gone from stock."""

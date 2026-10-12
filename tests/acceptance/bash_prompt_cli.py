@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Raw-byte prompt/trace differential through public CLI and real Unix PTYs.
 
-Requires an explicit GNU 5.3.20 oracle by default. --oracle-version 5.3.0 is
-investigative evidence only, never a qualification substitute. The first --shell
-is the oracle; --brush labels get Brush's no-config/minimal-backend switches.
+Requires the exact GNU Bash --oracle-version (default 5.3.0, the release CI
+builds). The first --shell is the oracle; --brush labels get Brush's no-config/minimal-backend switches.
 No implementation modules, decoded output, or output normalizers are used.
 """
 from __future__ import annotations
@@ -25,6 +24,8 @@ import subprocess
 import tempfile
 import termios
 import time
+
+import bash_report
 
 
 @dataclasses.dataclass
@@ -100,6 +101,17 @@ def corpus() -> list[Case]:
         cases.append(Case("tty-" + name, env={b"PS1": primary, b"PS2": secondary,
                                              b"PROMPT_BYTES": b"\xff\xfe" if name == "variable" else b"ASCII"}, tty=True))
     return cases
+
+
+# GNU Bash 5.3.0, the pinned oracle, crashes (SIGSEGV) printing these PS4
+# traces of invalid UTF-8 in a UTF-8 locale (later 5.3 patches fix it). With no
+# valid reference they run in the C locale only.
+GNU_5_3_0_UTF8_CRASHES = {
+    "literal-fffe-expand", "literal-fffe-literal", "variable-expand", "command-substitution-expand",
+    "octal-fffe-expand", "octal-fffe-literal", "octal-dollar-expand", "date-raw-literals-expand",
+    "date-raw-literals-literal", "raw-source-prefix", "trace-status", "repeat-fffe3e-stderr",
+    "repeat-fffe3e-file", "repeat-c358fe3e-stderr", "repeat-c358fe3e-file",
+}
 
 
 def sha(path: Path) -> str:
@@ -195,7 +207,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--shell", action="append", required=True, metavar="LABEL=PATH")
     parser.add_argument("--brush", action="append", default=[])
-    parser.add_argument("--oracle-version", default="5.3.20")
+    parser.add_argument("--oracle-version", default="5.3.0")
     parser.add_argument("--utf8-locale", default="C.utf8")
     parser.add_argument("--evidence", required=True, type=Path)
     parser.add_argument("--require-exact", action="append", default=[])
@@ -220,6 +232,8 @@ def main() -> int:
     for locale in (b"C", args.utf8_locale.encode("ascii")):
         for case in corpus():
             if args.case and case.name not in args.case:
+                continue
+            if locale != b"C" and case.name in GNU_5_3_0_UTF8_CRASHES:
                 continue
             results = {}
             for label, binary in binaries.items():
@@ -271,8 +285,13 @@ def main() -> int:
             with (evidence / "results.jsonl").open("a") as log:
                 log.write(json.dumps(record) + "\n")
     stable = all(sha(binary) == identities[label]["sha256"] for label, binary in binaries.items())
+    candidate = args.require_exact[0] if args.require_exact else None
+    if candidate:
+        bash_report.write(evidence, {f"{r['case']}@{bytes.fromhex(r['locale']).decode()}":
+                                     bash_report.verdict(r["oracle_valid"], r["exact"][candidate]) for r in records},
+                          [] if stable else ["a binary changed during the run"])
     summary = {"count": len(records), "exact": {label: sum(r["exact"][label] for r in records) for label in binaries},
-               "qualification_oracle": args.oracle_version == "5.3.20", "oracle_version": version,
+               "qualification_oracle": args.oracle_version == "5.3.0", "oracle_version": version,
                "oracle_defects": [{"case": r["case"], "locale": r["locale"], "status": r["results"][oracle]["status"]}
                                   for r in records if not r["oracle_valid"]],
                "identities": identities, "binary_stable": stable, "harness_sha256": sha(Path(__file__)),

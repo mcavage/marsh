@@ -18,6 +18,7 @@ map (run.py cleanup).
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import pathlib
@@ -25,13 +26,11 @@ import re
 import subprocess
 import sys
 import time
-import traceback
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from provenance import stock_baseline, stock_vm_inventory  # noqa: E402
-from processes_uat import Processes  # noqa: E402
-from workspaces_uat import Fail, require, text  # noqa: E402
+from harness import Fail, ScenarioSuite, require, scenario_parser, suite_main, text  # noqa: E402
+from provenance import stock_baseline  # noqa: E402
 
 SHELLS = ("bash", "zsh")
 SCENARIOS = {
@@ -54,10 +53,14 @@ RC = {
 }
 
 
-class Shells(Processes):
+class Shells(ScenarioSuite):
+    LABEL = "shells"
+    EVIDENCE = "shells.json"
+    SCENARIOS = SCENARIOS
+    ORDER = ORDER
+
     def __init__(self, arguments: argparse.Namespace) -> None:
         super().__init__(arguments)
-        self.selected = [s for s in ORDER if not arguments.only or s in arguments.only]
         self.shells = [s for s in SHELLS if not arguments.shell or s in arguments.shell]
         self.host_env.pop("MARSH_SHELL", None)
 
@@ -282,112 +285,22 @@ class Shells(Processes):
         self.git(self.project, "add", "-A")
         self.git(self.project, "commit", "-q", "-m", "seed")
         self.run([self.marsh, "--load", "fixture", "-c", "true"], timeout=900)
-        failures = []
         cases = []
         for scenario in self.selected:
             if scenario in PER_SHELL:
                 cases.extend((scenario, shell) for shell in self.shells)
             else:
                 cases.append((scenario, None))
-        for scenario, shell in cases:
-            label = scenario + (f"[{shell}]" if shell else "")
-            began = time.monotonic()
-            try:
-                getattr(self, SCENARIOS[scenario])(shell)
-                outcome, failure = "passed", None
-            except Fail as error:
-                outcome, failure = "failed", str(error)
-            except Exception as error:  # a product or harness break is still a failure
-                outcome, failure = "failed", f"{type(error).__name__}: {error}"
-                self.records.append({"scenario": label, "traceback": traceback.format_exc()})
-            finally:
-                for process in self.live:
-                    self.kill(process)
-                self.live.clear()
-            self.results.append({"scenario": label, "outcome": outcome, "failure": failure,
-                                 "seconds": round(time.monotonic() - began, 1)})
-            print(f"shells: {label}: {outcome}" + (f": {failure[:500]}" if failure else ""), flush=True)
-            if failure:
-                failures.append(label)
-                if self.fail_fast:
-                    break
-        self.document("status", "--json")
-        self.selected = [label for label, _ in cases]
-        if failures:
-            raise Fail(f"{len(failures)}/{len(cases)} cases failed: {', '.join(failures)}")
-
-    def finish(self, error: Exception | None) -> int:
-        for process in self.live:
-            self.kill(process)
-        cleanup_errors = self.cleanup_isolated_scope()
-        if self.stock_before is not None:
-            try:
-                after = stock_vm_inventory(self.sbx)
-                self.source["stock_after"] = after
-                cleanup_errors.extend(self.stock_leftover_errors(after))
-            except Exception as caught:
-                cleanup_errors.append(f"independent stock cleanup unavailable: {caught}")
-        if cleanup_errors:
-            cleanup = RuntimeError("; ".join(dict.fromkeys(cleanup_errors)))
-            error = cleanup if error is None else RuntimeError(f"{error}; cleanup: {cleanup}")
-        destination = self.evidence / "shells.json"
-        destination.write_text(json.dumps({
-            "outcome": "failed" if error else "passed", "failure": str(error) if error else None,
-            "scenarios": self.results, "root": str(self.root), "environment": self.source,
-            "records": self.records}, indent=2, default=str) + "\n", encoding="utf-8")
-        destination.chmod(0o600)
-        passed = sum(r["outcome"] == "passed" for r in self.results)
-        print(f"shells: {passed}/{len(self.results)} passed; {'failed' if error else 'passed'}; "
-              f"evidence: {destination}")
-        if error:
-            print(f"shells: {error}")
-        return 1 if error else 0
+        self.selected = [scenario + (f"[{shell}]" if shell else "") for scenario, shell in cases]
+        self.run_cases([(label, functools.partial(getattr(self, SCENARIOS[scenario]), shell))
+                        for label, (scenario, shell) in zip(self.selected, cases)])
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--prefix", default=str(pathlib.Path.home() / ".marsh-dev"),
-                        help="installed dev product (bin/marsh, libexec/marsh)")
-    parser.add_argument("--sbx", default="sbx")
-    parser.add_argument("--kit", default=None, help="fixture Kit: immutable OCI ref or native v3 source dir")
-    parser.add_argument("--evidence", default=None)
-    parser.add_argument("--only", action="append", choices=sorted(SCENARIOS), help="repeatable")
+    parser = scenario_parser(__doc__, SCENARIOS, preflight=False,
+                             kit_help="fixture Kit: immutable OCI ref or native v3 source dir")
     parser.add_argument("--shell", action="append", choices=SHELLS, help="repeatable; default both")
-    parser.add_argument("--fail-fast", action="store_true")
-    parser.add_argument("--list", action="store_true", help="print scenario ids and exit")
-    parser.add_argument("--source-tree", default=str(pathlib.Path(__file__).resolve().parents[2]))
-    parser.add_argument("--source-revision", default=None)
-    parser.add_argument("--build-receipt", type=pathlib.Path, default=None)
-    arguments = parser.parse_args()
-    if arguments.list:
-        for scenario in ORDER:
-            print(f"{scenario}\t{getattr(Shells, SCENARIOS[scenario]).__doc__.strip().splitlines()[0]}")
-        return 0
-    if not arguments.kit:
-        parser.error("--kit is required")
-    arguments.no_preflight = True
-    arguments.live = False
-    prefix = pathlib.Path(arguments.prefix).expanduser().resolve()
-    arguments.marsh = str(prefix / "bin" / "marsh")
-    arguments.guest_artifacts = prefix / "libexec" / "marsh"
-    if not os.access(arguments.marsh, os.X_OK):
-        print(f"shells: no installed product at {arguments.marsh} (run `make dev`)")
-        return 1
-    if arguments.source_revision is None:
-        arguments.source_revision = subprocess.run(
-            ["git", "-C", arguments.source_tree, "rev-parse", "HEAD"], capture_output=True, text=True,
-            timeout=30, check=True).stdout.strip()
-    if arguments.evidence is None:
-        arguments.evidence = f"/private/tmp/marsh-dev-shells-{os.getuid()}"
-    pathlib.Path(arguments.evidence).mkdir(mode=0o700, parents=True, exist_ok=True)
-    harness = Shells(arguments)
-    try:
-        harness.run_all()
-    except KeyboardInterrupt:
-        return harness.finish(InterruptedError("shells acceptance interrupted"))
-    except Exception as error:
-        return harness.finish(error)
-    return harness.finish(None)
+    return suite_main(Shells, parser)
 
 
 if __name__ == "__main__":

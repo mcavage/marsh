@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """`make verify` / `make regress`: run the sbx-backed suites concurrently.
 
-Every suite is an existing harness run exactly as `make regress-serial` runs it
-(real installed dev product, real stock `sbx`, no fakes); this file only
-schedules them. Each suite gets its own evidence directory and its own
+This is the one scheduler for the sbx-backed harnesses (real installed dev
+product, real stock `sbx`, no fakes); it only schedules them. `--jobs 1` runs
+one suite at a time. `--only` takes suite names, families, or scenario ids
+(W01-plain-bash, P02-self-spawn-bash-c, S03-split-join): the scenario ids of one
+family run as one suite. Each suite gets its own evidence directory and its own
 disposable root (the harnesses create an isolated MARSH_HOME, control home,
 project and daemon per process), so suites share nothing but the host's image
 caches and stock SBX itself.
@@ -194,8 +196,11 @@ class Plan:
         candidate("run.py", "acceptance", 530, ("regress",), ["--kit", self.kit], avoid=("cpu-heavy",))
         ws = [s for s in list_scenarios("workspaces_uat.py")]
         prefixed("workspaces_uat.py", "workspaces", ws, self.args.workspace_shards, ("regress",))
-        ps = [s for s in list_scenarios("processes_uat.py") if s not in LIVE_SCENARIOS]
+        all_ps = list_scenarios("processes_uat.py")
+        ps = [s for s in all_ps if s not in LIVE_SCENARIOS]
         prefixed("processes_uat.py", "processes", ps, self.args.process_shards, ("regress",))
+        self.scenarios = {"workspaces": ("workspaces_uat.py", ws), "processes": ("processes_uat.py", all_ps),
+                          "shells": ("shells_uat.py", list_scenarios("shells_uat.py"))}
         for shell in ("bash", "zsh"):
             suites.append(Suite(f"shells-{shell}", "shells",
                                 [python, str(ACCEPTANCE / "shells_uat.py"), "--prefix", str(self.prefix),
@@ -208,6 +213,25 @@ class Plan:
                             [python, str(ACCEPTANCE / "mcp_load_uat.py"), "--marsh", str(self.marsh),
                              "--guest-artifacts", str(self.guest), *self.common(), "--kit", "fixture"],
                             190, ("regress",), ("mcp-registry",), ("mcp-registry",)))
+        suites.append(Suite("mcp-gateway", "mcp_gateway",
+                            [python, str(ACCEPTANCE / "mcp_gateway_uat.py"), "--marsh", str(self.marsh),
+                             "--guest-artifacts", str(self.guest), *self.common()],
+                            100, ("regress",), ("mcp-registry",), ("mcp-registry",)))
+        suites.append(Suite("kit-live-install", "kit_live_install",
+                            [python, str(ACCEPTANCE / "kit_live_install_uat.py"), "--marsh", str(self.marsh),
+                             *self.common(), "--kit", self.kit], 40, ("regress",)))
+        # Codex as an MCP/ACP host of published tools: needs a host `codex` CLI
+        # (isolated CODEX_HOME, no model calls).
+        codex = shutil.which("codex")
+        if codex:
+            candidate("published_codex_uat.py", "published-codex", 50, ("regress",), ["--codex", codex],
+                      ("mcp-registry",), ("mcp-registry",))
+            candidate("published_acp_uat.py", "published-acp", 60, ("regress",), ["--codex", codex],
+                      ("mcp-registry",), ("mcp-registry",))
+        else:
+            print("regress: published-codex and published-acp not scheduled: no `codex` on PATH", file=sys.stderr)
+        if sys.platform == "darwin":
+            candidate("shell_disconnect.py", "shell-disconnect", 150, ("regress",))
         suites.append(Suite("self-dev", "self_dev",
                             [python, str(ACCEPTANCE / "self_dev.py"), "--prefix", str(self.prefix),
                              "--sbx", self.sbx, "--kit", self.kit], 310, ("regress",), ("cpu-heavy",)))
@@ -217,6 +241,27 @@ class Plan:
             if "quiet" in suite.groups:
                 suite.after = others
         return suites
+
+
+    def scenario_suites(self, tokens: list[str], tier: str) -> tuple[list[Suite], list[str]]:
+        """One suite per family for the scenario ids among `tokens`; the other tokens are returned."""
+        weights = load_weights()
+        picked: dict[str, list[str]] = {}
+        rest = []
+        for token in tokens:
+            family = next((f for f, (_, ids) in self.scenarios.items() if token in ids), None)
+            if family is None:
+                rest.append(token)
+            else:
+                picked.setdefault(family, []).append(token)
+        suites = []
+        for family, ids in picked.items():
+            script = self.scenarios[family][0]
+            suites.append(Suite(f"{family}-only", family,
+                                [sys.executable, str(ACCEPTANCE / script), "--prefix", str(self.prefix),
+                                 "--kit", self.kit, *self.common(), *[x for s in ids for x in ("--only", s)]],
+                                sum(weights.get(s, DEFAULT_SCENARIO_S) for s in ids) + 60, (tier,)))
+        return suites, rest
 
 
 def select(suites: list[Suite], tier: str, only: list[str], skip: list[str]) -> list[Suite]:
@@ -229,7 +274,7 @@ def select(suites: list[Suite], tier: str, only: list[str], skip: list[str]) -> 
     known = {t for s in suites for t in (s.name, s.family)}
     unknown = [t for t in only + skip if t not in known]
     if unknown:
-        raise SystemExit(f"regress: unknown suite(s) {unknown}; known: {sorted(known)}")
+        raise SystemExit(f"regress: unknown suite(s) {unknown}; known: {sorted(known)} or a scenario id")
     return chosen
 
 
@@ -358,8 +403,9 @@ def launch(suite: Suite, plan: Plan, environment: dict[str, str]) -> None:
     # check --source-revision against it, so bind each suite to HEAD at its start.
     if "--source-revision" in argv:
         argv[argv.index("--source-revision") + 1] = plan.head()
-    # Harness flag names differ: self_dev takes a file, the rest a directory.
-    evidence_arg = suite.evidence / "self-dev.json" if suite.family == "self_dev" else suite.evidence
+    # Harness flag names differ: self_dev and kit_live_install take a file, the rest a directory.
+    evidence_file = {"self_dev": "self-dev.json", "kit_live_install": "kit-live-install.json"}.get(suite.family)
+    evidence_arg = suite.evidence / evidence_file if evidence_file else suite.evidence
     argv += ["--evidence", str(evidence_arg)]
     if suite.family == "mcp_load":
         commands = suite.evidence / "fixture-commands.json"
@@ -589,7 +635,7 @@ def main() -> int:
     parser.add_argument("--prefix", default=str(pathlib.Path.home() / ".marsh-dev"))
     parser.add_argument("--sbx", default="sbx")
     parser.add_argument("--kit", default=None, help="immutable fixture Kit OCI reference (make fixture-ref)")
-    parser.add_argument("--only", action="append", default=[], help="suite name or family; repeatable/comma list")
+    parser.add_argument("--only", action="append", default=[], help="suite name, family, or scenario id; repeatable/comma list")
     parser.add_argument("--skip", action="append", default=[], help="suite name or family; repeatable/comma list")
     parser.add_argument("--jobs", type=int, default=3, help="max concurrent suites (default 3)")
     parser.add_argument("--stagger", type=float, default=5, help="seconds between suite starts")
@@ -611,11 +657,14 @@ def main() -> int:
     if args.jobs < 1:
         parser.error("--jobs must be >= 1")
     plan = Plan(args)
-    suites = select(plan.build(), args.tier, args.only, args.skip)
+    requested = list(args.only)
+    planned = plan.build()
+    picked, only = plan.scenario_suites(args.only, args.tier)
+    suites = (select(planned, args.tier, only, args.skip) if only or not picked else []) + picked
     if args.list:
         for suite in suites:
             print(f"{suite.name:<16} est {suite.est:5.0f}s groups={','.join(suite.groups) or '-'}  "
-                  f"{' '.join(a for a in suite.argv[2:] if a.startswith(('W', 'P', '--shell')) or a in ('bash', 'zsh'))}")
+                  f"{' '.join(a for a in suite.argv[2:] if a.startswith(('W', 'P', 'S', '--shell')) or a in ('bash', 'zsh'))}")
         return 0
     if not suites:
         parser.error("no suites selected")
@@ -625,7 +674,7 @@ def main() -> int:
     # VMs when the installed product changed, so it must settle before the
     # stock baseline is taken, and a broken product fails fast.
     pre: list[dict[str, Any]] = []
-    if (not args.only or "check" in args.only) and "check" not in args.skip:
+    if (not requested or "check" in requested) and "check" not in args.skip:
         began = time.monotonic()
         check = subprocess.run([sys.executable, str(CHECKOUT / "tests" / "check.py"), "--prefix", str(plan.prefix),
                                 "--sbx", plan.sbx, "--kit", plan.kit], cwd=CHECKOUT, env={

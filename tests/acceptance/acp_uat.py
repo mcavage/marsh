@@ -16,8 +16,8 @@ import sys
 import time
 import traceback
 
-from run import IsolatedScopeCleanup, disposable_root, resolve_executable, scoped_control_home, source_identity
-from provenance import verify_candidate, host_only_path, stock_vm_names, stock_baseline
+from harness import AcpScope
+from provenance import source_identity
 
 
 SCRIPT = r'''
@@ -495,70 +495,8 @@ def verify_private(output: str) -> dict:
     }
 
 
-class Scope(IsolatedScopeCleanup):
-    def __init__(self, args: argparse.Namespace) -> None:
-        self.marsh = str(pathlib.Path(args.marsh).resolve(strict=True))
-        self.sbx = resolve_executable(args.sbx)
-        self.guest_artifacts, self.build_receipt = verify_candidate(args, self.marsh)
-        evidence = pathlib.Path(args.evidence).absolute()
-        evidence.mkdir(parents=True, mode=0o700, exist_ok=True)
-        host_only_path(evidence / "source-binding.json", pathlib.Path(args.source_tree).resolve())
-        self.stock_before = stock_baseline(self.sbx)
-        self.root = disposable_root("marsh-acp-uat-")
-        self.home = self.root / "home"
-        self.control_root = self.root / "control"
-        self.project = self.root / "project"
-        self.home.mkdir()
-        self.control_root.mkdir(mode=0o700)
-        self.control_home = scoped_control_home(self.control_root, self.home)
-        self.project.mkdir()
-        kit = pathlib.Path(__file__).with_name("acp-fixture").resolve(strict=True)
-        (self.control_home / "commands.json").write_text(
-            json.dumps({"fixture-acp": str(kit)}) + "\n", encoding="utf-8"
-        )
-        (self.control_home / "agents.json").write_text(
-            json.dumps([{
-                "schema_version": 1,
-                "name": "fixture-session",
-                "protocol": "acp_v1",
-                "command": "fixture-acp",
-                "required_capabilities": [],
-            }]) + "\n", encoding="utf-8"
-        )
-        self.environment = os.environ.copy()
-        shell_history = self.project / ".marsh-uat-history"
-        shell_history.touch(mode=0o600, exist_ok=False)
-        self.environment["HISTFILE"] = str(shell_history)
-        self.environment["MARSH_HOME"] = str(self.home)
-        self.environment["MARSH_CONTROL_HOME"] = str(self.control_root)
-        self.environment["MARSH_SBX"] = self.sbx
-        self.environment["MARSH_GUEST_ARTIFACTS"] = str(self.guest_artifacts)
-        self.initialize_scope_cleanup()
-
-    def cleanup_isolated_scope(self) -> list[str]:
-        errors = []
-        if self.scope_started:
-            try:
-                self.public_status()  # include Kits created since the initial snapshot
-            except Exception as error:
-                errors.append(f"final ownership snapshot unavailable: {error}")
-        errors.extend(super().cleanup_isolated_scope())
-        try:
-            self.stock_after = stock_vm_names(self.sbx)
-            errors.extend(self.stock_leftover_errors(self.stock_after))
-        except Exception as error:
-            errors.append(f"independent stock cleanup inventory unavailable: {error}")
-        return errors
-
-    def public_status(self) -> dict:
-        self.scope_started = True
-        result = subprocess.run(
-            [self.marsh, "status", "--json"], cwd=self.project,
-            env=self.environment, capture_output=True, timeout=20, check=True, start_new_session=True,
-        )
-        document = json.loads(result.stdout)
-        self.remember_owned_status(document)
-        return document
+class Scope(AcpScope):
+    """The ACP UAT scope plus its interactive and cross-scope probes."""
 
     def top_refresh_interrupt(self) -> dict:
         master, slave = os.openpty()

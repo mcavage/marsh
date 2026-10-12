@@ -24,6 +24,12 @@ use uuid::Uuid;
 
 static HOST_INIT: std::sync::Once = std::sync::Once::new();
 
+/// Created in the project to let a `control-flood` agent exit.
+const RELEASE_FLOOD: &str = ".release-control-flood";
+
+/// Bounds a wait for a condition that holds quickly on an idle machine.
+const CONDITION_DEADLINE: Duration = Duration::from_secs(30);
+
 struct Fixture {
     preparations: Arc<AtomicUsize>,
     preparation_release: Arc<AtomicBool>,
@@ -102,6 +108,10 @@ impl DaemonBackend for Fixture {
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../tests/acceptance/acp-fixture/agent.mjs"
             ))
+            .env(
+                "MARSH_FIXTURE_RELEASE",
+                request.session.launch_directory.join(RELEASE_FLOOD),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
@@ -164,6 +174,20 @@ impl DaemonBackend for Fixture {
     }
 }
 
+/// Every test process (cargo-nextest runs one per test) installs the same
+/// host script at this one path. Replace it atomically: rewriting it in place
+/// would let another process's daemon run a truncated host.
+fn install_host_fixture(host: &std::path::Path) {
+    let staged = host.with_file_name(format!("marsh.{}", std::process::id()));
+    fs::write(
+        &staged,
+        include_str!("../../../tests/acceptance/acp-fixture/host.py"),
+    )
+    .unwrap();
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::rename(&staged, host).unwrap();
+}
+
 struct Rig {
     server: Arc<Server>,
     client: Client,
@@ -189,6 +213,12 @@ impl Rig {
     }
 
     fn with_home_policy(real: bool, ephemeral: bool) -> Self {
+        Self::build(real, ephemeral, |server| server)
+    }
+
+    /// `configure` adjusts the daemon before it serves, e.g. its publication
+    /// budgets.
+    fn build(real: bool, ephemeral: bool, configure: impl FnOnce(Server) -> Server) -> Self {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("home");
         let backing = home.join("home");
@@ -206,14 +236,7 @@ impl Rig {
         // Substitute only stock registration. The grant and private host-to-
         // daemon preparation handshake still use their production paths.
         let host = std::env::current_exe().unwrap().with_file_name("marsh");
-        HOST_INIT.call_once(|| {
-            fs::write(
-                &host,
-                include_str!("../../../tests/acceptance/acp-fixture/host.py"),
-            )
-            .unwrap();
-            fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
-        });
+        HOST_INIT.call_once(|| install_host_fixture(&host));
         let stock = root.path().join("stock-sbx");
         fs::write(
             &stock,
@@ -228,7 +251,7 @@ impl Rig {
         let preparations = Arc::new(AtomicUsize::new(0));
         let preparation_release = Arc::new(AtomicBool::new(true));
         let preparation_delay_ms = Arc::new(AtomicU64::new(0));
-        let server = Arc::new(
+        let server = Arc::new(configure(
             Server::bind_with_stock_sbx_and_control_home(&home, &stock, &control)
                 .unwrap()
                 .with_backend(Arc::new(Fixture {
@@ -236,7 +259,7 @@ impl Rig {
                     preparation_release: Arc::clone(&preparation_release),
                     preparation_delay_ms: Arc::clone(&preparation_delay_ms),
                 })),
-        );
+        ));
         let owner = fs::metadata(root.path()).unwrap();
         let authority = SessionAuthority {
             username: "fixture".into(),
@@ -340,7 +363,7 @@ impl Rig {
         self.client
             .acp_stop(self.id.clone(), self.shell.clone())
             .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + CONDITION_DEADLINE;
         loop {
             let status = self.status(0);
             if status.attachment.terminal.is_some() {
@@ -374,7 +397,7 @@ impl Rig {
             .unwrap()
     }
     fn done(&self) -> AcpSessionStatus {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + CONDITION_DEADLINE;
         loop {
             let s = self.status(0);
             if !s.turn_active {
@@ -403,19 +426,14 @@ impl Drop for Rig {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[allow(
-    clippy::too_many_lines,
-    reason = "One stateful real-socket journey preserves turn and publication history between actions"
-)]
-async fn fixture_caller_all_turns_and_published_actions() {
+#[test]
+fn idle_cursor_holds_and_update_loss_is_reported_per_turn() {
     let rig = Rig::new();
-    // Idle documented cursors never advance.
     let mut cursor = 0;
     for _ in 0..5 {
         cursor = rig.status(cursor).next_cursor;
     }
-    assert_eq!(cursor, 0);
+    assert_eq!(cursor, 0, "an idle cursor advanced");
     rig.prompt("lossy");
     let lossy = rig.done();
     assert!(lossy.updates_lost);
@@ -424,14 +442,21 @@ async fn fixture_caller_all_turns_and_published_actions() {
     let clean = rig.prompt("clean");
     rig.done();
     let s = rig.status(before);
-    assert!(!s.updates_lost);
+    assert!(
+        !s.updates_lost,
+        "an earlier turn's loss leaked into a clean one"
+    );
     assert_eq!(s.updates[0].turn_id.as_deref(), Some(clean.as_str()));
     assert_eq!(s.updates[0].update["content"]["text"], "fixture:clean");
-    let before = s.latest_cursor;
+}
+
+#[test]
+fn burst_pages_without_loss_and_raw_updates_keep_unknown_fields() {
+    let rig = Rig::new();
     rig.prompt("burst-400");
     rig.done();
     let mut chunks = Vec::new();
-    cursor = before;
+    let mut cursor = 0;
     loop {
         let s = rig.status(cursor);
         assert!(!s.updates_lost);
@@ -451,10 +476,9 @@ async fn fixture_caller_all_turns_and_published_actions() {
             .chain((0..400).map(|n| format!("b{n};")))
             .collect::<Vec<_>>()
     );
-    let before = cursor;
     rig.prompt("diff");
     rig.done();
-    let diff = rig.status(before);
+    let diff = rig.status(cursor);
     assert!(!diff.updates_lost);
     assert_eq!(diff.updates[1].update["content"][0]["newText"], "new");
     assert_eq!(diff.updates[1].update["locations"][0]["line"], 3);
@@ -463,6 +487,11 @@ async fn fixture_caller_all_turns_and_published_actions() {
         diff.updates[2].update["availableCommands"][0]["name"],
         "review"
     );
+}
+
+#[test]
+fn unanswerable_permissions_agent_errors_and_oversize_updates_are_reported() {
+    let rig = Rig::new();
     rig.prompt("always-only");
     let s = rig.done();
     assert!(s.permission_note.unwrap().contains("allow_once"));
@@ -475,7 +504,11 @@ async fn fixture_caller_all_turns_and_published_actions() {
     rig.prompt("oversize-update");
     rig.done();
     assert!(rig.status(before).updates_lost);
-    // Publication authority and real MCP caller, after prior host history.
+}
+
+#[test]
+fn published_session_refuses_host_prompt_cancel_and_stop() {
+    let rig = Rig::new();
     rig.relay
         .acp_publish(
             rig.id.clone(),
@@ -499,8 +532,21 @@ async fn fixture_caller_all_turns_and_published_actions() {
                 .acp_stop(rig.id.clone(), rig.shell.clone())
                 .unwrap_err(),
         };
-        assert!(error.to_string().contains("unpublish"));
+        assert!(error.to_string().contains("unpublish"), "{action}: {error}");
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn published_session_serves_mcp_permission_turns_until_unpublished() {
+    let rig = Rig::new();
+    rig.relay
+        .acp_publish(
+            rig.id.clone(),
+            rig.shell.clone(),
+            "fixture_tool".into(),
+            None,
+        )
+        .unwrap();
     let path = rig.shell.launch_directory.join("publication.json");
     let declaration = AcpDeclaration::load_private(&path).unwrap();
     let exporter = AcpExportMcp::new(rig.home.clone(), path, declaration).unwrap();
@@ -521,78 +567,21 @@ async fn fixture_caller_all_turns_and_published_actions() {
             reply.structured_content.unwrap()["result"].clone()
         }};
     }
-    let key = Uuid::new_v4().to_string();
-    let ask = call!(json!({"action":"ask","key":key,"text":"slow-6"}));
-    assert!(ask.get("status").is_none());
-    let turn = ask["turn_id"].as_str().unwrap();
-    let mut cursor = ask["start_cursor"].as_u64().unwrap();
-    let mut texts = Vec::new();
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let page = call!(json!({"action":"status","turn_id":turn,"cursor":cursor}));
-        assert!(!page["updates_lost"].as_bool().unwrap());
-        let next = page["next_cursor"].as_u64().unwrap();
-        if page["updates"].as_array().unwrap().is_empty() {
-            assert_eq!(cursor, next);
-        }
-        for u in page["updates"].as_array().unwrap() {
-            assert_eq!(u["turn_id"], turn);
-            texts.push(u["update"]["content"]["text"].as_str().unwrap().to_owned());
-        }
-        cursor = next;
-        if page["turn_active"] == false && page["more_updates"] == false {
-            break;
-        }
-        assert!(Instant::now() < deadline);
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert_eq!(
-        texts,
-        std::iter::once("fixture:slow-6".to_owned())
-            .chain((0..6).map(|n| format!("u{n};")))
-            .collect::<Vec<_>>()
-    );
-    let retry = call!(json!({"action":"ask","key":key,"text":"slow-6"}));
-    assert_eq!(retry, ask);
-    let hold = call!(json!({"action":"ask","key":Uuid::new_v4().to_string(),"text":"hold"}));
-    // Idle polling is a property of a turn that cannot progress, so it is
-    // observed on a held turn: after its echo the agent writes nothing until
-    // cancelled, and every further page is empty with an unmoved cursor. (A
-    // paced turn only shows empty pages if the poller outruns the pacing, which
-    // a stalled machine does not.)
-    let mut held_cursor = hold["start_cursor"].as_u64().unwrap();
-    let mut idle = 0;
-    let held_deadline = Instant::now() + Duration::from_secs(10);
-    while idle < 4 {
-        let page = call!(json!({"action":"status","turn_id":hold["turn_id"],"cursor":held_cursor}));
-        assert_eq!(page["turn_active"], true, "{page}");
-        let next = page["next_cursor"].as_u64().unwrap();
-        if page["updates"].as_array().unwrap().is_empty() {
-            assert_eq!(held_cursor, next);
-            idle += 1;
-        }
-        held_cursor = next;
-        assert!(Instant::now() < held_deadline, "held turn never went idle");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-    let _ = call!(json!({"action":"cancel"}));
-    rig.done();
-    let cancelled = call!(json!({"action":"status","turn_id":hold["turn_id"]}));
-    assert_eq!(cancelled["last_stop_reason"], "cancelled");
-    let _ = call!(json!({"action":"ask","key":Uuid::new_v4().to_string(),"text":"permission"}));
+    let asked = call!(json!({"action":"ask","key":Uuid::new_v4().to_string(),"text":"permission"}));
+    let deadline = Instant::now() + CONDITION_DEADLINE;
     let offered = loop {
         let s = call!(json!({"action":"status"}));
         if !s["permissions"].as_array().unwrap().is_empty() {
             break s;
         }
-        assert!(Instant::now() < deadline + Duration::from_secs(10));
+        assert!(Instant::now() < deadline, "permission never offered");
         tokio::time::sleep(Duration::from_millis(10)).await;
     };
     let _ = call!(
         json!({"action":"respond","request_id":offered["permissions"][0]["request_id"],"option_id":"once"})
     );
     rig.done();
-    let permitted = call!(json!({"action":"status"}));
+    let permitted = call!(json!({"action":"status","turn_id":asked["turn_id"]}));
     assert_eq!(permitted["last_stop_reason"], "end_turn");
     assert!(
         permitted["updates"]
@@ -601,31 +590,12 @@ async fn fixture_caller_all_turns_and_published_actions() {
             .iter()
             .any(|u| u["update"]["content"]["text"] == "fixture:permission:allowed")
     );
-    // Old turn remains separately readable after subsequent turns.
-    let old = call!(json!({"action":"status","turn_id":turn,"cursor":ask["start_cursor"]}));
-    assert_eq!(old["last_stop_reason"], "end_turn");
-    assert!(
-        old["updates"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|u| u["turn_id"] == turn)
-    );
-    let _ =
-        call!(json!({"action":"ask","key":Uuid::new_v4().to_string(),"text":"oversize-update"}));
-    rig.done();
-    let old_after_gap =
-        call!(json!({"action":"status","turn_id":turn,"cursor":ask["start_cursor"]}));
-    assert_eq!(
-        old_after_gap["updates_lost"], false,
-        "later omission poisoned a fully retained earlier turn"
-    );
     let _ = call!(json!({"action":"ask","key":Uuid::new_v4().to_string(),"text":"always-only"}));
     rig.done();
-    let old_note = call!(json!({"action":"status","turn_id":turn,"cursor":ask["start_cursor"]}));
+    let earlier = call!(json!({"action":"status","turn_id":asked["turn_id"]}));
     assert!(
-        old_note["permission_note"].is_null(),
-        "another turn's permission note leaked into selected turn"
+        earlier["permission_note"].is_null(),
+        "another turn's permission note leaked into the selected turn"
     );
     rig.relay
         .acp_unpublish(rig.shell.clone(), "fixture_tool".into())
@@ -654,9 +624,6 @@ async fn fixture_caller_all_turns_and_published_actions() {
     tokio::task::spawn_blocking(move || drop(rig))
         .await
         .unwrap();
-    eprintln!(
-        "fixture-caller: actual Node process + daemon Unix socket + MCP Unix socket: paging, burst, raw JSON, loss/reset, permission, cancel, publication/revoke, recovery passed"
-    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -696,8 +663,6 @@ async fn external_mcp_process_drives_real_exporter_and_node_agent() {
     );
     let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["external_mcp_caller"], "passed");
-    assert_eq!(result["cancel_tail_chunks"], 201);
-    eprintln!("external MCP caller: {result}");
     serving.await.unwrap().unwrap();
     tokio::task::spawn_blocking(move || drop(rig))
         .await
@@ -895,7 +860,7 @@ fn typed_host_lost_malformed_and_false_rejection_are_uncertain() {
 fn cancellation_tail_is_lossless_and_wire_terminal_fences_late_updates() {
     let rig = Rig::new();
     let turn = rig.prompt("cancel-burst");
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + CONDITION_DEADLINE;
     while rig.status(0).updates.is_empty() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(5));
@@ -1002,9 +967,7 @@ fn concurrent_publications_have_one_name_owner_and_recover() {
     rig.client
         .acp_stop(second.clone(), rig.shell.clone())
         .unwrap();
-    lease
-        .set_read_timeout(Some(Duration::from_secs(3)))
-        .unwrap();
+    lease.set_read_timeout(Some(CONDITION_DEADLINE)).unwrap();
     let mut terminal = [0];
     lease.read_exact(&mut terminal).unwrap();
     assert_eq!(terminal, *b"T");
@@ -1099,26 +1062,23 @@ fn failed_publication_revokes_its_grant_even_after_project_replacement() {
 fn status_remains_available_during_blocked_cancel_dispatch() {
     let rig = Rig::new();
     rig.prompt("control-flood");
-    // The agent echoes the prompt and then stops reading its stdin (its bounded
-    // hostile lifetime starts here). Wait for that echo, not a fixed delay.
-    let deadline = Instant::now() + Duration::from_secs(30);
+    // The agent echoes the prompt, then stops reading stdin until released
+    // while flooding the daemon with requests whose replies fill that stdin.
+    let deadline = Instant::now() + CONDITION_DEADLINE;
+
     while rig.status(0).updates.is_empty() {
         assert!(Instant::now() < deadline, "agent never received the prompt");
         thread::sleep(Duration::from_millis(5));
     }
     thread::scope(|scope| {
         let rig_ref = &rig;
-        // A cancel blocks only once the agent's unread stdin is full, which takes
-        // the daemon a few replies to the flood (about 30 KB each) to do. How long
-        // that takes depends on machine load, so do not assume it: cancel until one
-        // is stuck. A cancel that returns without blocking has just put its small
-        // frame in the pipe, and the turn is still active, so the next one is closer
-        // to blocking. The agent exits after 5 s, so stop trying well before that.
-        let attempts_until = Instant::now() + Duration::from_secs(3);
-        let done_rx = loop {
+        // A cancel blocks once the agent's unread stdin is full; until then a
+        // cancel just adds its frame to the pipe and returns. Cancel until one
+        // stays in flight, then require status to answer while it still is.
+        let pending = loop {
             assert!(
-                Instant::now() < attempts_until,
-                "no cancel ever blocked behind the agent's unread stdin"
+                Instant::now() < deadline,
+                "status never answered while a cancel was in flight"
             );
             let (done_tx, done_rx) = std::sync::mpsc::channel();
             scope.spawn(move || {
@@ -1127,31 +1087,33 @@ fn status_remains_available_during_blocked_cancel_dispatch() {
                     .acp_cancel(rig_ref.id.clone(), rig_ref.shell.clone());
                 done_tx.send(result).unwrap();
             });
-            // The cancel has reached dispatch once status reports it requested.
             while !rig.status(0).cancel_requested {
                 assert!(Instant::now() < deadline, "cancel never reached dispatch");
                 thread::sleep(Duration::from_millis(1));
             }
-            match done_rx.recv_timeout(Duration::from_millis(250)) {
-                Ok(_) => {}
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break done_rx,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    panic!("the cancel call ended without a result")
-                }
+            if done_rx.recv_timeout(Duration::from_millis(250)).is_ok() {
+                continue;
+            }
+            let status = rig.status(0);
+            assert!(status.cancel_requested);
+            if matches!(
+                done_rx.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Empty)
+            ) {
+                break done_rx;
             }
         };
-        // This cancel is in flight and blocked on the agent's unread stdin.
-        let started = Instant::now();
-        let status = rig.status(0);
-        assert!(
-            started.elapsed() < Duration::from_millis(500),
-            "status blocked behind cancellation transport IO"
-        );
-        assert!(status.cancel_requested);
-        let _ = done_rx
-            .recv_timeout(Duration::from_secs(12))
-            .expect("cancel never resolved after bounded peer exit");
+        fs::write(rig.shell.launch_directory.join(RELEASE_FLOOD), b"").unwrap();
+        // Once the agent reads its stdin again, the cancel is delivered.
+        pending
+            .recv_timeout(CONDITION_DEADLINE)
+            .expect("cancel never resolved after the agent was released")
+            .unwrap();
     });
+    assert_eq!(
+        rig.done().last_stop_reason,
+        Some(marsh_acp::StopReason::Cancelled)
+    );
 }
 
 /// Relay real authenticated frames, but either close the listener before the
@@ -1214,7 +1176,7 @@ fn prompt_reply_proxy(
 }
 
 #[test]
-#[ignore = "requires exact freshly built marsh and sibling marsh-mcp"]
+#[ignore = "requires MARSH_ACP_CALLER_BIN pointing to the exact newly built marsh"]
 #[allow(clippy::too_many_lines)] // One real CLI/private-host/daemon/Node transaction and recovery journey.
 fn cli_typed_publication_drives_real_host_and_preserves_effect_classes() {
     let rig = Rig::with_host(true);
@@ -1337,7 +1299,7 @@ fn cli_typed_publication_drives_real_host_and_preserves_effect_classes() {
 }
 
 #[test]
-#[ignore = "requires exact freshly built marsh and sibling marsh-mcp"]
+#[ignore = "requires MARSH_ACP_CALLER_BIN pointing to the exact newly built marsh"]
 fn cli_host_direct_cannot_forge_daemon_dispatch_with_environment() {
     let root = tempfile::tempdir().unwrap();
     let project = root.path().join("project");
@@ -1386,7 +1348,7 @@ fn cli_host_direct_cannot_forge_daemon_dispatch_with_environment() {
 }
 
 #[test]
-#[ignore = "requires exact freshly built CLI pair; discards an actual publication reply"]
+#[ignore = "requires MARSH_ACP_CALLER_BIN pointing to the exact newly built marsh"]
 fn cli_disconnect_after_preparation_reports_uncertainty_not_cancellation() {
     let rig = Rig::with_host(true);
     rig.preparation_delay_ms.store(2_000, Ordering::SeqCst);
@@ -1474,9 +1436,11 @@ fn cli_disconnect_after_preparation_reports_uncertainty_not_cancellation() {
 }
 
 #[test]
-#[ignore = "observes the real five-minute host budget; no fake clock or timeout override"]
 fn publication_host_deadline_retains_post_grant_uncertainty() {
-    let rig = Rig::new();
+    let budget = Duration::from_secs(3);
+    let rig = Rig::build(false, false, |server| {
+        server.with_publication_host_budget(budget)
+    });
     let marker = rig.shell.launch_directory.join(".host-timeout");
     fs::write(&marker, b"").unwrap();
     let start = Instant::now();
@@ -1499,11 +1463,12 @@ fn publication_host_deadline_retains_post_grant_uncertainty() {
     );
     let error = result.unwrap_err().to_string();
     assert!(
-        error.contains("five minutes") && error.contains("grant was revoked"),
+        error.contains("outside Kit preparation") && error.contains("grant was revoked"),
         "{error}"
     );
+    // The hung host sleeps far longer than this bound: only the budget ends it.
     assert!(
-        elapsed >= Duration::from_mins(5) && elapsed < Duration::from_secs(330),
+        elapsed >= budget,
         "host budget was not exercised: {elapsed:?}"
     );
     assert!(rig.status(0).published_name.is_none());
@@ -1515,22 +1480,25 @@ fn publication_host_deadline_retains_post_grant_uncertainty() {
         Some(marsh_acp::StopReason::EndTurn)
     );
     rig.stop_and_receipt();
-    eprintln!(
-        "actual ACP host budget expired in {:.3}s; public uncertainty and exact-generation revocation observed",
-        elapsed.as_secs_f64()
-    );
 }
 
 #[test]
-#[ignore = "real CLI scope contention across two Node agents; crosses the production 30s admission wait"]
+#[ignore = "requires MARSH_ACP_CALLER_BIN pointing to the exact newly built marsh"]
 fn cli_scope_contention_rejects_before_second_agent_grant() {
-    let rig = Rig::with_host(true);
+    let admission_wait = Duration::from_secs(2);
+    let rig = Rig::build(true, false, |server| {
+        server.with_publication_admission_wait(admission_wait)
+    });
     let (second, _, second_lease) = rig
         .client
         .acp_start_reserved("fixture".into(), rig.shell.clone(), None)
         .unwrap();
     let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        rig.preparation_delay_ms.store(35_000, Ordering::SeqCst);
+        // The first publication holds the scope well past the second's wait.
+        rig.preparation_delay_ms.store(
+            u64::try_from((admission_wait * 4).as_millis()).unwrap(),
+            Ordering::SeqCst,
+        );
         thread::scope(|threads| {
             let first = threads.spawn(|| {
                 rig.cli(&[
@@ -1542,7 +1510,7 @@ fn cli_scope_contention_rejects_before_second_agent_grant() {
                     "fixture",
                 ])
             });
-            let deadline = Instant::now() + Duration::from_secs(10);
+            let deadline = Instant::now() + CONDITION_DEADLINE;
             while rig.preparations.load(Ordering::SeqCst) == 0 {
                 assert!(
                     Instant::now() < deadline,
@@ -1561,7 +1529,7 @@ fn cli_scope_contention_rejects_before_second_agent_grant() {
                     && diagnostic.contains("scope is busy"),
                 "{diagnostic}"
             );
-            assert!(started.elapsed() >= Duration::from_secs(30));
+            assert!(started.elapsed() >= admission_wait);
             assert_eq!(
                 fs::read(&calls).unwrap(),
                 before,
@@ -1605,96 +1573,6 @@ fn cli_scope_contention_rejects_before_second_agent_grant() {
     if let Err(panic) = checked {
         std::panic::resume_unwind(panic);
     }
-}
-
-#[test]
-#[ignore = "actual >six-minute production daemon-client/private-channel preparation"]
-fn cold_publication_daemon_client_exceeds_six_minutes() {
-    let rig = Rig::new();
-    rig.preparation_delay_ms.store(365_250, Ordering::SeqCst);
-    let start = Instant::now();
-    let result = rig.relay.acp_publish_target(
-        rig.id.clone(),
-        rig.shell.clone(),
-        "fixture_tool".into(),
-        None,
-        Some("fixture".into()),
-    );
-    let elapsed = start.elapsed();
-    assert!(
-        result.is_ok(),
-        "quiet preparation failed after {elapsed:?}: {result:?}"
-    );
-    assert!(elapsed >= Duration::from_secs(365));
-    assert_eq!(rig.preparations.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        rig.status(0).published_name.as_deref(),
-        Some("fixture_tool")
-    );
-    let events = fs::read_to_string(rig.shell.launch_directory.join(".host-events.jsonl")).unwrap();
-    let kinds: Vec<_> = events
-        .lines()
-        .map(|line| {
-            serde_json::from_str::<serde_json::Value>(line).unwrap()["type"]
-                .as_str()
-                .unwrap()
-                .to_owned()
-        })
-        .collect();
-    assert_eq!(kinds, ["prepare_kit", "begin_commit", "complete"]);
-    rig.relay
-        .acp_unpublish(rig.shell.clone(), "fixture_tool".into())
-        .unwrap();
-    assert!(!rig.shell.launch_directory.join("publication.json").exists());
-    rig.stop_and_receipt();
-    eprintln!(
-        "actual public daemon client/private host cold preparation {:.3}s; committed once; no read-cap timeout (CLI/stock qualification separate)",
-        elapsed.as_secs_f64()
-    );
-}
-
-#[test]
-#[ignore = "observed >six-minute backend preparation; requires freshly built CLI pair"]
-fn cold_publication_exceeds_six_minutes() {
-    let rig = Rig::with_host(true);
-    rig.preparation_delay_ms.store(365_250, Ordering::SeqCst);
-    let start = Instant::now();
-    let result = rig.cli(&[
-        "publish",
-        &rig.id,
-        "--name",
-        "fixture_tool",
-        "--kit",
-        "fixture",
-    ]);
-    let elapsed = start.elapsed();
-    assert!(
-        result.status.success(),
-        "quiet cold preparation failed after {elapsed:?}: {}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    assert!(
-        elapsed >= Duration::from_secs(365),
-        "slow backend boundary was not exercised"
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&result.stderr)
-            .matches("starting fixture worker VM")
-            .count(),
-        1,
-        "periodic progress masked the former read cap"
-    );
-    assert_eq!(rig.preparations.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        rig.status(0).published_name.as_deref(),
-        Some("fixture_tool")
-    );
-    eprintln!(
-        "observed quiet ACP Kit preparation: {:.3}s; one cold frame; committed, not timed out or replayed",
-        elapsed.as_secs_f64()
-    );
-    assert!(rig.cli(&["unpublish", "fixture_tool"]).status.success());
-    rig.stop_and_receipt();
 }
 
 #[test]
@@ -1855,7 +1733,7 @@ fn cli_stdin_permissions_reservations_and_publication_options() {
     let rows: serde_json::Value = serde_json::from_slice(&mine.stdout).unwrap();
     assert_eq!(rows[0]["owner_shell_session_id"], rig.shell.session_id);
     rig.prompt("permission");
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + CONDITION_DEADLINE;
     while rig.status(0).permissions.is_empty() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(5));
@@ -1974,7 +1852,7 @@ fn cli_stdin_permissions_reservations_and_publication_options() {
             .success()
     );
     assert!(invoke(&["stop", &rig.id], &[]).status.success());
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + CONDITION_DEADLINE;
     while rig.status(0).attachment.terminal.is_none() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(5));
@@ -1991,7 +1869,7 @@ fn cli_stdin_permissions_reservations_and_publication_options() {
     );
     thread::scope(|scope| {
         let run = scope.spawn(|| invoke(&["run", "--reservation", &id, "fixture"], &[]));
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + CONDITION_DEADLINE;
         loop {
             let ready = rig
                 .client

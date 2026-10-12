@@ -172,7 +172,6 @@ impl ThreadProof {
                     identity.display()
                 );
             }
-            println!("exact_pump_threads_reaped={identities:?}");
         }
     }
 }
@@ -240,6 +239,7 @@ struct Fixture {
     runtime: Arc<ObservedRuntime>,
     io_dropped: Arc<AtomicUsize>,
     reaped: Arc<AtomicUsize>,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))] // Checked via /proc.
     carrier_pid: u32,
     input_progress: Arc<AtomicUsize>,
     termination_receipt_failed: Arc<AtomicBool>,
@@ -378,12 +378,18 @@ fn limits() -> SupervisionLimits {
         writable_bytes: u64::MAX,
     }
 }
-fn receipt(case: &str, report: &WorkerReport, bytes: Option<usize>, pid: u32) {
-    println!(
-        "WORKER_DRAIN_RECEIPT {}",
-        serde_json::json!({"case": case, "report": report, "collected_stdout_bytes": bytes, "carrier_pid": pid, "carrier_reaped": true, "io_owners_dropped": 3, "wait_joined": true})
-    );
+/// Polls a condition that a real fixture process makes true on its own.
+fn wait_for(what: &str, condition: impl Fn() -> bool) {
+    let deadline = Instant::now() + CONDITION_DEADLINE;
+    while !condition() {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        thread::sleep(Duration::from_millis(5));
+    }
 }
+
+/// Short, so that a consumer paused for ten graces after the exit is
+/// observed still finishes quickly; a drain bounded by the grace would expire.
+const GRACE: Duration = Duration::from_millis(100);
 
 fn assert_payload(bytes: &[u8]) {
     assert_eq!(bytes.len(), 4_194_304, "carrier output truncated");
@@ -402,16 +408,19 @@ fn observed_exit_does_not_expire_a_healthy_paused_output_carrier() {
         let (send, receive) = mpsc::channel();
         send.send(Ok(WorkerControl::CloseInput)).unwrap();
         let (output, mut reader) = UnixStream::pair().unwrap();
+        let wait_done = fixture.runtime.wait_done.clone();
         let reading = thread::spawn(move || {
-            thread::sleep(Duration::from_secs(7));
+            wait_for("observed exit", || wait_done.load(Ordering::SeqCst) == 1);
+            thread::sleep(GRACE * 10);
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes).unwrap();
             bytes
         });
-        let started = Instant::now();
         let worker = Worker::with_grant_verifier(
             fixture.runtime.clone(),
-            Arc::new(ThreadSupervisor::default()),
+            Arc::new(ThreadSupervisor {
+                termination_grace: GRACE,
+            }),
             Arc::new(Granted),
         );
         let mut spec = super::tests::job();
@@ -430,18 +439,6 @@ fn observed_exit_does_not_expire_a_healthy_paused_output_carrier() {
         assert_eq!(report.delivery, DeliveryOutcome::Complete);
         assert_eq!(report.cleanup, CleanupOutcome::Verified);
         fixture.assert_reaped();
-        receipt(
-            &format!("paused7s-exit{code}"),
-            &report,
-            Some(bytes.len()),
-            fixture.carrier_pid,
-        );
-        println!(
-            "positive code={code} bytes={} paused=7s elapsed={:?} carrier_pid={} owners_dropped=3 waiter_joined=true carrier_reaped=true report={report:?}",
-            bytes.len(),
-            started.elapsed(),
-            fixture.carrier_pid
-        );
     }
 }
 
@@ -548,11 +545,10 @@ fn blocked_output_cancel_loss_wall_and_output_limit_preserve_actual42() {
         if mode == "output" {
             policy.output_bytes = 512 * 1024;
         }
-        let started = Instant::now();
         let worker = Worker::with_grant_verifier(
             fixture.runtime.clone(),
             Arc::new(ThreadSupervisor {
-                termination_grace: Duration::from_millis(100),
+                termination_grace: GRACE,
             }),
             Arc::new(Granted),
         );
@@ -598,17 +594,6 @@ fn blocked_output_cancel_loss_wall_and_output_limit_preserve_actual42() {
         assert_eq!(report.delivery, expected);
         assert_eq!(report.cleanup, CleanupOutcome::Verified);
         fixture.assert_reaped();
-        receipt(
-            &format!("blocked-{mode}"),
-            &report,
-            None,
-            fixture.carrier_pid,
-        );
-        println!(
-            "blocked mode={mode} stdin_and_output_observed_blocked=true elapsed={:?} carrier_pid={} owners_dropped=3 waiter_joined=true carrier_reaped=true report={report:?}",
-            started.elapsed(),
-            fixture.carrier_pid
-        );
     }
 }
 
@@ -617,13 +602,13 @@ fn retained_terminal_follows_all_output_and_joined_carrier() {
     let fixture = Fixture::new(42, false);
     let worker = Arc::new(Worker::with_grant_verifier(
         fixture.runtime.clone(),
-        Arc::new(ThreadSupervisor::default()),
+        Arc::new(ThreadSupervisor {
+            termination_grace: GRACE,
+        }),
         Arc::new(Granted),
     ));
     let (mut client, peer) = UnixStream::pair().unwrap();
-    client
-        .set_read_timeout(Some(Duration::from_secs(20)))
-        .unwrap();
+    client.set_read_timeout(Some(CONDITION_DEADLINE)).unwrap();
     let transport = WorkerTransport::from_socket(peer).unwrap();
     let serving = thread::spawn(move || serve_retained(&worker, 1, 1, transport));
     assert!(matches!(
@@ -648,7 +633,10 @@ fn retained_terminal_follows_all_output_and_joined_carrier() {
         },
     )
     .unwrap();
-    thread::sleep(Duration::from_secs(7));
+    wait_for("observed exit", || {
+        fixture.runtime.wait_done.load(Ordering::SeqCst) == 1
+    });
+    thread::sleep(GRACE * 10);
     let mut bytes = Vec::new();
     let report = loop {
         match read_frame::<WorkerResponse>(&mut client).unwrap() {
@@ -662,18 +650,8 @@ fn retained_terminal_follows_all_output_and_joined_carrier() {
     assert_eq!(report.execution, ExecutionOutcome::Exited { code: 42 });
     assert_eq!(report.delivery, DeliveryOutcome::Complete);
     fixture.assert_reaped();
-    receipt(
-        "retained-terminal-order",
-        &report,
-        Some(bytes.len()),
-        fixture.carrier_pid,
-    );
     drop(client);
     serving.join().unwrap().unwrap();
-    println!(
-        "retained bytes={} terminal_after_output=true exact_carrier_reaped=true report={report:?}",
-        bytes.len()
-    );
 }
 #[test]
 fn start_failure_preserves_local_cleanup_uncertainty_after_verified_deletion() {
@@ -721,10 +699,6 @@ fn start_failure_preserves_local_cleanup_uncertainty_after_verified_deletion() {
             }
         );
         assert_eq!(report.quarantine, uncertain);
-        println!(
-            "START_FAILURE_RECEIPT {}",
-            serde_json::json!({"missing_local_termination_receipt": uncertain, "real_carrier_pid": fixture.carrier_pid, "carrier_reaped": true, "io_owners_dropped": 3, "container_delete_verified": true, "supervision_pumps_started": 0, "report": report})
-        );
     }
 }
 
@@ -763,12 +737,6 @@ fn healthy_closed_stdio_carrier_still_uses_wall_not_cleanup_grace() {
     assert_eq!(report.execution, ExecutionOutcome::Exited { code: 42 });
     assert_eq!(report.delivery, DeliveryOutcome::Complete);
     fixture.assert_reaped();
-    receipt(
-        "healthy-carrier-lingers-after-stdio-eof",
-        &report,
-        Some(bytes.len()),
-        fixture.carrier_pid,
-    );
 }
 
 #[test]
@@ -777,22 +745,14 @@ fn retained_cancel_finishes_started_frame_before_terminal() {
     let worker = Arc::new(Worker::with_grant_verifier(
         fixture.runtime.clone(),
         Arc::new(ThreadSupervisor {
-            termination_grace: Duration::from_millis(100),
+            termination_grace: GRACE,
         }),
         Arc::new(Granted),
     ));
     let (mut client, peer) = UnixStream::pair().unwrap();
-    client
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .unwrap();
+    client.set_read_timeout(Some(CONDITION_DEADLINE)).unwrap();
     let transport = WorkerTransport::from_socket(peer).unwrap();
-    let cancel = transport.cancellation();
-    let (done, result) = mpsc::channel();
-    let serving = thread::spawn(move || {
-        let result = serve_retained(&worker, 1, 8, transport);
-        let _ = done.send(());
-        result
-    });
+    let serving = thread::spawn(move || serve_retained(&worker, 1, 8, transport));
     assert!(matches!(
         read_frame::<WorkerResponse>(&mut client).unwrap(),
         WorkerResponse::Ready { .. }
@@ -815,9 +775,44 @@ fn retained_cancel_finishes_started_frame_before_terminal() {
         },
     )
     .unwrap();
-    // Keep the peer connected and do NOT read any job output.
-    thread::sleep(Duration::from_millis(500));
-    let started = Instant::now();
+    // One output frame proves the job is streaming. The client then stops
+    // reading, so the rest of the 4 MiB payload backs up behind a frame the
+    // worker has started writing.
+    loop {
+        match read_frame::<WorkerResponse>(&mut client).unwrap() {
+            WorkerResponse::Stdout { .. } => break,
+            WorkerResponse::Started { .. } => {}
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    write_frame(
+        &mut client,
+        &WorkerRequest::Cancel {
+            attempt: "blocked".into(),
+        },
+    )
+    .unwrap();
+    // Every frame up to the terminal must still decode: a cancelled attempt
+    // finishes its started frame rather than truncating the stream.
+    let report = loop {
+        match read_frame::<WorkerResponse>(&mut client).unwrap() {
+            WorkerResponse::Terminal { report, .. } => break report,
+            WorkerResponse::Stdout { .. } => {}
+            other => panic!("unexpected {other:?}"),
+        }
+    };
+    assert_eq!(report.execution, ExecutionOutcome::Exited { code: 42 });
+    // The cancel also wakes the blocked output writer, so the attempt may
+    // record the interrupted delivery before it reads the cancel itself.
+    assert!(
+        matches!(
+            report.delivery,
+            DeliveryOutcome::Cancelled | DeliveryOutcome::Failed
+        ),
+        "{report:?}"
+    );
+    fixture.assert_reaped();
+    // Routine attempt cancellation leaves the transport serving.
     write_frame(
         &mut client,
         &WorkerRequest::Ping {
@@ -826,40 +821,15 @@ fn retained_cancel_finishes_started_frame_before_terminal() {
         },
     )
     .unwrap();
-    write_frame(
-        &mut client,
-        &WorkerRequest::Cancel {
-            attempt: "blocked".into(),
-        },
-    )
-    .unwrap();
-    thread::sleep(Duration::from_millis(100));
-    let alive = matches!(result.try_recv(), Err(mpsc::TryRecvError::Empty));
-    let observed = (|| -> Result<WorkerReport, WorkerError> {
-        loop {
-            if let WorkerResponse::Terminal { report, .. } =
-                read_frame::<WorkerResponse>(&mut client)?
-            {
-                return Ok(report);
-            }
+    assert_eq!(
+        read_frame::<WorkerResponse>(&mut client).unwrap(),
+        WorkerResponse::Pong {
+            generation: 1,
+            nonce: 1
         }
-    })();
-    drop(client);
-    if observed.is_err() {
-        cancel.cancel();
-    }
-    let serving_result = serving.join().unwrap();
-    assert!(alive, "routine attempt cancellation closed the transport");
-    let report = observed.unwrap();
-    assert_eq!(report.execution, ExecutionOutcome::Exited { code: 42 });
-    assert_ne!(report.delivery, DeliveryOutcome::Complete);
-    assert!(serving_result.is_ok());
-    fixture.assert_reaped();
-    println!(
-        "retained_cancel valid_frame_and_terminal=true carrier_pid={} reaped=true elapsed={:?}",
-        fixture.carrier_pid,
-        started.elapsed()
     );
+    drop(client);
+    serving.join().unwrap().unwrap();
 }
 
 struct Granted;

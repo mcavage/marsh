@@ -1,0 +1,48 @@
+Bind-mount MOUNT_SPEC inside the running sandbox.
+
+MOUNT_SPEC is HOST[:CTR_TARGET[:ro|rw]] in docker -v style:
+
+  HOST                      Bind-mount HOST at the same path inside the
+                            running container — the same convention the
+                            create-time workspace mount uses, so in-container
+                            paths match host paths. On Windows the drive
+                            letter becomes a root directory (C:\Users\me\data
+                            → /c/Users/me/data).
+  HOST:CTR_TARGET           Bind-mount the host path at CTR_TARGET instead
+                            (real bind mount via setns + open_tree +
+                            move_mount, not a symlink).
+  HOST:CTR_TARGET:ro|rw     Mount read-only (:ro) or read-write (:rw, the
+                            default).
+
+HOST may be absolute or relative; relative paths are resolved against the
+current working directory before submission, and ./.. segments are cleaned.
+HOST must exist on the host. CTR_TARGET must be absolute. Mount operations
+are idempotent: re-running the same MOUNT_SPEC is a no-op success.
+
+Mounts are restored after stop/start. If a saved mount cannot be restored,
+startup fails; restore its host path or use sbx umount while stopped to remove
+the saved mount.
+
+Mount policy (governance) is enforced before the call reaches the daemon, mirroring
+the create-time check, and uses the effective read-only intent so policies
+that distinguish ro/rw match what the bind mount does.
+
+Usage:
+  sbx mount SANDBOX MOUNT_SPEC [flags]
+
+Examples:
+  # Bind-mount at the same path as on the host
+  sbx mount my-sandbox /Users/me/extra-data
+
+  # Bind-mount inside the container at /workspace/data (read-write)
+  sbx mount my-sandbox /Users/me/extra-data:/workspace/data
+
+  # Bind-mount read-only (writes inside the container return EROFS)
+  sbx mount my-sandbox /Users/me/extra-data:/workspace/data:ro
+
+Flags:
+  -h, --help   help for mount
+
+Global Flags:
+      --cloud   Dispatch to Docker Cloud Sandboxes API instead of local sandboxd (supported by a growing set of verbs — run 'sbx --cloud --help' for the current list)
+  -D, --debug   Enable debug logging

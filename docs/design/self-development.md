@@ -1,6 +1,6 @@
 # Develop marsh from marsh (lean dev broker)
 
-Status: built (E2E 1 and E2E 2 below pass).
+Status: built (E2E 1 below, the `self-dev` regress suite, passes).
 
 Goal: in an marsh session at the checkout's Mac path, edit marsh, build a Linux candidate,
 and run it, with every stock VM the candidate needs going through a host-daemon broker.
@@ -181,14 +181,3 @@ command (a job container that cannot reach the broker); use `pi-dev`.
   install telemetry off); after that it is the operator's file.
 - **Not imported.** No host agent profile, extensions, themes or skills. A personal agent
   built on Pi belongs in its own Kit ([plan](../plan/custom-agent-kit.md)).
-
-## E2E 2
-
-`python3 tests/acceptance/pi_dev.py --sbx $(command -v sbx) --kit <fixture-ref>
-[--prefix ~/.marsh-dev]` (one billed model turn): uses the dev install like E2E 1,
-runs `pi-dev -p --mode json` in `marsh --dev` asking Pi to run one command (echo a nonce with
-`$SANDBOX_NAME` and the grant prefix, `make dev-inner`, `make dev-inner-run CMD="fixture
-identity"`) and report the identity line. It asserts the bash tool result carries the nonce with
-the dev shell VM's recorded name and the identity output, the model reported it, the inner build
-landed in `S/artifacts` during the run, receipts are in `S/control`, child VMs carry the grant
-prefix, Pi's session is in `S/cache/pi-dev`, and then the E2E 1 cleanup checks.

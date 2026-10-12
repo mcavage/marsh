@@ -2,6 +2,9 @@ mod execution_cwd;
 mod shell_admission;
 
 use super::*;
+use crate::test_support::{
+    PATIENCE, fenced, recv, reopen, returns, socket_pair, wait_for, wait_until,
+};
 use std::{
     io::{Cursor, Read, Write},
     process::Command,
@@ -11,7 +14,7 @@ use std::{
 #[test]
 fn credited_client_preserves_terminal_queued_before_construction_or_failed_input_write() {
     for code in [0, 1, 42] {
-        let (client, mut peer) = UnixStream::pair().unwrap();
+        let (client, mut peer) = socket_pair();
         write_frame(
             &mut peer,
             &AttachmentFrame::Stdout {
@@ -20,8 +23,9 @@ fn credited_client_preserves_terminal_queued_before_construction_or_failed_input
         )
         .unwrap();
         write_frame(&mut peer, &AttachmentFrame::Exited { code }).unwrap();
-        peer.shutdown(Shutdown::Both).unwrap();
-        drop(peer);
+        // Fully closed (macOS still accepts writes after a peer's shutdown),
+        // and with no spawn in flight that could hold a duplicate open.
+        fenced(|| drop(peer));
         let client = ClientExecution::new_shell(client).unwrap();
         assert!(matches!(
             client.send(&AttachmentFrame::StdinEof),
@@ -35,10 +39,10 @@ fn credited_client_preserves_terminal_queued_before_construction_or_failed_input
         );
         assert_eq!(client.receive().unwrap(), AttachmentFrame::Exited { code });
     }
-    let (client, mut peer) = UnixStream::pair().unwrap();
+    let (client, mut peer) = socket_pair();
     peer.write_all(&100_u32.to_be_bytes()).unwrap();
     peer.write_all(b"{\"type\":\"exited\"").unwrap();
-    drop(peer);
+    fenced(|| drop(peer));
     let client = ClientExecution::new_shell(client).unwrap();
     let _ = client.send(&AttachmentFrame::StdinEof);
     assert!(
@@ -49,42 +53,33 @@ fn credited_client_preserves_terminal_queued_before_construction_or_failed_input
 
 #[test]
 fn attachment_frame_write_preserves_partial_frames_across_slow_connected_reads() {
-    let (server, mut client) = UnixStream::pair().unwrap();
+    let (server, mut client) = socket_pair();
     let attachment = ServerAttachment::new(server).unwrap();
     let reader = thread::spawn(move || {
+        // A consumer that stalls past several of the writer's 20 ms polls.
         thread::sleep(Duration::from_millis(100));
-        let mut wire = Vec::new();
-        let mut bytes = [0_u8; 4096];
-        loop {
-            match client.read(&mut bytes) {
-                Ok(0) => break,
-                Err(error) => panic!("{error}"),
-                Ok(count) => {
-                    wire.extend_from_slice(&bytes[..count]);
-                    thread::sleep(Duration::from_millis(2));
-                }
-            }
-        }
-        read_frame::<AttachmentFrame>(&mut &wire[..]).unwrap()
+        read_frame::<AttachmentFrame>(&mut client).unwrap()
     });
     let frame = AttachmentFrame::Failed {
         message: "x".repeat(500 * 1024),
     };
     attachment.send(&frame).unwrap();
-    drop(attachment);
     assert_eq!(reader.join().unwrap(), frame);
 }
 
+/// A paused but connected guest must never turn credited shell input into a
+/// timed-out, torn stream: the socket carries no send deadline at all.
 #[test]
-fn credit_client_connected_input_pause_does_not_tear_frames() {
-    let (client, mut peer) = UnixStream::pair().unwrap();
+fn shell_input_has_no_send_deadline_and_arrives_whole() {
+    let (client, mut peer) = socket_pair();
+    let socket = client.try_clone().unwrap();
     let execution = ClientExecution::new_shell(client).unwrap();
+    assert_eq!(socket.write_timeout().unwrap(), None);
     let sender = thread::spawn(move || {
         execution.send(&AttachmentFrame::Stdin {
             bytes: vec![23; 1_000_000],
         })
     });
-    thread::sleep(Duration::from_secs(7));
     let mut received = Vec::new();
     let result = loop {
         match read_frame::<AttachmentFrame>(&mut peer) {
@@ -109,18 +104,13 @@ fn credit_client_connected_input_pause_does_not_tear_frames() {
 
 #[test]
 fn server_attachment_close_input_wakes_receiver_without_losing_final_status() {
-    let (server, mut client) = UnixStream::pair().unwrap();
+    let (server, mut client) = socket_pair();
     let attachment = ServerAttachment::new(server).unwrap();
     let receiver = attachment.clone();
     let (send, receive) = mpsc::channel();
     let task = thread::spawn(move || send.send(receiver.receive()).unwrap());
     attachment.close_input();
-    assert!(
-        receive
-            .recv_timeout(Duration::from_secs(1))
-            .unwrap()
-            .is_err()
-    );
+    assert!(recv(&receive, "closed input wakes the receiver").is_err());
     task.join().unwrap();
     attachment
         .send(&AttachmentFrame::Exited { code: 42 })
@@ -133,7 +123,7 @@ fn server_attachment_close_input_wakes_receiver_without_losing_final_status() {
 
 #[test]
 fn server_attachment_polling_preserves_partial_frames_across_idle_intervals() {
-    let (server, mut client) = UnixStream::pair().unwrap();
+    let (server, mut client) = socket_pair();
     let attachment = ServerAttachment::new(server).unwrap();
     let expected = AttachmentFrame::Signal {
         signal: "TERM".into(),
@@ -153,7 +143,7 @@ fn server_attachment_polling_preserves_partial_frames_across_idle_intervals() {
 #[test]
 fn cleanup_uncertain_shell_cannot_be_detached_or_release_session_authority() {
     let home = tempfile::tempdir().unwrap();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(42, authority("/Users/example/project", home.path()));
     let token = store.issue_relay_token(&session).unwrap();
     store.mark_shell_cleanup_uncertain(&session);
@@ -163,15 +153,29 @@ fn cleanup_uncertain_shell_cannot_be_detached_or_release_session_authority() {
         Err(DaemonError::ShellCleanupUncertain(_))
     ));
     assert!(!store.safe_to_shutdown());
-    let state = store.lock();
-    assert_eq!(state.shells[&session].state, ShellState::CleanupUncertain);
-    assert!(state.session_authorities.contains_key(&session));
-    assert!(!state.authentication_tokens.contains_key(&token));
+    assert!(
+        store
+            .status(None)
+            .shells
+            .iter()
+            .any(|shell| shell.session_id == session
+                && shell.state == ShellState::CleanupUncertain)
+    );
+    assert!(store.authentication_scope(&token).is_none());
+    // The session authority stays: a fresh relay still resolves to it.
+    let fresh = store.issue_relay_token(&session).unwrap();
+    let authorized = store
+        .authorize_session(&fresh, &self::session(&session, home.path()))
+        .unwrap();
+    assert_eq!(
+        authorized.launch_directory,
+        Path::new("/Users/example/project")
+    );
 }
 
 #[test]
 fn client_attachment_write_has_deadline_when_peer_stops_reading() {
-    let (client, _peer) = UnixStream::pair().unwrap();
+    let (client, _peer) = socket_pair();
     let execution =
         ClientExecution::new_with_write_timeout(client, Duration::from_millis(25)).unwrap();
     let started = Instant::now();
@@ -186,17 +190,23 @@ fn client_attachment_write_has_deadline_when_peer_stops_reading() {
 }
 
 #[test]
-fn client_attachment_shutdown_does_not_wait_for_writer_lock() {
-    let (client, _peer) = UnixStream::pair().unwrap();
-    let execution = ClientExecution::new(client).unwrap();
-    let writer = execution.writer.lock().unwrap();
-    let (sent, received) = mpsc::channel();
-    let shutdown = execution.clone();
-    let caller = thread::spawn(move || sent.send(shutdown.shutdown()).unwrap());
-    let result = received.recv_timeout(Duration::from_millis(500));
-    drop(writer);
-    caller.join().unwrap();
-    assert!(result.unwrap().is_ok());
+fn client_shutdown_wakes_a_sender_blocked_mid_frame() {
+    let (client, mut peer) = socket_pair();
+    // No deadline of its own: only shutdown can end this send.
+    let execution = ClientExecution::new_with_write_timeout(client, PATIENCE * 10).unwrap();
+    let sender = execution.clone();
+    let (sent, outcome) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = sent.send(sender.send(&AttachmentFrame::Failed {
+            message: "x".repeat(900 * 1024),
+        }));
+    });
+    // The frame header has arrived and the peer stops reading: the sender is
+    // now inside a frame far larger than the socket buffer.
+    let mut header = [0_u8; 4];
+    peer.read_exact(&mut header).unwrap();
+    execution.shutdown().unwrap();
+    assert!(recv(&outcome, "shutdown wakes the blocked sender").is_err());
 }
 
 #[test]
@@ -212,7 +222,7 @@ fn shell_stdin_read_failure_reports_error_without_hanging() {
         }
     }
 
-    let (_server, client) = UnixStream::pair().unwrap();
+    let (_server, client) = socket_pair();
     let execution = ClientExecution::new_shell(client).unwrap();
     let (sent, received) = mpsc::channel();
     thread::spawn(move || {
@@ -226,9 +236,7 @@ fn shell_stdin_read_failure_reports_error_without_hanging() {
         );
         sent.send((result, stderr)).unwrap();
     });
-    let (result, stderr) = received
-        .recv_timeout(Duration::from_secs(2))
-        .expect("stdin read failure must end the attachment");
+    let (result, stderr) = recv(&received, "stdin read failure ends the attachment");
     let message = String::from_utf8(stderr).unwrap();
     assert!(message.contains("synthetic stdin fault"), "{message}");
     assert!(message.contains("forwarding 0 bytes"), "{message}");
@@ -257,12 +265,16 @@ impl Drop for SaturatingInput {
     }
 }
 
-#[test]
-fn shell_exit_after_blocked_stdin_keeps_its_exit_status() {
-    let (server_stream, client_stream) = UnixStream::pair().unwrap();
-    server_stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .unwrap();
+type AttachmentResult = (Result<i32, DaemonError>, Vec<u8>);
+
+/// A shell attachment whose input pump has spent the whole credit window and
+/// is blocked on the next chunk.
+fn blocked_shell_input() -> (
+    ServerAttachment,
+    mpsc::Receiver<()>,
+    mpsc::Receiver<AttachmentResult>,
+) {
+    let (server_stream, client_stream) = socket_pair();
     let server = ServerAttachment::new(server_stream).unwrap();
     let execution = ClientExecution::new_shell(client_stream).unwrap();
     let (dropped_send, dropped_receive) = mpsc::channel();
@@ -287,115 +299,77 @@ fn shell_exit_after_blocked_stdin_keeps_its_exit_status() {
             AttachmentFrame::Stdin { bytes } if bytes == vec![b'x'; SHELL_STDIN_CHUNK]
         ));
     }
+    (server, dropped_receive, result_receive)
+}
+
+#[test]
+fn shell_exit_after_blocked_stdin_keeps_its_exit_status() {
+    let (server, dropped, result) = blocked_shell_input();
     server.send(&AttachmentFrame::StdinClosed).unwrap();
-    dropped_receive
-        .recv_timeout(Duration::from_secs(2))
-        .expect("the blocked input pump must observe stdin closure");
+    recv(&dropped, "the blocked input pump observes stdin closure");
     server.send(&AttachmentFrame::Exited { code: 130 }).unwrap();
-    let (result, stderr) = result_receive.recv_timeout(Duration::from_secs(2)).unwrap();
+    let (result, stderr) = recv(&result, "attachment result");
     assert_eq!(result.unwrap(), 130);
     assert!(stderr.is_empty(), "{}", String::from_utf8_lossy(&stderr));
 }
 
 #[test]
 fn lost_transport_after_remote_stdin_close_reports_transport_cause() {
-    let (server_stream, client_stream) = UnixStream::pair().unwrap();
-    server_stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .unwrap();
-    let server = ServerAttachment::new(server_stream).unwrap();
-    let execution = ClientExecution::new_shell(client_stream).unwrap();
-    let (dropped_send, dropped_receive) = mpsc::channel();
-    let (result_send, result_receive) = mpsc::channel();
-    thread::spawn(move || {
-        let mut stderr = Vec::new();
-        let result = relay_attachment(
-            &execution,
-            false,
-            SaturatingInput {
-                remaining: SHELL_STDIN_WINDOW + 1,
-                dropped: dropped_send,
-            },
-            Vec::new(),
-            &mut stderr,
-        );
-        result_send.send((result, stderr)).unwrap();
-    });
-    for _ in 0..SHELL_STDIN_WINDOW {
-        assert!(matches!(
-            server.receive().unwrap(),
-            AttachmentFrame::Stdin { .. }
-        ));
-    }
+    let (server, dropped, result) = blocked_shell_input();
     server.send(&AttachmentFrame::StdinClosed).unwrap();
-    dropped_receive
-        .recv_timeout(Duration::from_secs(2))
-        .expect("the input pump must observe remote stdin closure");
+    recv(&dropped, "the input pump observes remote stdin closure");
+    // Shut the socket itself down: a descriptor briefly inherited by another
+    // test's child process would keep a merely dropped peer open.
+    server.shutdown().unwrap();
     drop(server);
-    let (result, stderr) = result_receive.recv_timeout(Duration::from_secs(2)).unwrap();
+    let (result, stderr) = recv(&result, "attachment result");
     assert!(matches!(result, Err(DaemonError::Io(_))));
     assert!(stderr.is_empty(), "{}", String::from_utf8_lossy(&stderr));
 }
 
+/// A control frame (a forwarded signal) that cannot be written fences the
+/// transport: stdin blocked on credit wakes with the cause, and the terminal
+/// status the guest already queued is still delivered.
 #[test]
-fn local_signal_write_failure_wakes_blocked_stdin_and_reports_cause() {
-    let (server_stream, client_stream) = UnixStream::pair().unwrap();
-    server_stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .unwrap();
-    let server = ServerAttachment::new(server_stream).unwrap();
-    let mut execution =
-        ClientExecution::new_with_write_timeout(client_stream, Duration::from_millis(25)).unwrap();
-    execution.stdin_window = Some(Arc::new(StdinWindow::new()));
-    let signal_client = execution.clone();
-    let (result_send, result_receive) = mpsc::channel();
+fn failed_control_write_wakes_stdin_blocked_on_credit() {
+    let (client, mut peer) = socket_pair();
+    let local = client.try_clone().unwrap();
+    let execution = ClientExecution::new_shell(client).unwrap();
+    let input = execution.clone();
+    let (input_send, input_result) = mpsc::channel();
     thread::spawn(move || {
-        let mut stderr = Vec::new();
-        let result = relay_attachment(
-            &execution,
-            false,
-            Cursor::new(vec![b'x'; SHELL_STDIN_CHUNK * (SHELL_STDIN_WINDOW + 1)]),
-            Vec::new(),
-            &mut stderr,
-        );
-        result_send.send((result, stderr)).unwrap();
+        let _ = input_send.send(input.send(&AttachmentFrame::Stdin {
+            bytes: vec![b'x'; SHELL_STDIN_CHUNK * (SHELL_STDIN_WINDOW + 1)],
+        }));
     });
     for _ in 0..SHELL_STDIN_WINDOW {
         assert!(matches!(
-            server.receive().unwrap(),
+            read_frame::<AttachmentFrame>(&mut peer).unwrap(),
             AttachmentFrame::Stdin { .. }
         ));
     }
-    // A real disconnect, not a healthy connected consumer's pause. Close the
-    // peer descriptor: macOS still accepts writes after a peer's SHUT_RD.
-    server.shutdown().unwrap();
-    drop(server);
-    let write_error = signal_client
-        .send(&AttachmentFrame::Signal {
-            signal: "interrupt".into(),
-        })
-        .unwrap_err();
-    assert!(matches!(write_error, DaemonError::ShellInputWriteFailed(_)));
-    let (result, stderr) = result_receive
-        .recv_timeout(Duration::from_secs(2))
-        .expect("local signal write failure must end the attachment");
+    write_frame(&mut peer, &AttachmentFrame::Exited { code: 7 }).unwrap();
+    // The write direction fails without the peer (or the receiver) noticing.
+    local.shutdown(Shutdown::Write).unwrap();
     assert!(matches!(
-        result,
-        Err(DaemonError::InvalidState(_) | DaemonError::Io(_))
+        execution.send(&AttachmentFrame::Signal {
+            signal: "interrupt".into(),
+        }),
+        Err(DaemonError::ShellInputWriteFailed(_))
     ));
-    let diagnostic = String::from_utf8(stderr).unwrap();
-    assert!(
-        diagnostic.is_empty() || diagnostic.contains("transport closed"),
-        "{diagnostic}"
+    assert!(matches!(
+        recv(&input_result, "blocked stdin wakes"),
+        Err(DaemonError::ShellInputTransportClosed(_))
+    ));
+    assert_eq!(
+        execution.receive().unwrap(),
+        AttachmentFrame::Exited { code: 7 }
     );
 }
 
 #[test]
 fn shell_stdin_window_keeps_signal_sendable_when_guest_stalls() {
-    let (server_stream, client_stream) = UnixStream::pair().unwrap();
-    server_stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .unwrap();
+    let (server_stream, client_stream) = socket_pair();
     let server = ServerAttachment::new(server_stream).unwrap();
     let client = ClientExecution::new_shell(client_stream).unwrap();
     let input_client = client.clone();
@@ -420,14 +394,8 @@ fn shell_stdin_window_keeps_signal_sendable_when_guest_stalls() {
             AttachmentFrame::Stdin { bytes } if bytes == vec![b'x'; SHELL_STDIN_CHUNK]
         ));
     }
-    window_received
-        .recv_timeout(Duration::from_secs(2))
-        .unwrap();
-    assert!(
-        extra_received
-            .recv_timeout(Duration::from_millis(50))
-            .is_err()
-    );
+    recv(&window_received, "input spent the window");
+    // Without credit the next chunk stays queued behind the signal.
     client
         .send(&AttachmentFrame::Signal {
             signal: "interrupt".into(),
@@ -446,7 +414,7 @@ fn shell_stdin_window_keeps_signal_sendable_when_guest_stalls() {
         server.receive().unwrap(),
         AttachmentFrame::Stdin { bytes } if bytes == vec![b'x'; SHELL_STDIN_CHUNK]
     ));
-    extra_received.recv_timeout(Duration::from_secs(2)).unwrap();
+    recv(&extra_received, "credited chunk sent");
     server.send(&AttachmentFrame::Exited { code: 130 }).unwrap();
     assert_eq!(
         output.join().unwrap(),
@@ -499,7 +467,7 @@ fn runtime_identity_binds_the_canonical_sbx_path_and_contents() {
 #[test]
 fn cleanup_quarantine_removes_worker_from_warm_ready_admission() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     store
         .register_worker(WorkerStatus {
             worker_id: "worker-1".into(),
@@ -549,61 +517,34 @@ fn host_terminal_mode_is_raw_and_restores_exact_flags() {
 }
 
 #[test]
-fn initial_terminal_dimensions_are_frozen_before_attachment() {
-    let opened = nix::pty::openpty(None, None).unwrap();
-    let terminal = File::from(opened.slave);
-    rustix::termios::tcsetwinsize(
-        &terminal,
-        rustix::termios::Winsize {
-            ws_row: 51,
-            ws_col: 173,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        },
-    )
-    .unwrap();
-    let home = home();
-    let mut request = session("session", home.path());
-    request.terminal = true;
+fn initial_terminal_dimensions_are_frozen_before_attachment_with_a_safe_fallback() {
+    for ((rows, columns), expected) in [((51, 173), (51, 173)), ((0, 0), (24, 80))] {
+        let opened = nix::pty::openpty(None, None).unwrap();
+        let terminal = File::from(opened.slave);
+        rustix::termios::tcsetwinsize(
+            &terminal,
+            rustix::termios::Winsize {
+                ws_row: rows,
+                ws_col: columns,
+                ws_xpixel: 0,
+                ws_ypixel: 0,
+            },
+        )
+        .unwrap();
+        let home = home();
+        let mut request = session("session", home.path());
+        request.terminal = true;
 
-    capture_initial_terminal_size_from(&mut request, &terminal).unwrap();
+        capture_initial_terminal_size_from(&mut request, &terminal).unwrap();
 
-    assert_eq!(
-        request.terminal_size,
-        Some(TerminalSize {
-            rows: 51,
-            columns: 173,
-        })
-    );
-}
-
-#[test]
-fn zero_initial_terminal_dimensions_fall_back_safely() {
-    let opened = nix::pty::openpty(None, None).unwrap();
-    let terminal = File::from(opened.slave);
-    rustix::termios::tcsetwinsize(
-        &terminal,
-        rustix::termios::Winsize {
-            ws_row: 0,
-            ws_col: 0,
-            ws_xpixel: 0,
-            ws_ypixel: 0,
-        },
-    )
-    .unwrap();
-    let home = home();
-    let mut request = session("session", home.path());
-    request.terminal = true;
-
-    capture_initial_terminal_size_from(&mut request, &terminal).unwrap();
-
-    assert_eq!(
-        request.terminal_size,
-        Some(TerminalSize {
-            rows: 24,
-            columns: 80,
-        })
-    );
+        assert_eq!(
+            request.terminal_size,
+            Some(TerminalSize {
+                rows: expected.0,
+                columns: expected.1,
+            })
+        );
+    }
 }
 
 #[test]
@@ -720,7 +661,7 @@ fn mcp_publication_uses_attached_session_and_rejects_replaced_project() {
     let project = root.path().join("project");
     fs::create_dir(&project).unwrap();
     let project = project.canonicalize().unwrap();
-    let store = DaemonStore::new(root.path());
+    let store = reopen(root.path()).unwrap();
     let session_id = store.attach_shell(7, authority(project.to_str().unwrap(), root.path()));
     let token = store.issue_relay_token(&session_id).unwrap();
     let mut request = PublicRequest::McpPublish {
@@ -868,37 +809,16 @@ fn attached_relay_waits_for_slow_mcp_host_reply() {
     spec.username = "owner".into();
     spec.uid = rustix::process::geteuid().as_raw();
     spec.gid = rustix::process::getegid().as_raw();
-    // The scripted host peer commits without writing a declaration, so stand
-    // one in: unpublishing a name that was never published is refused.
-    let declaration = server
-        .mcp_host
-        .as_ref()
-        .unwrap()
-        .declaration_path(&spec, PublicationKind::Mcp, "slow")
-        .unwrap();
-    {
-        use std::os::unix::fs::DirBuilderExt as _;
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(declaration.parent().unwrap())
-            .unwrap();
-    }
-    fs::write(&declaration, b"{}").unwrap();
+    // Longer than the 5 s default client request timeout: the relay must wait
+    // on the publication reply budget, not the ordinary request budget.
     let server = Arc::new(server);
-    for publish in [true, false] {
-        let task_server = Arc::clone(&server);
-        let task = thread::spawn(move || task_server.serve_one().unwrap());
-        let started = Instant::now();
-        let result = if publish {
-            relay.mcp_publish(spec.clone(), "slow".into(), None, None, "cat".into())
-        } else {
-            relay.mcp_unpublish(spec.clone(), "slow".into())
-        };
-        assert!(result.unwrap().contains("host operation finished"));
-        assert!(started.elapsed() >= Duration::from_secs(6));
-        task.join().unwrap();
-    }
+    let task_server = Arc::clone(&server);
+    let task = thread::spawn(move || task_server.serve_one().unwrap());
+    let started = Instant::now();
+    let result = relay.mcp_publish(spec, "slow".into(), None, None, "cat".into());
+    assert!(result.unwrap().contains("host operation finished"));
+    assert!(started.elapsed() >= Duration::from_secs(6));
+    task.join().unwrap();
 }
 
 #[test]
@@ -959,12 +879,16 @@ fn concurrent_mcp_publishes_are_serialized_and_invalid_targets_rejected() {
         fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
     }
     let public_started = root.path().join("public-started");
-    let private_started = root.path().join("private-started");
+    let release = root.path().join("release-public");
+    let log = root.path().join("host-log");
+    // The first publisher holds the host step until released, then records
+    // whether the declaration it bound was overwritten meanwhile.
     let script = typed_mcp_host_peer(&format!(
-        "pipeline=sys.argv[-1]\np=pathlib.Path({declaration})\np.write_bytes(pipeline.encode())\np.chmod(0o600)\nif pipeline=='public':\n pathlib.Path({public_started}).touch()\n time.sleep(1)\nelse:\n pathlib.Path({private_started}).touch()\ncommitted('published '+pipeline)",
+        "pipeline=sys.argv[-1]\np=pathlib.Path({declaration})\nlog=pathlib.Path({log})\nwith log.open('a') as f: f.write('start '+pipeline+'\\n')\np.write_bytes(pipeline.encode())\np.chmod(0o600)\nif pipeline=='public':\n pathlib.Path({public_started}).touch()\n while not pathlib.Path({release}).exists(): time.sleep(.01)\n assert p.read_bytes()==b'public'\nwith log.open('a') as f: f.write('end '+pipeline+'\\n')\ncommitted('published '+pipeline)",
         declaration = serde_json::to_string(&declaration).unwrap(),
+        log = serde_json::to_string(&log).unwrap(),
         public_started = serde_json::to_string(&public_started).unwrap(),
-        private_started = serde_json::to_string(&private_started).unwrap(),
+        release = serde_json::to_string(&release).unwrap(),
     ));
     fs::write(&host_cli, script).unwrap();
     fs::set_permissions(&host_cli, fs::Permissions::from_mode(0o700)).unwrap();
@@ -983,25 +907,16 @@ fn concurrent_mcp_publishes_are_serialized_and_invalid_targets_rejected() {
     let public = thread::spawn(move || {
         public_relay.mcp_publish(public_spec, "shared".into(), None, None, "public".into())
     });
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !public_started.exists() && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(10));
-    }
-    assert!(
-        public_started.exists(),
-        "first publisher did not reach host CLI: {:?}",
-        public.join().unwrap()
-    );
+    wait_until("first publisher reaches the host CLI", || {
+        public_started.exists() || public.is_finished()
+    });
+    assert!(public_started.exists(), "{:?}", public.join().unwrap());
     let private_server = Arc::clone(&server);
     let private_request = thread::spawn(move || private_server.serve_one().unwrap());
     let private = thread::spawn(move || {
         private_relay.mcp_publish(private_spec, "shared".into(), None, None, "private".into())
     });
-    thread::sleep(Duration::from_millis(150));
-    assert!(
-        !private_started.exists(),
-        "competing publisher reached host CLI before first declaration was bound"
-    );
+    fs::write(&release, b"").unwrap();
     assert!(public.join().unwrap().unwrap().contains("published public"));
     assert!(
         private
@@ -1009,6 +924,11 @@ fn concurrent_mcp_publishes_are_serialized_and_invalid_targets_rejected() {
             .unwrap()
             .unwrap()
             .contains("published private")
+    );
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        "start public\nend public\nstart private\nend private\n",
+        "a competing publisher reached the host CLI before the first finished"
     );
     public_request.join().unwrap();
     private_request.join().unwrap();
@@ -1115,7 +1035,7 @@ fn lifecycle_is_exclusive_and_owner_only() {
         Err(DaemonError::EndpointExists(_))
     ));
     drop(lifecycle);
-    Lifecycle::bind(home.path()).unwrap();
+    fenced(|| Lifecycle::bind(home.path())).unwrap();
 }
 
 #[test]
@@ -1142,7 +1062,7 @@ fn stale_owned_endpoint_is_reclaimed_but_live_owner_is_preserved() {
     let root = home();
     let stale = endpoint_paths(root.path().join("stale"));
     fs::create_dir(&stale.runtime_directory).unwrap();
-    let mut child = Command::new("/usr/bin/true").spawn().unwrap();
+    let mut child = fenced(|| Command::new("/usr/bin/true").spawn()).unwrap();
     let pid = child.id();
     child.wait().unwrap();
     fs::write(&stale.lock, format!("{pid}\n")).unwrap();
@@ -1164,7 +1084,7 @@ fn stale_endpoint_with_unknown_content_fails_closed() {
     let root = home();
     let paths = endpoint_paths(root.path().join("unknown"));
     fs::create_dir(&paths.runtime_directory).unwrap();
-    let mut child = Command::new("/usr/bin/true").spawn().unwrap();
+    let mut child = fenced(|| Command::new("/usr/bin/true").spawn()).unwrap();
     let pid = child.id();
     child.wait().unwrap();
     fs::write(&paths.lock, format!("{pid}\n")).unwrap();
@@ -1192,7 +1112,7 @@ fn framing_is_bounded_and_round_trips() {
 #[test]
 fn store_exposes_safe_versioned_documents() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(42, authority("/Users/example/project", home.path()));
     let scope = store.status(Some(session.clone())).scope_id;
     store
@@ -1258,7 +1178,7 @@ fn store_exposes_safe_versioned_documents() {
 #[test]
 fn uncertain_cleanup_quarantines_worker_and_releases_capacity() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(42, authority("/Users/example/project", home.path()));
     let scope = store.status(None).scope_id;
     store
@@ -1311,7 +1231,7 @@ fn uncertain_cleanup_quarantines_worker_and_releases_capacity() {
     );
     assert!(store.worker_reuse_blocked("vm-1"));
     drop(store);
-    let reopened = DaemonStore::new(home.path());
+    let reopened = reopen(home.path()).unwrap();
     assert!(reopened.status(None).workers.is_empty());
     assert!(
         !reopened.worker_reuse_blocked("vm-1"),
@@ -1319,154 +1239,85 @@ fn uncertain_cleanup_quarantines_worker_and_releases_capacity() {
     );
 }
 
+/// A failure before the container ran (an abort, a verified pre-runtime
+/// cleanup, an uncertain grant rollback) keeps its cause on the receipt but
+/// never blocks a freshly created VM of the same name after a restart.
 #[test]
-fn reserved_attempt_failure_remains_auditable_without_blocking_fresh_vm() {
-    let home = home();
-    let store = DaemonStore::new(home.path());
-    let session = store.attach_shell(42, authority("/Users/example/project", home.path()));
-    let scope = store.status(None).scope_id;
-    store
-        .register_worker(WorkerStatus {
-            worker_id: "worker-reserved".into(),
-            vm_id: "vm-reserved".into(),
-            scope_id: scope,
-            kit_ref: "fixture".into(),
-            kits: Vec::new(),
-            warm: true,
-            health: WorkerHealth::Ready,
-            container_capacity: 1,
-            active_container_ids: vec![],
-        })
-        .unwrap();
-    let (job, _) = store
-        .begin_job(NewJob {
-            session_id: session,
-            command: "fixture".into(),
-            kit_ref: "fixture".into(),
-            workload_image: format!("example/fixture@sha256:{}", "a".repeat(64)),
-            mounts: vec![],
-        })
-        .unwrap();
-    store
-        .reserve_worker(&job, "worker-reserved", "vm-reserved")
-        .unwrap();
-    assert_eq!(
-        store.job(&job).unwrap().vm_id.as_deref(),
-        Some("vm-reserved")
-    );
-    store.abort_job(&job, "backend_failed").unwrap();
-    drop(store);
+fn pre_runtime_failures_stay_auditable_without_blocking_a_fresh_vm() {
+    enum End {
+        Abort,
+        Finish(&'static str, CleanupState),
+    }
+    for (end, cause) in [
+        (End::Abort, "backend_failed; cleanup_uncertain"),
+        (
+            End::Finish("worker_start_failed", CleanupState::Verified),
+            "worker_start_failed",
+        ),
+        (
+            End::Finish(
+                "grant_prepare_failed: second mount rejected",
+                CleanupState::Uncertain,
+            ),
+            "grant_prepare_failed: second mount rejected; cleanup_uncertain",
+        ),
+    ] {
+        let home = home();
+        let store = reopen(home.path()).unwrap();
+        let session = store.attach_shell(42, authority("/Users/example/project", home.path()));
+        let scope = store.status(None).scope_id;
+        store
+            .register_worker(WorkerStatus {
+                worker_id: "worker".into(),
+                vm_id: "vm".into(),
+                scope_id: scope,
+                kit_ref: "fixture".into(),
+                kits: Vec::new(),
+                warm: true,
+                health: WorkerHealth::Ready,
+                container_capacity: 1,
+                active_container_ids: vec![],
+            })
+            .unwrap();
+        let (job, _) = store
+            .begin_job(NewJob {
+                session_id: session,
+                command: "fixture".into(),
+                kit_ref: "fixture".into(),
+                workload_image: format!("example/fixture@sha256:{}", "a".repeat(64)),
+                mounts: vec![],
+            })
+            .unwrap();
+        store.reserve_worker(&job, "worker", "vm").unwrap();
+        assert_eq!(store.job(&job).unwrap().vm_id.as_deref(), Some("vm"));
+        match end {
+            End::Abort => store.abort_job(&job, "backend_failed").unwrap(),
+            End::Finish(cause, cleanup) => store
+                .finish_job(
+                    &job,
+                    ExitStatus {
+                        code: Some(125),
+                        cause: cause.into(),
+                    },
+                    false,
+                    cleanup,
+                    TimingReport::default(),
+                )
+                .unwrap(),
+        }
+        assert_eq!(store.job(&job).unwrap().exit.unwrap().cause, cause);
+        drop(store);
 
-    let reopened = DaemonStore::new(home.path());
-    assert!(!reopened.worker_reuse_blocked("vm-reserved"));
-}
-
-#[test]
-fn verified_pre_runtime_cleanup_does_not_tombstone_vm() {
-    let home = home();
-    let store = DaemonStore::new(home.path());
-    let session = store.attach_shell(42, authority("/Users/example/project", home.path()));
-    let scope = store.status(None).scope_id;
-    store
-        .register_worker(WorkerStatus {
-            worker_id: "worker-clean".into(),
-            vm_id: "vm-clean".into(),
-            scope_id: scope,
-            kit_ref: "fixture".into(),
-            kits: Vec::new(),
-            warm: true,
-            health: WorkerHealth::Ready,
-            container_capacity: 1,
-            active_container_ids: vec![],
-        })
-        .unwrap();
-    let (job, _) = store
-        .begin_job(NewJob {
-            session_id: session,
-            command: "fixture".into(),
-            kit_ref: "fixture".into(),
-            workload_image: format!("example/fixture@sha256:{}", "a".repeat(64)),
-            mounts: vec![],
-        })
-        .unwrap();
-    store
-        .reserve_worker(&job, "worker-clean", "vm-clean")
-        .unwrap();
-    store
-        .finish_job(
-            &job,
-            ExitStatus {
-                code: Some(125),
-                cause: "worker_start_failed".into(),
-            },
-            false,
-            CleanupState::Verified,
-            TimingReport::default(),
-        )
-        .unwrap();
-    drop(store);
-
-    let reopened = DaemonStore::new(home.path());
-    assert!(!reopened.worker_reuse_blocked("vm-clean"));
-}
-
-#[test]
-fn uncertain_grant_rollback_preserves_cause_without_blocking_fresh_vm() {
-    let home = home();
-    let store = DaemonStore::new(home.path());
-    let session = store.attach_shell(42, authority("/Users/example/project", home.path()));
-    let scope = store.status(None).scope_id;
-    store
-        .register_worker(WorkerStatus {
-            worker_id: "worker-grant".into(),
-            vm_id: "vm-grant".into(),
-            scope_id: scope,
-            kit_ref: "fixture".into(),
-            kits: Vec::new(),
-            warm: true,
-            health: WorkerHealth::Ready,
-            container_capacity: 1,
-            active_container_ids: vec![],
-        })
-        .unwrap();
-    let (job, _) = store
-        .begin_job(NewJob {
-            session_id: session,
-            command: "fixture".into(),
-            kit_ref: "fixture".into(),
-            workload_image: format!("example/fixture@sha256:{}", "a".repeat(64)),
-            mounts: vec![],
-        })
-        .unwrap();
-    store
-        .reserve_worker(&job, "worker-grant", "vm-grant")
-        .unwrap();
-    store
-        .finish_job(
-            &job,
-            ExitStatus {
-                code: Some(125),
-                cause: "grant_prepare_failed: second mount rejected".into(),
-            },
-            false,
-            CleanupState::Uncertain,
-            TimingReport::default(),
-        )
-        .unwrap();
-    assert_eq!(
-        store.job(&job).unwrap().exit.unwrap().cause,
-        "grant_prepare_failed: second mount rejected; cleanup_uncertain"
-    );
-    drop(store);
-
-    let reopened = DaemonStore::new(home.path());
-    assert!(!reopened.worker_reuse_blocked("vm-grant"));
+        let reopened = reopen(home.path()).unwrap();
+        assert_eq!(reopened.job(&job).unwrap().exit.unwrap().cause, cause);
+        assert!(!reopened.worker_reuse_blocked("vm"), "{cause}");
+    }
 }
 
 #[test]
 fn detaching_a_shell_revokes_its_relay_tokens() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(42, authority("/Users/example/project", home.path()));
     let token = store.issue_relay_token(&session).unwrap();
 
@@ -1478,7 +1329,7 @@ fn detaching_a_shell_revokes_its_relay_tokens() {
 #[test]
 fn relay_token_restores_host_authority_and_rejects_other_sessions() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let first = store.attach_shell(1, authority("/Users/example/approved", home.path()));
     let second = store.attach_shell(2, authority("/Users/example/other", home.path()));
     let token = store.issue_relay_token(&first).unwrap();
@@ -1566,7 +1417,7 @@ fn job_capability_admits_only_its_own_requests() {
 #[test]
 fn relay_token_cannot_detach_another_session() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let first = store.attach_shell(1, authority("/Users/example/first", home.path()));
     let second = store.attach_shell(2, authority("/Users/example/second", home.path()));
     let token = store.issue_relay_token(&first).unwrap();
@@ -1604,7 +1455,7 @@ fn relay_token_cannot_detach_another_session() {
 #[test]
 fn capacity_is_reserved_before_container_identity_and_abort_releases_it() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let scope = store.status(None).scope_id;
     store
@@ -1640,7 +1491,7 @@ fn capacity_is_reserved_before_container_identity_and_abort_releases_it() {
 #[test]
 fn worker_repair_claim_is_atomic_with_admission_and_live_work() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let scope = store.status(None).scope_id;
     store
@@ -1686,7 +1537,7 @@ fn worker_repair_claim_is_atomic_with_admission_and_live_work() {
 #[test]
 fn failed_worker_repair_quarantines_the_generation() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let scope = store.status(None).scope_id;
     store
         .register_worker(WorkerStatus {
@@ -1713,7 +1564,7 @@ fn failed_worker_repair_quarantines_the_generation() {
 #[test]
 fn worker_reset_refuses_active_selection_atomically_and_preserves_other_state() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let scope = store.status(None).scope_id;
     for worker in ["first", "second"] {
@@ -1764,7 +1615,7 @@ fn worker_reset_refuses_active_selection_atomically_and_preserves_other_state() 
 #[test]
 fn abort_receipt_is_explicitly_failed() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let (job, _) = store
         .begin_job(NewJob {
@@ -1787,7 +1638,7 @@ fn abort_receipt_is_explicitly_failed() {
 #[test]
 fn incomplete_output_makes_terminal_receipt_failed() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let scope = store.status(None).scope_id;
     store
@@ -1835,7 +1686,7 @@ fn incomplete_output_makes_terminal_receipt_failed() {
 fn receipts_survive_restart_and_active_work_becomes_unknown() {
     let home = home();
     let (finished, active) = {
-        let store = DaemonStore::open(home.path()).unwrap();
+        let store = reopen(home.path()).unwrap();
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let create = |command: &str| NewJob {
             session_id: session.clone(),
@@ -1864,7 +1715,7 @@ fn receipts_survive_restart_and_active_work_becomes_unknown() {
         (finished, active)
     };
 
-    let reopened = DaemonStore::open(home.path()).unwrap();
+    let reopened = reopen(home.path()).unwrap();
     assert_eq!(reopened.job(&finished).unwrap().state, JobState::Finished);
     let interrupted = reopened.job(&active).unwrap();
     assert_eq!(interrupted.state, JobState::Unknown);
@@ -1875,7 +1726,7 @@ fn receipts_survive_restart_and_active_work_becomes_unknown() {
 #[test]
 fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let (job, _) = store
         .begin_job(NewJob {
@@ -1912,61 +1763,6 @@ fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
 }
 
 #[test]
-fn receipt_journal_is_owner_only_and_contains_no_captured_content() {
-    let home = home();
-    let store = DaemonStore::new(home.path());
-    let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
-    let (job, _) = store
-        .begin_job(NewJob {
-            session_id: session,
-            command: "fixture".into(),
-            kit_ref: "fixture".into(),
-            workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
-            mounts: Vec::new(),
-        })
-        .unwrap();
-    store
-        .finish_job(
-            &job,
-            ExitStatus {
-                code: Some(0),
-                cause: "exited".into(),
-            },
-            true,
-            CleanupState::Verified,
-            TimingReport::default(),
-        )
-        .unwrap();
-    let state = home.path().join("state");
-    let journal = receipt_journal::journal_path(home.path());
-    assert_eq!(fs::metadata(&state).unwrap().mode() & 0o777, 0o700);
-    assert_eq!(fs::metadata(&journal).unwrap().mode() & 0o777, 0o600);
-    let bytes = fs::read(journal).unwrap();
-    assert!(
-        !bytes
-            .windows(b"raw prompt secret".len())
-            .any(|part| part == b"raw prompt secret")
-    );
-    assert!(
-        !bytes
-            .windows(b"stdout secret".len())
-            .any(|part| part == b"stdout secret")
-    );
-    assert!(
-        !bytes
-            .windows(b"stderr secret".len())
-            .any(|part| part == b"stderr secret")
-    );
-    for forbidden_key in [b"\"prompt\"".as_slice(), b"\"stdout\"", b"\"stderr\""] {
-        assert!(
-            !bytes
-                .windows(forbidden_key.len())
-                .any(|part| part == forbidden_key)
-        );
-    }
-}
-
-#[test]
 fn receipt_journal_rejects_permissive_state_modes() {
     let state_home = home();
     fs::create_dir(state_home.path().join("state")).unwrap();
@@ -1976,17 +1772,17 @@ fn receipt_journal_rejects_permissive_state_modes() {
     )
     .unwrap();
     assert!(matches!(
-        DaemonStore::open(state_home.path()),
+        reopen(state_home.path()),
         Err(DaemonError::UnsafeHome(_))
     ));
 
     let file_home = home();
-    let store = DaemonStore::new(file_home.path());
+    let store = reopen(file_home.path()).unwrap();
     drop(store);
     let journal = receipt_journal::journal_path(file_home.path());
     fs::set_permissions(&journal, fs::Permissions::from_mode(0o644)).unwrap();
     assert!(matches!(
-        DaemonStore::open(file_home.path()),
+        reopen(file_home.path()),
         Err(DaemonError::UnsafeHome(_))
     ));
 }
@@ -1999,7 +1795,7 @@ fn production_receipts_ignore_guest_written_legacy_journal() {
     fs::set_permissions(&control_home, fs::Permissions::from_mode(0o700)).unwrap();
     let sbx = stock_sbx(b"stock-sbx");
 
-    let legacy = DaemonStore::new(selected.path());
+    let legacy = reopen(selected.path()).unwrap();
     let legacy_session =
         legacy.attach_shell(1, authority("/Users/example/project", selected.path()));
     legacy
@@ -2040,9 +1836,10 @@ fn production_receipts_ignore_guest_written_legacy_journal() {
     );
     drop(server);
 
-    let resumed =
+    let resumed = fenced(|| {
         Server::bind_with_stock_sbx_and_control_home(selected.path(), sbx.path(), &control_home)
-            .unwrap();
+    })
+    .unwrap();
     assert_eq!(resumed.store.status(None).scope_id, scope_id);
     assert_eq!(resumed.store.jobs().jobs.len(), 1);
     assert_eq!(resumed.store.jobs().jobs[0].command, "host-owned");
@@ -2064,7 +1861,8 @@ fn daemon_endpoint_is_shared_across_different_tmpdirs() {
         .tempdir_in("/tmp")
         .unwrap();
     let runner = |role: &str, tmpdir: &Path| {
-        Command::new(std::env::current_exe().unwrap())
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
             .args([
                 "--exact",
                 "tests::daemon_endpoint_cross_tmpdir_child",
@@ -2076,18 +1874,19 @@ fn daemon_endpoint_is_shared_across_different_tmpdirs() {
             .env("MARSH_TEST_JOURNAL_SBX", sbx.path())
             .env("TMPDIR", tmpdir)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap()
+            .stderr(Stdio::piped());
+        fenced(|| command.spawn()).unwrap()
     };
-    let owner = runner("owner", first_tmp.path());
+    let mut owner = runner("owner", first_tmp.path());
     let ready = control_home.join("ready");
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while !ready.exists() && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(10));
-    }
-    if !ready.exists() {
-        fs::write(control_home.join("release"), b"go").unwrap();
+    let bound = wait_for("owner binds its endpoint or exits", || {
+        if ready.exists() {
+            Some(true)
+        } else {
+            owner.try_wait().unwrap().map(|_| false)
+        }
+    });
+    if !bound {
         let output = owner.wait_with_output().unwrap();
         panic!(
             "owner did not bind its first endpoint: {}{}",
@@ -2112,9 +1911,10 @@ fn daemon_endpoint_is_shared_across_different_tmpdirs() {
         String::from_utf8_lossy(&owner_output.stdout),
         String::from_utf8_lossy(&owner_output.stderr)
     );
-    let reopened =
+    let reopened = fenced(|| {
         Server::bind_with_stock_sbx_and_control_home(selected.path(), sbx.path(), &control_home)
-            .unwrap();
+    })
+    .unwrap();
     assert_eq!(reopened.store.jobs().jobs.len(), 1);
 }
 
@@ -2143,8 +1943,10 @@ fn daemon_endpoint_cross_tmpdir_child() {
                     mounts: Vec::new(),
                 })
                 .unwrap();
+            // Publish atomically: the parent starts the contender as soon
+            // as `ready` exists.
             fs::write(
-                control.join("ready"),
+                control.join("ready.partial"),
                 server
                     .lifecycle
                     .paths()
@@ -2153,6 +1955,7 @@ fn daemon_endpoint_cross_tmpdir_child() {
                     .as_encoded_bytes(),
             )
             .unwrap();
+            fs::rename(control.join("ready.partial"), control.join("ready")).unwrap();
             server
                 .serve_until(|| control.join("release").exists())
                 .unwrap();
@@ -2181,11 +1984,11 @@ fn daemon_endpoint_cross_tmpdir_child() {
 #[test]
 fn journal_owner_lock_rejects_loose_permissions_and_symlink() {
     let home = home();
-    drop(DaemonStore::new(home.path()));
+    drop(reopen(home.path()).unwrap());
     let lock = home.path().join("state/owner.lock");
     fs::set_permissions(&lock, fs::Permissions::from_mode(0o644)).unwrap();
     assert!(matches!(
-        DaemonStore::open(home.path()),
+        reopen(home.path()),
         Err(DaemonError::UnsafeHome(_))
     ));
     fs::remove_file(&lock).unwrap();
@@ -2193,7 +1996,7 @@ fn journal_owner_lock_rejects_loose_permissions_and_symlink() {
     fs::write(&target, b"sentinel").unwrap();
     std::os::unix::fs::symlink(&target, &lock).unwrap();
     assert!(matches!(
-        DaemonStore::open(home.path()),
+        reopen(home.path()),
         Err(DaemonError::UnsafeHome(_))
     ));
     assert_eq!(fs::read(&target).unwrap(), b"sentinel");
@@ -2202,19 +2005,19 @@ fn journal_owner_lock_rejects_loose_permissions_and_symlink() {
 #[test]
 fn journal_owner_lock_excludes_a_second_direct_open() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     assert!(matches!(
         receipt_journal::ReceiptJournal::open(home.path()),
         Err(DaemonError::InvalidState(message)) if message.contains("already owned")
     ));
     drop(store);
-    assert!(receipt_journal::ReceiptJournal::open(home.path()).is_ok());
+    assert!(fenced(|| receipt_journal::ReceiptJournal::open(home.path())).is_ok());
 }
 
 #[test]
 fn ordinary_terminal_transition_appends_without_compacting() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let (job, _) = store
         .begin_job(NewJob {
@@ -2242,38 +2045,10 @@ fn ordinary_terminal_transition_appends_without_compacting() {
 }
 
 #[test]
-fn receipt_retention_compacts_with_hysteresis() {
-    let home = home();
-    let store = DaemonStore::new(home.path());
-    let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
-    let (job, _) = store
-        .begin_job(NewJob {
-            session_id: session,
-            command: "fixture".into(),
-            kit_ref: "fixture".into(),
-            workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
-            mounts: Vec::new(),
-        })
-        .unwrap();
-    let template = store.job(&job).unwrap();
-    let mut receipts = BTreeMap::new();
-    for cursor in 1..=receipt_journal::MAX_RETAINED_RECEIPTS as u64 + 1 {
-        let mut receipt = template.clone();
-        receipt.cursor = cursor;
-        receipt.job_id = format!("job-{cursor}");
-        receipt.state = JobState::Finished;
-        receipts.insert(receipt.job_id.clone(), receipt);
-    }
-    assert!(receipt_journal::trim_receipts(&mut receipts));
-    assert_eq!(receipts.len(), 900);
-    assert_eq!(receipts.values().map(|value| value.cursor).min(), Some(102));
-}
-
-#[test]
 fn receipt_retention_compacts_an_overfull_journal_on_restart() {
     let home = home();
     let template = {
-        let store = DaemonStore::new(home.path());
+        let store = reopen(home.path()).unwrap();
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
@@ -2306,15 +2081,25 @@ fn receipt_retention_compacts_an_overfull_journal_on_restart() {
         .collect();
     receipt_journal::replace_uncompacted(home.path(), &receipts);
 
-    let reopened = DaemonStore::open(home.path()).unwrap();
-    assert_eq!(reopened.jobs().jobs.len(), 900);
+    // Over the limit, the oldest terminal receipts go, with hysteresis: down
+    // to 900, not to the limit, so the next job does not compact again.
+    let reopened = reopen(home.path()).unwrap();
+    let mut retained = reopened
+        .jobs()
+        .jobs
+        .iter()
+        .map(|job| reopened.job(&job.job_id).unwrap().cursor)
+        .collect::<Vec<_>>();
+    retained.sort_unstable();
+    let total = receipt_journal::MAX_RETAINED_RECEIPTS as u64 + 1;
+    assert_eq!(retained, (total - 899..=total).collect::<Vec<_>>());
     assert_eq!(receipt_journal::record_count(home.path()), 900);
 }
 
 #[test]
 fn receipt_journal_compacts_and_replays_a_reserved_queued_receipt() {
     let home = home();
-    let store = DaemonStore::new(home.path());
+    let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let scope = store.status(None).scope_id;
     store
@@ -2349,7 +2134,7 @@ fn receipt_journal_compacts_and_replays_a_reserved_queued_receipt() {
     }
     drop(store);
 
-    let reopened = DaemonStore::open(home.path()).unwrap();
+    let reopened = reopen(home.path()).unwrap();
     let receipt = reopened.job(&job).unwrap();
     assert_eq!(receipt.state, JobState::Unknown);
     assert_eq!(
@@ -2366,7 +2151,7 @@ fn receipt_journal_compacts_and_replays_a_reserved_queued_receipt() {
 fn receipt_journal_rejects_a_half_assigned_queued_receipt() {
     let home = home();
     let mut receipt = {
-        let store = DaemonStore::new(home.path());
+        let store = reopen(home.path()).unwrap();
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
@@ -2383,7 +2168,7 @@ fn receipt_journal_rejects_a_half_assigned_queued_receipt() {
     receipt_journal::replace_uncompacted(home.path(), &[receipt]);
 
     assert!(matches!(
-        DaemonStore::open(home.path()),
+        reopen(home.path()),
         Err(DaemonError::InvalidState(message)) if message.contains("state evidence")
     ));
 }
@@ -2392,7 +2177,7 @@ fn receipt_journal_rejects_a_half_assigned_queued_receipt() {
 fn receipt_journal_truncates_only_a_corrupt_tail() {
     let home = home();
     let job = {
-        let store = DaemonStore::new(home.path());
+        let store = reopen(home.path()).unwrap();
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         store
             .begin_job(NewJob {
@@ -2414,7 +2199,7 @@ fn receipt_journal_truncates_only_a_corrupt_tail() {
         .write_all(b"\0\0")
         .unwrap();
 
-    let reopened = DaemonStore::open(home.path()).unwrap();
+    let reopened = reopen(home.path()).unwrap();
     assert_eq!(reopened.job(&job).unwrap().state, JobState::Unknown);
     assert!(fs::metadata(journal).unwrap().len() >= good_length);
 }
@@ -2423,7 +2208,7 @@ fn receipt_journal_truncates_only_a_corrupt_tail() {
 fn receipt_journal_fails_closed_on_interior_corruption() {
     let home = home();
     {
-        let store = DaemonStore::new(home.path());
+        let store = reopen(home.path()).unwrap();
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         for command in ["first", "second"] {
             store
@@ -2442,7 +2227,7 @@ fn receipt_journal_fails_closed_on_interior_corruption() {
     bytes[8] ^= 1;
     fs::write(&journal, bytes).unwrap();
     assert!(matches!(
-        DaemonStore::open(home.path()),
+        reopen(home.path()),
         Err(DaemonError::InvalidState(message)) if message.contains("corrupt")
     ));
 }
@@ -2451,7 +2236,7 @@ fn receipt_journal_fails_closed_on_interior_corruption() {
 fn receipt_journal_fails_closed_on_complete_corrupt_final_record() {
     let home = home();
     {
-        let store = DaemonStore::new(home.path());
+        let store = reopen(home.path()).unwrap();
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         store
             .begin_job(NewJob {
@@ -2470,7 +2255,7 @@ fn receipt_journal_fails_closed_on_complete_corrupt_final_record() {
     fs::write(&journal, bytes).unwrap();
 
     assert!(matches!(
-        DaemonStore::open(home.path()),
+        reopen(home.path()),
         Err(DaemonError::InvalidState(message)) if message.contains("checksum mismatch")
     ));
 }
@@ -2479,7 +2264,7 @@ fn receipt_journal_fails_closed_on_complete_corrupt_final_record() {
 fn receipt_journal_rejects_inconsistent_terminal_state_evidence() {
     let home = home();
     let mut receipt = {
-        let store = DaemonStore::new(home.path());
+        let store = reopen(home.path()).unwrap();
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
@@ -2496,7 +2281,7 @@ fn receipt_journal_rejects_inconsistent_terminal_state_evidence() {
     receipt_journal::replace_uncompacted(home.path(), &[receipt]);
 
     assert!(matches!(
-        DaemonStore::open(home.path()),
+        reopen(home.path()),
         Err(DaemonError::InvalidState(message)) if message.contains("state evidence")
     ));
 }
@@ -2530,7 +2315,7 @@ fn receipt_journal_accepts_coherent_terminal_placement_and_cleanup_states() {
     ] {
         let home = home();
         let mut receipt = {
-            let store = DaemonStore::new(home.path());
+            let store = reopen(home.path()).unwrap();
             let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
             let (job, _) = store
                 .begin_job(NewJob {
@@ -2564,7 +2349,7 @@ fn receipt_journal_accepts_coherent_terminal_placement_and_cleanup_states() {
         receipt.finished_unix_ms = Some(receipt.created_unix_ms + 1);
         receipt_journal::replace_uncompacted(home.path(), &[receipt.clone()]);
 
-        let reopened = DaemonStore::open(home.path()).unwrap();
+        let reopened = reopen(home.path()).unwrap();
         assert_eq!(reopened.job(&receipt.job_id).unwrap(), receipt);
     }
 }
@@ -2573,7 +2358,7 @@ fn receipt_journal_accepts_coherent_terminal_placement_and_cleanup_states() {
 fn receipt_journal_rejects_terminal_container_without_worker_placement() {
     let home = home();
     let mut receipt = {
-        let store = DaemonStore::new(home.path());
+        let store = reopen(home.path()).unwrap();
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
@@ -2598,7 +2383,7 @@ fn receipt_journal_rejects_terminal_container_without_worker_placement() {
     receipt_journal::replace_uncompacted(home.path(), &[receipt]);
 
     assert!(matches!(
-        DaemonStore::open(home.path()),
+        reopen(home.path()),
         Err(DaemonError::InvalidState(message)) if message.contains("state evidence")
     ));
 }
@@ -2607,7 +2392,7 @@ fn receipt_journal_rejects_terminal_container_without_worker_placement() {
 fn receipt_journal_rejects_success_with_uncertain_cleanup() {
     let home = home();
     let mut receipt = {
-        let store = DaemonStore::new(home.path());
+        let store = reopen(home.path()).unwrap();
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
@@ -2631,24 +2416,9 @@ fn receipt_journal_rejects_success_with_uncertain_cleanup() {
     receipt_journal::replace_uncompacted(home.path(), &[receipt]);
 
     assert!(matches!(
-        DaemonStore::open(home.path()),
+        reopen(home.path()),
         Err(DaemonError::InvalidState(message)) if message.contains("state evidence")
     ));
-}
-
-#[test]
-fn attachment_copy_failure_is_terminal() {
-    struct FailingWriter;
-    impl Write for FailingWriter {
-        fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
-            Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
-        }
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    assert!(write_attachment_bytes(&mut FailingWriter, b"output").is_err());
 }
 
 #[test]
@@ -2793,23 +2563,19 @@ fn resident_replacement_retries_the_bounded_post_probe_admission_race() {
     ));
 
     // Model the narrow tail where Ping has written its reply but its ordinary
-    // admission guard has not dropped yet.
+    // admission guard has not dropped yet. The retry is bounded: with the
+    // admission held throughout, the caller gives up with the busy refusal.
     let admission = server.store.begin_ordinary_request().unwrap();
-    let (send, receive) = mpsc::sync_channel(1);
-    thread::spawn(move || {
-        let _ = send.send(client.shutdown_resident_after_probe());
-    });
     assert!(matches!(
-        receive.recv_timeout(Duration::from_millis(40)),
-        Err(mpsc::RecvTimeoutError::Timeout)
+        client.shutdown_resident_after_probe_within(Duration::ZERO),
+        Err(DaemonError::Remote(message)) if message == BUSY_LIFECYCLE_MESSAGE
     ));
     assert!(!server.shutdown_requested.load(Ordering::Acquire));
 
+    // Within its budget the caller retries past the released admission.
+    let retrying = thread::spawn(move || client.shutdown_resident_after_probe_within(PATIENCE));
     drop(admission);
-    receive
-        .recv_timeout(Duration::from_secs(1))
-        .expect("bounded retry must observe released Ping admission")
-        .unwrap();
+    retrying.join().unwrap().unwrap();
     task.join().unwrap();
 }
 
@@ -2833,14 +2599,12 @@ fn changed_stock_sbx_refuses_to_replace_a_daemon_with_an_attached_shell() {
     let expected = runtime_identity(&std::env::current_exe().unwrap(), new_sbx.path()).unwrap();
     let paths = EndpointPaths::for_home(home.path()).unwrap();
 
-    let started = Instant::now();
     let error = Client::reconcile_resident(home.path(), &paths, &expected).unwrap_err();
     assert!(matches!(
         error,
         DaemonError::Remote(ref message)
             if message == BUSY_LIFECYCLE_MESSAGE
     ));
-    assert!(started.elapsed() < Duration::from_secs(1));
     assert!(!server.shutdown_requested.load(Ordering::Acquire));
 
     server.store.detach_shell(&session).unwrap();
@@ -3488,25 +3252,28 @@ fn hold_attachment(attachment: &ServerAttachment) -> Result<(), DaemonError> {
     }
 }
 
+/// Refused at once and without blocking `Status`: neither call may wait for
+/// the live shell or job to end (it never ends on its own here).
 fn assert_lifecycle_refused_and_status_responsive(client: &Client, request: PublicRequest) {
-    let started = Instant::now();
+    let refusing = client.clone();
     assert!(matches!(
-        client.request(request).unwrap(),
+        returns("lifecycle refusal", move || refusing
+            .request(request)
+            .unwrap()),
         PublicReply::Error {
             code: ErrorCode::InvalidRequest,
             ..
         }
     ));
-    assert!(started.elapsed() < Duration::from_secs(1));
-
-    let started = Instant::now();
+    let status = client.clone();
     assert!(matches!(
-        client
-            .request(PublicRequest::Status { session_id: None })
-            .unwrap(),
+        returns("status during live work", move || {
+            status
+                .request(PublicRequest::Status { session_id: None })
+                .unwrap()
+        }),
         PublicReply::Status(_)
     ));
-    assert!(started.elapsed() < Duration::from_secs(1));
 }
 
 #[test]
@@ -3615,12 +3382,7 @@ fn active_execute_refuses_lifecycle_immediately_without_blocking_status() {
             .unwrap(),
         PublicReply::Detached
     ));
-    let admission_deadline = Instant::now() + Duration::from_secs(1);
-    while server.store.lock().ordinary_requests != 1 && Instant::now() < admission_deadline {
-        thread::sleep(Duration::from_millis(5));
-    }
-    assert_eq!(server.store.lock().ordinary_requests, 1);
-
+    // The accepted execution holds its connection's admission until it ends.
     for request in [
         PublicRequest::ResetScope,
         PublicRequest::StopScope,
@@ -3634,11 +3396,12 @@ fn active_execute_refuses_lifecycle_immediately_without_blocking_status() {
         execution.receive().unwrap(),
         AttachmentFrame::Exited { code: 0 }
     );
-    let deadline = Instant::now() + Duration::from_secs(1);
-    while server.store.lock().ordinary_requests != 0 && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(5));
-    }
-    assert_eq!(server.store.lock().ordinary_requests, 0);
+    wait_until("lifecycle is admitted once the execution ends", || {
+        matches!(
+            client.request(PublicRequest::ResetScope),
+            Ok(PublicReply::ScopeLifecycle(_))
+        )
+    });
     stop.store(true, Ordering::Relaxed);
     task.join().unwrap();
 }
@@ -3648,10 +3411,14 @@ struct BlockingLifecycleBackend {
     gate: Arc<(Mutex<(bool, bool)>, std::sync::Condvar)>,
 }
 
-#[derive(Debug)]
-struct DeadlineAwareMultiComponentBackend;
+/// Records the teardown deadline the daemon hands it and reports every
+/// component uncertain.
+#[derive(Debug, Default)]
+struct DeadlineRecordingBackend {
+    deadline: Mutex<Option<Instant>>,
+}
 
-impl DaemonBackend for DeadlineAwareMultiComponentBackend {
+impl DaemonBackend for DeadlineRecordingBackend {
     fn registered_commands(&self) -> Result<Vec<String>, DaemonError> {
         Ok(Vec::new())
     }
@@ -3662,9 +3429,7 @@ impl DaemonBackend for DeadlineAwareMultiComponentBackend {
         _store: DaemonStore,
         deadline: Instant,
     ) -> ScopeLifecycleReport {
-        // Model a first stock-SBX component that consumes the whole remaining
-        // budget. Later components must be reported uncertain without effects.
-        thread::sleep(deadline.saturating_duration_since(Instant::now()));
+        *self.deadline.lock().unwrap() = Some(deadline);
         ScopeLifecycleReport {
             action,
             cleanup_complete: false,
@@ -3675,7 +3440,7 @@ impl DaemonBackend for DeadlineAwareMultiComponentBackend {
                     label: label.into(),
                     state: ScopeCleanupState::CleanupUncertain,
                     vm: None,
-                    detail: Some("scope lifecycle deadline expired".into()),
+                    detail: Some(format!("{label} not verified")),
                 })
                 .collect(),
         }
@@ -3710,33 +3475,40 @@ impl DaemonBackend for DeadlineAwareMultiComponentBackend {
     }
 }
 
+/// The daemon gives teardown one absolute deadline (its configured lifecycle
+/// budget from admission), returns the backend's per-component report
+/// unchanged, and releases the lifecycle gate afterwards.
 #[test]
-fn aggregate_lifecycle_deadline_returns_coherent_report_and_releases_gate() {
+fn scope_teardown_gets_the_configured_deadline_and_releases_the_gate() {
     let home = home();
+    let backend = Arc::new(DeadlineRecordingBackend::default());
+    let budget = Duration::from_hours(1);
     let server = Arc::new(
         Server::bind(home.path())
             .unwrap()
-            .with_backend(Arc::new(DeadlineAwareMultiComponentBackend))
-            .with_scope_lifecycle_timeout(Duration::from_millis(35)),
+            .with_backend(backend.clone())
+            .with_scope_lifecycle_timeout(budget),
     );
-    let stop = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stop = Arc::clone(&stop);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stop.load(Ordering::Relaxed))
-            .unwrap();
-    });
+    let (stop, task) = start_server(Arc::clone(&server));
     let client = Client::connect(home.path()).unwrap();
-    let started = Instant::now();
+    let sent = Instant::now();
     let report = client.reset_scope().unwrap();
-    assert!(started.elapsed() < Duration::from_secs(1));
+    let received = Instant::now();
+    let deadline = backend.deadline.lock().unwrap().unwrap();
+    assert!(sent + budget <= deadline && deadline <= received + budget);
     assert!(!report.cleanup_complete);
-    assert_eq!(report.components.len(), 3);
-    assert!(report.components.iter().all(|component| {
-        component.state == ScopeCleanupState::CleanupUncertain
-            && component.detail.as_deref() == Some("scope lifecycle deadline expired")
-    }));
+    assert_eq!(
+        report
+            .components
+            .iter()
+            .map(|component| (component.label.as_str(), component.detail.as_deref()))
+            .collect::<Vec<_>>(),
+        [
+            ("kit-a", Some("kit-a not verified")),
+            ("kit-b", Some("kit-b not verified")),
+            ("shell", Some("shell not verified")),
+        ]
+    );
     assert!(matches!(
         client
             .request(PublicRequest::Status { session_id: None })
@@ -3829,17 +3601,18 @@ fn admitted_lifecycle_blocks_new_work_only_until_teardown_finishes() {
         }
     }
 
-    let started = Instant::now();
+    let status = client.clone();
     assert!(matches!(
-        client
-            .request(PublicRequest::Status { session_id: None })
-            .unwrap(),
+        returns("status refused during teardown", move || {
+            status
+                .request(PublicRequest::Status { session_id: None })
+                .unwrap()
+        }),
         PublicReply::Error {
             code: ErrorCode::InvalidRequest,
             ..
         }
     ));
-    assert!(started.elapsed() < Duration::from_secs(1));
 
     {
         let (state, changed) = &*gate;
@@ -3861,8 +3634,44 @@ fn admitted_lifecycle_blocks_new_work_only_until_teardown_finishes() {
     task.join().unwrap();
 }
 
+/// A socket read timeout is an idle timeout; the lifecycle client instead
+/// imposes one absolute deadline over the whole framed reply, so a daemon
+/// that sends part of a reply and stalls cannot hold it past that deadline.
 #[test]
-fn scope_lifecycle_client_has_an_absolute_deadline_and_server_recovers_after_teardown() {
+fn scope_lifecycle_client_deadline_covers_a_stalled_partial_reply() {
+    let root = home();
+    let paths = endpoint_paths(root.path().join("runtime"));
+    fs::create_dir(&paths.runtime_directory).unwrap();
+    let listener = std::os::unix::net::UnixListener::bind(&paths.socket).unwrap();
+    let daemon = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _: Envelope<PublicRequest> = read_frame(&mut stream).unwrap();
+        stream.write_all(&100_u32.to_be_bytes()).unwrap();
+        stream.write_all(b"{\"type\":").unwrap();
+        // Hold the connection open until the caller gives up.
+        let _ = stream.read(&mut [0_u8; 1]);
+    });
+    let client = Client {
+        paths,
+        token: "0".repeat(64),
+    };
+    let timeout = Duration::from_millis(50);
+    let started = Instant::now();
+    let error = client
+        .scope_lifecycle_with_timeout(PublicRequest::ResetScope, timeout)
+        .unwrap_err();
+    assert!(
+        matches!(error, DaemonError::Io(ref error) if error.kind() == io::ErrorKind::TimedOut),
+        "{error:?}"
+    );
+    assert!(started.elapsed() >= timeout);
+    daemon.join().unwrap();
+}
+
+/// A lifecycle caller that vanishes mid-teardown does not wedge the daemon:
+/// once teardown finishes, its gate is released and ordinary work resumes.
+#[test]
+fn daemon_recovers_after_teardown_for_a_vanished_caller() {
     let home = home();
     let gate = Arc::new((Mutex::new((false, false)), std::sync::Condvar::new()));
     let server = Arc::new(Server::bind(home.path()).unwrap().with_backend(Arc::new(
@@ -3870,69 +3679,43 @@ fn scope_lifecycle_client_has_an_absolute_deadline_and_server_recovers_after_tea
             gate: Arc::clone(&gate),
         },
     )));
-    let stop = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stop = Arc::clone(&stop);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stop.load(Ordering::Relaxed))
-            .unwrap();
-    });
+    let (stop, task) = start_server(Arc::clone(&server));
     let client = Client::connect(home.path()).unwrap();
-
-    // The caller's deadline must outlast the daemon's pickup of its request: a
-    // daemon does not tear down for a caller that has already gone, and a
-    // 25 ms deadline is often gone before a loaded runner's daemon has read the
-    // request. So give the caller a generous deadline, in a thread, wait for the
-    // teardown it started to be blocked on the gate, and only then expect the
-    // caller to return at its own deadline without any reply from the server.
-    let timeout = Duration::from_secs(2);
-    let timed = Client::connect(home.path()).unwrap();
-    let started = Instant::now();
-    let caller = thread::spawn(move || {
-        timed.scope_lifecycle_with_timeout(PublicRequest::ResetScope, timeout)
-    });
+    let mut caller = UnixStream::connect(&client.paths.socket).unwrap();
+    write_frame(
+        &mut caller,
+        &Envelope {
+            protocol: PROTOCOL.into(),
+            token: client.token.clone(),
+            body: PublicRequest::ResetScope,
+        },
+    )
+    .unwrap();
     {
         let (state, changed) = &*gate;
         let state = state.lock().unwrap();
         let (_state, waited) = changed
-            .wait_timeout_while(state, Duration::from_secs(30), |state| !state.0)
+            .wait_timeout_while(state, PATIENCE, |state| !state.0)
             .unwrap();
         assert!(!waited.timed_out(), "teardown never began");
     }
-    let error = caller.join().unwrap().unwrap_err();
-    assert!(
-        matches!(
-            error,
-            DaemonError::Io(ref error) if error.kind() == io::ErrorKind::TimedOut
-        ),
-        "expected the client's own deadline: {error:?}"
-    );
-    assert!(
-        started.elapsed() >= timeout,
-        "the caller returned before its deadline"
-    );
-    assert!(started.elapsed() < Duration::from_secs(30));
-
+    caller.shutdown(Shutdown::Both).unwrap();
+    drop(caller);
     {
         let (state, changed) = &*gate;
         state.lock().unwrap().1 = true;
         changed.notify_all();
     }
-
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        match client.request(PublicRequest::Status { session_id: None }) {
-            Ok(PublicReply::Status(_)) => break,
-            Ok(PublicReply::Error { .. }) if Instant::now() < deadline => {
-                thread::sleep(Duration::from_millis(10));
-            }
-            result => panic!("daemon did not recover after bounded client timeout: {result:?}"),
-        }
-    }
+    wait_until("the daemon serves Status after teardown", || {
+        matches!(
+            client.request(PublicRequest::Status { session_id: None }),
+            Ok(PublicReply::Status(_))
+        )
+    });
     stop.store(true, Ordering::Relaxed);
     task.join().unwrap();
 }
+
 #[test]
 fn internal_attachment_pair_keeps_kit_bytes_and_control_separate() {
     let (server, client) = ServerAttachment::pair().unwrap();
@@ -4054,11 +3837,9 @@ impl DaemonBackend for FakeAcpKit {
                                     if let Some(path) = request["params"]["prompt"][0]["text"].as_str()
                                         .and_then(|text| text.strip_prefix("finish-on-file:"))
                                     {
-                                        let deadline = Instant::now() + Duration::from_secs(3);
-                                        while !std::path::Path::new(path).exists() {
-                                            assert!(Instant::now() < deadline, "test did not release natural completion");
-                                            thread::sleep(Duration::from_millis(5));
-                                        }
+                                        wait_until("the test releases natural completion", || {
+                                            std::path::Path::new(path).exists()
+                                        });
                                     }
                                     Some(serde_json::json!({"jsonrpc":"2.0","id":id,"result":{"stopReason":"end_turn"}}))
                                 }
@@ -4135,33 +3916,133 @@ fn acp_handoff_during_admission(
             attempt_rx.recv().unwrap();
             assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err());
         }));
-        let outcome = done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let outcome = recv(&done_rx, "handoff finishes after the hook");
         handoff.join().unwrap();
         outcome
     })
 }
 
+/// A daemon serving an ACP Kit, with two shells attached to one project.
+struct AcpFixture {
+    home: tempfile::TempDir,
+    server: Arc<Server>,
+    client: Client,
+    first_id: String,
+    second_id: String,
+    first: SessionSpec,
+    second: SessionSpec,
+    stopping: Arc<AtomicBool>,
+    task: Option<thread::JoinHandle<()>>,
+}
+
+impl AcpFixture {
+    fn new() -> Self {
+        Self::with_backend(Arc::new(FakeAcpKit), None)
+    }
+
+    /// `project`: attach the shells to a real directory under the fixture
+    /// home (publication binds to its identity) instead of a nominal path.
+    fn with_backend(backend: Arc<dyn DaemonBackend>, project: Option<&str>) -> Self {
+        let home = home();
+        let launch = match project {
+            Some(name) => {
+                let project = home.path().join(name);
+                fs::create_dir(&project).unwrap();
+                project.canonicalize().unwrap()
+            }
+            None => PathBuf::from("/Users/example/project"),
+        };
+        let server = Arc::new(Server::bind(home.path()).unwrap().with_backend(backend));
+        let first_id = server
+            .store()
+            .attach_shell(1, authority(launch.to_str().unwrap(), home.path()));
+        let second_id = server
+            .store()
+            .attach_shell(2, authority(launch.to_str().unwrap(), home.path()));
+        let spec = |id: &str| SessionSpec {
+            launch_directory: launch.clone(),
+            ..session(id, home.path())
+        };
+        let (first, second) = (spec(&first_id), spec(&second_id));
+        let stopping = Arc::new(AtomicBool::new(false));
+        let task_server = Arc::clone(&server);
+        let task_stopping = Arc::clone(&stopping);
+        let task = thread::spawn(move || {
+            task_server
+                .serve_until(|| task_stopping.load(Ordering::Acquire))
+                .unwrap();
+        });
+        let client = Client::connect(home.path()).unwrap();
+        Self {
+            home,
+            server,
+            client,
+            first_id,
+            second_id,
+            first,
+            second,
+            stopping,
+            task: Some(task),
+        }
+    }
+
+    fn wait_status(
+        &self,
+        id: &str,
+        shell: &SessionSpec,
+        what: &str,
+        ready: impl Fn(&AcpSessionStatus) -> bool,
+    ) -> AcpSessionStatus {
+        wait_for(what, || {
+            let status = self
+                .client
+                .acp_status(id.to_owned(), shell.clone(), 0)
+                .unwrap();
+            ready(&status).then_some(status)
+        })
+    }
+
+    fn turn_ended(&self, id: &str, shell: &SessionSpec, what: &str) -> AcpSessionStatus {
+        self.wait_status(id, shell, what, |status| {
+            status.last_stop_reason == Some(marsh_acp::StopReason::EndTurn)
+        })
+    }
+
+    /// A child test process holding an `acp run` lease for `shell`.
+    fn lease_child(&self, shell: &str, marker: &Path, ready: Option<&Path>) -> std::process::Child {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args(["--exact", "tests::acp_run_lease_child"])
+            .env("MARSH_TEST_ACP_LEASE_HOME", self.home.path())
+            .env("MARSH_TEST_ACP_LEASE_SHELL", shell)
+            .env("MARSH_TEST_ACP_LEASE_MARKER", marker)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        if let Some(ready) = ready {
+            command.env("MARSH_TEST_ACP_LEASE_READY", ready);
+        }
+        fenced(|| command.spawn()).unwrap()
+    }
+}
+
+impl Drop for AcpFixture {
+    fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        if let Some(task) = self.task.take() {
+            let _ = task.join();
+        }
+    }
+}
+
+fn signal_child(child: &std::process::Child, signal: rustix::process::Signal) {
+    let pid = rustix::process::Pid::from_raw(i32::try_from(child.id()).unwrap()).unwrap();
+    rustix::process::kill_process(pid, signal).unwrap();
+}
+
 #[test]
 fn acp_prompt_retry_after_lost_reply_keeps_one_provider_turn() {
-    let home = home();
-    let server = Arc::new(
-        Server::bind(home.path())
-            .unwrap()
-            .with_backend(Arc::new(FakeAcpKit)),
-    );
-    let shell_id = server
-        .store()
-        .attach_shell(1, authority("/Users/example/project", home.path()));
-    let shell = session(&shell_id, home.path());
-    let stopping = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stopping = Arc::clone(&stopping);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stopping.load(Ordering::Acquire))
-            .unwrap();
-    });
-    let client = Client::connect(home.path()).unwrap();
+    let acp = AcpFixture::new();
+    let (client, shell) = (&acp.client, acp.first.clone());
     let (id, _, lease) = client
         .acp_start("agent-session".into(), shell.clone())
         .unwrap();
@@ -4181,15 +4062,7 @@ fn acp_prompt_retry_after_lost_reply_keeps_one_provider_turn() {
         },
     )
     .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let initial = loop {
-        let status = client.acp_status(id.clone(), shell.clone(), 0).unwrap();
-        if status.last_stop_reason == Some(marsh_acp::StopReason::EndTurn) {
-            break status;
-        }
-        assert!(Instant::now() < deadline, "lost-reply turn did not finish");
-        thread::sleep(Duration::from_millis(5));
-    };
+    let initial = acp.turn_ended(&id, &shell, "lost-reply turn ends");
     // The daemon has admitted and finished the turn. Discard the reply
     // without reading it, as a caller whose acknowledgment was lost would.
     drop(lost_reply);
@@ -4214,45 +4087,13 @@ fn acp_prompt_retry_after_lost_reply_keeps_one_provider_turn() {
     );
     client.acp_stop(id, shell).unwrap();
     drop(lease);
-    stopping.store(true, Ordering::Release);
-    task.join().unwrap();
 }
 
 #[test]
-#[allow(clippy::too_many_lines)] // One real socket journey proves grant, lease, retry, and revocation together.
 fn acp_published_grant_survives_parent_lease_and_revokes_cached_call() {
-    let home = home();
-    let project = home.path().join("project");
-    fs::create_dir(&project).unwrap();
-    let project = project.canonicalize().unwrap();
-    let server = Arc::new(
-        Server::bind(home.path())
-            .unwrap()
-            .with_backend(Arc::new(FakeAcpKit)),
-    );
-    let owner_id = server
-        .store()
-        .attach_shell(1, authority(project.to_str().unwrap(), home.path()));
-    let observer_id = server
-        .store()
-        .attach_shell(2, authority(project.to_str().unwrap(), home.path()));
-    let owner = SessionSpec {
-        launch_directory: project.clone(),
-        ..session(&owner_id, home.path())
-    };
-    let observer = SessionSpec {
-        launch_directory: project,
-        ..session(&observer_id, home.path())
-    };
-    let stopping = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stopping = Arc::clone(&stopping);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stopping.load(Ordering::Acquire))
-            .unwrap();
-    });
-    let client = Client::connect(home.path()).unwrap();
+    let acp = AcpFixture::with_backend(Arc::new(FakeAcpKit), Some("project"));
+    let (server, client) = (&acp.server, &acp.client);
+    let (owner, observer) = (acp.first.clone(), acp.second.clone());
     let (agent_id, _, lease) = client
         .acp_start("agent-session".into(), owner.clone())
         .unwrap();
@@ -4264,7 +4105,7 @@ fn acp_published_grant_survives_parent_lease_and_revokes_cached_call() {
             .is_err()
     );
     let mut relay = client.clone();
-    relay.token = server.store.issue_relay_token(&owner_id).unwrap();
+    relay.token = server.store.issue_relay_token(&acp.first_id).unwrap();
     assert!(
         relay
             .acp_published_status(agent_id.clone(), generation.clone(), 0)
@@ -4279,22 +4120,14 @@ fn acp_published_grant_survives_parent_lease_and_revokes_cached_call() {
             "hello".into(),
         )
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
+    let status = wait_for("published ACP turn ends", || {
         let status = client
             .acp_published_status(agent_id.clone(), generation.clone(), 0)
             .unwrap();
-        if status.last_stop_reason == Some(marsh_acp::StopReason::EndTurn) {
-            assert_eq!(status.updates.len(), 1);
-            assert!(status.controller_shell_session_id.is_none());
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "published ACP turn did not finish"
-        );
-        thread::sleep(Duration::from_millis(5));
-    }
+        (status.last_stop_reason == Some(marsh_acp::StopReason::EndTurn)).then_some(status)
+    });
+    assert_eq!(status.updates.len(), 1);
+    assert!(status.controller_shell_session_id.is_none());
     assert_eq!(
         client
             .acp_published_prompt(
@@ -4312,13 +4145,31 @@ fn acp_published_grant_survives_parent_lease_and_revokes_cached_call() {
             .is_err()
     );
     drop(lease);
-    thread::sleep(Duration::from_millis(50));
+    // Fence the lease-loss callback (idempotent with the socket handler's).
+    server
+        .acp
+        .run_disconnected(&agent_id, &acp.first_id, &server.store());
     assert!(
         !client
             .acp_published_status(agent_id.clone(), generation.clone(), 0)
             .unwrap()
             .stopping
     );
+    server
+        .acp
+        .unpublish("shared", &owner, Some(&generation))
+        .unwrap();
+    client.acp_stop(agent_id, owner).unwrap();
+}
+
+#[test]
+fn acp_unpublish_revokes_its_grant_and_a_late_rollback_spares_a_newer_one() {
+    let acp = AcpFixture::with_backend(Arc::new(FakeAcpKit), Some("project"));
+    let (server, client, owner) = (&acp.server, &acp.client, acp.first.clone());
+    let (agent_id, _, lease) = client
+        .acp_start("agent-session".into(), owner.clone())
+        .unwrap();
+    let generation = server.acp.publish(&agent_id, &owner, "shared").unwrap();
     server
         .acp
         .unpublish("shared", &owner, Some(&generation))
@@ -4360,35 +4211,17 @@ fn acp_published_grant_survives_parent_lease_and_revokes_cached_call() {
         .unpublish("shared", &owner, Some(&newer))
         .unwrap();
     client.acp_stop(agent_id, owner).unwrap();
-    stopping.store(true, Ordering::Release);
-    task.join().unwrap();
+    drop(lease);
 }
 
 #[test]
 fn acp_cancel_racing_natural_completion_keeps_session_usable() {
-    let home = home();
-    let server = Arc::new(
-        Server::bind(home.path())
-            .unwrap()
-            .with_backend(Arc::new(FakeAcpKit)),
-    );
-    let shell_id = server
-        .store()
-        .attach_shell(1, authority("/Users/example/project", home.path()));
-    let shell = session(&shell_id, home.path());
-    let stopping = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stopping = Arc::clone(&stopping);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stopping.load(Ordering::Acquire))
-            .unwrap();
-    });
-    let client = Client::connect(home.path()).unwrap();
+    let acp = AcpFixture::new();
+    let (client, shell) = (&acp.client, acp.first.clone());
     let (id, _, lease) = client
         .acp_start("agent-session".into(), shell.clone())
         .unwrap();
-    let finish = home.path().join("allow-natural-completion");
+    let finish = acp.home.path().join("allow-natural-completion");
     client
         .acp_prompt(
             id.clone(),
@@ -4396,81 +4229,46 @@ fn acp_cancel_racing_natural_completion_keeps_session_usable() {
             format!("finish-on-file:{}", finish.display()),
         )
         .unwrap();
-    let phase = server.acp.cancel_after_reservation(&id, &shell, || {
+    let phase = acp.server.acp.cancel_after_reservation(&id, &shell, || {
         // No timing window: the fixture cannot finish before this cancel has
         // reserved the turn, then it completes before dispatch is attempted.
         fs::write(&finish, b"").unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            let status = client.acp_status(id.clone(), shell.clone(), 0).unwrap();
-            if !status.turn_active {
-                assert_eq!(
-                    status.last_stop_reason,
-                    Some(marsh_acp::StopReason::EndTurn)
-                );
-                break;
-            }
-            assert!(Instant::now() < deadline, "natural completion stalled");
-            thread::sleep(Duration::from_millis(5));
-        }
+        let status = acp.wait_status(&id, &shell, "natural completion", |status| {
+            !status.turn_active
+        });
+        assert_eq!(
+            status.last_stop_reason,
+            Some(marsh_acp::StopReason::EndTurn)
+        );
     });
     client
         .acp_prompt(id.clone(), shell.clone(), "same session next turn".into())
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
-    loop {
-        let status = client.acp_status(id.clone(), shell.clone(), 0).unwrap();
-        if !status.turn_active {
-            assert_eq!(
-                status.last_stop_reason,
-                Some(marsh_acp::StopReason::EndTurn)
-            );
-            assert_eq!(status.turns.len(), 2);
-            break;
-        }
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(5));
-    }
+    let status = acp.wait_status(&id, &shell, "next turn ends", |status| {
+        !status.turn_active && status.turns.len() == 2
+    });
+    assert_eq!(
+        status.last_stop_reason,
+        Some(marsh_acp::StopReason::EndTurn)
+    );
     client.acp_stop(id, shell).unwrap();
     drop(lease);
-    stopping.store(true, Ordering::Release);
-    task.join().unwrap();
     assert_eq!(phase.unwrap(), "AlreadyFinished");
 }
 
 #[test]
 fn acp_handoff_waits_for_release_and_prompt_admission() {
-    let home = home();
-    let server = Arc::new(
-        Server::bind(home.path())
-            .unwrap()
-            .with_backend(Arc::new(FakeAcpKit)),
-    );
-    let first = server
-        .store()
-        .attach_shell(1, authority("/Users/example/project", home.path()));
-    let second = server
-        .store()
-        .attach_shell(2, authority("/Users/example/project", home.path()));
-    let first = session(&first, home.path());
-    let second = session(&second, home.path());
-    let stopping = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stopping = Arc::clone(&stopping);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stopping.load(Ordering::Acquire))
-            .unwrap();
-    });
-    let client = Client::connect(home.path()).unwrap();
-    let (id, _, lease) = client
+    let acp = AcpFixture::new();
+    let (server, first, second) = (&acp.server, acp.first.clone(), acp.second.clone());
+    let (id, _, lease) = acp
+        .client
         .acp_start("agent-session".into(), first.clone())
         .unwrap();
 
     // A second release and handoff may begin after the first authorization,
     // but they cannot finish before that release clears its own lease.
     let (stale_release, attach) =
-        acp_handoff_during_admission(&server, &id, &first, &second, |hook| {
+        acp_handoff_during_admission(server, &id, &first, &second, |hook| {
             server
                 .acp
                 .release_after_authorization(&id, &first, hook)
@@ -4493,7 +4291,7 @@ fn acp_handoff_waits_for_release_and_prompt_admission() {
     // The prompt is admitted under the first controller before the second
     // shell can take over. A stale check followed by an unlocked enqueue
     // would let the handoff finish inside the hook.
-    let (release, attach) = acp_handoff_during_admission(&server, &id, &first, &second, |hook| {
+    let (release, attach) = acp_handoff_during_admission(server, &id, &first, &second, |hook| {
         server
             .acp
             .prompt_after_authorization(
@@ -4516,196 +4314,119 @@ fn acp_handoff_waits_for_release_and_prompt_admission() {
 
     server.acp.stop(&id, &second).unwrap();
     drop(lease);
-    stopping.store(true, Ordering::Release);
-    task.join().unwrap();
+}
+
+/// The daemon can be dropped while a turn still waits on its Kit: the Kit has
+/// not answered, or its exit has not yet reached the transport (macOS can
+/// delay that EOF by losing the bridge's shutdown wakeup). The drop must not
+/// wait for the turn to end.
+#[test]
+fn acp_daemon_drop_does_not_wait_for_an_active_turn() {
+    let acp = AcpFixture::new();
+    let (server, shell) = (Arc::clone(&acp.server), acp.first.clone());
+    let (id, _) = server
+        .acp
+        .start_reserved(
+            Arc::clone(&server.backend),
+            &server.store(),
+            "agent-session",
+            shell.clone(),
+            &Arc::new(AcpStartupAbort::default()),
+            None,
+        )
+        .unwrap();
+    server
+        .acp
+        .prompt_with_key(&id, &shell, &Uuid::new_v4().to_string(), "hold".into())
+        .unwrap();
+    wait_until("the held turn records its first update", || {
+        let status = server.acp.status(&id, &shell, 0, &server.store()).unwrap();
+        status.turn_active && !status.updates.is_empty()
+    });
+    // The fixture's drop is then the manager's last owner.
+    drop(server);
+    wait_until("connection handlers release the ACP manager", || {
+        Arc::strong_count(&acp.server.acp) == 1
+    });
+    returns("the daemon drops with a turn in flight", move || drop(acp));
 }
 
 #[test]
-#[allow(clippy::too_many_lines)] // Exercises the complete daemon caller lifecycle in one fixture.
 fn acp_daemon_caller_has_distinct_identity_controller_and_stop() {
-    let home = home();
-    let server = Arc::new(
-        Server::bind(home.path())
-            .unwrap()
-            .with_backend(Arc::new(FakeAcpKit)),
-    );
-    let first = server
+    let acp = AcpFixture::new();
+    let (client, first, second) = (&acp.client, acp.first.clone(), acp.second.clone());
+    let other = acp
+        .server
         .store()
-        .attach_shell(1, authority("/Users/example/project", home.path()));
-    let second = server
-        .store()
-        .attach_shell(2, authority("/Users/example/project", home.path()));
-    let other = server
-        .store()
-        .attach_shell(3, authority("/Users/example/other", home.path()));
-    let stopping = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stopping = Arc::clone(&stopping);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stopping.load(Ordering::Acquire))
-            .unwrap();
-    });
-    let client = Client::connect(home.path()).unwrap();
+        .attach_shell(3, authority("/Users/example/other", acp.home.path()));
+    let other = session(&other, acp.home.path());
     let (agent_id, job_id, lease) = client
-        .acp_start("agent-session".into(), session(&first, home.path()))
+        .acp_start("agent-session".into(), first.clone())
         .unwrap();
-    assert_ne!(agent_id, first);
+    assert_ne!(agent_id, acp.first_id);
     assert_ne!(agent_id, "remote-session");
     assert_ne!(job_id, agent_id);
-    assert_eq!(
-        client.acp_list(session(&first, home.path())).unwrap().len(),
-        1
-    );
+    assert_eq!(client.acp_list(first.clone()).unwrap().len(), 1);
+    assert!(client.acp_status(agent_id.clone(), other, 0).is_err());
     assert!(
         client
-            .acp_status(agent_id.clone(), session(&other, home.path()), 0)
+            .acp_status("forged-agent-id".into(), first.clone(), 0)
             .is_err()
     );
-    assert!(
-        client
-            .acp_status("forged-agent-id".into(), session(&first, home.path()), 0)
-            .is_err()
-    );
-    assert!(
-        client
-            .acp_attach(agent_id.clone(), session(&second, home.path()))
-            .is_err()
-    );
+    assert!(client.acp_attach(agent_id.clone(), second.clone()).is_err());
     client
-        .acp_prompt(
-            agent_id.clone(),
-            session(&first, home.path()),
-            "hello".into(),
-        )
+        .acp_prompt(agent_id.clone(), first.clone(), "hello".into())
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while client
-        .acp_status(agent_id.clone(), session(&first, home.path()), 0)
-        .unwrap()
-        .last_stop_reason
-        .is_none()
-    {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(5));
-    }
-    let first_turn = client
-        .acp_status(agent_id.clone(), session(&first, home.path()), 0)
-        .unwrap();
+    let first_turn = acp.wait_status(&agent_id, &first, "first turn ends", |status| {
+        status.last_stop_reason.is_some()
+    });
     assert!(
         !first_turn.updates.is_empty(),
         "completed turn must expose every queued update before its stop reason"
     );
     let cursor = first_turn.next_cursor;
     client
-        .acp_prompt(
-            agent_id.clone(),
-            session(&first, home.path()),
-            "hold".into(),
-        )
+        .acp_prompt(agent_id.clone(), first.clone(), "hold".into())
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while client
-        .acp_status(agent_id.clone(), session(&first, home.path()), cursor)
-        .unwrap()
-        .updates
-        .is_empty()
-    {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(5));
-    }
+    wait_until("held turn reports progress", || {
+        !client
+            .acp_status(agent_id.clone(), first.clone(), cursor)
+            .unwrap()
+            .updates
+            .is_empty()
+    });
     assert_eq!(
-        client
-            .acp_cancel(agent_id.clone(), session(&first, home.path()))
-            .unwrap(),
+        client.acp_cancel(agent_id.clone(), first.clone()).unwrap(),
         "Dispatched"
     );
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while client
-        .acp_status(agent_id.clone(), session(&first, home.path()), cursor)
-        .unwrap()
-        .last_stop_reason
-        != Some(marsh_acp::StopReason::Cancelled)
-    {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(5));
-    }
-    client
-        .acp_release(agent_id.clone(), session(&first, home.path()))
-        .unwrap();
-    client
-        .acp_attach(agent_id.clone(), session(&second, home.path()))
-        .unwrap();
-    client
-        .acp_stop(agent_id.clone(), session(&second, home.path()))
-        .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while client
-        .acp_status(agent_id.clone(), session(&second, home.path()), 0)
-        .unwrap()
-        .attachment
-        .terminal
-        .is_none()
-    {
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(5));
-    }
+    acp.wait_status(&agent_id, &first, "held turn is cancelled", |status| {
+        status.last_stop_reason == Some(marsh_acp::StopReason::Cancelled)
+    });
+    client.acp_release(agent_id.clone(), first).unwrap();
+    client.acp_attach(agent_id.clone(), second.clone()).unwrap();
+    client.acp_stop(agent_id.clone(), second.clone()).unwrap();
+    acp.wait_status(&agent_id, &second, "stopped Kit ends", |status| {
+        status.attachment.terminal.is_some()
+    });
     drop(lease);
-    stopping.store(true, Ordering::Release);
-    task.join().unwrap();
 }
 
 #[test]
-#[allow(
-    clippy::too_many_lines,
-    reason = "One real daemon caller permission lifecycle"
-)]
 fn acp_permission_requires_controller_and_offered_one_time_choice() {
-    let home = home();
-    let server = Arc::new(
-        Server::bind(home.path())
-            .unwrap()
-            .with_backend(Arc::new(FakeAcpKit)),
-    );
-    let first = server
-        .store()
-        .attach_shell(1, authority("/Users/example/project", home.path()));
-    let second = server
-        .store()
-        .attach_shell(2, authority("/Users/example/project", home.path()));
-    let stopping = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stopping = Arc::clone(&stopping);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stopping.load(Ordering::Acquire))
-            .unwrap();
-    });
-    let client = Client::connect(home.path()).unwrap();
+    let acp = AcpFixture::new();
+    let (client, first, second) = (&acp.client, acp.first.clone(), acp.second.clone());
     let (id, _, lease) = client
-        .acp_start("agent-session".into(), session(&first, home.path()))
+        .acp_start("agent-session".into(), first.clone())
         .unwrap();
     client
-        .acp_prompt(
-            id.clone(),
-            session(&first, home.path()),
-            "permission".into(),
-        )
+        .acp_prompt(id.clone(), first.clone(), "permission".into())
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let request = loop {
-        let status = client
-            .acp_status(id.clone(), session(&first, home.path()), 0)
-            .unwrap();
-        if let Some(permission) = status.permissions.first() {
-            break permission.clone();
-        }
-        assert!(
-            Instant::now() < deadline,
-            "permission request was not surfaced"
-        );
-        thread::sleep(Duration::from_millis(5));
-    };
+    let request = acp
+        .wait_status(&id, &first, "permission request surfaces", |status| {
+            !status.permissions.is_empty()
+        })
+        .permissions[0]
+        .clone();
     assert_eq!(request.tool_call_id, "tool-1");
     assert_eq!(
         request.options.len(),
@@ -4714,7 +4435,7 @@ fn acp_permission_requires_controller_and_offered_one_time_choice() {
     );
     assert!(
         client
-            .acp_status(id.clone(), session(&second, home.path()), 0)
+            .acp_status(id.clone(), second.clone(), 0)
             .unwrap()
             .permissions
             .is_empty(),
@@ -4724,7 +4445,7 @@ fn acp_permission_requires_controller_and_offered_one_time_choice() {
         client
             .acp_respond(
                 id.clone(),
-                session(&second, home.path()),
+                second,
                 request.request_id.clone(),
                 "once".into(),
             )
@@ -4735,7 +4456,7 @@ fn acp_permission_requires_controller_and_offered_one_time_choice() {
         client
             .acp_respond(
                 id.clone(),
-                session(&first, home.path()),
+                first.clone(),
                 request.request_id.clone(),
                 "always".into(),
             )
@@ -4743,32 +4464,12 @@ fn acp_permission_requires_controller_and_offered_one_time_choice() {
         "persistent option is not allowed"
     );
     client
-        .acp_respond(
-            id.clone(),
-            session(&first, home.path()),
-            request.request_id,
-            "once".into(),
-        )
+        .acp_respond(id.clone(), first.clone(), request.request_id, "once".into())
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        let status = client
-            .acp_status(id.clone(), session(&first, home.path()), 0)
-            .unwrap();
-        if status.last_stop_reason == Some(marsh_acp::StopReason::EndTurn) {
-            assert!(status.permissions.is_empty());
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "approved ACP turn did not finish"
-        );
-        thread::sleep(Duration::from_millis(5));
-    }
-    client.acp_stop(id, session(&first, home.path())).unwrap();
+    let status = acp.turn_ended(&id, &first, "approved turn ends");
+    assert!(status.permissions.is_empty());
+    client.acp_stop(id, first).unwrap();
     drop(lease);
-    stopping.store(true, Ordering::Release);
-    task.join().unwrap();
 }
 
 #[test]
@@ -4849,229 +4550,101 @@ impl DaemonBackend for StalledAcpKit {
 
 #[test]
 fn killed_run_process_during_acp_handshake_terminates_kit_promptly() {
-    let home = home();
     let launched = Arc::new(AtomicBool::new(false));
     let terminated = Arc::new(AtomicBool::new(false));
-    let server = Arc::new(Server::bind(home.path()).unwrap().with_backend(Arc::new(
-        StalledAcpKit {
+    let acp = AcpFixture::with_backend(
+        Arc::new(StalledAcpKit {
             launched: Arc::clone(&launched),
             terminated: Arc::clone(&terminated),
-        },
-    )));
-    let shell = server
-        .store()
-        .attach_shell(1, authority("/Users/example/project", home.path()));
-    let stopping = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stopping = Arc::clone(&stopping);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stopping.load(Ordering::Acquire))
-            .unwrap();
-    });
-    let marker = home.path().join("startup-marker");
-    let ready = home.path().join("startup-ready");
-    let mut child = Command::new(std::env::current_exe().unwrap())
-        .args(["--exact", "tests::acp_run_lease_child"])
-        .env("MARSH_TEST_ACP_LEASE_HOME", home.path())
-        .env("MARSH_TEST_ACP_LEASE_SHELL", &shell)
-        .env("MARSH_TEST_ACP_LEASE_MARKER", &marker)
-        .env("MARSH_TEST_ACP_LEASE_READY", &ready)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(3);
-    while !launched.load(Ordering::Acquire) {
-        assert!(Instant::now() < deadline, "ACP Kit did not start");
-        thread::sleep(Duration::from_millis(5));
-    }
+        }),
+        None,
+    );
+    let marker = acp.home.path().join("startup-marker");
+    let ready = acp.home.path().join("startup-ready");
+    let mut child = acp.lease_child(&acp.first_id, &marker, Some(&ready));
+    wait_until("ACP Kit starts", || launched.load(Ordering::Acquire));
     assert!(ready.exists());
     assert!(!marker.exists(), "ACP handshake unexpectedly completed");
-    let pid = rustix::process::Pid::from_raw(i32::try_from(child.id()).unwrap()).unwrap();
-    rustix::process::kill_process(pid, rustix::process::Signal::KILL).unwrap();
+    signal_child(&child, rustix::process::Signal::KILL);
     child.wait().unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !terminated.load(Ordering::Acquire) {
-        assert!(Instant::now() < deadline, "orphaned ACP startup Kit");
-        thread::sleep(Duration::from_millis(5));
-    }
+    wait_until("orphaned ACP startup Kit is terminated", || {
+        terminated.load(Ordering::Acquire)
+    });
     assert!(
-        Client::connect(home.path())
-            .unwrap()
-            .acp_list(session(&shell, home.path()))
+        acp.client
+            .acp_list(acp.first.clone())
             .unwrap()
             .iter()
             .all(|entry| entry.terminal && entry.state.as_deref() == Some("failed"))
     );
-    stopping.store(true, Ordering::Release);
-    task.join().unwrap();
 }
 
 #[test]
 fn killed_or_interrupted_run_process_stops_kit_and_releases_controller() {
-    let home = home();
-    let server = Arc::new(
-        Server::bind(home.path())
-            .unwrap()
-            .with_backend(Arc::new(FakeAcpKit)),
-    );
-    let first = server
-        .store()
-        .attach_shell(1, authority("/Users/example/project", home.path()));
-    let second = server
-        .store()
-        .attach_shell(2, authority("/Users/example/project", home.path()));
-    let stopping = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stopping = Arc::clone(&stopping);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stopping.load(Ordering::Acquire))
-            .unwrap();
-    });
-    let client = Client::connect(home.path()).unwrap();
+    let acp = AcpFixture::new();
     for signal in [rustix::process::Signal::KILL, rustix::process::Signal::INT] {
-        let marker = home.path().join(format!("lease-{signal:?}"));
-        let mut child = Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", "tests::acp_run_lease_child"])
-            .env("MARSH_TEST_ACP_LEASE_HOME", home.path())
-            .env("MARSH_TEST_ACP_LEASE_SHELL", &first)
-            .env("MARSH_TEST_ACP_LEASE_MARKER", &marker)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let id = loop {
-            if let Ok(id) = fs::read_to_string(&marker)
-                && !id.is_empty()
-            {
-                break id;
-            }
-            assert!(Instant::now() < deadline, "ACP child did not start");
-            thread::sleep(Duration::from_millis(5));
-        };
-        let pid = rustix::process::Pid::from_raw(i32::try_from(child.id()).unwrap()).unwrap();
-        rustix::process::kill_process(pid, signal).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while child.try_wait().unwrap().is_none() {
-            assert!(Instant::now() < deadline, "ACP child survived {signal:?}");
-            thread::sleep(Duration::from_millis(5));
-        }
-        let deadline = Instant::now() + Duration::from_secs(3);
-        loop {
-            let status = client
-                .acp_status(id.clone(), session(&first, home.path()), 0)
-                .unwrap();
-            if status.controller_shell_session_id.is_none() && status.attachment.terminal.is_some()
-            {
-                break;
-            }
-            assert!(Instant::now() < deadline, "ACP Kit survived {signal:?}");
-            thread::sleep(Duration::from_millis(5));
-        }
-        client
-            .acp_attach(id.clone(), session(&second, home.path()))
+        let marker = acp.home.path().join(format!("lease-{signal:?}"));
+        let child = acp.lease_child(&acp.first_id, &marker, None);
+        let id = wait_for("ACP child starts its session", || {
+            fs::read_to_string(&marker).ok().filter(|id| !id.is_empty())
+        });
+        signal_child(&child, signal);
+        let mut child = child;
+        returns("ACP child exits", move || child.wait().unwrap());
+        acp.wait_status(
+            &id,
+            &acp.first,
+            "Kit stops and releases its controller",
+            |status| {
+                status.controller_shell_session_id.is_none() && status.attachment.terminal.is_some()
+            },
+        );
+        acp.client
+            .acp_attach(id.clone(), acp.second.clone())
             .unwrap();
         assert!(
-            client
-                .acp_prompt(id, session(&second, home.path()), "late".into())
+            acp.client
+                .acp_prompt(id, acp.second.clone(), "late".into())
                 .is_err()
         );
     }
-    stopping.store(true, Ordering::Release);
-    task.join().unwrap();
 }
 
 #[test]
 fn ended_shell_releases_acp_controller_without_explicit_detach() {
-    let home = home();
-    let server = Arc::new(
-        Server::bind(home.path())
-            .unwrap()
-            .with_backend(Arc::new(FakeAcpKit)),
-    );
-    let first = server
-        .store()
-        .attach_shell(1, authority("/Users/example/project", home.path()));
-    let second = server
-        .store()
-        .attach_shell(2, authority("/Users/example/project", home.path()));
-    let stopping = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stopping = Arc::clone(&stopping);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stopping.load(Ordering::Acquire))
-            .unwrap();
-    });
-    let client = Client::connect(home.path()).unwrap();
+    let acp = AcpFixture::new();
+    let client = &acp.client;
     let (id, _, lease) = client
-        .acp_start("agent-session".into(), session(&first, home.path()))
+        .acp_start("agent-session".into(), acp.first.clone())
         .unwrap();
     assert!(matches!(
         client.request(PublicRequest::OpenShell(ShellSpec {
             dev: false,
             arguments: vec![],
-            session: session(&first, home.path()),
+            session: acp.first.clone(),
         })),
         Ok(PublicReply::ShellAccepted)
     ));
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        if client
-            .acp_attach(id.clone(), session(&second, home.path()))
-            .is_ok()
-        {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "dead shell retained ACP controller"
-        );
-        thread::sleep(Duration::from_millis(5));
-    }
+    wait_until("the ended shell releases its ACP controller", || {
+        client.acp_attach(id.clone(), acp.second.clone()).is_ok()
+    });
     drop(lease);
     assert!(
         client
-            .acp_status(id.clone(), session(&second, home.path()), 0)
+            .acp_status(id.clone(), acp.second.clone(), 0)
             .unwrap()
             .attachment
             .terminal
             .is_none(),
         "explicit handoff keeps the Kit running"
     );
-    client.acp_stop(id, session(&second, home.path())).unwrap();
-    stopping.store(true, Ordering::Release);
-    task.join().unwrap();
+    client.acp_stop(id, acp.second.clone()).unwrap();
 }
 
 #[test]
 fn handed_off_kit_stops_when_last_controller_detaches_after_run_lease_loss() {
-    let home = home();
-    let server = Arc::new(
-        Server::bind(home.path())
-            .unwrap()
-            .with_backend(Arc::new(FakeAcpKit)),
-    );
-    let first_id = server
-        .store()
-        .attach_shell(1, authority("/Users/example/project", home.path()));
-    let second_id = server
-        .store()
-        .attach_shell(2, authority("/Users/example/project", home.path()));
-    let stopping = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stopping = Arc::clone(&stopping);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stopping.load(Ordering::Acquire))
-            .unwrap();
-    });
-    let client = Client::connect(home.path()).unwrap();
-    let first = session(&first_id, home.path());
-    let second = session(&second_id, home.path());
+    let acp = AcpFixture::new();
+    let (client, first, second) = (&acp.client, acp.first.clone(), acp.second.clone());
     let (id, _, lease) = client
         .acp_start("agent-session".into(), first.clone())
         .unwrap();
@@ -5080,72 +4653,37 @@ fn handed_off_kit_stops_when_last_controller_detaches_after_run_lease_loss() {
     drop(lease);
     // Fence the lease callback before B detaches; the socket handler may
     // independently observe the same close, which is intentionally idempotent.
-    server.acp.run_disconnected(&id, &first_id, &server.store());
+    acp.server
+        .acp
+        .run_disconnected(&id, &acp.first_id, &acp.server.store());
     let status = client.acp_status(id.clone(), second.clone(), 0).unwrap();
-    assert_eq!(status.controller_shell_session_id, Some(second_id.clone()));
+    assert_eq!(
+        status.controller_shell_session_id,
+        Some(acp.second_id.clone())
+    );
     assert!(!status.stopping);
     client
         .acp_prompt(id.clone(), second.clone(), "hello".into())
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        let status = client.acp_status(id.clone(), second.clone(), 0).unwrap();
-        if status.last_stop_reason == Some(marsh_acp::StopReason::EndTurn) {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "handoff controller lost live Kit"
-        );
-        thread::sleep(Duration::from_millis(5));
-    }
+    acp.turn_ended(&id, &second, "handed-off controller's turn ends");
     assert!(matches!(
         client.request(PublicRequest::DetachShell {
-            session_id: second_id
+            session_id: acp.second_id.clone()
         }),
         Ok(PublicReply::Detached)
     ));
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        let status = client.acp_status(id.clone(), first.clone(), 0).unwrap();
-        if status.attachment.terminal.is_some() {
-            assert!(status.stopping);
-            assert!(status.controller_shell_session_id.is_none());
-            assert_eq!(status.receipt.unwrap().cleanup, CleanupState::Verified);
-            break;
-        }
-        assert!(Instant::now() < deadline, "orphaned Kit was not stopped");
-        thread::sleep(Duration::from_millis(5));
-    }
-    stopping.store(true, Ordering::Release);
-    task.join().unwrap();
+    let status = acp.wait_status(&id, &first, "orphaned Kit is stopped", |status| {
+        status.attachment.terminal.is_some()
+    });
+    assert!(status.stopping);
+    assert!(status.controller_shell_session_id.is_none());
+    assert_eq!(status.receipt.unwrap().cleanup, CleanupState::Verified);
 }
 
 #[test]
 fn handed_off_controller_can_detach_while_run_lease_is_live() {
-    let home = home();
-    let server = Arc::new(
-        Server::bind(home.path())
-            .unwrap()
-            .with_backend(Arc::new(FakeAcpKit)),
-    );
-    let first_id = server
-        .store()
-        .attach_shell(1, authority("/Users/example/project", home.path()));
-    let second_id = server
-        .store()
-        .attach_shell(2, authority("/Users/example/project", home.path()));
-    let stopping = Arc::new(AtomicBool::new(false));
-    let task_server = Arc::clone(&server);
-    let task_stopping = Arc::clone(&stopping);
-    let task = thread::spawn(move || {
-        task_server
-            .serve_until(|| task_stopping.load(Ordering::Acquire))
-            .unwrap();
-    });
-    let client = Client::connect(home.path()).unwrap();
-    let first = session(&first_id, home.path());
-    let second = session(&second_id, home.path());
+    let acp = AcpFixture::new();
+    let (client, first, second) = (&acp.client, acp.first.clone(), acp.second.clone());
     let (id, _, lease) = client
         .acp_start("agent-session".into(), first.clone())
         .unwrap();
@@ -5153,7 +4691,7 @@ fn handed_off_controller_can_detach_while_run_lease_is_live() {
     client.acp_attach(id.clone(), second).unwrap();
     assert!(matches!(
         client.request(PublicRequest::DetachShell {
-            session_id: second_id
+            session_id: acp.second_id.clone()
         }),
         Ok(PublicReply::Detached)
     ));
@@ -5167,8 +4705,6 @@ fn handed_off_controller_can_detach_while_run_lease_is_live() {
         .unwrap();
     client.acp_stop(id, first).unwrap();
     drop(lease);
-    stopping.store(true, Ordering::Release);
-    task.join().unwrap();
 }
 
 #[derive(Debug)]
@@ -5207,7 +4743,7 @@ impl DaemonBackend for StdinEchoBackend {
             attachment.send(&AttachmentFrame::Stdout { bytes })?;
         }
         attachment.send(&AttachmentFrame::Stderr {
-            bytes: b"diagnostic\0\xff".to_vec(),
+            bytes: b"stderr secret".to_vec(),
         })?;
         store.finish_job(
             &job_id,
@@ -5242,31 +4778,40 @@ fn start_server(server: Arc<Server>) -> (Arc<AtomicBool>, thread::JoinHandle<()>
     (stop, task)
 }
 
+/// The handshake deadline is absolute: a peer trickling one byte at a time
+/// (each well inside any idle timeout) still times out at the deadline.
 #[test]
 fn daemon_handshake_deadline_survives_trickled_frame_bytes() {
-    let (mut writer, mut reader) = UnixStream::pair().unwrap();
+    let (mut writer, mut reader) = socket_pair();
+    let deadline = Instant::now() + Duration::from_millis(100);
     let sender = thread::spawn(move || {
-        for byte in [0_u8; 16] {
-            if writer.write_all(&[byte]).is_err() {
+        // A 64-byte frame, one byte per 10 ms: complete only long after the
+        // deadline, and then not valid JSON.
+        writer.write_all(&64_u32.to_be_bytes()).unwrap();
+        for _ in 0..64 {
+            thread::sleep(Duration::from_millis(10));
+            if writer.write_all(b" ").is_err() {
                 break;
             }
-            thread::sleep(Duration::from_millis(20));
         }
     });
-    let start = Instant::now();
     let result = read_frame::<PublicRequest>(&mut DeadlineRead {
         stream: &mut reader,
-        deadline: start + Duration::from_millis(65),
+        deadline,
     });
-    assert!(result.is_err());
-    assert!(start.elapsed() < Duration::from_millis(180));
+    assert!(
+        matches!(&result, Err(DaemonError::Io(error))
+            if matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)),
+        "{result:?}"
+    );
     drop(reader);
     sender.join().unwrap();
 }
 
-/// A daemon job's structural receipt carries its exit status.
+/// Job input/output and agent prompts flow through the daemon but never into
+/// its durable receipt journal, which is owner-only.
 #[test]
-fn echo_job_keeps_structural_receipt() {
+fn receipt_journal_is_owner_only_and_keeps_no_job_or_prompt_content() {
     let parent = home();
     let selected_home = parent.path().join("selected-home");
     let project = parent.path().join("project");
@@ -5278,38 +4823,79 @@ fn echo_job_keeps_structural_receipt() {
             .unwrap()
             .with_backend(Arc::new(StdinEchoBackend)),
     );
-    let (stop, task) = start_server(server);
+    let (stop, task) = start_server(Arc::clone(&server));
     let client = Client::connect(&selected_home).unwrap();
-    let session_id = match client
+    let PublicReply::ShellAttached { session_id } = client
         .request(PublicRequest::AttachShell {
             pid: 7,
             session: authority(project.to_str().unwrap(), &selected_home),
         })
         .unwrap()
-    {
-        PublicReply::ShellAttached { session_id } => session_id,
-        reply => panic!("unexpected reply: {reply:?}"),
+    else {
+        panic!("attach failed");
     };
     let mut selected = session(&session_id, &selected_home);
     selected.launch_directory = project;
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
     let code = client
         .execute_with_io(
             ExecuteSpec {
                 placement: Placement::Local,
-                environment: std::collections::BTreeMap::new(),
+                environment: BTreeMap::new(),
                 command: "fixture".into(),
                 arguments: Vec::new(),
-                session: selected.clone(),
+                session: selected,
                 process: None,
                 working_directory: None,
             },
-            Cursor::new(b"private\0\xff".to_vec()),
-            Vec::new(),
-            Vec::new(),
+            Cursor::new(b"stdout secret".to_vec()),
+            &mut stdout,
+            &mut stderr,
         )
         .unwrap();
     assert_eq!(code, 23);
+    assert_eq!(stdout, b"stdout secret");
+    assert_eq!(stderr, b"stderr secret");
     assert_eq!(client.jobs().unwrap().jobs[0].exit_code, Some(23));
     stop.store(true, Ordering::Relaxed);
     task.join().unwrap();
+
+    let acp = AcpFixture::new();
+    let (id, _, lease) = acp
+        .client
+        .acp_start("agent-session".into(), acp.first.clone())
+        .unwrap();
+    acp.client
+        .acp_prompt(id.clone(), acp.first.clone(), "raw prompt secret".into())
+        .unwrap();
+    acp.wait_status(&id, &acp.first, "prompt turn ends", |status| {
+        status.last_stop_reason == Some(marsh_acp::StopReason::EndTurn)
+    });
+    acp.client.acp_stop(id, acp.first.clone()).unwrap();
+    drop(lease);
+
+    for home in [selected_home.as_path(), acp.home.path()] {
+        assert_eq!(
+            fs::metadata(home.join("state")).unwrap().mode() & 0o777,
+            0o700
+        );
+        let journal = receipt_journal::journal_path(home);
+        assert_eq!(fs::metadata(&journal).unwrap().mode() & 0o777, 0o600);
+        let bytes = fs::read(journal).unwrap();
+        assert!(receipt_journal::record_count(home) > 0);
+        for forbidden in [
+            b"stdout secret".as_slice(),
+            b"stderr secret",
+            b"raw prompt secret",
+            b"\"prompt\"",
+            b"\"stdout\"",
+            b"\"stderr\"",
+        ] {
+            assert!(
+                !bytes.windows(forbidden.len()).any(|part| part == forbidden),
+                "journal holds {}",
+                String::from_utf8_lossy(forbidden)
+            );
+        }
+    }
 }

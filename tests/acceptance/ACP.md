@@ -18,8 +18,8 @@ python3 tests/acceptance/acp_uat.py \
 `--build-receipt` is optional for `make dev` runs (as in `smoke.py`); without it
 only the source identity is recorded and the run is not release evidence. The
 packaged source Kits under `kits/` need staged `dhi-notices`/`image-repair`
-inputs before stock SBX can build them, so `mcp_load_uat.py`,
-`mcp_gateway_uat.py`, and `acp_mcp_uat.py` accept `--commands FILE` to overlay
+inputs before stock SBX can build them, so `mcp_load_uat.py` and
+`mcp_gateway_uat.py` accept `--commands FILE` to overlay
 the isolated scope's `commands.json` with staged sources or published digests.
 
 With a receipt, evidence requires the exact source tree at the specified revision, including
@@ -179,20 +179,11 @@ old receipts. The exact CLI process test also distinguishes a connection failure
 before dispatch from a discarded real daemon acceptance reply:
 
 
-```sh
-export PATH=/home/agent/.cargo/bin:$PATH
-export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
-# Use a new empty target for each independent source snapshot.
-export CARGO_TARGET_DIR=/tmp/marsh-acp-$(date +%s)-target
-cargo test -p marsh-acp --test fixture_caller --test capture_backpressure -- --test-threads=1
-cargo build -p marsh --bin marsh
-MARSH_ACP_CALLER_BIN="$CARGO_TARGET_DIR/debug/marsh" \
-  cargo test -p marsh-acp --test fixture_caller cli_stdin -- --ignored --nocapture
-docs/model/check.sh 'Grants*.cfg'
-```
+`make test-rust` runs all of it, including the ignored real-CLI callers (with
+`MARSH_ACP_CALLER_BIN` set to the freshly built `marsh` and an owner-only
+`HOME`); `make test-model` checks the Grants specs.
 
-Record source hashes and the exact executable paths/SHA256 before execution;
-never reuse a target across copied source trees based on copied mtimes. These
+These
 tests substitute only Kit launch and host registration with a bounded
 local fixture process and declaration writer. They do not qualify VMs, stock
 Gateway loading or packaged cleanup. Publication,
@@ -306,26 +297,6 @@ before upgrading.
 For published MCP tools inside child ACP sessions, the Claude and Codex Kits'
 ACP modes add only the validated sandbox-local stock Gateway to `session/new`.
 Preload the tool into the exact Kit VM; publication in the project alone does
-not load it. The focused `acp_mcp_uat.py --agent claude-session|codex-session`
-journey checks the packaged adapter's advertised HTTP MCP capability, a real
-model tool call, the pipeline's `FOO` side effect and answer, one-time approval
-of only the named tool when required, and full isolated cleanup. The pinned Pi
-ACP adapter does not connect ACP-provided MCP servers. Its packaged Pi process
-loads the same image-owned Gateway extension as plain Pi, exposing the generic
-`mcp_gateway_list` and `mcp_gateway_call` tools to the model. The separate
-`pi_mcp_uat.py` journey loads one publication into the pi Kit VM, then
-checks a real plain Pi and Pi ACP model call, the pipeline's `FOO` side effect
-and answer, and full isolated cleanup.
-
-After `make build` (or the single-step `make dev`), run `real_acp_uat.py --agent NAME --live` for each of
-`claude-session`, `codex-session`, and `pi-session`. It opens a disposable
-stock-SBX scope, starts the packaged agent Kit in ACP mode, sends two prompts in one session
-and a third after reopening in the same selected home, checks all streamed
-`PONG` replies and `end_turn` states, stops both jobs, and
-requires complete scope cleanup. It writes candidate and artifact hashes plus
-the observed stock-SBX credential mode to `target/acceptance/real-acp/`. The
-source and artifacts must match the observed build receipt. Configure
-the corresponding service with `sbx secret set anthropic`
-or `sbx secret set openai` first. With no OpenAI secret, use
-`--agent codex-session --expect-auth-required` to check the visible failure and
-cleanup path; that does not qualify Codex's live-model flow.
+not load it. Live model journeys (a real Claude, Codex or Pi turn) are billed
+and are not part of this repository's suites; the fixture agent (`acp_uat.py`)
+and `mcp_load_uat.py` cover the product side of both paths.

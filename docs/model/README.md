@@ -1,6 +1,6 @@
 # Lean cross-component model
 
-Six small TLA+ modules specify the cross-component state of the lean product.
+Five small TLA+ modules specify the cross-component state of the lean product.
 They are bounded executable specifications, not proofs that the Rust code refines them.
 
 - `Ownership.tla`: one daemon per selected home, stock SBX as a name -> VM table that
@@ -27,15 +27,6 @@ They are bounded executable specifications, not proofs that the Rust code refine
   module specifies a default (untargeted) MCP publication: the daemon's record, one Kit VM
   that is created and removed, shell and host-terminal revocation, and loading only at VM
   create after re-checking the declaration.
-- `Split.tla` (the retired `split-join.md` design; implemented by patches `0033`/`0034`, `split_workspace.rs`,
-  and `marsh-daemon/src/split_confinement.rs`): one `split { } | join | CMD...` over
-  private workspaces (Git worktrees or copies): one snapshot, workspace allocate/abort,
-  branch run/exit/capture, Ctrl-C with confirmed reap or unconfirmed (`unreaped`) grace
-  expiry, the downstream stages ("join"), remove or retain-and-report after the last stage
-  exits, shell crash, and the next split's non-destructive scan. The user edits the project
-  at any time; branch shell processes write only below their cwd (assumption C1), while a
-  branch's Kit job is confined by its mounts (one representative branch starts one).
-  Superseded by `Workspace.tla`; the shell-side split is deleted.
 - `Workspace.tla` (`../design/workspaces.md`; built in `marsh-daemon/src/split.rs`): daemon-owned workspaces and split
   lineage. The daemon journals each split, snapshots the caller's tree (the user's tree for a
   session, the creator branch's fork for a nested split), clones sibling forks, and runs every
@@ -67,8 +58,7 @@ Invariants: `NoForeignEffect`, `OwnedAreOurs`, `NoLeak`, `ChildNoLeak`, `ChildCo
 without its session), `ChildCapacity`, `MapsDisjoint` (Ownership); `CapacityBound`, `NoReplay`,
 `NoStartOnQuarantined`, `LossIsUncertain`, `MountRefcount`, `NoStaleSourceUse`,
 `CancelScoped` (Worker); `RevokedGrantInert`, `GrantTargetBound`, `OneTimePermission`,
-`DefaultSparesRunning`, `DefaultRevokedInert`, `DefaultReachesNewVms` (Grants); `NoWriteToUserTreeBeforeJoin`, `OneBase`, `JoinSeesAllBranches`, `NoRemoveWhileLive`,
-`CancelReapsAll`, `CleanupOrRetain`, `BranchJobConfined` (Split); `SnapshotImmutable`, `AdminReadOnly`,
+`DefaultSparesRunning`, `DefaultRevokedInert`, `DefaultReachesNewVms` (Grants); `SnapshotImmutable`, `AdminReadOnly`,
 `ExposedClean`, `OneBase`, `ChildFromParent`, `ForkIsolation`, `NoWriteToUserTree`,
 `CaptureStable`, `LineageWF`, `BudgetBound`, `LiveUnderLive`, `CancelPropagates`,
 `CancelScoped`, `NoRemoveWhileLive`, `NoReplay`, `WorkspaceRecorded` (Workspace); `LineageWF`,
@@ -76,8 +66,7 @@ without its session), `ChildCapacity`, `MapsDisjoint` (Ownership); `CapacityBoun
 `CancelPropagates`, `RevokedAtRestart`, `RestartUncertain`, `NoReplay`, `EntryOnce`,
 `NoEntryRecursion`, `SameKitBound`, `SpawnSetAttenuates`, `KitVMBound` (Process). Liveness: `ChildCleanedAfterRevoke` (strong
 fairness on host cleanup, which is retried after every restart and inventory),
-`AttemptsTerminate` (weak fairness), `EventuallySettled` (Split; weak fairness on process
-progress and on the next split's scan), and `EventuallySettled` (Workspace; weak fairness on
+`AttemptsTerminate` (weak fairness), and `EventuallySettled` (Workspace; weak fairness on
 daemon steps and process progress, checked in the smaller `Workspace_live_pass.cfg`).
 
 Each module has a `Bug` constant. `Module.cfg` uses `Bug = "none"` and checks every
@@ -88,11 +77,7 @@ consults another grant's map), `childIgnoreRevoke`, `childOverMax`, `childNoInte
 the restart that lost its session). Default-publication controls: `loadRunning` (load
 into the running Kit VM at the next admission: DefaultSparesRunning), `trustRecord` (load
 from the record without re-reading the declaration, so a host-terminal unpublish is
-resurrected: DefaultRevokedInert), and `skipCreateLoad` (DefaultReachesNewVms). Split controls: `fallbackInPlace` (a branch runs in the
-project when its worktree fails), `perBranchSnapshot`, `joinEarly`, `removeUnreaped`,
-`cancelOrphan` (fanout-style drop treated as reaped), `retainSilently`, `noScan`, and
-`kitWholeProject` (a branch's Kit job mounts the whole project and writes the user's tree
-through an absolute path). Workspace controls each remove one guard of a real action: `objectsRW` (store.git mounted
+resurrected: DefaultRevokedInert), and `skipCreateLoad` (DefaultReachesNewVms). Workspace controls each remove one guard of a real action: `objectsRW` (store.git mounted
 rw: SnapshotImmutable), `adminRW` (git admin files mounted rw: AdminReadOnly), `noCaptureCheck`
 (capture skips admin/nested-`.git` verification: ExposedClean), `liveFork` (OneBase),
 `childFromUser` (ChildFromParent), `nestedFork` (ForkIsolation), `wholeProject` and
@@ -157,30 +142,33 @@ Assumptions (outside the model, stated not checked):
 
 Run: `docs/model/check.sh [--quick | --huge | --no-huge] [--cores N] [--workers N] [CONFIG...]`. Configs run
 concurrently inside a core budget (default: the runner's CPUs, at most 8), one TLC process each with its own
-log; the verdict of a config does not depend on scheduling. `--quick` skips the configs marked `slow`
-(`\* marsh-check: slow` on the first line of the `.cfg`; about 30 s to 7 min with two workers, and
-`Workspace_depth3_pass` about 30 min) and is the static gate (`make verify-static`); the default and
-`make regress` run everything. `--huge` / `--no-huge` split the one config that does not fit a CI job with
-its siblings from the rest. `TLC_CACHE=DIR` skips a config whose spec, config, jar and `check.sh` are
-byte-identical to one that already gave its expected verdict; the release run does not set it. This needs
-Docker (or `TLC_RUNNER=java` with a local Java 17+) and the
-TLA+ tools jar at `/private/tmp/marsh-tla2tools-1.8.0.jar` (override with
-`TLA2TOOLS_JAR`). The script exits nonzero if a positive config fails or a
-negative control passes or fails for the wrong reason. The jar is not committed.
+log; the verdict of a config does not depend on scheduling. `--quick` (run by `make test`, about 90 s on 8
+cores) checks every negative control and, for each module, a positive config with every invariant
+(`Ownership.cfg`, `Worker.cfg`, `Grants.cfg`, `Process.cfg`, `Workspace_restart_pass.cfg`) plus the liveness
+configs (`Process_live_pass.cfg`, `Workspace_live_pass.cfg`). It skips only the configs marked
+`\* marsh-check: slow`, the larger positive bounds: `Workspace.cfg` (about 7 min), `Process_caps_pass`,
+`Process_kits_pass`, `Process_kitvms_pass` (about 2 min each), and `Workspace_depth3_pass` (about 30 min).
+The default, CI's model job, and `make regress` run every config. `--huge` / `--no-huge` split the one config
+that does not fit a CI job with its siblings from the rest. `TLC_CACHE=DIR` skips a config whose spec, config,
+jar and `check.sh` are byte-identical to one that already gave its expected verdict (`make test` uses
+`target/tlc-cache`); the release run does not set it. This needs Docker (or `TLC_RUNNER=java` with a local
+Java 17+) and the TLA+ tools jar at `/private/tmp/marsh-tla2tools-1.8.0.jar` (override with
+`TLA2TOOLS_JAR`). The script exits nonzero if a positive config fails or a negative control passes or fails
+for the wrong reason. The jar is not committed.
 
-| Spec action | Intended code location |
+| Spec action | Code location |
 |---|---|
-| Inventory, Use, StartVM, Remove | marsh-sbx stock adapter (inventory cache, UUID-conditional ops) - intended |
+| Inventory, Use, StartVM, Remove | marsh-sbx `lib.rs` `StockSbx::stock_view` (cached `sbx ls --json`, refreshed on demand; `stock_inventory.rs` decodes it) and `classify_vm` -> `vm_ownership.rs` `classify` (owned only with its recorded UUID present, else foreign or absent); `ensure_kit_vm_authorized` / `ensure_shell_vm_inner` (StartVM); `remove_owned_vm` (fresh classification, `sbx rm`, then proves the recorded UUID is gone) |
 | CreateBegin / CreateDo / Record / Restart | marsh-sbx `vm_ownership.rs` (`assign`, `store_view` adopt/drop) |
 | Remove (incl. operator Retire) | marsh-sbx `retire_kit_vm_before` via `marsh workers reset KIT` (a quarantined VM's references, and pins of shells no longer attached, end with the VM) and via `marsh stop`/`reset` `teardown_scope` (lifecycle admission proves no attached shell or running job, so every retained reference ends with the VM) |
 | ChildCreateBegin/Do/Record, ChildOp, ChildRemove | marsh-daemon `dev_broker.rs` (`serve`, `serve_admitted` incl. `Action::Run`: a fresh `run` is a ChildCreate, a reattach a ChildOp; `check_owned`) + `dev_broker/policy.rs`; grant section in marsh-sbx `vm_ownership.rs` (`update_dev_grants`, adoption in `store_view`) |
 | RevokeChild, Restart (revoke all), HostAdoptChild, HostCleanChild | marsh-daemon `dev_broker.rs` (`revoke_session` at session end in marsh-backend `open_shell`, `revoke_all` at `marsh stop`/`marsh reset` and in `marshd` startup, `remove_children`) |
-| Admit / Run / Exit / Cleanup / Cancel | marsh-daemon admission + marsh-worker control - intended |
-| TransportLoss / ReplaceTransport / Retire | marsh-worker transport + marsh-daemon worker registry - intended |
+| Admit / Run / Exit / Cleanup / Cancel | marsh-sbx `StockSbx::launch_worker` (refuses a quarantined VM or a stale worker generation; one `AttemptRoute` per attempt on the VM's retained worker transport); marsh-worker `control.rs` (per-attempt start, exit and cleanup frames) and `transport.rs` (`cancellation`). Not implemented as modeled: a per-VM `CAP`; concurrency is bounded by the daemon's session pool (`marsh-daemon/src/process.rs` `admit`) |
+| TransportLoss / ReplaceTransport / Retire | marsh-sbx `ensure_worker_lease` (a dead or unresponsive transport, `ping_worker`, with live attempts quarantines the VM in `quarantined_workers`; an idle one is replaced under a new worker generation), `WorkerLoss` (the loss diagnostic), `stop_quarantined`, `retire_kit_vm_before` (`marsh workers reset KIT`) |
 | Shell: Admit / Run / Exit / Cleanup | marsh-sbx `shell_supervisor.rs` (`Supervisor::spawn`, `Control::cleanup_session`); guest `marsh/src/shell_supervisor.rs` |
 | Shell: TransportLoss / ReplaceTransport | marsh-sbx `shell_supervisor.rs` (`lose`, `ping`); `ensure_shell_lease` (replace idle, quarantine with live attempts) |
-| Admit (mount ref) / MountFinish | marsh-sbx host_grants / shell_mount_observation - intended |
-| Publish / Revoke / Deliver / Offer / Choose | marsh-daemon acp_bridge, mcp_publication; marsh-acp, marsh-mcp - intended |
+| Admit (mount ref) / MountFinish | marsh-sbx `prepare_job_grants` -> `acquire_shared_grant` (mount on first reference, refcounted in `grant_mount_references`; a source whose identity changed is refused, `SourceChanged`) -> `mount_shared_grant`; `revoke_grants` / `release_session_grant` drop references; `evict_idle_grant_locked` unmounts only an idle mount of a replaced source; shell VMs: `acquire_shell_mount` / `evict_idle_shell_mount` |
+| Publish / Revoke / Deliver / Offer / Choose | marsh-daemon `mcp_publication.rs` `McpHostControl` (`publish`, `publish_acp`, `load`, `unpublish`, `unpublish_acp`, `mark_revocation_pending`); marsh-mcp `acp_export.rs` (every published prompt, status, cancel and permission response carries the declaration `generation`); marsh-daemon `acp_session.rs` `AcpPermissionInbox` (only an offered `allow_once` / `reject_once` option is accepted, and the request leaves `pending` when chosen) |
 | DPublish / DRecord / DRevokeDaemon / DRevokeHost (default MCP publication) | marsh-daemon `lib.rs` `McpPublish` (record after commit: `McpHostControl::record_default`; targeted republish: `drop_default`) and `McpUnpublish` (`drop_default` before revocation); host-terminal unpublish `marsh/src/main.rs` `unpublish_mcp`; record file `marsh-daemon/src/mcp_defaults.rs` |
 | VmCreate (default load; no LazyLoad step exists) | marsh-backend `prepare_one_authorized` (only when `ReadyKitVm::cold_started` and not ephemeral, before `ready_kits` insert) -> `load_default_mcp_publications` -> `mcp_defaults::loadable` (re-reads declaration generation, revoke marker; prunes) -> marsh-sbx `StockSbx::load_mcp_server` |
 | Workspace: Create / Alloc / Refuse | `marsh-daemon/src/split.rs` `SplitEngine::create` -> `plan` (labels, 16-branch cap, depth 3, registered argv, creator-only nesting, argv branches only for a nested creator *and for any job creator* (a top-level job on its capability socket gets no shell branch: the model's `Kit(b)` for a branch-created split, which the code applies to every `Creator::Job`); Refuse = status 2 before effects) -> `setup` (journal record before branches; all I/O by descriptor through `split_fs::Dir` (`O_NOFOLLOW`, `O_EXCL`, `clonefileat` with `CLONE_NOFOLLOW`); `split_fs::snapshot` clones the caller's tree and prunes ignored entries and nested `.git`, one `clonefileat` of `base` per fork, `write_admin`) |

@@ -1,7 +1,5 @@
-//! Integration tests for export-only MCP server mode.
-//!
-//! Tests the real daemon Unix socket protocol, argument validation, option injection prevention,
-//! command registration checks, execution streaming, truncation, and cancellation over real MCP JSON-RPC.
+//! Export-only MCP server mode over real MCP JSON-RPC and the real daemon Unix
+//! socket protocol. Only the daemon backend (the Kit side) is a test double.
 
 use marsh_daemon::{
     AttachmentFrame, DaemonBackend, DaemonError, DaemonStore, ExecuteSpec, LoadSelection,
@@ -12,13 +10,14 @@ use marsh_mcp::{
     WorkspaceIdentity,
 };
 use rmcp::{
-    ClientHandler, ServiceExt,
-    model::{CallToolRequestParams, ClientConfig},
+    ClientHandler, RoleClient, ServiceExt,
+    model::{CallToolRequestParams, CallToolResult, ClientConfig},
+    service::RunningService,
 };
-use serde_json::json;
+use serde_json::{Value, json};
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
+    os::{fd::AsRawFd as _, unix::fs::PermissionsExt},
     path::PathBuf,
     sync::{
         Arc, Mutex,
@@ -27,6 +26,7 @@ use std::{
     thread,
     time::Duration,
 };
+use tokio::sync::Notify;
 
 #[derive(Clone, Debug, Default)]
 struct RecordedExecution {
@@ -37,9 +37,16 @@ struct RecordedExecution {
     home_backing: PathBuf,
 }
 
-enum ReceiptBehavior {
-    Record,
+/// What the Kit job does once its stdin is complete.
+enum Job {
+    /// Writes the injected output, records a receipt, then exits.
+    Complete,
+    /// Exits 0 without recording a receipt.
     ExitWithoutReceipt,
+    /// Drops the attachment without an exit frame.
+    DisconnectEarly,
+    /// Runs until the attachment delivers a signal it obeys.
+    HoldUntilSignalled,
 }
 
 struct TestKitBackend {
@@ -52,11 +59,11 @@ struct TestKitBackend {
     observed_execution: Option<marsh_daemon::ExecutionOutcome>,
     injected_stdout: Vec<u8>,
     injected_stderr: Vec<u8>,
-    delay: Duration,
-    early_disconnect: bool,
-    receipt_behavior: ReceiptBehavior,
+    job: Job,
     ignore_sigint: bool,
     received_signals: Arc<Mutex<Vec<String>>>,
+    started: Arc<Notify>,
+    signalled: Arc<Notify>,
     decoy_session_after_own_job: Arc<Mutex<Option<String>>>,
 }
 
@@ -72,13 +79,34 @@ impl TestKitBackend {
             observed_execution: None,
             injected_stdout: b"test output\n".to_vec(),
             injected_stderr: Vec::new(),
-            delay: Duration::ZERO,
-            early_disconnect: false,
-            receipt_behavior: ReceiptBehavior::Record,
+            job: Job::Complete,
             ignore_sigint: false,
             received_signals: Arc::new(Mutex::new(Vec::new())),
+            started: Arc::new(Notify::new()),
+            signalled: Arc::new(Notify::new()),
             decoy_session_after_own_job: Arc::new(Mutex::new(None)),
         }
+    }
+
+    fn signals(&self) -> Vec<String> {
+        self.received_signals.lock().unwrap().clone()
+    }
+
+    /// Records `signal`; returns true when the job ends because of it.
+    fn on_signal(&self, attachment: &ServerAttachment, signal: &str) -> bool {
+        let obeyed = !self.ignore_sigint || signal != "SIGINT";
+        self.received_signals
+            .lock()
+            .unwrap()
+            .push(signal.to_owned());
+        self.signalled.notify_one();
+        if obeyed {
+            let _ = attachment.send(&AttachmentFrame::Stderr {
+                bytes: format!("interrupted by {signal}").into_bytes(),
+            });
+            let _ = attachment.send(&AttachmentFrame::Exited { code: 130 });
+        }
+        obeyed
     }
 
     fn publish_receipt_before_exit(
@@ -179,21 +207,10 @@ impl DaemonBackend for TestKitBackend {
         let mut stdin_bytes = Vec::new();
         loop {
             match attachment.receive()? {
-                AttachmentFrame::Stdin { bytes } => {
-                    stdin_bytes.extend_from_slice(&bytes);
-                }
-                AttachmentFrame::StdinEof => {
-                    break;
-                }
-                AttachmentFrame::Signal { signal } => {
-                    self.received_signals.lock().unwrap().push(signal.clone());
-                    if !self.ignore_sigint || signal != "SIGINT" {
-                        let _ = attachment.send(&AttachmentFrame::Stderr {
-                            bytes: format!("interrupted by {signal}").into_bytes(),
-                        });
-                        let _ = attachment.send(&AttachmentFrame::Exited { code: 130 });
-                        return Ok(());
-                    }
+                AttachmentFrame::Stdin { bytes } => stdin_bytes.extend_from_slice(&bytes),
+                AttachmentFrame::StdinEof => break,
+                AttachmentFrame::Signal { signal } if self.on_signal(&attachment, &signal) => {
+                    return Ok(());
                 }
                 _ => {}
             }
@@ -206,39 +223,30 @@ impl DaemonBackend for TestKitBackend {
             guest_home: request.session.guest_home.clone(),
             home_backing: request.session.home_backing.clone(),
         });
+        self.started.notify_one();
 
-        if self.early_disconnect {
-            // Drop connection without Exited frame
-            drop(attachment);
-            return Ok(());
-        }
-
-        if self.delay > Duration::ZERO {
-            let deadline = std::time::Instant::now() + self.delay;
-            while std::time::Instant::now() < deadline {
+        match self.job {
+            Job::Complete => {}
+            Job::ExitWithoutReceipt => {
+                return attachment.send(&AttachmentFrame::Exited { code: 0 });
+            }
+            Job::DisconnectEarly => {
+                drop(attachment);
+                return Ok(());
+            }
+            Job::HoldUntilSignalled => loop {
                 match attachment.receive() {
-                    Ok(AttachmentFrame::Signal { signal }) => {
-                        self.received_signals.lock().unwrap().push(signal.clone());
-                        if !self.ignore_sigint || signal != "SIGINT" {
-                            let _ = attachment.send(&AttachmentFrame::Stderr {
-                                bytes: format!("interrupted by {signal}").into_bytes(),
-                            });
-                            let _ = attachment.send(&AttachmentFrame::Exited { code: 130 });
-                            return Ok(());
-                        }
+                    Ok(AttachmentFrame::Signal { signal })
+                        if self.on_signal(&attachment, &signal) =>
+                    {
+                        return Ok(());
                     }
                     Ok(_) => {}
                     Err(_) => return Ok(()),
                 }
-            }
+            },
         }
 
-        if matches!(self.receipt_behavior, ReceiptBehavior::ExitWithoutReceipt) {
-            attachment.send(&AttachmentFrame::Exited { code: 0 })?;
-            return Ok(());
-        }
-
-        // Record a job receipt in store so client.jobs() returns a record
         let kit_ref = self
             .override_receipt_kit_ref
             .clone()
@@ -284,14 +292,16 @@ impl DaemonBackend for TestKitBackend {
     }
 }
 
+/// A real daemon server on a private home, plus the host executables an
+/// export server pins.
 struct TestHarness {
     temp: tempfile::TempDir,
     workspace: PathBuf,
     home: PathBuf,
     marsh: PathBuf,
-    _marshd: PathBuf,
     sbx: PathBuf,
-    server_shutdown: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    server: Option<thread::JoinHandle<()>>,
 }
 
 impl TestHarness {
@@ -302,61 +312,100 @@ impl TestHarness {
         let home = temp.path().join("home");
         fs::create_dir(&home).unwrap();
         fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+        let executable = |name: &str| {
+            let path = temp.path().join(name);
+            fs::write(&path, b"#!/bin/sh\nexit 0\n").unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let marsh = executable("marsh");
+        executable("marshd");
+        let sbx = executable("sbx");
 
-        let marsh = temp.path().join("marsh");
-        fs::write(&marsh, b"#!/bin/sh\nexit 0\n").unwrap();
-        fs::set_permissions(&marsh, fs::Permissions::from_mode(0o755)).unwrap();
-
-        let marshd = temp.path().join("marshd");
-        fs::write(&marshd, b"#!/bin/sh\nexit 0\n").unwrap();
-        fs::set_permissions(&marshd, fs::Permissions::from_mode(0o755)).unwrap();
-
-        let sbx = temp.path().join("sbx");
-        fs::write(&sbx, b"#!/bin/sh\nexit 0\n").unwrap();
-        fs::set_permissions(&sbx, fs::Permissions::from_mode(0o755)).unwrap();
-
-        // Start the real daemon server in a background thread
+        // The socket is bound before the serving thread starts.
         let server = Server::bind(&home).unwrap().with_backend(backend);
-        let shutdown = Arc::new(AtomicBool::new(false));
-        let shutdown_clone = Arc::clone(&shutdown);
-        thread::spawn(move || {
-            while !shutdown_clone.load(Ordering::Relaxed) {
-                if server.serve_one().is_err() {
-                    break;
-                }
-            }
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = Arc::clone(&stop);
+        let server = thread::spawn(move || {
+            server
+                .serve_until(|| stopping.load(Ordering::Acquire))
+                .unwrap();
         });
-
-        // Ensure daemon socket exists before proceeding
-        let paths = marsh_daemon::EndpointPaths::for_home(&home).unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while std::time::Instant::now() < deadline {
-            if paths.socket.exists() {
-                break;
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-
         Self {
             temp,
             workspace,
             home,
             marsh,
-            _marshd: marshd,
             sbx,
-            server_shutdown: shutdown,
+            stop,
+            server: Some(server),
         }
     }
 
     fn host_config(&self) -> HostConfig {
         HostConfig::new(&self.workspace, &self.home, &self.marsh, &self.sbx, false).unwrap()
     }
+
+    /// Serves `declaration` over a Unix socket and connects an MCP client.
+    async fn connect(&self, declaration: ToolDeclaration) -> Connection {
+        let server = ExportMcp::new(ExportConfig::new(self.host_config(), declaration).unwrap());
+        let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
+        let serving = server.clone();
+        let task = tokio::spawn(async move {
+            let _ = serving.serve(server_socket).await.unwrap().waiting().await;
+        });
+        let client = TestClient.serve(client_socket).await.unwrap();
+        Connection {
+            client,
+            server,
+            _task: task,
+        }
+    }
 }
 
 impl Drop for TestHarness {
     fn drop(&mut self) {
-        self.server_shutdown.store(true, Ordering::Relaxed);
+        self.stop.store(true, Ordering::Release);
+        if let Some(server) = self.server.take()
+            && server.join().is_err()
+            && !thread::panicking()
+        {
+            panic!("daemon server thread panicked");
+        }
     }
+}
+
+struct Connection {
+    client: RunningService<RoleClient, TestClient>,
+    server: ExportMcp,
+    _task: tokio::task::JoinHandle<()>,
+}
+
+impl Connection {
+    async fn call(&self, arguments: Value) -> CallToolResult {
+        self.client.call_tool(call_params(arguments)).await.unwrap()
+    }
+}
+
+fn call_params(arguments: Value) -> CallToolRequestParams {
+    let Value::Object(arguments) = arguments else {
+        panic!("tool arguments must be an object: {arguments}");
+    };
+    CallToolRequestParams::new("project_test").with_arguments(arguments)
+}
+
+fn structured(result: &CallToolResult) -> &Value {
+    result.structured_content.as_ref().unwrap()
+}
+
+fn error_text(result: &CallToolResult) -> &str {
+    structured(result)["error"].as_str().unwrap()
+}
+
+async fn notified(notify: &Notify, what: &str) {
+    tokio::time::timeout(Duration::from_secs(20), notify.notified())
+        .await
+        .unwrap_or_else(|_| panic!("timed out waiting for {what}"));
 }
 
 fn make_declaration(command: &str) -> ToolDeclaration {
@@ -404,6 +453,20 @@ fn make_declaration(command: &str) -> ToolDeclaration {
     }
 }
 
+fn pipeline_declaration(harness: &TestHarness) -> ToolDeclaration {
+    let mut declaration = make_declaration("");
+    declaration.pipeline = Some("printf safe".into());
+    declaration.publication_generation = Some("00000000-0000-4000-8000-000000000001".into());
+    declaration.bindings.argv.clear();
+    declaration.bindings.stdin = None;
+    declaration.input_schema =
+        json!({"type": "object", "properties": {}, "additionalProperties": false});
+    declaration.canonical_workspace = Some(harness.workspace.clone());
+    declaration.workspace_identity =
+        Some(WorkspaceIdentity::for_directory(&harness.workspace).unwrap());
+    declaration
+}
+
 #[derive(Clone, Debug, Default)]
 struct TestClient;
 
@@ -415,82 +478,21 @@ impl ClientHandler for TestClient {
 
 #[tokio::test]
 async fn test_tools_list_exposes_only_published_tool() {
-    let backend = Arc::new(TestKitBackend::new(vec!["test-report".into()]));
-    let harness = TestHarness::new(backend);
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let tools = client.list_all_tools().await.unwrap();
+    let harness = TestHarness::new(Arc::new(TestKitBackend::new(vec!["test-report".into()])));
+    let connection = harness.connect(make_declaration("test-report")).await;
+    let tools = connection.client.list_all_tools().await.unwrap();
 
     assert_eq!(tools.len(), 1);
-    let tool = &tools[0];
-    assert_eq!(tool.name, "project_test");
-    assert_eq!(tool.description.as_deref(), Some("Run project tests"));
-
-    // Verify dev MCP tools are completely absent
-    for forbidden in [
-        "shell_run",
-        "qualify",
-        "doctor",
-        "status",
-        "results_list",
-        "scope_start",
-        "scope_run",
-        "workers_reset",
-        "prewarm",
-    ] {
-        assert!(
-            tools.iter().all(|t| t.name != forbidden),
-            "forbidden tool '{forbidden}' must not be exposed"
-        );
-    }
+    assert_eq!(tools[0].name, "project_test");
+    assert_eq!(tools[0].description.as_deref(), Some("Run project tests"));
 }
 
 #[tokio::test]
 async fn published_pipeline_rejects_replaced_project_for_live_and_restarted_clients() {
-    let backend = Arc::new(TestKitBackend::new(vec![]));
-    let harness = TestHarness::new(backend);
+    let harness = TestHarness::new(Arc::new(TestKitBackend::new(vec![])));
     fs::write(&harness.marsh, b"#!/bin/sh\nprintf ran > \"$PWD/marker\"\n").unwrap();
-    let mut declaration = make_declaration("");
-    declaration.pipeline = Some("printf safe".into());
-    declaration.publication_generation = Some("00000000-0000-4000-8000-000000000001".into());
-    declaration.bindings.argv.clear();
-    declaration.input_schema = json!({
-        "type": "object",
-        "properties": {"input": {"type": "string"}},
-        "additionalProperties": false
-    });
-    declaration.bindings.stdin = Some(StdinBinding {
-        field: "input".into(),
-        max_bytes: 4096,
-    });
-    declaration.canonical_workspace = Some(harness.workspace.clone());
-    declaration.workspace_identity =
-        Some(WorkspaceIdentity::for_directory(&harness.workspace).unwrap());
-    let config = ExportConfig::new(harness.host_config(), declaration.clone()).unwrap();
-    let server = ExportMcp::new(config);
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-    let client = TestClient.serve(client_transport).await.unwrap();
+    let declaration = pipeline_declaration(&harness);
+    let connection = harness.connect(declaration.clone()).await;
 
     let moved = harness.temp.path().join("moved-project");
     let alternate = harness.temp.path().join("alternate-project");
@@ -498,20 +500,14 @@ async fn published_pipeline_rejects_replaced_project_for_live_and_restarted_clie
     fs::create_dir(&alternate).unwrap();
     std::os::unix::fs::symlink(&alternate, &harness.workspace).unwrap();
 
-    let response = client
-        .call_tool(CallToolRequestParams::new("project_test"))
-        .await
-        .unwrap();
+    let response = connection.call(json!({})).await;
     assert_eq!(response.is_error, Some(true));
     assert!(!alternate.join("marker").exists());
     assert!(ExportConfig::new(harness.host_config(), declaration).is_err());
 
     fs::remove_file(&harness.workspace).unwrap();
     fs::create_dir(&harness.workspace).unwrap();
-    let response = client
-        .call_tool(CallToolRequestParams::new("project_test"))
-        .await
-        .unwrap();
+    let response = connection.call(json!({})).await;
     assert_eq!(response.is_error, Some(true));
     assert!(!harness.workspace.join("marker").exists());
 }
@@ -524,33 +520,11 @@ async fn published_pipeline_passes_persisted_project_identity_to_host_child() {
         b"#!/bin/sh\nprintf '%s\\n%s\\n%s' \"$MARSH_MCP_EXPECTED_PROJECT_PATH\" \"$MARSH_MCP_EXPECTED_PROJECT_DEV\" \"$MARSH_MCP_EXPECTED_PROJECT_INO\"\n",
     )
     .unwrap();
-    let mut declaration = make_declaration("");
-    declaration.pipeline = Some("printf safe".into());
-    declaration.publication_generation = Some("00000000-0000-4000-8000-000000000001".into());
-    declaration.bindings.argv.clear();
-    declaration.bindings.stdin = None;
-    declaration.input_schema =
-        json!({"type": "object", "properties": {}, "additionalProperties": false});
-    declaration.canonical_workspace = Some(harness.workspace.clone());
-    let identity = WorkspaceIdentity::for_directory(&harness.workspace).unwrap();
-    declaration.workspace_identity = Some(identity);
-    let config = ExportConfig::new(harness.host_config(), declaration).unwrap();
-    let server = ExportMcp::new(config);
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let response = client
-        .call_tool(CallToolRequestParams::new("project_test"))
-        .await
-        .unwrap();
-    let result = response.structured_content.unwrap();
+    let declaration = pipeline_declaration(&harness);
+    let identity = declaration.workspace_identity.unwrap();
+    let connection = harness.connect(declaration).await;
+    let response = connection.call(json!({})).await;
+    let result = structured(&response);
     assert_eq!(
         result["data"]["stdout"],
         format!(
@@ -563,213 +537,104 @@ async fn published_pipeline_passes_persisted_project_identity_to_host_child() {
     );
 }
 
+/// A published pipeline's host marsh starts only while no descriptor is
+/// between creation and close-on-exec (macOS std), so it never inherits one.
+#[tokio::test]
+async fn published_pipeline_host_child_never_inherits_a_descriptor_being_created() {
+    let harness = TestHarness::new(Arc::new(TestKitBackend::new(vec![])));
+    fs::write(&harness.marsh, b"#!/bin/sh\nls /dev/fd | tr '\\n' ' '\n").unwrap();
+    let connection = harness.connect(pipeline_declaration(&harness)).await;
+    let (held, creating) = std::sync::mpsc::channel();
+    let creator = thread::spawn(move || {
+        marsh_runtime::with_host_descriptor_creation_excluded(|| {
+            let null = fs::File::open("/dev/null").unwrap();
+            let created = rustix::io::fcntl_dupfd_cloexec(&null, 200).unwrap();
+            rustix::io::fcntl_setfd(&created, rustix::io::FdFlags::empty()).unwrap();
+            held.send(created.as_raw_fd()).unwrap();
+            thread::sleep(Duration::from_secs(1));
+            rustix::io::fcntl_setfd(&created, rustix::io::FdFlags::CLOEXEC).unwrap();
+            created
+        })
+    });
+    let created = creating.recv().unwrap().to_string();
+    let response = connection.call(json!({})).await;
+    drop(creator.join().unwrap());
+    let result = structured(&response);
+    let descriptors = result["data"]["stdout"].as_str().unwrap();
+    assert!(!descriptors.is_empty(), "{result}");
+    assert!(
+        !descriptors.split_whitespace().any(|fd| fd == created),
+        "the pipeline's host marsh inherited descriptor {created}: {descriptors}"
+    );
+}
+
 #[tokio::test]
 async fn test_call_tool_rejects_unauthorized_tool_names() {
-    let backend = Arc::new(TestKitBackend::new(vec!["test-report".into()]));
-    let harness = TestHarness::new(backend);
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
+    let harness = TestHarness::new(Arc::new(TestKitBackend::new(vec!["test-report".into()])));
+    let connection = harness.connect(make_declaration("test-report")).await;
     for forbidden in ["shell_run", "qualify", "doctor", "unknown_tool"] {
-        let result = client
+        let result = connection
+            .client
             .call_tool(CallToolRequestParams::new(forbidden))
             .await
             .unwrap();
         assert_eq!(result.is_error, Some(true));
-        let structured = result.structured_content.unwrap();
-        assert_eq!(structured["ok"], false);
-        assert!(
-            structured["error"]
-                .as_str()
-                .unwrap()
-                .contains("export-only server exposes only 'project_test'")
-        );
+        assert_eq!(structured(&result)["ok"], false);
+        assert!(error_text(&result).contains("export-only server exposes only 'project_test'"));
+    }
+}
+
+/// MCP-01 and MCP-02: arguments outside the declared schema, or that would
+/// become options, never reach the daemon.
+#[tokio::test]
+async fn invalid_arguments_are_rejected_before_any_job() {
+    for (arguments, error) in [
+        (
+            json!({"filter": "test1", "injected_unpermitted_field": "dangerous"}),
+            "unknown field 'injected_unpermitted_field' is not permitted",
+        ),
+        (
+            json!({"filter": "--injected-flag"}),
+            "cannot start with '-' (option injection prevented)",
+        ),
+    ] {
+        let backend = Arc::new(TestKitBackend::new(vec!["test-report".into()]));
+        let harness = TestHarness::new(backend.clone());
+        let connection = harness.connect(make_declaration("test-report")).await;
+        let result = connection.call(arguments).await;
+        assert_eq!(result.is_error, Some(true), "{error}");
+        assert_eq!(structured(&result)["ok"], false, "{error}");
+        assert!(error_text(&result).contains(error), "{result:?}");
+        assert!(backend.last_execution.lock().unwrap().is_none(), "{error}");
     }
 }
 
 #[tokio::test]
-async fn test_call_tool_rejects_unknown_field_mcp01() {
-    let backend = Arc::new(TestKitBackend::new(vec!["test-report".into()]));
-    let harness = TestHarness::new(backend.clone());
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "test1",
-        "injected_unpermitted_field": "dangerous"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-
-    assert_eq!(result.is_error, Some(true));
-    let structured = result.structured_content.unwrap();
-    assert_eq!(structured["ok"], false);
-    assert!(
-        structured["error"]
-            .as_str()
-            .unwrap()
-            .contains("unknown field 'injected_unpermitted_field' is not permitted")
-    );
-    assert!(
-        backend.last_execution.lock().unwrap().is_none(),
-        "no job should be created when validation fails"
-    );
-}
-
-#[tokio::test]
-async fn test_call_tool_rejects_option_injection_mcp02() {
-    let backend = Arc::new(TestKitBackend::new(vec!["test-report".into()]));
-    let harness = TestHarness::new(backend.clone());
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "--injected-flag",
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-
-    assert_eq!(result.is_error, Some(true));
-    let structured = result.structured_content.unwrap();
-    assert_eq!(structured["ok"], false);
-    assert!(
-        structured["error"]
-            .as_str()
-            .unwrap()
-            .contains("cannot start with '-' (option injection prevented)")
-    );
-    assert!(
-        backend.last_execution.lock().unwrap().is_none(),
-        "no job should be created when option injection is attempted"
-    );
-}
-
-#[tokio::test]
 async fn test_call_tool_rejects_unregistered_command_mcp03() {
-    // Backend registers "other-cmd", but tool declaration demands "test-report"
-    let backend = Arc::new(TestKitBackend::new(vec!["other-cmd".into()]));
-    let harness = TestHarness::new(backend);
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "valid_test",
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-
+    // The daemon registers "other-cmd"; the declaration demands "test-report".
+    let harness = TestHarness::new(Arc::new(TestKitBackend::new(vec!["other-cmd".into()])));
+    let connection = harness.connect(make_declaration("test-report")).await;
+    let result = connection.call(json!({"filter": "valid_test"})).await;
     assert_eq!(result.is_error, Some(true));
-    let structured = result.structured_content.unwrap();
-    assert_eq!(structured["ok"], false);
-    assert!(
-        structured["error"]
-            .as_str()
-            .unwrap()
-            .contains("command 'test-report' is not registered")
-    );
+    assert_eq!(structured(&result)["ok"], false);
+    assert!(error_text(&result).contains("command 'test-report' is not registered"));
 }
 
 #[tokio::test]
 async fn test_call_tool_success_executes_real_daemon_path() {
     let backend = Arc::new(TestKitBackend::new(vec!["test-report".into()]));
     let harness = TestHarness::new(backend.clone());
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "unit_suite",
-        "coverage": true,
-        "input_data": "sample payload"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
+    let connection = harness.connect(make_declaration("test-report")).await;
+    let result = connection
+        .call(json!({
+            "filter": "unit_suite",
+            "coverage": true,
+            "input_data": "sample payload"
+        }))
+        .await;
 
     assert_eq!(result.is_error, Some(false));
-    let structured = result.structured_content.unwrap();
+    let structured = structured(&result);
     assert_eq!(structured["ok"], true);
     let data = &structured["data"];
     assert_eq!(data["tool_name"], "project_test");
@@ -781,7 +646,7 @@ async fn test_call_tool_success_executes_real_daemon_path() {
     assert_eq!(data["output_complete"], true);
     assert!(data["receipt_selector"].is_string());
 
-    // Verify backend received exact literal argv and stdin without shell interpolation
+    // The daemon receives exact literal argv and stdin, without shell interpolation.
     let recorded = backend.last_execution.lock().unwrap().clone().unwrap();
     assert_eq!(recorded.command, "test-report");
     assert_eq!(recorded.home_backing, harness.home.canonicalize().unwrap());
@@ -816,34 +681,14 @@ async fn observed_worker_outcome_survives_real_mcp_and_daemon_sockets() {
         backend.injected_exit_code = 125;
         backend.observed_execution = Some(serde_json::from_value(observed.clone()).unwrap());
         let harness = TestHarness::new(Arc::new(backend));
-        let server = ExportMcp::new(
-            ExportConfig::new(harness.host_config(), make_declaration("test-report")).unwrap(),
-        );
-        let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
-        let task = tokio::spawn(async move {
-            server
-                .serve(server_socket)
-                .await
-                .unwrap()
-                .waiting()
-                .await
-                .unwrap()
-        });
-        let client = TestClient.serve(client_socket).await.unwrap();
-        let arguments = json!({"filter":"typed", "input_data":"probe"})
-            .as_object()
-            .unwrap()
-            .clone();
-        let result = client
-            .call_tool(CallToolRequestParams::new("project_test").with_arguments(arguments))
-            .await
-            .unwrap();
-        let data = &result.structured_content.as_ref().unwrap()["data"];
+        let connection = harness.connect(make_declaration("test-report")).await;
+        let result = connection
+            .call(json!({"filter":"typed", "input_data":"probe"}))
+            .await;
+        let data = &structured(&result)["data"];
         assert_eq!(data["exit_code"], 125);
         assert_eq!(data["execution"], observed);
         assert!(data["job_id"].is_string());
-        client.cancel().await.unwrap();
-        task.await.unwrap();
     }
 }
 
@@ -852,38 +697,12 @@ async fn test_call_tool_nonzero_exit_code_mcp04() {
     let mut backend = TestKitBackend::new(vec!["test-report".into()]);
     backend.injected_exit_code = 42;
     backend.injected_stderr = b"test error logged\n".to_vec();
-    let backend = Arc::new(backend);
-    let harness = TestHarness::new(backend);
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "failing_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
+    let harness = TestHarness::new(Arc::new(backend));
+    let connection = harness.connect(make_declaration("test-report")).await;
+    let result = connection.call(json!({"filter": "failing_test"})).await;
 
     assert_eq!(result.is_error, Some(true));
-    let structured = result.structured_content.unwrap();
-    let data = &structured["data"];
+    let data = &structured(&result)["data"];
     assert_eq!(data["outcome"], "exit_nonzero");
     assert_eq!(data["exit_code"], 42);
     assert_eq!(data["stderr"], "test error logged\n");
@@ -893,37 +712,13 @@ async fn test_call_tool_nonzero_exit_code_mcp04() {
 async fn test_call_tool_truncates_oversized_output() {
     let mut backend = TestKitBackend::new(vec!["test-report".into()]);
     backend.injected_stdout = vec![b'A'; 2048]; // max_output_bytes is 1024
-    let backend = Arc::new(backend);
-    let harness = TestHarness::new(backend);
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
+    let harness = TestHarness::new(Arc::new(backend));
+    let connection = harness.connect(make_declaration("test-report")).await;
+    let result = connection
+        .call(json!({"filter": "large_output_test"}))
+        .await;
 
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "large_output_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-
-    let structured = result.structured_content.unwrap();
-    let data = &structured["data"];
+    let data = &structured(&result)["data"];
     assert_eq!(data["stdout_truncated"], true);
     assert_eq!(data["output_complete"], false);
     assert_eq!(data["stdout"].as_str().unwrap().len(), 1024);
@@ -932,38 +727,12 @@ async fn test_call_tool_truncates_oversized_output() {
 #[tokio::test]
 async fn test_early_eof_marks_failed_uncertain() {
     let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    backend.early_disconnect = true;
-    let backend = Arc::new(backend);
-    let harness = TestHarness::new(backend);
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
+    backend.job = Job::DisconnectEarly;
+    let harness = TestHarness::new(Arc::new(backend));
+    let connection = harness.connect(make_declaration("test-report")).await;
+    let result = connection.call(json!({"filter": "test1"})).await;
 
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "test1"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-
-    let structured = result.structured_content.unwrap();
-    let data = &structured["data"];
+    let data = &structured(&result)["data"];
     assert_eq!(data["outcome"], "failed");
     assert_eq!(data["cleanup_certainty"], "uncertain");
     assert_eq!(data["output_complete"], false);
@@ -972,29 +741,12 @@ async fn test_early_eof_marks_failed_uncertain() {
 #[tokio::test]
 async fn test_exit_zero_without_receipt_is_not_success() {
     let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    backend.receipt_behavior = ReceiptBehavior::ExitWithoutReceipt;
+    backend.job = Job::ExitWithoutReceipt;
     let harness = TestHarness::new(Arc::new(backend));
-    let server = ExportMcp::new(
-        ExportConfig::new(harness.host_config(), make_declaration("test-report")).unwrap(),
-    );
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({ "filter": "test1" }).as_object().unwrap().clone();
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
+    let connection = harness.connect(make_declaration("test-report")).await;
+    let result = connection.call(json!({ "filter": "test1" })).await;
     assert_eq!(result.is_error, Some(true));
-    let structured = result.structured_content.unwrap();
-    let data = &structured["data"];
+    let data = &structured(&result)["data"];
     assert_eq!(data["outcome"], "failed");
     assert_eq!(data["cleanup_certainty"], "uncertain");
     assert_eq!(data["output_complete"], false);
@@ -1005,25 +757,23 @@ fn run_decoy_job(
     client: &marsh_daemon::Client,
     session_id: &str,
     username: &str,
-    workspace: &std::path::Path,
-    home: &std::path::Path,
-    arg: &str,
+    harness: &TestHarness,
 ) {
     let spec = marsh_daemon::ExecuteSpec {
         process: None,
         placement: marsh_daemon::Placement::Local,
         environment: std::collections::BTreeMap::new(),
         command: "test-report".to_string(),
-        arguments: vec![arg.into()],
+        arguments: vec![b"--decoy-1".to_vec()],
         working_directory: None,
         session: marsh_daemon::SessionSpec {
             session_id: session_id.to_string(),
             username: username.to_string(),
             uid: rustix::process::getuid().as_raw(),
             gid: rustix::process::getgid().as_raw(),
-            launch_directory: workspace.to_path_buf(),
-            guest_home: home.to_path_buf(),
-            home_backing: home.to_path_buf(),
+            launch_directory: harness.workspace.clone(),
+            guest_home: harness.home.clone(),
+            home_backing: harness.home.clone(),
             ephemeral_home: false,
             terminal: false,
             terminal_size: None,
@@ -1043,11 +793,8 @@ fn run_decoy_job(
 async fn test_concurrent_receipt_binding_exact_session() {
     let backend = Arc::new(TestKitBackend::new(vec!["test-report".into()]));
     let harness = TestHarness::new(backend.clone());
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
 
-    // Attach a separate shell session to produce decoy jobs
+    // Attach a separate shell session to produce decoy jobs.
     let client_direct = marsh_daemon::Client::connect(&harness.home).unwrap();
     let username = harness.host_config().username().to_string();
     let authority = marsh_daemon::SessionAuthority {
@@ -1073,42 +820,12 @@ async fn test_concurrent_receipt_binding_exact_session() {
 
     // Pre-populate one decoy, then let the backend create a second decoy
     // *after* the MCP job begins and *before* its receipt lookup.
-    run_decoy_job(
-        &client_direct,
-        &other_session,
-        &username,
-        &harness.workspace,
-        &harness.home,
-        "--decoy-1",
-    );
+    run_decoy_job(&client_direct, &other_session, &username, &harness);
     *backend.decoy_session_after_own_job.lock().unwrap() = Some(other_session.clone());
 
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let mcp_client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "test_receipt"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = mcp_client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-
-    let structured = result.structured_content.unwrap();
-    let data = &structured["data"];
-    let job_id = data["job_id"].as_str().unwrap();
+    let connection = harness.connect(make_declaration("test-report")).await;
+    let result = connection.call(json!({"filter": "test_receipt"})).await;
+    let job_id = structured(&result)["data"]["job_id"].as_str().unwrap();
 
     let all_jobs = client_direct.jobs().unwrap();
     assert_eq!(
@@ -1133,7 +850,7 @@ async fn test_concurrent_receipt_binding_exact_session() {
         "must not bind to earlier decoy"
     );
 
-    // Verify the bound job in the daemon belongs to the exact session created for this call, NOT other_session
+    // The bound job belongs to the session created for this call.
     let receipt = client_direct.job(job_id.to_string()).unwrap();
     assert_ne!(
         receipt.session_id, other_session,
@@ -1143,583 +860,258 @@ async fn test_concurrent_receipt_binding_exact_session() {
     assert_eq!(receipt.command, "test-report");
 }
 
+/// A job still running at the declared timeout is interrupted, then
+/// terminated when it ignores the interrupt.
 #[tokio::test]
-async fn test_timeout_escalates_and_reaps() {
+async fn timeout_interrupts_then_terminates_a_job_that_ignores_interrupt() {
     let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    backend.delay = Duration::from_secs(5);
-    backend.ignore_sigint = true; // Forces escalation to SIGTERM
+    backend.job = Job::HoldUntilSignalled;
+    backend.ignore_sigint = true;
     let backend = Arc::new(backend);
     let harness = TestHarness::new(backend.clone());
-    let mut decl = make_declaration("test-report");
-    decl.timeout_ms = 200; // Fast timeout
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
+    let mut declaration = make_declaration("test-report");
+    declaration.timeout_ms = 200;
+    let connection = harness.connect(declaration).await;
+    let result = connection.call(json!({"filter": "timeout_test"})).await;
 
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "timeout_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let start = std::time::Instant::now();
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-    let elapsed = start.elapsed();
-
-    assert!(
-        elapsed < Duration::from_secs(4),
-        "must reap promptly, took {elapsed:?}"
-    );
-
-    let structured = result.structured_content.unwrap();
-    let data = &structured["data"];
+    let data = &structured(&result)["data"];
     assert_eq!(data["outcome"], "timeout");
     assert_eq!(data["output_complete"], false);
-
-    // Backend must have received SIGINT, and then SIGTERM upon escalation
-    let signals = backend.received_signals.lock().unwrap().clone();
-    assert!(
-        signals.contains(&"SIGINT".to_string()),
-        "must send SIGINT first"
-    );
-    assert!(
-        signals.contains(&"SIGTERM".to_string()),
-        "must escalate to SIGTERM"
-    );
+    assert_eq!(backend.signals(), ["SIGINT", "SIGTERM"]);
 }
 
+/// Server shutdown cancels an in-flight call: the job is interrupted and the
+/// caller receives a cancelled result.
 #[tokio::test]
-async fn test_kit_identity_match_succeeds() {
+async fn shutdown_interrupts_an_in_flight_job_and_reports_cancelled() {
     let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    backend
-        .registered_kits
-        .insert("test-report".into(), "local-v3:/path/to/test-kit".into());
-    let backend = Arc::new(backend);
-    let harness = TestHarness::new(backend);
-    let mut decl = make_declaration("test-report");
-    decl.kit_identity = Some("local-v3:/path/to/test-kit".into());
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "kit_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-
-    let structured = result.structured_content.unwrap();
-    assert_eq!(structured["ok"], true);
-}
-
-#[tokio::test]
-async fn test_kit_identity_mismatch_fails_closed() {
-    let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    backend
-        .registered_kits
-        .insert("test-report".into(), "local-v3:/path/to/actual-kit".into());
-    let backend = Arc::new(backend);
-    let harness = TestHarness::new(backend);
-    let mut decl = make_declaration("test-report");
-    decl.kit_identity = Some("local-v3:/path/to/expected-different-kit".into());
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "kit_mismatch_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-
-    assert_eq!(result.is_error, Some(true));
-    let structured = result.structured_content.unwrap();
-    assert_eq!(structured["ok"], false);
-    assert!(
-        structured["error"]
-            .as_str()
-            .unwrap()
-            .contains("does not match declared kit_identity")
-    );
-}
-
-#[tokio::test]
-async fn test_early_disconnect_server_shutdown() {
-    let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    backend.delay = Duration::from_secs(10);
-    let backend = Arc::new(backend);
-    let harness = TestHarness::new(backend);
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let server_clone = server.clone();
-    let server_task = tokio::spawn(async move {
-        let running = server_clone.clone().serve(server_transport).await.unwrap();
-        let _ = running.waiting().await;
-        server_clone.shutdown_server().await
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "disconnect_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    // Start call in background
-    let call_task = tokio::spawn(async move {
-        let _ = client
-            .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-            .await;
-    });
-
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    // Simulate early disconnect / transport drop
-    drop(call_task);
-
-    // Shutdown completes boundedly without leaking or hanging
-    let start = std::time::Instant::now();
-    let shutdown_res = tokio::time::timeout(Duration::from_secs(5), server.shutdown_server()).await;
-    assert!(shutdown_res.is_ok(), "shutdown must finish within timeout");
-    assert!(start.elapsed() < Duration::from_secs(4));
-    let _ = server_task.await;
-}
-
-#[tokio::test]
-async fn test_cancel_escalates_and_reaps() {
-    let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    backend.delay = Duration::from_secs(5);
+    backend.job = Job::HoldUntilSignalled;
     let backend = Arc::new(backend);
     let harness = TestHarness::new(backend.clone());
-    let decl = make_declaration("test-report");
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let server_clone = server.clone();
-    let _server_task = tokio::spawn(async move {
-        let _ = server_clone
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "cancel_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    // Call tool in background
-    let call_future = tokio::spawn(async move {
+    let Connection { client, server, .. } = harness.connect(make_declaration("test-report")).await;
+    let call = tokio::spawn(async move {
         client
-            .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
+            .call_tool(call_params(json!({"filter": "cancel_test"})))
             .await
             .unwrap()
     });
+    notified(&backend.started, "the job to start").await;
 
-    // Wait until tool starts executing in backend
-    let deadline = std::time::Instant::now() + Duration::from_secs(2);
-    while std::time::Instant::now() < deadline {
-        if backend.last_execution.lock().unwrap().is_some() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    server.shutdown_server().await.unwrap();
 
-    // Trigger cancellation via server in-flight cancellation
-    let _ = server.shutdown_server().await;
-
-    let result = call_future.await.unwrap();
-    let structured = result.structured_content.unwrap();
-    let data = &structured["data"];
+    let result = call.await.unwrap();
+    let data = &structured(&result)["data"];
     assert_eq!(data["outcome"], "cancelled");
     assert_eq!(data["output_complete"], false);
-
-    // Backend must have received cancellation signal
-    let signals = backend.received_signals.lock().unwrap().clone();
-    assert!(
-        signals.contains(&"SIGINT".to_string()) || signals.contains(&"SIGTERM".to_string()),
-        "must send signal on cancellation, got: {signals:?}"
-    );
+    assert_eq!(backend.signals(), ["SIGINT"]);
 }
 
+/// A caller that disconnects mid-call does not leave its job running: the
+/// export server (as `marsh-mcp` runs it: serve, wait for the transport to
+/// close, then shut down) interrupts the job and exits cleanly.
 #[tokio::test]
-async fn test_kit_identity_sibling_local_v3_fails() {
+async fn caller_disconnect_interrupts_the_job_and_the_server_exits() {
     let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    // Daemon has registered kit as sibling path (e.g. /path/to/test-kit-sibling)
-    backend.registered_kits.insert(
-        "test-report".into(),
-        "local-v3:/path/to/test-kit-sibling".into(),
-    );
+    backend.job = Job::HoldUntilSignalled;
     let backend = Arc::new(backend);
     let harness = TestHarness::new(backend.clone());
-    let mut decl = make_declaration("test-report");
-    decl.kit_identity = Some("local-v3:/path/to/test-kit".into());
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
+    let server = ExportMcp::new(
+        ExportConfig::new(harness.host_config(), make_declaration("test-report")).unwrap(),
+    );
+    let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
+    let server_task = tokio::spawn(async move {
+        let running = server.clone().serve(server_socket).await.unwrap();
+        let _ = running.waiting().await;
+        server.shutdown_server().await
+    });
+    let client = TestClient.serve(client_socket).await.unwrap();
+    let call = tokio::spawn(async move {
+        let _ = client
+            .call_tool(call_params(json!({"filter": "disconnect_test"})))
             .await;
     });
+    notified(&backend.started, "the job to start").await;
 
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "sibling_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
+    // Dropping the running client closes its transport.
+    call.abort();
+    let _ = call.await;
 
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
+    notified(&backend.signalled, "the job to be interrupted").await;
+    let shutdown = tokio::time::timeout(Duration::from_secs(30), server_task)
         .await
+        .expect("export server did not exit after the caller disconnected")
         .unwrap();
-
-    assert_eq!(result.is_error, Some(true));
-    let structured = result.structured_content.unwrap();
-    assert_eq!(structured["ok"], false);
-    assert!(
-        structured["error"]
-            .as_str()
-            .unwrap()
-            .contains("does not match declared kit_identity")
-    );
-    // Ensure execution did NOT proceed
-    assert!(backend.last_execution.lock().unwrap().is_none());
+    assert_eq!(shutdown, Ok(()));
+    assert_eq!(backend.signals(), ["SIGINT"]);
 }
 
+/// A declared `kit_identity` binds the call to the daemon's registered Kit,
+/// before execution and again against the job receipt.
 #[tokio::test]
-async fn test_registered_kits_error_fails_before_execution() {
-    let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    backend.registered_kits_error = true;
-    let backend = Arc::new(backend);
-    let harness = TestHarness::new(backend.clone());
-    let mut decl = make_declaration("test-report");
-    decl.kit_identity = Some("local-v3:/path/to/test-kit".into());
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
+async fn declared_kit_identity_is_enforced_before_and_after_execution() {
+    const KIT: &str = "local-v3:/path/to/test-kit";
+    struct Case {
+        name: &'static str,
+        registered: Option<&'static str>,
+        query_fails: bool,
+        receipt: Option<&'static str>,
+        error: Option<&'static str>,
+        executes: bool,
+    }
+    for case in [
+        Case {
+            name: "match",
+            registered: Some(KIT),
+            query_fails: false,
+            receipt: None,
+            error: None,
+            executes: true,
+        },
+        Case {
+            name: "sibling path",
+            registered: Some("local-v3:/path/to/test-kit-sibling"),
+            query_fails: false,
+            receipt: None,
+            error: Some("does not match declared kit_identity"),
+            executes: false,
+        },
+        Case {
+            name: "registry query fails",
+            registered: None,
+            query_fails: true,
+            receipt: None,
+            error: Some("cannot query registered kits from daemon"),
+            executes: false,
+        },
+        Case {
+            name: "command has no Kit",
+            registered: None,
+            query_fails: false,
+            receipt: None,
+            error: Some("has no registered kit identity in daemon"),
+            executes: false,
+        },
+        Case {
+            name: "receipt names another Kit",
+            registered: Some(KIT),
+            query_fails: false,
+            receipt: Some("local-v3:/path/to/unexpected-kit"),
+            error: Some("does not match declared kit_identity"),
+            executes: true,
+        },
+    ] {
+        let name = case.name;
+        let mut backend = TestKitBackend::new(vec!["test-report".into()]);
+        if let Some(kit) = case.registered {
+            backend
+                .registered_kits
+                .insert("test-report".into(), kit.into());
+        }
+        backend.registered_kits_error = case.query_fails;
+        backend.override_receipt_kit_ref = case.receipt.map(Into::into);
+        let backend = Arc::new(backend);
+        let harness = TestHarness::new(backend.clone());
+        let mut declaration = make_declaration("test-report");
+        declaration.kit_identity = Some(KIT.into());
+        let connection = harness.connect(declaration).await;
+        let result = connection.call(json!({"filter": "kit_test"})).await;
+        let structured = structured(&result);
 
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "map_err_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-
-    assert_eq!(result.is_error, Some(true));
-    let structured = result.structured_content.unwrap();
-    assert_eq!(structured["ok"], false);
-    assert!(
-        structured["error"]
-            .as_str()
-            .unwrap()
-            .contains("cannot query registered kits from daemon")
-    );
-    // Must fail before execution
-    assert!(backend.last_execution.lock().unwrap().is_none());
+        assert_eq!(
+            backend.last_execution.lock().unwrap().is_some(),
+            case.executes,
+            "{name}"
+        );
+        match (case.error, case.executes) {
+            (None, _) => assert_eq!(structured["ok"], true, "{name}: {structured}"),
+            (Some(error), false) => {
+                assert_eq!(result.is_error, Some(true), "{name}");
+                assert_eq!(structured["ok"], false, "{name}");
+                assert!(error_text(&result).contains(error), "{name}: {structured}");
+            }
+            (Some(error), true) => {
+                assert_eq!(result.is_error, Some(true), "{name}");
+                let data = &structured["data"];
+                assert_eq!(data["outcome"], "failed", "{name}");
+                assert!(data["job_id"].is_string(), "{name}: must return job id");
+                assert!(
+                    data["stderr"].as_str().unwrap().contains(error),
+                    "{name}: {structured}"
+                );
+            }
+        }
+    }
 }
 
+/// The largest permitted output (256 KiB on each stream, dense in multi-byte
+/// UTF-8 and JSON escapes) is delivered complete in a response frame of at
+/// most 1 MiB, measured on the wire.
 #[tokio::test]
-async fn test_registered_kits_missing_map_fails_before_execution() {
+async fn maximum_output_is_delivered_complete_within_one_mib_frame() {
+    use base64::Engine as _;
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
     let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    // backend.registered_kits is empty -> command missing from map
-    backend.registered_kits.clear();
-    let backend = Arc::new(backend);
-    let harness = TestHarness::new(backend.clone());
-    let mut decl = make_declaration("test-report");
-    decl.kit_identity = Some("local-v3:/path/to/test-kit".into());
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "missing_map_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-
-    assert_eq!(result.is_error, Some(true));
-    let structured = result.structured_content.unwrap();
-    assert_eq!(structured["ok"], false);
-    assert!(
-        structured["error"]
-            .as_str()
-            .unwrap()
-            .contains("has no registered kit identity in daemon")
-    );
-    // Must fail before execution
-    assert!(backend.last_execution.lock().unwrap().is_none());
-}
-
-#[tokio::test]
-async fn test_mismatched_postreceipt_returns_failed_with_job_id() {
-    let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    // Pre-execution matches registered_kits
-    backend
-        .registered_kits
-        .insert("test-report".into(), "local-v3:/path/to/test-kit".into());
-    // Post-execution receipt will report mismatched kit_ref
-    backend.override_receipt_kit_ref = Some("local-v3:/path/to/unexpected-kit".into());
-    let backend = Arc::new(backend);
-    let harness = TestHarness::new(backend.clone());
-    let mut decl = make_declaration("test-report");
-    decl.kit_identity = Some("local-v3:/path/to/test-kit".into());
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
-
-    let (server_transport, client_transport) = tokio::io::duplex(65_536);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
-    });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "postreceipt_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
-    let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
-        .await
-        .unwrap();
-
-    assert_eq!(result.is_error, Some(true));
-    let structured = result.structured_content.unwrap();
-    assert_eq!(structured["ok"], false);
-    let data = &structured["data"];
-    assert_eq!(data["outcome"], "failed");
-    assert!(data["job_id"].as_str().is_some(), "must return job id");
-    assert!(
-        data["stderr"]
-            .as_str()
-            .unwrap()
-            .contains("does not match declared kit_identity")
-    );
-    // Execution DID occur
-    assert!(backend.last_execution.lock().unwrap().is_some());
-}
-
-#[tokio::test]
-async fn test_bound_response_data_dual_max_nonascii_escape_outputs() {
-    let mut backend = TestKitBackend::new(vec!["test-report".into()]);
-    // 256 KiB of mixed non-ASCII (4-byte emojis, 3-byte CJK, Cyrillic) and JSON escape characters (\, ", \n, \t, etc.)
     let pattern = "🦀🚀✨\"\\/\n\t\r\x0c你好世界приветαβγδε";
-    let reps = (262_144 / pattern.len()) + 1;
-    let large_bytes = pattern.repeat(reps).into_bytes();
-    backend.injected_stdout = large_bytes[..262_144].to_vec();
-    backend.injected_stderr = large_bytes[..262_144].to_vec();
-    let backend = Arc::new(backend);
-    let harness = TestHarness::new(backend);
-    let mut decl = make_declaration("test-report");
-    decl.max_output_bytes = 262_144;
-    let export_config = ExportConfig::new(harness.host_config(), decl).unwrap();
-    let server = ExportMcp::new(export_config);
+    let large = pattern.repeat(262_144 / pattern.len() + 1).into_bytes();
+    backend.injected_stdout = large[..262_144].to_vec();
+    backend.injected_stderr = large[..262_144].to_vec();
+    let expected = backend.injected_stdout.clone();
+    let harness = TestHarness::new(Arc::new(backend));
+    let mut declaration = make_declaration("test-report");
+    declaration.max_output_bytes = 262_144;
+    let server = ExportMcp::new(ExportConfig::new(harness.host_config(), declaration).unwrap());
 
-    let (server_transport, client_transport) = tokio::io::duplex(2_000_000);
-    let _server_task = tokio::spawn(async move {
-        let _ = server
-            .serve(server_transport)
-            .await
-            .unwrap()
-            .waiting()
-            .await;
+    // server <-> relay <-> client; the relay records each server frame's size.
+    let (server_socket, mut relay_server) = tokio::net::UnixStream::pair().unwrap();
+    let (mut relay_client, client_socket) = tokio::net::UnixStream::pair().unwrap();
+    let largest = Arc::new(Mutex::new(0_usize));
+    let recorded = Arc::clone(&largest);
+    let _server = tokio::spawn(async move {
+        let _ = server.serve(server_socket).await.unwrap().waiting().await;
     });
-
-    let client = TestClient.serve(client_transport).await.unwrap();
-    let args = json!({
-        "filter": "dual_max_test"
-    })
-    .as_object()
-    .unwrap()
-    .clone();
-
+    let _relay = tokio::spawn(async move {
+        let (mut from_server, mut to_server) = relay_server.split();
+        let (mut from_client, mut to_client) = relay_client.split();
+        let upstream = tokio::io::copy(&mut from_client, &mut to_server);
+        let downstream = async {
+            let (mut buffer, mut frame) = (vec![0_u8; 65_536], 0_usize);
+            loop {
+                let count = from_server.read(&mut buffer).await?;
+                if count == 0 {
+                    return Ok::<_, std::io::Error>(());
+                }
+                for &byte in &buffer[..count] {
+                    if byte == b'\n' {
+                        let mut largest = recorded.lock().unwrap();
+                        *largest = (*largest).max(frame);
+                        frame = 0;
+                    } else {
+                        frame += 1;
+                    }
+                }
+                to_client.write_all(&buffer[..count]).await?;
+            }
+        };
+        let _ = tokio::join!(upstream, downstream);
+    });
+    let client = TestClient.serve(client_socket).await.unwrap();
     let result = client
-        .call_tool(CallToolRequestParams::new("project_test").with_arguments(args))
+        .call_tool(call_params(json!({"filter": "dual_max_test"})))
         .await
         .unwrap();
 
-    let structured = result.structured_content.unwrap();
-    let data = &structured["data"];
+    let data = &structured(&result)["data"];
     assert_eq!(data["stdout_truncated"], false);
     assert_eq!(data["stderr_truncated"], false);
     assert_eq!(data["output_complete"], true);
-
-    // Measure the full rmcp CallToolResult frame serialized to JSON
-    let envelope = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "result": {
-            "resultType": "complete",
-            "content": [{ "type": "text", "text": "Exact output bytes and status are in structuredContent." }],
-            "structuredContent": structured,
-            "isError": false
-        }
-    });
-    let frame_bytes = serde_json::to_vec(&envelope).unwrap();
+    let stdout = base64::engine::general_purpose::STANDARD
+        .decode(data["stdout_base64"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(stdout, expected);
+    let largest = *largest.lock().unwrap();
     assert!(
-        frame_bytes.len() <= 1_048_576,
-        "full frame {} must be <= 1 MiB",
-        frame_bytes.len()
-    );
-}
-
-#[tokio::test]
-async fn test_escalate_and_drain_join_error_uncertain() {
-    let backend = Arc::new(TestKitBackend::new(vec!["test-report".into()]));
-    let harness = TestHarness::new(backend);
-    let client_direct = marsh_daemon::Client::connect(&harness.home).unwrap();
-    let authority = marsh_daemon::SessionAuthority {
-        username: harness.host_config().username().to_string(),
-        uid: rustix::process::getuid().as_raw(),
-        gid: rustix::process::getgid().as_raw(),
-        launch_directory: harness.workspace.clone(),
-        guest_home: harness.home.clone(),
-        home_backing: harness.home.clone(),
-        ephemeral_home: false,
-    };
-    let marsh_daemon::PublicReply::ShellAttached { session_id } = client_direct
-        .request(marsh_daemon::PublicRequest::AttachShell {
-            pid: std::process::id(),
-            session: authority,
-        })
-        .unwrap()
-    else {
-        panic!("attach failed")
-    };
-    let spec = marsh_daemon::ExecuteSpec {
-        process: None,
-        placement: marsh_daemon::Placement::Local,
-        environment: std::collections::BTreeMap::new(),
-        command: "test-report".to_string(),
-        arguments: vec![],
-        working_directory: None,
-        session: marsh_daemon::SessionSpec {
-            session_id,
-            username: harness.host_config().username().to_string(),
-            uid: rustix::process::getuid().as_raw(),
-            gid: rustix::process::getgid().as_raw(),
-            launch_directory: harness.workspace.clone(),
-            guest_home: harness.home.clone(),
-            home_backing: harness.home.clone(),
-            ephemeral_home: false,
-            terminal: false,
-            terminal_size: None,
-        },
-    };
-    let execution = client_direct.start_execution(spec).unwrap();
-    let mut panicking_handle: tokio::task::JoinHandle<marsh_mcp::export::TaskOutput> =
-        tokio::task::spawn(async {
-            panic!("simulated task panic for join error test");
-        });
-    let output =
-        marsh_mcp::export::test_escalate_and_drain(&execution, &mut panicking_handle).await;
-    // eof is the 7th element: must be true on join error to guarantee uncertain cleanup certainty
-    assert!(
-        output.6,
-        "early_eof must be true on join error to guarantee uncertain cleanup"
-    );
-    assert!(
-        String::from_utf8_lossy(&output.2).contains("join error"),
-        "stderr must note the join error"
+        largest <= 1_048_576,
+        "response frame of {largest} bytes exceeds 1 MiB"
     );
 }

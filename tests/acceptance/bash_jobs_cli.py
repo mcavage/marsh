@@ -2,7 +2,7 @@
 """Byte-exact public CLI jobs/fg/bg differential, with FIFO-latched children.
 
 Linux evidence runner (uses /proc start times and subreaping for exact cleanup).
-The first --shell must be GNU Bash 5.3.20. No candidate internals are imported.
+The first --shell must be GNU Bash 5.3. No candidate internals are imported.
 Job-control cases get a real controlling PTY, with stdout/stderr kept separate.
 Only reported child PID identities are normalized, never command/status bytes.
 """
@@ -24,6 +24,8 @@ import tempfile
 import termios
 import time
 from dataclasses import dataclass
+
+import bash_report
 
 
 @dataclass
@@ -186,7 +188,7 @@ def proc(pid):
         fields = Path(f'/proc/{pid}/stat').read_bytes().rsplit(b') ', 1)[1].split()
         return {'pid': pid, 'state': fields[0].decode('ascii'), 'ppid': int(fields[1]),
                 'pgid': int(fields[2]), 'sid': int(fields[3]), 'starttime': int(fields[19])}
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):  # the process has just exited
         return None
 
 
@@ -582,6 +584,11 @@ def equivalent(actual, expected):
         and all(actual['lifecycle_checks'].values()) and all(expected['lifecycle_checks'].values())
 
 
+def healthy(result):
+    return (not result['timeout'] and not result['protocol_error'] and not result.get('normalization_errors')
+            and result['cleanup']['clean'] and all(result['lifecycle_checks'].values()))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--shell', action='append', required=True, metavar='LABEL=PATH')
@@ -589,7 +596,9 @@ def main():
     parser.add_argument('--require-exact', action='append', default=[])
     parser.add_argument('--evidence', type=Path, required=True)
     parser.add_argument('--case', action='append', default=[])
+    parser.add_argument('--shard', default='0/1', help='K/N: run every Nth case from the Kth')
     args = parser.parse_args()
+    shard, shards = map(int, args.shard.split('/'))
     if sys.platform != 'linux' or not hasattr(os, 'pidfd_open'):
         parser.error('requires Linux /proc and pidfd cleanup; no unowned-process fallback')
     # Adopt only descendants orphaned by our own test shells; reap exact recorded PIDs.
@@ -603,12 +612,12 @@ def main():
     identities = {label: {'path': str(path), 'sha256': digest(path)} for label, path in binaries.items()}
     version = subprocess.run([binaries[oracle], '--version'], env={'LC_ALL': 'C', 'PATH': '/usr/bin:/bin'},
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, start_new_session=True)
-    if b'GNU bash, version 5.3.20(' not in version.stdout:
-        parser.error('the independent oracle must be actual GNU Bash 5.3.20')
+    if b'GNU bash, version 5.3.' not in version.stdout:
+        parser.error('the independent oracle must be actual GNU Bash 5.3')
     evidence = args.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=False)
     records = []
-    cases = [c for c in corpus() if not args.case or c.name in args.case]
+    cases = [c for c in corpus() if not args.case or c.name in args.case][shard::shards]
     if not cases:
         parser.error('no cases selected')
     for case in cases:
@@ -648,6 +657,11 @@ def main():
                 'negative_controls': negative_controls,
                 'cleanup_failures': sum(not o['cleanup']['clean'] for r in records for o in r['outputs'].values())}
     (evidence / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    if args.require_exact:
+        errors = [] if stable and all(negative_controls) else ['unstable binary or failed negative control']
+        bash_report.write(evidence, {r['name']: bash_report.verdict(healthy(r['outputs'][oracle]),
+                                                                     r['exact'][args.require_exact[0]])
+                                     for r in records}, errors)
     print(json.dumps(manifest, indent=2))
     return int(not stable or not all(negative_controls) or manifest['cleanup_failures'] != 0
                or any(not r['exact'][label] for r in records for label in [oracle, *args.require_exact]))

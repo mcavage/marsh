@@ -527,8 +527,8 @@ alone does not force every agent client to load or discover the tool.
 Claude and Codex ACP sessions (the agent Kits' ACP mode) pass the validated stock Gateway as an HTTP MCP
 server when creating their ACP session. Load the published tool into that Kit
 VM before `acp run`, then use `acp prompt` and approve the exact tool's
-one-time permission if asked. The ACP child path is covered by
-`tests/acceptance/acp_mcp_uat.py` with real model calls and exact scope cleanup.
+one-time permission if asked. The ACP publication path is covered without model calls by the regress suites
+`published-acp` and `published-codex` (`tests/acceptance/published_*_uat.py`).
 Plain Pi and Pi ACP use an image-owned Pi extension instead: Pi exposes
 `mcp_gateway_list` and `mcp_gateway_call` to the model. Ask Pi to list the
 Gateway tools, then call the published name with `{"input":"foo"}` (or the
@@ -537,9 +537,9 @@ listed tool's argument schema). The pinned Pi ACP adapter does not wire ACP
 Gateway, through the stock SBX proxy. Plain Pi and Pi ACP run in the same pi
 Kit VM, so `mcp load NAME --kit pi` serves both for an existing publication
 (use the registered command name in your scope). Every fresh job in a
-loaded Kit VM can use its Gateway tools. `tests/acceptance/pi_mcp_uat.py`
-checks real plain Pi and Pi ACP model calls, exact pipeline side effects, and
-disposable-scope cleanup.
+loaded Kit VM can use its Gateway tools. The `mcp-gateway` regress suite
+(`tests/acceptance/mcp_gateway_uat.py`) checks the Gateway path with the fixture
+Kit; no automated suite makes real Pi model calls.
 
 Host Codex MCP configuration is separate from stock SBX's registration. From a
 macOS terminal in the publishing project, with the same `MARSH_HOME` and

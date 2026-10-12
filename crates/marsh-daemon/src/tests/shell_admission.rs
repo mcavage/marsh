@@ -4,7 +4,6 @@ use super::*;
 use std::{
     process::Stdio,
     sync::atomic::{AtomicI32, AtomicUsize},
-    time::Instant,
 };
 
 #[derive(Default)]
@@ -42,13 +41,15 @@ impl DaemonBackend for Backend {
         _: DaemonStore,
     ) -> Result<(), DaemonError> {
         use std::os::unix::process::CommandExt as _;
-        let mut child = Command::new("/usr/bin/python3")
-            .args(["-c", "import sys; sys.stdin.buffer.read(); sys.exit(42)"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()?;
+        let mut child = fenced(|| {
+            Command::new("/usr/bin/python3")
+                .args(["-c", "import sys; sys.stdin.buffer.read(); sys.exit(42)"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()
+        })?;
         self.starts.fetch_add(1, Ordering::Release);
         let delivery = (|| {
             attachment.send(&AttachmentFrame::ShellReady)?;
@@ -60,19 +61,9 @@ impl DaemonBackend for Backend {
                 }
             }
         })();
+        // Closing its stdin ends the child; its real exit status is the outcome.
         drop(child.stdin.take());
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let status = loop {
-            if let Some(status) = child.try_wait()? {
-                break status;
-            }
-            if Instant::now() >= deadline {
-                child.kill()?;
-                break child.wait()?;
-            }
-            thread::sleep(Duration::from_millis(5));
-        };
-        let actual = status.code().unwrap_or(125);
+        let actual = child.wait()?.code().unwrap_or(125);
         self.actual_exit.store(actual, Ordering::Release);
         if self.uncertain {
             return Err(DaemonError::ShellCleanupUncertain(format!(
@@ -109,13 +100,7 @@ impl Fixture {
                 .with_backend(backend.clone()),
         );
         let stop = Arc::new(AtomicBool::new(false));
-        let serving = Arc::clone(&server);
-        let stopping = Arc::clone(&stop);
-        let task = thread::spawn(move || {
-            serving
-                .serve_until(|| stopping.load(Ordering::Acquire))
-                .unwrap();
-        });
+        let task = serve(&server, &stop);
         let client = Client::connect(home.path()).unwrap();
         let authority = authority(project.to_str().unwrap(), home.path());
         let PublicReply::ShellAttached { session_id } = client
@@ -164,19 +149,31 @@ impl Fixture {
             .map_or(ShellState::Detached, |row| row.state)
     }
     fn wait_state(&self, expected: ShellState) {
-        let deadline = Instant::now() + Duration::from_secs(4);
-        loop {
-            let state = self.state();
-            if state == expected {
-                return;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "session remained {state:?}, expected {expected:?}"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
+        wait_until(&format!("session becomes {expected:?}"), || {
+            self.state() == expected
+        });
     }
+
+    /// Stop the serving loop so the test decides when the daemon accepts.
+    fn pause(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        self.task.take().unwrap().join().unwrap();
+        self.stop.store(false, Ordering::Release);
+    }
+
+    fn resume(&mut self) {
+        self.task = Some(serve(&self.server, &self.stop));
+    }
+}
+
+fn serve(server: &Arc<Server>, stop: &Arc<AtomicBool>) -> thread::JoinHandle<()> {
+    let serving = Arc::clone(server);
+    let stopping = Arc::clone(stop);
+    thread::spawn(move || {
+        serving
+            .serve_until(|| stopping.load(Ordering::Acquire))
+            .unwrap();
+    })
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
@@ -230,7 +227,8 @@ fn duplicate_open_and_public_detach_cannot_release_a_live_generation() {
 
 #[test]
 fn acknowledgement_disconnect_has_no_orphaned_registration_or_running_child() {
-    let f = Fixture::new(false);
+    let mut f = Fixture::new(false);
+    f.pause();
     let mut raw = UnixStream::connect(&f.client.paths.socket).unwrap();
     write_frame(
         &mut raw,
@@ -243,28 +241,22 @@ fn acknowledgement_disconnect_has_no_orphaned_registration_or_running_child() {
     .unwrap();
     raw.shutdown(Shutdown::Both).unwrap();
     drop(raw);
-    // Linux reads the buffered request and admits it, then releases it as
-    // Detached. macOS rejects socket options on a closed peer, so the daemon
-    // drops the request before admission. Either way nothing is orphaned.
-    let deadline = Instant::now() + Duration::from_secs(2);
-    let detached = loop {
-        if f.state() == ShellState::Detached {
-            break true;
-        }
-        if Instant::now() >= deadline {
-            break false;
-        }
-        thread::sleep(Duration::from_millis(10));
-    };
+    // The daemon handles the departed caller's request to completion here.
+    // Linux reads the buffered request, admits it, and releases the session
+    // as Detached (with or without a child, depending on whether the
+    // acknowledgement write failed first); macOS rejects socket options on a
+    // closed peer and drops the request before admission. Either way nothing
+    // is orphaned.
+    let _ = f.server.serve_one();
+    f.resume();
     let starts = f.backend.starts.load(Ordering::Acquire);
-    assert!(starts <= 1);
-    if detached {
+    if f.state() == ShellState::Detached {
+        assert!(starts <= 1, "{starts} children started for one request");
         if starts == 1 {
             assert_eq!(f.backend.actual_exit.load(Ordering::Acquire), 42);
         }
     } else {
-        // Dropped before admission: no child ran and the session is still
-        // admissible (no orphaned attachment registration).
+        // No child ran and the session is still admissible.
         assert_eq!(starts, 0);
         let retry = f.client.start_shell(f.spec.clone()).unwrap();
         assert_eq!(retry.receive().unwrap(), AttachmentFrame::ShellReady);

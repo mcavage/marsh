@@ -1,0 +1,12 @@
+# cargo-nextest: one process per test (make test-rust; CI uses --profile ci).
+# No retries: a test that fails once fails the run.
+
+[profile.default]
+# The longest tests take about 15 s on a 1.5-CPU Linux runner. A test still
+# running at 30 s is reported as slow, and killed and failed by name at 2 min,
+# instead of stalling the job until its timeout.
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+[profile.ci]
+# Report every failure, not just the first.
+fail-fast = false

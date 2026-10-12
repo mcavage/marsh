@@ -1648,6 +1648,7 @@ dependencies = [
  "base64",
  "futures",
  "marsh-daemon",
+ "marsh-runtime",
  "nix",
  "rmcp",
  "rustix",

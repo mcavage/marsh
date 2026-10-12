@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare finite raw-NUL shell-input callers with GNU Bash 5.3.20.
+"""Compare finite raw-NUL shell-input callers with GNU Bash 5.3.
 
 Every case also runs with NUL removed to isolate pre-existing behavior. Inputs,
 HOME, HISTFILE and BASH_ENV are owned fixtures. Only executable spellings in
@@ -117,6 +117,7 @@ def observe(shell: Path, root: Path, home: Path, name: str, route: str, data: by
 
 
 def main() -> int:
+    import bash_report  # here: history_input_probes/nul.py loads this module for its vectors
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--oracle", type=Path, required=True)
@@ -131,8 +132,8 @@ def main() -> int:
         version = subprocess.check_output([executables["gnu"], "--version"],
             env={"PATH": "/usr/bin:/bin", "HOME": str(root), "HISTFILE": str(root / "history")},
             start_new_session=True, timeout=3)
-        if b"version 5.3.20(" not in version:
-            raise SystemExit("GNU oracle must be Bash 5.3.20")
+        if b"version 5.3." not in version:
+            raise SystemExit("GNU oracle must be Bash 5.3")
 
         def normalized(record: dict) -> tuple:
             stderr = bytes.fromhex(record["stderr"])
@@ -164,6 +165,12 @@ def main() -> int:
     summary = {"total": len(rows), "raw_exact": sum(row["raw_exact"] for row in rows),
         "without_nul_exact": sum(row["without_nul_exact"] for row in rows),
         "timeouts": sum(record["timeout"] for row in rows for record in row["runs"].values())}
+    verdicts = {}
+    for row in rows:
+        for variant, field in (("raw", "raw_exact"), ("without-nul", "without_nul_exact")):
+            verdicts[f"{row['case']}@{row['route']}@{variant}"] = bash_report.verdict(
+                not row["runs"]["gnu-" + variant]["timeout"], row[field])
+    bash_report.write(args.evidence, verdicts)
     for name, value in (("identity", identity), ("observations", rows), ("summary", summary)):
         (args.evidence / (name + ".json")).write_text(json.dumps(value, indent=2) + "\n")
     print(json.dumps(summary))

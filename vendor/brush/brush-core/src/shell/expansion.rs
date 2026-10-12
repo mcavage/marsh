@@ -10,9 +10,14 @@ impl<SE: extensions::ShellExtensions> crate::Shell<SE> {
         self.env_str("IFS").unwrap_or_else(|| " \t\n".into())
     }
 
-    /// Returns the first character of the IFS variable, or a space if it is not set.
-    pub(crate) fn get_ifs_first_char(&self) -> char {
-        self.ifs().chars().next().unwrap_or(' ')
+    /// Returns the first character of the IFS variable (a space if it is not
+    /// set), or nothing when it is set but empty: `"$*"` then joins with nothing.
+    pub(crate) fn get_ifs_first_char(&self) -> String {
+        self.ifs()
+            .chars()
+            .next()
+            .map(String::from)
+            .unwrap_or_default()
     }
 
     /// Applies basic shell expansion to the provided string.

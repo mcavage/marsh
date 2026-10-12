@@ -1410,10 +1410,13 @@ impl AcpSessionManager {
             }
         }
         // Four bounded 1 MiB values. Drain independently of the prompt result.
+        // An async task, not a blocking one: the client's turn state holds the
+        // sender until the turn ends, and dropping the runtime waits for every
+        // blocking task, so a turn still in flight would stall that drop.
         let (updates, mut receiver) = mpsc::channel::<serde_json::Value>(4);
         let turn_log = Arc::clone(&session.turn);
-        let collector = self.runtime.spawn_blocking(move || {
-            while let Some(value) = receiver.blocking_recv() {
+        let collector = self.runtime.spawn(async move {
+            while let Some(value) = receiver.recv().await {
                 let mut turn = turn_log
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -2082,7 +2085,7 @@ impl crate::Client {
         let bytes = self
             .encode_acp_prompt(agent_session_id, session, operation_id, text)
             .map_err(Rejected)?;
-        let mut stream = std::os::unix::net::UnixStream::connect(&self.paths.socket)
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)
             .map_err(|error| Rejected(error.into()))?;
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
@@ -2403,10 +2406,10 @@ mod tests {
         );
         let (mut sender, mut receiver) = std::os::unix::net::UnixStream::pair().unwrap();
         sender
-            .set_write_timeout(Some(Duration::from_secs(2)))
+            .set_write_timeout(Some(crate::test_support::PATIENCE))
             .unwrap();
         receiver
-            .set_read_timeout(Some(Duration::from_secs(2)))
+            .set_read_timeout(Some(crate::test_support::PATIENCE))
             .unwrap();
         let send = std::thread::spawn(move || {
             crate::write_frame(

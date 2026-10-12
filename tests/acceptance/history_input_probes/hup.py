@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Signal only owned primary-reader shells; retain exact effects and cleanup."""
-import importlib.util,json,os,signal,subprocess,sys,time
+import importlib.util,json,os,signal,subprocess,sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[3]
 s=importlib.util.spec_from_file_location('h',ROOT/'tests/acceptance/bash_readline_cli.py');h=importlib.util.module_from_spec(s);s.loader.exec_module(h)
@@ -34,21 +34,16 @@ for mode,tty,noedit in modes:
     sent.append(data.hex())
     if tty:c.send(data)
     else:c.child.stdin.write(data);c.child.stdin.flush()
-   def settle(seconds):
-    end=time.monotonic()+seconds
-    while time.monotonic()<end:
-     if tty:c.pump(.02)
-     else:c.track();time.sleep(.01)
    try:
     if tty:c.wait(lambda:h.PROMPT in c.raw)
-    send(setup);end=time.monotonic()+3
+    send(setup)
     while not (work/'ready').exists():
-     settle(.02)
-     if time.monotonic()>end or c.child.poll() is not None:raise RuntimeError('setup handshake')
-    settle(.08);send(partial);settle(.08)
+     c.pump(.01)
+     if c.child.poll() is not None:raise RuntimeError('setup handshake')
+    c.settle();send(partial);c.settle()
     if c.child.poll() is not None:raise RuntimeError('shell exited before owned HUP')
     os.kill(c.child.pid,signal.SIGHUP)
-    settle(.2);survived=c.child.poll() is None;early=effects()
+    c.settle();survived=c.child.poll() is None;early=effects()
     if survived:send(tail)
     if tty:c.finish();stderr=bytes(c.raw)
     else:stdout,stderr=c.child.communicate(timeout=5)

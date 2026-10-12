@@ -1,13 +1,13 @@
-"""Black-box stdio protocol tests for marsh-mcp export-only MCP mode (Cut A).
+"""Black-box stdio protocol tests for marsh-mcp export-only MCP mode.
 
-Verifies that in export-only mode:
-- tools/list publishes ONLY the single explicitly declared tool.
-- Development-control tools (shell_run, qualify, doctor, scope_*) are completely absent.
-- Calling unpublished or dev tools fails closed.
-- Caller-supplied unknown fields are rejected before job creation (MCP-01).
-- Option injection (arguments starting with '-') is rejected before job creation (MCP-02).
-- Missing/unregistered command fails closed (MCP-03).
-- Fixed canonical workspace pinning is enforced.
+In export-only mode:
+- tools/list publishes only the declared tool; development-control tools are
+  absent and calling them fails closed.
+- Unknown fields, option injection and missing required fields are rejected
+  before a daemon is started (MCP-01, MCP-02).
+- Startup refuses unsafe declarations, a different pinned workspace, a missing
+  --home, --scope-root and full SBX control.
+- Pipeline calls preserve bytes, bound output and input, and time out.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 from binary_preflight import required_binary
 
 MCP_BINARY = required_binary("MARSH_MCP_BIN")
-from jsonrpc_peer import JsonRpcPeer
+from jsonrpc_peer import WAIT_TIMEOUT, JsonRpcPeer
 
 
 class ExportMcpProtocolTests(unittest.TestCase):
@@ -39,7 +39,7 @@ class ExportMcpProtocolTests(unittest.TestCase):
         self.fake_marsh.write_text("#!/bin/sh\nexit 0\n")
         self.fake_marsh.chmod(0o755)
         self.fake_marshd = root / "marshd"
-        self.fake_marshd.write_text("#!/bin/sh\nexit 0\n")
+        self.fake_marshd.write_text('#!/bin/sh\n: > "$0.called"\n')
         self.fake_marshd.chmod(0o755)
         self.fake_sbx = root / "sbx"
         self.fake_sbx.write_text("#!/bin/sh\nexit 0\n")
@@ -70,7 +70,7 @@ class ExportMcpProtocolTests(unittest.TestCase):
                 "stdin": {"field": "payload", "max_bytes": 4096},
             },
             "max_output_bytes": 1024,
-            "timeout_ms": 5000,
+            "timeout_ms": 900000,
         }
         self.declaration_path.write_text(json.dumps(self.declaration))
         self.declaration_path.chmod(0o600)
@@ -112,7 +112,7 @@ class ExportMcpProtocolTests(unittest.TestCase):
         ]
         result = subprocess.run(
             command, env=self.environment, cwd=ROOT,
-            capture_output=True, text=True, timeout=5, check=False,
+            capture_output=True, text=True, timeout=WAIT_TIMEOUT, check=False,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires an explicit --home", result.stderr)
@@ -132,7 +132,7 @@ class ExportMcpProtocolTests(unittest.TestCase):
             with self.subTest(extra=extra):
                 result = subprocess.run(
                     base + extra, env=self.environment, cwd=ROOT,
-                    capture_output=True, text=True, timeout=5, check=False,
+                    capture_output=True, text=True, timeout=WAIT_TIMEOUT, check=False,
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(reason, result.stderr)
@@ -147,29 +147,9 @@ class ExportMcpProtocolTests(unittest.TestCase):
             self.assertEqual(
                 tool["description"], "Run project test suite and report results"
             )
-            props = tool["inputSchema"]["properties"]
-            self.assertIn("filter", props)
-            self.assertIn("verbose", props)
-            self.assertIn("payload", props)
-
-            # Dev-control tools must be completely absent (MCP-05)
-            names = {t["name"] for t in listed}
-            for forbidden in [
-                "shell_run",
-                "qualify",
-                "doctor",
-                "status",
-                "results_list",
-                "scope_start",
-                "scope_run",
-                "scope_status",
-                "scope_reset",
-                "scope_stop",
-                "scope_remove",
-                "workers_reset",
-                "prewarm",
-            ]:
-                self.assertNotIn(forbidden, names)
+            self.assertEqual(
+                set(tool["inputSchema"]["properties"]), {"filter", "verbose", "payload"}
+            )
         finally:
             peer.close()
 
@@ -187,65 +167,28 @@ class ExportMcpProtocolTests(unittest.TestCase):
         finally:
             peer.close()
 
-    def test_call_tool_rejects_unknown_field_mcp01(self) -> None:
+    def test_call_tool_rejects_invalid_arguments_mcp01_mcp02(self) -> None:
         peer = self.start_export_peer()
         try:
-            res = peer.request(
-                "tools/call",
-                {
-                    "name": "project_test",
-                    "arguments": {
-                        "filter": "test_auth",
-                        "unpermitted_unknown_arg": "exploit",
-                    },
-                },
-            )["result"]
-            self.assertTrue(res.get("isError"))
-            struct = res.get("structuredContent", {})
-            self.assertFalse(struct.get("ok"))
-            self.assertIn("unknown field 'unpermitted_unknown_arg'", struct.get("error", ""))
+            for arguments, diagnostic in (
+                ({"filter": "test_auth", "unpermitted_unknown_arg": "exploit"},
+                 "unknown field 'unpermitted_unknown_arg'"),
+                ({"filter": "--injected-flag"}, "option injection prevented"),
+                ({"verbose": True}, "missing required field 'filter'"),
+            ):
+                with self.subTest(diagnostic=diagnostic):
+                    res = peer.request(
+                        "tools/call", {"name": "project_test", "arguments": arguments}
+                    )["result"]
+                    self.assertTrue(res.get("isError"))
+                    struct = res.get("structuredContent", {})
+                    self.assertFalse(struct.get("ok"))
+                    self.assertIn(diagnostic, struct.get("error", ""))
+            self.assertFalse(Path(f"{self.fake_marshd}.called").exists(), "a daemon was started")
         finally:
             peer.close()
 
-    def test_call_tool_rejects_option_injection_mcp02(self) -> None:
-        peer = self.start_export_peer()
-        try:
-            res = peer.request(
-                "tools/call",
-                {
-                    "name": "project_test",
-                    "arguments": {
-                        "filter": "--injected-flag",
-                    },
-                },
-            )["result"]
-            self.assertTrue(res.get("isError"))
-            struct = res.get("structuredContent", {})
-            self.assertFalse(struct.get("ok"))
-            self.assertIn("option injection prevented", struct.get("error", ""))
-        finally:
-            peer.close()
-
-    def test_call_tool_rejects_missing_required_field(self) -> None:
-        peer = self.start_export_peer()
-        try:
-            res = peer.request(
-                "tools/call",
-                {
-                    "name": "project_test",
-                    "arguments": {
-                        "verbose": True,
-                    },
-                },
-            )["result"]
-            self.assertTrue(res.get("isError"))
-            struct = res.get("structuredContent", {})
-            self.assertFalse(struct.get("ok"))
-            self.assertIn("missing required field 'filter'", struct.get("error", ""))
-        finally:
-            peer.close()
-
-    def test_serve_mode_with_export_flag(self) -> None:
+    def test_serve_with_declaration_is_export_only(self) -> None:
         peer = self.start_export_peer(mode="serve")
         try:
             listed = peer.request("tools/list", {})["result"]["tools"]
@@ -278,7 +221,8 @@ class ExportMcpProtocolTests(unittest.TestCase):
             str(pinned_path),
         ]
         proc = subprocess.run(
-            cmd, env=self.environment, capture_output=True, text=True
+            cmd, env=self.environment, input="", capture_output=True, text=True,
+            timeout=WAIT_TIMEOUT,
         )
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("pinned to workspace", proc.stderr)
@@ -294,7 +238,7 @@ class ExportMcpProtocolTests(unittest.TestCase):
                         "--home", str(self.home), "--marsh", str(self.fake_marsh),
                         "--sbx", str(self.fake_sbx), "--declaration", str(declaration_path),
                     ],
-                    env=self.environment, cwd=ROOT, capture_output=True, text=True, timeout=5,
+                    env=self.environment, cwd=ROOT, capture_output=True, text=True, timeout=WAIT_TIMEOUT,
                     check=False,
                 )
                 self.assertNotEqual(result.returncode, 0)
@@ -308,7 +252,7 @@ class ExportMcpProtocolTests(unittest.TestCase):
                 "--home", str(self.home), "--marsh", str(self.fake_marsh),
                 "--sbx", str(self.fake_sbx), "--declaration", str(self.declaration_path),
             ],
-            env=self.environment, cwd=ROOT, capture_output=True, text=True, timeout=5,
+            env=self.environment, cwd=ROOT, capture_output=True, text=True, timeout=WAIT_TIMEOUT,
             check=False,
         )
         self.assertNotEqual(result.returncode, 0)
@@ -336,7 +280,8 @@ class ExportMcpProtocolTests(unittest.TestCase):
             str(bad_path),
         ]
         proc = subprocess.run(
-            cmd, env=self.environment, capture_output=True, text=True
+            cmd, env=self.environment, input="", capture_output=True, text=True,
+            timeout=WAIT_TIMEOUT,
         )
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("unsupported JSON Schema keyword 'pattern'", proc.stderr)
@@ -434,7 +379,7 @@ class ExportMcpProtocolTests(unittest.TestCase):
         peer = self.start_export_peer()
         try:
             result = peer.request(
-                "tools/call", {"name": "project_test", "arguments": {}}, timeout=15
+                "tools/call", {"name": "project_test", "arguments": {}}
             )["result"]
             data = result["structuredContent"]["data"]
             self.assertEqual(data["stdout"], "")
@@ -550,7 +495,7 @@ class ExportMcpProtocolTests(unittest.TestCase):
             self.assertTrue(oversized["isError"])
             self.assertIn("exceeds configured limit", oversized["structuredContent"]["error"])
             timed_out = peer.request(
-                "tools/call", {"name": "project_test", "arguments": {"input": "x"}}, timeout=15
+                "tools/call", {"name": "project_test", "arguments": {"input": "x"}}
             )["result"]["structuredContent"]["data"]
             self.assertEqual(timed_out["outcome"], "timeout")
             self.assertEqual(timed_out["cleanup_certainty"], "uncertain")

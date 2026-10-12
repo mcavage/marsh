@@ -1302,7 +1302,7 @@ mod update_loss_tests {
         let client = AcpClient::new(reader, writer, AcpClientConfig::default(), None);
 
         let result = timeout(
-            Duration::from_secs(1),
+            Duration::from_secs(30),
             client
                 .shared
                 .send_request("session/prompt", None, Duration::ZERO, "session/prompt"),
@@ -1333,7 +1333,7 @@ mod update_loss_tests {
         client.shared.is_terminated.store(true, Ordering::Release);
         drop(pending);
 
-        let result = timeout(Duration::from_secs(1), request)
+        let result = timeout(Duration::from_secs(30), request)
             .await
             .expect("registration race must not strand the request")
             .expect("request task must succeed");

@@ -201,7 +201,11 @@ async fn apply_binary_predicate(
     params: &ExecutionParameters,
 ) -> Result<bool, error::Error> {
     match op {
-        ast::BinaryPredicate::StringMatchesRegex => {
+        // The parser gives a pattern that starts with a quote its own predicate,
+        // but it is a regex whose quoted parts match literally, and a match sets
+        // `BASH_REMATCH` like any other.
+        ast::BinaryPredicate::StringMatchesRegex
+        | ast::BinaryPredicate::StringContainsSubstring => {
             let s = expansion::basic_expand_word(shell, params, left).await?;
             let regex = expansion::basic_expand_regex(shell, params, right)
                 .await?
@@ -265,18 +269,6 @@ async fn apply_binary_predicate(
             }
 
             Ok(left != right)
-        }
-        ast::BinaryPredicate::StringContainsSubstring => {
-            let s = expansion::basic_expand_word(shell, params, left).await?;
-            let substring = expansion::basic_expand_word(shell, params, right).await?;
-
-            if shell.options().print_commands_and_arguments {
-                shell
-                    .trace_command(params, std::format!("[[ {s} {op} {substring} ]]"))
-                    .await;
-            }
-
-            Ok(s.contains(substring.as_str()))
         }
         ast::BinaryPredicate::FilesReferToSameDeviceAndInodeNumbers => {
             let left = expansion::basic_expand_word(shell, params, left).await?;
@@ -429,11 +421,13 @@ async fn apply_binary_predicate(
         // operand (treated as a shell pattern).
         // TODO(test): implement case-insensitive matching if relevant via shopt options
         // (nocasematch).
+        // As in Bash, `[[ == ]]` and `[[ != ]]` patterns are extended globs
+        // whether or not `extglob` is set.
         ast::BinaryPredicate::StringExactlyMatchesPattern => {
             let s = expansion::basic_expand_word(shell, params, left).await?;
             let pattern = expansion::basic_expand_pattern(shell, params, right)
                 .await?
-                .set_extended_globbing(shell.options().extended_globbing)
+                .set_extended_globbing(true)
                 .set_case_insensitive(shell.options().case_insensitive_conditionals);
 
             if shell.options().print_commands_and_arguments {
@@ -453,7 +447,7 @@ async fn apply_binary_predicate(
             let s = expansion::basic_expand_word(shell, params, left).await?;
             let pattern = expansion::basic_expand_pattern(shell, params, right)
                 .await?
-                .set_extended_globbing(shell.options().extended_globbing)
+                .set_extended_globbing(true)
                 .set_case_insensitive(shell.options().case_insensitive_conditionals);
 
             if shell.options().print_commands_and_arguments {

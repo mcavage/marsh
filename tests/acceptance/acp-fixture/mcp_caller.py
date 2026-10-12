@@ -13,7 +13,7 @@ import uuid
 
 def main():
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.settimeout(15)
+        connection.settimeout(30)
         connection.connect(sys.argv[1])
         wire = connection.makefile("rwb", buffering=0)
         request_id = 0
@@ -51,7 +51,7 @@ def main():
 
         def collect(receipt):
             cursor, chunks = receipt["start_cursor"], []
-            deadline = time.monotonic() + 15
+            deadline = time.monotonic() + 30
             while True:
                 page = call(action="status", turn_id=receipt["turn_id"], cursor=cursor)
                 assert not page["updates_lost"], page
@@ -75,7 +75,7 @@ def main():
         # can poll after the paced turn is over.
         held, _ = ask("hold")
         cursor, idle = held["start_cursor"], 0
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 30
         while idle < 4:
             page = call(action="status", turn_id=held["turn_id"], cursor=cursor)
             assert page["turn_active"], page
@@ -96,13 +96,13 @@ def main():
         late, _ = ask("late")
         chunks, page = collect(late)
         assert chunks == ["fixture:late"], chunks
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 30
         while page["session_out_of_turn_updates"] != 1:
             assert time.monotonic() < deadline, page
             page = call(action="status", turn_id=late["turn_id"])
             time.sleep(.01)
         oversized, _ = ask("oversize-update")
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 30
         while True:
             page = call(action="status", turn_id=oversized["turn_id"])
             if not page["turn_active"]:
@@ -112,7 +112,7 @@ def main():
             time.sleep(.01)
         older = call(action="status", turn_id=first["turn_id"], cursor=first["start_cursor"])
         assert not older["updates_lost"] and older["last_stop_reason"] == "end_turn", older
-        print(json.dumps(dict(external_mcp_caller="passed", idle_polls=idle, cancel_tail_chunks=201, old_turn_preserved=first["turn_id"], out_of_turn_updates=1)))
+        print(json.dumps(dict(external_mcp_caller="passed")))
 
 
 if __name__ == "__main__":

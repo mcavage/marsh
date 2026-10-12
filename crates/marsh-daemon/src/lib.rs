@@ -3172,6 +3172,26 @@ impl Server {
         self
     }
 
+    /// Replace the host publication budget (default five minutes outside Kit
+    /// preparation and stock calls), e.g. to observe its expiry in seconds.
+    #[must_use]
+    pub fn with_publication_host_budget(mut self, budget: Duration) -> Self {
+        self.mcp_host = self
+            .mcp_host
+            .map(|host| host.with_host_command_budget(budget));
+        self
+    }
+
+    /// Replace how long a publication waits for another operation's scope
+    /// admission (default 30 seconds).
+    #[must_use]
+    pub fn with_publication_admission_wait(mut self, wait: Duration) -> Self {
+        self.mcp_host = self
+            .mcp_host
+            .map(|host| host.with_scope_admission_wait(wait));
+        self
+    }
+
     /// Advertise the same daemon-launch resource snapshot used by its backend.
     #[must_use]
     pub fn with_job_defaults(self, defaults: JobDefaults) -> Self {
@@ -3205,7 +3225,7 @@ impl Server {
     }
 
     pub fn serve_one(&self) -> Result<(), DaemonError> {
-        let (stream, _) = self.lifecycle.listener.accept()?;
+        let stream = marsh_runtime::accept_unix(&self.lifecycle.listener)?;
         self.handler().handle(stream)
     }
 
@@ -3216,8 +3236,8 @@ impl Server {
         self.lifecycle.listener.set_nonblocking(true)?;
         let active_connections = Arc::new(AtomicUsize::new(0));
         while !stop() && !self.shutdown_requested.load(Ordering::Acquire) {
-            match self.lifecycle.listener.accept() {
-                Ok((stream, _)) => {
+            match marsh_runtime::accept_unix(&self.lifecycle.listener) {
+                Ok(stream) => {
                     let Some(permit) = acquire_daemon_connection(&active_connections) else {
                         drop(stream);
                         continue;
@@ -3789,10 +3809,22 @@ impl ConnectionHandler {
                 };
                 // The owner exists before ACK: failure here cannot orphan a
                 // registration or retire a duplicate request's live generation.
-                write_frame(&mut stream, &PublicReply::ShellAccepted)?;
-                stream.set_read_timeout(None)?;
-                stream.set_write_timeout(None)?;
-                let attachment = ServerAttachment::new(stream)?;
+                let accepted = (|| {
+                    write_frame(&mut stream, &PublicReply::ShellAccepted)?;
+                    stream.set_read_timeout(None)?;
+                    stream.set_write_timeout(None)?;
+                    ServerAttachment::new(stream)
+                })();
+                let attachment = match accepted {
+                    Ok(attachment) => attachment,
+                    Err(error) => {
+                        // The shell ends unstarted (its client is gone), so it
+                        // also gives up the ACP controller it holds.
+                        drop(owner);
+                        self.acp.detach_shell(&session_id);
+                        return Err(error);
+                    }
+                };
                 owner.started();
                 let outcome = self
                     .backend
@@ -4785,13 +4817,13 @@ impl ServerAttachment {
     /// Builds an in-process framed attachment for an independently managed
     /// Kit caller. The backend receives `server`; the controller retains `client`.
     pub fn pair() -> Result<(Self, ClientExecution), DaemonError> {
-        let (server, client) = UnixStream::pair()?;
+        let (server, client) = marsh_runtime::unix_stream_pair()?;
         Ok((Self::new(server)?, ClientExecution::new(client)?))
     }
 
     /// In-process shell caller using the same stdin credit window as public `OpenShell`.
     pub fn shell_pair() -> Result<(Self, ClientExecution), DaemonError> {
-        let (server, client) = UnixStream::pair()?;
+        let (server, client) = marsh_runtime::unix_stream_pair()?;
         Ok((Self::new(server)?, ClientExecution::new_shell(client)?))
     }
 
@@ -5107,7 +5139,11 @@ impl Client {
     }
 
     fn shutdown_resident_after_probe(&self) -> Result<(), DaemonError> {
-        let deadline = Instant::now() + RESIDENT_SHUTDOWN_RETRY_TIMEOUT;
+        self.shutdown_resident_after_probe_within(RESIDENT_SHUTDOWN_RETRY_TIMEOUT)
+    }
+
+    fn shutdown_resident_after_probe_within(&self, retry: Duration) -> Result<(), DaemonError> {
+        let deadline = Instant::now() + retry;
         loop {
             let reply = self.request(PublicRequest::Shutdown)?;
             match reply {
@@ -5138,7 +5174,7 @@ impl Client {
         pty: Option<TerminalSize>,
         cwd: Option<PathBuf>,
     ) -> Result<i32, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         write_frame(
             &mut stream,
             &Envelope {
@@ -5160,7 +5196,7 @@ impl Client {
         body: PublicRequest,
         read_timeout: Duration,
     ) -> Result<PublicReply, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_read_timeout(Some(read_timeout))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         write_frame(
@@ -5199,7 +5235,7 @@ impl Client {
         session: SessionSpec,
         reservation_id: Option<String>,
     ) -> Result<(String, String, UnixStream), DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_read_timeout(Some(Duration::from_mins(4)))?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         write_frame(
@@ -5482,8 +5518,8 @@ impl Client {
         let rejected = |error: DaemonError| {
             DaemonError::Publication(PublicationOutcome::rejected(error.to_string()))
         };
-        let mut stream =
-            UnixStream::connect(&self.paths.socket).map_err(|error| rejected(error.into()))?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)
+            .map_err(|error| rejected(error.into()))?;
         // Backend owns cold preparation deadlines. A lost reply after complete
         // dispatch is not a rejection and must never imply remote cancellation.
         stream
@@ -5566,7 +5602,7 @@ impl Client {
     }
 
     pub fn reset_workers(&self, selection: LoadSelection) -> Result<Vec<String>, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         write_frame(
             &mut stream,
@@ -5613,7 +5649,7 @@ impl Client {
         request: PublicRequest,
         timeout: Duration,
     ) -> Result<ScopeLifecycleReport, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         stream.set_write_timeout(Some(Duration::from_secs(5)))?;
         write_frame(
             &mut stream,
@@ -5670,7 +5706,7 @@ impl Client {
         dev: bool,
         mut progress_output: impl Write,
     ) -> Result<PreparationResult, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         write_frame(
             &mut stream,
             &Envelope {
@@ -5782,7 +5818,7 @@ impl Client {
     }
 
     fn start_attached(&self, body: PublicRequest) -> Result<ClientExecution, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         write_frame(
             &mut stream,
             &Envelope {
@@ -5819,7 +5855,7 @@ impl Client {
     /// Send one request and hand back the stream for a streamed exchange
     /// (`SplitCreate`, `SplitJoin`).
     pub fn open_request(&self, request: PublicRequest) -> Result<UnixStream, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         write_frame(
             &mut stream,
             &Envelope {
@@ -5832,7 +5868,7 @@ impl Client {
     }
 
     pub fn start_shell(&self, spec: ShellSpec) -> Result<ClientExecution, DaemonError> {
-        let mut stream = UnixStream::connect(&self.paths.socket)?;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         write_frame(
             &mut stream,
             &Envelope {
@@ -6213,6 +6249,7 @@ impl Drop for SignalRelay {
 #[derive(Clone, Debug)]
 pub struct ClientExecution {
     reader: Arc<Mutex<UnixStream>>,
+    reader_stopped: Arc<AtomicBool>,
     writer: Arc<Mutex<UnixStream>>,
     writer_shutdown: Arc<UnixStream>,
     stdin_window: Option<Arc<StdinWindow>>,
@@ -6335,7 +6372,8 @@ impl ClientExecution {
         let writer = stream.try_clone()?;
         let writer_shutdown = Arc::new(writer.try_clone()?);
         Ok(Self {
-            reader: Arc::new(Mutex::new(stream)),
+            reader: Arc::new(Mutex::new(Self::polled(stream)?)),
+            reader_stopped: Arc::new(AtomicBool::new(false)),
             writer: Arc::new(Mutex::new(writer)),
             writer_shutdown,
             stdin_window: Some(Arc::new(StdinWindow::new())),
@@ -6355,15 +6393,33 @@ impl ClientExecution {
         }
         let writer_shutdown = Arc::new(writer.try_clone()?);
         Ok(Self {
-            reader: Arc::new(Mutex::new(stream)),
+            reader: Arc::new(Mutex::new(Self::polled(stream)?)),
+            reader_stopped: Arc::new(AtomicBool::new(false)),
             writer: Arc::new(Mutex::new(writer)),
             writer_shutdown,
             stdin_window: None,
         })
     }
 
+    /// The receiver wakes every 20 ms: [`Self::shutdown`] cannot rely on the
+    /// socket shutdown alone to wake it (macOS can lose that wakeup). EINVAL
+    /// means the peer has already closed, so reads cannot block.
+    fn polled(stream: UnixStream) -> Result<UnixStream, DaemonError> {
+        if let Err(error) = stream.set_read_timeout(Some(Duration::from_millis(20)))
+            && error.raw_os_error() != Some(rustix::io::Errno::INVAL.raw_os_error())
+        {
+            return Err(error.into());
+        }
+        Ok(stream)
+    }
+
     pub fn receive(&self) -> Result<AttachmentFrame, DaemonError> {
-        self.receive_using(read_frame)
+        self.receive_using(|stream| {
+            read_frame(&mut ShutdownAwareReader {
+                stream,
+                stopped: &self.reader_stopped,
+            })
+        })
     }
 
     fn receive_using(
@@ -6453,7 +6509,37 @@ impl ClientExecution {
         if let Some(window) = &self.stdin_window {
             window.close();
         }
+        self.reader_stopped.store(true, Ordering::Release);
         self.writer_shutdown.shutdown(Shutdown::Both)
+    }
+}
+
+/// Polled reads that end as the local shutdown would (EOF) once it has been
+/// requested, even if the kernel never woke the blocked read.
+struct ShutdownAwareReader<'a> {
+    stream: &'a mut UnixStream,
+    stopped: &'a AtomicBool,
+}
+
+impl Read for ShutdownAwareReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        loop {
+            match self.stream.read(buffer) {
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock
+                            | io::ErrorKind::TimedOut
+                            | io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    if self.stopped.load(Ordering::Acquire) {
+                        return Ok(0);
+                    }
+                }
+                result => return result,
+            }
+        }
     }
 }
 
@@ -6590,6 +6676,8 @@ pub enum DaemonError {
 
 #[cfg(test)]
 extern crate self as marsh_daemon;
+#[cfg(test)]
+mod test_support;
 #[cfg(test)]
 mod tests;
 

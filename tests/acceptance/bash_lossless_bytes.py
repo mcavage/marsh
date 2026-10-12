@@ -13,6 +13,8 @@ Each role uses the same owned native fixture path, with no output normalization.
 """
 import argparse, hashlib, json, os, pathlib, shutil, signal, subprocess, tempfile, time
 
+import bash_report
+
 BAD = b'\xff\xfe'
 MIXED = b'caf\xc3\xa9\xff\xfe\xef\xbf\xbd\xee\x80\x80'
 # ASCII source produces raw bytes without relying on raw-source parsing.
@@ -87,6 +89,8 @@ case('brace-literal-ifs', b'IFS=:; '+DUMP+b' {a:b,c:d}')
 case('brace-empty-fields', DUMP+b' {,} ""')
 case('brace-scalar-assignment', b'v={a,b}; printf "%s" "$v"')
 case('inherited-invalid-env-unset', b"unset $'BAD_\\377'; /usr/bin/python3 -c 'import os; os.write(1, os.environb.get(b\"BAD_\\xff\", b\"missing\"))'", env={b'BAD_\xff': BAD})
+# Thousands of substitutions that grow shell state stay correct.
+case('growing-variable-substitutions', b'for i in $(seq 1 3000); do eval "v$i=\\$(printf %0100d $i)"; done; ( echo ${v2999:0:3} )')
 case('inherited-invalid-env-name', b"/usr/bin/python3 -c 'import os; os.write(1, os.environb.get(b\"BAD_\\xff\", b\"missing\"))'", env={b'BAD_\xff': BAD})
 for locale in (b'C', b'C.utf8'):
     tag=locale.decode('ascii')
@@ -172,7 +176,7 @@ def main():
     if identities['oracle']['sha256']==identities['candidate']['sha256']:
         parser.error('candidate and oracle must be distinct artifacts, not a self-comparison')
     version=bounded_probe([str(binaries['oracle']),'--version'])
-    if b'version 5.3.20' not in version.splitlines()[0]: parser.error('GNU Bash 5.3.20 oracle required')
+    if b'version 5.3.' not in version.splitlines()[0]: parser.error('GNU Bash 5.3 oracle required')
     locales=bounded_probe(['/usr/bin/locale','-a']).splitlines()
     if args.utf8_locale:
         utf8=os.fsencode(args.utf8_locale)
@@ -220,11 +224,14 @@ def main():
                 if test['name'] in exact_oracle and (expected['status']!=0 or expected['stdout_hex']!=exact_oracle[test['name']].hex()):
                     delta.append('oracle-fixture-contract')
                 if expected['timed_out'] or actual['timed_out']: delta.append('timeout')
-                report['cases'].append(dict(name=test['name'],passed=not delta,differences=delta))
+                report['cases'].append(dict(name=test['name'],passed=not delta,differences=delta,
+                    verdict=bash_report.verdict('oracle-fixture-contract' not in delta and not expected['timed_out'], not delta)))
     for role,path in binaries.items():
         identities[role]['stable']=identities[role]['sha256']==digest(path)
     report['passed']=all(row['passed'] for row in report['cases']) and all(info['stable'] for info in identities.values())
     (args.evidence/'result.json').write_text(json.dumps(report,indent=2))
+    bash_report.write(args.evidence,{row['name']:row['verdict'] for row in report['cases']},
+                      [] if all(info['stable'] for info in identities.values()) else ['a binary changed during the run'])
     print(json.dumps(dict(passed=report['passed'],cases=len(report['cases']),failed=sum(not row['passed'] for row in report['cases']))))
     raise SystemExit(0 if report['passed'] else 1)
 
