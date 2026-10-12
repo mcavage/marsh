@@ -1,5 +1,5 @@
 diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
-index 892791e..9ec9255 100644
+index 6abc27b..472f17f 100644
 --- a/brush-core/src/commands.rs
 +++ b/brush-core/src/commands.rs
 @@ -225,9 +225,19 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(

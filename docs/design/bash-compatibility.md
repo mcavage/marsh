@@ -48,8 +48,8 @@ One explicit oracle-version divergence is classified: command-substitution
 marsh's exact `127`; the parent's subsequent wait must still return its child
 status. Candidate failures are not normalized away.
 
-The current corpus has 55 differential test functions (all enabled; one,
-the signal-at-launch check, runs on Linux only), a split `PIPESTATUS` check,
+The current corpus has 55 differential test functions (all enabled), a split
+`PIPESTATUS` check,
 and 53 smoke journeys (51 on Linux, where two macOS `script(1)` job-control
 journeys are compiled out), run on macOS ARM64 with Rust
 1.95.0 and GNU Bash 5.3 and in a Linux arm64 `rust:1.95-bookworm` container

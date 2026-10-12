@@ -411,15 +411,18 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   sends `TERM` to the process group, as in Bash (clap consumed `--` and the
   operand was read as a signal: "invalid signal specification"). Covered by
   `kill_double_dash_negative_operand_terminates_the_group`.
-- `0053` blocks every signal from `fork` until the child has given its caught
-  signals their default actions (an external command's child just before
-  `exec`; a forked subshell once it has set its dispositions), then restores
-  the mask. A signal sent to a command the moment it was launched used to run
-  the shell's handler in the child and be lost: `sleep 3 & kill $!; wait $!`
-  exited 0 about one run in ten on Linux (Bash: 143 always). On Darwin a signal
-  can still be lost while a multithreaded forked shell execs, so the test,
-  `a_signal_sent_right_after_launch_reaches_the_command` (200 launches, Linux),
-  runs on the guest platform only.
+- `0053` makes a signal sent to a command the moment it is launched reach it.
+  A forked shell runs its in-place `exec` (the sole external command of
+  `cmd &`, `( cmd )`, a pipeline stage) on its main thread: Darwin drops a
+  signal, even `SIGKILL`, sent while a secondary thread of a multithreaded
+  process execs, so `sleep 3 & kill $!; wait $!` exited 0 about one run in
+  seven on macOS (Bash: 143 always). And every signal stays blocked from
+  `fork` until the child has given its caught signals their default actions
+  (an external command's child just before `exec`, a forked shell once it has
+  set its dispositions), so one landing in that window no longer runs the
+  shell's handler in the child. Covered by
+  `a_signal_sent_right_after_launch_reaches_the_command` (200 launches each
+  of `TERM` and `KILL`).
 - `0054` delivers a typed line feed to the line editor as a carriage return
   (`INLCR` while reedline reads). reedline stops reading a batch of queued
   input at Enter (CR) and keeps the rest for the next prompt, but a raw LF is

@@ -691,7 +691,7 @@ fn exec_external_command_in_place(
     )?;
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
-    let spawn_err = sys::commands::CommandExt::exec(&mut cmd);
+    let spawn_err = crate::subshell::exec_in_place(cmd);
     if spawn_err.kind() == std::io::ErrorKind::NotFound {
         if !context.shell.working_dir().exists() {
             Err(error::ErrorKind::WorkingDirMissing(context.shell.working_dir().to_owned()).into())

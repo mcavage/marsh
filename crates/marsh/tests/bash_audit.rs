@@ -1352,20 +1352,20 @@ fn kill_double_dash_negative_operand_terminates_the_group() {
     );
 }
 
-/// A signal sent to a command the instant it is launched reaches it: one that
-/// lands between the shell's fork and the command's exec used to run the
-/// shell's own handler in the child and be lost, leaving `sleep` running
-/// (about one run in ten on Linux). Repeated because it is a window (patch `0053`).
-/// Linux only: on Darwin a signal can still be lost while a multithreaded
-/// forked shell execs (docs/upstream/brush/README.md, `0053`); the shell's
-/// product platform is the Linux guest.
-#[cfg(target_os = "linux")]
+/// A signal sent to a command the instant it is launched reaches it. A forked
+/// shell used to exec the command from a secondary thread, and Darwin drops a
+/// signal (even `SIGKILL`) sent during such an exec, leaving `sleep` running
+/// (about one run in seven on macOS); a signal landing between fork and exec
+/// also ran the shell's handler in the child. Repeated because it is a window
+/// (patch `0053`).
 #[test]
 fn a_signal_sent_right_after_launch_reaches_the_command() {
     differential(
-        "n=0; for i in $(seq 200); do sleep 2 & kill $!; wait $!; test $? = 143 && n=$((n+1)); done; echo $n",
+        // Bash reports each killed job on stderr ("Killed: 9"); Brush does not.
+        "exec 2>/dev/null; n=0; for i in $(seq 200); do sleep 2 & kill $!; wait $!; test $? = 143 && n=$((n+1)); \
+         /bin/sleep 2 & kill -KILL $!; wait $!; test $? = 137 && n=$((n+1)); done; echo $n",
         0,
-        b"200\n",
+        b"400\n",
     );
 }
 

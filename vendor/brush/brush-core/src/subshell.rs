@@ -70,7 +70,7 @@ pub(crate) struct Forked {
 pub(crate) use imp::standard_descriptor_closed_at_startup;
 #[cfg(unix)]
 pub(crate) use imp::{
-    available, die_by_signal, fork, restore_trapped_signal, shell_pid, wait_for_pid,
+    available, die_by_signal, exec_in_place, fork, restore_trapped_signal, shell_pid, wait_for_pid,
 };
 #[cfg(unix)]
 pub use imp::{
@@ -123,6 +123,37 @@ mod imp {
     static SIGNAL_SOCKETS: OnceLock<Option<[Vec<RawFd>; 2]>> = OnceLock::new();
     /// Dispositions a forked child replaced, restored if it traps the signal.
     static SAVED_ACTIONS: Mutex<Vec<(i32, libc::sigaction)>> = Mutex::new(Vec::new());
+    /// In a forked child: the main thread, which runs the child's in-place
+    /// `exec` (see [`exec_in_place`]).
+    static MAIN_THREAD_EXEC: Mutex<Option<std::sync::mpsc::Sender<Option<ExecRequest>>>> =
+        Mutex::new(None);
+
+    /// A command for the main thread to exec, and where to report its failure.
+    type ExecRequest = (
+        std::process::Command,
+        std::sync::mpsc::Sender<std::io::Error>,
+    );
+
+    /// Replaces this process with `command`, returning only its error. In a
+    /// forked child the main thread does it: Darwin can drop a signal, even
+    /// `SIGKILL`, sent while a secondary thread of a multithreaded process
+    /// execs, so `sleep 3 & kill $!` could leave `sleep` running.
+    pub(crate) fn exec_in_place(mut command: std::process::Command) -> std::io::Error {
+        use std::os::unix::process::CommandExt as _;
+        let sender = MAIN_THREAD_EXEC.lock().ok().and_then(|main| main.clone());
+        if let Some(sender) = sender {
+            let (reply, failed) = std::sync::mpsc::channel();
+            return match sender.send(Some((command, reply))) {
+                Ok(()) => failed.recv().unwrap_or_else(|_| {
+                    std::io::Error::other("exec on the main thread did not report")
+                }),
+                // The main thread is gone; exec here.
+                Err(std::sync::mpsc::SendError(Some((mut command, _)))) => command.exec(),
+                Err(std::sync::mpsc::SendError(None)) => std::io::Error::other("no command"),
+            };
+        }
+        command.exec()
+    }
 
     static CLOSED_AT_STARTUP: [std::sync::atomic::AtomicBool; 3] = [
         std::sync::atomic::AtomicBool::new(false),
@@ -623,7 +654,20 @@ mod imp {
         // a signal that arrived since then now takes the dispositions set above.
         unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &raw const mask, std::ptr::null_mut()) };
         close_foreign_pipes(keep);
+        let (exec_sender, exec_requests) = std::sync::mpsc::channel::<Option<ExecRequest>>();
+        if let Ok(mut main) = MAIN_THREAD_EXEC.try_lock() {
+            *main = Some(exec_sender.clone());
+        }
+        /// Tells the main thread the body thread is gone, however it ends.
+        struct BodyDone(std::sync::mpsc::Sender<Option<ExecRequest>>);
+        impl Drop for BodyDone {
+            fn drop(&mut self) {
+                let _ = self.0.send(None);
+            }
+        }
+        let done = BodyDone(exec_sender);
         let thread = std::thread::Builder::new().spawn(move || {
+            let _done = done;
             // The parent is waiting for this, and gives up on a child that
             // never gets here. Nothing has run yet, so being given up on is
             // simply the end.
@@ -641,6 +685,12 @@ mod imp {
             exit_child(code)
         });
         if let Ok(thread) = thread {
+            // The body thread exits the process; until then this thread runs
+            // the in-place execs it asks for.
+            while let Ok(Some((mut command, reply))) = exec_requests.recv() {
+                use std::os::unix::process::CommandExt as _;
+                let _ = reply.send(command.exec());
+            }
             let _ = thread.join();
         }
         exit_child(126);
