@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Public shell entry byte builtin differential callers; no text normalization.
 
-GNU 5.3.20 is an external oracle, never the candidate's implementation. Each
+GNU Bash 5.3 is an external oracle, never the candidate's implementation. Each
 invocation owns a fresh SID/PGID. Retain stdout/stderr/status/files as exact hex.
 Run with --candidate only after the atomic parser/core/builtin graph coheres.
 """
@@ -19,6 +19,8 @@ import signal
 import subprocess
 import tempfile
 import time
+
+import bash_report
 
 ROOT = Path(__file__).resolve().parents[2]
 NATIVE = b""
@@ -98,7 +100,8 @@ def cases():
     yield Case("read-timeout-partial-unit", b'IFS= read -r -t 0.1 v; s=$?; printf "<%s>|%s" "$v" "$s"', stdin=b"\xff\xc3", hold_open=True, expected=(b"<\xff\xc3>|142",b"",0))
     yield Case("read-timeout-N-partial-unit", b'IFS= read -r -N 1 -t 0.1 v; s=$?; printf "<%s>|%s" "$v" "$s"', stdin=b"\xc3", hold_open=True)
     yield Case("read-timeout-backslash", b'IFS= read -t 0.1 v; s=$?; printf "<%s>|%s" "$v" "$s"', stdin=b"a\\", hold_open=True)
-    yield Case("read-t0-noassign", b'v=old; read -t 0 v; s=$?; printf "<%s>|%s|" "$v" "$s"; /usr/bin/cat',stdin=b"data\n",expected=(b"<old>|0|data\n",b"",0))
+    # The input is a here-string, already complete when `read -t 0` polls it.
+    yield Case("read-t0-noassign", b'v=old; exec <<<data; read -t 0 v; s=$?; printf "<%s>|%s|" "$v" "$s"; /usr/bin/cat',expected=(b"<old>|0|data\n",b"",0))
     yield Case("mapfile-raw-nul-controls", b'mapfile a; printf "<%s>" "${a[@]}"',stdin=b"\xff\x03\x04\npre\0post\n\xfe",expected=(b"<\xff\x03\x04\n><pre><\xfe>",b"",0))
     yield Case("mapfile-callback-status", b'cb() { printf "cb<%s><%s>" "$1" "$2"; return 7; }; mapfile -t -C cb -c 1 a; s=$?; printf "|%s|" "$s"; printf "<%s>" "${a[@]}"',stdin=b"\xff\n\xfe\n",expected=(b"cb<0><\xff>cb<1><\xfe>|0|<\xff><\xfe>",b"",0))
     yield Case("mapfile-origin-n", b'a=(old keep); mapfile -t -O 1 -n 1 a; printf "<%s>" "${a[@]}"; /usr/bin/cat',stdin=b"\xff\n\xfe\n",expected=(b"<old><\xff>\xfe\n",b"",0))
@@ -227,6 +230,7 @@ def main():
     identity={'binaries':{k:{'path':str(v),'sha256':sha(v)} for k,v in binaries.items()},'harness_sha256':sha(__file__)}
     (ns.evidence/'identity.json').write_text(json.dumps(identity,indent=2)+'\n')
     counts={k:{'exact':0,'different':0,'assertion_failures':0} for k in binaries}
+    verdicts={}
     with tempfile.TemporaryDirectory(prefix='marsh-byte-builtins-') as tmp, (ns.evidence/'observations.jsonl').open('w') as log:
         for locale in (b'C',b'C.utf8'):
             for case in [*cases(), *terminal_cases()]:
@@ -235,6 +239,7 @@ def main():
                 # between runs rather than normalize path bytes in outputs.
                 work=Path(tmp)/'work'; work.mkdir(exist_ok=True)
                 reference=None
+                oracle_valid=True
                 for kind,binary in binaries.items():
                     for path in work.iterdir(): path.unlink()
                     record=(run_terminal if case.name.startswith('tty-') else run)(binary,case,locale,work)
@@ -246,8 +251,11 @@ def main():
                     if reference is None: reference=observable(record)
                     exact=observable(record)==reference
                     counts[kind]['exact' if exact else 'different']+=1
+                    if kind=='oracle': oracle_valid=asserted and not record['timeout'] and not record['survivor']
+                    if kind=='candidate': verdicts[f"{case.name}@{locale.decode()}"]=bash_report.verdict(oracle_valid,exact and asserted)
                     log.write(json.dumps({'case':case.name,'locale':locale.decode(),'binary':kind,'source_hex':case.source.hex(),'asserted':asserted,'exact':exact,**record})+'\n'); log.flush()
     (ns.evidence/'summary.json').write_text(json.dumps(counts,indent=2)+'\n')
+    bash_report.write(ns.evidence,verdicts)
     print(json.dumps(counts,indent=2))
     return int(bool(counts['oracle']['assertion_failures']) or bool(ns.candidate and (counts['candidate']['different'] or counts['candidate']['assertion_failures'])))
 

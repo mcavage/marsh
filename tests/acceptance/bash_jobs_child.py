@@ -41,7 +41,7 @@ if sys.argv[1] == '--observe-cats':
             try:
                 fields = Path(f'/proc/{pid}/stat').read_bytes().rsplit(b') ', 1)[1].split()
                 executable = os.stat(f'/proc/{pid}/exe')
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
                 time.sleep(.005)
                 continue
             if int(fields[3]) != os.getsid(0):
@@ -89,7 +89,7 @@ if sys.argv[1] in ('--pipe', '--pipe-stop'):
                 raise RuntimeError('not an owned pipeline peer')
             try:
                 state = Path(f'/proc/{peer_info["pid"]}/stat').read_bytes().rsplit(b') ', 1)[1].split()[0]
-            except FileNotFoundError:
+            except (FileNotFoundError, ProcessLookupError):
                 break
             if state == b'Z':
                 break
@@ -126,7 +126,7 @@ if sys.argv[1] in ('--observe-pipeline', '--observe-all-exited', '--observe-both
             for child in stages:
                 try:
                     state = Path(f'/proc/{child["pid"]}/stat').read_bytes().rsplit(b') ', 1)[1].split()[0]
-                except FileNotFoundError:
+                except (FileNotFoundError, ProcessLookupError):
                     continue
                 finished &= state == b'Z'
             if not finished:
@@ -175,7 +175,7 @@ if sys.argv[1] in ('--observe-exit', '--observe-stop', '--observe-exit-stage', '
     while time.monotonic() < deadline:
         try:
             state = Path(f'/proc/{pid}/stat').read_bytes().rsplit(b') ', 1)[1].split()[0]
-        except FileNotFoundError:
+        except (FileNotFoundError, ProcessLookupError):
             break
         if (running and state not in (b'T', b't', b'Z')) or (not running and state == (b'T' if stopped else b'Z')):
             break

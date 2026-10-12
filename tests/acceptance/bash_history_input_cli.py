@@ -17,6 +17,8 @@ import re
 import subprocess
 import sys
 
+import bash_report
+
 PROBES = Path(__file__).resolve().with_name("history_input_probes")
 SUITES = {
     "context-pipe": ("context.py", ["pipe"]),
@@ -111,6 +113,7 @@ def main() -> int:
                 "scope": "exact command bytes/status/history/cursors/counters/cleanup; raw terminal paint retained"}
     (args.evidence / "identity.json").write_text(json.dumps(identity, indent=2) + "\n")
     comparisons, failures = [], []
+    verdicts, errors = {}, []
     exact = {label: 0 for label in shells}
     runs = {label: 0 for label in shells}
     clean = {label: 0 for label in shells}
@@ -130,6 +133,8 @@ def main() -> int:
                     result = subprocess.run(command, env=probe_env, stdout=output,
                                             stderr=subprocess.STDOUT, start_new_session=True)
                 receipt = directory / "receipts.json"
+                if not receipt.exists():
+                    errors.append(f"{suite} {label}: probe exited {result.returncode} without receipts")
                 if result.returncode != 0 or not receipt.exists():
                     failures.append({"locale": locale, "suite": suite, "shell": label,
                                      "probe_status": result.returncode, "receipt": str(receipt)})
@@ -143,6 +148,7 @@ def main() -> int:
                 failures.append({"locale": locale, "suite": suite, "error": "missing GNU observations"})
             for label, records in observations.items():
                 if records.keys() != reference.keys():
+                    errors.append(f"{suite} {label}: different observation sets")
                     failures.append({"locale": locale, "suite": suite, "shell": label,
                                      "error": "different observation sets"})
                 for case, row in records.items():
@@ -161,6 +167,10 @@ def main() -> int:
                                   "source_equal": equal_source, "expected": oracle_signature,
                                   "actual": actual, "receipt": str(args.evidence / f"{locale_index}-{suite}-{label}" / "receipts.json")}
                     comparisons.append(comparison)
+                    if label in args.require_exact[:1]:
+                        name, posix, basic = case
+                        verdicts[f"{suite}:{name}{'-posix' if posix else ''}{'-rawprompt' if basic else ''}@{locale}"] = \
+                            bash_report.verdict(oracle is not None and healthy(oracle) and equal_source, equal)
                     if not equal:
                         failures.append({name: comparison[name] for name in
                                          ("locale", "suite", "case", "shell", "healthy", "source_equal")})
@@ -168,6 +178,8 @@ def main() -> int:
                "failures": failures, "product_qualified": False}
     (args.evidence / "comparisons.json").write_text(json.dumps(comparisons, indent=2) + "\n")
     (args.evidence / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
+    if args.require_exact:
+        bash_report.write(args.evidence, verdicts, errors)
     print(json.dumps(summary))
     required = {"gnu", *args.require_exact}
     return int(any(exact[label] != runs[label] or runs[label] == 0 or clean[label] != runs[label]
