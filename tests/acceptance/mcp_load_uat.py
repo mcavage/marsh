@@ -17,7 +17,8 @@ import subprocess
 import sys
 import traceback
 
-from mcp_gateway_uat import Scope, gateway_call, gateway_data, wait_until
+from harness import wait_until
+from mcp_harness import McpScope as Scope, gateway_call, gateway_data
 from provenance import SharedBaseline, host_only_path, stock_vm_names, verify_candidate
 
 

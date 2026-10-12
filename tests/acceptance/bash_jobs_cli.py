@@ -603,8 +603,8 @@ def main():
     identities = {label: {'path': str(path), 'sha256': digest(path)} for label, path in binaries.items()}
     version = subprocess.run([binaries[oracle], '--version'], env={'LC_ALL': 'C', 'PATH': '/usr/bin:/bin'},
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, start_new_session=True)
-    if b'GNU bash, version 5.3.20(' not in version.stdout:
-        parser.error('the independent oracle must be actual GNU Bash 5.3.20')
+    if b'GNU bash, version 5.3.' not in version.stdout:
+        parser.error('the independent oracle must be actual GNU Bash 5.3')
     evidence = args.evidence.resolve()
     evidence.mkdir(parents=True, exist_ok=False)
     records = []

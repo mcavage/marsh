@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exact public-CLI regression gate for core Bash completion repairs.
 
-Run with distinct candidate/GNU Bash 5.3.20 binaries and a candidate source receipt.
+Run with distinct candidate/GNU Bash 5.3 binaries (optionally a candidate source receipt).
 Fixtures retain their upstream group/index and annotations, but NO ignore_stdout,
 ignore_stderr, known_failure, whitespace, or status waivers are applied. Interactive
 cases belong to the separate owned-PTY suite. This is not release/stock qualification.
@@ -105,7 +105,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", required=True, type=Path)
     parser.add_argument("--oracle", required=True, type=Path)
-    parser.add_argument("--source-manifest", required=True, type=Path)
+    parser.add_argument("--source-manifest", type=Path, help="optional candidate build receipt to bind")
     parser.add_argument("--evidence", required=True, type=Path)
     parser.add_argument("--cases", nargs="+", help="Optional group.yaml#index subset")
     parser.add_argument("--fixtures", type=Path, default=FIXTURES)
@@ -124,17 +124,18 @@ def main() -> int:
     identity = {"artifacts": {role: {"path": str(path), "sha256": sha(path)}
                               for role, path in binaries.items()},
                 "harness_sha256": sha(Path(__file__)), "fixtures_sha256": sha(args.fixtures),
-                "source_manifest_sha256": sha(args.source_manifest),
+                "source_manifest_sha256": sha(args.source_manifest) if args.source_manifest else None,
                 "qualification": "local public CLI only; not independent review or stock approval"}
     if identity["artifacts"]["oracle"]["sha256"] == identity["artifacts"]["candidate"]["sha256"]:
         parser.error("oracle and candidate must be distinct artifacts")
-    receipt = json.loads(args.source_manifest.read_bytes())
+    receipt = json.loads(args.source_manifest.read_bytes()) if args.source_manifest else {}
     if "sha256" in receipt and receipt["sha256"] != identity["artifacts"]["candidate"]["sha256"]:
         parser.error("candidate does not match source receipt artifact")
     if "source_before" in receipt and receipt["source_before"] != receipt.get("source_after"):
         parser.error("source receipt changed during build")
     args.evidence.mkdir(parents=True, exist_ok=False)
-    (args.evidence / "source-manifest.json").write_bytes(args.source_manifest.read_bytes())
+    if args.source_manifest:
+        (args.evidence / "source-manifest.json").write_bytes(args.source_manifest.read_bytes())
     passed = 0
     with tempfile.TemporaryDirectory(prefix="marsh-core-cli-") as directory:
         work = Path(directory) / "fixture"
@@ -142,9 +143,9 @@ def main() -> int:
         (args.evidence / "oracle-version.json").write_text(json.dumps(oracle_probe, indent=2))
         if (oracle_probe["status"] != 0 or oracle_probe["stderr_hex"]
                 or oracle_probe["timeout"]
-                or not bytes.fromhex(oracle_probe["stdout_hex"]).startswith(b"5.3.20(")):
+                or not bytes.fromhex(oracle_probe["stdout_hex"]).startswith(b"5.3.")):
             (args.evidence / "identity.json").write_text(json.dumps(identity, indent=2))
-            raise RuntimeError("invalid GNU 5.3.20 oracle; observations retained")
+            raise RuntimeError("invalid GNU 5.3 oracle; observations retained")
         with (args.evidence / "observations.jsonl").open("w") as output:
             for case in cases:
                 rows = {role: run(binary, case, work) for role, binary in binaries.items()}

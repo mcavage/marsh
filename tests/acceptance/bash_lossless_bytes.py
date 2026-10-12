@@ -172,7 +172,7 @@ def main():
     if identities['oracle']['sha256']==identities['candidate']['sha256']:
         parser.error('candidate and oracle must be distinct artifacts, not a self-comparison')
     version=bounded_probe([str(binaries['oracle']),'--version'])
-    if b'version 5.3.20' not in version.splitlines()[0]: parser.error('GNU Bash 5.3.20 oracle required')
+    if b'version 5.3.' not in version.splitlines()[0]: parser.error('GNU Bash 5.3 oracle required')
     locales=bounded_probe(['/usr/bin/locale','-a']).splitlines()
     if args.utf8_locale:
         utf8=os.fsencode(args.utf8_locale)

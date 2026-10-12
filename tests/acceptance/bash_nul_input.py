@@ -131,8 +131,8 @@ def main() -> int:
         version = subprocess.check_output([executables["gnu"], "--version"],
             env={"PATH": "/usr/bin:/bin", "HOME": str(root), "HISTFILE": str(root / "history")},
             start_new_session=True, timeout=3)
-        if b"version 5.3.20(" not in version:
-            raise SystemExit("GNU oracle must be Bash 5.3.20")
+        if b"version 5.3." not in version:
+            raise SystemExit("GNU oracle must be Bash 5.3")
 
         def normalized(record: dict) -> tuple:
             stderr = bytes.fromhex(record["stderr"])

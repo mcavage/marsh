@@ -7,12 +7,11 @@ registered fixture Kit commands, the in-Kit `marsh` shim through the fixture's
 `pipeline` mode) and observes only public outputs: bytes, statuses,
 PIPESTATUS, the user's tree and `.git`, `out/` artifacts, public JSON, and
 stock `sbx exec ... docker inspect`. Runs in an isolated MARSH_HOME/control
-scope and removes only VMs from its own ownership map (run.Smoke cleanup).
+scope and removes only VMs from its own ownership map (harness.IsolatedScope cleanup).
 """
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import os
@@ -25,20 +24,22 @@ import statistics
 import subprocess
 import sys
 import time
-import traceback
-from typing import Any, Callable
+from typing import Any
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import doc_examples  # noqa: E402
-from provenance import stock_baseline, stock_vm_inventory  # noqa: E402
-from run import (  # noqa: E402
-    CONTAINER,
-    Smoke,
+from harness import (  # noqa: E402
+    ScenarioSuite,
+    find_records,
     product_owned_vm_names,
+    require,
+    scenario_parser,
     stable_process_identity,
-    verify_container_deleted,
+    suite_main,
+    text,
 )
+from provenance import stock_baseline, stock_vm_inventory  # noqa: E402
 
 SCENARIOS = {
     "W01-plain-bash": "plain_bash",
@@ -95,159 +96,17 @@ KIT_SCENARIOS = {
     "W28-quarantine-retire", "W29-doc-examples",
 }
 
-GIT_ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_OPTIONAL_LOCKS": "0"}
 SPLIT_OVERHEAD_BUDGET_S = 1.5  # proposed (docs/design/workspaces-acceptance.md W24)
 LEASE_S = 60  # docs/design/workspaces.md section 6
 RO_ERRORS = ("read-only file system", "device or resource busy", "permission denied",
              "operation not permitted")
 
 
-class Fail(AssertionError):
-    pass
-
-
-def require(condition: object, message: str) -> None:
-    if not condition:
-        raise Fail(message)
-
-
-def text(value: bytes | None) -> str:
-    return (value or b"").decode(errors="replace")
-
-
-def find_records(document: Any, predicate: Callable[[dict[str, Any]], bool]) -> list[dict[str, Any]]:
-    found: list[dict[str, Any]] = []
-    stack = [document]
-    while stack:
-        value = stack.pop()
-        if isinstance(value, dict):
-            if predicate(value):
-                found.append(value)
-            stack.extend(value.values())
-        elif isinstance(value, list):
-            stack.extend(value)
-    return found
-
-
-class Workspaces(Smoke):
-    def __init__(self, arguments: argparse.Namespace) -> None:
-        super().__init__(arguments)
-        self.prefix_bin = str(pathlib.Path(self.marsh).parent)
-        self.selected = [s for s in ORDER if not arguments.only or s in arguments.only]
-        self.fail_fast = arguments.fail_fast
-        self.preflight_enabled = not arguments.no_preflight
-        self.results: list[dict[str, Any]] = []
-        self.live: list[subprocess.Popen[bytes]] = []
-        self.host_env = {**self.environment, **GIT_ENV,
-                         "PATH": f"{self.prefix_bin}:{self.environment.get('PATH', '/usr/bin:/bin')}",
-                         "LC_ALL": "C"}
-
-    # ---- callers -------------------------------------------------------
-    def _record(self, kind: str, argv: Any, cwd: pathlib.Path, started: float,
-                status: int | None, stdout: bytes, stderr: bytes) -> None:
-        self.records.append({
-            "caller": kind, "argv": argv, "cwd": str(cwd), "status": status,
-            "elapsed_ms": round((time.monotonic() - started) * 1000),
-            "stdout": text(stdout)[-8000:], "stderr": text(stderr)[-8000:],
-        })
-
-    def call(self, kind: str, argv: list[str], cwd: pathlib.Path, *, stdin: bytes = b"",
-             timeout: float = 240) -> subprocess.CompletedProcess[bytes]:
-        self.scope_started = True
-        started = time.monotonic()
-        process = subprocess.Popen(argv, cwd=cwd, env=self.host_env, stdin=subprocess.PIPE,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   start_new_session=True)
-        try:
-            stdout, stderr = process.communicate(input=stdin, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            self.kill(process)  # the whole process group: no orphaned callers
-            self._record(kind, argv, cwd, started, None, b"", b"")
-            raise Fail(f"{kind} timed out after {timeout}s: {shlex.join(argv)[:300]}") from None
-        finally:
-            self.kill(process)
-        self._record(kind, argv, cwd, started, process.returncode, stdout, stderr)
-        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
-
-    def bash(self, script: str, cwd: pathlib.Path, **kw: Any) -> subprocess.CompletedProcess[bytes]:
-        """Plain host bash invoking the installed CLI (`marsh` on PATH)."""
-        return self.call("host-bash", ["/bin/bash", "-c", script], cwd, **kw)
-
-    def brush(self, script: str, cwd: pathlib.Path, **kw: Any) -> subprocess.CompletedProcess[bytes]:
-        """One marsh session (Brush in the shell VM)."""
-        return self.call("marsh-session", [self.marsh, "-c", script], cwd, **kw)
-
-    def cli(self, args: list[str], cwd: pathlib.Path, **kw: Any) -> subprocess.CompletedProcess[bytes]:
-        return self.call("host-cli", [self.marsh, *args], cwd, **kw)
-
-    def spawn(self, argv: list[str], cwd: pathlib.Path) -> subprocess.Popen[bytes]:
-        self.scope_started = True
-        process = subprocess.Popen(argv, cwd=cwd, env=self.host_env, stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   start_new_session=True)
-        self.live.append(process)
-        self.records.append({"caller": "spawn", "argv": argv, "cwd": str(cwd), "pid": process.pid})
-        return process
-
-    def reap(self, process: subprocess.Popen[bytes], timeout: float) -> tuple[int, bytes, bytes]:
-        try:
-            stdout, stderr = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            self.kill(process)
-            raise Fail(f"process {process.args!r} did not exit within {timeout}s") from None
-        self.records.append({"caller": "reap", "pid": process.pid, "status": process.returncode,
-                             "stdout": text(stdout)[-8000:], "stderr": text(stderr)[-8000:]})
-        return process.returncode, stdout, stderr
-
-    @staticmethod
-    def kill(process: subprocess.Popen[bytes]) -> None:
-        if process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            try:
-                process.communicate(timeout=10)
-            except subprocess.TimeoutExpired:
-                pass
-
-    def wait_until(self, predicate: Callable[[], bool], timeout: float, what: str,
-                   processes: tuple[subprocess.Popen[bytes], ...] = ()) -> None:
-        deadline = time.monotonic() + timeout
-        while not predicate():
-            for process in processes:
-                if process.poll() is not None:
-                    _, out, err = self.reap(process, 5)
-                    raise Fail(f"{what}: caller exited {process.returncode} first: "
-                               f"stdout={text(out)[-400:]!r} stderr={text(err)[-800:]!r}")
-            if time.monotonic() > deadline:
-                raise Fail(f"timed out after {timeout}s waiting for {what}")
-            time.sleep(0.25)
-
-    # ---- projects and observation --------------------------------------
-    def git(self, cwd: pathlib.Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
-        completed = subprocess.run(
-            ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
-             "-c", "commit.gpgsign=false", *args],
-            cwd=cwd, env={**os.environ, **GIT_ENV, "HOME": str(self.root)},
-            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=60, check=False)
-        if check and completed.returncode != 0:
-            raise RuntimeError(f"git {args}: {text(completed.stderr)}")
-        return completed
-
-    def new_repo(self, name: str, files: dict[str, bytes | str], *, commit: bool = True) -> pathlib.Path:
-        project = self.root / name
-        project.mkdir()
-        for relative, content in files.items():
-            path = project / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content.encode() if isinstance(content, str) else content)
-        if commit:
-            self.git(project, "init", "-q", "-b", "main")
-            self.git(project, "add", "-A")
-            self.git(project, "commit", "-q", "-m", "seed")
-        return project
+class Workspaces(ScenarioSuite):
+    LABEL = "workspaces"
+    EVIDENCE = "workspaces.json"
+    SCENARIOS = SCENARIOS
+    ORDER = ORDER
 
     def seed_main(self) -> None:
         """Committed base plus staged, unstaged, deleted, untracked, ignored edits."""
@@ -265,128 +124,6 @@ class Workspaces(Smoke):
         # The isolated product's launch project is self.project; make it the main repo.
         shutil.rmtree(self.project)
         main.rename(self.project)
-
-    @staticmethod
-    def tree_state(root: pathlib.Path) -> dict[str, tuple[Any, ...]]:
-        """Every user path (not `.git`/`.marsh`): kind, exec bit, bytes digest or link target."""
-        state: dict[str, tuple[Any, ...]] = {}
-        for path in sorted(root.rglob("*")):
-            relative = path.relative_to(root)
-            if relative.parts[0] in {".git", ".marsh"}:
-                continue
-            if path.is_symlink():
-                state[str(relative)] = ("l", os.readlink(path))
-            elif path.is_file():
-                state[str(relative)] = ("f", bool(path.stat().st_mode & 0o100),
-                                        hashlib.sha256(path.read_bytes()).hexdigest())
-        return state
-
-    def user_state(self, project: pathlib.Path) -> dict[str, Any]:
-        """The user's tree plus `.git` index bytes, refs, objects, config, hooks."""
-        state: dict[str, Any] = {"tree": self.tree_state(project)}
-        git_dir = project / ".git"
-        if git_dir.is_dir():
-            index = git_dir / "index"
-            state["index"] = (hashlib.sha256(index.read_bytes()).hexdigest(), index.stat().st_mtime_ns) \
-                if index.exists() else None
-            state["head"] = (git_dir / "HEAD").read_bytes()
-            state["config"] = (git_dir / "config").read_bytes()
-            state["refs"] = sorted(str(p.relative_to(git_dir)) + ":" + p.read_text()
-                                   for p in (git_dir / "refs").rglob("*") if p.is_file())
-            state["packed"] = (git_dir / "packed-refs").read_bytes() if (git_dir / "packed-refs").exists() else b""
-            state["objects"] = sorted(str(p.relative_to(git_dir)) for p in (git_dir / "objects").rglob("*")
-                                      if p.is_file())
-            state["hooks"] = sorted(p.name for p in (git_dir / "hooks").iterdir()) \
-                if (git_dir / "hooks").is_dir() else []
-            state["worktrees"] = (git_dir / "worktrees").exists()
-        return state
-
-    def assert_user_unchanged(self, project: pathlib.Path, before: dict[str, Any], scenario: str) -> None:
-        after = self.user_state(project)
-        changed = sorted(key for key in before if before[key] != after.get(key))
-        require(not changed, f"{scenario}: the user's {changed} changed (marsh never writes the "
-                             "caller's tree or .git; workspaces.md s1, s8)")
-
-    @staticmethod
-    def split_root(project: pathlib.Path) -> pathlib.Path:
-        return project / ".marsh" / "split"
-
-    def split_ids(self, project: pathlib.Path) -> set[str]:
-        root = self.split_root(project)
-        return {p.name for p in root.iterdir() if p.is_dir()} if root.is_dir() else set()
-
-    def out(self, project: pathlib.Path, split_id: str) -> pathlib.Path:
-        return self.split_root(project) / split_id / "out"
-
-    def handle(self, completed: subprocess.CompletedProcess[bytes] | bytes, what: str) -> str:
-        stdout = completed if isinstance(completed, bytes) else completed.stdout
-        lines = [line for line in stdout.splitlines() if line.strip()]
-        try:
-            document = json.loads(lines[-1])
-        except (IndexError, json.JSONDecodeError):
-            stderr = "" if isinstance(completed, bytes) else text(completed.stderr)
-            raise Fail(f"{what}: no handle line {{\"marsh_split\":1,\"id\":...}} on stdout "
-                       f"(s2): stdout={text(stdout)[-300:]!r} stderr={stderr[-600:]!r}") from None
-        require(isinstance(document, dict) and document.get("marsh_split") == 1
-                and isinstance(document.get("id"), str) and set(document) == {"marsh_split", "id"},
-                f"{what}: malformed handle {lines[-1]!r}")
-        require(re.fullmatch(r"[A-Za-z0-9_-]{1,64}", document["id"]),
-                f"{what}: split id is not a safe path component: {document['id']!r}")
-        return document["id"]
-
-    @staticmethod
-    def handle_line(split_id: str) -> bytes:
-        return json.dumps({"marsh_split": 1, "id": split_id}, separators=(",", ":")).encode() + b"\n"
-
-    def splits(self, cwd: pathlib.Path, split_id: str | None = None) -> Any:
-        completed = self.cli(["splits", "--json", *([split_id] if split_id else [])], cwd, timeout=30)
-        require(completed.returncode == 0, f"`marsh splits --json` failed ({completed.returncode}): "
-                                           f"{text(completed.stderr)[-600:]}")
-        return json.loads(completed.stdout)
-
-    def split_record(self, cwd: pathlib.Path, split_id: str) -> dict[str, Any]:
-        document = self.splits(cwd, split_id)
-        records = find_records(document, lambda d: d.get("id") == split_id and "state" in d)
-        require(records, f"`marsh splits --json {split_id}` lacks the split: {document!r}"[:800])
-        return records[0]
-
-    @staticmethod
-    def branch_status(project: pathlib.Path, split_id: str, label: str) -> str:
-        path = project / ".marsh" / "split" / split_id / "out" / label / "status"
-        require(path.is_file(), f"out/{label}/status missing for split {split_id} (s5)")
-        return path.read_text().strip()
-
-    def fixture_job_ids(self) -> set[str]:
-        return {summary["job_id"] for summary in self.document("jobs", "--json")["jobs"]
-                if summary.get("command") == "fixture"}
-
-    def new_receipts(self, before: set[str], count: int, timeout: float = 120,
-                     finished: bool = True, states: tuple[str, ...] = ("finished",)) -> list[dict[str, Any]]:
-        deadline = time.monotonic() + timeout
-        while True:
-            fresh = [self.document("jobs", "show", job, "--json")
-                     for job in sorted(self.fixture_job_ids() - before)]
-            done = [r for r in fresh if r.get("state") in states] if finished else fresh
-            if len(done) >= count and (not finished or len(done) == len(fresh)):
-                return fresh
-            if time.monotonic() > deadline:
-                raise Fail(f"expected {count} {'finished ' if finished else ''}fixture jobs, got "
-                           f"{[(r.get('job_id'), r.get('state')) for r in fresh]}")
-            time.sleep(0.5)
-
-    def verify_deleted(self, receipts: list[dict[str, Any]]) -> None:
-        for receipt in receipts:
-            container = receipt.get("container_id")
-            require(receipt.get("cleanup") == "verified" and CONTAINER.fullmatch(container or ""),
-                    f"Kit container is not verified deleted: {receipt!r}"[:800])
-            verify_container_deleted(lambda argv: self.run(argv, timeout=30, check=False),
-                                     [self.sbx, "exec", "-u", "root", receipt["vm_id"]], container)
-
-    def fixture_capable(self, *blobs: bytes | str) -> None:
-        joined = "".join(b if isinstance(b, str) else text(b) for b in blobs)
-        if "unknown fixture mode: pipeline" in joined:
-            raise Fail("fixture Kit lacks the `pipeline` mode (nested-split driver); pass "
-                       "--kit tests/acceptance/fixture or republish the fixture from this checkout")
 
     # ---- scenarios ------------------------------------------------------
     def plain_bash(self) -> None:
@@ -1371,113 +1108,18 @@ class Workspaces(Smoke):
         if self.preflight_enabled:
             blocked = self.preflight()
             if blocked:
-                for scenario in self.selected:
-                    self.results.append({"scenario": scenario, "outcome": "blocked", "failure": blocked})
-                    print(f"workspaces: {scenario}: blocked: {blocked}", flush=True)
-                raise Fail(f"preflight: workspace CLI unavailable: {blocked}")
+                self.blocked(blocked, "workspace CLI")
         if KIT_SCENARIOS & set(self.selected):
             self.run([self.marsh, "--load", "fixture", "-c", "true"], timeout=900)
             self.document("status", "--json")
-        failures = []
-        for scenario in self.selected:
-            began = time.monotonic()
-            try:
-                getattr(self, SCENARIOS[scenario])()
-                outcome, failure = "passed", None
-            except Fail as error:
-                outcome, failure = "failed", str(error)
-            except Exception as error:  # an unexpected harness/product break is still a failure
-                outcome, failure = "failed", f"{type(error).__name__}: {error}"
-                self.records.append({"scenario": scenario, "traceback": traceback.format_exc()})
-            finally:
-                for process in self.live:
-                    self.kill(process)
-                self.live.clear()
-            self.results.append({"scenario": scenario, "outcome": outcome, "failure": failure,
-                                 "seconds": round(time.monotonic() - began, 1)})
-            print(f"workspaces: {scenario}: {outcome}" + (f": {failure[:400]}" if failure else ""), flush=True)
-            if failure:
-                failures.append(scenario)
-                if self.fail_fast:
-                    break
-        self.document("status", "--json")
-        if failures:
-            raise Fail(f"{len(failures)}/{len(self.selected)} scenarios failed: {', '.join(failures)}")
-
-    def finish(self, error: Exception | None) -> int:
-        for process in self.live:
-            self.kill(process)
-        cleanup_errors = self.cleanup_isolated_scope()
-        if self.stock_before is not None:
-            try:
-                after = stock_vm_inventory(self.sbx)
-                self.source["stock_after"] = after
-                cleanup_errors.extend(self.stock_leftover_errors(after))
-            except Exception as caught:
-                cleanup_errors.append(f"independent stock cleanup unavailable: {caught}")
-        if cleanup_errors:
-            cleanup = RuntimeError("; ".join(dict.fromkeys(cleanup_errors)))
-            error = cleanup if error is None else RuntimeError(f"{error}; cleanup: {cleanup}")
-        destination = self.evidence / "workspaces.json"
-        destination.write_text(json.dumps({
-            "outcome": "failed" if error else "passed", "failure": str(error) if error else None,
-            "scenarios": self.results, "root": str(self.root), "environment": self.source,
-            "records": self.records}, indent=2, default=str) + "\n", encoding="utf-8")
-        destination.chmod(0o600)
-        passed = sum(r["outcome"] == "passed" for r in self.results)
-        print(f"workspaces: {passed}/{len(self.selected)} passed; "
-              f"{'failed' if error else 'passed'}; evidence: {destination}")
-        if error:
-            print(f"workspaces: {error}")
-        return 1 if error else 0
+        self.run_scenarios()
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--prefix", default=str(pathlib.Path.home() / ".marsh-dev"),
-                        help="installed dev product (bin/marsh, libexec/marsh)")
-    parser.add_argument("--sbx", default="sbx")
-    parser.add_argument("--kit", default=None,
-                        help="fixture Kit: immutable OCI ref, native v3 source dir, or a commands.json "
-                             "whose \"fixture\" key holds the ref (nested scenarios need the `pipeline` mode)")
-    parser.add_argument("--evidence", default=None)
-    parser.add_argument("--only", action="append", choices=sorted(SCENARIOS), help="repeatable")
-    parser.add_argument("--fail-fast", action="store_true", help="stop at the first failed scenario")
-    parser.add_argument("--no-preflight", action="store_true")
-    parser.add_argument("--list", action="store_true", help="print scenario ids and exit")
-    parser.add_argument("--source-tree", default=str(pathlib.Path(__file__).resolve().parents[2]))
-    parser.add_argument("--source-revision", default=None)
-    parser.add_argument("--build-receipt", type=pathlib.Path, default=None)
-    arguments = parser.parse_args()
-    if arguments.list:
-        for scenario in ORDER:
-            print(f"{scenario}\t{getattr(Workspaces, SCENARIOS[scenario]).__doc__.strip().splitlines()[0]}")
-        return 0
-    if not arguments.kit:
-        parser.error("--kit is required")
-    prefix = pathlib.Path(arguments.prefix).expanduser().resolve()
-    arguments.marsh = str(prefix / "bin" / "marsh")
-    arguments.guest_artifacts = prefix / "libexec" / "marsh"
-    if not os.access(arguments.marsh, os.X_OK):
-        print(f"workspaces: no installed product at {arguments.marsh} (run `make dev`)")
-        return 1
-    kit = pathlib.Path(arguments.kit).expanduser()
-    if kit.is_file():
-        arguments.kit = json.loads(kit.read_text())["fixture"]
-    if arguments.source_revision is None:
-        arguments.source_revision = subprocess.run(
-            ["git", "-C", arguments.source_tree, "rev-parse", "HEAD"], capture_output=True, text=True,
-            timeout=30, check=True).stdout.strip()
-    if arguments.evidence is None:
-        arguments.evidence = f"/private/tmp/marsh-dev-workspaces-{os.getuid()}"
-    harness = Workspaces(arguments)
-    try:
-        harness.run_all()
-    except KeyboardInterrupt:
-        return harness.finish(InterruptedError("workspaces acceptance interrupted"))
-    except Exception as error:
-        return harness.finish(error)
-    return harness.finish(None)
+    return suite_main(Workspaces, scenario_parser(
+        __doc__, SCENARIOS,
+        kit_help="fixture Kit: immutable OCI ref, native v3 source dir, or a commands.json whose \"fixture\" "
+                 "key holds the ref (nested scenarios need the `pipeline` mode)"))
 
 
 if __name__ == "__main__":

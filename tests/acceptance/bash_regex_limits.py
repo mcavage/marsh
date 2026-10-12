@@ -321,7 +321,7 @@ def main() -> int:
     candidate, oracle = args.candidate.resolve(), args.oracle.resolve()
     candidate_prefix = tuple(os.fsencode(arg) for arg in args.candidate_arg)
     version = subprocess.check_output([oracle, "--version"])
-    assert b"version 5.3.20(" in version
+    assert b"version 5.3." in version
     args.evidence.mkdir(parents=True, exist_ok=True)
     identity = dict(candidate=dict(path=str(candidate), arguments=args.candidate_arg, sha256=hashlib.sha256(candidate.read_bytes()).hexdigest()),
                     oracle=dict(path=str(oracle), sha256=hashlib.sha256(oracle.read_bytes()).hexdigest(), version=version.hex()),

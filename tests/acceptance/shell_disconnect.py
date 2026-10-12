@@ -70,7 +70,7 @@ def owned_survivors(rows, identities, token):
     return [row for row in rows if not row["state"].startswith(("Z", "X"))
             and (process_identity(row) in identities or (token and token in row["command"]))]
 
-from run import disposable_root, resolve_executable, scoped_control_home
+from harness import disposable_root, resolve_executable, scoped_control_home
 from provenance import host_only_path, verify_build_receipt
 
 

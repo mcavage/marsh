@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import base64
-import hashlib
 import json
 import os
 import pathlib
@@ -21,6 +20,7 @@ import tempfile
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from harness import product_owned_vm_names  # noqa: E402
 from provenance import SharedBaseline, stock_baseline  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -38,10 +38,10 @@ def stock(sbx: str) -> dict[str, dict]:
 def owned_names(control: pathlib.Path) -> set[str]:
     """VM names in this run's own daemon ownership map (empty once the scope is stopped)."""
     names: set[str] = set()
-    for path in control.glob("*/vm-ownership.json"):
+    for scope in control.glob("*/"):
         try:
-            names |= set(json.loads(path.read_text()).get("vms", {}))
-        except (OSError, ValueError):
+            names |= product_owned_vm_names(scope)
+        except (OSError, AssertionError, ValueError):
             pass
     return names
 
