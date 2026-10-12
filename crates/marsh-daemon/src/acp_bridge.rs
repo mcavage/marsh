@@ -155,14 +155,14 @@ impl AcpAttachmentBridge {
 mod tests {
     use super::*;
     use crate::ServerAttachment;
-    use std::time::Duration;
 
     #[test]
     fn bridge_preserves_acp_bytes_and_separate_diagnostics() {
         let (server, client) = ServerAttachment::pair().unwrap();
         let mut bridge = AcpAttachmentBridge::new(client).unwrap();
         let mut io = bridge.take_stream().unwrap();
-        io.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        io.set_read_timeout(Some(crate::test_support::PATIENCE))
+            .unwrap();
         io.write_all(b"{\"method\":\"initialize\"}\n").unwrap();
         assert!(matches!(
             server.receive().unwrap(),
@@ -187,7 +187,10 @@ mod tests {
         io.read_exact(&mut response).unwrap();
         assert_eq!(&response, b"{\"result\":{}}\n");
         server.send(&AttachmentFrame::Exited { code: 0 }).unwrap();
-        std::thread::sleep(Duration::from_millis(10));
+        // The bridge closes the ACP stream only after recording the terminal.
+        let mut rest = Vec::new();
+        io.read_to_end(&mut rest).unwrap();
+        assert!(rest.is_empty());
         assert_eq!(bridge.status().job_id.as_deref(), Some("job-1"));
         assert_eq!(bridge.status().stderr, b"diagnostic");
         assert_eq!(bridge.status().terminal, Some(Ok(0)));

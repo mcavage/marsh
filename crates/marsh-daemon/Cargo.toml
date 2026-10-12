@@ -31,6 +31,7 @@ tokio = { version = "1.48", features = ["io-util", "net", "rt-multi-thread", "sy
 uuid = { version = "1.18", features = ["v4"] }
 
 [dev-dependencies]
+marsh-runtime = { path = "../marsh-runtime", features = ["test-support"] }
 marsh-sbx = { path = "../marsh-sbx", features = ["test-support"] }
 nix = { version = "0.31", features = ["term"] }
 tempfile = "3.23"

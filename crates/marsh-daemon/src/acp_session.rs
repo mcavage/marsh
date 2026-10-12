@@ -2403,10 +2403,10 @@ mod tests {
         );
         let (mut sender, mut receiver) = std::os::unix::net::UnixStream::pair().unwrap();
         sender
-            .set_write_timeout(Some(Duration::from_secs(2)))
+            .set_write_timeout(Some(crate::test_support::PATIENCE))
             .unwrap();
         receiver
-            .set_read_timeout(Some(Duration::from_secs(2)))
+            .set_read_timeout(Some(crate::test_support::PATIENCE))
             .unwrap();
         let send = std::thread::spawn(move || {
             crate::write_frame(
