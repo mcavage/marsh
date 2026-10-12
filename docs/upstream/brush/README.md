@@ -274,8 +274,9 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
 - `0038` gives `PIPESTATUS` one entry per stage when a split does not run
   its stages (setup failure 2, cancellation 130): the stages after `join`
   get the same status instead of being omitted. An interactive Ctrl-C'd
-  split returns the `0036` interrupt flow. Covered in `bash_audit.rs`
-  (setup failure; cancellation shares the code path).
+  split returns the `0036` interrupt flow. Covered in `smoke.rs`
+  (`failed_split_reports_a_status_for_every_stage`: setup failure;
+  cancellation shares the code path).
 - `0039` reports Bash's line in syntax errors:
   `line N: syntax error near unexpected token `X' (col C)` and
   `line N: syntax error: unexpected end of file`, where an end of file is on
