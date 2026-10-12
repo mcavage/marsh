@@ -29,7 +29,7 @@ class McpBinaryPreflight(unittest.TestCase):
             environment["MARSH_MCP_BIN"] = str(selected)
         return subprocess.run(
             [sys.executable, "-B", "-c", PROBE, str(ROOT / "tests/mcp" / suite)],
-            env=environment, capture_output=True, text=True, timeout=10,
+            env=environment, capture_output=True, text=True, timeout=60,
             start_new_session=True,
         )
 

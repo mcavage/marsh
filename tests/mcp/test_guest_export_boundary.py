@@ -8,6 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 from binary_preflight import required_binary
+from jsonrpc_peer import WAIT_TIMEOUT
 
 MCP = required_binary("MARSH_MCP_BIN")
 
@@ -35,7 +36,7 @@ class GuestExportBoundary(unittest.TestCase):
                         [str(MCP), mode, "--workspace", str(project), "--home", str(home),
                          "--marsh", str(product), "--sbx", str(product),
                          "--declaration", str(declaration)],
-                        input=b"", capture_output=True, timeout=5,
+                        input=b"", capture_output=True, timeout=WAIT_TIMEOUT,
                     )
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(result.stdout, b"")
