@@ -287,7 +287,7 @@ The final development gate must follow every mutation, including any agent
 The Codex Kit also puts `/usr/local/bin` first in its image PATH and invokes its
 selected native binary by absolute path, with a built-image lookup/version guard.
 Four npm recipes retain explicitly base-labelled early receipts and issue
-final scoped receipts after additions. ACP0.156.1 and Claude SDK0.3.274 package
+final scoped receipts after additions. ACP0.156.1 and Claude SDK 0.3.293 package
 members and required retained texts are independently bound to SHA512-checked
 public packages. Other npm coverage is metadata/notices only, not full-code approval.
 
