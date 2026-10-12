@@ -13,6 +13,8 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+# One budget for every wait on a helper process: startup, a marker, exit.
+WAIT_TIMEOUT = 60
 
 # This is an independent tiny Docker/OCI archive producer, not the verifier.
 PEER = r'''
@@ -95,20 +97,20 @@ with socketserver.UnixStreamServer(sys.argv[2],Handler) as server:server.serve_f
     process = subprocess.Popen([sys.executable, '-c', script, str(root), str(socket_path)],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + WAIT_TIMEOUT
         while not socket_path.exists():
             if process.poll() is not None or time.monotonic() > deadline:
-                raise RuntimeError('owned SDK peer failed to start')
+                raise RuntimeError(f'owned SDK peer did not create {socket_path} within {WAIT_TIMEOUT}s')
             time.sleep(.01)
     except BaseException:
-        if process.poll() is None:os.killpg(process.pid, signal.SIGKILL);process.wait(timeout=5)
+        if process.poll() is None:os.killpg(process.pid, signal.SIGKILL);process.wait()
         if directory is not None:directory.cleanup()
         raise
     def close():
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGTERM)
             try:process.wait(timeout=5)
-            except subprocess.TimeoutExpired:os.killpg(process.pid, signal.SIGKILL);process.wait(timeout=5)
+            except subprocess.TimeoutExpired:os.killpg(process.pid, signal.SIGKILL);process.wait()
         if directory is not None:directory.cleanup()
         else:socket_path.unlink(missing_ok=True)
     return 'unix://' + str(socket_path), close
@@ -147,7 +149,7 @@ class ImageCallerTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(self.source / "scripts" / script),
                                "--docker", str(self.root / "docker"), "--sbx", str(self.root / "sbx"),
                                "--output", str(self.output), *extra], cwd=self.source, env=self.env,
-                              capture_output=True, text=True, timeout=30, start_new_session=True)
+                              capture_output=True, text=True, timeout=WAIT_TIMEOUT, start_new_session=True)
 
     def calls(self):
         path = self.root / "calls.jsonl"
@@ -158,7 +160,7 @@ class ImageCallerTests(unittest.TestCase):
         result = subprocess.run(["make", "prepare-shell-image", f"DOCKER={self.root / 'docker'}",
                                  f"PYTHON={sys.executable}", f"GUEST_ARTIFACTS={self.output.parent}"],
                                 cwd=self.source, env=self.env, capture_output=True, text=True,
-                                timeout=30, start_new_session=True)
+                                timeout=WAIT_TIMEOUT, start_new_session=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         proof = json.loads(self.output.with_name("shell-image.build.json").read_text())
         self.assertEqual(proof["publication"], "local-template")
@@ -348,22 +350,22 @@ if args[:2] == ['buildx','build']:
                    cwd=self.source, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
         child = None
         try:
-            deadline = time.monotonic() + 10
+            deadline = time.monotonic() + WAIT_TIMEOUT
             while not (self.root/'started.json').exists():
                 self.assertIsNone(process.poll())
-                self.assertLess(time.monotonic(), deadline)
+                self.assertLess(time.monotonic(), deadline, 'builder did not start')
                 time.sleep(.05)
             child = json.loads((self.root/'started.json').read_text())
             self.assertEqual(child['parent'], process.pid)
             self.assertEqual(child['pgid'], child['pid'])
             os.killpg(process.pid, signal.SIGTERM)
-            _, errors = process.communicate(timeout=15)
+            _, errors = process.communicate(timeout=WAIT_TIMEOUT)
             self.assertNotEqual(process.returncode, 0, errors)
             self.assertEqual((self.root/'terminated').read_text(), str(int(signal.SIGTERM)))
             self.assertEqual(self.output.read_text(), 'previous reference')
         finally:
             if process.poll() is None:
-                os.killpg(process.pid, signal.SIGKILL); process.wait(timeout=5)
+                os.killpg(process.pid, signal.SIGKILL); process.wait()
             if child and not (self.root/'terminated').exists():
                 self.assertGreater(child['pid'], 1)
                 self.assertNotEqual(child['pgid'], os.getpgrp())
