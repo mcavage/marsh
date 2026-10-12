@@ -759,10 +759,18 @@ mod tests {
             };
             let sent = sender.join().unwrap();
             let outcome = task.join().unwrap();
-            assert!(
-                matches!(sent, Err(DaemonError::ShellStdinClosed)),
-                "{sent:?}"
-            );
+            // The flood ends as "input closed" either way: the remote's close
+            // frame or its socket close may reach the sender first, and the
+            // product treats both alike (marsh-daemon attachment_input_closed).
+            let input_closed = match &sent {
+                Err(DaemonError::ShellStdinClosed) => true,
+                Err(DaemonError::ShellInputWriteFailed(error)) => matches!(
+                    error.kind(),
+                    io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
+                ),
+                _ => false,
+            };
+            assert!(input_closed, "{sent:?}");
             assert_eq!(code, expected, "{outcome:?}");
             assert!(outcome.delivered, "{outcome:?}");
             assert!(matches!(outcome.cleanup, Cleanup::Verified));
