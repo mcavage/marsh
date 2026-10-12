@@ -33,7 +33,7 @@ impl AcpAttachmentBridge {
     /// Starts byte pumps. The caller owns the returned stream and must close it
     /// on failed negotiation; closure sends a terminate signal to the Kit job.
     pub fn new(execution: ClientExecution) -> Result<Self, DaemonError> {
-        let (io, bridge_io) = UnixStream::pair()?;
+        let (io, bridge_io) = marsh_runtime::unix_stream_pair()?;
         let mut input = bridge_io.try_clone()?;
         let input_execution = execution.clone();
         thread::spawn(move || {

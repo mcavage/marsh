@@ -2082,7 +2082,7 @@ impl crate::Client {
         let bytes = self
             .encode_acp_prompt(agent_session_id, session, operation_id, text)
             .map_err(Rejected)?;
-        let mut stream = std::os::unix::net::UnixStream::connect(&self.paths.socket)
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)
             .map_err(|error| Rejected(error.into()))?;
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))

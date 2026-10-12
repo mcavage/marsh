@@ -110,7 +110,8 @@ pub(super) fn run(client: &Client, mut spec: ShellSpec) -> Result<i32, DaemonErr
     ready?;
     let _terminal = HostTerminalMode::enter_if(terminal)?;
     // The duplicate is polled, never a detached blocking std::io::Stdin read.
-    let input = File::from(rustix::io::dup(io::stdin()).map_err(io::Error::from)?);
+    let input =
+        File::from(rustix::io::fcntl_dupfd_cloexec(io::stdin(), 0).map_err(io::Error::from)?);
     let result = relay_io(&execution, terminal, input, io::stdout(), io::stderr());
     let _ = execution.shutdown();
     result.map_err(crate::lost_after_accept)

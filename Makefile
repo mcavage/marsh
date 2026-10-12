@@ -46,9 +46,13 @@ TEST_BIN = $(abspath $(TARGET_DIR))/debug
 PUBLISHER_VENV ?= $(abspath $(TARGET_DIR))/publisher-venv
 MODEL_FLAGS ?= --quick
 MODEL_CACHE ?= $(abspath $(TARGET_DIR))/tlc-cache
-# The MCP load callers (#[ignore]d: they need MARSH_LOAD_TEST_BIN, a built marsh
-# with its sibling marsh-mcp and marshd).
-MCP_LOAD_CALLERS := (package(marsh-mcp) & binary(mcp_load)) | (package(marsh-daemon) & test(/^mcp_load_tests::/))
+# The callers of the built binaries, #[ignore]d without them: the MCP load
+# callers (MARSH_LOAD_TEST_BIN, a built marsh beside marsh-mcp and marshd) and
+# the real-CLI ACP callers (MARSH_ACP_CALLER_BIN). Every #[ignore]d test is one.
+BINARY_CALLERS := (package(marsh-mcp) & binary(mcp_load)) | (package(marsh-daemon) & test(/^mcp_load_tests::/)) \
+	| (package(marsh-acp) & binary(fixture_caller))
+# The binary callers' host publications write under $HOME: give them their own.
+CALLER_HOME = $(abspath $(TARGET_DIR))/caller-home
 # Export serving is a Mac host boundary, not a Linux contributor capability.
 MCP_TEST_FILES := test_stdio_protocol.py test_guest_export_boundary.py test_publication_cli.py \
 	$(if $(filter Darwin,$(shell uname -s)),test_export_stdio_protocol.py)
@@ -118,8 +122,8 @@ test: test-rust test-harness test-model
 
 # Every workspace test, one process per test (cargo-nextest; .config/nextest.toml
 # fails a hung test by name). nextest skips doctests, so cargo runs those.
-# Then the #[ignore]d MCP load callers, which drive the built marsh, marsh-mcp
-# and marshd binaries (no VM).
+# Then the #[ignore]d binary callers and the ACP host caller, which drive the
+# built marsh, marsh-mcp and marshd binaries (no VM) with an isolated HOME.
 test-rust:
 	@$(CARGO) nextest --version >/dev/null 2>&1 || { echo 'make test: cargo-nextest is required: brew install cargo-nextest (or cargo install --locked cargo-nextest)' >&2; exit 1; }
 	$(CARGO) fmt --all -- --check
@@ -127,8 +131,12 @@ test-rust:
 	$(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" --profile "$(NEXTEST_PROFILE)"
 	$(CARGO) test --workspace --doc --locked --target-dir "$(TARGET_DIR)"
 	$(CARGO) build --workspace --bins --locked --target-dir "$(TARGET_DIR)"
-	MARSH_LOAD_TEST_BIN="$(TEST_BIN)/marsh" $(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" \
-		--profile "$(NEXTEST_PROFILE)" --run-ignored only -E '$(MCP_LOAD_CALLERS)'
+	rm -rf "$(CALLER_HOME)" && mkdir -m 700 "$(CALLER_HOME)"
+	CARGO_HOME="$${CARGO_HOME:-$$HOME/.cargo}" RUSTUP_HOME="$${RUSTUP_HOME:-$$HOME/.rustup}" HOME="$(CALLER_HOME)" \
+		MARSH_LOAD_TEST_BIN="$(TEST_BIN)/marsh" MARSH_ACP_CALLER_BIN="$(TEST_BIN)/marsh" \
+		$(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" \
+		--profile "$(NEXTEST_PROFILE)" --run-ignored only -E '$(BINARY_CALLERS)'
+	$(PYTHON) tests/acceptance/acp-fixture/typed_host_caller.py --marsh "$(TEST_BIN)/marsh"
 
 # Python and shell harnesses against the debug binaries: shipped-entrypoint
 # journeys (onboarding), MCP protocol callers, the Kit publisher, and the

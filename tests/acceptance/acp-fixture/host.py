@@ -56,7 +56,7 @@ assert context["kind"] == "acp" and context["operation"] == operation
 assert context["name"] == sys.argv[3]
 assert context["session"]["session_id"]
 if pathlib.Path(".host-timeout").exists():
-    time.sleep(330)  # Actual host budget must expire; no synthetic clock/knob.
+    time.sleep(330)  # Outlasts the host budget the caller sets.
     sys.exit(0)
 
 

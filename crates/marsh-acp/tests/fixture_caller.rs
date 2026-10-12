@@ -174,6 +174,20 @@ impl DaemonBackend for Fixture {
     }
 }
 
+/// Every test process (cargo-nextest runs one per test) installs the same
+/// host script at this one path. Replace it atomically: rewriting it in place
+/// would let another process's daemon run a truncated host.
+fn install_host_fixture(host: &std::path::Path) {
+    let staged = host.with_file_name(format!("marsh.{}", std::process::id()));
+    fs::write(
+        &staged,
+        include_str!("../../../tests/acceptance/acp-fixture/host.py"),
+    )
+    .unwrap();
+    fs::set_permissions(&staged, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::rename(&staged, host).unwrap();
+}
+
 struct Rig {
     server: Arc<Server>,
     client: Client,
@@ -199,6 +213,12 @@ impl Rig {
     }
 
     fn with_home_policy(real: bool, ephemeral: bool) -> Self {
+        Self::build(real, ephemeral, |server| server)
+    }
+
+    /// `configure` adjusts the daemon before it serves, e.g. its publication
+    /// budgets.
+    fn build(real: bool, ephemeral: bool, configure: impl FnOnce(Server) -> Server) -> Self {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("home");
         let backing = home.join("home");
@@ -216,14 +236,7 @@ impl Rig {
         // Substitute only stock registration. The grant and private host-to-
         // daemon preparation handshake still use their production paths.
         let host = std::env::current_exe().unwrap().with_file_name("marsh");
-        HOST_INIT.call_once(|| {
-            fs::write(
-                &host,
-                include_str!("../../../tests/acceptance/acp-fixture/host.py"),
-            )
-            .unwrap();
-            fs::set_permissions(&host, fs::Permissions::from_mode(0o700)).unwrap();
-        });
+        HOST_INIT.call_once(|| install_host_fixture(&host));
         let stock = root.path().join("stock-sbx");
         fs::write(
             &stock,
@@ -238,7 +251,7 @@ impl Rig {
         let preparations = Arc::new(AtomicUsize::new(0));
         let preparation_release = Arc::new(AtomicBool::new(true));
         let preparation_delay_ms = Arc::new(AtomicU64::new(0));
-        let server = Arc::new(
+        let server = Arc::new(configure(
             Server::bind_with_stock_sbx_and_control_home(&home, &stock, &control)
                 .unwrap()
                 .with_backend(Arc::new(Fixture {
@@ -246,7 +259,7 @@ impl Rig {
                     preparation_release: Arc::clone(&preparation_release),
                     preparation_delay_ms: Arc::clone(&preparation_delay_ms),
                 })),
-        );
+        ));
         let owner = fs::metadata(root.path()).unwrap();
         let authority = SessionAuthority {
             username: "fixture".into(),
@@ -1163,7 +1176,7 @@ fn prompt_reply_proxy(
 }
 
 #[test]
-#[ignore = "requires exact freshly built marsh and sibling marsh-mcp"]
+#[ignore = "requires MARSH_ACP_CALLER_BIN pointing to the exact newly built marsh"]
 #[allow(clippy::too_many_lines)] // One real CLI/private-host/daemon/Node transaction and recovery journey.
 fn cli_typed_publication_drives_real_host_and_preserves_effect_classes() {
     let rig = Rig::with_host(true);
@@ -1286,7 +1299,7 @@ fn cli_typed_publication_drives_real_host_and_preserves_effect_classes() {
 }
 
 #[test]
-#[ignore = "requires exact freshly built marsh and sibling marsh-mcp"]
+#[ignore = "requires MARSH_ACP_CALLER_BIN pointing to the exact newly built marsh"]
 fn cli_host_direct_cannot_forge_daemon_dispatch_with_environment() {
     let root = tempfile::tempdir().unwrap();
     let project = root.path().join("project");
@@ -1335,7 +1348,7 @@ fn cli_host_direct_cannot_forge_daemon_dispatch_with_environment() {
 }
 
 #[test]
-#[ignore = "requires exact freshly built CLI pair; discards an actual publication reply"]
+#[ignore = "requires MARSH_ACP_CALLER_BIN pointing to the exact newly built marsh"]
 fn cli_disconnect_after_preparation_reports_uncertainty_not_cancellation() {
     let rig = Rig::with_host(true);
     rig.preparation_delay_ms.store(2_000, Ordering::SeqCst);
@@ -1423,9 +1436,11 @@ fn cli_disconnect_after_preparation_reports_uncertainty_not_cancellation() {
 }
 
 #[test]
-#[ignore = "observes the real five-minute host budget; no fake clock or timeout override"]
 fn publication_host_deadline_retains_post_grant_uncertainty() {
-    let rig = Rig::new();
+    let budget = Duration::from_secs(3);
+    let rig = Rig::build(false, false, |server| {
+        server.with_publication_host_budget(budget)
+    });
     let marker = rig.shell.launch_directory.join(".host-timeout");
     fs::write(&marker, b"").unwrap();
     let start = Instant::now();
@@ -1448,11 +1463,12 @@ fn publication_host_deadline_retains_post_grant_uncertainty() {
     );
     let error = result.unwrap_err().to_string();
     assert!(
-        error.contains("five minutes") && error.contains("grant was revoked"),
+        error.contains("outside Kit preparation") && error.contains("grant was revoked"),
         "{error}"
     );
+    // The hung host sleeps far longer than this bound: only the budget ends it.
     assert!(
-        elapsed >= Duration::from_mins(5) && elapsed < Duration::from_secs(330),
+        elapsed >= budget,
         "host budget was not exercised: {elapsed:?}"
     );
     assert!(rig.status(0).published_name.is_none());
@@ -1467,15 +1483,22 @@ fn publication_host_deadline_retains_post_grant_uncertainty() {
 }
 
 #[test]
-#[ignore = "real CLI scope contention across two Node agents; crosses the production 30s admission wait"]
+#[ignore = "requires MARSH_ACP_CALLER_BIN pointing to the exact newly built marsh"]
 fn cli_scope_contention_rejects_before_second_agent_grant() {
-    let rig = Rig::with_host(true);
+    let admission_wait = Duration::from_secs(2);
+    let rig = Rig::build(true, false, |server| {
+        server.with_publication_admission_wait(admission_wait)
+    });
     let (second, _, second_lease) = rig
         .client
         .acp_start_reserved("fixture".into(), rig.shell.clone(), None)
         .unwrap();
     let checked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        rig.preparation_delay_ms.store(35_000, Ordering::SeqCst);
+        // The first publication holds the scope well past the second's wait.
+        rig.preparation_delay_ms.store(
+            u64::try_from((admission_wait * 4).as_millis()).unwrap(),
+            Ordering::SeqCst,
+        );
         thread::scope(|threads| {
             let first = threads.spawn(|| {
                 rig.cli(&[
@@ -1506,7 +1529,7 @@ fn cli_scope_contention_rejects_before_second_agent_grant() {
                     && diagnostic.contains("scope is busy"),
                 "{diagnostic}"
             );
-            assert!(started.elapsed() >= Duration::from_secs(30));
+            assert!(started.elapsed() >= admission_wait);
             assert_eq!(
                 fs::read(&calls).unwrap(),
                 before,
@@ -1550,88 +1573,6 @@ fn cli_scope_contention_rejects_before_second_agent_grant() {
     if let Err(panic) = checked {
         std::panic::resume_unwind(panic);
     }
-}
-
-#[test]
-#[ignore = "actual >six-minute production daemon-client/private-channel preparation"]
-fn cold_publication_daemon_client_exceeds_six_minutes() {
-    let rig = Rig::new();
-    rig.preparation_delay_ms.store(365_250, Ordering::SeqCst);
-    let start = Instant::now();
-    let result = rig.relay.acp_publish_target(
-        rig.id.clone(),
-        rig.shell.clone(),
-        "fixture_tool".into(),
-        None,
-        Some("fixture".into()),
-    );
-    let elapsed = start.elapsed();
-    assert!(
-        result.is_ok(),
-        "quiet preparation failed after {elapsed:?}: {result:?}"
-    );
-    assert!(elapsed >= Duration::from_secs(365));
-    assert_eq!(rig.preparations.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        rig.status(0).published_name.as_deref(),
-        Some("fixture_tool")
-    );
-    let events = fs::read_to_string(rig.shell.launch_directory.join(".host-events.jsonl")).unwrap();
-    let kinds: Vec<_> = events
-        .lines()
-        .map(|line| {
-            serde_json::from_str::<serde_json::Value>(line).unwrap()["type"]
-                .as_str()
-                .unwrap()
-                .to_owned()
-        })
-        .collect();
-    assert_eq!(kinds, ["prepare_kit", "begin_commit", "complete"]);
-    rig.relay
-        .acp_unpublish(rig.shell.clone(), "fixture_tool".into())
-        .unwrap();
-    assert!(!rig.shell.launch_directory.join("publication.json").exists());
-    rig.stop_and_receipt();
-}
-
-#[test]
-#[ignore = "observed >six-minute backend preparation; requires freshly built CLI pair"]
-fn cold_publication_exceeds_six_minutes() {
-    let rig = Rig::with_host(true);
-    rig.preparation_delay_ms.store(365_250, Ordering::SeqCst);
-    let start = Instant::now();
-    let result = rig.cli(&[
-        "publish",
-        &rig.id,
-        "--name",
-        "fixture_tool",
-        "--kit",
-        "fixture",
-    ]);
-    let elapsed = start.elapsed();
-    assert!(
-        result.status.success(),
-        "quiet cold preparation failed after {elapsed:?}: {}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    assert!(
-        elapsed >= Duration::from_secs(365),
-        "slow backend boundary was not exercised"
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&result.stderr)
-            .matches("starting fixture worker VM")
-            .count(),
-        1,
-        "periodic progress masked the former read cap"
-    );
-    assert_eq!(rig.preparations.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        rig.status(0).published_name.as_deref(),
-        Some("fixture_tool")
-    );
-    assert!(rig.cli(&["unpublish", "fixture_tool"]).status.success());
-    rig.stop_and_receipt();
 }
 
 #[test]

@@ -207,9 +207,10 @@ struct StartupChild {
 
 impl StartupChild {
     fn spawn(home: &Path, daemon: &Path, stock: &Path, launch: &File) -> Result<Self, DaemonError> {
-        let (reader, writer) = UnixStream::pair()?;
+        let (reader, writer) = marsh_runtime::unix_stream_pair()?;
         reader.set_nonblocking(true)?;
-        let child = Command::new(daemon)
+        let mut command = Command::new(daemon);
+        command
             .arg("--home")
             .arg(home)
             .env("MARSH_SBX", stock)
@@ -217,8 +218,8 @@ impl StartupChild {
             .stdin(Stdio::from(launch.try_clone()?))
             .stdout(Stdio::null())
             .stderr(Stdio::from(OwnedFd::from(writer)))
-            .process_group(0)
-            .spawn()
+            .process_group(0);
+        let child = marsh_runtime::with_host_descriptor_creation_excluded(|| command.spawn())
             .map_err(DaemonError::Spawn)?;
         Ok(Self {
             child,

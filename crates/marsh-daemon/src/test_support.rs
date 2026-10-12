@@ -2,6 +2,8 @@
 //! rather than red. A correct run never gets near the budget.
 
 use std::{
+    io::{self, Read},
+    os::unix::net::UnixStream,
     sync::mpsc,
     thread,
     time::{Duration, Instant},
@@ -63,4 +65,30 @@ pub fn socket_pair() -> (
     std::os::unix::net::UnixStream,
 ) {
     fenced(std::os::unix::net::UnixStream::pair).unwrap()
+}
+
+/// Read `stream` to EOF within [`PATIENCE`]. macOS can leave a thread blocked
+/// in `read` after its peer's `shutdown` (a lost wakeup; a full close always
+/// wakes it), so poll with short timeouts instead of one blocking read.
+pub fn read_to_end(stream: &mut UnixStream) -> io::Result<Vec<u8>> {
+    // macOS rejects setsockopt (EINVAL) once the peer has fully closed; a
+    // read then cannot block.
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(20)));
+    let deadline = Instant::now() + PATIENCE;
+    let mut bytes = Vec::new();
+    let mut buffer = [0; 16 * 1024];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => return Ok(bytes),
+            Ok(count) => bytes.extend_from_slice(&buffer[..count]),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock
+                        | io::ErrorKind::TimedOut
+                        | io::ErrorKind::Interrupted
+                ) && Instant::now() < deadline => {}
+            Err(error) => return Err(error),
+        }
+    }
 }

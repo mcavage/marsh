@@ -3,7 +3,7 @@
 //!
 //! The relay journeys need prebuilt host binaries (`MARSH_LOAD_TEST_BIN`
 //! names `marsh`; `marsh-mcp` and `marshd` sit beside it), so they are
-//! ignored by default and run by `tests/mcp/run_publication_callers.py`.
+//! ignored by default and run by `make test-rust` (`MCP_LOAD_CALLERS`).
 use super::*;
 use crate::test_support::{PATIENCE, fenced, wait_for, wait_until};
 use std::sync::atomic::AtomicUsize;
@@ -28,9 +28,8 @@ impl DaemonBackend for Kits {
     ) -> Result<PreparationResult, DaemonError> {
         self.prepared.fetch_add(1, Ordering::SeqCst);
         progress.cold_boot("other-kit", false)?;
-        if self.root.join("long-prepare").exists() {
-            // Longer than the host's five-minute command budget.
-            thread::sleep(Duration::from_secs(305));
+        if let Ok(seconds) = fs::read_to_string(self.root.join("long-prepare")) {
+            thread::sleep(Duration::from_secs(seconds.trim().parse().unwrap()));
         }
         if self.root.join("hold-prepare").exists() {
             fs::write(self.root.join("prepare-entered"), b"").unwrap();
@@ -232,14 +231,14 @@ pub(crate) struct LoadFixture {
 
 impl LoadFixture {
     pub(crate) fn new() -> Self {
-        Self::with_admission_wait(None)
+        Self::with_host(|host| host)
     }
 
     #[allow(
         clippy::too_many_lines,
         reason = "one daemon, host peer, and three shells"
     )]
-    fn with_admission_wait(wait: Option<Duration>) -> Self {
+    fn with_host(configure: impl FnOnce(McpHostControl) -> McpHostControl) -> Self {
         let cli =
             PathBuf::from(std::env::var_os("MARSH_LOAD_TEST_BIN").expect("MARSH_LOAD_TEST_BIN"));
         for name in ["marsh", "marsh-mcp", "marshd"] {
@@ -271,10 +270,12 @@ impl LoadFixture {
             prepared: Arc::clone(&prepared),
             root: temp.path().into(),
         }));
-        let mut host = McpHostControl::new(peer, sbx, host_home, Some(home.clone()));
-        if let Some(wait) = wait {
-            host = host.with_scope_admission_wait(wait);
-        }
+        let host = configure(McpHostControl::new(
+            peer,
+            sbx,
+            host_home,
+            Some(home.clone()),
+        ));
         server.mcp_host = Some(host.clone());
         let authority = SessionAuthority {
             username: "fixture".into(),
@@ -595,7 +596,7 @@ fn load_needs_no_second_daemon_connection() {
 #[ignore = "requires prebuilt MARSH_LOAD_TEST_BIN and its sibling host binaries"]
 fn competing_publication_is_refused_after_the_scope_admission_wait() {
     let wait = Duration::from_secs(1);
-    let f = LoadFixture::with_admission_wait(Some(wait));
+    let f = LoadFixture::with_host(|host| host.with_scope_admission_wait(wait));
     f.hold_preparation();
     thread::scope(|threads| {
         let load = threads.spawn(|| f.guest("mcp load stable --kit other-kit"));
@@ -831,4 +832,65 @@ fn stock_descendants_do_not_outlive_their_carrier() {
         .unwrap();
     wait_until("the stock descendant ends", || !running(pid));
     assert!(!f.path("forbidden-late-mutation").exists());
+}
+
+/// A host budget short enough to outlast in seconds; real host work outside
+/// preparation and stock calls takes well under it.
+const SHORT_HOST_BUDGET: Duration = Duration::from_secs(10);
+
+/// Kit preparation is backend-owned: a cold preparation longer than the
+/// host's command budget still completes the load.
+#[test]
+#[ignore = "requires prebuilt MARSH_LOAD_TEST_BIN and its sibling host binaries"]
+fn cold_preparation_outlasts_the_host_budget() {
+    let f = LoadFixture::with_host(|host| host.with_host_command_budget(SHORT_HOST_BUDGET));
+    let preparation = SHORT_HOST_BUDGET + Duration::from_secs(3);
+    fs::write(f.path("long-prepare"), preparation.as_secs().to_string()).unwrap();
+    let loaded = f.guest("mcp load stable --kit other-kit");
+    assert!(loaded.status.success(), "{}", stderr(&loaded));
+    assert_eq!(f.prepared(), 1);
+    assert!(f.published());
+}
+
+/// Supervised stock calls in a failed republish, rollback included, do not
+/// count against the host budget: their sum outlasts it, and the prior
+/// declaration and registration survive.
+#[test]
+#[ignore = "requires prebuilt MARSH_LOAD_TEST_BIN and its sibling host binaries"]
+fn slow_stock_rollback_keeps_the_prior_publication() {
+    let f = LoadFixture::with_host(|host| host.with_host_command_budget(SHORT_HOST_BUDGET));
+    assert!(f.guest("mcp publish slow-rollback -- cat").status.success());
+    let declaration = f
+        .host
+        .declaration_path(&f.session, PublicationKind::Mcp, "slow-rollback")
+        .unwrap();
+    let prior = fs::read(&declaration).unwrap();
+    let prior_registration = f.registration();
+    let calls_before = f.effects().lines().count();
+    // Each stock `mcp` call (the controlled sbx delays only those) takes this.
+    let delay = Duration::from_millis(1500);
+    fs::write(f.path("stock-delay"), delay.as_secs_f64().to_string()).unwrap();
+    let failed = f.guest("mcp publish slow-rollback --sandbox rollback-slow -- 'printf changed'");
+    fs::remove_file(f.path("stock-delay")).unwrap();
+    assert!(!failed.status.success());
+    assert!(stderr(&failed).contains("uncertain"), "{}", stderr(&failed));
+    assert!(
+        stderr(&failed).contains("forced load failure"),
+        "{}",
+        stderr(&failed)
+    );
+    let slow_calls = f
+        .effects()
+        .lines()
+        .skip(calls_before)
+        .filter(|call| call.starts_with("mcp "))
+        .count();
+    assert!(
+        delay * u32::try_from(slow_calls).unwrap() > SHORT_HOST_BUDGET,
+        "{slow_calls} slow stock calls do not outlast the host budget"
+    );
+    assert_eq!(fs::read(&declaration).unwrap(), prior);
+    assert_eq!(f.registration(), prior_registration);
+    assert!(f.guest("mcp unpublish slow-rollback").status.success());
+    assert!(!f.path("registration.json").exists());
 }
