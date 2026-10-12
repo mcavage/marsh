@@ -6229,6 +6229,7 @@ impl Drop for SignalRelay {
 #[derive(Clone, Debug)]
 pub struct ClientExecution {
     reader: Arc<Mutex<UnixStream>>,
+    reader_stopped: Arc<AtomicBool>,
     writer: Arc<Mutex<UnixStream>>,
     writer_shutdown: Arc<UnixStream>,
     stdin_window: Option<Arc<StdinWindow>>,
@@ -6351,7 +6352,8 @@ impl ClientExecution {
         let writer = stream.try_clone()?;
         let writer_shutdown = Arc::new(writer.try_clone()?);
         Ok(Self {
-            reader: Arc::new(Mutex::new(stream)),
+            reader: Arc::new(Mutex::new(Self::polled(stream)?)),
+            reader_stopped: Arc::new(AtomicBool::new(false)),
             writer: Arc::new(Mutex::new(writer)),
             writer_shutdown,
             stdin_window: Some(Arc::new(StdinWindow::new())),
@@ -6371,15 +6373,33 @@ impl ClientExecution {
         }
         let writer_shutdown = Arc::new(writer.try_clone()?);
         Ok(Self {
-            reader: Arc::new(Mutex::new(stream)),
+            reader: Arc::new(Mutex::new(Self::polled(stream)?)),
+            reader_stopped: Arc::new(AtomicBool::new(false)),
             writer: Arc::new(Mutex::new(writer)),
             writer_shutdown,
             stdin_window: None,
         })
     }
 
+    /// The receiver wakes every 20 ms: [`Self::shutdown`] cannot rely on the
+    /// socket shutdown alone to wake it (macOS can lose that wakeup). EINVAL
+    /// means the peer has already closed, so reads cannot block.
+    fn polled(stream: UnixStream) -> Result<UnixStream, DaemonError> {
+        if let Err(error) = stream.set_read_timeout(Some(Duration::from_millis(20)))
+            && error.raw_os_error() != Some(rustix::io::Errno::INVAL.raw_os_error())
+        {
+            return Err(error.into());
+        }
+        Ok(stream)
+    }
+
     pub fn receive(&self) -> Result<AttachmentFrame, DaemonError> {
-        self.receive_using(read_frame)
+        self.receive_using(|stream| {
+            read_frame(&mut ShutdownAwareReader {
+                stream,
+                stopped: &self.reader_stopped,
+            })
+        })
     }
 
     fn receive_using(
@@ -6469,7 +6489,37 @@ impl ClientExecution {
         if let Some(window) = &self.stdin_window {
             window.close();
         }
+        self.reader_stopped.store(true, Ordering::Release);
         self.writer_shutdown.shutdown(Shutdown::Both)
+    }
+}
+
+/// Polled reads that end as the local shutdown would (EOF) once it has been
+/// requested, even if the kernel never woke the blocked read.
+struct ShutdownAwareReader<'a> {
+    stream: &'a mut UnixStream,
+    stopped: &'a AtomicBool,
+}
+
+impl Read for ShutdownAwareReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        loop {
+            match self.stream.read(buffer) {
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::WouldBlock
+                            | io::ErrorKind::TimedOut
+                            | io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    if self.stopped.load(Ordering::Acquire) {
+                        return Ok(0);
+                    }
+                }
+                result => return result,
+            }
+        }
     }
 }
 
