@@ -148,9 +148,8 @@ fn foreground_group_signal_runs_the_trap_after_the_child_dies() {
                 "trap 'printf trapped; exit {status}' {name}; sh -c 'printf ready > ready; exec sleep 300'"
             ))
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0);
-        let child = command.spawn().unwrap();
+            .stderr(Stdio::piped());
+        let child = common::spawn_group(&mut command);
         // The trap is installed before the child starts, so the shell catches
         // the signal whether or not it has reached its wait.
         common::wait_until("the foreground child", Duration::from_secs(20), || {
@@ -191,14 +190,13 @@ fn matches_bash_in_a_fresh_directory(script: &str, expected: &[u8]) {
     common::require_bash_oracle();
     let run = |mut command: Command| {
         let directory = tempfile::tempdir().unwrap();
-        let child = command
-            .current_dir(directory.path())
-            .args(["--noprofile", "--norc", "-c", script])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0)
-            .spawn()
-            .unwrap();
+        let child = common::spawn_group(
+            command
+                .current_dir(directory.path())
+                .args(["--noprofile", "--norc", "-c", script])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped()),
+        );
         common::wait_for_exit(child, script, Duration::from_mins(1))
     };
     let bash = run(isolated_command("bash"));
@@ -272,15 +270,14 @@ fn term_trap_runs_while_shell_waits_for_more_input() {
 
     let directory = tempfile::tempdir().unwrap();
     let ready = directory.path().join("ready");
-    let mut child = marsh()
-        .args(["--no-config", "--noprofile", "--norc", "-s"])
-        .current_dir(directory.path())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()
-        .unwrap();
+    let mut child = common::spawn_group(
+        marsh()
+            .args(["--no-config", "--noprofile", "--norc", "-s"])
+            .current_dir(directory.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
     let mut stdin = child.stdin.take().unwrap();
     stdin
         .write_all(b"trap 'printf trapped; exit 143' TERM\nprintf ready > ready\n")
@@ -305,15 +302,14 @@ fn idle_term_trap_can_resume_reading_commands() {
 
     let directory = tempfile::tempdir().unwrap();
     let ready = directory.path().join("ready");
-    let mut child = marsh()
-        .args(["--no-config", "--noprofile", "--norc", "-s"])
-        .current_dir(directory.path())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()
-        .unwrap();
+    let mut child = common::spawn_group(
+        marsh()
+            .args(["--no-config", "--noprofile", "--norc", "-s"])
+            .current_dir(directory.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
     let mut stdin = child.stdin.take().unwrap();
     stdin
         .write_all(b"trap 'printf trapped; printf handled > handled' TERM\nprintf ready > ready\n")
@@ -331,7 +327,7 @@ fn idle_term_trap_can_resume_reading_commands() {
     });
     stdin.write_all(b"ter\n").unwrap();
     drop(stdin);
-    let output = child.wait_with_output().unwrap();
+    let output = common::wait_for_exit(child, "idle TERM trap resume", Duration::from_secs(20));
     assert_eq!(output.status.code(), Some(0), "{:?}", output.stderr);
     assert_eq!(output.stdout, b"trappedafter");
 }
@@ -376,9 +372,8 @@ fn trapped_term_interrupts_wait() {
             .arg("-c")
             .arg(format!("trap 'printf trapped' TERM; sleep 300 & pid=$!; printf ready > ready; {wait}; rc=$?; printf '%s:%s' \"$rc\" \"${{done-unset}}\"; kill \"$pid\"; wait \"$pid\" 2>/dev/null; exit 0"))
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0);
-        let child = command.spawn().unwrap();
+            .stderr(Stdio::piped());
+        let child = common::spawn_group(&mut command);
         common::wait_until(wait, Duration::from_secs(20), || ready.exists());
         // Past `printf ready` the next blocking point is the wait itself.
         common::wait_until_blocked(child.id(), wait);
@@ -578,37 +573,27 @@ fn interactive_command_string_takes_terminal_for_foreground_commands() {
     // terminal control, the first foreground job stops on SIGTTOU and hangs.
     let script = "/bin/echo PTY_HI; /bin/echo one | /bin/cat; exit 3";
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
-        let mut child = isolated_command("script")
-            .args([
-                "-q",
-                "/dev/null",
-                program,
-                "--noprofile",
-                "--norc",
-                "-i",
-                "-c",
-                script,
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0)
-            .spawn()
-            .unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while child.try_wait().unwrap().is_none() {
-            if std::time::Instant::now() > deadline {
-                // Kill the whole group so a stopped shell or job cannot linger.
-                let _ = nix::sys::signal::killpg(
-                    nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap()),
-                    nix::sys::signal::Signal::SIGKILL,
-                );
-                let output = child.wait_with_output().unwrap();
-                panic!("{program}: -i -c hung under a PTY: {output:?}");
-            }
-            thread::sleep(Duration::from_millis(20));
-        }
-        let output = child.wait_with_output().unwrap();
+        let child = common::spawn_group(
+            isolated_command("script")
+                .args([
+                    "-q",
+                    "/dev/null",
+                    program,
+                    "--noprofile",
+                    "--norc",
+                    "-i",
+                    "-c",
+                    script,
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped()),
+        );
+        let output = common::wait_for_exit(
+            child,
+            &format!("{program}: -i -c under a PTY"),
+            Duration::from_secs(10),
+        );
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert_eq!(output.status.code(), Some(3), "{program}: {output:?}");
         assert!(stdout.contains("PTY_HI"), "{program}: {output:?}");
@@ -646,7 +631,7 @@ fn fanout_runs_pipelines_concurrently_and_collects_in_declaration_order() {
 #[cfg(unix)]
 fn rendezvous_fanout_finishes() -> bool {
     let directory = tempfile::tempdir().unwrap();
-    let mut child = composition_shell()
+    let mut child = common::spawn_group(composition_shell()
         .current_dir(directory.path())
         .args([
             "--no-config",
@@ -656,23 +641,17 @@ fn rendezvous_fanout_finishes() -> bool {
             "printf input | fanout { first: sh -c 'touch first-ready; i=0; while test ! -e second-ready; do i=$((i+1)); test \"$i\" -lt 600 || exit 41; sleep 0.01; done; printf one' | cat; second: (sh -c 'touch second-ready; i=0; while test ! -e first-ready; do i=$((i+1)); test \"$i\" -lt 600 || exit 42; sleep 0.01; done; printf input' | tr a-z A-Z) } | collect",
         ])
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()
-        .unwrap();
+        .stderr(Stdio::piped()));
     // The branches give up after six seconds, so a run that outlives this is a
     // hang, not a slow machine.
     let deadline = std::time::Instant::now() + Duration::from_mins(1);
     while child.try_wait().unwrap().is_none() {
         if std::time::Instant::now() >= deadline {
-            let group = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap());
-            let _ = nix::sys::signal::killpg(group, nix::sys::signal::Signal::SIGKILL);
-            let _ = child.wait();
             return false;
         }
         thread::sleep(Duration::from_millis(20));
     }
-    let output = child.wait_with_output().unwrap();
+    let output = common::wait_for_exit(child, "rendezvous fanout", Duration::from_secs(10));
     assert!(output.status.success(), "{output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -918,19 +897,18 @@ fn fanout_enforces_prefix_and_combined_output_bounds_before_delivery() {
     assert!(String::from_utf8_lossy(&prefix.stderr).contains("input exceeds 64 MiB"));
 
     // The branch would run for five minutes; collect must stop it at the bound.
-    let child = composition_shell()
-        .args([
-            "--no-config",
-            "--noprofile",
-            "--norc",
-            "-c",
-            "fanout { noisy: sh -c 'head -c 17825792 /dev/zero; sleep 300' } | collect",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()
-        .unwrap();
+    let child = common::spawn_group(
+        composition_shell()
+            .args([
+                "--no-config",
+                "--noprofile",
+                "--norc",
+                "-c",
+                "fanout { noisy: sh -c 'head -c 17825792 /dev/zero; sleep 300' } | collect",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
     let output = common::wait_for_exit(child, "over-limit fanout", Duration::from_mins(1));
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
@@ -1174,9 +1152,8 @@ fn interrupt_cancels_every_fanout_branch() {
     command
         .args(["--no-config", "--noprofile", "--norc", "-c", &script])
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
-    let child = command.spawn().unwrap();
+        .stderr(Stdio::piped());
+    let child = common::spawn_group(&mut command);
     common::wait_until("both branches", Duration::from_secs(20), || {
         std::fs::read_to_string(&pids).is_ok_and(|contents| contents.lines().count() == 2)
     });
@@ -1208,9 +1185,8 @@ fn term_trap_cancels_every_fanout_branch() {
     command
         .args(["--no-config", "--noprofile", "--norc", "-c", &script])
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
-    let child = command.spawn().unwrap();
+        .stderr(Stdio::piped());
+    let child = common::spawn_group(&mut command);
     common::wait_until("both branches", Duration::from_secs(20), || {
         std::fs::read_to_string(&pids).is_ok_and(|contents| contents.lines().count() == 2)
     });
@@ -1344,7 +1320,9 @@ fn compound_background_list_has_a_waitable_pid() {
 struct PtyShell {
     program: String,
     input: std::sync::Arc<std::sync::Mutex<std::process::ChildStdin>>,
-    child: std::process::Child,
+    /// `script`, leading its own process group. The shell under it leads
+    /// the terminal's session, outside that group. `None` once reaped.
+    child: Option<std::process::Child>,
     output: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
     reader: Option<thread::JoinHandle<()>>,
 }
@@ -1404,7 +1382,7 @@ impl PtyShell {
         Self {
             program: program.into(),
             input,
-            child,
+            child: Some(child),
             output,
             reader: Some(reader),
         }
@@ -1504,19 +1482,26 @@ impl PtyShell {
         }
     }
 
+    /// Kills the shell and everything under `script` (whatever session or
+    /// group it is in), then `script`'s group, and reaps `script`.
     fn kill(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        common::kill_descendants(child.id());
         let _ = nix::sys::signal::killpg(
-            nix::unistd::Pid::from_raw(i32::try_from(self.child.id()).unwrap()),
+            nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap()),
             nix::sys::signal::Signal::SIGKILL,
         );
-        let _ = self.child.wait();
+        let _ = child.wait();
     }
 
     /// Waits for the shell to exit and returns its status and output.
     fn finish(mut self) -> (Option<i32>, String) {
         let deadline = std::time::Instant::now() + Duration::from_secs(15);
         loop {
-            if let Some(status) = self.child.try_wait().unwrap() {
+            if let Some(status) = self.child.as_mut().unwrap().try_wait().unwrap() {
+                self.child = None;
                 // `script` has exited, so the reader reaches end of file.
                 self.reader.take().unwrap().join().unwrap();
                 return (status.code(), self.output());
@@ -1528,6 +1513,13 @@ impl PtyShell {
             }
             thread::sleep(Duration::from_millis(20));
         }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for PtyShell {
+    fn drop(&mut self) {
+        self.kill();
     }
 }
 

@@ -32,25 +32,26 @@ fn run(program: &str, script: &str, from_stdin: bool) -> Output {
     if program != "bash" {
         command.arg("--no-config");
     }
-    command.args(["--noprofile", "--norc"]);
+    command
+        .args(["--noprofile", "--norc"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if from_stdin {
-        let mut child = command
-            .arg("-s")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(script.as_bytes())
-            .unwrap();
-        child.wait_with_output().unwrap()
+        command.arg("-s").stdin(Stdio::piped());
     } else {
-        command.args(["-c", script]).output().unwrap()
+        command.args(["-c", script]);
     }
+    // A shell that misses a signal hangs; this fails the test by name and
+    // kills the shell's group instead.
+    let mut child = common::spawn_group(&mut command);
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(script.as_bytes()).unwrap();
+    }
+    common::wait_for_exit(
+        child,
+        &format!("{program}: {script}"),
+        Duration::from_mins(1),
+    )
 }
 
 fn differential(script: &str, status: i32, stdout: &[u8]) {
@@ -474,7 +475,6 @@ fn executable_without_shebang_uses_brush_and_preserves_state_arguments_and_fds()
 /// the trap and ends that wait with 130; the child is neither reaped nor killed.
 #[test]
 fn trapped_sigint_interrupts_wait_without_consuming_or_killing_the_child() {
-    use std::os::unix::process::CommandExt as _;
     for wait in ["wait \"$pid\"", "wait -n -p done \"$pid\"", "wait"] {
         let script = format!(
             "trap 'printf \"trap:%s\\n\" \"$?\"' INT; mkfifo gate; sh -c 'read x < gate; exit 17' & pid=$!; printf ready >ready; {wait}; first=$?; kill -0 \"$pid\" || exit 91; test -z \"${{done+x}}\" || exit 92; echo >gate; wait \"$pid\"; second=$?; printf '%s:%s\\n' \"$first\" \"$second\""
@@ -485,16 +485,15 @@ fn trapped_sigint_interrupts_wait_without_consuming_or_killing_the_child() {
             if program != "bash" {
                 command.arg("--no-config");
             }
-            let child = command
-                .args(["--noprofile", "--norc", "-c", &script])
-                .env_remove("BASH_ENV")
-                .env_remove("ENV")
-                .current_dir(directory.path())
-                .process_group(0)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap();
+            let child = common::spawn_group(
+                command
+                    .args(["--noprofile", "--norc", "-c", &script])
+                    .env_remove("BASH_ENV")
+                    .env_remove("ENV")
+                    .current_dir(directory.path())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped()),
+            );
             let ready = directory.path().join("ready");
             common::wait_until(
                 &format!("{program}: ready"),
@@ -1142,7 +1141,7 @@ fn coreutils_split_and_join_are_unaffected_by_split_join_composition() {
 /// wait may not have installed the handler that defers the signal.
 #[test]
 fn noninteractive_group_sigint_ends_the_command_list() {
-    use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
+    use std::os::unix::process::ExitStatusExt as _;
     for (script, status, stdout) in [
         (
             "for i in 1 2 3; do sh -c 'printf r >> ready; exec sleep 300'; echo it$i; done; echo loopdone",
@@ -1166,15 +1165,14 @@ fn noninteractive_group_sigint_ends_the_command_list() {
             if program != "bash" {
                 command.arg("--no-config");
             }
-            let child = command
-                .args(["--noprofile", "--norc", "-c", script])
-                .current_dir(directory.path())
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .process_group(0)
-                .spawn()
-                .unwrap();
+            let child = common::spawn_group(
+                command
+                    .args(["--noprofile", "--norc", "-c", script])
+                    .current_dir(directory.path())
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped()),
+            );
             let ready = directory.path().join("ready");
             common::wait_until(
                 &format!("{program}: {script}: ready"),
