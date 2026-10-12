@@ -416,7 +416,9 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   `cmd &`, `( cmd )`, a pipeline stage) on its main thread: Darwin drops a
   signal, even `SIGKILL`, sent while a secondary thread of a multithreaded
   process execs, so `sleep 3 & kill $!; wait $!` exited 0 about one run in
-  seven on macOS (Bash: 143 always). And every signal stays blocked from
+  seven on macOS (Bash: 143 always). The request reaches the main thread over
+  a pipe (a forked child must not park threads on synchronization state
+  copied from its parent; Darwin traps). And every signal stays blocked from
   `fork` until the child has given its caught signals their default actions
   (an external command's child just before `exec`, a forked shell once it has
   set its dispositions), so one landing in that window no longer runs the

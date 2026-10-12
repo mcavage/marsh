@@ -113,7 +113,7 @@ mod imp {
     use std::collections::HashSet;
     use std::io::Write as _;
     use std::os::fd::RawFd;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
     use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
 
@@ -123,34 +123,71 @@ mod imp {
     static SIGNAL_SOCKETS: OnceLock<Option<[Vec<RawFd>; 2]>> = OnceLock::new();
     /// Dispositions a forked child replaced, restored if it traps the signal.
     static SAVED_ACTIONS: Mutex<Vec<(i32, libc::sigaction)>> = Mutex::new(Vec::new());
-    /// In a forked child: the main thread, which runs the child's in-place
-    /// `exec` (see [`exec_in_place`]).
-    static MAIN_THREAD_EXEC: Mutex<Option<std::sync::mpsc::Sender<Option<ExecRequest>>>> =
-        Mutex::new(None);
+    /// In a forked child: the pipe to its main thread, which runs the child's
+    /// in-place `exec` (see [`exec_in_place`]), and the pipe it answers on.
+    /// Pipes, not channels: a forked child must not park threads on
+    /// synchronization state copied from its parent (Darwin traps).
+    static EXEC_REQUESTS: AtomicI32 = AtomicI32::new(-1);
+    static EXEC_REPLIES: AtomicI32 = AtomicI32::new(-1);
 
-    /// A command for the main thread to exec, and where to report its failure.
-    type ExecRequest = (
-        std::process::Command,
-        std::sync::mpsc::Sender<std::io::Error>,
-    );
+    fn write_all(fd: RawFd, bytes: &[u8]) -> bool {
+        let mut done = 0;
+        while done < bytes.len() {
+            // SAFETY: writes from a live buffer to a descriptor this process owns.
+            let n = unsafe { libc::write(fd, bytes[done..].as_ptr().cast(), bytes.len() - done) };
+            if n > 0 {
+                done += n.cast_unsigned();
+            } else if n < 0
+                && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
+            {
+                continue;
+            } else {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn read_exact<const N: usize>(fd: RawFd) -> Option<[u8; N]> {
+        let mut bytes = [0u8; N];
+        let mut done = 0;
+        while done < N {
+            // SAFETY: reads into a live buffer from a descriptor this process owns.
+            let n = unsafe { libc::read(fd, bytes[done..].as_mut_ptr().cast(), N - done) };
+            if n > 0 {
+                done += n.cast_unsigned();
+            } else if n < 0
+                && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
+            {
+                continue;
+            } else {
+                return None;
+            }
+        }
+        Some(bytes)
+    }
 
     /// Replaces this process with `command`, returning only its error. In a
     /// forked child the main thread does it: Darwin can drop a signal, even
     /// `SIGKILL`, sent while a secondary thread of a multithreaded process
     /// execs, so `sleep 3 & kill $!` could leave `sleep` running.
-    pub(crate) fn exec_in_place(mut command: std::process::Command) -> std::io::Error {
+    pub(crate) fn exec_in_place(command: std::process::Command) -> std::io::Error {
         use std::os::unix::process::CommandExt as _;
-        let sender = MAIN_THREAD_EXEC.lock().ok().and_then(|main| main.clone());
-        if let Some(sender) = sender {
-            let (reply, failed) = std::sync::mpsc::channel();
-            return match sender.send(Some((command, reply))) {
-                Ok(()) => failed.recv().unwrap_or_else(|_| {
-                    std::io::Error::other("exec on the main thread did not report")
-                }),
-                // The main thread is gone; exec here.
-                Err(std::sync::mpsc::SendError(Some((mut command, _)))) => command.exec(),
-                Err(std::sync::mpsc::SendError(None)) => std::io::Error::other("no command"),
-            };
+        let (requests, replies) = (
+            EXEC_REQUESTS.load(Ordering::Acquire),
+            EXEC_REPLIES.load(Ordering::Acquire),
+        );
+        let mut command = Box::new(command);
+        if requests >= 0 && replies >= 0 {
+            let pointer = Box::into_raw(command);
+            if write_all(requests, &(pointer as usize).to_ne_bytes()) {
+                return match read_exact::<4>(replies) {
+                    Some(errno) => std::io::Error::from_raw_os_error(i32::from_ne_bytes(errno)),
+                    None => std::io::Error::other("exec on the main thread did not report"),
+                };
+            }
+            // SAFETY: the main thread did not take the request; it is ours again.
+            command = unsafe { Box::from_raw(pointer) };
         }
         command.exec()
     }
@@ -654,18 +691,28 @@ mod imp {
         // a signal that arrived since then now takes the dispositions set above.
         unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &raw const mask, std::ptr::null_mut()) };
         close_foreign_pipes(keep);
-        let (exec_sender, exec_requests) = std::sync::mpsc::channel::<Option<ExecRequest>>();
-        if let Ok(mut main) = MAIN_THREAD_EXEC.try_lock() {
-            *main = Some(exec_sender.clone());
-        }
-        /// Tells the main thread the body thread is gone, however it ends.
-        struct BodyDone(std::sync::mpsc::Sender<Option<ExecRequest>>);
-        impl Drop for BodyDone {
-            fn drop(&mut self) {
-                let _ = self.0.send(None);
+        let mut pipes = [[-1; 2]; 2];
+        for pipe in &mut pipes {
+            // SAFETY: creates a pipe into a live array; marks both ends close-on-exec.
+            unsafe {
+                if libc::pipe(pipe.as_mut_ptr()) == 0 {
+                    for fd in *pipe {
+                        libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+                    }
+                }
             }
         }
-        let done = BodyDone(exec_sender);
+        let [[request_read, request_write], [reply_read, reply_write]] = pipes;
+        EXEC_REQUESTS.store(request_write, Ordering::Release);
+        EXEC_REPLIES.store(reply_read, Ordering::Release);
+        /// Tells the main thread the body thread is gone, however it ends.
+        struct BodyDone(RawFd);
+        impl Drop for BodyDone {
+            fn drop(&mut self) {
+                let _ = write_all(self.0, &0usize.to_ne_bytes());
+            }
+        }
+        let done = BodyDone(request_write);
         let thread = std::thread::Builder::new().spawn(move || {
             let _done = done;
             // The parent is waiting for this, and gives up on a child that
@@ -687,9 +734,17 @@ mod imp {
         if let Ok(thread) = thread {
             // The body thread exits the process; until then this thread runs
             // the in-place execs it asks for.
-            while let Ok(Some((mut command, reply))) = exec_requests.recv() {
+            while let Some(pointer) = read_exact::<{ size_of::<usize>() }>(request_read) {
                 use std::os::unix::process::CommandExt as _;
-                let _ = reply.send(command.exec());
+                let pointer = usize::from_ne_bytes(pointer);
+                if pointer == 0 {
+                    break;
+                }
+                // SAFETY: exec_in_place sent a pointer from Box::into_raw and
+                // gave up ownership of it.
+                let mut command = unsafe { Box::from_raw(pointer as *mut std::process::Command) };
+                let errno = command.exec().raw_os_error().unwrap_or(libc::EINVAL);
+                let _ = write_all(reply_write, &errno.to_ne_bytes());
             }
             let _ = thread.join();
         }
