@@ -13,10 +13,11 @@ code, post them in
 
 You need an Apple Silicon Mac with Xcode Command Line Tools, Docker Desktop
 (with Buildx), `sbx` 0.45.0 or newer, Rust 1.95.0 (`rust-toolchain.toml` picks
-it), Python 3.10+, and `jq`.
+it), `cargo-nextest`, Python 3.10+, Node 22, GNU Bash 5.3 (the test oracle),
+and `jq`.
 
 ```sh
-brew install jq docker/tap/sbx
+brew install jq bash node cargo-nextest docker/tap/sbx
 rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
 sbx login
 ```
@@ -37,11 +38,10 @@ broker, so you can build and test marsh from inside marsh
 ~/.marsh-dev/bin/marsh --dev -c pi-dev # Pi, in a dev shell, in this checkout
 ```
 
-The acceptance smoke needs the fixture Kit, which release CI publishes:
+The sbx-backed tests need the fixture Kit, which release CI publishes:
 
 ```sh
-make fixture-ref                       # writes target/fixture-ref
-make dev-smoke                         # or: make dev-smoke DEV_KIT=REPO@sha256:...
+make fixture-ref                       # writes target/fixture-ref; or pass DEV_KIT=REPO@sha256:...
 ```
 
 To publish your own fixture instead:
@@ -49,33 +49,45 @@ To publish your own fixture instead:
 
 ## Testing
 
-Everything runs against the installed dev product and real `sbx`.
+There are two kinds of tests: VM-free ones (`make test`, which CI runs) and
+ones that drive real `sbx` microVMs (only on a Mac, by hand).
 
-| command | time | when |
+| command | runs | where |
 |---|---|---|
-| `make check` | ~7 s warm, ~30 s cold | after every change (`make dev && make check`; `make check-reset` stops its scope) |
-| `make verify` | ~3 min | before you push: `check` plus the highest-signal acceptance scenarios |
-| `make regress` | ~12 min | before a release: every sbx-backed suite, then the host suites |
+| `make test` | `test-rust`, `test-harness`, `test-model` (below); no VMs, no credentials | your machine; CI on Linux arm64 and macOS |
+| `make test-rust` | `cargo fmt --check`, clippy, every workspace test under `cargo-nextest` (one process per test), doctests, the `#[ignore]`d MCP load callers against the built binaries | CI on both |
+| `make test-harness` | onboarding journeys through the shipped binaries, MCP protocol callers, the Kit publisher, kit adapter scripts, self-tests of the acceptance/perf/release tooling | CI on both |
+| `make test-model` | quick TLA+ sweep (Docker, or `TLC_RUNNER=java`) | CI's model job runs every config |
+| `make check` | fast real smoke of the installed dev product (~7 s warm) | Mac, after `make dev` |
+| `make verify` | `check` plus the highest-signal sbx suites (~3 min) | Mac, before you push |
+| `make regress` | every sbx suite (~12 min), then `make test` with the full model | Mac, before a release |
+| `make acceptance` | builds a fresh candidate, runs the full gate with a receipt | Mac, the release run |
 
-`make verify` and `make regress` run `tests/regress.py`. Each suite gets its
-own scope and evidence directory, at most 3 run at once (`REGRESS_JOBS=N`; it
-backs off when load or disk is high), and a failure keeps its log in
-`target/regress/` (`last.json` is the summary). Pick suites with
-`ONLY=workspaces-1 SKIP=self-dev` (`python3 tests/regress.py --list`), or run
-them one at a time with `make regress-serial`.
+`make test` needs `cargo-nextest`; it stops with an install hint rather than
+falling back to `cargo test`, so it runs exactly what CI runs. CI uses the
+nextest `ci` profile (`NEXTEST_PROFILE=ci`: no fail-fast). A test that runs
+longer than its slow timeout (`.config/nextest.toml`) is killed and reported
+by name. There are no retries.
 
-`make dev-acceptance`, `make dev-split`, and `make dev-processes` run single
-areas (`ONLY=P02-...` picks one scenario). `make help` lists the rest.
+`make verify` and `make regress` run `tests/regress.py`, the one scheduler for
+sbx suites. Each suite gets its own scope and evidence directory, at most 3 run
+at once (`REGRESS_JOBS=N`; `REGRESS_JOBS=1` runs them one at a time; it backs
+off when load or disk is high), and a failure keeps its log in
+`target/regress/` (`last.json` is the summary). `ONLY=` and `SKIP=` take suite
+names, families, or scenario ids: `make regress ONLY=smoke`,
+`make regress ONLY=workspaces`, `make regress ONLY=W01-plain-bash,P02-self-spawn-bash-c`
+(list them with `python3 tests/regress.py --list --kit REF`). With `ONLY`,
+`make regress` runs just those suites. `VERIFY_DEPS=` skips the `make dev`
+rebuild.
 
 ### What CI covers, and what needs your Mac
 
-Almost everything runs in CI on Linux arm64: the shell and its Bash
-differential tests, the guest and worker crates, the ACP/MCP protocol callers,
-the publisher, docs links, and the TLA+ model. CI's macOS job builds the host
-side and runs its tests against a fake `sbx`.
-
-What it cannot do is start a real microVM, so `make check`, `make verify`,
-`make regress`, and `make acceptance` run on a Mac. The reasons:
+CI runs `make test-rust` and `make test-harness` on Linux arm64 and on macOS,
+the full TLA+ sweep, and the docs and link checks. On Linux that includes the
+shell and its Bash differential tests (against GNU Bash 5.3) and every other
+workspace crate; host-side tests use a fake `sbx` and temporary homes. Nothing in CI
+starts a microVM, so `make check`, `make verify`, `make regress`, and
+`make acceptance` run only on a Mac. The reasons:
 
 - A microVM needs a hypervisor. GitHub's hosted macOS runners are themselves
   VMs on Apple Silicon without nested virtualization, and the hosted Linux
@@ -95,32 +107,18 @@ never use real credentials.
 
 ## Building on Linux
 
-A Linux arm64 machine can build and test the shell and protocols without a Mac,
-Docker, `sbx`, or credentials. This is what CI's Linux job runs:
-
-```sh
-export CARGO_TARGET_DIR="/tmp/marsh-target-$(id -u)" CARGO_INCREMENTAL=0
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-make onboarding                        # real shell journeys through the shipped binaries
-cargo test --locked -p marsh --test smoke --test bash_audit --test results_cli
-make mcp-test
-```
-
-`bash_audit` compares marsh with GNU Bash from `PATH`; include `bash --version`
-when you report results. On a small disk, set `CARGO_PROFILE_DEV_DEBUG=0` and
-`CARGO_PROFILE_TEST_DEBUG=0`.
+A Linux arm64 machine runs `make test-rust` and `make test-harness` without a
+Mac, Docker, `sbx`, or credentials; that is CI's Linux job. You need Rust
+1.95.0, `cargo-nextest`, Python 3.10+, Node 22, and GNU Bash 5.3 first on
+`PATH` (`bash_audit` and the other differential tests compare marsh with the
+`bash` on `PATH`; include `bash --version` when you report results). On a small
+disk, set `CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_PROFILE_TEST_DEBUG=0`.
 
 ## Before you send a change
 
-```sh
-make verify-static
-```
-
-That runs `cargo fmt --check`, clippy, every Rust test (under `cargo-nextest`
-if installed), and a quick TLA+ sweep, with no VMs. Add focused tests for the
-crate you changed, and on a Mac run `make dev-smoke`. `make acceptance` builds
-a fresh candidate and runs the full gate; it is the release run.
+Run `make test`. Add focused tests for the crate you changed, and on a Mac run
+`make verify` (`make dev` first). `make acceptance` builds a fresh candidate
+and runs the full gate; it is the release run.
 
 ### Shell behavior
 
@@ -146,7 +144,8 @@ update the [TLA+ model](docs/model/README.md) in the same change: the
 invariant, its negative control, and the code-location table.
 
 ```sh
-docs/model/check.sh                    # Docker, or TLC_RUNNER=java with a local JDK
+make test-model                        # quick sweep; MODEL_FLAGS= runs every config
+docs/model/check.sh                    # every config (Docker, or TLC_RUNNER=java with a local JDK)
 ```
 
 A model pass supports a review; it is not evidence about the Rust code.
