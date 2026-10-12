@@ -1,5 +1,5 @@
 #!/bin/sh
-# pi-dev: the Pi coding agent (1.0.0, npm-locked) in the shell VM (made for `marsh --dev`).
+# pi-dev: the Pi coding agent (1.1.0, npm-locked) in the shell VM (made for `marsh --dev`).
 #
 # Pi runs in the dev shell VM, so its tool calls run there too: `make
 # dev-inner`, the session's `sbx` shim and the broker work as they do for the
