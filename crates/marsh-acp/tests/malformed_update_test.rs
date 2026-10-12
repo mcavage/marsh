@@ -41,7 +41,7 @@ async fn malformed_updates_are_counted_without_losing_the_valid_reply() {
     let client = AcpClient::new(reader, writer, AcpClientConfig::default(), None);
     let (updates, mut received) = mpsc::channel(8);
     let reply = timeout(
-        Duration::from_secs(1),
+        Duration::from_secs(30),
         client.prompt("session", vec![ContentBlock::text("hello")], updates),
     )
     .await

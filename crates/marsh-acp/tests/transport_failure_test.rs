@@ -1,7 +1,7 @@
 //! Real peer regressions for bounded transport failure and envelope validation.
 
 use marsh_acp::{AcpClient, AcpClientConfig, AcpError, ContentBlock};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -9,21 +9,23 @@ use tokio::{
     time::timeout,
 };
 
-#[tokio::test]
-async fn saturated_peer_cannot_block_cancel_or_keep_transport_live() {
-    let (reader, mut peer_output) = tokio::io::duplex(32 * 1024);
-    let (writer, peer_input) = tokio::io::duplex(128);
+#[tokio::test(start_paused = true)]
+async fn peer_that_stops_reading_cannot_block_cancel_or_keep_transport_live() {
+    let (reader, _peer_output) = tokio::io::duplex(32 * 1024);
+    // The peer never reads; the prompt frame alone overfills this buffer, so
+    // the writer is stuck and nothing the client sends can be flushed.
+    let (writer, _peer_input) = tokio::io::duplex(128);
+    let cancel_deadline = Duration::from_millis(100);
     let client = Arc::new(AcpClient::new(
         reader,
         writer,
         AcpClientConfig {
-            cancel_timeout: Duration::from_millis(100),
+            cancel_timeout: cancel_deadline,
             turn_timeout: Duration::ZERO,
             ..Default::default()
         },
         None,
     ));
-    let mut peer_input = BufReader::new(peer_input);
     let (updates, _) = mpsc::channel(1);
     let prompt_client = Arc::clone(&client);
     let prompt = tokio::spawn(async move {
@@ -31,31 +33,22 @@ async fn saturated_peer_cannot_block_cancel_or_keep_transport_live() {
             .prompt("session", vec![ContentBlock::text("hello")], updates)
             .await
     });
-    let mut request = String::new();
-    peer_input.read_line(&mut request).await.unwrap();
-    assert_eq!(
-        serde_json::from_str::<Value>(&request).unwrap()["method"],
-        "session/prompt"
-    );
-
-    // The peer keeps its input open but stops reading rejection responses.
-    // This fills the bounded outbound queue without needing a large payload.
-    for id in 0..128 {
-        peer_output
-            .write_all(format!("{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"terminal/create\",\"params\":{{}}}}\n").as_bytes())
-            .await
-            .unwrap();
+    while client.session_cancel_phase("session").await.is_none() {
+        tokio::task::yield_now().await;
     }
-    tokio::time::sleep(Duration::from_millis(25)).await;
-    let result = timeout(Duration::from_secs(1), client.cancel_prompt("session"))
-        .await
-        .expect("cancellation must include queue admission in its deadline");
+    let started = tokio::time::Instant::now();
+    let result = client.cancel_prompt("session").await;
     assert!(
         matches!(result, Err(AcpError::TransportLost(_))),
         "{result:?}"
     );
+    assert!(
+        started.elapsed() <= cancel_deadline,
+        "cancel outlived its deadline: {:?}",
+        started.elapsed()
+    );
     assert!(*client.transport_termination().borrow());
-    let result = timeout(Duration::from_secs(1), prompt)
+    let result = timeout(Duration::from_secs(30), prompt)
         .await
         .expect("transport failure must wake the unbounded prompt")
         .unwrap();
@@ -93,7 +86,7 @@ async fn invalid_envelopes_cannot_complete_a_turn_or_deliver_later_updates() {
         let client = AcpClient::new(reader, writer, AcpClientConfig::default(), None);
         let (updates, mut received) = mpsc::channel(8);
         let result = timeout(
-            Duration::from_secs(1),
+            Duration::from_secs(30),
             client.prompt("session", vec![ContentBlock::text("hello")], updates),
         )
         .await

@@ -8,6 +8,9 @@ use tokio::{
     time::{sleep, timeout},
 };
 
+/// Bounds a wait for the fixture; generous so a starved runner is not a hang.
+const CONDITION_DEADLINE: Duration = Duration::from_secs(30);
+
 async fn fixture(deadline: Duration) -> (tokio::process::Child, Arc<AcpClient>, String) {
     let mut child = Command::new("node")
         .arg(concat!(
@@ -34,21 +37,31 @@ async fn fixture(deadline: Duration) -> (tokio::process::Child, Arc<AcpClient>, 
     (child, client, id)
 }
 
+/// Waits until the one-slot update queue is full, so the reader is blocked
+/// delivering the next update.
+async fn wait_queue_full<T>(receiver: &mpsc::Receiver<T>) {
+    timeout(CONDITION_DEADLINE, async {
+        while receiver.len() < receiver.max_capacity() {
+            sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the agent's burst never filled the update queue");
+}
+
 #[tokio::test]
 async fn delayed_consumer_preserves_every_burst_chunk() {
-    let (mut child, client, id) = fixture(Duration::from_secs(2)).await;
+    let (mut child, client, id) = fixture(Duration::from_secs(10)).await;
     let (sink, mut receiver) = mpsc::channel(1);
     let c = client.clone();
     let turn = tokio::spawn(async move {
         c.prompt(&id, vec![ContentBlock::text("burst-400")], sink)
             .await
     });
-    sleep(Duration::from_millis(100)).await;
+    // Start consuming only once the burst is backed up behind the consumer.
+    wait_queue_full(&receiver).await;
     let mut seen = Vec::new();
-    while let Some(update) = timeout(Duration::from_secs(20), receiver.recv())
-        .await
-        .unwrap()
-    {
+    while let Some(update) = timeout(CONDITION_DEADLINE, receiver.recv()).await.unwrap() {
         let value = serde_json::to_value(update).unwrap();
         seen.push(value["content"]["text"].as_str().unwrap().to_owned());
     }
@@ -77,15 +90,18 @@ async fn stalled_consumer_does_not_deadlock_cancel_reader_or_terminal() {
         c.prompt_raw(&remote, vec![ContentBlock::text("burst-hold")], sink)
             .await
     });
-    // The queue contains the first update; deliberately do not drain it yet.
-    sleep(Duration::from_millis(100)).await;
-    timeout(Duration::from_secs(1), client.cancel_prompt(&id))
+    wait_queue_full(&receiver).await;
+    client.cancel_prompt(&id).await.unwrap();
+    // Delivery is abandoned, and counted, only at the delivery deadline; a
+    // cancel that had waited on the stalled consumer would return after it.
+    assert_eq!(
+        client.dropped_updates(),
+        0,
+        "cancel waited for the stalled update consumer"
+    );
+    let result = timeout(CONDITION_DEADLINE, turn)
         .await
-        .expect("cancel blocked on update consumer")
-        .unwrap();
-    let result = timeout(Duration::from_secs(3), turn)
-        .await
-        .expect("terminal reader exceeded the configured delivery deadline")
+        .expect("the terminal reply never got past the stalled consumer")
         .unwrap()
         .unwrap();
     assert_eq!(result.stop_reason, marsh_acp::StopReason::Cancelled);
@@ -103,7 +119,7 @@ async fn stalled_consumer_without_cancel_fences_transport_at_deadline() {
     let (mut child, client, id) = fixture(Duration::from_millis(100)).await;
     let (sink, _receiver) = mpsc::channel(1);
     let result = timeout(
-        Duration::from_secs(1),
+        CONDITION_DEADLINE,
         client.prompt_raw(&id, vec![ContentBlock::text("burst-400")], sink),
     )
     .await

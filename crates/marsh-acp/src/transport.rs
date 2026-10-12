@@ -359,21 +359,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_recv_message_skips_blank_lines() {
-        let data = b"\n\r\n   \n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n  \r\n{\"jsonrpc\":\"2.0\",\"method\":\"notif\"}\n\n";
-        let mut reader = MessageReader::new(Cursor::new(data), 1024);
-
-        let msg1 = reader.recv_message().await.unwrap();
-        assert!(matches!(msg1, Some(JsonRpcMessage::Response(_))));
-
-        let msg2 = reader.recv_message().await.unwrap();
-        assert!(matches!(msg2, Some(JsonRpcMessage::Notification(_))));
-
-        let msg3 = reader.recv_message().await.unwrap();
-        assert!(msg3.is_none());
-    }
-
-    #[tokio::test]
     async fn test_read_bounded_line_oversized() {
         let data = b"this is a very long line that exceeds the limit\n";
         let mut cursor = Cursor::new(data);

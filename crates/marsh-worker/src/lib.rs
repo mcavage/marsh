@@ -712,17 +712,27 @@ impl GrantIdentity {
     }
 
     fn capture_ready(path: &Path) -> io::Result<Self> {
-        for attempt in 0..GRANT_READY_ATTEMPTS {
+        Self::capture_ready_with(path, GRANT_READY_ATTEMPTS, || {
+            thread::sleep(GRANT_READY_DELAY);
+        })
+    }
+
+    fn capture_ready_with(
+        path: &Path,
+        attempts: usize,
+        mut wait: impl FnMut(),
+    ) -> io::Result<Self> {
+        for attempt in 0..attempts {
             match Self::capture(path) {
                 Ok(identity) => return Ok(identity),
                 Err(error)
-                    if attempt + 1 < GRANT_READY_ATTEMPTS
+                    if attempt + 1 < attempts
                         && matches!(
                             error.kind(),
                             io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
                         ) =>
                 {
-                    thread::sleep(GRANT_READY_DELAY);
+                    wait();
                 }
                 Err(error) => return Err(error),
             }
