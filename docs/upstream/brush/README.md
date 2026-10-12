@@ -484,6 +484,15 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
 - `0067` lets the smallest prefix or suffix a pattern matches be empty:
   `${v#*}` and `${v%?(a)}` remove nothing (Brush removed one character).
   Covered by `smallest_pattern_removal_can_remove_nothing`.
+- `0068` makes a forked child's wait ask the kernel (`waitpid` with
+  `WNOHANG`) on every poll. The interactive prompt checks each job by
+  polling its wait once; that wait re-checked only after the runtime had
+  relayed a `SIGCHLD`, so a job that had already exited was still listed as
+  running whenever the relay was not done, and its `[1]+  Done` line missed
+  the prompt (`interactive_job_launch_and_completion_lines_match_bash` failed
+  that way at 1.5 CPUs). Covered by
+  `an_exited_job_is_reported_at_the_next_prompt_without_sigchld` (smoke,
+  Linux): the shell starts with `SIGCHLD` blocked, so the relay never comes.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

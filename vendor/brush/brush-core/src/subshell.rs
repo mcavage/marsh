@@ -769,28 +769,44 @@ mod imp {
     }
 
     /// Waits for a forked child to exit, returning its status as process output.
+    ///
+    /// Every poll asks the kernel first. A job check polls this future once
+    /// (`now_or_never`) before each interactive prompt; waiting for the
+    /// runtime to relay `SIGCHLD` first left a child that had already exited
+    /// listed as running whenever the relay was not done yet.
     pub(crate) async fn wait_for_pid(pid: i32) -> std::io::Result<std::process::Output> {
         use std::os::unix::process::ExitStatusExt as _;
         let mut sigchld = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::child())?;
-        loop {
-            let mut status = 0;
-            // SAFETY: waits only for this specific child.
-            let result = unsafe { libc::waitpid(pid, &raw mut status, libc::WNOHANG) };
-            if result == pid {
-                return Ok(std::process::Output {
-                    status: std::process::ExitStatus::from_raw(status),
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                });
-            }
-            if result == -1 {
-                let error = std::io::Error::last_os_error();
-                if error.kind() != std::io::ErrorKind::Interrupted {
-                    return Err(error);
+        std::future::poll_fn(move |cx| {
+            loop {
+                let mut status = 0;
+                // SAFETY: waits only for this specific child.
+                let result = unsafe { libc::waitpid(pid, &raw mut status, libc::WNOHANG) };
+                if result == pid {
+                    return std::task::Poll::Ready(Ok(std::process::Output {
+                        status: std::process::ExitStatus::from_raw(status),
+                        stdout: Vec::new(),
+                        stderr: Vec::new(),
+                    }));
                 }
-                continue;
+                if result == -1 {
+                    let error = std::io::Error::last_os_error();
+                    if error.kind() != std::io::ErrorKind::Interrupted {
+                        return std::task::Poll::Ready(Err(error));
+                    }
+                    continue;
+                }
+                match sigchld.poll_recv(cx) {
+                    std::task::Poll::Ready(Some(())) => {}
+                    std::task::Poll::Ready(None) => {
+                        return std::task::Poll::Ready(Err(std::io::Error::other(
+                            "SIGCHLD stream ended",
+                        )));
+                    }
+                    std::task::Poll::Pending => return std::task::Poll::Pending,
+                }
             }
-            let _ = sigchld.recv().await;
-        }
+        })
+        .await
     }
 }

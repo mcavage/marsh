@@ -1,8 +1,8 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 65 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 50 fix Bash
+`vendor/brush/UPSTREAM_REVISION`) plus the 66 patches in
+[`docs/upstream/brush/`](../upstream/brush/README.md). 51 fix Bash
 compatibility: job control and job lines, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
 formats, startup files, option order, field splitting, `read`, `[[ ]]`
@@ -50,8 +50,8 @@ status. Candidate failures are not normalized away.
 
 The current corpus has 55 differential test functions (all enabled), a split
 `PIPESTATUS` check,
-and 53 smoke journeys (51 on Linux, where two macOS `script(1)` job-control
-journeys are compiled out), run on macOS ARM64 with Rust
+and 54 smoke journeys (52 on Linux, where two macOS `script(1)` job-control
+journeys are compiled out; 53 on macOS, without one that reads `/proc`), run on macOS ARM64 with Rust
 1.95.0 and GNU Bash 5.3 and in a Linux arm64 `rust:1.95-bookworm` container
 with GNU Bash 5.3.0 built from source. A test function may contain several distinct
 scripts. These counts describe the selected
