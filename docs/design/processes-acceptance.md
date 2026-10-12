@@ -2,7 +2,7 @@
 
 Black-box scenarios (P01-P38, P26 retired in revision 5; P32 is billed and runs only with `--live`) for `docs/processes.md` (cited as `sN`), written from the
 spec before the implementation. Harness: `tests/acceptance/processes_uat.py`,
-run by `make dev-processes DEV_KIT=<fixture>` against `~/.marsh-dev`
+run by `make regress ONLY=processes` (or `ONLY=P02-self-spawn-bash-c`) against `~/.marsh-dev`
 (`--prefix`). It reuses the `workspaces_uat.py` callers and run.py isolation:
 own MARSH_HOME and control home, timeouts and process-group kills on every
 subprocess, cleanup of only owned VMs by recorded identity, and a stock
@@ -24,7 +24,7 @@ uses the packaged `shell` Kit as a second, different Kit.
 home, and stock `sbx exec <owned vm> docker inspect`, which proves each
 container is deleted. A preflight checks VM-free `marsh --help` for `run` and
 `context`, then `run --help` and `context`. If either is missing, every
-scenario is `blocked` before any VM work. Use `--only`/`ONLY=`, `--list`,
+scenario is `blocked` before any VM work. Use `--only`, `--list`,
 `--fail-fast`, and `--no-preflight`. Evidence: `<evidence>/processes.json`.
 
 | ID | Spec claim | Action | Pass criteria |

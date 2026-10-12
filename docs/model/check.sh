@@ -12,19 +12,21 @@
 # process (a separate container under Docker) with its own log, and the verdict
 # of each is independent of scheduling. A comment line in a config
 #   \* marsh-check: WORD
-# is a scheduling hint, measured with two workers: `mid` (20-60 s), `slow` (over
-# 60 s; skipped by --quick), `huge` (also slow; tens of millions of states, which
-# does not fit one CI job with its siblings), optionally followed by the measured
+# is a scheduling hint, measured with two workers: `mid` (20-100 s), `slow`
+# (skipped by --quick), `huge` (also slow; tens of millions of states, which does
+# not fit one CI job with its siblings), optionally followed by the measured
 # seconds as `426s`. Hinted configs start first, longest first, with two workers;
-# the rest run with one. Hints never change a verdict.
+# the rest run with one. Hints never change a verdict. Only the larger positive
+# bounds are `slow`: --quick still checks every negative control and, per module,
+# a positive config with every invariant (about 90 s on 8 cores).
 #
-#   --quick     skip every slow config (the fast static gate; the full sweep is the default)
+#   --quick     skip the slow configs (make test; the full sweep is the default)
 #   --huge      only the huge configs   --no-huge   everything except them (CI shards)
 #   --list      print the selected configs, with workers, and exit
 #   --cores N   core budget (TLC_CORES; default min(CPUs of the runner, 8))
 #   TLC_CACHE=DIR  skip a config whose spec, config, jar and this script are byte-identical to
-#               one that already gave its expected verdict (CI keeps DIR between runs; the
-#               release run `make regress` does not set it)
+#               one that already gave its expected verdict (CI and make test keep DIR between
+#               runs; the release run `make regress` does not set it)
 #   --workers N TLC workers per config (TLC_WORKERS; default 1, 2 for hinted, half the
 #               budget for huge, shared evenly when few configs; "auto" = the default)
 set -u

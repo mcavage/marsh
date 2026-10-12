@@ -304,7 +304,7 @@ nested splits already use. This stays out of the model until it is built.
 6. The Brush hook becomes a thin client (delete branch forking from
    `split_interp.rs`). Delete the guest `split_workspace.rs`. Update
    the user guide (`split.md`), `architecture.md`, the contract, and `CONTRACT.md`.
-   Fold `Split.tla` in.
+   Retire `Split.tla` (`Workspace.tla` replaces it; deleted).
 
 ## 11. Acceptance additions
 
