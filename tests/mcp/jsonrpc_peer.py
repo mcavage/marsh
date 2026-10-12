@@ -14,6 +14,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 PROTOCOL_VERSION = "2025-06-18"
+# Default wait for a reply; also the shared budget for callers' waits on
+# asynchronous operations. Generous so a starved runner is slow, not failing.
+WAIT_TIMEOUT = 60.0
 
 
 class JsonRpcPeer:
@@ -66,7 +69,7 @@ class JsonRpcPeer:
         self._write(message)
 
     def request(
-        self, method: str, params: dict | None = None, timeout: float = 5.0
+        self, method: str, params: dict | None = None, timeout: float = WAIT_TIMEOUT
     ) -> dict:
         with self._lock:
             request_id = self._next_id
@@ -82,14 +85,14 @@ class JsonRpcPeer:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise AssertionError(
-                    f"timed out waiting for JSON-RPC response {request_id}"
+                    f"no JSON-RPC response to {method} (id {request_id}) within {timeout:g}s"
                 )
             try:
                 item = self._lines.get(timeout=remaining)
             except queue.Empty:
                 raise AssertionError(
-                    f"timed out waiting for JSON-RPC response {request_id}"
-                )
+                    f"no JSON-RPC response to {method} (id {request_id}) within {timeout:g}s"
+                ) from None
             if isinstance(item, BaseException):
                 raise item
             if item.get("id") == request_id:
