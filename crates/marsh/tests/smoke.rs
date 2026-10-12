@@ -1156,7 +1156,7 @@ fn assert_branches_exit(members: &[i32]) {
         common::wait_until(
             &format!("fanout branch {member} to exit"),
             Duration::from_secs(10),
-            || nix::sys::signal::kill(nix::unistd::Pid::from_raw(member), None).is_err(),
+            || common::has_exited(member),
         );
     }
 }

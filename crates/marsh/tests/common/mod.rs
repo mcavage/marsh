@@ -60,6 +60,16 @@ pub fn all_threads_asleep(pid: u32) -> bool {
     !states.is_empty() && states.iter().all(|state| matches!(state, 'S' | 'I'))
 }
 
+/// `pid` has exited: it is gone, or a zombie nobody has reaped yet (an
+/// orphan whose new parent, e.g. a container's init, does not reap).
+pub fn has_exited(pid: i32) -> bool {
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_err()
+        || u32::try_from(pid).is_ok_and(|pid| {
+            let states = thread_states(pid);
+            !states.is_empty() && states.iter().all(|state| *state == 'Z')
+        })
+}
+
 #[cfg(target_os = "linux")]
 fn thread_states(pid: u32) -> Vec<char> {
     let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else {
