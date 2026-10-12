@@ -32,6 +32,11 @@ const MAX_RELAY_CONNECTIONS: usize = 16;
 // At most 1 MiB per connection, including an in-progress write. A stalled
 // recipient must not hold the tunnel reader or the shared connection map.
 const MAX_PENDING_CHUNKS: usize = 64;
+// macOS can leave a thread blocked in `read` on a Unix socket after a
+// `shutdown` of either end (a lost wakeup; data and a full close always wake
+// it). Readers therefore wake this often to re-check, instead of relying on
+// the peer's half-close or the relay's own abort to interrupt them.
+const READ_WAKE: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -136,6 +141,13 @@ impl SendWindow {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.1 = true;
         self.changed.notify_all();
+    }
+
+    fn closed(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .1
     }
 }
 
@@ -511,7 +523,24 @@ where
             if !source.send_window.acquire() {
                 return;
             }
-            match source.stream.read(&mut buffer) {
+            let read = loop {
+                match source.stream.read(&mut buffer) {
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            std::io::ErrorKind::WouldBlock
+                                | std::io::ErrorKind::TimedOut
+                                | std::io::ErrorKind::Interrupted
+                        ) =>
+                    {
+                        if source.send_window.closed() {
+                            return;
+                        }
+                    }
+                    read => break read,
+                }
+            };
+            match read {
                 Ok(0) => {
                     // A zero-byte socket write changes no protocol bytes and
                     // distinguishes a peer that closed both directions from
@@ -733,6 +762,12 @@ fn register_connection<W: Write + Send + 'static>(
 ) -> Result<ConnectionReader, DaemonError> {
     let identity = Arc::new(());
     let send_window = Arc::new(SendWindow::new());
+    // EINVAL (macOS): the peer has already closed, so reads cannot block.
+    if let Err(error) = stream.set_read_timeout(Some(READ_WAKE))
+        && error.raw_os_error() != Some(rustix::io::Errno::INVAL.raw_os_error())
+    {
+        return Err(error.into());
+    }
     let reader = ConnectionReader {
         stream: stream.try_clone()?,
         identity: Arc::clone(&identity),
@@ -862,7 +897,7 @@ fn parent(path: &Path) -> Result<&Path, DaemonError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{PATIENCE, recv, socket_pair, wait_until};
+    use crate::test_support::{PATIENCE, read_to_end, recv, socket_pair, wait_until};
     use crate::{
         AttachmentFrame, Client, DaemonBackend, DaemonStore, ExecuteSpec, LoadSelection,
         PreparationProgress, PreparationResult, PublicReply, PublicRequest, Server,
@@ -1110,10 +1145,7 @@ mod tests {
         // Portable disconnect proof: the abandoned peer reaches EOF before the
         // queued megabyte arrives. (macOS accepts writes after a peer's
         // SHUT_RD, so a failed write is not a portable observation.)
-        // macOS rejects setsockopt (EINVAL) once the peer has fully closed.
-        let _ = stalled.set_read_timeout(Some(PATIENCE));
-        let mut abandoned_bytes = Vec::new();
-        let abandoned = stalled.read_to_end(&mut abandoned_bytes);
+        let abandoned = read_to_end(&mut stalled);
         write_frame(
             &mut guest,
             &TunnelFrame::Data {
@@ -1123,19 +1155,17 @@ mod tests {
         )
         .unwrap();
         write_frame(&mut guest, &TunnelFrame::Eof { connection: 1 }).unwrap();
-        let mut received = Vec::new();
-        let delivered = replacement.read_to_end(&mut received);
+        let delivered = read_to_end(&mut replacement);
         // Always release blocked writers before assertions, including with
         // the previous implementation that queued Close behind the data.
         control.shutdown(Shutdown::Both).unwrap();
         relay.join().unwrap().unwrap();
         drain.join().unwrap();
         assert!(
-            abandoned.is_ok() && abandoned_bytes.len() < MAX_PENDING_CHUNKS * CHUNK_BYTES,
+            abandoned.is_ok_and(|bytes| bytes.len() < MAX_PENDING_CHUNKS * CHUNK_BYTES),
             "Close left the abandoned socket connected or delivered all queued data"
         );
-        delivered.unwrap();
-        assert_eq!(received, b"replacement");
+        assert_eq!(delivered.unwrap(), b"replacement");
     }
 
     #[test]
@@ -1264,8 +1294,7 @@ mod tests {
             // Let full-close reach the guest while its final bytes remain
             // queued behind an intentionally unread socket buffer.
             thread::sleep(Duration::from_millis(25));
-            let mut response = Vec::new();
-            if guest.read_to_end(&mut response).is_err() || response != expected {
+            if read_to_end(&mut guest).ok().as_ref() != Some(&expected) {
                 complete_responses = false;
                 break;
             }
@@ -1308,15 +1337,12 @@ mod tests {
         let (mut sibling, mut server) = relays.connect();
         sibling.write_all(b"request").unwrap();
         sibling.shutdown(Shutdown::Write).unwrap();
-        let mut request = Vec::new();
-        let sibling_request = server.read_to_end(&mut request);
+        let sibling_request = read_to_end(&mut server);
         let sibling_reply = server
             .write_all(b"response")
             .and_then(|()| server.shutdown(Shutdown::Write));
-        let mut reply = Vec::new();
-        let sibling_read = sibling.read_to_end(&mut reply);
-        let mut actual = Vec::new();
-        let slow_read = slow_client.read_to_end(&mut actual);
+        let sibling_read = read_to_end(&mut sibling);
+        let slow_read = read_to_end(&mut slow_client);
         let written = early.unwrap_or_else(|_| recv(&received, "producer finishes"));
         // Release transport and every blocked credit/socket waiter before
         // asserting so a regression cannot strand either relay in the test.
@@ -1326,14 +1352,11 @@ mod tests {
             was_waiting,
             "slow recipient did not backpressure its producer"
         );
-        sibling_request.unwrap();
+        assert_eq!(sibling_request.unwrap(), b"request");
         sibling_reply.unwrap();
-        sibling_read.unwrap();
-        assert_eq!(request, b"request");
-        assert_eq!(reply, b"response");
+        assert_eq!(sibling_read.unwrap(), b"response");
         written.unwrap();
-        slow_read.unwrap();
-        assert_eq!(actual, expected);
+        assert_eq!(slow_read.unwrap(), expected);
     }
 
     #[test]
@@ -1409,12 +1432,10 @@ mod tests {
         )
         .unwrap();
         write_frame(&mut host, &TunnelFrame::Eof { connection }).unwrap();
-        let mut response = Vec::new();
-        let received = client.read_to_end(&mut response);
+        let received = read_to_end(&mut client);
         write_frame(&mut host, &TunnelFrame::Shutdown).unwrap();
         relay.join().unwrap().unwrap();
-        received.unwrap();
-        assert_eq!(response, b"response");
+        assert_eq!(received.unwrap(), b"response");
     }
 
     #[test]
