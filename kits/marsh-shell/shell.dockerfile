@@ -1,5 +1,5 @@
 # marsh shell Kit: the stock DHI shell template plus marsh image repair.
-FROM dhi.io/sbx-templates:shell-docker@sha256:36fd3782db091cec28ddfcb28458fbc96ed540435b91d910c1a00b07ec50d5a2
+FROM dhi.io/sbx-templates:shell-docker@sha256:ff0fe56f7fbc14a969131c52d8e7233862a4810196fbc0e2d8d88441204081a9
 USER root
 COPY image-repair /tmp/marsh-image-repair
 RUN python3 -I -S /tmp/marsh-image-repair/repair.py \

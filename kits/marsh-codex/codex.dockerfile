@@ -3,7 +3,7 @@
 # publishes, so the provide cannot claim a version the image does not ship.
 # codex-code-mode-host rides along: codex spawns it as a sibling executable
 # for Code Mode and fails that feature closed when it is missing.
-FROM dhi.io/debian-base:trixie-dev@sha256:f3bd649e61fc5357c3b2f207a0b047961d5562f0dc9905b85adbf4fa19580292 AS build
+FROM dhi.io/debian-base:trixie-dev@sha256:c6fc0de84b65bc20346cee5f071fd976ccf383431515db2a4d9721ca936feb9f AS build
 ARG CODEX_VERSION
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
@@ -31,7 +31,7 @@ RUN case "$TARGETARCH" in \
     done \
  && /out/usr/local/bin/codex --version
 
-FROM dhi.io/sbx-templates:codex-docker@sha256:0529fcace182dc3de0967bdb235ed3f8ca715f8eafc9f987a53a258ae3bf83f3
+FROM dhi.io/sbx-templates:codex-docker@sha256:ca1bf06e604ca2d409c638fd8e3e9feecbbffe88432e9dd6d9b14ee3123ec4e6
 ARG CODEX_VERSION
 USER root
 COPY image-repair /tmp/marsh-image-repair
