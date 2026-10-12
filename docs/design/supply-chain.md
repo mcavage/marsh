@@ -15,7 +15,7 @@ builder filesystem.
 The current checksum sources are:
 
 - [Claude Code 2.1.296 manifest](https://downloads.claude.ai/claude-code-releases/2.1.296/manifest.json).
-- [Codex 0.155.1 release asset metadata](https://api.github.com/repos/openai/codex/releases/tags/rust-v0.155.1).
+- [Codex 0.162.1 release asset metadata](https://api.github.com/repos/openai/codex/releases/tags/rust-v0.162.1).
 
 To update a native version, change the descriptor and run
 `python3 scripts/refresh-agent-checksums.py`: it rewrites each Kit's
@@ -171,7 +171,7 @@ provenance signatures.
 
 Native Claude 2.1.296 carries the publisher's exact-version npm LICENSE and
 README, retrieved with tarball integrity verification, alongside the unchanged
-native binary. Native Codex 0.155.1 carries its exact-release LICENSE, NOTICE,
+native binary. Native Codex 0.162.1 carries its exact-release LICENSE, NOTICE,
 and bundled native notices. Codex ACP's separately locked npm release is 0.156.1
 and receives that release's notices. The development shell also retains notices
 for Claude 2.1.296 and Codex 0.162.0 shipped by the maintained DHI templates.
@@ -181,7 +181,7 @@ notice collection. Native Kit overlays retain both their configured-version
 notices and the base-agent notices because both payloads remain installed (the
 Claude Kit and its template currently ship the same 2.1.296 binary).
 Their final `--profile claude-kit --version 2.1.296` and
-`--profile codex-kit --version 0.155.1` gates check exact selected native hashes,
+`--profile codex-kit --version 0.162.1` gates check exact selected native hashes,
 required legal files and declared link/metadata changes after installation;
 earlier observations are explicitly base-stage receipts. Unsupported versions
 fail rather than silently upgrading. The template layers and their original
@@ -242,8 +242,8 @@ exact native checksum manifests are recorded separately from npm legal texts.
 
 Available original Codex and ripgrep exact-release-lock Rust licence/NOTICE
 texts are collected, with immutable `.cargo_vcs_info`-commit supplements for
-omissions. The 1472/1485/1493/1473-package locks for 0.159.2/0.155.1/0.156.1/0.162.0
-are conservative supersets, not evidence that every package is linked.
+omissions. The 1472/1485/1493/1473/1473-package locks for
+0.159.2/0.155.1/0.156.1/0.162.0/0.162.1 are conservative supersets, not evidence that every package is linked.
 `packaging/dhi-notices/add-codex-release.py --version V` records a further
 Codex release (exact-tag lock and source, the canonical collectors, provider
 legal files); `add-claude-release.py --version V` records a Claude Code

@@ -35,7 +35,7 @@ Final scopes run after every payload addition:
 ```sh
 python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --copied-agents --receipt
 python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --profile claude-kit --version 2.1.296 --adapter claude-acp --receipt
-python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --profile codex-kit --version 0.155.1 --adapter codex-acp --receipt
+python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --profile codex-kit --version 0.162.1 --adapter codex-acp --receipt
 python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --adapter pi --stage final --receipt
 ```
 
@@ -60,7 +60,7 @@ What each scope checks:
 - **Copied development agents:** Claude 2.1.296 at `/usr/local/bin/claude` and
   the Codex 0.162.0 npm-global tree: bytes, type, mode, owner, link targets and
   tree equality.
-- **Native Kits:** the selected Claude 2.1.296 and Codex 0.155.1 hashes and
+- **Native Kits:** the selected Claude 2.1.296 and Codex 0.162.1 hashes and
   their allowed mutations. The Codex recipe also checks `command -v codex` and
   `codex --version` before the final receipt.
 - **ACP adapters:** SHA-512-checked public package members for codex-acp

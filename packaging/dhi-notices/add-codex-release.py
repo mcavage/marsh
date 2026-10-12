@@ -11,6 +11,12 @@ supplement-rust-notices.py collectors, and adds the results to the bundle:
 - provider-notices/codex-VERSION-* for every legal document in the source tree
   (notice_rules.notice_document), with agent-notices.json rows
 
+With --kit-profile it also makes this release the codex-kit profile in
+derived-profiles.json: the release archives listed in
+kits/marsh-codex/release-checksums.txt are acquired and checksum-verified, and
+the native codex and codex-code-mode-host members become the profile's
+additions (recorded in public-acquisitions.json as kit-ARCH-BINARY).
+
 It prints the provider required_notices list for the profile or payload record
 that ships this release. It executes no downloaded code. Re-running for the same
 version replaces that version's records only.
@@ -62,6 +68,40 @@ def copy_texts(source, bundle):
             destination.write_bytes(data)
 
 
+def write_kit_profile(bundle, version, required, cache):
+    """The Kit overlays the selected native binaries in /usr/local/bin."""
+    checksums = {}
+    for line in (HERE.parent.parent / "kits/marsh-codex/release-checksums.txt").read_text().splitlines():
+        if line and not line.startswith("#"):
+            digest, name = line.split()
+            checksums[name] = digest
+    acquisitions_path = bundle / "source-records/public-acquisitions.json"
+    acquisitions = json.loads(acquisitions_path.read_text())
+    profile = {}
+    for architecture, target in (("arm64", "aarch64-unknown-linux-musl"), ("amd64", "x86_64-unknown-linux-musl")):
+        additions = []
+        for binary in ("codex", "codex-code-mode-host"):
+            asset = f"{binary}-{target}.tar.gz"
+            url = f"https://github.com/{REPOSITORY}/releases/download/rust-v{version}/{asset}"
+            path, record = acquire(url, cache, sha256=checksums[version + "/" + asset])
+            content = [(n, d, m) for n, d, m in members(path, record["sha256"])]
+            if [n for n, _, _ in content] != [f"{binary}-{target}"]:
+                raise ValueError("unexpected release archive members: " + asset)
+            name, data, mode = content[0]
+            digest = hashlib.sha256(data).hexdigest()
+            acquisitions[f"kit-{architecture}-{binary}"] = dict(record, members=[
+                {"member": name, "sha256": digest, "size": len(data), "mode": mode & 0o777}])
+            additions.append({"path": "/usr/local/bin/" + binary, "type": "file", "mode": 0o755,
+                              "uid": 0, "gid": 0, "sha256": digest, "size": len(data)})
+        profile[architecture] = {"base_agent": "codex", "required_notices": required,
+                                 "replacements": {}, "additions": additions}
+    acquisitions_path.write_bytes(encode(acquisitions))
+    profiles_path = bundle / "derived-profiles.json"
+    profiles = json.loads(profiles_path.read_text())
+    profiles["codex-kit"] = {version: profile}
+    profiles_path.write_bytes(encode(profiles))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
@@ -70,6 +110,7 @@ def main():
     parser.add_argument("--bundle", type=Path, default=HERE / "collected")
     parser.add_argument("--index", choices=["rust-notices.json", "selected-rust-notices.json"],
                         default="selected-rust-notices.json")
+    parser.add_argument("--kit-profile", action="store_true")
     args = parser.parse_args()
     version, bundle = args.version, args.bundle.absolute()
     args.work.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -144,11 +185,14 @@ def main():
         })
         required.append({"file": "provider-notices/" + file, "sha256": digest})
     providers_path.write_bytes(encode(providers))
+    required.sort(key=lambda r: r["file"])
+    if args.kit_profile:
+        write_kit_profile(bundle, version, required, args.cache)
     shutil.rmtree(args.work)
     print(json.dumps({"version": version, "commit": commit, "lock_packages": inventory["package_count"],
                       "missing_after_lock": len(inventory["missing_notices"]),
                       "unresolved_after_supplements": supplement["unresolved"],
-                      "required_notices": sorted(required, key=lambda r: r["file"])}, indent=2))
+                      "required_notices": required}, indent=2))
 
 
 if __name__ == "__main__":
