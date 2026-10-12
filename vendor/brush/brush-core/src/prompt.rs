@@ -25,8 +25,24 @@ pub(crate) async fn expand_prompt(
         // prepend a `\` so pass 2 consumes it and leaves the char alone.
         let semantically_literal =
             matches!(piece, brush_parser::prompt::PromptPiece::DollarOrPound);
+        // Names from the system (the working directory, the shell's name) are
+        // data: as in Bash, pass 2 must not expand a `$(...)` in a directory name.
+        let quoted_data = matches!(
+            piece,
+            brush_parser::prompt::PromptPiece::CurrentWorkingDirectory { .. }
+                | brush_parser::prompt::PromptPiece::ShellBaseName
+        );
 
-        let formatted_piece = format_prompt_piece(shell, piece)?;
+        let mut formatted_piece = format_prompt_piece(shell, piece)?;
+        if shell.options().expand_prompt_strings && quoted_data {
+            formatted_piece = formatted_piece
+                .chars()
+                .flat_map(|c| {
+                    let escape = expansion::DOUBLE_QUOTED_ESCAPE_CHARS.contains(&c) && c != '\n';
+                    escape.then_some('\\').into_iter().chain(std::iter::once(c))
+                })
+                .collect();
+        }
 
         // Only useful when pass 2 actually consumes a `\` for that leading
         // byte; otherwise the `\` would leak through.
@@ -215,11 +231,42 @@ where
         brush_parser::prompt::PromptDateFormat::WeekdayMonthDate => {
             datetime.format("%a %b %d").to_string()
         }
-        brush_parser::prompt::PromptDateFormat::Custom(fmt) => {
-            let fmt_items = chrono::format::StrftimeItems::new(fmt);
-            datetime.format_with_items(fmt_items).to_string()
-        }
+        brush_parser::prompt::PromptDateFormat::Custom(fmt) => format_strftime(datetime, fmt),
     }
+}
+
+/// Formats `fmt` one conversion at a time: one the formatter does not know is
+/// shown as written (as `strftime` does), instead of failing the whole prompt.
+fn format_strftime<Tz: chrono::TimeZone>(datetime: &chrono::DateTime<Tz>, fmt: &str) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let mut rest = fmt;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let spec = &rest[start..];
+        // `%`, an optional padding flag, and the conversion character.
+        let mut end = spec.len();
+        for (index, c) in spec.char_indices().skip(1) {
+            if !matches!(c, '-' | '_' | '0') || index > 1 {
+                end = index + c.len_utf8();
+                break;
+            }
+        }
+        let piece = &spec[..end];
+        let mut formatted = String::new();
+        let items = chrono::format::StrftimeItems::new(piece);
+        if write!(formatted, "{}", datetime.format_with_items(items)).is_ok() {
+            out.push_str(&formatted);
+        } else {
+            out.push_str(piece);
+        }
+        rest = &spec[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 #[cfg(test)]

@@ -225,8 +225,18 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
             // that are set (i.e., have a value). This means a variable that
             // shows up in `declare -p` but has no *set* value will be omitted.
             if v.value().is_set() {
-                cmd.env(k.as_str(), v.value().to_cow_str(context.shell).as_ref());
+                let value = v.value().to_cow_str(context.shell);
+                #[cfg(unix)]
+                if let Some(raw) = sys::env::inherited_bytes(k.as_str(), value.as_ref()) {
+                    cmd.env(k.as_str(), raw);
+                    continue;
+                }
+                cmd.env(k.as_str(), value.as_ref());
             }
+        }
+        #[cfg(unix)]
+        for (k, v) in sys::env::inherited_unnamed_entries() {
+            cmd.env(k, v);
         }
         // Set _ to the resolved command path for external commands.
         cmd.env("_", command_name);
@@ -779,6 +789,22 @@ pub(crate) fn execute_external_command(
             .join(" ")
     );
 
+    // Signals stay blocked from the fork until the child has default
+    // dispositions, so one sent before it execs is not lost to our handlers.
+    #[cfg(unix)]
+    let blocked = sys::signal::BlockedForFork::new();
+    #[cfg(unix)]
+    {
+        let previous = blocked.previous();
+        // SAFETY: only sigaction and pthread_sigmask run after fork.
+        unsafe {
+            cmd.pre_exec(move || {
+                sys::signal::restore_defaults_after_fork(&previous);
+                Ok(())
+            });
+        }
+    }
+
     // Run ENOEXEC files with this shell rather than the platform's /bin/sh.
     #[cfg(unix)]
     sys::commands::exec_with_script_fallback(
@@ -788,7 +814,10 @@ pub(crate) fn execute_external_command(
         context.iter_fds().map(|(fd, _)| fd),
     )?;
 
-    match sys::process::spawn(cmd, context.shell.options().kill_external_commands_on_drop) {
+    let spawned = sys::process::spawn(cmd, context.shell.options().kill_external_commands_on_drop);
+    #[cfg(unix)]
+    drop(blocked);
+    match spawned {
         Ok(child) => {
             // Retrieve the pid.
             #[expect(clippy::cast_possible_wrap)]

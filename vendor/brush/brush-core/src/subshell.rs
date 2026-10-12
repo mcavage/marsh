@@ -527,14 +527,17 @@ mod imp {
         Fut: std::future::Future<Output = i32>,
     {
         for timeout in START_TIMEOUTS {
+            // Signals stay pending until the child has set its dispositions.
+            let blocked = crate::sys::signal::BlockedForFork::new();
             // SAFETY: the child only uses fork-safe state: it replaces the runtime's
             // signal sockets, never touches the parent's runtime, and leaves with _exit.
             let pid = unsafe { libc::fork() };
+            if pid == 0 {
+                run_child(flag, group, signals, blocked.previous(), keep, body);
+            }
+            drop(blocked);
             if pid < 0 {
                 return Err(std::io::Error::last_os_error().into());
-            }
-            if pid == 0 {
-                run_child(flag, group, signals, keep, body);
             }
             let pgid = match group {
                 ChildGroup::Inherit => None,
@@ -565,6 +568,7 @@ mod imp {
         flag: StartFlag,
         group: ChildGroup,
         signals: &ChildSignals,
+        mask: libc::sigset_t,
         keep: &HashSet<RawFd>,
         body: F,
     ) -> !
@@ -615,6 +619,9 @@ mod imp {
                 }
             }
         }
+        // SAFETY: restores the mask the parent had before blocking for the fork;
+        // a signal that arrived since then now takes the dispositions set above.
+        unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &raw const mask, std::ptr::null_mut()) };
         close_foreign_pipes(keep);
         let thread = std::thread::Builder::new().spawn(move || {
             // The parent is waiting for this, and gives up on a child that

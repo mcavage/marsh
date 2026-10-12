@@ -1,0 +1,158 @@
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index 686792d..892791e 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -779,6 +779,22 @@ pub(crate) fn execute_external_command(
+             .join(" ")
+     );
+ 
++    // Signals stay blocked from the fork until the child has default
++    // dispositions, so one sent before it execs is not lost to our handlers.
++    #[cfg(unix)]
++    let blocked = sys::signal::BlockedForFork::new();
++    #[cfg(unix)]
++    {
++        let previous = blocked.previous();
++        // SAFETY: only sigaction and pthread_sigmask run after fork.
++        unsafe {
++            cmd.pre_exec(move || {
++                sys::signal::restore_defaults_after_fork(&previous);
++                Ok(())
++            });
++        }
++    }
++
+     // Run ENOEXEC files with this shell rather than the platform's /bin/sh.
+     #[cfg(unix)]
+     sys::commands::exec_with_script_fallback(
+@@ -788,7 +804,10 @@ pub(crate) fn execute_external_command(
+         context.iter_fds().map(|(fd, _)| fd),
+     )?;
+ 
+-    match sys::process::spawn(cmd, context.shell.options().kill_external_commands_on_drop) {
++    let spawned = sys::process::spawn(cmd, context.shell.options().kill_external_commands_on_drop);
++    #[cfg(unix)]
++    drop(blocked);
++    match spawned {
+         Ok(child) => {
+             // Retrieve the pid.
+             #[expect(clippy::cast_possible_wrap)]
+diff --git a/brush-core/src/subshell.rs b/brush-core/src/subshell.rs
+index 6a7bb7b..a54246c 100644
+--- a/brush-core/src/subshell.rs
++++ b/brush-core/src/subshell.rs
+@@ -527,15 +527,18 @@ mod imp {
+         Fut: std::future::Future<Output = i32>,
+     {
+         for timeout in START_TIMEOUTS {
++            // Signals stay pending until the child has set its dispositions.
++            let blocked = crate::sys::signal::BlockedForFork::new();
+             // SAFETY: the child only uses fork-safe state: it replaces the runtime's
+             // signal sockets, never touches the parent's runtime, and leaves with _exit.
+             let pid = unsafe { libc::fork() };
++            if pid == 0 {
++                run_child(flag, group, signals, blocked.previous(), keep, body);
++            }
++            drop(blocked);
+             if pid < 0 {
+                 return Err(std::io::Error::last_os_error().into());
+             }
+-            if pid == 0 {
+-                run_child(flag, group, signals, keep, body);
+-            }
+             let pgid = match group {
+                 ChildGroup::Inherit => None,
+                 ChildGroup::New { .. } => Some(pid),
+@@ -565,6 +568,7 @@ mod imp {
+         flag: StartFlag,
+         group: ChildGroup,
+         signals: &ChildSignals,
++        mask: libc::sigset_t,
+         keep: &HashSet<RawFd>,
+         body: F,
+     ) -> !
+@@ -615,6 +619,9 @@ mod imp {
+                 }
+             }
+         }
++        // SAFETY: restores the mask the parent had before blocking for the fork;
++        // a signal that arrived since then now takes the dispositions set above.
++        unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &raw const mask, std::ptr::null_mut()) };
+         close_foreign_pipes(keep);
+         let thread = std::thread::Builder::new().spawn(move || {
+             // The parent is waiting for this, and gives up on a child that
+diff --git a/brush-core/src/sys/unix/signal.rs b/brush-core/src/sys/unix/signal.rs
+index 4f54fc8..9718024 100644
+--- a/brush-core/src/sys/unix/signal.rs
++++ b/brush-core/src/sys/unix/signal.rs
+@@ -79,6 +79,70 @@ pub(crate) async fn await_term() -> Result<(), error::Error> {
+     Ok(())
+ }
+ 
++/// Blocks every signal in the calling thread until dropped, around a `fork`.
++///
++/// A forked child starts with the shell's handlers, so a signal sent to it
++/// before it restores default dispositions would run the shell's handler there
++/// and be lost (`sleep 3 & kill $!` could leave `sleep` running). Blocked, the
++/// signal stays pending until the child has restored them and its mask.
++pub(crate) struct BlockedForFork {
++    previous: libc::sigset_t,
++}
++
++impl BlockedForFork {
++    pub(crate) fn new() -> Self {
++        // SAFETY: sigfillset/pthread_sigmask only write the provided sets.
++        unsafe {
++            let mut all: libc::sigset_t = std::mem::zeroed();
++            let mut previous: libc::sigset_t = std::mem::zeroed();
++            libc::sigfillset(&raw mut all);
++            libc::pthread_sigmask(libc::SIG_BLOCK, &raw const all, &raw mut previous);
++            Self { previous }
++        }
++    }
++
++    /// The calling thread's mask before blocking, which the child restores.
++    pub(crate) const fn previous(&self) -> libc::sigset_t {
++        self.previous
++    }
++}
++
++impl Drop for BlockedForFork {
++    fn drop(&mut self) {
++        // SAFETY: restores the mask saved by `new` in this same thread.
++        unsafe {
++            libc::pthread_sigmask(
++                libc::SIG_SETMASK,
++                &raw const self.previous,
++                std::ptr::null_mut(),
++            )
++        };
++    }
++}
++
++/// In a forked child about to exec: gives every caught signal its default
++/// action, then restores `previous` (see [`BlockedForFork`]), so a signal that
++/// arrived since the fork takes effect as it would on the executed program.
++/// Only async-signal-safe calls.
++pub(crate) fn restore_defaults_after_fork(previous: &libc::sigset_t) {
++    // SAFETY: sigaction queries and installs SIG_DFL only; pthread_sigmask
++    // installs the saved mask.
++    unsafe {
++        for signal in 1..65 {
++            let mut current: libc::sigaction = std::mem::zeroed();
++            if libc::sigaction(signal, std::ptr::null(), &raw mut current) == 0
++                && current.sa_sigaction != libc::SIG_DFL
++                && current.sa_sigaction != libc::SIG_IGN
++            {
++                let mut default: libc::sigaction = std::mem::zeroed();
++                default.sa_sigaction = libc::SIG_DFL;
++                libc::sigaction(signal, &raw const default, std::ptr::null_mut());
++            }
++        }
++        libc::pthread_sigmask(libc::SIG_SETMASK, previous, std::ptr::null_mut());
++    }
++}
++
+ pub(crate) fn mask_sigttou() -> Result<(), error::Error> {
+     let ignore = nix::sys::signal::SigAction::new(
+         nix::sys::signal::SigHandler::SigIgn,

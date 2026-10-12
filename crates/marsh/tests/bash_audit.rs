@@ -1340,3 +1340,265 @@ fn command_flag_takes_the_first_operand_in_bash_option_order() {
         assert_eq!(output.status.code(), Some(2), "{program}: {output:?}");
     }
 }
+
+/// `kill -- -PGID` with no signal sends `TERM` to the process group: `--` ends
+/// the options, so `-PGID` is an operand, not a signal (patch `0052`).
+#[test]
+fn kill_double_dash_negative_operand_terminates_the_group() {
+    differential(
+        "set -m; sh -c ': >p; exec sleep 30' & p=$!; until test -e p; do sleep .01; done; kill -- -\"$p\"; echo \"kill:$?\"; wait \"$p\"; echo \"wait:$?\"",
+        0,
+        b"kill:0\nwait:143\n",
+    );
+}
+
+/// A signal sent to a command the instant it is launched reaches it: one that
+/// lands between the shell's fork and the command's exec used to run the
+/// shell's own handler in the child and be lost, leaving `sleep` running
+/// (about one run in ten on Linux). Repeated because it is a window (patch `0053`).
+/// Linux only: on Darwin a signal can still be lost while a multithreaded
+/// forked shell execs (docs/upstream/brush/README.md, `0053`); the shell's
+/// product platform is the Linux guest.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_signal_sent_right_after_launch_reaches_the_command() {
+    differential(
+        "n=0; for i in $(seq 200); do sleep 2 & kill $!; wait $!; test $? = 143 && n=$((n+1)); done; echo $n",
+        0,
+        b"200\n",
+    );
+}
+
+/// Environment entries that are not UTF-8 neither end the shell nor change:
+/// external commands receive them byte for byte, unless the shell assigns or
+/// unsets the variable (patch `0055`). Inside the shell such a value is text
+/// (see docs/design/bash-compatibility.md, BYTES).
+#[test]
+fn inherited_non_utf8_environment_reaches_commands_unchanged() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt as _;
+    let script = "/usr/bin/env | grep -a -e '^RAW_' | sort; KEPT=1; RAW_SET=new; unset RAW_UNSET; \
+                  /usr/bin/env | grep -a -e '^RAW_SET' -e '^RAW_UNSET' | sort";
+    let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+        let mut command = shell(program);
+        if program != "bash" {
+            command.arg("--no-config");
+        }
+        command
+            .env_remove("BASH_ENV")
+            .env_remove("ENV")
+            .env("LC_ALL", "C")
+            .env("RAW_KEPT", OsStr::from_bytes(b"a\xffZ"))
+            .env("RAW_SET", OsStr::from_bytes(b"b\xfe"))
+            .env("RAW_UNSET", OsStr::from_bytes(b"c\xff"))
+            .stdin(Stdio::null())
+            .args(["--noprofile", "--norc", "-c", script])
+            .output()
+            .unwrap()
+    });
+    let [bash, brush] = &outputs;
+    assert_eq!(
+        bash.stdout, b"RAW_KEPT=a\xffZ\nRAW_SET=b\xfe\nRAW_UNSET=c\xff\nRAW_SET=new\n",
+        "Bash: {bash:?}"
+    );
+    assert_eq!(brush.status.code(), bash.status.code(), "{brush:?}");
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
+}
+
+/// A pattern that starts with a quote is still a regex (its quoted parts
+/// match literally), and a match sets `BASH_REMATCH` (patch `0056`).
+#[test]
+fn quoted_regex_patterns_set_bash_rematch() {
+    differential(
+        "[[ xay =~ \"a\" ]]; echo \"$?:${BASH_REMATCH[0]}:${#BASH_REMATCH[@]}\"; \
+         [[ xa.yz =~ \"a\".y ]]; echo \"$?:${BASH_REMATCH[0]}\"; \
+         [[ xay =~ \"b\" ]]; echo \"$?:${#BASH_REMATCH[@]}\"",
+        0,
+        b"0:a:1\n0:a.y\n1:0\n",
+    );
+}
+
+/// `[[ == ]]` and `[[ != ]]` match extended globs whether or not `extglob`
+/// is set, literal or expanded (patch `0057`).
+#[test]
+fn conditional_patterns_are_extended_globs_without_extglob() {
+    differential(
+        "shopt -u extglob; p='@(a|ab)'; [[ ab == $p ]]; echo $?; [[ ab != $p ]]; echo $?; \
+         [[ abc == +([a-c]) ]]; echo $?",
+        0,
+        b"0\n1\n0\n",
+    );
+}
+
+/// `!` directly before an operator is the parameter `$!`, not indirection
+/// (patch `0058`).
+#[test]
+fn last_background_pid_takes_parameter_operators() {
+    differential(
+        "echo \"${!:-none}\"; sh -c : & p=$!; wait; test \"${!:-none}\" = \"$p\" && echo same; \
+         test \"${!:+set}\" = set && echo set; x=y; y=z; echo \"${!x}\"",
+        0,
+        b"none\nsame\nset\nz\n",
+    );
+}
+
+/// `read -u` takes any descriptor, not only 0-255 (patch `0059`).
+#[test]
+fn read_takes_descriptors_above_255() {
+    differential(
+        "ulimit -n 512; exec 260<<<hello; read -u 260 x; echo \"$?:$x\"",
+        0,
+        b"0:hello\n",
+    );
+}
+
+/// `read` with several names splits as Bash does: IFS whitespace around a
+/// delimiter is part of it, and the last name drops a trailing delimiter when
+/// one word is left (patch `0060`).
+#[test]
+fn read_splits_fields_for_names_like_bash() {
+    differential(
+        r#"for l in "a,b," "a,b,c," "a,," " a , b , " "a,b,,"; do IFS=", " read a b <<< "$l"; printf '[%s][%s]' "$a" "$b"; done; echo
+           IFS=: read a b <<< "x::y:"; echo "[$a][$b]"; IFS=, read a <<< "x,"; echo "[$a]""#,
+        0,
+        b"[a][b][a][b,c,][a][][a][b][a][b,,]\n[x][:y:]\n[x]\n",
+    );
+}
+
+/// An unknown `\D{...}` conversion in a prompt is shown as written instead of
+/// ending the shell (patch `0061`). Not a differential: which conversions
+/// exist is the platform `strftime`'s, and the panic is what is tested.
+#[test]
+fn unknown_prompt_date_conversion_does_not_end_the_shell() {
+    let output = run(
+        env!("CARGO_BIN_EXE_marsh-local"),
+        "PS4='\\D{%Q}x '; set -x; :; set +x; echo after",
+        false,
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"after\n", "{output:?}");
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("%Qx :\n"),
+        "{output:?}"
+    );
+}
+
+/// `\w` and `\W` show the directory name as data: a `$(...)` in it is not run
+/// (patch `0062`). Before, tracing such a command expanded PS4 again forever.
+#[test]
+fn prompt_directory_names_are_not_expanded() {
+    for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
+        let directory = tempfile::tempdir().unwrap();
+        let cwd = directory.path().join("a$(touch hit)`touch hit2`\"q\"\\b");
+        std::fs::create_dir(&cwd).unwrap();
+        let mut command = shell(program);
+        if program != "bash" {
+            command.arg("--no-config");
+        }
+        let child = command
+            .env_remove("BASH_ENV")
+            .env("LC_ALL", "C")
+            .current_dir(&cwd)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                "PS4='\\W| '; set -x; :; set +x",
+            ])
+            .spawn()
+            .unwrap();
+        let output = common::wait_for_exit(child, program, Duration::from_secs(20));
+        assert_eq!(output.status.code(), Some(0), "{program}: {output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "a$(touch hit)`touch hit2`\"q\"\\b| :\na$(touch hit)`touch hit2`\"q\"\\b| set +x\n",
+            "{program}"
+        );
+        assert!(
+            std::fs::read_dir(&cwd).unwrap().next().is_none(),
+            "{program}: ran a command"
+        );
+    }
+}
+
+/// PS4 is expanded with `xtrace` off, as in Bash: a `$(...)` in it is not
+/// traced, which used to expand PS4 again without end (patch `0063`).
+#[test]
+fn trace_prompt_command_substitutions_are_not_traced() {
+    let script = "n=0; PS4='$(printf X)$((n+=1)) '; set -x; false; :; set +x; echo \"n=$n\"";
+    let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+        let mut command = shell(program);
+        if program != "bash" {
+            command.arg("--no-config");
+        }
+        let child = command
+            .env_remove("BASH_ENV")
+            .env("LC_ALL", "C")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .args(["--noprofile", "--norc", "-c", script])
+            .spawn()
+            .unwrap();
+        common::wait_for_exit(child, program, Duration::from_secs(20))
+    });
+    let [bash, brush] = &outputs;
+    assert_eq!(bash.stdout, b"n=3\n", "Bash: {bash:?}");
+    assert_eq!(
+        bash.stderr, b"X1 false\nX2 :\nX3 set +x\n",
+        "Bash: {bash:?}"
+    );
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
+}
+
+/// Only the results of expansions are field-split, as in Bash: with `IFS=:` a
+/// literal `x:y` and each word of a brace expansion stay whole, while `$v`
+/// splits, keeping the empty fields a non-whitespace IFS character delimits
+/// (patch `0064`).
+#[test]
+fn field_splitting_splits_only_expansion_results() {
+    differential(
+        r#"IFS=:; v=":a::b:"; printf '<%s>' x:y $v {c:d,e:f} ${u:-g:h}; echo
+           v=':'; printf '<%s>' a${v}${v}b a${v} ${v}b; echo
+           IFS=' :'; v='  : a  :  : b  :  '; printf '<%s>' $v; echo
+           unset IFS; printf '<%s>' {,} ""{,} a{,}b {"p q",r}; echo"#,
+        0,
+        b"<x:y><><a><><b><c:d><e:f><g><h>\n<a><><b><a><><b>\n<><a><><b>\n<><><ab><ab><p q><r>\n",
+    );
+}
+
+/// An assignment's value is not brace-expanded (patch `0065`).
+#[test]
+fn assignment_values_are_not_brace_expanded() {
+    differential(
+        "v={a,b}; y=(x{1,2} [5]={p,q}); echo \"$v ${y[*]}\"",
+        0,
+        b"{a,b} x1 x2 {p,q}\n",
+    );
+}
+
+/// With `IFS` set but empty, `"$*"` joins the parameters with nothing (patch `0066`).
+#[test]
+fn star_joins_with_nothing_under_an_empty_ifs() {
+    differential(
+        "set -- a b; IFS=; x=\"$*\"; a=(p q); echo \"$x ${a[*]}\"; unset IFS; echo \"$*\"",
+        0,
+        b"ab pq\na b\n",
+    );
+}
+
+/// The smallest prefix or suffix a pattern matches may be empty: `${v#*}` and
+/// `${v%?(a)}` remove nothing (patch `0067`).
+#[test]
+fn smallest_pattern_removal_can_remove_nothing() {
+    differential(
+        "shopt -s extglob; v=aaaa; p=/x/y; echo \"${v#*} ${v%*} ${v%?(a)} ${v#@(|a)} ${v##*}. ${p#*/} ${p%/*}\"",
+        0,
+        b"aaaa aaaa aaaa aaaa . x/y /x\n",
+    );
+}

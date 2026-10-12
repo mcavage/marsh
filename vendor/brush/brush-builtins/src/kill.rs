@@ -29,6 +29,19 @@ pub(crate) struct KillCommand {
 impl builtins::Command for KillCommand {
     type Error = brush_core::Error;
 
+    /// Keeps `--` among the operands, where it ends the options as in Bash
+    /// (`kill -- -PGID` signals a process group with the default `TERM`).
+    fn new<I>(args: I) -> Result<Self, clap::Error>
+    where
+        I: IntoIterator<Item = String>,
+    {
+        let (mut this, rest_args) = brush_core::builtins::try_parse_known::<Self>(args)?;
+        if let Some(args) = rest_args {
+            this.args.extend(args);
+        }
+        Ok(this)
+    }
+
     async fn execute<SE: brush_core::ShellExtensions>(
         &self,
         context: brush_core::ExecutionContext<'_, SE>,

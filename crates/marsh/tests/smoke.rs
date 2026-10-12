@@ -1774,3 +1774,24 @@ fn failed_split_reports_a_status_for_every_stage() {
         );
     }
 }
+
+/// Lines typed ahead with line feeds (a pty driver, `expect`, or a paste
+/// without bracketed paste) all run: the line editor submits the first and
+/// keeps the rest for the next prompts, as Bash's readline does (patch `0054`).
+#[cfg(unix)]
+#[test]
+fn lines_typed_ahead_with_line_feeds_all_run() {
+    for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
+        let mut shell = PtyShell::spawn(program, true);
+        shell.expect("PROMPT$ ", 1);
+        shell.send(b"echo one-$((0+1))\necho two-$((1+1))\necho three-$((1+2))\nexit 0\n");
+        let (status, output) = shell.finish();
+        assert_eq!(status, Some(0), "{program}: {output:?}");
+        for line in ["one-1", "two-2", "three-3"] {
+            assert!(
+                output.contains(line),
+                "{program}: {line} did not run: {output:?}"
+            );
+        }
+    }
+}

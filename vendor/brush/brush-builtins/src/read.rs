@@ -71,7 +71,7 @@ pub(crate) struct ReadCommand {
 
     /// File descriptor to read from instead of stdin.
     #[clap(short = 'u', name = "FD")]
-    fd_num_to_read: Option<u8>,
+    fd_num_to_read: Option<brush_core::ShellFd>,
 
     /// Optionally, names of variables to receive read input.
     variable_names: Vec<String>,
@@ -262,9 +262,48 @@ fn build_variable_fields(
             // With -N, don't split - put entire input in first variable.
             VecDeque::from([line.to_string()])
         }
-        Some(line) => split_line_by_ifs(ifs, line, Some(num_variables)),
+        Some(line) => split_line_for_variables(ifs, line, num_variables),
         None => VecDeque::new(),
     }
+}
+
+/// Splits `line` for `num_variables` names as Bash's `read` does: each name but
+/// the last takes one word and the delimiter after it (IFS whitespace around at
+/// most one other IFS character). The last takes the rest less its trailing IFS
+/// whitespace, or, when the rest is a single word, that word without the
+/// delimiter after it (`IFS=, read a b <<< 'a,b,'` sets `b` to `b`).
+fn split_line_for_variables(ifs: &str, line: &str, num_variables: usize) -> VecDeque<String> {
+    let is_ifs = |c: char| ifs.contains(c);
+    let is_ifs_whitespace = |c: char| matches!(c, ' ' | '\t' | '\n') && is_ifs(c);
+    // One word and the delimiter after it: (word, rest).
+    let next_word = |text: &str| -> (String, usize) {
+        let end = text.find(is_ifs).unwrap_or(text.len());
+        let mut rest = text[end..].trim_start_matches(is_ifs_whitespace);
+        if let Some(c) = rest.chars().next()
+            && is_ifs(c)
+            && !is_ifs_whitespace(c)
+        {
+            rest = rest[c.len_utf8()..].trim_start_matches(is_ifs_whitespace);
+        }
+        (text[..end].to_owned(), text.len() - rest.len())
+    };
+
+    let mut fields = VecDeque::new();
+    let mut rest = line.trim_start_matches(is_ifs_whitespace);
+    while fields.len() + 1 < num_variables && !rest.is_empty() {
+        let (word, consumed) = next_word(rest);
+        fields.push_back(word);
+        rest = &rest[consumed..];
+    }
+    if !rest.is_empty() {
+        let (word, consumed) = next_word(rest);
+        fields.push_back(if consumed == rest.len() {
+            word
+        } else {
+            rest.trim_end_matches(is_ifs_whitespace).to_owned()
+        });
+    }
+    fields
 }
 
 /// Result of a `read` operation.

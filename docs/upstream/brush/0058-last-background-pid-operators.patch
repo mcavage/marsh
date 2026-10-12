@@ -1,0 +1,16 @@
+diff --git a/brush-parser/src/word.rs b/brush-parser/src/word.rs
+index 44bdaed..3e3a368 100644
+--- a/brush-parser/src/word.rs
++++ b/brush-parser/src/word.rs
+@@ -1120,8 +1120,10 @@ peg::parser! {
+                 ParameterExpr::LowercaseFirstChar { parameter, indirect, pattern }
+             }
+ 
++        // `!` is indirection only before a parameter; otherwise it is the
++        // parameter `$!` itself (`${!:-none}`, `${!-none}`).
+         rule parameter_indirection() -> bool =
+-            non_posix_extensions_enabled() "!" { true } /
++            non_posix_extensions_enabled() "!" !("-" !"}") &parameter() { true } /
+             { false }
+ 
+         rule non_posix_parameter_transformation_op() -> ParameterTransformOp =

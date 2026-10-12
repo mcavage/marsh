@@ -1120,8 +1120,10 @@ peg::parser! {
                 ParameterExpr::LowercaseFirstChar { parameter, indirect, pattern }
             }
 
+        // `!` is indirection only before a parameter; otherwise it is the
+        // parameter `$!` itself (`${!:-none}`, `${!-none}`).
         rule parameter_indirection() -> bool =
-            non_posix_extensions_enabled() "!" { true } /
+            non_posix_extensions_enabled() "!" !("-" !"}") &parameter() { true } /
             { false }
 
         rule non_posix_parameter_transformation_op() -> ParameterTransformOp =

@@ -1,0 +1,33 @@
+diff --git a/brush-interactive/src/reedline/input_backend.rs b/brush-interactive/src/reedline/input_backend.rs
+index e1e26b1..5e6c6f2 100644
+--- a/brush-interactive/src/reedline/input_backend.rs
++++ b/brush-interactive/src/reedline/input_backend.rs
+@@ -370,7 +370,8 @@ mod tests {
+ ///
+ /// `cfmakeraw` clears `OPOST`, so without this a background job that writes
+ /// `a\nb\n` while the prompt is up stair-steps (LF without CR). GNU readline
+-/// leaves output processing on while editing, and so does this.
++/// leaves output processing on while editing, and so does this. Input line
++/// feeds arrive as carriage returns (see below).
+ #[cfg(unix)]
+ fn enter_raw_mode_keeping_output_processing() {
+     use std::os::fd::AsRawFd as _;
+@@ -402,10 +403,17 @@ fn enter_raw_mode_keeping_output_processing() {
+     }
+     // SAFETY: as above.
+     let mut raw: libc::termios = unsafe { std::mem::zeroed() };
+-    if unsafe { libc::tcgetattr(fd, &raw mut raw) } != 0 || raw.c_oflag == original.c_oflag {
++    if unsafe { libc::tcgetattr(fd, &raw mut raw) } != 0 {
+         return;
+     }
+     raw.c_oflag = original.c_oflag;
++    // Deliver a typed line feed as a carriage return. reedline stops reading a
++    // batch of queued input at Enter (CR) and leaves the rest for the next line,
++    // but a raw LF is Ctrl-J, which also submits the line and so discarded every
++    // later line typed ahead in the same batch. Readline treats both as
++    // accept-line; pasted text keeps its newlines (reedline turns CR back into
++    // LF in a bracketed paste).
++    raw.c_iflag |= libc::INLCR;
+     // SAFETY: fd is an open terminal; raw is a valid termios.
+     if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw const raw) } != 0 {
+         tracing::debug!(

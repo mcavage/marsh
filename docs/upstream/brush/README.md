@@ -407,6 +407,79 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   (96 concurrent two-branch fanouts; 5 of 5 runs hung before) and by the
   `fanout` smoke tests, which hung about 1.7% of runs.
 
+- `0052` keeps `--` among `kill`'s operands, so `kill -- -PGID` with no signal
+  sends `TERM` to the process group, as in Bash (clap consumed `--` and the
+  operand was read as a signal: "invalid signal specification"). Covered by
+  `kill_double_dash_negative_operand_terminates_the_group`.
+- `0053` blocks every signal from `fork` until the child has given its caught
+  signals their default actions (an external command's child just before
+  `exec`; a forked subshell once it has set its dispositions), then restores
+  the mask. A signal sent to a command the moment it was launched used to run
+  the shell's handler in the child and be lost: `sleep 3 & kill $!; wait $!`
+  exited 0 about one run in ten on Linux (Bash: 143 always). On Darwin a signal
+  can still be lost while a multithreaded forked shell execs, so the test,
+  `a_signal_sent_right_after_launch_reaches_the_command` (200 launches, Linux),
+  runs on the guest platform only.
+- `0054` delivers a typed line feed to the line editor as a carriage return
+  (`INLCR` while reedline reads). reedline stops reading a batch of queued
+  input at Enter (CR) and keeps the rest for the next prompt, but a raw LF is
+  Ctrl-J, which also submits the line, so every later line typed ahead in the
+  same batch (a pty driver, `expect`, a paste without bracketed paste) was
+  discarded. Bracketed pastes keep their newlines (reedline turns CR back into
+  LF there). Covered by `lines_typed_ahead_with_line_feeds_all_run` (smoke).
+- `0055` imports inherited environment entries that are not UTF-8 instead of
+  panicking at startup: the shell sees the value as text (U+FFFD for invalid
+  bytes, see `docs/design/bash-compatibility.md`, BYTES), while external
+  commands receive the original bytes until the shell assigns or unsets the
+  variable; entries whose names are not UTF-8 pass through unchanged. Covered
+  by `inherited_non_utf8_environment_reaches_commands_unchanged`.
+- `0056` evaluates `[[ s =~ "quoted" ]]` (a pattern that starts with a quote)
+  as the regex it is, so a match sets `BASH_REMATCH` and unquoted parts after
+  the quote are regex syntax; Brush tested for a substring and left
+  `BASH_REMATCH` empty. Covered by `quoted_regex_patterns_set_bash_rematch`.
+- `0057` matches `[[ == ]]` and `[[ != ]]` patterns as extended globs whether
+  or not `extglob` is set, as Bash does. Covered by
+  `conditional_patterns_are_extended_globs_without_extglob`.
+- `0058` parses `${!:-word}` and `${!-word}` as operators on `$!`; `!` is
+  indirection only before a parameter. Brush printed the text literally.
+  Covered by `last_background_pid_takes_parameter_operators`.
+- `0059` lets `read -u` name any descriptor (it took only 0-255). Covered by
+  `read_takes_descriptors_above_255`.
+- `0060` splits a line for `read NAME...` as Bash's `read` does: each name
+  but the last takes a word and the delimiter after it (IFS whitespace around
+  at most one other IFS character), and the last takes the rest less trailing
+  IFS whitespace, or a lone remaining word without its delimiter
+  (`IFS=, read a b <<< 'a,b,'` sets `b` to `b`; Brush gave `b,`). Covered by
+  `read_splits_fields_for_names_like_bash`.
+- `0061` formats a prompt's `\D{...}` one conversion at a time and shows one
+  the formatter does not know as written; an unknown conversion panicked and
+  ended the shell. Covered by
+  `unknown_prompt_date_conversion_does_not_end_the_shell`.
+- `0062` escapes the working directory (`\w`, `\W`) and shell name (`\s`)
+  before a prompt's parameter expansion, as Bash does, so a `$(...)` or
+  backquote in a directory name is not run (and, in PS4, did not recurse
+  forever). Covered by `prompt_directory_names_are_not_expanded`.
+- `0063` expands PS4 with `xtrace` off, as Bash does: tracing the commands of
+  a `$(...)` in PS4 expanded PS4 again without end. Covered by
+  `trace_prompt_command_substitutions_are_not_traced`.
+- `0064` field-splits only the results of expansions, as Bash does. Unquoted
+  text written in the word (`x:y` with `IFS=:`) is a new `Literal` piece: a
+  pattern, never split; the text in an operator's word (`${u:-a:b}`) is part
+  of the expansion's result and still splits. Splitting itself now follows
+  Bash: a non-whitespace IFS character with the IFS whitespace around it ends
+  a field, so `:a::b:` is `""`, `a`, `""`, `b` (Brush dropped empty fields).
+  Brace expansion yields separate words that expand on their own, so
+  `{a:b,c:d}` is two fields whatever IFS is and an empty alternative
+  vanishes; Brush joined the words with spaces and relied on splitting.
+  Covered by `field_splitting_splits_only_expansion_results`.
+- `0065` does not brace-expand an assignment's value (`v={a,b}` is
+  `{a,b}`). Covered by `assignment_values_are_not_brace_expanded`.
+- `0066` joins `"$*"` and `${a[*]}` with nothing when IFS is set and empty
+  (Brush used a space). Covered by `star_joins_with_nothing_under_an_empty_ifs`.
+- `0067` lets the smallest prefix or suffix a pattern matches be empty:
+  `${v#*}` and `${v%?(a)}` remove nothing (Brush removed one character).
+  Covered by `smallest_pattern_removal_can_remove_nothing`.
+
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
 path is sourced before it.

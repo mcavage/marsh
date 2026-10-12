@@ -1,0 +1,36 @@
+diff --git a/brush-core/src/extendedtests.rs b/brush-core/src/extendedtests.rs
+index 1b58fcf..2533abb 100644
+--- a/brush-core/src/extendedtests.rs
++++ b/brush-core/src/extendedtests.rs
+@@ -201,7 +201,11 @@ async fn apply_binary_predicate(
+     params: &ExecutionParameters,
+ ) -> Result<bool, error::Error> {
+     match op {
+-        ast::BinaryPredicate::StringMatchesRegex => {
++        // The parser gives a pattern that starts with a quote its own predicate,
++        // but it is a regex whose quoted parts match literally, and a match sets
++        // `BASH_REMATCH` like any other.
++        ast::BinaryPredicate::StringMatchesRegex
++        | ast::BinaryPredicate::StringContainsSubstring => {
+             let s = expansion::basic_expand_word(shell, params, left).await?;
+             let regex = expansion::basic_expand_regex(shell, params, right)
+                 .await?
+@@ -266,18 +270,6 @@ async fn apply_binary_predicate(
+ 
+             Ok(left != right)
+         }
+-        ast::BinaryPredicate::StringContainsSubstring => {
+-            let s = expansion::basic_expand_word(shell, params, left).await?;
+-            let substring = expansion::basic_expand_word(shell, params, right).await?;
+-
+-            if shell.options().print_commands_and_arguments {
+-                shell
+-                    .trace_command(params, std::format!("[[ {s} {op} {substring} ]]"))
+-                    .await;
+-            }
+-
+-            Ok(s.contains(substring.as_str()))
+-        }
+         ast::BinaryPredicate::FilesReferToSameDeviceAndInodeNumbers => {
+             let left = expansion::basic_expand_word(shell, params, left).await?;
+             let right = expansion::basic_expand_word(shell, params, right).await?;

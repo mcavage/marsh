@@ -1,0 +1,29 @@
+diff --git a/brush-core/src/prompt.rs b/brush-core/src/prompt.rs
+index 5946063..6a00bd4 100644
+--- a/brush-core/src/prompt.rs
++++ b/brush-core/src/prompt.rs
+@@ -25,6 +25,24 @@ pub(crate) async fn expand_prompt(
+         // prepend a `\` so pass 2 consumes it and leaves the char alone.
+         let semantically_literal =
+             matches!(piece, brush_parser::prompt::PromptPiece::DollarOrPound);
++        // Names from the system (the working directory, the shell's name) are
++        // data: as in Bash, pass 2 must not expand a `$(...)` in a directory name.
++        let quoted_data = matches!(
++            piece,
++            brush_parser::prompt::PromptPiece::CurrentWorkingDirectory { .. }
++                | brush_parser::prompt::PromptPiece::ShellBaseName
++        );
++
++        let mut formatted_piece = format_prompt_piece(shell, piece)?;
++        if shell.options().expand_prompt_strings && quoted_data {
++            formatted_piece = formatted_piece
++                .chars()
++                .flat_map(|c| {
++                    let escape = expansion::DOUBLE_QUOTED_ESCAPE_CHARS.contains(&c) && c != '\n';
++                    escape.then_some('\\').into_iter().chain(std::iter::once(c))
++                })
++                .collect();
++        }
+ 
+         // Only useful when pass 2 actually consumes a `\` for that leading
+         // byte; otherwise the `\` would leak through.
