@@ -1312,6 +1312,10 @@ fn compound_background_list_has_a_waitable_pid() {
     assert!(output.stderr.is_empty());
 }
 
+/// Bracketed paste on: emitted once each time the shell starts reading a line.
+#[cfg(unix)]
+const READING_LINE: &str = "\x1b[?2004h";
+
 /// An interactive shell on a fresh pseudo-terminal, under `script(1)` so the
 /// terminal is its controlling terminal. A reader thread records output and,
 /// when `answer_cursor` is set, answers cursor position queries (`ESC [ 6 n`)
@@ -1392,6 +1396,18 @@ impl PtyShell {
         String::from_utf8_lossy(&self.output.lock().unwrap()).into_owned()
     }
 
+    /// Lines the shell has started reading. Both shells switch bracketed paste
+    /// on once per line read; Brush draws the prompt itself twice (again after
+    /// its cursor position query), so counting prompts would run ahead.
+    fn prompts(&self) -> usize {
+        self.output().matches(READING_LINE).count()
+    }
+
+    /// Waits until the shell has started reading its `count`th line.
+    fn expect_prompts(&mut self, count: usize) {
+        self.expect(READING_LINE, count);
+    }
+
     /// Waits until the output contains `needle` `count` times.
     fn expect(&mut self, needle: &str, count: usize) {
         let deadline = std::time::Instant::now() + Duration::from_secs(15);
@@ -1414,7 +1430,7 @@ impl PtyShell {
     /// follows the answer.
     fn shell_pid(&mut self, prompts: usize) -> u32 {
         self.send(b"echo shell-pid=$$\r");
-        self.expect("PROMPT$ ", prompts);
+        self.expect_prompts(prompts);
         let output = self.output();
         let (_, tail) = output.rsplit_once("shell-pid=").unwrap();
         let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
@@ -1548,7 +1564,7 @@ fn interactive_ctrl_c_abandons_the_rest_of_the_command_line() {
     ] {
         for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
             let mut shell = PtyShell::spawn(program, true);
-            shell.expect("PROMPT$ ", 1);
+            shell.expect_prompts(1);
             let pid = shell.shell_pid(2);
             shell.send(format!("{line}\r").as_bytes());
             shell.expect("started\r\n", 1);
@@ -1556,9 +1572,9 @@ fn interactive_ctrl_c_abandons_the_rest_of_the_command_line() {
                 shell.expect_foreground_child(pid);
             }
             // Typed-ahead input is safe once the next prompt is drawn.
-            let prompts = shell.output().matches("PROMPT$ ").count();
+            let prompts = shell.prompts();
             shell.send(b"\x03");
-            shell.expect("PROMPT$ ", prompts + 1);
+            shell.expect_prompts(prompts + 1);
             shell.send(b"echo rc=$?\r");
             shell.expect("rc=130", 1);
             shell.send(b"exit 3\r");
@@ -1574,13 +1590,14 @@ fn interactive_ctrl_c_abandons_the_rest_of_the_command_line() {
 }
 
 /// A terminal that never answers the cursor position query does not end the
-/// interactive session: lines are still read and run (Bash never asks).
+/// interactive session: lines are still read and run (Bash never asks), and
+/// the first line, typed while the shell waits for the answer, is not lost.
 #[cfg(unix)]
 #[test]
 fn interactive_shell_survives_a_terminal_that_never_reports_the_cursor() {
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
         let mut shell = PtyShell::spawn(program, false);
-        shell.expect("PROMPT$ ", 1);
+        shell.expect_prompts(1);
         shell.send(b"echo o''ne\r");
         shell.expect("one\r\n", 1);
         shell.send(b"for i in a b; do\r");
@@ -1668,32 +1685,32 @@ fn interactive_job_launch_and_completion_lines_match_bash() {
     let mut seen = Vec::new();
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
         let mut shell = PtyShell::spawn(program, true);
-        shell.expect("PROMPT$ ", 1);
+        shell.expect_prompts(1);
         let pid = shell.shell_pid(2);
         // Each notification is read only after the real condition: every job
         // the shell started has exited. (Fixed sleeps raced a loaded machine:
         // `sh -c 'exit 3'` had not run yet when `true` asked for the report.)
         shell.send(b"sleep 1 &\r");
-        shell.expect("PROMPT$ ", 3);
+        shell.expect_prompts(3);
         shell.expect_children_exited(pid);
         shell.send(b"true\r");
         shell.expect("Done", 1);
-        shell.expect("PROMPT$ ", 4);
+        shell.expect_prompts(4);
         shell.send(b"sh -c 'exit 3' &\r");
-        shell.expect("PROMPT$ ", 5);
+        shell.expect_prompts(5);
         shell.expect_children_exited(pid);
         shell.send(b"true\r");
         shell.expect("Exit 3", 1);
-        shell.expect("PROMPT$ ", 6);
+        shell.expect_prompts(6);
         shell.send(b"sleep 2 & sleep 2 &\r");
-        shell.expect("PROMPT$ ", 7);
+        shell.expect_prompts(7);
         shell.send(b"jobs\r");
         shell.expect("Running", 2);
-        shell.expect("PROMPT$ ", 8);
+        shell.expect_prompts(8);
         shell.expect_children_exited(pid);
         shell.send(b"true\r");
         shell.expect("Done", 3);
-        shell.expect("PROMPT$ ", 9);
+        shell.expect_prompts(9);
         shell.send(b"exit 0\r");
         let (status, output) = shell.finish();
         assert_eq!(status, Some(0), "{program}: {output:?}");
@@ -1728,11 +1745,11 @@ fn interactive_job_launch_and_completion_lines_match_bash() {
 fn background_output_at_the_prompt_keeps_terminal_newline_translation() {
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
         let mut shell = PtyShell::spawn(program, true);
-        shell.expect("PROMPT$ ", 1);
+        shell.expect_prompts(1);
         // The job writes once the line editor has put the terminal in
         // noncanonical mode to wait for input.
         shell.send(b"(until stty -a </dev/tty | grep -q -- -icanon; do sleep .01; done; printf 'al''pha\\nbe''ta\\nga''mma\\n') &\r");
-        shell.expect("PROMPT$ ", 2);
+        shell.expect_prompts(2);
         shell.expect("gamma", 1);
         shell.send(b"exit 0\r");
         let (status, output) = shell.finish();
@@ -1781,7 +1798,7 @@ fn failed_split_reports_a_status_for_every_stage() {
 fn lines_typed_ahead_with_line_feeds_all_run() {
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
         let mut shell = PtyShell::spawn(program, true);
-        shell.expect("PROMPT$ ", 1);
+        shell.expect_prompts(1);
         shell.send(b"echo one-$((0+1))\necho two-$((1+1))\necho three-$((1+2))\nexit 0\n");
         let (status, output) = shell.finish();
         assert_eq!(status, Some(0), "{program}: {output:?}");
@@ -1813,16 +1830,16 @@ fn an_exited_job_is_reported_at_the_next_prompt_without_sigchld() {
             "'sigprocmask(SIG_BLOCK, POSIX::SigSet->new(SIGCHLD)) or die; exec @ARGV or die'",
         ];
         let mut shell = PtyShell::spawn_wrapped(program, true, &wrapper);
-        shell.expect("PROMPT$ ", 1);
+        shell.expect_prompts(1);
         shell.send(b"sh -c 'exit 3' & p=$!\r");
-        shell.expect("PROMPT$ ", 2);
+        shell.expect_prompts(2);
         shell.send(
             b"until [[ ! -e /proc/$p ]] || { read -r l < /proc/$p/stat && [[ $l == *') Z '* ]]; } 2>/dev/null; do :; done\r",
         );
-        shell.expect("PROMPT$ ", 3);
+        shell.expect_prompts(3);
         shell.send(b"true\r");
         shell.expect("Exit 3", 1);
-        shell.expect("PROMPT$ ", 4);
+        shell.expect_prompts(4);
         shell.send(b"exit 0\r");
         let (status, output) = shell.finish();
         assert_eq!(status, Some(0), "{program}: {output:?}");
