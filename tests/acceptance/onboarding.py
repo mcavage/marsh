@@ -71,7 +71,9 @@ def main():
         "cases": [],
     }
     with tempfile.TemporaryDirectory(prefix="marsh-onboarding-") as temporary:
-        root = Path(temporary)
+        # Physical path: with no inherited PWD a shell reports getcwd(), and macOS
+        # temporary directories live under the /var -> /private/var symlink.
+        root = Path(temporary).resolve()
         home, project = root / "home", root / "project with spaces"
         home.mkdir()
         project.mkdir()
