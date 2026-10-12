@@ -170,7 +170,7 @@ fn wait_n_returns_first_child_status_and_pid() {
     let directory = tempfile::tempdir().unwrap();
     let output = marsh()
         .current_dir(directory.path())
-        .args(["--no-config", "--noprofile", "--norc", "-c", "mkfifo gate; sh -c 'exit 23' & a=$!; sh -c 'read x < gate; exit 17' & b=$!; wait -n -p won \"$a\" \"$b\"; rc=$?; test \"$won\" = \"$a\"; printf '%s:%s' \"$rc\" \"$?\"; : > gate; wait \"$b\""])
+        .args(["--no-config", "--noprofile", "--norc", "-c", "mkfifo gate; sh -c 'exit 23' & a=$!; sh -c 'read x < gate; exit 17' & b=$!; wait -n -p won \"$a\" \"$b\"; rc=$?; test \"$won\" = \"$a\"; printf '%s:%s' \"$rc\" \"$?\"; echo >gate; wait \"$b\""])
         .output().unwrap();
     assert_eq!(output.status.code(), Some(17), "{output:?}");
     assert_eq!(output.stdout, b"23:0", "{output:?}");
@@ -216,7 +216,7 @@ fn matches_bash_in_a_fresh_directory(script: &str, expected: &[u8]) {
 #[test]
 fn wait_n_preserves_unselected_pipeline_status() {
     matches_bash_in_a_fresh_directory(
-        "mkfifo gate; sh -c 'read x < gate' | sh -c 'exit 7' & slow=$!; true & fast=$!; wait -n \"$slow\" \"$fast\"; : > gate; wait \"$slow\"; printf 'slow-status=%s\\n' \"$?\"",
+        "mkfifo gate; sh -c 'read x < gate' | sh -c 'exit 7' & slow=$!; true & fast=$!; wait -n \"$slow\" \"$fast\"; echo >gate; wait \"$slow\"; printf 'slow-status=%s\\n' \"$?\"",
         b"slow-status=7\n",
     );
 }
@@ -225,7 +225,7 @@ fn wait_n_preserves_unselected_pipeline_status() {
 #[test]
 fn wait_by_original_pipeline_pid_survives_completed_first_stage() {
     matches_bash_in_a_fresh_directory(
-        "mkfifo gate; sh -c ': > first-done' | sh -c 'read x < gate; exit 7' & pid=$!; until test -e first-done; do sleep .01; done; : > gate; wait \"$pid\"; printf 'status=%s\\n' \"$?\"",
+        "mkfifo gate; sh -c ': > first-done' | sh -c 'read x < gate; exit 7' & pid=$!; until test -e first-done; do sleep .01; done; echo >gate; wait \"$pid\"; printf 'status=%s\\n' \"$?\"",
         b"status=7\n",
     );
 }
@@ -495,7 +495,7 @@ fn background_pid_jobs_and_wait_use_the_real_child() {
             "--noprofile",
             "--norc",
             "-c",
-            "mkfifo gate; sh -c 'read x < gate; exit 23' & pid=$!; test -n \"$pid\"; jobs -p >pids; jobs -l >long; grep -F \"$pid\" pids >/dev/null; grep -F \"$pid\" long >/dev/null; : > gate; wait \"$pid\"; status=$?; rm pids long gate; exit \"$status\"",
+            "mkfifo gate; sh -c 'read x < gate; exit 23' & pid=$!; test -n \"$pid\"; jobs -p >pids; jobs -l >long; grep -F \"$pid\" pids >/dev/null; grep -F \"$pid\" long >/dev/null; echo >gate; wait \"$pid\"; status=$?; rm pids long gate; exit \"$status\"",
         ])
         .output()
         .expect("run marsh");
@@ -1326,7 +1326,7 @@ fn compound_background_list_has_a_waitable_pid() {
             "--noprofile",
             "--norc",
             "-c",
-            "mkfifo gate; true && sh -c 'read x < gate; :' & pid=$!; test -n \"$pid\"; jobs -p | grep -Fx \"$pid\" >/dev/null; : > gate; wait \"$pid\"",
+            "mkfifo gate; true && sh -c 'read x < gate; :' & pid=$!; test -n \"$pid\"; jobs -p | grep -Fx \"$pid\" >/dev/null; echo >gate; wait \"$pid\"",
         ])
         .output()
         .expect("run marsh");
@@ -1352,12 +1352,18 @@ struct PtyShell {
 #[cfg(unix)]
 impl PtyShell {
     fn spawn(program: &str, answer_cursor: bool) -> Self {
+        Self::spawn_wrapped(program, answer_cursor, &[])
+    }
+
+    /// As [`Self::spawn`], with the shell run by `wrapper` (words before it).
+    fn spawn_wrapped(program: &str, answer_cursor: bool, wrapper: &[&str]) -> Self {
         use std::io::{Read as _, Write as _};
         if program == "bash" {
             common::require_bash_oracle();
         }
 
-        let mut shell = vec![program];
+        let mut shell = wrapper.to_vec();
+        shell.push(program);
         if program != "bash" {
             shell.push("--no-config");
         }
@@ -1793,5 +1799,40 @@ fn lines_typed_ahead_with_line_feeds_all_run() {
                 "{program}: {line} did not run: {output:?}"
             );
         }
+    }
+}
+
+/// A background job that has exited is reported at the next prompt even
+/// before the shell's runtime relays its `SIGCHLD`: the prompt's job check
+/// asks the kernel (patch `0068`). Before, it waited for the relay, and the
+/// `[1]+  Done` line could miss its prompt. Here the shell starts with
+/// `SIGCHLD` blocked, so the relay never comes; the command line waits with
+/// builtins only (`/proc`) until the job is a zombie (Bash reaps it first).
+#[cfg(target_os = "linux")]
+#[test]
+fn an_exited_job_is_reported_at_the_next_prompt_without_sigchld() {
+    for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
+        // `script` resets its child's signal mask, so a wrapper blocks SIGCHLD
+        // and execs the shell.
+        let wrapper = [
+            "perl",
+            "-MPOSIX",
+            "-e",
+            "'sigprocmask(SIG_BLOCK, POSIX::SigSet->new(SIGCHLD)) or die; exec @ARGV or die'",
+        ];
+        let mut shell = PtyShell::spawn_wrapped(program, true, &wrapper);
+        shell.expect("PROMPT$ ", 1);
+        shell.send(b"sh -c 'exit 3' & p=$!\r");
+        shell.expect("PROMPT$ ", 2);
+        shell.send(
+            b"until [[ ! -e /proc/$p ]] || { read -r l < /proc/$p/stat && [[ $l == *') Z '* ]]; } 2>/dev/null; do :; done\r",
+        );
+        shell.expect("PROMPT$ ", 3);
+        shell.send(b"true\r");
+        shell.expect("Exit 3", 1);
+        shell.expect("PROMPT$ ", 4);
+        shell.send(b"exit 0\r");
+        let (status, output) = shell.finish();
+        assert_eq!(status, Some(0), "{program}: {output:?}");
     }
 }
