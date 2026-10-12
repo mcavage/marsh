@@ -17,6 +17,8 @@ import unittest
 import uuid
 
 
+from jsonrpc_peer import WAIT_TIMEOUT
+
 ROOT = Path(__file__).resolve().parents[2]
 MARSH = Path(os.environ["MARSH_BINARY"]).resolve(strict=True)
 FAKE_SBX = r'''#!/usr/bin/env python3
@@ -59,12 +61,11 @@ elif args[:2] == ["mcp", "load"]:
         sys.exit(7)
     if sandbox == "hold":
         (root / "load-entered").touch()
-        for _ in range(400):
-            if (root / "release-load").exists():
-                break
+        # Held until the test releases it (or deletes its directory).
+        while not (root / "release-load").exists():
+            if not root.exists():
+                sys.exit(8)
             time.sleep(0.025)
-        else:
-            sys.exit(8)
 elif args[:2] == ["mcp", "rm"]:
     if (root / "fail-rm-once").exists():
         (root / "fail-rm-once").unlink()
@@ -94,7 +95,6 @@ class TypedHostPeer:
         self.outcome = None
         self.failure = None
         parent, child = socket.socketpair()
-        parent.settimeout(90)
         self.channel = parent
         self.process = subprocess.Popen(argv, cwd=cwd, env={**env, 'MARSH_PUBLICATION_CHANNEL': '1'},
             stdin=child, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
@@ -130,7 +130,7 @@ class TypedHostPeer:
                     self.send({'Ok': None})
                 elif event['type'] == 'run_stock':
                     result = subprocess.run([self.env['MARSH_SBX'], *event['data']['arguments']],
-                        cwd=self.cwd, env=self.env, capture_output=True, timeout=65, start_new_session=True)
+                        cwd=self.cwd, env=self.env, capture_output=True, start_new_session=True)
                     self.send({'Ok': {'exit_code': result.returncode, 'stdout': list(result.stdout), 'stderr': list(result.stderr)}})
                 elif event['type'] == 'prepare_kit':
                     self.send({'Err': 'controlled host peer has no Kit backend'})
@@ -144,9 +144,9 @@ class TypedHostPeer:
         finally:
             self.channel.close()
 
-    def communicate(self, timeout=None):
+    def communicate(self, timeout=WAIT_TIMEOUT):
         output, error = self.process.communicate(timeout=timeout)
-        self.reader.join(timeout=2)
+        self.reader.join(timeout=WAIT_TIMEOUT)
         if self.failure:
             raise self.failure
         if self.reader.is_alive() or self.outcome is None:
@@ -228,10 +228,43 @@ class PublicationCliTests(unittest.TestCase):
 
     def command(self, *args):
         child = self.spawn(*args, text=True)
-        output, error = child.communicate(timeout=90)
+        output, error = child.communicate(timeout=WAIT_TIMEOUT)
         result = subprocess.CompletedProcess(child.args, child.returncode, output, error)
         result.publication_outcome = getattr(child, 'outcome', None)
         return result
+
+    def wait_until(self, condition, awaited):
+        deadline = time.monotonic() + WAIT_TIMEOUT
+        while not condition():
+            if time.monotonic() > deadline:
+                self.fail(f"{awaited} not observed within {WAIT_TIMEOUT:g}s")
+            time.sleep(0.025)
+
+    def hold_load(self, child):
+        """Wait until child's stock load is held open by the fake SBX."""
+        def entered():
+            self.assertIsNone(child.poll(), "held process exited before its stock load")
+            return (self.root / "load-entered").exists()
+        self.wait_until(entered, "stock load entry")
+
+    def wait_at_admission(self, child):
+        """Wait until child holds the publication admission lock file open
+        while the held operation owns it: it is waiting for admission."""
+        lock, = self.host_home.rglob("publication-locks/*.lock")
+        lock = os.path.realpath(lock)
+
+        def open_files():
+            if sys.platform.startswith("linux"):
+                directory = Path(f"/proc/{child.pid}/fd")
+                return {os.path.realpath(entry) for entry in directory.iterdir()}
+            listed = subprocess.run(["lsof", "-a", "-p", str(child.pid), "-Fn"], capture_output=True,
+                                    text=True, timeout=WAIT_TIMEOUT)
+            return {os.path.realpath(line[1:]) for line in listed.stdout.splitlines() if line.startswith("n/")}
+
+        def waiting():
+            self.assertIsNone(child.poll(), "concurrent operation exited while the held one owned admission")
+            return lock in open_files()
+        self.wait_until(waiting, f"process {child.pid} waiting on {lock}")
 
     def declaration(self, name):
         matches = list(self.host_home.rglob(f"{name}.json"))
@@ -280,18 +313,16 @@ class PublicationCliTests(unittest.TestCase):
         first = self.spawn('publish', 'race', '--sandbox', 'hold', '--', 'cat')
         second = None
         try:
-            deadline = time.monotonic() + 10
-            while not (self.root / "load-entered").exists():
-                self.assertIsNone(first.poll())
-                self.assertLess(time.monotonic(), deadline)
-                time.sleep(0.025)
+            self.hold_load(first)
+            effects = (self.root / "calls.log").read_bytes()
             second = self.spawn('host-publish', 'race', str(uuid.uuid4()), str(uuid.uuid4()), protocol='acp')
-            time.sleep(0.25)
-            self.assertIsNone(second.poll(), "ACP bypassed MCP's scope admission lock")
+            self.wait_at_admission(second)
+            self.assertEqual((self.root / "calls.log").read_bytes(), effects,
+                             "ACP bypassed MCP's scope admission lock")
             (self.root / "release-load").touch()
-            out, err = first.communicate(timeout=15)
+            out, err = first.communicate()
             self.assertEqual(first.returncode, 0, err)
-            out, err = second.communicate(timeout=15)
+            out, err = second.communicate()
             self.assertNotEqual(second.returncode, 0)
             self.assertIn(b"other protocol", err)
             self.assertFalse((self.root / "acp-registry.json").exists())
@@ -306,7 +337,7 @@ class PublicationCliTests(unittest.TestCase):
         before = sorted(str(p.relative_to(self.root)) for p in self.root.rglob('*'))
         denied = subprocess.run([str(MARSH), 'mcp', 'publish', 'host-denied', '--', 'cat'],
                                 cwd=self.project, env=self.env, capture_output=True,
-                                text=True, timeout=20, start_new_session=True)
+                                text=True, timeout=WAIT_TIMEOUT, start_new_session=True)
         self.assertNotEqual(denied.returncode, 0, denied.stdout)
         self.assertIn('attached', denied.stderr)
         self.assertEqual(sorted(str(p.relative_to(self.root)) for p in self.root.rglob('*')), before)
@@ -321,7 +352,7 @@ class PublicationCliTests(unittest.TestCase):
         for change in changes:
             before = sorted(str(p.relative_to(self.host_home)) for p in self.host_home.rglob('*'))
             child = self.spawn('publish', 'context-bound', '--', 'cat', text=True, context_changes=change)
-            _, error = child.communicate(timeout=20)
+            _, error = child.communicate()
             self.assertNotEqual(child.returncode, 0, error)
             self.assertEqual(child.outcome['status'], 'rejected_before_effect')
             self.assertEqual(sorted(str(p.relative_to(self.host_home)) for p in self.host_home.rglob('*')), before)
@@ -330,7 +361,7 @@ class PublicationCliTests(unittest.TestCase):
     def test_forged_channel_environment_is_not_a_socket_or_grant(self):
         env = {**self.env, 'MARSH_PUBLICATION_CHANNEL': '1'}
         result = subprocess.run([str(MARSH), 'mcp', 'publish', 'forged', '--', 'cat'], cwd=self.project,
-            env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=20, start_new_session=True)
+            env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=WAIT_TIMEOUT, start_new_session=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(b'private channel', result.stderr)
         self.assertFalse((self.root / 'calls.log').exists())
@@ -420,19 +451,17 @@ class PublicationCliTests(unittest.TestCase):
         first = self.spawn('load', 'locked', '--sandbox', 'hold')
         second = None
         try:
-            deadline = time.monotonic() + 10
-            while not (self.root / "load-entered").exists() and time.monotonic() < deadline:
-                self.assertIsNone(first.poll(), "load exited before stock effect")
-                time.sleep(0.025)
-            self.assertTrue((self.root / "load-entered").exists())
+            self.hold_load(first)
+            effects = (self.root / "calls.log").read_bytes()
             second = self.spawn(*mutation)
-            time.sleep(0.25)
-            self.assertIsNone(second.poll(), "publication mutation bypassed existing load lock")
+            self.wait_at_admission(second)
+            self.assertEqual((self.root / "calls.log").read_bytes(), effects,
+                             "publication mutation bypassed existing load lock")
             self.assertTrue(self.declaration("locked").is_file())
             (self.root / "release-load").touch()
-            self.assertEqual(first.communicate(timeout=15)[1], b"")
+            self.assertEqual(first.communicate(timeout=WAIT_TIMEOUT)[1], b"")
             self.assertEqual(first.returncode, 0)
-            self.assertEqual(second.communicate(timeout=15)[1], b"")
+            self.assertEqual(second.communicate(timeout=WAIT_TIMEOUT)[1], b"")
             self.assertEqual(second.returncode, 0)
         finally:
             (self.root / "release-load").touch()
@@ -525,22 +554,18 @@ class PublicationCliTests(unittest.TestCase):
     def test_concurrent_host_publish_waits_through_load(self):
         first = self.spawn('publish', 'shared', '--sandbox', 'hold', '--', 'printf first', text=True)
         try:
-            deadline = time.monotonic() + 15
-            while not (self.root / "load-entered").exists() and time.monotonic() < deadline:
-                self.assertIsNone(first.poll(), "first publisher exited before load")
-                time.sleep(0.025)
-            self.assertTrue((self.root / "load-entered").exists(), "first publisher did not reach load")
+            self.hold_load(first)
+            effects = (self.root / "calls.log").read_bytes()
             second = self.spawn('publish', 'shared', '--', 'printf second', text=True)
             try:
-                time.sleep(5)
-                self.assertIsNone(second.poll(), "second publisher bypassed the first lock")
+                self.wait_at_admission(second)
+                self.assertEqual((self.root / "calls.log").read_bytes(), effects,
+                                 "second publisher bypassed the first lock")
                 self.assertEqual(json.loads(self.declaration("shared").read_text())["pipeline"], "printf first")
-                calls = (self.root / "calls.log").read_text().splitlines()
-                self.assertEqual(sum(line.startswith("mcp inspect") for line in calls), 2)
                 (self.root / "release-load").touch()
-                self.assertEqual(first.communicate(timeout=15)[0].count("Published MCP tool: shared"), 1)
+                self.assertEqual(first.communicate()[0].count("Published MCP tool: shared"), 1)
                 self.assertEqual(first.returncode, 0)
-                self.assertEqual(second.communicate(timeout=15)[0].count("Published MCP tool: shared"), 1)
+                self.assertEqual(second.communicate()[0].count("Published MCP tool: shared"), 1)
                 self.assertEqual(second.returncode, 0)
                 self.assertEqual(json.loads(self.declaration("shared").read_text())["pipeline"], "printf second")
                 self.assertTrue((self.root / "registry.json").exists())
