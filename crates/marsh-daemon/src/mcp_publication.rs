@@ -423,6 +423,7 @@ pub(super) struct McpHostControl {
     /// This daemon's control directory, where default publications are
     /// recorded (`mcp_defaults`). `None` disables default recording.
     defaults_home: Option<PathBuf>,
+    host_command_budget: Duration,
     scope_admission_wait: Duration,
     publication_locks: PublicationLocks,
     publication_fences: PublicationFences,
@@ -441,6 +442,7 @@ impl McpHostControl {
             host_home,
             scope_root,
             defaults_home: None,
+            host_command_budget: HOST_COMMAND_TIMEOUT,
             scope_admission_wait: SCOPE_ADMISSION_WAIT,
             publication_locks: Arc::new(Mutex::new(BTreeMap::new())),
             publication_fences: Arc::new(Mutex::new(BTreeMap::new())),
@@ -453,7 +455,15 @@ impl McpHostControl {
         self
     }
 
-    #[cfg(test)]
+    /// Replace the five-minute host publication budget (time outside Kit
+    /// preparation and supervised stock calls).
+    #[must_use]
+    pub fn with_host_command_budget(mut self, budget: Duration) -> Self {
+        self.host_command_budget = budget;
+        self
+    }
+
+    /// Replace the 30-second wait for another operation's scope admission.
     #[must_use]
     pub fn with_scope_admission_wait(mut self, wait: Duration) -> Self {
         self.scope_admission_wait = wait;
@@ -1016,7 +1026,7 @@ impl McpHostControl {
                 }
             }
         });
-        let mut deadline = Instant::now() + HOST_COMMAND_TIMEOUT;
+        let mut deadline = Instant::now() + self.host_command_budget;
         let mut outcome = None;
         let mut commit_started = false;
         let mut preparation_started = false;

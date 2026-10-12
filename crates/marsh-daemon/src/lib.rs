@@ -3172,6 +3172,26 @@ impl Server {
         self
     }
 
+    /// Replace the host publication budget (default five minutes outside Kit
+    /// preparation and stock calls), e.g. to observe its expiry in seconds.
+    #[must_use]
+    pub fn with_publication_host_budget(mut self, budget: Duration) -> Self {
+        self.mcp_host = self
+            .mcp_host
+            .map(|host| host.with_host_command_budget(budget));
+        self
+    }
+
+    /// Replace how long a publication waits for another operation's scope
+    /// admission (default 30 seconds).
+    #[must_use]
+    pub fn with_publication_admission_wait(mut self, wait: Duration) -> Self {
+        self.mcp_host = self
+            .mcp_host
+            .map(|host| host.with_scope_admission_wait(wait));
+        self
+    }
+
     /// Advertise the same daemon-launch resource snapshot used by its backend.
     #[must_use]
     pub fn with_job_defaults(self, defaults: JobDefaults) -> Self {
@@ -6663,5 +6683,3 @@ mod tests;
 
 #[cfg(test)]
 mod mcp_load_tests;
-#[cfg(test)]
-mod mcp_long_tests;
