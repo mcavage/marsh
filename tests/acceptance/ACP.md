@@ -179,20 +179,11 @@ old receipts. The exact CLI process test also distinguishes a connection failure
 before dispatch from a discarded real daemon acceptance reply:
 
 
-```sh
-export PATH=/home/agent/.cargo/bin:$PATH
-export CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
-# Use a new empty target for each independent source snapshot.
-export CARGO_TARGET_DIR=/tmp/marsh-acp-$(date +%s)-target
-cargo test -p marsh-acp --test fixture_caller --test capture_backpressure -- --test-threads=1
-cargo build -p marsh --bin marsh
-MARSH_ACP_CALLER_BIN="$CARGO_TARGET_DIR/debug/marsh" \
-  cargo test -p marsh-acp --test fixture_caller cli_stdin -- --ignored --nocapture
-docs/model/check.sh 'Grants*.cfg'
-```
+`make test-rust` runs all of it, including the ignored real-CLI callers (with
+`MARSH_ACP_CALLER_BIN` set to the freshly built `marsh` and an owner-only
+`HOME`); `make test-model` checks the Grants specs.
 
-Record source hashes and the exact executable paths/SHA256 before execution;
-never reuse a target across copied source trees based on copied mtimes. These
+These
 tests substitute only Kit launch and host registration with a bounded
 local fixture process and declaration writer. They do not qualify VMs, stock
 Gateway loading or packaged cleanup. Publication,
