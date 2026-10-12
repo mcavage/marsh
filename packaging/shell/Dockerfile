@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # The one shell VM template: the repaired DHI shell (gcc, make, git, python3,
 # node, npm, docker) plus the pinned Rust 1.95 toolchain with the aarch64 gnu
-# and musl targets `make dev-inner` needs, plus the Pi coding agent 1.0.0
+# and musl targets `make dev-inner` needs, plus the Pi coding agent 1.1.0
 # (`pi-dev`, locked by pi/package-lock.json). `marsh --dev` uses this same image;
 # it only adds the dev broker. The caller supplies the exact reviewed upstream
 # DHI digest. The exported reference names this repaired image, never the

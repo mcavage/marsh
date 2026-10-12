@@ -2144,7 +2144,7 @@
     "pi": {
       "root": "/opt/marsh/pi-gateway",
       "base_agent": "claude",
-      "lock_sha256": "17c1695b9f45cc21aa7997f00fbb04dcd80c4e8fa885679b6da01ed4da1a5dcd",
+      "lock_sha256": "4346b9928b5276a70873dbc945a0961ad4594e9c62858aef90f170435a236b5c",
       "notice_root": "/usr/local/share/licenses/marsh-pi",
       "architectures": {
         "arm64": {

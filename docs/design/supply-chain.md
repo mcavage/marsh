@@ -105,20 +105,19 @@ Both Pi Kits install their runtime and gateway dependencies with `npm ci` and
 lifecycle scripts disabled. Their package locks carry integrity hashes. Native
 Pi's declared Kit version must match its exact package version.
 
-Pi 1.0.0 (like 0.86.1) embeds an npm shrinkwrap containing `brace-expansion` 5.0.9. npm can
+Pi 1.0.0 (like 0.86.1) embedded an npm shrinkwrap containing `brace-expansion` 5.0.9. npm can
 install that version despite a root override and a changed outer lock entry.
 Consequently, a clean audit of a manually changed outer lock is insufficient.
+Pi 1.1.0 no longer nests `brace-expansion`; its `minimatch` resolves the
+top-level package.
 
 Each Pi Kit separately locks `brace-expansion` 5.0.12. After installation,
-`patch-pi-dependencies.mjs` validates the reviewed versions, removes the nested
-vulnerable package, and replaces it with a real copy of that fixed package
-(not a symlink: the notice verifier rejects symlinked package ancestors). It checks the path that
-Pi's own `minimatch` resolves and exercises representative brace/glob behavior.
-The patch is idempotent and rejects unreviewed Pi or dependency versions.
-The Kit input publisher stages the canonical repair into each build context
-until an upstream Pi release removes this repair. The original nested 5.0.9 remains accurately recorded in the package
-lock because it is downloaded before replacement; lock-only audit output must
-be interpreted alongside the assembled module inventory.
+`patch-pi-dependencies.mjs` validates the reviewed versions (Pi 1.1.0,
+`brace-expansion` 5.0.12), fails if Pi bundles its own `brace-expansion`
+again, checks that Pi's own `minimatch` resolves the fixed package, and
+exercises representative brace/glob behavior. It rejects unreviewed Pi or
+dependency versions, so a Pi bump is reviewed against this check (Pi 1.0.0
+needed a real-copy replacement of the nested 5.0.9; see the git history).
 
 The fixed release addresses the publisher's
 [quadratic expansion](https://github.com/advisories/GHSA-q2hr-2g5m-vwhr),
