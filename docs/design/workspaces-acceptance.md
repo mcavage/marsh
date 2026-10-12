@@ -2,7 +2,7 @@
 
 Black-box scenarios for `docs/workspaces.md` (cited as `sN`), written before
 the implementation. Harness: `tests/acceptance/workspaces_uat.py`, run by
-`make dev-workspaces DEV_KIT=<fixture>` against `~/.marsh-dev` (`--prefix`).
+`make regress ONLY=workspaces` (or `ONLY=W01-plain-bash`) against `~/.marsh-dev` (`--prefix`).
 There are no unit tests or mocks. Callers are host bash, `marsh -c` sessions,
 the host CLI, and registered fixture Kit commands. Inside Kit jobs the caller is
 the shipped `marsh` shim, driven by the fixture's argv-only `pipeline SEP ARGV
@@ -23,7 +23,7 @@ has a timeout and is killed by process group. A preflight checks
 `join --help`. If the CLI is missing, it marks every scenario blocked before
 any VM work. Without the preflight, an unknown `marsh split` runs as a Brush
 script and boots a shell VM. Use `--no-preflight` to skip it,
-`--only ID` (repeatable) or `ONLY=` to select scenarios, and `--fail-fast` to
+`--only ID` (repeatable) to select scenarios, and `--fail-fast` to
 stop at the first failure. Evidence goes to `<evidence>/workspaces.json`.
 
 | ID | Spec claim | Setup / action | Pass criteria |
