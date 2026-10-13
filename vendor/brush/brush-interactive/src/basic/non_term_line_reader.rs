@@ -5,7 +5,7 @@ pub(crate) struct NonTermLineReader;
 impl super::LineReader for NonTermLineReader {
     fn read_line(
         &self,
-        _prompt: Option<&str>,
+        prompt: Option<&str>,
         _completion_handler: impl FnMut(
             &str,
             usize,
@@ -14,6 +14,12 @@ impl super::LineReader for NonTermLineReader {
             crate::ShellError,
         >,
     ) -> Result<crate::ReadResult, crate::ShellError> {
+        if let Some(prompt) = prompt {
+            use std::io::Write as _;
+            let mut stderr = std::io::stderr();
+            write!(stderr, "{prompt}")?;
+            stderr.flush()?;
+        }
         let mut input = Vec::new();
         let bytes_read =
             std::io::BufRead::read_until(&mut std::io::stdin().lock(), b'\n', &mut input)
