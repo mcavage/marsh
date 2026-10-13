@@ -1,69 +1,103 @@
 # Let a judge pick the winner
 
-When two attempts both pass your tests, you still have to choose. A judge is
-one more command after `join`: it reads every branch's result on its stdin, and
-you read its verdict before you apply anything. Start from
-[Race two agents on one bug](race-two-agents.md).
+When both branches of a [race](race-two-agents.md) pass your tests, your tests
+cannot choose between them. Pipe `join` into a third agent and have it choose:
+
+```console
+marsh-0.5$ split {
+>   claude: claude -p "make test fails. Fix slug.py without editing the tests. Reply in one line." && make test
+>   codex:  codex exec "make test fails. Fix slug.py without editing the tests. Reply in one line." && make test
+> } | join --keep | claude -p "Two attempts at one fix follow, each with its status, output, and patch. Pick one to apply. First line: claude or codex, nothing else. Then at most three lines of reasons. Reject a patch that edits tests."
+claude
+
+- Both patches are byte-identical (same blob hash `fe5e599c`), so the choice is arbitrary; neither edits tests.
+- Both touch only `slug.py`, pass all 3 tests, and correctly collapse separator runs plus strip edge hyphens.
+- Picked claude by label order only — applying codex would give the identical working tree.
+split: kept …/.marsh/split/1106d7ad153e (join --keep); inspect, then: marsh splits rm 1106d7ad153e
+```
+
+The judge read both patches and said they were the same. It took 3 seconds
+and one more model run.
+
+Use a judge when both patches pass and differ in size, scope, or risk. It does
+not help when neither is right: it picks among candidates and does not repair
+them.
 
 ## Add the judge
 
-<!-- doc-test: shell replace=["split {\n  claude: claude -p \"Make the retry logic idempotent.\" && make test\n  codex:  codex exec \"Make the retry logic idempotent.\" && make test\n} | join --keep | claude -p \"Two agents made the same change; each one's output and patch follow. Choose the one to apply. First line: its label, claude or codex. Then your reasons. Prefer the smaller change, and reject a patch that edits tests.\"\n", "out=$(split {\n  claude: fixture project-write notes.txt $'alpha\\nbeta\\ngamma\\n' && grep -q gamma notes.txt\n  codex:  fixture project-write notes.txt $'alpha\\nbeta\\ndelta\\n' && grep -q alpha notes.txt\n} | join --keep | sh -c 'cat >judge.in; echo claude; echo smaller change')\ntest \"$(head -1 <<<\"$out\")\" = claude\ngrep -q '^== claude (exited 0' judge.in\ngrep -q '^== codex (exited 0' judge.in\nid=$(head -1 judge.in | cut -d' ' -f3 | tr -d :)\nmarsh splits rm \"$id\"\nrm judge.in\n"] -->
+<!-- doc-test: shell replace=["split {\n  claude: claude -p \"Make the retry logic idempotent.\" && make test\n  codex:  codex exec \"Make the retry logic idempotent.\" && make test\n} | join --keep | claude -p \"Two attempts at one change follow, each with its status, output, and patch. First line: claude, codex, or neither, nothing else. Then your reasons. Reject a branch that did not exit 0 or that edits tests. Prefer the smaller change.\"\n", "out=$(split {\n  claude: fixture project-write notes.txt $'alpha\\nbeta\\ngamma\\n' && grep -q gamma notes.txt\n  codex:  fixture project-write notes.txt $'alpha\\nbeta\\ndelta\\n' && grep -q alpha notes.txt\n} | join --keep | sh -c 'cat >judge.in; echo claude; echo smaller change')\ntest \"$(head -1 <<<\"$out\")\" = claude\ngrep -q '^== claude (exited 0' judge.in\ngrep -q '^== codex (exited 0' judge.in\nid=$(head -1 judge.in | cut -d' ' -f3 | tr -d :)\nmarsh splits rm \"$id\"\nrm judge.in\n"] -->
 ```sh
 split {
   claude: claude -p "Make the retry logic idempotent." && make test
   codex:  codex exec "Make the retry logic idempotent." && make test
-} | join --keep | claude -p "Two agents made the same change; each one's output and patch follow. Choose the one to apply. First line: its label, claude or codex. Then your reasons. Prefer the smaller change, and reject a patch that edits tests."
+} | join --keep | claude -p "Two attempts at one change follow, each with its status, output, and patch. First line: claude, codex, or neither, nothing else. Then your reasons. Reject a branch that did not exit 0 or that edits tests. Prefer the smaller change."
 ```
 
-Commands after `join` read its output on stdin: every status, every output,
-every patch. The judge sees the whole result, including a branch that failed,
-so it can say that only one of them passed. `claude -p` reads that stdin as
-part of its prompt. `--keep` leaves the results on disk, so you can still apply
-a patch after reading what the judge says.
+The judge gets `join`'s whole output on stdin: every header, every branch's
+output, and every diff, including a branch that failed. `claude -p` and
+`codex exec` read piped stdin along with the prompt.
 
-The judge's reply is the last thing printed. You apply the patch it names, the
-same way as before:
+Write the judge's prompt as a rubric. Say what to prefer (the smaller change,
+no new dependencies, no test edits) and fix the answer's format, so you can
+read it at a glance or parse it.
+
+`--keep` matters. Without it, `join` deletes the patches when the pipeline
+succeeds, before you have read the verdict. With it, apply the chosen patch
+and clean up:
 
 ```sh
-git apply .marsh/split/8d5c8fdd1563/out/claude/diff.patch
-marsh splits rm 8d5c8fdd1563
+git apply .marsh/split/1106d7ad153e/out/claude/diff.patch
+marsh splits rm 1106d7ad153e
 ```
-
-A judge is another agent and can be wrong. Its value is that it reads both
-patches closely and gives you reasons to check, not that you can skip reading.
-Pick a different agent for the judge than for the branches if you can; a model
-may favor its own style.
 
 ## Let the judge apply it
 
-Once you trust the verdict, you can apply it in the same command. The judge
-must answer with a branch label on the first line, so the script can use it:
+To apply the verdict in the same command, parse its first line. In the
+`split { }` form, every command after `join` runs in your project and sees
+`$SPLIT_DIR` and `$SPLIT_ID`:
 
-<!-- doc-test: shell replace=["split {\n  claude: claude -p \"Make the retry logic idempotent.\" && make test\n  codex:  codex exec \"Make the retry logic idempotent.\" && make test\n} | join --keep | sh -c 'pick=$(claude -p \"Choose the patch to apply. Reply with exactly one word on the first line, claude or codex, then your reasons.\" | tee /dev/stderr | head -1)\n  git apply \"$SPLIT_DIR/$pick/diff.patch\" && marsh splits rm \"$SPLIT_ID\"'\n", "split {\n  claude: fixture project-write notes.txt $'alpha\\nbeta\\ngamma\\n' && grep -q gamma notes.txt\n  codex:  fixture project-write notes.txt $'alpha\\nbeta\\ndelta\\n' && grep -q alpha notes.txt\n} | join --keep | sh -c 'pick=$(sh -c \"cat >/dev/null; echo claude; echo smaller change\" | tee /dev/stderr | head -1)\n  git apply \"$SPLIT_DIR/$pick/diff.patch\" && marsh splits rm \"$SPLIT_ID\"'\ngrep -q gamma notes.txt\n"] -->
+<!-- doc-test: shell replace=["split {\n  claude: claude -p \"Make the retry logic idempotent.\" && make test\n  codex:  codex exec \"Make the retry logic idempotent.\" && make test\n} | join --keep | sh -c '\n  verdict=$(claude -p \"Choose the patch to apply. First line: exactly claude, codex, or neither. Then your reasons.\")\n  printf \"%s\\n\" \"$verdict\" >&2\n  pick=$(printf \"%s\\n\" \"$verdict\" | head -1)\n  case $pick in claude|codex) ;; *) echo \"no pick; split kept\" >&2; exit 1 ;; esac\n  grep -qx \"exited 0\" \"$SPLIT_DIR/$pick/status\" || exit 1\n  git apply \"$SPLIT_DIR/$pick/diff.patch\" && make test && marsh splits rm \"$SPLIT_ID\"'\n", "split {\n  claude: fixture project-write notes.txt $'alpha\\nbeta\\ngamma\\n' && grep -q gamma notes.txt\n  codex:  fixture project-write notes.txt $'alpha\\nbeta\\ndelta\\n' && grep -q alpha notes.txt\n} | join --keep | sh -c '\n  verdict=$(sh -c \"cat >/dev/null; echo claude; echo smaller change\")\n  printf \"%s\\n\" \"$verdict\" >&2\n  pick=$(printf \"%s\\n\" \"$verdict\" | head -1)\n  case $pick in claude|codex) ;; *) echo \"no pick; split kept\" >&2; exit 1 ;; esac\n  grep -qx \"exited 0\" \"$SPLIT_DIR/$pick/status\" || exit 1\n  git apply \"$SPLIT_DIR/$pick/diff.patch\" && grep -q gamma notes.txt && marsh splits rm \"$SPLIT_ID\"'\ngrep -q gamma notes.txt\n"] -->
 ```sh
 split {
   claude: claude -p "Make the retry logic idempotent." && make test
   codex:  codex exec "Make the retry logic idempotent." && make test
-} | join --keep | sh -c 'pick=$(claude -p "Choose the patch to apply. Reply with exactly one word on the first line, claude or codex, then your reasons." | tee /dev/stderr | head -1)
-  git apply "$SPLIT_DIR/$pick/diff.patch" && marsh splits rm "$SPLIT_ID"'
+} | join --keep | sh -c '
+  verdict=$(claude -p "Choose the patch to apply. First line: exactly claude, codex, or neither. Then your reasons.")
+  printf "%s\n" "$verdict" >&2
+  pick=$(printf "%s\n" "$verdict" | head -1)
+  case $pick in claude|codex) ;; *) echo "no pick; split kept" >&2; exit 1 ;; esac
+  grep -qx "exited 0" "$SPLIT_DIR/$pick/status" || exit 1
+  git apply "$SPLIT_DIR/$pick/diff.patch" && make test && marsh splits rm "$SPLIT_ID"'
 ```
 
-Commands after `join` run in your project and see `$SPLIT_DIR` and `$SPLIT_ID`.
-This is safe to try because it fails closed. If the judge answers with anything
-that is not a label, there is no `$SPLIT_DIR/$pick/diff.patch`, `git apply`
-fails, and `--keep` has left the results on disk for you to read. Only when the
-patch applies does the command remove them, so your tree has exactly one patch
-applied. `tee /dev/stderr` shows you the judge's reasons as it works.
+Each step can stop it:
 
-## Where a judge helps, and where it doesn't
+- A first line other than `claude` or `codex` (including `neither`) exits 1.
+  The split stays on disk for you to read.
+- A pick whose branch did not pass (`status` is not `exited 0`) exits 1.
+- `git apply` fails if your tree moved.
+- `make test` runs again on your real tree after the patch applies. If it
+  fails, the patch stays applied and the split stays on disk; undo it with
+  `git apply -R` on the same file.
 
-- It helps when both patches pass and differ in scope, style, or risk, which is
-  the case your tests cannot decide.
-- It does not help when neither patch is right. A judge picks among candidates;
-  it does not repair them. If both are wrong, change the prompt or the tests and
-  race again.
+The split is removed only when all of that passes. The judge's reasons go to
+stderr, so you see them either way. This checks the label and the branch
+status, not the judge's reasoning.
+
+## Limits and failure modes
+
+- **The judge can be wrong.** It can miss a defect or prefer the worse
+  patch. Its reasons are claims to check, and you still read the patch you
+  merge.
+- **Self-preference.** A model may favor a patch in its own style. Use a
+  different agent for the judge than for the branches when you can.
+- **Large diffs are cut.** `join` prints at most 128 KiB of diff, and a cut
+  diff ends with `(diff truncated; full diff: PATH)`. On a big change, tell
+  the judge to read the full patches in `.marsh/split/ID/out/LABEL/diff.patch`.
+- **Cost.** One more model run. Its input is the whole `join` output, so it
+  grows with the patches.
 
 ## Next
 
-To use agents on a change that already exists, see
-[Review a change with a panel](review-with-a-panel.md).
+[Review a change with a panel](review-with-a-panel.md) to put several agents
+on a change that already exists.

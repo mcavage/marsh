@@ -1,12 +1,13 @@
 # Contributing to marsh
 
-Thanks for helping. This page covers building, testing, and sending changes.
-The [design index](docs/design/README.md) explains how the parts fit together,
-and [AGENTS.md](AGENTS.md) is the short version of the project rules.
+This page covers building, testing, and sending changes. The
+[design index](docs/design/README.md) explains how the parts fit together, and
+[AGENTS.md](AGENTS.md) is the short version of the project rules.
 
-For a large or cross-component change, open an issue first. Small fixes can go
-straight to a pull request. If you have Kits or recipes to share rather than
-code, post them in
+Open an issue first for a large or cross-component change. Small fixes can go
+straight to a pull request. Doc fixes are welcome: every guide example runs in
+the test suite, so a broken example is a bug. To share a Kit, a pipeline, or an
+AGENTS.md recipe instead of code, post it in
 [Show and tell](https://github.com/mcavage/marsh/discussions).
 
 ## Building on a Mac

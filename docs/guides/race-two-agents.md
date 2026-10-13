@@ -1,99 +1,136 @@
 # Race two agents on one bug
 
-You have a failing test. Instead of trying one agent and then another, run
-both at once, each on its own private copy of your project, let each prove its
-fix with your own test suite, and read what comes back. Nothing touches your
-files until you apply a patch.
+Two agents fix the same failing test at the same time, each on a private copy
+of your project, and each copy runs your tests. marsh waits for both, then
+shows both patches and both test results. The agents never touch your working
+tree; you apply the patch you choose.
 
-You need a project with a test command that exits nonzero when a test fails,
-and a credential for each agent
-([Agent credentials](../quickstart.md#agent-credentials)).
+```console
+marsh-0.5$ split {
+>   claude: claude -p "make test fails. Fix slug.py without editing the tests. Reply in one line." && make test
+>   codex:  codex exec "make test fails. Fix slug.py without editing the tests. Reply in one line." && make test
+> } | join --keep
+# split 3c8145fd9046: 2 branches; manifest …/.marsh/split/3c8145fd9046/out/manifest.json
 
-## Check that your tests run in the VM
+== claude (exited 0, shell-vm) ==
+Fixed `slug.py:6` to collapse runs of non-alphanumerics into one hyphen and strip leading/trailing hyphens — all 3 tests pass (no children spawned; the edit was a one-liner).
+python3 -m unittest -q
+-- claude: 1 file (M slug.py); diff …/out/claude/diff.patch --
+diff --git a/slug.py b/slug.py
+…
+-    return re.sub(r"[^a-z0-9]", "-", title.lower())
++    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
 
-The commands in a branch run in marsh's Linux VM, not on your Mac. That VM is
-Debian on arm64 with git, make, gcc, Node.js, and Rust. If your tests need
-something else, install it once before you race. Every branch shares the VM, so
-all of them see it, and it lasts as long as the VM does:
+== codex (exited 0, shell-vm) ==
+Fixed `slug.py` to collapse separators and trim hyphens; all 3 tests pass, tests unchanged, no child agents used.
+python3 -m unittest -q
+-- codex: 1 file (M slug.py); diff …/out/codex/diff.patch --
+diff --git a/slug.py b/slug.py
+…
+split: kept …/.marsh/split/3c8145fd9046 (join --keep); inspect, then: marsh splits rm 3c8145fd9046
+```
+
+That run took 12 seconds on a three-test Python project with warm VMs (not a
+benchmark). Both agents found the same one-line fix. When the patches differ,
+compare their scope and their test output before you apply one. `…` marks
+output trimmed here.
+
+Use a race when a fix is worth a second attempt and you have a failure you
+can reproduce: a regression, or a failing CI check that also fails locally.
+For a flaky test, gate on a repeated run (`go test -count=20 -run TestX`);
+one passing run proves nothing. Skip races for changes your tests cannot
+judge.
+
+You need a test command that exits nonzero on failure, and a credential for
+each agent ([Agent credentials](../quickstart.md#agent-credentials)).
+
+## Make sure the tests run in marsh
+
+The `&& make test` part of each branch runs in marsh's shell VM, not on your
+Mac. The VM is Debian on arm64 with git, make, gcc, Python 3, Node.js, and
+Rust. Run your test command at the marsh prompt once. If it needs something
+else, install it there; packages stay until the VM is removed:
 
 ```sh
 sudo apt-get install -y python3-pytest
 ```
 
-Run your test command in the marsh shell first. If it passes or fails there the
-way it does on your Mac, the gate in the next step means something.
+If the tests fail in the VM for reasons unrelated to the bug, every branch
+fails and the race tells you nothing.
 
-## Race
+## Run the race
 
-<!-- doc-test: shell replace=["split {\n  claude: claude -p \"TestDialTimeout fails. Fix it without editing the test.\" && make test\n  codex:  codex exec \"TestDialTimeout fails. Fix it without editing the test.\" && make test\n} | join --keep\n", "out=$(split {\n  claude: fixture project-write notes.txt $'alpha\\nbeta\\ngamma\\n' && grep -q gamma notes.txt\n  codex:  fixture project-write notes.txt $'alpha\\nbeta\\n' && grep -q gamma notes.txt\n} | join --keep)\nprintf '%s\\n' \"$out\" | grep -q '^== claude (exited 0'\nprintf '%s\\n' \"$out\" | grep -q '^== codex (exited 1'\nid=$(printf '%s\\n' \"$out\" | head -1 | cut -d' ' -f3 | tr -d :)\ngit apply \".marsh/split/$id/out/claude/diff.patch\"\ngrep -q gamma notes.txt\nmarsh splits rm \"$id\"\n"] -->
+<!-- doc-test: shell replace=["split {\n  claude: claude -p \"make test fails. Fix the code, not the tests.\" && make test\n  codex:  codex exec \"make test fails. Fix the code, not the tests.\" && make test\n} | join --keep\n", "out=$(split {\n  claude: fixture project-write notes.txt $'alpha\\nbeta\\ngamma\\n' && grep -q gamma notes.txt\n  codex:  fixture project-write notes.txt $'alpha\\nbeta\\n' && grep -q gamma notes.txt\n} | join --keep)\nprintf '%s\\n' \"$out\" | grep -q '^== claude (exited 0'\nprintf '%s\\n' \"$out\" | grep -q '^== codex (exited 1'\nid=$(printf '%s\\n' \"$out\" | head -1 | cut -d' ' -f3 | tr -d :)\ngit apply \".marsh/split/$id/out/claude/diff.patch\"\ngrep -q gamma notes.txt\nmarsh splits rm \"$id\"\n"] -->
 ```sh
 split {
-  claude: claude -p "TestDialTimeout fails. Fix it without editing the test." && make test
-  codex:  codex exec "TestDialTimeout fails. Fix it without editing the test." && make test
+  claude: claude -p "make test fails. Fix the code, not the tests." && make test
+  codex:  codex exec "make test fails. Fix the code, not the tests." && make test
 } | join --keep
 ```
 
-Each line is a branch with its own fork of your project. A branch is ordinary
-Bash, so `agent && make test` means: run the agent on the fork, and if it
-exits 0, run your tests on the same fork. A branch counts as passed only when
-the agent finished and the tests passed. Both branches run at once.
+Each line inside the braces is a branch: a label, a colon, and ordinary Bash.
+marsh gives each branch its own copy of your working tree, uncommitted changes
+included, and runs the branches at once. `agent && make test` runs the tests
+on that copy only if the agent exits 0.
 
-`join` prints each branch's status, its output, and a patch:
+The agent runs in a fresh container that mounts only its branch's copy.
+`make test` runs in the shell VM as you, starting in the branch's copy. It is
+your own command, so marsh does not confine it: a test that writes to a fixed
+path outside the project writes the real one.
 
-```text
-# split 8d5c8fdd1563: 2 branches; manifest …/out/manifest.json
+## Read the result
 
-== claude (exited 0, shell-vm) ==
-…
-ok  	example.com/api/net	0.412s
--- claude: 1 file (M net/dial.go); diff …/out/claude/diff.patch --
-diff --git a/net/dial.go b/net/dial.go
-…
-== codex (exited 2, shell-vm) ==
-…
---- FAIL: TestDialTimeout (0.31s)
--- codex: 2 files (M net/dial.go, M net/dial_test.go); diff …/out/codex/diff.patch --
-diff --git a/net/dial.go b/net/dial.go
-…
-```
+For each branch, `join` prints:
 
-Here `claude` passed and `codex` did not. `--keep` leaves the results on disk
-so you can apply one.
+- A header with the exit status. `exited 0` means the agent finished and the
+  tests passed on that copy. Anything else means one of them failed; the
+  branch's stderr follows.
+- What the agent and the tests printed.
+- A `--` line listing the files changed, then the diff.
 
-## Read before you apply
+Look at the files list before the diff. A patch that lists a test file
+(`M test_slug.py`) may have passed by changing the test. The prompt says not
+to; check anyway.
 
-Passing tests prove that the tests pass, not that the fix is right. Two lines
-in the output tell you more:
-
-- The status in each `==` header: `exited 0` means the agent finished and your
-  tests passed on that fork.
-- The files in each `--` line. An agent that made a test pass by editing the
-  test shows `M net/dial_test.go` there. Say "without editing the test" in the
-  prompt, and treat a patch that touches tests as suspect anyway.
+`join` exits with the first nonzero branch status. With `--keep`, the copies
+and patches stay on disk either way, so you can apply one.
 
 ## Apply one
 
-The split's id is in the first line of the output. Apply the patch you want
-with `git apply`, then remove the kept results:
+The split id is on the first line. Apply the patch you chose, then remove
+the kept split:
 
 ```sh
-git apply .marsh/split/8d5c8fdd1563/out/claude/diff.patch
-marsh splits rm 8d5c8fdd1563
+git apply .marsh/split/3c8145fd9046/out/claude/diff.patch
+marsh splits rm 3c8145fd9046
 ```
 
-Your tree changes only with that `git apply`. If it has moved since the split,
-see [Merging when your tree has moved](../split.md#merging-when-your-tree-has-moved).
+That `git apply` is the step that brings an agent's change into your working
+tree. If you edited the same lines while the agents worked, use
+`git apply --3way`
+([Merging when your tree has moved](../split.md#merging-when-your-tree-has-moved)).
 
-## What this costs
+## When it goes wrong
 
-Two agents are two model runs for one fix. The race buys wall-clock time (you
-wait for the slower one, not the sum) and a second attempt, not a cheaper one.
-A split has at most 16 branches, and marsh runs at most 8 jobs at a time per
-daemon ([Agents running agents](../agents.md#limits-and-messages)). If one
-branch hangs, Ctrl-C stops all of them and anything they started.
+| What you see | What it means | What to do |
+|---|---|---|
+| Both branches `exited 1` or `exited 2` | Neither fix passed | Read both stderr sections. Sharpen the prompt (name the file, paste the error) and race again |
+| A branch exits nonzero with an authentication error | No credential for that agent | `sbx secret set anthropic` or `sbx secret set openai`, then rerun |
+| `[starting codex worker VM…]` and a long wait | First use of that agent boots its VM and may download its image (about 3.5 GB) | Wait once; later runs reuse the warm VM. `marsh --load claude,codex` starts them ahead of time |
+| One branch never finishes | An agent is stuck | Ctrl-C stops every branch and anything they started |
+| `capacity: 8 jobs` in a branch's stderr | Eight jobs were already running on this daemon, so that agent never started | Wait for some to finish and rerun |
+| `git apply` fails | Your tree moved since the split | `git apply --3way`, as above |
+
+## Cost
+
+Each branch is a full agent run, billed to that agent's account. A two-way
+race costs two runs for one fix. You wait for the slower branch, not for both
+in turn. A split takes up to 16 branches; at most 8 jobs run at once per
+daemon.
 
 ## Next
 
-When both pass, have a third agent choose: [Let a judge pick the
-winner](add-a-judge.md). To use several agents on a change that is already
-written, see [Review a change with a panel](review-with-a-panel.md).
+- [Let a judge pick the winner](add-a-judge.md) when both branches pass.
+- [Let an agent farm out work](farm-out-work.md) to have an agent run this
+  race itself.
+- [Split and join](../split.md) for every option.

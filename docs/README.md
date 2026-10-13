@@ -1,7 +1,8 @@
 # marsh manual
 
-marsh is Bash with `split`, `fanout`, `join`, and `collect` for running
-agents in parallel, each command in its own sandbox.
+marsh is a Bash-compatible shell for Apple Silicon Macs in which agent CLIs
+are ordinary commands. Each call runs in a fresh container in a Docker Sandbox
+microVM, with your project at its Mac path.
 
 ```sh
 marsh split -n ::: a claude -p 'fix the failing test' \
@@ -11,19 +12,14 @@ marsh split -n ::: a claude -p 'fix the failing test' \
 ```text
 # split 8d5c8fdd1563: 2 branches; manifest …/out/manifest.json
 
-== a (exited 0, shell-vm) ==
+== a (exited 0, kit:claude) ==
 The test raced on a fixed port; it now asks the kernel for a free one.
 -- a: 1 file (M net/dial_test.go); diff …/out/a/diff.patch --
 …
 ```
 
-Each agent works on a private copy of your project. `join` prints what each
-one said and changed, as a patch. Your files do not change until you apply a
-patch. Ctrl-C stops every job.
-
-Each agent or tool runs in a fresh container in a Linux VM that Docker
-Sandboxes (`sbx`) manages, with your project at the same path as on the Mac.
-marsh runs on Apple Silicon Macs.
+Each agent worked on a private copy of the project. `join` printed what each
+one said and changed, as a patch. Your files change only when you apply one.
 
 Start with the [Quickstart](quickstart.md).
 
@@ -35,15 +31,17 @@ Start with the [Quickstart](quickstart.md).
 
 ## Guides
 
-Walkthroughs for doing a job, in the order to read them
+Each guide does one job, with real output, costs, and failure modes
 ([all guides](guides/README.md)):
 
-- [Race two agents on one bug](guides/race-two-agents.md): parallel attempts,
-  each proved by your tests, and one patch you choose
+- [Race two agents on one bug](guides/race-two-agents.md): two attempts, each
+  gated on your tests, and the patch you choose
 - [Let a judge pick the winner](guides/add-a-judge.md): a third agent reads
-  both results
+  both results and names one
 - [Review a change with a panel](guides/review-with-a-panel.md): one reviewer
   per concern, plus your checks, at once
+- [Let an agent farm out work](guides/farm-out-work.md): an agent starts other
+  agents from its shell, with an AGENTS.md snippet
 
 ## Using marsh
 
