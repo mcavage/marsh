@@ -1,13 +1,13 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 78 patches in
+`vendor/brush/UPSTREAM_REVISION`) plus the 79 patches in
 [`docs/upstream/brush/`](../upstream/brush/README.md). 63 fix Bash
 compatibility: redirection expansion order, job control, job lines and `disown`, function substitutions, NUL bytes in input, byte strings that are not UTF-8, pattern substitution, interactive shells without a terminal, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
 formats, startup files, option order, field splitting, `read`, `[[ ]]`
-patterns, prompts, and input typed ahead at the prompt. The other 15 add marsh's registered
-commands, `split`/`join`, and `fanout`/`collect`.
+patterns, prompts, and input typed ahead at the prompt. The other 16 add marsh's registered
+commands, `split`/`join`, `fanout`/`collect`, and a test hook.
 
 Bash is the test oracle. It is never a fallback and never the implementation.
 The goal is ordinary Bash behavior, not complete GNU Bash conformance.

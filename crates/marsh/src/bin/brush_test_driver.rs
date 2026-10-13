@@ -51,6 +51,9 @@ fn main() {
         )
         .expect("install placement probe");
     }
+    if std::env::var_os("MARSH_TEST_CURRENT_THREAD_RUNTIME").is_some() {
+        brush_shell::entry::use_current_thread_runtime();
+    }
     if std::env::var_os("MARSH_TEST_EXTENSIONS").is_some() {
         brush_shell::entry::enable_marsh_extensions();
     }
