@@ -1,0 +1,464 @@
+diff --git a/brush-core/src/extendedtests.rs b/brush-core/src/extendedtests.rs
+index 874af0f..457f25f 100644
+--- a/brush-core/src/extendedtests.rs
++++ b/brush-core/src/extendedtests.rs
+@@ -11,33 +11,43 @@ use crate::{
+     variables::{self, ArrayLiteral},
+ };
+ 
++/// Evaluates `[[ ... ]]` to its status: 0 or 1, or 2 for an invalid regular
++/// expression, which `&&` and `||` pass on as Bash's `execute_cond_node` does.
+ #[async_recursion::async_recursion]
+ pub(crate) async fn eval_extended_test_expr(
+     expr: &ast::ExtendedTestExpr,
+     shell: &mut Shell<impl extensions::ShellExtensions>,
+     params: &ExecutionParameters,
+-) -> Result<bool, error::Error> {
++) -> Result<u8, error::Error> {
++    let status = |result: bool| if result { 0 } else { 1 };
+     match expr {
+-        ast::ExtendedTestExpr::UnaryTest(op, operand) => {
+-            apply_unary_predicate(op, operand, shell, params).await
+-        }
+-        ast::ExtendedTestExpr::BinaryTest(op, left, right) => {
+-            apply_binary_predicate(op, left, right, shell, params).await
+-        }
++        ast::ExtendedTestExpr::UnaryTest(op, operand) => Ok(status(
++            apply_unary_predicate(op, operand, shell, params).await?,
++        )),
++        ast::ExtendedTestExpr::BinaryTest(
++            ast::BinaryPredicate::StringMatchesRegex
++            | ast::BinaryPredicate::StringContainsSubstring,
++            left,
++            right,
++        ) => match_regex(left, right, shell, params).await,
++        ast::ExtendedTestExpr::BinaryTest(op, left, right) => Ok(status(
++            apply_binary_predicate(op, left, right, shell, params).await?,
++        )),
+         ast::ExtendedTestExpr::And(left, right) => {
+-            let result = eval_extended_test_expr(left, shell, params).await?
+-                && eval_extended_test_expr(right, shell, params).await?;
+-            Ok(result)
++            match eval_extended_test_expr(left, shell, params).await? {
++                0 => eval_extended_test_expr(right, shell, params).await,
++                failed => Ok(failed),
++            }
+         }
+         ast::ExtendedTestExpr::Or(left, right) => {
+-            let result = eval_extended_test_expr(left, shell, params).await?
+-                || eval_extended_test_expr(right, shell, params).await?;
+-            Ok(result)
+-        }
+-        ast::ExtendedTestExpr::Not(expr) => {
+-            let result = !eval_extended_test_expr(expr, shell, params).await?;
+-            Ok(result)
++            match eval_extended_test_expr(left, shell, params).await? {
++                0 => Ok(0),
++                _ => eval_extended_test_expr(right, shell, params).await,
++            }
+         }
++        ast::ExtendedTestExpr::Not(expr) => Ok(status(
++            eval_extended_test_expr(expr, shell, params).await? != 0,
++        )),
+         ast::ExtendedTestExpr::Parenthesized(expr) => {
+             eval_extended_test_expr(expr, shell, params).await
+         }
+@@ -192,6 +202,75 @@ pub(crate) fn apply_unary_predicate_to_str(
+     }
+ }
+ 
++/// `[[ left =~ right ]]`: 0 for a match, 1 for none, 2 for an invalid regular
++/// expression. (The parser gives a pattern that starts with a quote its own
++/// predicate, but it is a regex whose quoted parts match literally.) A match
++/// sets `BASH_REMATCH`, no match empties it, and an invalid one leaves it.
++async fn match_regex(
++    left: &ast::Word,
++    right: &ast::Word,
++    shell: &mut Shell<impl extensions::ShellExtensions>,
++    params: &ExecutionParameters,
++) -> Result<u8, error::Error> {
++    let s = expansion::basic_expand_word(shell, params, left).await?;
++    let regex = expansion::basic_expand_regex(shell, params, right)
++        .await?
++        .set_multiline(true)
++        .set_case_insensitive(shell.options().case_insensitive_conditionals);
++    let pattern = regex.bash_pattern();
++
++    if shell.options().print_commands_and_arguments {
++        shell
++            .trace_command(params, std::format!("[[ {s} =~ {pattern} ]]"))
++            .await;
++    }
++
++    #[cfg(unix)]
++    let captures = match regex.posix_matches(
++        &s,
++        &shell.locale_category("LC_CTYPE"),
++        &shell.locale_category("LC_COLLATE"),
++    ) {
++        crate::regex::PosixMatch::Matched(captures) => captures,
++        crate::regex::PosixMatch::NoMatch => vec![],
++        crate::regex::PosixMatch::Invalid(reason) => {
++            let message = std::format!(
++                "{}[[: invalid regular expression `{pattern}': {reason}\n",
++                shell.diagnostic_prefix()
++            );
++            let _ = std::io::Write::write_all(
++                &mut params.stderr(shell),
++                &crate::bytes::encode(&message),
++            );
++            return Ok(2);
++        }
++    };
++    #[cfg(not(unix))]
++    let captures = match regex.matches(s.as_str()) {
++        Ok(captures) => captures.unwrap_or_default(),
++        Err(e) => {
++            tracing::warn!("error using regex: {}", e);
++            return Ok(2);
++        }
++    };
++
++    let matched = !captures.is_empty();
++    let captures_value = variables::ShellValueLiteral::Array(ArrayLiteral(
++        captures
++            .into_iter()
++            .map(|c| (None, c.unwrap_or_default()))
++            .collect(),
++    ));
++    shell.env_mut().update_or_add(
++        "BASH_REMATCH",
++        captures_value,
++        |_| Ok(()),
++        env::EnvironmentLookup::Anywhere,
++        env::EnvironmentScope::Global,
++    )?;
++    Ok(if matched { 0 } else { 1 })
++}
++
+ #[expect(clippy::too_many_lines)]
+ async fn apply_binary_predicate(
+     op: &ast::BinaryPredicate,
+@@ -201,50 +280,9 @@ async fn apply_binary_predicate(
+     params: &ExecutionParameters,
+ ) -> Result<bool, error::Error> {
+     match op {
+-        // The parser gives a pattern that starts with a quote its own predicate,
+-        // but it is a regex whose quoted parts match literally, and a match sets
+-        // `BASH_REMATCH` like any other.
+         ast::BinaryPredicate::StringMatchesRegex
+         | ast::BinaryPredicate::StringContainsSubstring => {
+-            let s = expansion::basic_expand_word(shell, params, left).await?;
+-            let regex = expansion::basic_expand_regex(shell, params, right)
+-                .await?
+-                .set_multiline(true);
+-
+-            if shell.options().print_commands_and_arguments {
+-                shell
+-                    .trace_command(params, std::format!("[[ {s} {op} {right} ]]"))
+-                    .await;
+-            }
+-
+-            let (matches, captures) = match regex.matches(s.as_str()) {
+-                Ok(Some(captures)) => (true, captures),
+-                Ok(None) => (false, vec![]),
+-                // If we can't compile the regex, don't abort the whole operation but make sure to
+-                // report it.
+-                // TODO(test): Docs indicate we should yield 2 on an invalid regex (not 1).
+-                Err(e) => {
+-                    tracing::warn!("error using regex: {}", e);
+-                    (false, vec![])
+-                }
+-            };
+-
+-            let captures_value = variables::ShellValueLiteral::Array(ArrayLiteral(
+-                captures
+-                    .into_iter()
+-                    .map(|c| (None, c.unwrap_or_default()))
+-                    .collect(),
+-            ));
+-
+-            shell.env_mut().update_or_add(
+-                "BASH_REMATCH",
+-                captures_value,
+-                |_| Ok(()),
+-                env::EnvironmentLookup::Anywhere,
+-                env::EnvironmentScope::Global,
+-            )?;
+-
+-            Ok(matches)
++            Ok(match_regex(left, right, shell, params).await? == 0)
+         }
+         ast::BinaryPredicate::StringExactlyMatchesString => {
+             let left = expansion::basic_expand_word(shell, params, left).await?;
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 7d62d8e..5275ebf 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -1953,15 +1953,9 @@ impl Execute for ast::CompoundCommand {
+             Self::Arithmetic(a) => a.execute(shell, params).await,
+             Self::ArithmeticForClause(a) => a.execute(shell, params).await,
+             Self::Coprocess(c) => c.execute(shell, params).await,
+-            Self::ExtendedTest(e) => {
+-                let result =
+-                    if extendedtests::eval_extended_test_expr(&e.expr, shell, params).await? {
+-                        0
+-                    } else {
+-                        1
+-                    };
+-                Ok(ExecutionResult::new(result))
+-            }
++            Self::ExtendedTest(e) => Ok(ExecutionResult::new(
++                extendedtests::eval_extended_test_expr(&e.expr, shell, params).await?,
++            )),
+         }
+     }
+ }
+diff --git a/brush-core/src/regex.rs b/brush-core/src/regex.rs
+index d19685b..01e607e 100644
+--- a/brush-core/src/regex.rs
++++ b/brush-core/src/regex.rs
+@@ -26,6 +26,7 @@ pub(crate) enum RegexPiece {
+     Literal(String),
+ }
+ 
++#[cfg(not(unix))]
+ impl RegexPiece {
+     fn to_regex_str(&self) -> Cow<'_, str> {
+         match self {
+@@ -83,6 +84,7 @@ impl Regex {
+     /// # Arguments
+     ///
+     /// * `value` - The string to check for a match.
++    #[cfg(not(unix))]
+     pub fn matches(&self, value: &str) -> Result<Option<Vec<Option<String>>>, error::Error> {
+         let regex_pattern: String = self
+             .pieces
+@@ -101,6 +103,199 @@ impl Regex {
+     }
+ }
+ 
++/// The outcome of matching with the C library's regular expressions.
++#[cfg(unix)]
++pub(crate) enum PosixMatch {
++    /// The match and each group (`None` for a group that took no part).
++    Matched(Vec<Option<String>>),
++    NoMatch,
++    /// `regcomp` refused the pattern; the C library's reason.
++    Invalid(String),
++}
++
++impl Regex {
++    /// The pattern as Bash hands it to `regcomp`: quoted parts keep only their
++    /// ERE special characters backslash-escaped (Bash's `ere_char`). Traces of
++    /// `[[ =~ ]]` show it.
++    pub(crate) fn bash_pattern(&self) -> String {
++        let mut pattern = String::new();
++        for piece in &self.pieces {
++            match piece {
++                RegexPiece::Pattern(s) => pattern.push_str(s),
++                RegexPiece::Literal(s) => {
++                    for c in s.chars() {
++                        if matches!(
++                            c,
++                            '.' | '[' | '\\' | '(' | ')' | '*' | '+' | '?' | '{' | '|' | '^' | '$'
++                        ) {
++                            pattern.push('\\');
++                        }
++                        pattern.push(c);
++                    }
++                }
++            }
++        }
++        pattern
++    }
++
++    /// Matches `value` with the C library's POSIX extended regular expressions,
++    /// as Bash's `[[ =~ ]]` does (leftmost-longest, the libc's classes and
++    /// messages), with the character type and collation of the named locales.
++    #[cfg(unix)]
++    pub(crate) fn posix_matches(&self, value: &str, ctype: &str, collate: &str) -> PosixMatch {
++        let pattern = self.bash_pattern();
++        let (Ok(c_pattern), Ok(c_value)) = (
++            std::ffi::CString::new(crate::bytes::encode(&pattern).into_owned()),
++            std::ffi::CString::new(crate::bytes::encode(value).into_owned()),
++        ) else {
++            return PosixMatch::NoMatch;
++        };
++        let _locale = posix::ThreadLocale::new(ctype, collate);
++        let mut flags = libc::REG_EXTENDED;
++        if self.case_insensitive {
++            flags |= libc::REG_ICASE;
++        }
++        // SAFETY: `regex` is initialized by a successful `regcomp`, used, and
++        // freed once; the strings are NUL-terminated and outlive the calls.
++        unsafe {
++            let mut regex: libc::regex_t = std::mem::zeroed();
++            let error = libc::regcomp(&raw mut regex, c_pattern.as_ptr(), flags);
++            if error != 0 {
++                let mut reason = [0u8; 256];
++                libc::regerror(
++                    error,
++                    &raw const regex,
++                    reason.as_mut_ptr().cast(),
++                    reason.len(),
++                );
++                let reason = std::ffi::CStr::from_bytes_until_nul(&reason)
++                    .map(|reason| reason.to_string_lossy().into_owned())
++                    .unwrap_or_default();
++                return PosixMatch::Invalid(reason);
++            }
++            let mut groups = vec![
++                libc::regmatch_t {
++                    rm_so: -1,
++                    rm_eo: -1
++                };
++                posix::group_count(&pattern) + 1
++            ];
++            let found = libc::regexec(
++                &raw const regex,
++                c_value.as_ptr(),
++                groups.len(),
++                groups.as_mut_ptr(),
++                0,
++            ) == 0;
++            libc::regfree(&raw mut regex);
++            if !found {
++                return PosixMatch::NoMatch;
++            }
++            let bytes = c_value.as_bytes();
++            PosixMatch::Matched(
++                groups
++                    .iter()
++                    .map(|group| {
++                        let start = usize::try_from(group.rm_so).ok()?;
++                        let end = usize::try_from(group.rm_eo).ok()?;
++                        Some(crate::bytes::decode(bytes.get(start..end)?).into_owned())
++                    })
++                    .collect(),
++            )
++        }
++    }
++}
++
++#[cfg(unix)]
++mod posix {
++    /// A locale in effect on this thread while it lives (`uselocale`).
++    pub(super) struct ThreadLocale {
++        locale: libc::locale_t,
++        previous: libc::locale_t,
++    }
++
++    impl ThreadLocale {
++        /// The named character type and collation (each falling back to `C`
++        /// where the system has no such locale, as `setlocale` leaves Bash).
++        pub(super) fn new(ctype: &str, collate: &str) -> Option<Self> {
++            let named = |name: &str| std::ffi::CString::new(name).ok();
++            // SAFETY: `newlocale` takes NUL-terminated names and a base it
++            // consumes on success; `uselocale` installs a valid locale.
++            unsafe {
++                let mut locale = std::ptr::null_mut();
++                for (mask, name) in [
++                    (libc::LC_CTYPE_MASK, ctype),
++                    (libc::LC_COLLATE_MASK, collate),
++                ] {
++                    let name = named(name)?;
++                    let updated = libc::newlocale(mask, name.as_ptr(), locale);
++                    let updated = if updated.is_null() {
++                        libc::newlocale(mask, c"C".as_ptr(), locale)
++                    } else {
++                        updated
++                    };
++                    if updated.is_null() {
++                        if !locale.is_null() {
++                            libc::freelocale(locale);
++                        }
++                        return None;
++                    }
++                    locale = updated;
++                }
++                let previous = libc::uselocale(locale);
++                Some(Self { locale, previous })
++            }
++        }
++    }
++
++    impl Drop for ThreadLocale {
++        fn drop(&mut self) {
++            // SAFETY: restores the thread's previous locale, then frees ours.
++            unsafe {
++                libc::uselocale(self.previous);
++                libc::freelocale(self.locale);
++            }
++        }
++    }
++
++    /// How many groups (`(`) an extended regular expression has, as
++    /// `regcomp`'s `re_nsub` counts them (outside bracket expressions).
++    pub(super) fn group_count(pattern: &str) -> usize {
++        let mut count = 0;
++        let mut chars = pattern.chars().peekable();
++        while let Some(c) = chars.next() {
++            match c {
++                '\\' => {
++                    chars.next();
++                }
++                '(' => count += 1,
++                '[' => {
++                    let _ = chars.next_if_eq(&'^');
++                    let _ = chars.next_if_eq(&']');
++                    while let Some(c) = chars.next() {
++                        match c {
++                            ']' => break,
++                            '[' if chars.peek().is_some_and(|c| matches!(c, ':' | '.' | '=')) => {
++                                let close = chars.next().unwrap_or_default();
++                                let mut previous = '\0';
++                                for c in chars.by_ref() {
++                                    if c == ']' && previous == close {
++                                        break;
++                                    }
++                                    previous = c;
++                                }
++                            }
++                            _ => (),
++                        }
++                    }
++                }
++                _ => (),
++            }
++        }
++        count
++    }
++}
++
+ pub(crate) fn compile_regex(
+     regex_str: String,
+     case_insensitive: bool,
+@@ -209,6 +404,7 @@ fn add_missing_escape_chars_to_regex(s: &str) -> Cow<'_, str> {
+     updated.into()
+ }
+ 
++#[cfg(not(unix))]
+ fn escape_literal_regex_piece(s: &str) -> Cow<'_, str> {
+     let mut result = String::new();
+ 
+diff --git a/brush-core/src/shell.rs b/brush-core/src/shell.rs
+index b1cdf7b..2feeb11 100644
+--- a/brush-core/src/shell.rs
++++ b/brush-core/src/shell.rs
+@@ -459,6 +459,15 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
+         std::format!("{name}: line {line}: ")
+     }
+ 
++    /// The locale for `category` (`LC_CTYPE`, `LC_COLLATE`, ...): `LC_ALL`, else
++    /// the category's variable, else `LANG`, else `C`.
++    pub(crate) fn locale_category(&self, category: &str) -> String {
++        ["LC_ALL", category, "LANG"]
++            .iter()
++            .find_map(|name| self.env_str(name).filter(|value| !value.is_empty()))
++            .map_or_else(|| String::from("C"), |value| value.into_owned())
++    }
++
+     /// Whether the shell's character locale (`LC_ALL`, else `LC_CTYPE`, else
+     /// `LANG`) is a UTF-8 one.
+     pub fn is_utf8_locale(&self) -> bool {

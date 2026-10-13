@@ -11,33 +11,43 @@ use crate::{
     variables::{self, ArrayLiteral},
 };
 
+/// Evaluates `[[ ... ]]` to its status: 0 or 1, or 2 for an invalid regular
+/// expression, which `&&` and `||` pass on as Bash's `execute_cond_node` does.
 #[async_recursion::async_recursion]
 pub(crate) async fn eval_extended_test_expr(
     expr: &ast::ExtendedTestExpr,
     shell: &mut Shell<impl extensions::ShellExtensions>,
     params: &ExecutionParameters,
-) -> Result<bool, error::Error> {
+) -> Result<u8, error::Error> {
+    let status = |result: bool| if result { 0 } else { 1 };
     match expr {
-        ast::ExtendedTestExpr::UnaryTest(op, operand) => {
-            apply_unary_predicate(op, operand, shell, params).await
-        }
-        ast::ExtendedTestExpr::BinaryTest(op, left, right) => {
-            apply_binary_predicate(op, left, right, shell, params).await
-        }
+        ast::ExtendedTestExpr::UnaryTest(op, operand) => Ok(status(
+            apply_unary_predicate(op, operand, shell, params).await?,
+        )),
+        ast::ExtendedTestExpr::BinaryTest(
+            ast::BinaryPredicate::StringMatchesRegex
+            | ast::BinaryPredicate::StringContainsSubstring,
+            left,
+            right,
+        ) => match_regex(left, right, shell, params).await,
+        ast::ExtendedTestExpr::BinaryTest(op, left, right) => Ok(status(
+            apply_binary_predicate(op, left, right, shell, params).await?,
+        )),
         ast::ExtendedTestExpr::And(left, right) => {
-            let result = eval_extended_test_expr(left, shell, params).await?
-                && eval_extended_test_expr(right, shell, params).await?;
-            Ok(result)
+            match eval_extended_test_expr(left, shell, params).await? {
+                0 => eval_extended_test_expr(right, shell, params).await,
+                failed => Ok(failed),
+            }
         }
         ast::ExtendedTestExpr::Or(left, right) => {
-            let result = eval_extended_test_expr(left, shell, params).await?
-                || eval_extended_test_expr(right, shell, params).await?;
-            Ok(result)
+            match eval_extended_test_expr(left, shell, params).await? {
+                0 => Ok(0),
+                _ => eval_extended_test_expr(right, shell, params).await,
+            }
         }
-        ast::ExtendedTestExpr::Not(expr) => {
-            let result = !eval_extended_test_expr(expr, shell, params).await?;
-            Ok(result)
-        }
+        ast::ExtendedTestExpr::Not(expr) => Ok(status(
+            eval_extended_test_expr(expr, shell, params).await? != 0,
+        )),
         ast::ExtendedTestExpr::Parenthesized(expr) => {
             eval_extended_test_expr(expr, shell, params).await
         }
@@ -192,6 +202,75 @@ pub(crate) fn apply_unary_predicate_to_str(
     }
 }
 
+/// `[[ left =~ right ]]`: 0 for a match, 1 for none, 2 for an invalid regular
+/// expression. (The parser gives a pattern that starts with a quote its own
+/// predicate, but it is a regex whose quoted parts match literally.) A match
+/// sets `BASH_REMATCH`, no match empties it, and an invalid one leaves it.
+async fn match_regex(
+    left: &ast::Word,
+    right: &ast::Word,
+    shell: &mut Shell<impl extensions::ShellExtensions>,
+    params: &ExecutionParameters,
+) -> Result<u8, error::Error> {
+    let s = expansion::basic_expand_word(shell, params, left).await?;
+    let regex = expansion::basic_expand_regex(shell, params, right)
+        .await?
+        .set_multiline(true)
+        .set_case_insensitive(shell.options().case_insensitive_conditionals);
+    let pattern = regex.bash_pattern();
+
+    if shell.options().print_commands_and_arguments {
+        shell
+            .trace_command(params, std::format!("[[ {s} =~ {pattern} ]]"))
+            .await;
+    }
+
+    #[cfg(unix)]
+    let captures = match regex.posix_matches(
+        &s,
+        &shell.locale_category("LC_CTYPE"),
+        &shell.locale_category("LC_COLLATE"),
+    ) {
+        crate::regex::PosixMatch::Matched(captures) => captures,
+        crate::regex::PosixMatch::NoMatch => vec![],
+        crate::regex::PosixMatch::Invalid(reason) => {
+            let message = std::format!(
+                "{}[[: invalid regular expression `{pattern}': {reason}\n",
+                shell.diagnostic_prefix()
+            );
+            let _ = std::io::Write::write_all(
+                &mut params.stderr(shell),
+                &crate::bytes::encode(&message),
+            );
+            return Ok(2);
+        }
+    };
+    #[cfg(not(unix))]
+    let captures = match regex.matches(s.as_str()) {
+        Ok(captures) => captures.unwrap_or_default(),
+        Err(e) => {
+            tracing::warn!("error using regex: {}", e);
+            return Ok(2);
+        }
+    };
+
+    let matched = !captures.is_empty();
+    let captures_value = variables::ShellValueLiteral::Array(ArrayLiteral(
+        captures
+            .into_iter()
+            .map(|c| (None, c.unwrap_or_default()))
+            .collect(),
+    ));
+    shell.env_mut().update_or_add(
+        "BASH_REMATCH",
+        captures_value,
+        |_| Ok(()),
+        env::EnvironmentLookup::Anywhere,
+        env::EnvironmentScope::Global,
+    )?;
+    Ok(if matched { 0 } else { 1 })
+}
+
 #[expect(clippy::too_many_lines)]
 async fn apply_binary_predicate(
     op: &ast::BinaryPredicate,
@@ -201,50 +280,9 @@ async fn apply_binary_predicate(
     params: &ExecutionParameters,
 ) -> Result<bool, error::Error> {
     match op {
-        // The parser gives a pattern that starts with a quote its own predicate,
-        // but it is a regex whose quoted parts match literally, and a match sets
-        // `BASH_REMATCH` like any other.
         ast::BinaryPredicate::StringMatchesRegex
         | ast::BinaryPredicate::StringContainsSubstring => {
-            let s = expansion::basic_expand_word(shell, params, left).await?;
-            let regex = expansion::basic_expand_regex(shell, params, right)
-                .await?
-                .set_multiline(true);
-
-            if shell.options().print_commands_and_arguments {
-                shell
-                    .trace_command(params, std::format!("[[ {s} {op} {right} ]]"))
-                    .await;
-            }
-
-            let (matches, captures) = match regex.matches(s.as_str()) {
-                Ok(Some(captures)) => (true, captures),
-                Ok(None) => (false, vec![]),
-                // If we can't compile the regex, don't abort the whole operation but make sure to
-                // report it.
-                // TODO(test): Docs indicate we should yield 2 on an invalid regex (not 1).
-                Err(e) => {
-                    tracing::warn!("error using regex: {}", e);
-                    (false, vec![])
-                }
-            };
-
-            let captures_value = variables::ShellValueLiteral::Array(ArrayLiteral(
-                captures
-                    .into_iter()
-                    .map(|c| (None, c.unwrap_or_default()))
-                    .collect(),
-            ));
-
-            shell.env_mut().update_or_add(
-                "BASH_REMATCH",
-                captures_value,
-                |_| Ok(()),
-                env::EnvironmentLookup::Anywhere,
-                env::EnvironmentScope::Global,
-            )?;
-
-            Ok(matches)
+            Ok(match_regex(left, right, shell, params).await? == 0)
         }
         ast::BinaryPredicate::StringExactlyMatchesString => {
             let left = expansion::basic_expand_word(shell, params, left).await?;

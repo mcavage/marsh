@@ -2187,3 +2187,20 @@ history -c; history -r hist; history -s "$(printf 'b\377')"; history; history -w
     assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
     assert_eq!(brush.status.code(), bash.status.code());
 }
+
+/// `[[ =~ ]]` is the C library's POSIX ERE, as in Bash: leftmost-longest
+/// alternation, every group in `BASH_REMATCH`, `nocasematch`; xtrace shows the
+/// quoted parts as Bash escapes them; an invalid regex is status 2 (passed on
+/// by `&&`) and leaves `BASH_REMATCH`.
+#[test]
+fn regex_matching_is_posix_extended() {
+    differential(
+        r#"[[ ab =~ (a|ab) ]]; printf '%s|' "$?" "${BASH_REMATCH[@]}"
+[[ xyz =~ (x)(q)?(y) ]]; printf '%s|' "$?" "${#BASH_REMATCH[@]}" "${BASH_REMATCH[@]}"
+shopt -s nocasematch; [[ ABC =~ b ]]; printf '%s|' "$?" "${BASH_REMATCH[0]}"; shopt -u nocasematch
+r='('; [[ ab =~ $r ]] 2>/dev/null; printf '%s|' "$?" "${BASH_REMATCH[0]}"; [[ a =~ $r && b == b ]] 2>/dev/null; echo "and=$?"
+set -x; [[ 'x[.]y' =~ x"[.]"y ]] 2>&1; set +x"#,
+        0,
+        b"0|ab|ab|0|4|xy|x||y|0|B|2|B|and=2\n+ [[ x[.]y =~ x\\[\\.]y ]]\n",
+    );
+}

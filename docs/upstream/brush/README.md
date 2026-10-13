@@ -652,6 +652,19 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   (readline's rules: `#`-digit lines are timestamps only in an interactive
   shell or a file that starts with one) and `-w` keeping every byte. Covered by
   `subscripts_named_descriptors_special_assignments_and_history_match_bash`.
+- `0084` matches `[[ =~ ]]` with the C library's `regcomp`/`regexec`
+  (`REG_EXTENDED`, `REG_ICASE` under `nocasematch`), as Bash's `sh_regmatch`
+  does, instead of fancy-regex: alternation is leftmost-longest, classes and
+  error messages are the libc's, and the match runs in the locale the shell's
+  `LC_ALL`/`LC_CTYPE`/`LC_COLLATE`/`LANG` name (`newlocale` + `uselocale`
+  on the matching thread; `C` where the system lacks it). The pattern is the
+  one Bash builds: quoted parts with only ERE special characters escaped
+  (`ere_char`), which xtrace now prints. `BASH_REMATCH` gets every group
+  (counted as `re_nsub` does). An invalid regex is status 2 with
+  `[[: invalid regular expression \`P': REASON`, leaving `BASH_REMATCH`;
+  `[[ ]]` now evaluates to a status so `&&` and `||` pass the 2 on, as
+  `execute_cond_node` does. Other platforms keep fancy-regex. Covered by
+  `regex_matching_is_posix_extended`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
