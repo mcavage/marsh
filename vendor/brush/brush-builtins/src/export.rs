@@ -69,6 +69,24 @@ impl ExportCommand {
         decl: &brush_core::CommandArg,
     ) -> Result<ExecutionResult, brush_core::Error> {
         match decl {
+            // A word that only became `name=value` when expanded (`export "$1"`)
+            // is still an assignment, as in Bash.
+            brush_core::CommandArg::String(s) if !self.names_are_functions && s.contains('=') => {
+                let (name, value) = s.split_once('=').unwrap_or_default();
+                let (name, append) = match name.strip_suffix('+') {
+                    Some(name) => (name, true),
+                    None => (name, false),
+                };
+                if !brush_core::env::valid_variable_name(name) {
+                    return self.invalid_identifier(context, s);
+                }
+                self.assign(
+                    context,
+                    name,
+                    variables::ShellValueLiteral::Scalar(value.to_owned()),
+                    append,
+                )
+            }
             brush_core::CommandArg::String(s) => {
                 // See if this is supposed to be a function name.
                 if self.names_are_functions {
@@ -84,6 +102,8 @@ impl ExportCommand {
                         writeln!(context.stderr(), "{s}: not a function")?;
                         return Ok(ExecutionExitCode::InvalidUsage.into());
                     }
+                } else if !brush_core::env::valid_variable_name(s) {
+                    return self.invalid_identifier(context, s);
                 }
                 // Try to find the variable already present; if we find it, then mark it
                 // exported.
@@ -94,13 +114,13 @@ impl ExportCommand {
                         variable.export();
                     }
                 }
+                Ok(ExecutionResult::success())
             }
             brush_core::CommandArg::Assignment(assignment) => {
                 let name = match &assignment.name {
                     ast::AssignmentName::VariableName(name) => name,
-                    ast::AssignmentName::ArrayElementName(_, _) => {
-                        writeln!(context.stderr(), "not a valid variable name")?;
-                        return Ok(ExecutionExitCode::InvalidUsage.into());
+                    ast::AssignmentName::ArrayElementName(name, index) => {
+                        return self.invalid_identifier(context, &std::format!("{name}[{index}]"));
                     }
                 };
 
@@ -116,41 +136,76 @@ impl ExportCommand {
                         ))
                     }
                 };
-
-                // `export name+=value` appends to the existing value, exactly like a
-                // bare `name+=value`. update_or_add always replaces, so when the
-                // variable already exists honor the append here. A missing variable
-                // falls through: appending to nothing is a plain assignment.
-                if assignment.append
-                    && let Some((_, variable)) = context.shell.env_mut().get_mut(name)
-                {
-                    variable.assign(value, true)?;
-                    if self.unexport {
-                        variable.unexport();
-                    } else {
-                        variable.export();
-                    }
-                    return Ok(ExecutionResult::success());
-                }
-
-                // Update the variable with the provided value and then mark it exported.
-                context.shell.env_mut().update_or_add(
-                    name,
-                    value,
-                    |var| {
-                        if self.unexport {
-                            var.unexport();
-                        } else {
-                            var.export();
-                        }
-                        Ok(())
-                    },
-                    EnvironmentLookup::Anywhere,
-                    EnvironmentScope::Global,
-                )?;
+                self.assign(context, name, value, assignment.append)
             }
         }
+    }
 
+    /// Bash's message for a word that names no variable; `export` goes on.
+    fn invalid_identifier(
+        &self,
+        context: &brush_core::ExecutionContext<'_, impl brush_core::ShellExtensions>,
+        word: &str,
+    ) -> Result<ExecutionResult, brush_core::Error> {
+        writeln!(
+            context.stderr(),
+            "{}{}: `{word}': not a valid identifier",
+            context.shell.diagnostic_prefix(),
+            context.command_name
+        )?;
+        Ok(ExecutionResult::general_error())
+    }
+
+    fn assign(
+        &self,
+        context: &mut brush_core::ExecutionContext<'_, impl brush_core::ShellExtensions>,
+        name: &str,
+        value: variables::ShellValueLiteral,
+        append: bool,
+    ) -> Result<ExecutionResult, brush_core::Error> {
+        if context
+            .shell
+            .env()
+            .get(name)
+            .is_some_and(|(_, variable)| variable.is_readonly())
+        {
+            writeln!(
+                context.stderr(),
+                "{}{name}: readonly variable",
+                context.shell.diagnostic_prefix()
+            )?;
+            return Ok(ExecutionResult::general_error());
+        }
+
+        // `export name+=value` appends to the existing value, exactly like a
+        // bare `name+=value`. update_or_add always replaces, so when the
+        // variable already exists honor the append here. A missing variable
+        // falls through: appending to nothing is a plain assignment.
+        if append && let Some((_, variable)) = context.shell.env_mut().get_mut(name) {
+            variable.assign(value, true)?;
+            if self.unexport {
+                variable.unexport();
+            } else {
+                variable.export();
+            }
+            return Ok(ExecutionResult::success());
+        }
+
+        // Update the variable with the provided value and then mark it exported.
+        context.shell.env_mut().update_or_add(
+            name,
+            value,
+            |var| {
+                if self.unexport {
+                    var.unexport();
+                } else {
+                    var.export();
+                }
+                Ok(())
+            },
+            EnvironmentLookup::Anywhere,
+            EnvironmentScope::Global,
+        )?;
         Ok(ExecutionResult::success())
     }
 }

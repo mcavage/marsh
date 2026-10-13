@@ -89,9 +89,11 @@ fn format_prompt_piece(
     let formatted = match piece {
         brush_parser::prompt::PromptPiece::EscapedSequence(s) => s,
         brush_parser::prompt::PromptPiece::Literal(l) => l,
-        brush_parser::prompt::PromptPiece::AsciiCharacter(c) => {
-            char::from_u32(c).map_or_else(String::new, |c| c.to_string())
-        }
+        // `\NNN` is a byte.
+        brush_parser::prompt::PromptPiece::AsciiCharacter(c) => match u8::try_from(c) {
+            Ok(byte) if byte >= 0x80 => crate::bytes::raw_char(byte).to_string(),
+            _ => char::from_u32(c).map_or_else(String::new, |c| c.to_string()),
+        },
         brush_parser::prompt::PromptPiece::Backslash => "\\".to_owned(),
         brush_parser::prompt::PromptPiece::BellCharacter => "\x07".to_owned(),
         brush_parser::prompt::PromptPiece::CarriageReturn => "\r".to_owned(),
@@ -193,15 +195,41 @@ fn format_current_working_directory(
         working_dir_str = shell.tilde_shorten(working_dir_str);
     }
 
-    if basename && let Some(filename) = Path::new(&working_dir_str).file_name() {
-        working_dir_str = filename.to_shell_text().to_string();
+    if basename
+        && working_dir_str != "/"
+        && let Some(filename) = working_dir_str.trim_end_matches('/').rsplit('/').next()
+    {
+        working_dir_str = filename.to_owned();
     }
 
     if cfg!(windows) {
         working_dir_str = working_dir_str.replace('\\', "/");
     }
 
-    working_dir_str
+    visible(&working_dir_str, shell.is_utf8_locale())
+}
+
+/// Bash's `sh_strvis` for `\w` and `\W`: a control character is `^X` (`^?`
+/// for DEL), and in a locale that is not UTF-8 a byte above 0x7f that is not
+/// part of valid UTF-8 is `M-` and the byte without its top bit; tabs and
+/// text stay as they are.
+fn visible(text: &str, utf8_locale: bool) -> String {
+    let mut shown = String::with_capacity(text.len());
+    for c in text.chars() {
+        match (c, crate::bytes::raw_byte(c)) {
+            (_, Some(byte)) if !utf8_locale => {
+                shown.push_str("M-");
+                shown.push(char::from(byte & 0x7f));
+            }
+            ('\x7f', None) => shown.push_str("^?"),
+            (c, None) if c.is_ascii_control() && c != '\t' => {
+                shown.push('^');
+                shown.push(char::from(c as u8 + 0x40));
+            }
+            (c, _) => shown.push(c),
+        }
+    }
+    shown
 }
 
 fn format_time<Tz: chrono::TimeZone>(

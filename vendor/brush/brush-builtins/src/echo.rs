@@ -27,17 +27,34 @@ pub(crate) struct EchoCommand {
 impl builtins::Command for EchoCommand {
     type Error = brush_core::Error;
 
-    /// Override the default [`builtins::Command::new`] function to handle clap's limitation related
-    /// to `--`. See [`builtins::parse_known`] for more information
-    /// TODO(echo): we can safely remove this after the issue is resolved
+    /// Parses options as Bash's `echo` does: leading words made only of
+    /// `-n`, `-e` and `-E` letters, in order (the last of `-e`/`-E` wins);
+    /// anything else, `--` included, starts the text.
     fn new<I>(args: I) -> Result<Self, clap::Error>
     where
         I: IntoIterator<Item = String>,
     {
-        let (mut this, rest_args) = brush_core::builtins::try_parse_known::<Self>(args)?;
-        if let Some(args) = rest_args {
-            this.args.extend(args);
+        let mut this = Self {
+            no_trailing_newline: false,
+            interpret_backslash_escapes: false,
+            no_interpret_backslash_escapes: false,
+            args: vec![],
+        };
+        let mut words = args.into_iter().skip(1).peekable();
+        while let Some(word) = words.next_if(|word| {
+            word.len() > 1
+                && word.starts_with('-')
+                && word[1..].chars().all(|c| matches!(c, 'n' | 'e' | 'E'))
+        }) {
+            for letter in word[1..].chars() {
+                match letter {
+                    'n' => this.no_trailing_newline = true,
+                    'e' => this.interpret_backslash_escapes = true,
+                    _ => this.interpret_backslash_escapes = false,
+                }
+            }
         }
+        this.args = words.collect();
         Ok(this)
     }
 

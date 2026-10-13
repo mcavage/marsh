@@ -1,8 +1,8 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 81 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 65 fix Bash
+`vendor/brush/UPSTREAM_REVISION`) plus the 82 patches in
+[`docs/upstream/brush/`](../upstream/brush/README.md). 66 fix Bash
 compatibility: `getopts` and `OPTIND`, redirection expansion order, job control, job lines and `disown`, function substitutions, NUL bytes in input, byte strings that are not UTF-8, pattern substitution, interactive shells without a terminal, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
 formats, startup files, option order, field splitting, `read`, `[[ ]]`
@@ -27,7 +27,7 @@ The focused executable corpus covers these regressions:
 | Redirection expansion | A command's words expand first, then its assignments (each seeing the previous one), then its redirections, which do not see the command's variables; an external command's redirections and here-documents expand as in its child (`>"$((++i))"`, `>"${v:=x}"`, `{fd}>file`, `>"${ exit 3; }"` leave the shell alone); failed redirections use Bash's message |
 | Interactive shell without a terminal | `-i` with standard error not a terminal and no controlling terminal: `NAME: cannot set terminal process group (-1): Inappropriate ioctl for device` and `NAME: no job control in this shell`, no `m` in `$-`, PS1 and PS2 on standard error for every line read (minimal, basic and Reedline backends; Reedline reads as the minimal backend without a terminal), `exit` at end of input |
 | Pattern substitution | `${v/pat/rep}`, `//`, `/#`, `/%` take Bash's leftmost, longest match (extended globs such as `!(a)` and `?(a)` included), keep one character after an empty match, try only a `*` pattern against empty text (and every pattern at the end for `/%`), change nothing for an empty pattern, and with `patsub_replacement` replace an unquoted `&` with the match (`\&` and quoted `&` are literal); `$0` in the replacement is text |
-| Bytes that are not UTF-8 | Arguments, `-c` and script text, standard input, command substitution, the environment, `$'\NNN'`, `echo -e`, `printf` (format, arguments, `-v`), external arguments and environment, `read` and `mapfile` (byte by byte, leaving the rest of the input unread), here-documents, and file names in globs, redirections, `cd` and command names keep every byte; `${#v}` counts bytes |
+| Bytes that are not UTF-8 | Arguments (and `bash -- script`), `BASH_ENV` and script paths, `-c` and script text, standard input, command substitution, the environment, `$'\NNN'`, `echo -e`, `printf` (format, arguments, `-v`), external arguments and environment, `read` and `mapfile` (byte by byte, leaving the rest of the input unread), here-documents, prompts (`\NNN`, and `\w`/`\W` showing control characters as `^X`, and in a non-UTF-8 locale other bytes as `M-X`), and file names in globs, redirections, `cd` and command names keep every byte; `${#v}` counts bytes; `printf %q` writes them as `$'\NNN'`; `echo` takes `-n`/`-e`/`-E` in order; `read -n 0` reads nothing; `export "$w"` assigns a `NAME=value` word and reports invalid names and readonly variables as Bash does |
 | NUL bytes in input | Dropped from scripts, standard input and interactive input; a script whose first line (two after `#!`) has a NUL within 80 bytes is refused (`NAME: PATH: cannot execute binary file`, 126, no `EXIT` trap), within 128 bytes for a file run as a command or by `exec` (`cannot execute binary file: Exec format error`); `.` and startup files remove NULs as Bash's `_evalfile` does (every second of consecutive NULs stays and ends the text) and `.` refuses more than 256; a syntax error in a sourced file fails only `.`; `printf -v` stops at a NUL |
 | Function substitutions | Bash 5.3 `${ cmd; }` runs in the current shell (side effects persist, `local` and `return` work, positional parameters are shared, `exit` exits) and yields its output without trailing newlines; `${\| cmd; }` yields a local `REPLY`; the closing brace counts only in command position (`${ echo x}y; }`, `${ echo hi;}x`); nested substitutions, groups, here-documents, double quotes and here-document bodies; xtrace depth |
 | Common idioms | Arrays and slices, `printf %q`, `read -r -a`, `read -d ''`, `read -t` end of file versus timeout, `printf '%(fmt)T'`, `((count[$key]++))`, `mapfile`, `getopts` (and `OPTIND=1` restarting it), `${x//a/b}`, `${x^^}`, `${x@Q}`, `${!prefix@}`, `BASH_REMATCH`, `pipefail` with `||`, here-strings, `<( )`, brace sequences, nested `( ( ) )` |
@@ -54,7 +54,7 @@ One explicit oracle-version divergence is classified: command-substitution
 marsh's exact `127`; the parent's subsequent wait must still return its child
 status. Candidate failures are not normalized away.
 
-The current corpus has 63 differential test functions (all enabled), a split
+The current corpus has 64 differential test functions (all enabled), a split
 `PIPESTATUS` check,
 and 55 smoke journeys (53 on Linux, where two macOS `script(1)` job-control
 journeys are compiled out; 54 on macOS, without one that reads `/proc`), run on macOS ARM64 with Rust
@@ -221,7 +221,8 @@ behavior that needs more than a small Brush patch.
 
 | ID | Difference from Bash | Scope | Reason |
 | --- | --- | --- | --- |
-| BYTES | Text that is not UTF-8 is held losslessly (patch `0073`), but a few paths still treat it as text: prompt and line-editor rendering and completion through Reedline, invocation options and script names parsed by clap, `printf %q` and invalid-conversion messages, and some builtins' handling of raw names and values (`export`, name references to subscripts) | `byte-builtins`, `prompt`, `readline`, `startup`, a few others | Paths outside the shell's own input and output |
+| BYTES | Text that is not UTF-8 is held losslessly (patches `0073`, `0079`), except in Reedline: keys typed as bytes that are not UTF-8, editing over them, `READLINE_POINT` and completion of such names | `readline` | Reedline (and crossterm) read and edit text as UTF-8 |
+| NAMEREF-SUBSCRIPT | A name reference to an array element (`declare -n r='a[2]'`) is an ordinary variable: `read`, `getopts`, `export` and `unset` through it change `r` | `byte-builtins` | Name references resolve only to variable names; elements need every lookup to resolve subscripts |
 | DEBUG-TRAP | In a `DEBUG` trap, `$BASH_COMMAND` is the command's expanded words rather than its source text, and `$LINENO` is one less | `nul-input` and history-input `debug-command` | Trap context |
 | LOCALE | No locale model: in the C locale `?`, `${v:i:n}`, `[[:alpha:]]` and regex `.` take a valid multibyte character as one (`${#v}` counts bytes in every locale), IFS characters are whole characters, case conversion changes non-ASCII letters, and `\u00e9` prints UTF-8; in UTF-8 Rust's full Unicode case mapping is used (`ß` upper-cases to `SS`, `ı`/`İ` differ) and `nocasematch` classes differ | Byte matcher and builtin cases with non-ASCII text | Brush text is Unicode regardless of `LC_ALL` |
 | REGEX | `[[ =~ ]]` uses fancy-regex: alternation is leftmost-first (`(a\|ab)` on `ab` captures `a`, POSIX takes `ab`); an invalid regex returns 1 with a log line instead of 2 with Bash's message, and clears `BASH_REMATCH` | `byte-matchers` `ere-*`, `regex` | A POSIX ERE engine is a large change |
@@ -238,7 +239,7 @@ behavior that needs more than a small Brush patch.
 | JOBS | Job-control builtins: `jobs -n` and `jobs SPEC` are unimplemented, `jobs -l` lists a pipeline on one line, a stopped job's status is 148 whatever the signal, finished jobs are listed `Running` until waited, signal names (`Terminated`) are not shown, `(wd: ...)` is missing, `bg` is unimplemented, `fg`/`bg` option errors | `jobs` | Brush's job table is partial |
 | TRAP-CHLD | A `CHLD` trap does not run | `regex` | Not implemented |
 | XTRACE | xtrace prints a quoted `[[ =~ ]]` operand as written (`"]"`), where Bash prints its quoted form (`\]`) | `regex` | Trace formatting |
-| PROMPT | Prompt strings get quote removal and brace expansion (`'"` and `{a,b}`), `\7`-style short octal escapes and `\001`/`\002` are treated differently, `\w` does not make control characters visible (`^A`), `strftime` conversions are chrono's (`%f`) | `prompt` | Brush's two-pass prompt expansion |
+| PROMPT | Prompt strings get quote removal and brace expansion (`'"` and `{a,b}`), `\7`-style short octal escapes and `\001`/`\002` are treated differently, `strftime` conversions are chrono's (`%f`) | `prompt` | Brush's two-pass prompt expansion |
 | READ | `read` without `-r` treats a backslash-escaped IFS character as a delimiter; `read -t 0` at end of file reports ready; `read -n 1` from a terminal returns nothing for `^D` | `byte-builtins`, `readiness` | `read` builtin details |
 | PRINTF | `%b` drops the backslash of `\"`, `\c` in `%b` does not stop all output, empty arguments to numeric conversions are not errors | `byte-builtins` | `printf` details |
 | MAPFILE-CALLBACK | `mapfile -C`/`-c` are unimplemented | `byte-builtins` | Not implemented |

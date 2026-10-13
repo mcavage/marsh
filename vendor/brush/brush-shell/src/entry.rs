@@ -134,8 +134,14 @@ impl CommandLineArgs {
         let (mut this, script_args) = brush_core::builtins::try_parse_known::<Self>(args)?;
 
         // Collect any args from after `--` (handled by try_parse_known) into
-        // script_args, which become positional parameters ($0, $1, ...).
+        // script_args, which become positional parameters ($0, $1, ...). As in
+        // Bash, a `--` before the script ends the options; after `-c CMD` or
+        // the script name it is an argument itself.
         if let Some(args) = script_args {
+            let mut args = args.peekable();
+            if this.command.is_none() && this.script_args.is_empty() {
+                args.next_if(|arg| arg == "--");
+            }
             this.script_args.extend(args);
         }
 
@@ -568,7 +574,7 @@ async fn run_in_shell(
             .lock()
             .await
             .run_script(
-                Path::new(&args.script_args[0]),
+                brush_core::bytes::to_path(&args.script_args[0]),
                 args.script_args.iter().skip(1),
             )
             .await?;

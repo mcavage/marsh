@@ -2,85 +2,6 @@
  "doc": "docs/design/bash-compatibility.md#classified-differential-divergences",
  "divergences": [
   {"id": "BYTES", "summary": "Non-UTF-8 bytes: Brush's words, values and input are UTF-8 text (known bug: rejected, panics, or U+FFFD/Latin-1 re-encoding)", "cases": {
-   "byte-builtins": [
-    "echo-escape-order@C",
-    "echo-escape-order@C.utf8",
-    "exec-enoexec-native@C",
-    "exec-enoexec-native@C.utf8",
-    "export-bad-identifier@C",
-    "export-bad-identifier@C.utf8",
-    "export-quoted-assignment@C",
-    "export-quoted-assignment@C.utf8",
-    "export-quoted-ref-element@C",
-    "export-quoted-ref-element@C.utf8",
-    "export-readonly-continues@C",
-    "export-readonly-continues@C.utf8",
-    "getopts-subscripted-ref@C",
-    "getopts-subscripted-ref@C.utf8",
-    "printf-invalid-conversion@C",
-    "printf-invalid-conversion@C.utf8",
-    "printf-invalid-number@C",
-    "printf-invalid-number@C.utf8",
-    "printf-q@C",
-    "printf-q@C.utf8",
-    "read-count--N0@C",
-    "read-count--N0@C.utf8",
-    "read-count--N1@C.utf8",
-    "read-count--N2@C.utf8",
-    "read-count--N3@C.utf8",
-    "read-count--n0@C",
-    "read-count--n0@C.utf8",
-    "read-count--n1@C.utf8",
-    "read-count--n2@C.utf8",
-    "read-count--n3@C.utf8",
-    "read-incomplete-c3005a@C.utf8",
-    "read-incomplete-c30a5a@C.utf8",
-    "read-incomplete-e0805a@C.utf8",
-    "read-incomplete-e2825851@C.utf8",
-    "read-incomplete-e282@C.utf8",
-    "read-incomplete-eda0bf5a@C.utf8",
-    "read-malformed-nul--N2@C.utf8",
-    "read-malformed-nul--N3@C.utf8",
-    "read-malformed-nul--n2@C.utf8",
-    "read-malformed-nul--n3@C.utf8",
-    "read-nameref-index@C",
-    "read-nameref-index@C.utf8",
-    "read-timeout-N-partial-unit@C.utf8",
-    "tty-read-incremental@C.utf8",
-    "unset-ref-raw-index@C",
-    "unset-ref-raw-index@C.utf8"
-   ],
-   "nul-input": [
-    "admission-raw-path@script@raw"
-   ],
-   "prompt": [
-    "command-substitution-expand@C",
-    "command-substitution-literal@C",
-    "command-substitution-literal@C.utf8",
-    "cwd-metadata-literal@C",
-    "cwd-metadata-literal@C.utf8",
-    "cwd-visible-controls@C",
-    "cwd-visible-controls@C.utf8",
-    "date-protected-variable-expand@C",
-    "date-protected-variable-expand@C.utf8",
-    "octal-fffe-expand@C",
-    "octal-fffe-literal@C",
-    "quotes-variable-expand@C",
-    "quotes-variable-expand@C.utf8",
-    "repeat-c3a9ff3e-file@C",
-    "repeat-c3a9ff3e-stderr@C",
-    "trace-status@C",
-    "tty-command-substitution@C",
-    "tty-command-substitution@C.utf8",
-    "tty-literal@C",
-    "tty-literal@C.utf8",
-    "tty-markers@C",
-    "tty-markers@C.utf8",
-    "tty-octal@C",
-    "tty-octal@C.utf8",
-    "tty-variable@C",
-    "tty-variable@C.utf8"
-   ],
    "readline": [
     "completion-raw-basic@C",
     "completion-raw-basic@C.utf8",
@@ -121,22 +42,6 @@
     "point-unicode-not-raw-3@C",
     "point-unicode-not-raw-3@C.utf8",
     "point-unicode-not-raw-99@C.utf8"
-   ],
-   "startup": [
-    "bash-env-raw-path",
-    "invalid-2d6f5ffffe",
-    "invalid-2dff",
-    "script-2b65",
-    "script-2d",
-    "script-2d736372697074",
-    "script-736372697074",
-    "script-7363726970742dfffe",
-    "stdin-boundary",
-    "typed-startup-2d4f5ffffe5f2d635f7072696e746620626f6479203e20626f64792e656666656374733b207072696e74662027424f44595c6e27",
-    "typed-startup-2d65ff"
-   ],
-   "tck": [
-    "core-byte-controls#6"
    ]
   }},
   {"id": "COMPGEN", "summary": "compgen -f does not expand ~ and $var in the word or quote results; compgen -A command lists differ", "cases": {
@@ -177,8 +82,6 @@
   }},
   {"id": "DIAGNOSTICS", "summary": "Error message wording, and the status of some usage errors, differ from Bash", "cases": {
    "byte-builtins": [
-    "export-array-identifier@C",
-    "export-array-identifier@C.utf8",
     "read-readonly-continues@C",
     "read-readonly-continues@C.utf8"
    ],
@@ -859,7 +762,26 @@
   }},
   {"id": "LOCALE", "summary": "No locale model: LC_ALL=C byte semantics and Bash's per-character case mapping are not implemented", "cases": {
    "byte-builtins": [
-    "printf-unicode@C"
+    "printf-q@C",
+    "printf-unicode@C",
+    "read-count--N1@C.utf8",
+    "read-count--N2@C.utf8",
+    "read-count--N3@C.utf8",
+    "read-count--n1@C.utf8",
+    "read-count--n2@C.utf8",
+    "read-count--n3@C.utf8",
+    "read-incomplete-c3005a@C.utf8",
+    "read-incomplete-c30a5a@C.utf8",
+    "read-incomplete-e0805a@C.utf8",
+    "read-incomplete-e2825851@C.utf8",
+    "read-incomplete-e282@C.utf8",
+    "read-incomplete-eda0bf5a@C.utf8",
+    "read-malformed-nul--N2@C.utf8",
+    "read-malformed-nul--N3@C.utf8",
+    "read-malformed-nul--n2@C.utf8",
+    "read-malformed-nul--n3@C.utf8",
+    "read-timeout-N-partial-unit@C.utf8",
+    "tty-read-incremental@C.utf8"
    ],
    "byte-matchers": [
     "case-C-53747261c39f65-^^",
@@ -990,6 +912,10 @@
     "length-slice-C",
     "length-slice-C.utf8",
     "read-count-conservation-C.utf8"
+   ],
+   "prompt": [
+    "repeat-c3a9ff3e-file@C",
+    "repeat-c3a9ff3e-stderr@C"
    ]
   }},
   {"id": "MAPFILE-CALLBACK", "summary": "mapfile -C/-c is not implemented", "cases": {
@@ -1005,6 +931,18 @@
     "builtin-variable-fd"
    ]
   }},
+  {"id": "NAMEREF-SUBSCRIPT", "summary": "A name reference to an array element (declare -n r='a[2]') is an ordinary variable: read, getopts, export and unset through it change r, not the element", "cases": {
+   "byte-builtins": [
+    "export-quoted-ref-element@C",
+    "export-quoted-ref-element@C.utf8",
+    "getopts-subscripted-ref@C",
+    "getopts-subscripted-ref@C.utf8",
+    "read-nameref-index@C",
+    "read-nameref-index@C.utf8",
+    "unset-ref-raw-index@C",
+    "unset-ref-raw-index@C.utf8"
+   ]
+  }},
   {"id": "POSIX-SPECIAL-ASSIGNMENT", "summary": "In posix mode an assignment before a special builtin does not persist", "cases": {
    "external-redirects": [
     "special-prefix-hidden"
@@ -1017,13 +955,19 @@
     "printf-empty-vs-missing-number@C",
     "printf-empty-vs-missing-number@C.utf8",
     "printf-format-escaped-quote@C",
-    "printf-format-escaped-quote@C.utf8"
+    "printf-format-escaped-quote@C.utf8",
+    "printf-invalid-conversion@C",
+    "printf-invalid-conversion@C.utf8",
+    "printf-invalid-number@C",
+    "printf-invalid-number@C.utf8"
    ]
   }},
   {"id": "PROMPT", "summary": "Prompt strings: quote removal and brace expansion are applied, \\nnn and \\001/\\002 handled differently, controls not made visible", "cases": {
    "prompt": [
     "braces-tilde-glob-expand@C",
     "braces-tilde-glob-expand@C.utf8",
+    "date-protected-variable-expand@C",
+    "date-protected-variable-expand@C.utf8",
     "date-unknown-expand@C",
     "date-unknown-expand@C.utf8",
     "date-unknown-literal@C",
@@ -1047,7 +991,9 @@
     "parameter-single-quotes-expand@C",
     "parameter-single-quotes-expand@C.utf8",
     "quotes-expand@C",
-    "quotes-expand@C.utf8"
+    "quotes-expand@C.utf8",
+    "quotes-variable-expand@C",
+    "quotes-variable-expand@C.utf8"
    ]
   }},
   {"id": "READ", "summary": "read: backslash-escaped IFS characters, read -t 0 at end of file, read -n 1 of ^D from a terminal", "cases": {
@@ -1235,8 +1181,10 @@
     "invalid-2d6f5f2d2d",
     "invalid-2d6f5f6261645f2b6f5f626164",
     "invalid-2d6f5f6e6f745f616e5f6f7074696f6e",
+    "invalid-2d6f5ffffe",
     "invalid-2d6f6e6f756e736574",
     "invalid-2d7a",
+    "invalid-2dff",
     "invocation-2b69",
     "invocation-2b6c",
     "invocation-2d695f2b69",
@@ -1289,10 +1237,12 @@
     "typed-startup-2bc3a9",
     "typed-startup-2d2d6e6f65646974696e675f2d636f",
     "typed-startup-2d4f5f657874676c6f625f2d634f",
+    "typed-startup-2d4f5ffffe5f2d635f7072696e746620626f6479203e20626f64792e656666656374733b207072696e74662027424f44595c6e27",
     "typed-startup-2d636f4f",
     "typed-startup-2d636f65",
     "typed-startup-2d636f657a",
     "typed-startup-2d65636f",
+    "typed-startup-2d65ff",
     "typed-startup-2d69636f",
     "typed-startup-2d6f5f706f7369785f2b6f5f706f7369785f2d634f",
     "typed-startup-2d6f5f706f7369785f2d634f"
@@ -1324,6 +1274,7 @@
     "core-byte-controls#2",
     "core-byte-controls#3",
     "core-byte-controls#4",
+    "core-byte-controls#6",
     "core-byte-controls#7",
     "options/set-u.yaml#8",
     "path_search.yaml#0",

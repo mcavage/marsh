@@ -158,7 +158,7 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
                     let expanded =
                         expansion::basic_expand_word(self, &params, startup_file).await?;
                     if !expanded.is_empty() {
-                        self.source_if_exists(PathBuf::from(expanded), &params)
+                        self.source_if_exists(crate::bytes::to_path(&expanded), &params)
                             .await?;
                     }
                 }

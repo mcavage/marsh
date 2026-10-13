@@ -48,7 +48,7 @@ impl InputBackend for MinimalInputBackend {
                 } else {
                     &prompt.continuation_prompt
                 };
-                write!(std::io::stderr(), "{to_display}")?;
+                std::io::stderr().write_all(&brush_core::bytes::encode(to_display))?;
                 std::io::stderr().flush()?;
             }
             // `read_line` is not cancellation safe: a TERM trap could discard
@@ -115,7 +115,7 @@ impl MinimalInputBackend {
                     &prompt.continuation_prompt
                 };
 
-                write!(writer, "{to_display}")?;
+                writer.write_all(&brush_core::bytes::encode(to_display))?;
                 writer.flush()?;
             }
 

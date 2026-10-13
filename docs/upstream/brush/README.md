@@ -607,6 +607,14 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   As in Bash's `sv_optind`, `OPTIND=1` (or less) restarts parsing, and
   another value takes effect once the cluster being parsed is done. Covered
   by `getopts_notices_every_assignment_to_optind`.
+- `0079` finishes the byte paths outside Reedline and fixes the builtins those
+  cases exposed: script and `BASH_ENV` paths and `bash -- script` (a leading
+  `--` ended options only after `-c`), `printf %q`/`%#q` of bytes that are not
+  UTF-8 (`$'\\NNN'`), prompt `\\NNN` bytes, prompt `\\w`/`\\W` visible control
+  characters (Bash's `sh_strvis`), prompts written by the line readers, `exec`
+  of an ENOEXEC file by its full path, `echo` options in order, `read -n 0`, and
+  `export` of an expanded `NAME=value` word with Bash's invalid-name and
+  readonly diagnostics. Covered by `byte_and_builtin_details_match_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
