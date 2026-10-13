@@ -28,6 +28,9 @@ import sys
 import termios
 import threading
 import time
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "acceptance"))
+from launch_env import clean_environment  # noqa: E402
 import traceback
 import uuid
 from typing import Any, Callable
@@ -71,9 +74,7 @@ class Scope:
         self.control_root = ROOT / "control"
         self.project = ROOT / "project"
         self.stamp_path = ROOT / "stamp.json"
-        self.environment = os.environ.copy()
-        for key in [key for key in self.environment if key.startswith("MARSH_")]:
-            del self.environment[key]
+        self.environment = clean_environment()
         self.environment.update({
             "MARSH_HOME": str(self.home),
             "MARSH_CONTROL_HOME": str(self.control_root),

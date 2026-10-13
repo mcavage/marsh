@@ -71,6 +71,7 @@ def owned_survivors(rows, identities, token):
             and (process_identity(row) in identities or (token and token in row["command"]))]
 
 from harness import disposable_root, product_owned_vm_names, resolve_executable, scoped_control_home
+from launch_env import clean_environment
 from provenance import host_only_path, stock_baseline, verify_build_receipt
 
 
@@ -102,10 +103,8 @@ class Journey:
             for path in [Path(self.marsh), *(artifacts / name for name in
                          ("marsh-linux-arm64", "marsh-worker-linux-arm64", "marsh-relay-linux-arm64"))]
         }
-        self.env = dict(os.environ, MARSH_HOME=str(self.home), MARSH_CONTROL_HOME=str(self.control),
+        self.env = dict(clean_environment(), MARSH_HOME=str(self.home), MARSH_CONTROL_HOME=str(self.control),
                         MARSH_GUEST_ARTIFACTS=str(artifacts), MARSH_SBX=self.sbx)
-        for key in ("MARSH_DAEMON_SOCKET", "MARSH_DAEMON_TOKEN", "MARSH_SESSION_ID"):
-            self.env.pop(key, None)
         # Shell VM names are random (`marsh-s-<id>`); discovered after first use.
         self.vm = None
         # Diagnostic only: a skipped fixture is recorded and never a pass.

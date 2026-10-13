@@ -1,7 +1,9 @@
 //! Public CLI startup failures read as plain sentences, before any daemon,
 //! VM, or SBX work. No SBX backend is involved.
 
-use std::{fs, os::unix::fs::PermissionsExt as _, process::Command};
+mod common;
+
+use std::{fs, os::unix::fs::PermissionsExt as _};
 
 #[test]
 fn a_bad_marsh_sbx_names_the_path_and_the_fix() {
@@ -16,7 +18,7 @@ fn a_bad_marsh_sbx_names_the_path_and_the_fix() {
         fs::create_dir(directory).unwrap();
         fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
     }
-    let output = Command::new(env!("CARGO_BIN_EXE_marsh"))
+    let output = common::command(env!("CARGO_BIN_EXE_marsh"))
         .args(["-c", "true"])
         .current_dir(&project)
         .env("MARSH_HOME", &home)
@@ -53,7 +55,7 @@ fn a_missing_sbx_prints_the_exact_install_command() {
         fs::create_dir(directory).unwrap();
         fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
     }
-    let output = Command::new(env!("CARGO_BIN_EXE_marsh"))
+    let output = common::command(env!("CARGO_BIN_EXE_marsh"))
         .args(["-c", "true"])
         .current_dir(&project)
         .env("MARSH_HOME", &home)

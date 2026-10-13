@@ -43,6 +43,7 @@ impl DaemonBackend for Backend {
         use std::os::unix::process::CommandExt as _;
         let mut child = Reaped(fenced(|| {
             Command::new("/usr/bin/python3")
+                .env_clear()
                 .args(["-c", "import sys; sys.stdin.buffer.read(); sys.exit(42)"])
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())

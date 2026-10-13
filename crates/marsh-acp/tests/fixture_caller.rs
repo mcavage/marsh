@@ -1648,6 +1648,13 @@ fn cli_stdin_permissions_reservations_and_publication_options() {
                 &rig.shell.session_id,
             ])
             .args(args)
+            // The developer's environment (credentials included) stays out.
+            .env_clear()
+            .envs(std::env::vars_os().filter(|(name, _)| {
+                ["PATH", "TMPDIR", "MARSH_TEST_RUN"]
+                    .iter()
+                    .any(|keep| name == keep)
+            }))
             .env("MARSH_HOME", &rig.home)
             .env("HOME", rig.root.path().join("host"))
             .env("USER", &rig.shell.username)
@@ -1682,6 +1689,8 @@ fn cli_stdin_permissions_reservations_and_publication_options() {
         .unwrap();
     // A syntax-only compatibility oracle, not Bash as the implementation.
     let parsed = Command::new("bash")
+        .env_clear()
+        .envs(std::env::vars_os().filter(|(name, _)| name == "PATH"))
         .args(["-n", "-c", example])
         .output()
         .unwrap();

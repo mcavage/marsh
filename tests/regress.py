@@ -57,6 +57,7 @@ ROOT = CHECKOUT / "target" / "regress"
 MIN_FREE_BYTES = 20 * 1024 ** 3
 BASELINE_ENV = "MARSH_REGRESS_BASELINE"
 sys.path.insert(0, str(ACCEPTANCE))
+from launch_env import clean_environment, credential_names  # noqa: E402
 
 # Billed live-agent scenarios are never part of a regression run.
 LIVE_SCENARIOS = {"P32-live-claude-codex"}
@@ -375,7 +376,7 @@ def stop_preserved_scopes(plan: Plan) -> list[str]:
         if home is None:
             notes.append(f"preserved scope {root} has no matching home; stop it by hand")
             continue
-        environment = {k: v for k, v in os.environ.items() if not k.startswith("MARSH_")}
+        environment = clean_environment()
         environment.update({"MARSH_HOME": str(home), "MARSH_CONTROL_HOME": str(scope.parent), "MARSH_SBX": plan.sbx})
         # Orphaned sessions of a killed harness make the daemon refuse a stop
         # until they end: poll for the scope to become stoppable.
@@ -440,8 +441,13 @@ def execute(plan: Plan, suites: list[Suite]) -> tuple[int, dict[str, Any]]:
     (plan.evidence_root.parent).chmod(0o700)
     baseline = stock_inventory(plan.sbx)
     plan.baseline_file.write_text(json.dumps({"vms": baseline, "taken_at": datetime.datetime.now().isoformat()}))
-    environment = {k: v for k, v in os.environ.items() if not k.startswith("MARSH_")}
+    # The suites (and the product they drive) get an allowlisted environment,
+    # never this one with its credentials (`make regress` sets a canary).
+    environment = clean_environment()
     environment.update({BASELINE_ENV: str(plan.baseline_file), "PYTHONUNBUFFERED": "1"})
+    leaked = credential_names(environment)
+    if leaked:
+        raise SystemExit(f"regress: credential-shaped variables would reach the suites: {leaked}")
     started = time.monotonic()
     pending = list(suites)
     running: list[Suite] = []
@@ -677,8 +683,8 @@ def main() -> int:
     if (not requested or "check" in requested) and "check" not in args.skip:
         began = time.monotonic()
         check = subprocess.run([sys.executable, str(CHECKOUT / "tests" / "check.py"), "--prefix", str(plan.prefix),
-                                "--sbx", plan.sbx, "--kit", plan.kit], cwd=CHECKOUT, env={
-            k: v for k, v in os.environ.items() if not k.startswith("MARSH_")})
+                                "--sbx", plan.sbx, "--kit", plan.kit], cwd=CHECKOUT,
+                               env=clean_environment())
         pre.append({"name": "check", "status": "PASS" if check.returncode == 0 else "FAIL",
                     "seconds": round(time.monotonic() - began, 1), "exit": check.returncode, "log": None,
                     "evidence": str(CHECKOUT / "target" / "check" / "last.json"), "note": "", "argv": check.args})

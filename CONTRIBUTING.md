@@ -76,6 +76,14 @@ group or session (beyond nextest's group kill) spawns it through
 `common::spawn_group` / `common::wait_for_exit`, which kill that group when the
 test fails or the child overstays its budget.
 
+Tests never hand a shell your login environment, which holds credentials.
+Shells and the product start from an allowlist (`PATH`, `HOME`, `TERM`,
+`LANG`, `LC_*`, `TMPDIR`, `USER`, `LOGNAME`, plus what each caller sets):
+`common::command` in the Rust tests, `tests/acceptance/launch_env.py` in the
+harnesses and `tests/regress.py`. `make test`, `make check` and `make regress`
+export a credential-shaped canary (`MARSH_TEST_CANARY_API_KEY`), and the
+checks fail if any credential-shaped name reaches a test shell.
+
 `make verify` and `make regress` run `tests/regress.py`, the one scheduler for
 sbx suites. Each suite gets its own scope and evidence directory, at most 3 run
 at once (`REGRESS_JOBS=N`; `REGRESS_JOBS=1` runs them one at a time; it backs

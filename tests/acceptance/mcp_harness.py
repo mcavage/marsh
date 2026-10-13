@@ -21,6 +21,7 @@ import uuid
 
 from harness import (IsolatedScope, disposable_root, request_authenticated_daemon_shutdown, resolve_executable,
                      scoped_control_home, stable_process_identity, wait_until)
+from launch_env import clean_environment
 from provenance import remove_owned_stock_vm, stock_baseline, stock_vm_names, verify_candidate
 
 
@@ -172,7 +173,7 @@ class McpScope(IsolatedScope):
             # Installed before the first public command starts the isolated
             # daemon, which freezes its command registry at startup.
             (self.control_home / "commands.json").write_bytes(pathlib.Path(commands).read_bytes())
-        self.environment = os.environ.copy()
+        self.environment = clean_environment()
         shell_history = self.project / ".marsh-uat-history"
         shell_history.touch(mode=0o600, exist_ok=False)
         self.environment["HISTFILE"] = str(shell_history)

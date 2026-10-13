@@ -25,7 +25,7 @@ fn isolated_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     if program.as_ref() == "bash" {
         common::require_bash_oracle();
     }
-    let mut command = Command::new(program);
+    let mut command = common::command(program);
     SHELL_HOME.with(|home| {
         command
             .env("HOME", home.path())
@@ -47,6 +47,37 @@ fn composition_shell() -> Command {
     let mut command = marsh();
     command.env("MARSH_TEST_EXTENSIONS", "1");
     command
+}
+
+/// No test shell sees the developer's credentials: each is started from a
+/// cleared environment plus an allowlist (`common::command`). `make test`
+/// exports a credential-shaped canary to prove it.
+#[test]
+fn test_shells_start_without_credentials() {
+    let names = "env | cut -d= -f1";
+    let options = ["--no-config", "--noprofile", "--norc", "-c", names];
+    common::assert_no_credentials_reach("marsh", marsh().args(options));
+    common::assert_no_credentials_reach("fanout marsh", composition_shell().args(options));
+    common::assert_no_credentials_reach(
+        "Bash",
+        isolated_command("bash").args(["--noprofile", "--norc", "-c", names]),
+    );
+    #[cfg(unix)]
+    for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("names");
+        let mut shell = PtyShell::spawn(program, true);
+        shell.expect_prompts(1);
+        shell.send(format!("{names} >{}\r", file.display()).as_bytes());
+        shell.expect_prompts(2);
+        shell.send(b"exit 0\r");
+        let (status, output) = shell.finish();
+        assert_eq!(status, Some(0), "{program}: {output:?}");
+        common::assert_no_credential_names(
+            &format!("interactive {program}"),
+            &std::fs::read_to_string(&file).unwrap(),
+        );
+    }
 }
 
 #[test]
@@ -799,7 +830,7 @@ fn fanout_branches_are_label_led_and_bodies_match_bash() {
             "{script:?}"
         );
         for (branch, (label, text)) in branches.iter().zip(expected.iter()) {
-            let bash = Command::new("bash")
+            let bash = isolated_command("bash")
                 .args(["--noprofile", "--norc", "-c", text])
                 .output()
                 .expect("run bash");
