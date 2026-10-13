@@ -38,7 +38,6 @@ project files: a job in any scope can write the project it runs in.
 | `MARSH_CONTROL_HOME` | Host-only state root. See [Control home](#control-home). |
 | `MARSH_SPAWN` | Names that jobs started from this shell may start. A comma-separated list, or `none`. It can only narrow. A refused name exits 126 ([Agents running agents](agents.md#narrowing-what-an-agent-may-start)). |
 | `MARSH_PLACE` | Where registered commands run. Only `local` is accepted; any other value is an error (`MARSH_PLACE must be local`). |
-| `MARSH_BANNER` | Set to `1` inside the shell VM to show the stock shell's banner. See [Banner](#banner). |
 | `MARSH_KIT_IMAGE_CACHE` | Cache of Kit images built from source. Default `~/Library/Caches/marsh/kit-images`. |
 
 ### Job limits
@@ -100,15 +99,6 @@ Generated MCP server scopes go beside it, in
 When unset, control directories are in
 `~/Library/Application Support/marsh/control`. Publications are in
 `~/Library/Application Support/marsh`.
-
-### Banner
-
-The stock shell template's ASCII banner is suppressed. To show it, set
-`MARSH_BANNER=1` in the VM's environment, for example:
-
-```sh
-MARSH_BANNER=1 bash -l
-```
 
 ## Files
 

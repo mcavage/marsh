@@ -1,0 +1,20 @@
+# Every Kit image is also its Kit VM's root filesystem. It needs Docker Engine
+# (dockerd runs the Kit's jobs from this same image); the /bin/sh and /bin/bash
+# Docker Sandboxes launches through; coreutils for the worker install; tar,
+# which `sbx cp` unpacks uploads with; sed and findutils for
+# update-ca-certificates, which adds the sandbox proxy's CA at VM start
+# (openssl comes with ca-certificates); and the git, curl and CA store Docker
+# Sandboxes expects of a workload image. The DHI-built Engine packages carry
+# no Debian copyright file: their notices are indexed by exact version in
+# dhi-notices, so they are pinned here.
+docker-ce=5:29.8.2-1
+docker-ce-cli=5:29.9.0-0
+containerd.io=2.4.1-3
+bash
+coreutils
+tar
+sed
+findutils
+git
+curl
+ca-certificates

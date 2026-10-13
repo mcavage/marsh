@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "scope": "The DHI image-level license file each built image carries in place, observed by inventory.py from docker export; it covers DHI definitions, patches and build scripts, not the included packages.",
+  "observations": [
+    {
+      "image": "marsh-dhi-shell:final",
+      "id": "sha256:6b3e79710a607fd94d8dedd55cba661eeeb5641d2b978a5c883820899d4e4dc3",
+      "path": "/opt/docker/.license.txt",
+      "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
+    },
+    {
+      "image": "marsh-dhi-pi:final",
+      "id": "sha256:1f127de7faee7134d69e3f2d138c05e2d09052d7aab523967da3218222285fe6",
+      "path": "/opt/docker/.license.txt",
+      "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
+    },
+    {
+      "image": "marsh-dhi-claude:final",
+      "id": "sha256:5438d45bb71d3989801d38532a53610a668347437050dd2f27673fdaf0643286",
+      "path": "/opt/docker/.license.txt",
+      "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
+    },
+    {
+      "image": "marsh-dhi-codex:final",
+      "id": "sha256:9bee1da40db8e029aada6731a00da6193e29ae6f28c1cf5f289d7e9af132ea9e",
+      "path": "/opt/docker/.license.txt",
+      "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
+    },
+    {
+      "image": "marsh-dhi-fixture:final",
+      "id": "sha256:f55b09d74b5a48fa0ba2b9a83195dae92a3e30bf5409ff84fb9f2219633660fb",
+      "path": "/opt/docker/.license.txt",
+      "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
+    },
+    {
+      "image": "marsh-dhi-shelltemplate:final",
+      "id": "sha256:68c67442722858ae16a4d0a2197aba24a08f3920074b751ae253fcdd0e0bba9c",
+      "path": "/opt/docker/.license.txt",
+      "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
+    }
+  ]
+}

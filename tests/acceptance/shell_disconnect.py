@@ -70,8 +70,8 @@ def owned_survivors(rows, identities, token):
     return [row for row in rows if not row["state"].startswith(("Z", "X"))
             and (process_identity(row) in identities or (token and token in row["command"]))]
 
-from harness import disposable_root, resolve_executable, scoped_control_home
-from provenance import host_only_path, verify_build_receipt
+from harness import disposable_root, product_owned_vm_names, resolve_executable, scoped_control_home
+from provenance import host_only_path, stock_baseline, verify_build_receipt
 
 
 class Journey:
@@ -358,7 +358,10 @@ class Journey:
     def run(self):
         if self.command([self.sbx, "version"], check=False).returncode:
             self.command([self.sbx, "--version"])
-        self.baseline = self.stock_names()
+        # Under tests/regress.py, peer suites' VMs come and go: compare with
+        # the runner's pre-launch snapshot, not a live one.
+        self.baseline = set(stock_baseline(self.sbx)) if os.environ.get("MARSH_REGRESS_BASELINE") \
+            else self.stock_names()
         self.started = True
         latency = []
         for index in range(6):
@@ -366,7 +369,12 @@ class Journey:
             elapsed = self.result["commands"][-1]["seconds"]
             assert result.stdout == b"shell-ready\n", result.stdout
             if self.vm is None:
-                created = sorted(name for name in self.stock_names() - self.baseline
+                # This scope's own ownership map names its VM; peer suites
+                # under tests/regress.py create shell VMs concurrently.
+                owned = set()
+                for path in self.control.glob("*/vm-ownership.json"):
+                    owned |= product_owned_vm_names(path.parent)
+                created = sorted(name for name in owned & self.stock_names()
                                  if name.startswith("marsh-s-"))
                 if len(created) != 1:
                     raise AssertionError(f"cannot identify this run's shell VM: {created}")

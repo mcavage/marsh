@@ -9,15 +9,14 @@
     "proxy_agent_negotiate": "Standard MIT text accompanies the publisher's MIT declaration for information; it is not an upstream grant or copyright notice."
   },
   "distribution_permissions": {
-    "proprietary_components": "Claude Code and the Claude Agent SDK (Anthropic) and the clipboard-bridge binary in the DHI base (Docker) are proprietary and are distributed under their vendors' terms, not an open-source license. This inventory grants no rights to them.",
-    "dhi_image_license": "The DHI license text covers DHI definitions, patches and build scripts under Apache-2.0; included binaries keep their own terms.",
-    "clipboard_spdx": "The clipboard-bridge SPDX document is retained unchanged and reconciled in source-records/clipboard-spdx-reconciliation.json. Its golang.org/x/sys v0.46.0 dependency notice is collected separately."
+    "proprietary_components": "Claude Code and the Claude Agent SDK (Anthropic), redistributed in the Claude Kit image, are proprietary and are distributed under Anthropic's terms, not an open-source license. This inventory grants no rights to them. No other proprietary component is installed: the images are built on the DHI Debian and Node.js base images and Debian/DHI packages, not on the Docker Sandboxes templates, so the templates' preinstalled agents and proprietary clipboard-bridge are absent.",
+    "dhi_image_license": "The DHI license text (/opt/docker/.license.txt, checked in place) covers DHI definitions, patches and build scripts under Apache-2.0; included packages and binaries keep their own terms. The bases are public DHI images; this does not by itself establish what DHI's terms say about redistributing images built on them."
   },
   "source_and_attestation_limits": [
     "npm archives pass their SHA-512 checks and SLSA subject/source commits are recorded; Sigstore signatures are not verified.",
     "Rust notices are collected from each release's Cargo.lock and declared features; they are not a record of what is actually linked. Upstream release builds do not pass --locked, and the v8 crate records dirty=true at its upstream commit.",
-    "Corresponding source for DHI packages and vendor patches is referenced through the published arm64 DHI source-image links; no amd64 source link is recorded.",
-    "The native Claude Code binary's embedded dependencies are not inventoried; its version-matched npm legal texts are retained."
+    "The native Claude Code binary's embedded dependencies are not inventoried; its version-matched npm legal texts are retained.",
+    "Debian packages carry their own copyright files in each image. Packages DHI builds itself (Docker Engine, Node.js, npm, Python) ship none; their notices are indexed by exact version in installed-package-notices.json. Corresponding source for the DHI-built packages and DHI's Debian package patches is not linked or bundled here; Debian sources are published by Debian for each package version."
   ],
   "lgpl_corresponding_source": {
     "status": "Upstream sources and license terms identified.",

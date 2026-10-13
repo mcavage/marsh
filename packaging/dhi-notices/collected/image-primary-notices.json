@@ -13,8 +13,14 @@
         "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
       }
     ],
-    "acquisition_receipt": "source-records/public-image-primary-receipt.json",
-    "receipt_sha256": "7a04cf1008303b0a5fd344f408958b1dcd8717bd096317a05c4fe25a8e85dfed",
-    "scope": "DHI definitions (Dockerfiles), patches and build scripts are Apache-2.0. Included packages/binaries retain their own upstream terms. SPDX CC0-1.0 covers the document, not proprietary clipboard code."
+    "acquisition_receipt": "source-records/dhi-base-image-legal.json",
+    "receipt_sha256": "16ec0a239b007daee356e8cf277e51ec1d4c9355c8a46a242159e23034aec9e0",
+    "scope": "DHI definitions (Dockerfiles), patches and build scripts are Apache-2.0. Included packages/binaries retain their own upstream terms. Every DHI base carries this text at /opt/docker/.license.txt; the verifier checks it in place.",
+    "image_files": [
+      {
+        "path": "/opt/docker/.license.txt",
+        "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
+      }
+    ]
   }
 ]

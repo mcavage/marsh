@@ -15,7 +15,7 @@ With --kit-profile it also makes this release the codex-kit profile in
 derived-profiles.json: the release archives listed in
 kits/marsh-codex/release-checksums.txt are acquired and checksum-verified, and
 the native codex and codex-code-mode-host members become the profile's
-additions (recorded in public-acquisitions.json as kit-ARCH-BINARY).
+files (recorded in public-acquisitions.json as kit-ARCH-BINARY).
 
 It prints the provider required_notices list for the profile or payload record
 that ships this release. It executes no downloaded code. Re-running for the same
@@ -93,8 +93,7 @@ def write_kit_profile(bundle, version, required, cache):
                 {"member": name, "sha256": digest, "size": len(data), "mode": mode & 0o777}])
             additions.append({"path": "/usr/local/bin/" + binary, "type": "file", "mode": 0o755,
                               "uid": 0, "gid": 0, "sha256": digest, "size": len(data)})
-        profile[architecture] = {"base_agent": "codex", "required_notices": required,
-                                 "replacements": {}, "additions": additions}
+        profile[architecture] = {"required_notices": required, "files": additions}
     acquisitions_path.write_bytes(encode(acquisitions))
     profiles_path = bundle / "derived-profiles.json"
     profiles = json.loads(profiles_path.read_text())

@@ -2,7 +2,6 @@
   "schema": "marsh.adapter-notice-payloads/v1",
   "adapters": {
     "codex-acp": {
-      "base_agent": "codex",
       "root": "/opt/marsh/codex-acp",
       "lock_sha256": "804b0ea9ef3c8b14a53fc15b5b41b0e6106b1bc8f1d3c5c6bf30f5078e33839d",
       "notice_root": "/usr/local/share/licenses/marsh-codex-acp",
@@ -1635,7 +1634,6 @@
       }
     },
     "claude-acp": {
-      "base_agent": "claude",
       "root": "/opt/marsh/claude-acp",
       "lock_sha256": "0975141cc5315960c1c17355a936aadef9797f18a257792abade5745ffbe9b43",
       "notice_root": "/usr/local/share/licenses/marsh-claude-acp",
@@ -2295,7 +2293,6 @@
     },
     "pi": {
       "root": "/opt/marsh/pi-gateway",
-      "base_agent": "claude",
       "lock_sha256": "4346b9928b5276a70873dbc945a0961ad4594e9c62858aef90f170435a236b5c",
       "notice_root": "/usr/local/share/licenses/marsh-pi",
       "architectures": {

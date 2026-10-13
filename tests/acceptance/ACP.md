@@ -17,7 +17,7 @@ python3 tests/acceptance/acp_uat.py \
 
 `--build-receipt` is optional for `make dev` runs (as in `smoke.py`); without it
 only the source identity is recorded and the run is not release evidence. The
-packaged source Kits under `kits/` need staged `dhi-notices`/`image-repair`
+packaged source Kits under `kits/` need staged `dhi-notices`/`image-base`
 inputs before stock SBX can build them, so `mcp_load_uat.py` and
 `mcp_gateway_uat.py` accept `--commands FILE` to overlay
 the isolated scope's `commands.json` with staged sources or published digests.

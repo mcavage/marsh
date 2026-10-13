@@ -2836,7 +2836,6 @@
       "sha256": "ffe61d0e558aff076c6be396c1a1cd46bcaa9b56a0f0e9d609767fcdc7eb1d6d"
     }
   ],
-  "image_reconciliation": "source-records/clipboard-spdx-reconciliation.json",
   "source_configuration": "source-records/source-dependency-scope-current.json",
   "notice_material_status": {
     "historical_unique_gap_count": 23,

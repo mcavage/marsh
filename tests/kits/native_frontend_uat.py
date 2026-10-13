@@ -19,7 +19,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = 'docker/sandbox-kit:3@sha256:11bb68806aef6a68d45c10c0c3b3dc86c2f794a296b5a933661d9dadf760b753'
-BASE = 'dhi.io/sbx-templates:shell-docker@sha256:ff0fe56f7fbc14a969131c52d8e7233862a4810196fbc0e2d8d88441204081a9'
+BASE = 'dhi.io/debian-base:trixie@sha256:20079b51710f0397da5e056bfc7156b6aafc7ff3aa4ef4cbcb0b0f1df99cd8c4'
 CASES = (
     ('re2-end-anchor', r'^[0-9]+\z', '1', None, None),
     ('posix-digit', '^[[:digit:]]+$', '123', None, None),
@@ -27,7 +27,7 @@ CASES = (
     ('invalid-default-valid-override', '^[0-9]+$', 'bad', '123', None),
     ('nested-quantifier-mismatch', '^(a+)+$', 'a' * 20000 + 'b', None, 'does not match pattern'),
 )
-DOCKERFILE = f'FROM {BASE}\nARG RAW_VALUE\nUSER agent\nENTRYPOINT ["/bin/true"]\n'
+DOCKERFILE = f'FROM {BASE}\nARG RAW_VALUE\nUSER nonroot\nENTRYPOINT ["/bin/true"]\n'
 
 
 def descriptor(pattern, default):

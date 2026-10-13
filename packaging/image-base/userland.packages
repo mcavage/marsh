@@ -1,0 +1,6 @@
+# The POSIX text and process tools a Kit job may expect.
+grep
+mawk
+diffutils
+procps
+gzip

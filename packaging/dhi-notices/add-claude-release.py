@@ -6,11 +6,10 @@ Version-driven: acquires the integrity-checked npm package
 provider-notices/claude-VERSION-package-{LICENSE,README}.md with
 agent-notices.json rows, and records both acquisitions in
 source-records/public-acquisitions.json. With --manifest-record NAME it also
-stores the manifest bytes as source-records/NAME (claude-manifest for the base
-template's release, claude-kit-manifest for the Kit's). --kit-profile makes this
-release the claude-kit profile in derived-profiles.json: the native binary from
-the publisher manifest, its versions/ symlink, and the versions/ tree it shares
-with the base template's own release.
+stores the manifest bytes as source-records/NAME (claude-kit-manifest for the
+Kit's release). --kit-profile makes this release the claude-kit profile in
+derived-profiles.json: the native binary from the publisher manifest, the
+~/.local/bin/claude symlink to it, and the versions/ tree holding only it.
 
 Claude Code is proprietary: the script refuses a release whose LICENSE.md
 differs from the already reviewed text unless --accept-license-change is given.
@@ -35,26 +34,21 @@ def encode(value):
 
 
 def write_kit_profile(bundle, version, manifest, providers, required):
-    """The Kit installs the selected binary beside the template's own release."""
+    """The Kit installs the selected binary and the launcher symlink install.sh would leave."""
     versions = "/home/agent/.local/share/claude/versions"
     profiles_path = bundle / "derived-profiles.json"
     profiles = json.loads(profiles_path.read_text())
     profile = {}
     for architecture, platform in (("arm64", "linux-arm64"), ("amd64", "linux-x64")):
-        base = providers["agents_by_architecture"][architecture]["claude"]["identity_marker"]
-        if not base.startswith(versions + "/"):
-            raise ValueError("unexpected base Claude identity marker: " + base)
         binary = manifest["platforms"][platform]
         selected = versions + "/" + version
         profile[architecture] = {
-            "base_agent": "claude",
             "required_notices": required,
-            "replacements": {"/home/agent/.local/bin/claude": {
-                "path": "/home/agent/.local/bin/claude", "type": "symlink", "mode": 0o777,
-                "uid": 1000, "gid": 1000, "target": selected}},
-            "additions": [{"path": selected, "type": "file", "mode": 0o755, "uid": 1000, "gid": 1000,
-                           "sha256": binary["checksum"], "size": binary["size"]}],
-            "exact_trees": [{"path": versions, "entries": sorted({selected, base})}],
+            "files": [{"path": selected, "type": "file", "mode": 0o755, "uid": 1000, "gid": 1000,
+                       "sha256": binary["checksum"], "size": binary["size"]},
+                      {"path": "/home/agent/.local/bin/claude", "type": "symlink", "mode": 0o777,
+                       "uid": 1000, "gid": 1000, "target": selected}],
+            "exact_trees": [{"path": versions, "entries": [selected]}],
         }
     profiles["claude-kit"] = {version: profile}
     profiles_path.write_bytes(encode(profiles))
@@ -65,7 +59,7 @@ def main():
     parser.add_argument("--version", required=True)
     parser.add_argument("--cache", type=Path, required=True, help="owner-private acquisition cache")
     parser.add_argument("--bundle", type=Path, default=HERE / "collected")
-    parser.add_argument("--manifest-record", choices=["claude-manifest", "claude-kit-manifest"])
+    parser.add_argument("--manifest-record", choices=["claude-kit-manifest"])
     parser.add_argument("--kit-profile", action="store_true")
     parser.add_argument("--accept-license-change", action="store_true")
     args = parser.parse_args()

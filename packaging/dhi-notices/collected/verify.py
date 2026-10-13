@@ -1,20 +1,32 @@
 #!/usr/bin/env python3
-"""Offline payload/notice correspondence, not a redistribution or source-completeness grant."""
+"""Offline payload/notice correspondence, not a redistribution or source-completeness grant.
+
+Checks one assembled image root (default /; a read-only bind of the image stage
+for runtime images that ship no Python) against this canonical bundle, which
+must be installed in that root at usr/local/share/licenses/marsh-dhi.
+"""
 
 import argparse
 import hashlib
+import io
 import json
 import os
 from pathlib import Path, PurePosixPath
 import stat
-import subprocess
 import tempfile
+import zipfile
 
 JSON_LIMIT = 32 * 1024**2
 FILE_LIMIT = 1024**3
 TREE_LIMIT = 256 * 1024**2
 COUNT_LIMIT = 20000
-RECEIPTS = {"image-verification.json", "base-image-verification.json"}
+RECEIPT = "image-verification.json"
+BUNDLE = PurePosixPath("usr/local/share/licenses/marsh-dhi")
+GO_MAGIC = b"\xff Go buildinf:"
+# OS-package executable locations scanned for Go build information. Agent and
+# npm trees carry their own indexed payloads and are not OS packages.
+GO_SCAN = ("usr/bin", "usr/sbin", "usr/libexec", "usr/lib/docker")
+LINK_LIMIT = 40
 
 
 def identity(st):
@@ -37,6 +49,17 @@ def regular(path, limit=FILE_LIMIT):
         os.close(fd)
         raise ValueError("not a bounded regular file: " + str(path))
     return fd, st
+
+
+def read_bytes(path, limit=JSON_LIMIT):
+    fd, before = regular(path, limit)
+    with os.fdopen(fd, "rb") as source:
+        data = source.read(limit + 1)
+        if len(data) != before.st_size or identity(os.fstat(source.fileno())) != identity(
+            before
+        ):
+            raise ValueError("file changed: " + str(path))
+    return data
 
 
 def sha(path):
@@ -66,20 +89,60 @@ def unique(pairs):
 
 
 def load(path):
-    fd, before = regular(path, JSON_LIMIT)
-    with os.fdopen(fd, "rb") as source:
-        data = source.read(JSON_LIMIT + 1)
-        if len(data) != before.st_size or identity(
-            os.fstat(source.fileno())
-        ) != identity(before):
-            raise ValueError("JSON changed")
-    return json.loads(data, object_pairs_hook=unique)
+    return json.loads(read_bytes(path), object_pairs_hook=unique)
 
 
-def no_link_parents(path):
-    for parent in path.parents:
-        if not stat.S_ISDIR(parent.lstat().st_mode):
-            raise ValueError("non-directory/symlink payload ancestor: " + str(parent))
+class Image:
+    """Absolute image paths, resolved inside ROOT; symlinks never escape it."""
+
+    def __init__(self, root):
+        self.root = Path(os.path.abspath(root))
+        if not stat.S_ISDIR(self.root.lstat().st_mode):
+            raise ValueError("image root is not a directory")
+
+    def path(self, absolute):
+        p = PurePosixPath(absolute)
+        if not p.is_absolute() or ".." in p.parts:
+            raise ValueError("invalid image path: " + str(absolute))
+        return self.root.joinpath(*p.parts[1:])
+
+    def resolve(self, absolute):
+        """The image-absolute path ABSOLUTE names after every symlink, or None."""
+        pending = list(PurePosixPath(absolute).parts[1:])
+        current = PurePosixPath("/")
+        hops = 0
+        while pending:
+            part = pending.pop(0)
+            if part in ("", "."):
+                continue
+            if part == "..":
+                current = current.parent
+                continue
+            candidate = current / part
+            try:
+                metadata = self.path(candidate).lstat()
+            except FileNotFoundError:
+                return None
+            if stat.S_ISLNK(metadata.st_mode):
+                hops += 1
+                if hops > LINK_LIMIT:
+                    raise ValueError("symlink loop: " + str(absolute))
+                target = PurePosixPath(os.readlink(self.path(candidate)))
+                pending = list(target.parts[1:] if target.is_absolute() else target.parts) + pending
+                if target.is_absolute():
+                    current = PurePosixPath("/")
+                continue
+            current = candidate
+        return current
+
+    def no_link_parents(self, absolute):
+        for parent in self.path(absolute).parents:
+            if parent == self.root.parent:
+                break
+            if not stat.S_ISDIR(parent.lstat().st_mode):
+                raise ValueError("non-directory/symlink payload ancestor: " + str(parent))
+            if parent == self.root:
+                break
 
 
 def tree(root):
@@ -101,7 +164,7 @@ def bundle_tree(root):
     for name, metadata in tree(root).items():
         path = Path(name)
         relative = str(path.relative_to(root))
-        if relative in RECEIPTS:
+        if relative == RECEIPT:
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
                 raise ValueError("unsafe existing receipt")
             continue
@@ -121,20 +184,79 @@ def bundle_tree(root):
     return result, hashlib.sha256(encoded).hexdigest()
 
 
-def check_entry(row, *, copied=False):
-    path = Path(row["path"])
-    if not path.is_absolute() or ".." in path.parts:
-        raise ValueError("invalid payload path")
-    no_link_parents(path)
+def stanzas(data):
+    for block in data.decode("utf-8", "replace").split("\n\n"):
+        fields, key = {}, None
+        for line in block.splitlines():
+            if line[:1] in (" ", "\t") and key:
+                continue
+            if ":" in line:
+                key, value = line.split(":", 1)
+                fields[key] = value.strip()
+        if "Package" in fields:
+            yield fields
+
+
+def installed_packages(image):
+    """Every installed package: dpkg status (installed only), then DHI status.d."""
+    packages, architectures = {}, set()
+    status = image.path("/var/lib/dpkg/status")
+    if os.path.lexists(status):
+        for fields in stanzas(read_bytes(status)):
+            if fields.get("Status", "").split()[-1:] == ["installed"]:
+                packages[fields["Package"]] = fields["Version"]
+                architectures.add(fields.get("Architecture"))
+    directory = image.path("/var/lib/dpkg/status.d")
+    if os.path.lexists(directory):
+        for entry in sorted(directory.iterdir()):
+            if entry.name.endswith(".md5sums"):
+                continue
+            for fields in stanzas(read_bytes(entry)):
+                # A dpkg-managed status file is authoritative for what it
+                # lists; status.d adds the packages only it records.
+                packages.setdefault(fields["Package"], fields["Version"])
+                architectures.add(fields.get("Architecture"))
+    if not packages or len(packages) > COUNT_LIMIT:
+        raise ValueError("installed package inventory missing or unbounded")
+    architectures.discard("all")
+    architectures.discard(None)
+    if len(architectures) != 1:
+        raise ValueError("installed packages do not share one architecture")
+    return packages, architectures.pop()
+
+
+def go_binaries(image):
+    found = {}
+    for top in GO_SCAN:
+        base = image.path("/" + top)
+        if not os.path.lexists(base) or not stat.S_ISDIR(base.lstat().st_mode):
+            continue
+        for name, metadata in tree(base).items():
+            if not stat.S_ISREG(metadata.st_mode) or not metadata.st_mode & 0o111:
+                continue
+            fd, _ = regular(name)
+            with os.fdopen(fd, "rb") as source:
+                carry = b""
+                while chunk := source.read(4 * 1024 * 1024):
+                    if GO_MAGIC in carry + chunk:
+                        found["/" + str(Path(name).relative_to(image.root))] = sha(name)
+                        break
+                    carry = chunk[-len(GO_MAGIC):]
+    return found
+
+
+def check_entry(image, row):
+    absolute = row["path"]
+    image.no_link_parents(absolute)
+    path = image.path(absolute)
     metadata = path.lstat()
-    expected_uid, expected_gid = (0, 0) if copied else (row["uid"], row["gid"])
-    if (metadata.st_uid, metadata.st_gid) != (expected_uid, expected_gid):
+    if (metadata.st_uid, metadata.st_gid) != (row["uid"], row["gid"]):
         raise ValueError(
-            f"payload ownership changed: {path}: expected {expected_uid}:{expected_gid}, got {metadata.st_uid}:{metadata.st_gid}"
+            f"payload ownership changed: {absolute}: expected {row['uid']}:{row['gid']}, got {metadata.st_uid}:{metadata.st_gid}"
         )
     if stat.S_IMODE(metadata.st_mode) != row["mode"]:
         raise ValueError(
-            f"payload mode changed: {path}: expected {row['mode']:04o}, got {stat.S_IMODE(metadata.st_mode):04o}"
+            f"payload mode changed: {absolute}: expected {row['mode']:04o}, got {stat.S_IMODE(metadata.st_mode):04o}"
         )
     kind = row["type"]
     if kind == "file":
@@ -143,50 +265,49 @@ def check_entry(row, *, copied=False):
             or metadata.st_size != row["size"]
             or sha(path) != row["sha256"]
         ):
-            raise ValueError("payload file changed: " + str(path))
+            raise ValueError("payload file changed: " + absolute)
     elif kind == "symlink":
-        if not stat.S_ISLNK(metadata.st_mode) or str(path.readlink()) != row["target"]:
-            raise ValueError("payload symlink changed: " + str(path))
+        if not stat.S_ISLNK(metadata.st_mode) or os.readlink(path) != row["target"]:
+            raise ValueError("payload symlink changed: " + absolute)
     elif kind != "directory" or not stat.S_ISDIR(metadata.st_mode):
-        raise ValueError("payload type changed: " + str(path))
+        raise ValueError("payload type changed: " + absolute)
 
 
-def verify_adapter(policy, architecture, require):
+def verify_adapter(image, policy, architecture, require):
     """Full selected native package bytes; other npm metadata/notices only."""
-    root = Path(policy["root"])
-    lock = root / "package-lock.json"
+    root = policy["root"]
+    lock = image.path(root + "/package-lock.json")
     if sha(lock) != policy["lock_sha256"]:
         raise ValueError("adapter lock changed: " + str(lock))
     selected = policy["architectures"][architecture]
     native = []
     for package in selected["packages"]:
-        directory = Path(package["root"])
+        directory = image.path(package["root"])
         for entry in package["payload_entries"]:
-            check_entry(entry)
-        if set(tree(directory)) | {str(directory)} != {
-            r["path"] for r in package["payload_entries"]
-        }:
+            check_entry(image, entry)
+        actual = {"/" + str(Path(p).relative_to(image.root)) for p in tree(directory)}
+        if actual | {package["root"]} != {r["path"] for r in package["payload_entries"]}:
             raise ValueError(
-                "unindexed or missing selected adapter package: " + str(directory)
+                "unindexed or missing selected adapter package: " + package["root"]
             )
-        actual = load(directory / "package.json")
-        if (actual.get("name"), actual.get("version")) != (
+        document = load(directory / "package.json")
+        if (document.get("name"), document.get("version")) != (
             package["package"],
             package["version"],
         ):
             raise ValueError("selected adapter package identity changed")
         native.append(
             {
-                "path": str(directory),
+                "path": package["root"],
                 "version": package["version"],
                 "verified_entries": len(package["payload_entries"]),
             }
         )
     for entry in selected["links"]:
-        check_entry(entry)
+        check_entry(image, entry)
     if selected["required_notices"]:
         require(selected["required_notices"])
-    notice_root = Path(policy["notice_root"])
+    notice_root = image.path(policy["notice_root"])
     inventory_path = notice_root / "npm-package-notices.json"
     document = load(inventory_path)
     if (
@@ -208,8 +329,9 @@ def verify_adapter(policy, architecture, require):
         if str(relative) in seen:
             raise ValueError("duplicate adapter package inventory entry")
         seen.add(str(relative))
-        path = root / "node_modules" / str(relative) / "package.json"
-        no_link_parents(path)
+        absolute = f"{root}/node_modules/{relative}/package.json"
+        image.no_link_parents(absolute)
+        path = image.path(absolute)
         if sha(path) != package["package_json_sha256"]:
             raise ValueError("adapter package metadata changed: " + str(relative))
         actual = load(path)
@@ -224,18 +346,17 @@ def verify_adapter(policy, architecture, require):
             digest = notice["sha256"]
             if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
                 raise ValueError("invalid adapter notice digest")
-            path = notice_root / "texts" / (digest + ".txt")
-            no_link_parents(path)
-            if sha(path) != digest:
+            text = notice_root / "texts" / (digest + ".txt")
+            if sha(text) != digest:
                 raise ValueError("adapter retained notice changed")
     for package in selected["packages"]:
-        expected = str(Path(package["root"]).relative_to(root / "node_modules"))
+        expected = str(PurePosixPath(package["root"]).relative_to(root + "/node_modules"))
         if expected not in seen:
             raise ValueError(
                 "selected native package absent from installed notice inventory"
             )
     return {
-        "root": str(root),
+        "root": root,
         "lock_sha256": policy["lock_sha256"],
         "full_payload_packages": native,
         "other_npm_package_metadata_and_notices": len(packages),
@@ -246,167 +367,34 @@ def verify_adapter(policy, architecture, require):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--receipt", action="store_true")
-    parser.add_argument("--copied-agents", action="store_true")
+    parser.add_argument("--root", default="/", help="assembled image root (default /)")
     parser.add_argument(
         "--profile", choices=["base", "claude-kit", "codex-kit"], default="base"
     )
     parser.add_argument(
-        "--version", help="Required exact version for a supported final Kit profile"
+        "--version", help="Required exact version for a native Kit profile"
     )
-    parser.add_argument("--stage", choices=["base", "final"], default=None)
     parser.add_argument(
         "--adapter",
         choices=["codex-acp", "claude-acp", "pi"],
         help="Selected ACP/npm payload; may accompany the matching Kit profile",
     )
     parser.add_argument(
-        "--expect-agent",
-        choices=["auto", "none", "claude", "codex"],
-        default="auto",
-        help="Require the known public base flavor instead of presence-only detection",
+        "--receipt-dir", type=Path, help="write image-verification.json here"
     )
     args = parser.parse_args()
-    if (
-        args.copied_agents
-        and args.profile != "base"
-        or (args.profile == "base") != (args.version is None)
-    ):
-        parser.error(
-            "copied mode and Kit repin profiles are distinct; Kit profile requires --version"
-        )
-    # One agent Kit ships its native CLI and its ACP adapter, so a Kit profile
-    # may carry that agent's adapter scope in the same final receipt.
+    if (args.profile == "base") != (args.version is None):
+        parser.error("a native Kit profile requires --version, and only a profile takes one")
     kit_adapters = {"claude-kit": "claude-acp", "codex-kit": "codex-acp"}
-    if args.adapter and (
-        args.copied_agents
-        or args.profile != "base"
-        and kit_adapters[args.profile] != args.adapter
-    ):
-        parser.error("adapter scope must match its Kit profile; copied agents are separate")
-    if args.stage is None:
-        args.stage = (
-            "final"
-            if args.adapter or args.copied_agents or args.profile != "base"
-            else "base"
-        )
-    root = Path(__file__).absolute().parent
-    no_link_parents(root / "verify.py")
+    if args.adapter and args.profile != "base" and kit_adapters[args.profile] != args.adapter:
+        parser.error("adapter scope must match its Kit profile")
+    image = Image(args.root)
+    root = image.path("/" + str(BUNDLE))
+    if Path(__file__).resolve() != (root / "verify.py").resolve():
+        raise ValueError("verifier must run from the bundle installed in the image root")
+    image.no_link_parents("/" + str(BUNDLE / "verify.py"))
     before, bundle_hash = bundle_tree(root)
-    architecture = subprocess.check_output(
-        ["dpkg", "--print-architecture"], text=True, timeout=30
-    ).strip()
-    inventory_files = {
-        "arm64": "installed-package-notices.json",
-        "amd64": "installed-package-notices-amd64.json",
-    }
-    if architecture not in inventory_files:
-        raise ValueError("unreviewed DHI architecture: " + architecture)
-    installed = load(root / inventory_files[architecture])
-    if installed["platform"] != "linux/" + architecture:
-        raise ValueError("DHI inventory architecture mismatch")
-    actual = subprocess.check_output(
-        ["dpkg-query", "-W", "-f=${Package}\t${Version}\n"], text=True, timeout=30
-    )
-    if len(actual) > JSON_LIMIT:
-        raise ValueError("package query exceeds bound")
-    actual = unique(line.split("\t", 1) for line in actual.splitlines())
-    for row in installed["packages"]:
-        if actual.get(row["package"]) != row["version"]:
-            raise ValueError("DHI package version changed: " + row["package"])
-    for row in installed["binaries"]:
-        path = Path(row["path"])
-        resolved = path.resolve(strict=True)
-        if (
-            str(resolved) != row.get("resolved", row["path"])
-            or sha(resolved) != row["sha256"]
-        ):
-            raise ValueError("DHI binary identity changed: " + row["path"])
-    bundled = load(root / "bundled-js-notices.json")
-    for row in bundled:
-        if sha(Path(row["path"])) != row["source_sha256"]:
-            raise ValueError("DHI bundled JavaScript identity changed")
-    modules = load(root / "go-module-notices.json")
-    supplements = load(root / "upstream-license-supplements.json")
-    if modules["failures"] or set(modules["missing_notice"]) != {
-        row["module"] for row in supplements
-    }:
-        raise ValueError("unresolved Go module notice collection")
-    components = (
-        load(root / "main-component-notices.json")
-        + load(root / "public-component-notices.json")
-        + load(root / "native-build-notices.json")
-        + load(root / "image-primary-notices.json")
-    )
-    references = list(bundled) + list(supplements)
-    # Text completeness is the union, not an accidental all-architectures equality.
-    for inventory_name in inventory_files.values():
-        for row in load(root / inventory_name)["packages"]:
-            references.extend(row.get("notices", []) + row.get("upstream_notices", []))
-    for row in modules["modules"]:
-        references.extend(row["notices"])
-    for row in components:
-        references.extend(row["notices"])
-    rust = load(root / "rust-notices.json")
-    for collection in (
-        rust["collections"] + load(root / "selected-rust-notices.json")["collections"]
-    ):
-        source_name = collection["source_inventory"]
-        if (
-            not source_name.startswith("source-records/")
-            or ".." in PurePosixPath(source_name).parts
-        ):
-            raise ValueError("unsafe Rust source inventory reference")
-        if (
-            before.get(source_name, {}).get("sha256")
-            != collection["source_inventory_sha256"]
-        ):
-            raise ValueError("Rust source inventory identity changed")
-        source = load(root / source_name)
-        rows = (
-            source
-            if isinstance(source, list)
-            else source.get("archives", source.get("supplements"))
-        )
-        acquired_notices = [notice for row in rows for notice in row["notices"]]
-        if acquired_notices != collection["notices"]:
-            raise ValueError(
-                "Rust notice correspondence changed from exact acquired source"
-            )
-        references.extend(acquired_notices)
-    primary = load(root / "primary-source-notices.json")
-    if (
-        primary["image_reconciliation"]
-        != "source-records/clipboard-spdx-reconciliation.json"
-    ):
-        raise ValueError("unreviewed image reconciliation source path")
-    for collection in primary["collections"]:
-        name = collection["source_inventory"]
-        if not name.startswith("source-records/") or ".." in PurePosixPath(name).parts:
-            raise ValueError("unsafe primary source inventory path")
-        if before.get(name, {}).get("sha256") != collection["source_inventory_sha256"]:
-            raise ValueError("primary source inventory changed: " + name)
-        source = load(root / name)
-        if isinstance(source, list):
-            acquired = source
-        elif "notices" in source:
-            acquired = source["notices"]
-        else:
-            rows = source.get(
-                "archives",
-                source.get(
-                    "packages", source.get("components", source.get("supplements"))
-                ),
-            )
-            acquired = [notice for row in rows for notice in row["notices"]]
-        if acquired != collection["notices"]:
-            raise ValueError("primary notice/source correspondence changed: " + name)
-        references.extend(acquired)
-    adapters = load(root / "adapter-payloads.json")["adapters"]
-    for adapter in adapters.values():
-        for inventory in adapter["architectures"].values():
-            for package in inventory["packages"]:
-                references.extend(package["notices"])
+    packages, architecture = installed_packages(image)
     indexed = {}
 
     def require(notices):
@@ -433,6 +421,131 @@ def main():
                 raise ValueError("conflicting notice references")
             indexed[filename] = notice["sha256"]
 
+    # OS packages: the package's own Debian copyright file, or (DHI-built
+    # packages ship none) the indexed notices for that exact version.
+    inventory = load(root / "installed-package-notices.json")
+    if inventory.get("schema") != 2:
+        raise ValueError("unsupported installed package notice inventory")
+    rows = {(r["package"], r["version"]): r for r in inventory["packages"]}
+    if len(rows) != len(inventory["packages"]):
+        raise ValueError("duplicate installed package notice row")
+    debian_copyright, indexed_packages = 0, {}
+    for package, version in sorted(packages.items()):
+        copyright = image.resolve(f"/usr/share/doc/{package}/copyright")
+        if copyright and stat.S_ISREG(image.path(copyright).lstat().st_mode):
+            debian_copyright += 1
+            continue
+        row = rows.get((package, version))
+        if row is None:
+            raise ValueError(
+                f"installed package has no notice: {package} {version} "
+                "(no /usr/share/doc copyright file and no indexed row)"
+            )
+        for notice in row["notices"]:
+            path = image.resolve(notice["path"])
+            if path is None or sha(image.path(path)) != notice["sha256"]:
+                raise ValueError(f"package notice missing/changed: {package}: {notice['path']}")
+        for notice in row["archive_notices"]:
+            path = image.resolve(notice["path"])
+            if path is None:
+                raise ValueError(f"package archive missing: {package}: {notice['path']}")
+            with zipfile.ZipFile(io.BytesIO(read_bytes(image.path(path), FILE_LIMIT))) as archive:
+                if hashlib.sha256(archive.read(notice["member"])).hexdigest() != notice["sha256"]:
+                    raise ValueError(f"package archive notice changed: {package}: {notice['member']}")
+        if not (row["notices"] or row["archive_notices"] or row["upstream_notices"]):
+            raise ValueError("indexed package row has no notice: " + package)
+        indexed_packages[package] = version
+    references = []
+    for row in inventory["packages"]:
+        references.extend(row["notices"] + row["archive_notices"] + row["upstream_notices"])
+
+    # Go dependency modules of the OS packages' compiled Go binaries.
+    modules = load(root / "go-module-notices.json")
+    supplements = load(root / "upstream-license-supplements.json")
+    if modules["failures"] or set(modules["missing_notice"]) != {
+        row["module"] for row in supplements
+    }:
+        raise ValueError("unresolved Go module notice collection")
+    recorded = {row["path"]: row for row in modules["binaries"]}
+    observed = go_binaries(image)
+    for path, digest in observed.items():
+        if path not in recorded:
+            raise ValueError("Go binary without indexed module notices: " + path)
+        if recorded[path]["sha256"] != digest:
+            raise ValueError("Go binary identity changed: " + path)
+    for row in modules["modules"]:
+        references.extend(row["notices"])
+    references.extend(supplements)
+
+    # Image-level legal files the DHI base ships in place.
+    image_primary = load(root / "image-primary-notices.json")
+    image_files = []
+    for component in image_primary:
+        for row in component["image_files"]:
+            if sha(image.path(row["path"])) != row["sha256"]:
+                raise ValueError("image-level legal identity changed: " + row["path"])
+            image_files.append(row["path"])
+    components = (
+        image_primary
+        + load(root / "main-component-notices.json")
+        + load(root / "public-component-notices.json")
+        + load(root / "native-build-notices.json")
+    )
+    for row in components:
+        references.extend(row["notices"])
+    for name in ("rust-notices.json", "selected-rust-notices.json"):
+        for collection in load(root / name)["collections"]:
+            source_name = collection["source_inventory"]
+            if (
+                not source_name.startswith("source-records/")
+                or ".." in PurePosixPath(source_name).parts
+            ):
+                raise ValueError("unsafe Rust source inventory reference")
+            if (
+                before.get(source_name, {}).get("sha256")
+                != collection["source_inventory_sha256"]
+            ):
+                raise ValueError("Rust source inventory identity changed")
+            source = load(root / source_name)
+            rows_ = (
+                source
+                if isinstance(source, list)
+                else source.get("archives", source.get("supplements"))
+            )
+            acquired = [notice for row in rows_ for notice in row["notices"]]
+            if acquired != collection["notices"]:
+                raise ValueError(
+                    "Rust notice correspondence changed from exact acquired source"
+                )
+            references.extend(acquired)
+    primary = load(root / "primary-source-notices.json")
+    for collection in primary["collections"]:
+        name = collection["source_inventory"]
+        if not name.startswith("source-records/") or ".." in PurePosixPath(name).parts:
+            raise ValueError("unsafe primary source inventory path")
+        if before.get(name, {}).get("sha256") != collection["source_inventory_sha256"]:
+            raise ValueError("primary source inventory changed: " + name)
+        source = load(root / name)
+        if isinstance(source, list):
+            acquired = source
+        elif "notices" in source:
+            acquired = source["notices"]
+        else:
+            rows_ = source.get(
+                "archives",
+                source.get(
+                    "packages", source.get("components", source.get("supplements"))
+                ),
+            )
+            acquired = [notice for row in rows_ for notice in row["notices"]]
+        if acquired != collection["notices"]:
+            raise ValueError("primary notice/source correspondence changed: " + name)
+        references.extend(acquired)
+    adapters = load(root / "adapter-payloads.json")["adapters"]
+    for adapter in adapters.values():
+        for selected in adapter["architectures"].values():
+            for package in selected["packages"]:
+                references.extend(package["notices"])
     for reference in references:
         require([reference])
     agent_notices = load(root / "agent-notices.json")
@@ -443,149 +556,59 @@ def main():
     }
     if set(indexed) != actual_texts:
         raise ValueError("unindexed or missing canonical notice text")
-    obligations = load(root / "payload-obligations.json")
-    # This independent source/member correspondence is not derived from the
-    # provider index. Dropping index rows and text files cannot discharge it.
+    # Independent source/member correspondence, not derived from the indexes:
+    # dropping index rows and text files cannot discharge it.
     for component in components:
         require(component["required_notices"])
-    for row in obligations["image_files"]:
-        if sha(Path(row["path"])) != row["sha256"]:
-            raise ValueError(
-                "image-level legal/metadata identity changed: " + row["path"]
-            )
-    payloads = load(root / "agent-payload-deltas.json")["architectures"][architecture]
-    clipboard_hash = sha(Path("/usr/local/bin/clipboard-bridge"))
-    variants = [
-        row for row in payloads["clipboard_variants"] if row["sha256"] == clipboard_hash
-    ]
-    if not variants:
-        raise ValueError("unreviewed DHI clipboard helper identity")
-    profiles = load(root / "derived-profiles.json")
+    require(primary["required_runtime_notices"])
+
     profile = None
     if args.profile != "base":
-        profile = profiles[args.profile].get(args.version, {}).get(architecture)
+        profile = load(root / "derived-profiles.json")[args.profile].get(
+            args.version, {}
+        ).get(architecture)
         if not profile:
             raise ValueError("unreviewed selected Kit version/architecture")
         require(profile["required_notices"])
-    observed_agents = {}
-    inventories = agent_notices["agents_by_architecture"][architecture]
-    for name, inventory in inventories.items():
-        if not os.path.lexists(inventory["identity_marker"]):
-            continue
-        require(inventory["required_notices"])
-        identity = obligations["agents"][architecture][name]
-        require(identity["required_notices"])
-        rows = inventory["payload_entries"]
-        changes = profile["replacements"] if profile else {}
-        for row in rows:
-            check_entry(
-                changes.get(row["path"], row),
-                copied=args.copied_agents and name == "codex",
-            )
-        for binary in identity["binaries"]:
-            if sha(Path(binary["path"])) != binary["sha256"]:
-                raise ValueError(
-                    "public-source payload identity changed: " + binary["path"]
-                )
-            require(binary["required_notices"])
-        if name == "codex":
-            require(primary["required_runtime_notices"])
-            package = Path(inventory["identity_marker"]).parent
-            scope = (
-                Path("/usr/local/share/npm-global") if args.copied_agents else package
-            )
-            expected = {
-                row["path"] for row in rows if Path(row["path"]).is_relative_to(scope)
-            }
-            actual_paths = set(tree(scope))
-            if not args.copied_agents:
-                actual_paths.add(str(scope))
-            if actual_paths != expected:
-                raise ValueError("unindexed or missing npm payload: " + str(scope))
-        observed_agents[name] = [row["path"] for row in rows]
-    if args.expect_agent != "auto":
-        expected_agents = set() if args.expect_agent == "none" else {args.expect_agent}
-        if set(observed_agents) != expected_agents:
-            raise ValueError(
-                "expected public base agent identity marker missing or unexpected"
-            )
+        for row in profile["files"]:
+            check_entry(image, row)
+        for scope in profile.get("exact_trees", []):
+            entries = {"/" + str(Path(p).relative_to(image.root)) for p in tree(image.path(scope["path"]))}
+            if entries != set(scope["entries"]):
+                raise ValueError("unreviewed final Kit version tree")
     adapter_result = None
     if args.adapter:
-        policy = adapters[args.adapter]
-        if policy["base_agent"] not in observed_agents:
-            raise ValueError("required adapter base agent is missing")
-        adapter_result = verify_adapter(policy, architecture, require)
-    copied_agents = {}
-    if args.copied_agents:
-        identity = obligations["agents"][architecture]["claude"]
-        require(identity["required_notices"])
-        require(inventories["claude"]["required_notices"])
-        expected = dict(
-            identity["binaries"][0],
-            path="/usr/local/bin/claude",
-            mode=0o755,
-            uid=0,
-            gid=0,
-            type="file",
-        )
-        check_entry(expected)
-        if "codex" not in observed_agents:
-            raise ValueError("copied maintained Codex package is missing")
-        copied_agents = {
-            "claude": {"path": expected["path"], "sha256": expected["sha256"]},
-            "codex": {"verified_npm_global_entries": len(observed_agents["codex"])},
-        }
-    if profile:
-        if profile["base_agent"] not in observed_agents:
-            raise ValueError("required retained Kit base agent missing")
-        for row in profile["additions"]:
-            check_entry(row)
-        for scope in profile.get("exact_trees", []):
-            if set(tree(Path(scope["path"]))) != set(scope["entries"]):
-                raise ValueError("unreviewed final Kit version tree")
-    after, after_hash = bundle_tree(root)
+        adapter_result = verify_adapter(image, adapters[args.adapter], architecture, require)
+    after, _ = bundle_tree(root)
     if before != after:
         raise ValueError("canonical source changed during verification")
     result = {
-        "schema": "marsh.dhi-notices-verification/v2",
-        "platform": installed["platform"],
-        "stage": args.stage,
+        "schema": "marsh.dhi-notices-verification/v3",
+        "platform": "linux/" + architecture,
         "profile": args.profile,
         "selected_version": args.version,
-        "stage_semantics": "Caller-declared verification point, not whole-image approval. Known recipes enforce ordering; payload coverage is limited to the explicit scopes below.",
-        "expected_base_agent": args.expect_agent,
-        "adapter_scope": adapter_result,
         "scope_kind": "native-kit+adapter"
         if args.adapter and profile
         else "adapter-final-scoped"
         if args.adapter
-        else "copied-agents"
-        if args.copied_agents
         else "native-kit"
         if profile
-        else "base-payload-only",
+        else "image",
         "verifier_sha256": before["verify.py"]["sha256"],
         "bundle_tree_sha256": bundle_hash,
-        "bundle_tree_hash_format": "SHA256 of compact sorted JSON {relative:{sha256,size,mode}}, excluding only two named receipts",
-        "inventory_image": installed["image"],
+        "bundle_tree_hash_format": "SHA256 of compact sorted JSON {relative:{sha256,size,mode}}, excluding only the receipt",
         "runtime_image_id": None,
-        "image_identity_boundary": "Host must bind this receipt to actual docker argv/image ID and exact Dockerfile/tool/source/evidence hashes; this process cannot infer its own image digest.",
-        "packages": len(installed["packages"]),
-        "additional_installed_packages": {
-            name: version
-            for name, version in actual.items()
-            if name not in {r["package"] for r in installed["packages"]}
-        },
-        "observed_base_agents": observed_agents,
-        "observed_copied_agents": copied_agents,
-        "known_final_mutations": profile if profile else None,
-        "agent_scope": "Exact listed file bytes/type/mode/uid/gid and symlink targets. Copied mode requires the entire npm-global tree, explicitly chowned root:root. Base mode requires the Codex subtree only. No agent code is executed.",
-        "agent_notice_files": len(agent_notices["notices"]),
+        "image_identity_boundary": "Host must bind this receipt to the actual image ID and the exact Dockerfile/tool/source hashes; this process cannot infer its own image digest.",
+        "installed_packages": len(packages),
+        "packages_with_debian_copyright": debian_copyright,
+        "packages_with_indexed_notices": indexed_packages,
+        "go_binaries": sorted(observed),
+        "image_legal_files": image_files,
+        "adapter_scope": adapter_result,
+        "native_kit_files": [row["path"] for row in profile["files"]] if profile else [],
         "notice_texts": len(indexed),
-        "clipboard_matching_source_images": [r["image"] for r in variants],
         "qualification": "Not evaluated by this byte/metadata verifier. Runtime host gates, shipping notice materials and external redistribution permissions are distinct; see qualification-boundaries.json.",
         "notice_materials": primary["notice_material_status"],
-        "clipboard_spdx_reconciliation": load(root / primary["image_reconciliation"]),
         "external_assumptions": load(root / "qualification-boundaries.json"),
         "rust_notice_coverage": load(root / "rust-coverage-status.json"),
         "selected_rust_notice_coverage": load(
@@ -593,13 +616,9 @@ def main():
         ),
     }
     data = (json.dumps(result, indent=2) + "\n").encode()
-    if args.receipt:
-        name = (
-            "base-image-verification.json"
-            if args.stage == "base"
-            else "image-verification.json"
-        )
-        destination = root / name
+    if args.receipt_dir:
+        args.receipt_dir.mkdir(parents=True, exist_ok=True)
+        destination = args.receipt_dir / RECEIPT
         if os.path.lexists(destination):
             st = destination.lstat()
             if (
@@ -608,12 +627,13 @@ def main():
                 or st.st_uid != os.getuid()
             ):
                 raise ValueError("unsafe receipt destination")
-        descriptor, temporary = tempfile.mkstemp(prefix=".receipt-", dir=root)
+        descriptor, temporary = tempfile.mkstemp(prefix=".receipt-", dir=args.receipt_dir)
         try:
             with os.fdopen(descriptor, "wb") as out:
                 out.write(data)
                 out.flush()
                 os.fsync(out.fileno())
+            os.chmod(temporary, 0o644)
             os.replace(temporary, destination)
         finally:
             if os.path.exists(temporary):
