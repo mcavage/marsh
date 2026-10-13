@@ -1,5 +1,6 @@
 //! Filesystem interaction in the shell.
 
+use crate::bytes::ToShellText as _;
 use std::path::{Path, PathBuf};
 
 use normalize_path::NormalizePath as _;
@@ -35,7 +36,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         // Normalize the path (but don't canonicalize it).
         let cleaned_path = abs_path.normalize();
 
-        let pwd = cleaned_path.to_string_lossy().to_string();
+        let pwd = cleaned_path.to_shell_text().to_string();
 
         self.env.update_or_add(
             "PWD",
@@ -48,7 +49,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
 
         self.env.update_or_add(
             "OLDPWD",
-            variables::ShellValueLiteral::Scalar(oldpwd.to_string_lossy().to_string()),
+            variables::ShellValueLiteral::Scalar(oldpwd.to_shell_text().to_string()),
             |_| Ok(()),
             EnvironmentLookup::Anywhere,
             EnvironmentScope::Global,
@@ -64,7 +65,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     /// * `s` - The string to shorten.
     pub fn tilde_shorten(&self, s: String) -> String {
         if let Some(home_dir) = self.home_dir()
-            && let Some(stripped) = s.strip_prefix(home_dir.to_string_lossy().as_ref())
+            && let Some(stripped) = s.strip_prefix(home_dir.to_shell_text().as_ref())
         {
             return format!("~{stripped}");
         }
@@ -198,9 +199,9 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     ///
     /// * `path` - The path to get the absolute form of.
     pub fn absolute_path(&self, path: impl AsRef<Path>) -> PathBuf {
-        let path = path.as_ref();
+        let path = crate::bytes::shell_path(path.as_ref());
         if path.as_os_str().is_empty() || path.is_absolute() {
-            path.to_owned()
+            path.into_owned()
         } else {
             self.working_dir().join(path)
         }
@@ -271,7 +272,7 @@ fn shell_fd_path_to_fd(path: &Path) -> Option<ShellFd> {
         && parent == Path::new("/dev/fd")
         && let Some(filename) = path.file_name()
     {
-        filename.to_string_lossy().parse::<ShellFd>().ok()
+        filename.to_shell_text().parse::<ShellFd>().ok()
     } else {
         None
     }

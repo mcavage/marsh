@@ -1,5 +1,6 @@
 //! Execution support for shell.
 
+use crate::bytes::ToShellText as _;
 use std::{
     io::{Read, Write as _},
     path::Path,
@@ -176,23 +177,17 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         nul.apply(&mut bytes)?;
 
         tracing::debug!(target: trace_categories::PARSE, "Parsing sourced file: {}", source_info.source);
-        let parse_result = self.parse(bytes.as_slice());
+        let text = crate::bytes::decode_vec(bytes);
+        let parse_result = self.parse_string(text.as_str());
 
         let script_positional_args = args.map(Into::into);
 
         self.call_stack
             .push_script(call_type, source_info, script_positional_args);
 
-        let result = match String::from_utf8(bytes) {
-            Ok(text) => {
-                self.run_source_text(&text, parse_result, source_info, params)
-                    .await
-            }
-            Err(_) => {
-                self.run_parsed_result(parse_result, source_info, params)
-                    .await
-            }
-        };
+        let result = self
+            .run_source_text(&text, parse_result, source_info, params)
+            .await;
 
         self.call_stack.pop();
 
@@ -316,7 +311,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
             // Like Bash, refuse a binary file before running anything, EXIT trap included.
             Err(error) if matches!(error.kind(), error::ErrorKind::BinaryFile(_)) => {
                 if let error::ErrorKind::BinaryFile(path) = error.kind() {
-                    let path = path.to_string_lossy();
+                    let path = path.to_shell_text();
                     let _ = writeln!(
                         params.stderr(self),
                         "{path}: {path}: cannot execute binary file"

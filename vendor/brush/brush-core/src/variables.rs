@@ -1,5 +1,6 @@
 //! Implements variables for a shell environment.
 
+use crate::bytes::ToShellText as _;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -1074,7 +1075,7 @@ impl From<String> for ShellValue {
 
 impl From<OsString> for ShellValue {
     fn from(value: OsString) -> Self {
-        Self::String(value.to_string_lossy().into_owned())
+        Self::String(value.to_shell_text().into_owned())
     }
 }
 

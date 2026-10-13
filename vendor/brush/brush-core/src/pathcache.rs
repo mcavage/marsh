@@ -1,5 +1,6 @@
 //! Path cache
 
+use crate::bytes::ToShellText as _;
 use crate::{error, variables};
 use std::path::PathBuf;
 
@@ -41,7 +42,7 @@ impl PathCache {
         let pairs = self
             .cache
             .iter()
-            .map(|(k, v)| (Some(k.to_owned()), v.to_string_lossy().to_string()))
+            .map(|(k, v)| (Some(k.to_owned()), v.to_shell_text().to_string()))
             .collect::<Vec<_>>();
 
         variables::ShellValue::associative_array_from_literals(variables::ArrayLiteral(pairs))

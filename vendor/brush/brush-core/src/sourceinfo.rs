@@ -1,5 +1,6 @@
 //! Source info.
 
+use crate::bytes::ToShellText as _;
 use std::{path::PathBuf, sync::Arc};
 
 /// Source context.
@@ -25,7 +26,7 @@ impl From<&str> for SourceInfo {
 impl From<PathBuf> for SourceInfo {
     fn from(path: PathBuf) -> Self {
         Self {
-            source: path.to_string_lossy().to_string(),
+            source: path.to_shell_text().to_string(),
             start: None,
         }
     }

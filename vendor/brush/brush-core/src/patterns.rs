@@ -1,5 +1,6 @@
 //! Shell patterns
 
+use crate::bytes::ToShellText as _;
 use crate::{error, regex, sys, trace_categories};
 use std::{collections::VecDeque, path::Path};
 
@@ -45,7 +46,7 @@ fn push_descendants(
     };
     let mut entries: Vec<_> = entries
         .filter_map(Result::ok)
-        .filter(|entry| allow_dot_files || !entry.file_name().to_string_lossy().starts_with('.'))
+        .filter(|entry| allow_dot_files || !entry.file_name().to_shell_text().starts_with('.'))
         .collect();
     entries.sort_by_key(std::fs::DirEntry::file_name);
     for entry in entries {
@@ -275,7 +276,7 @@ impl Pattern {
             // also uses `/` on Windows (to avoid `PathBuf::push` drive-letter
             // semantics) — if we left `\` here, the strip_prefix below would
             // miss on Windows and leave results as absolute paths.
-            let working_dir_str = working_dir.to_string_lossy();
+            let working_dir_str = working_dir.to_shell_text();
             let mut working_dir_str =
                 sys::fs::normalize_path_separators(&working_dir_str).into_owned();
             if !working_dir_str.ends_with('/') {
@@ -330,6 +331,9 @@ impl Pattern {
                     .collect::<String>();
                 paths_so_far.retain_mut(|p| {
                     sys::fs::push_path_for_pattern(p, &flattened);
+                    if let std::borrow::Cow::Owned(path) = crate::bytes::shell_path(p) {
+                        *p = path;
+                    }
 
                     // Drop candidates that don't name an existing directory entry.
                     // We use `symlink_metadata` (lstat) rather than `exists` (stat) so
@@ -358,13 +362,13 @@ impl Pattern {
                     || subpattern_starts_with_dot;
 
                 let matches_dotfile_policy = |dir_entry: &std::fs::DirEntry| {
-                    !dir_entry.file_name().to_string_lossy().starts_with('.') || allow_dot_files
+                    !dir_entry.file_name().to_shell_text().starts_with('.') || allow_dot_files
                 };
 
                 let regex = subpattern.to_regex(true, true)?;
                 let matches_regex = |dir_entry: &std::fs::DirEntry| {
                     regex
-                        .is_match(dir_entry.file_name().to_string_lossy().as_ref())
+                        .is_match(dir_entry.file_name().to_shell_text().as_ref())
                         .unwrap_or(false)
                 };
 
@@ -397,7 +401,7 @@ impl Pattern {
                 // prefix so that `prefix_to_remove` (already normalized to
                 // use `/`) matches paths that may contain a mix of `\` and
                 // `/` on Windows.
-                let path_str = path.to_string_lossy();
+                let path_str = path.to_shell_text();
                 let normalized = sys::fs::normalize_path_separators(&path_str);
                 let mut path_ref: &str = normalized.as_ref();
 

@@ -479,7 +479,7 @@ fn read_plain_line(
     prompt: &InteractivePrompt,
     typed_ahead: &mut String,
 ) -> Result<ReadResult, ShellError> {
-    use std::io::{BufRead as _, Write as _};
+    use std::io::Write as _;
 
     let mut program = String::new();
     loop {
@@ -494,7 +494,7 @@ fn read_plain_line(
 
         let mut line = String::new();
         let read = if typed_ahead.is_empty() {
-            std::io::stdin().lock().read_line(&mut line)?
+            read_stdin_line(&mut line)?
         } else {
             // Typed while the terminal was raw, so never echoed: show it as the
             // terminal would have.
@@ -503,7 +503,7 @@ fn read_plain_line(
             write!(stderr, "{line}")?;
             stderr.flush()?;
             if !line.ends_with('\n') {
-                std::io::stdin().lock().read_line(&mut line)?;
+                read_stdin_line(&mut line)?;
             }
             line.len()
         };
@@ -527,4 +527,12 @@ fn read_plain_line(
     } else {
         Ok(ReadResult::Input(program))
     }
+}
+
+/// Appends a line of standard input, decoded as shell text, to `line`.
+fn read_stdin_line(line: &mut String) -> std::io::Result<usize> {
+    let mut bytes = Vec::new();
+    let read = std::io::BufRead::read_until(&mut std::io::stdin().lock(), b'\n', &mut bytes)?;
+    line.push_str(&brush_core::bytes::decode(&bytes));
+    Ok(read)
 }

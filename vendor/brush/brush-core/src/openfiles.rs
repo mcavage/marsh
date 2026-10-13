@@ -267,6 +267,14 @@ impl TryFrom<OpenFile> for Stdio {
 impl std::io::Read for OpenFile {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         match self {
+            // Read the descriptor itself: the standard library's buffer would take
+            // input meant for the commands that follow (`read -n 1; cat`).
+            #[cfg(unix)]
+            Self::Stdin(f) => {
+                use std::os::fd::AsFd as _;
+                nix::unistd::read(f.as_fd(), buf).map_err(std::io::Error::from)
+            }
+            #[cfg(not(unix))]
             Self::Stdin(f) => f.read(buf),
             Self::Stdout(_) => Err(std::io::Error::other(
                 error::ErrorKind::OpenFileNotReadable("stdout"),
@@ -287,7 +295,44 @@ impl std::io::Read for OpenFile {
 }
 
 impl std::io::Write for OpenFile {
+    /// Shell text written here becomes the bytes it stands for (see
+    /// [`crate::bytes`]).
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let std::borrow::Cow::Owned(bytes) = crate::bytes::encode_output(buf) {
+            self.write_raw_all(&bytes)?;
+            return Ok(buf.len());
+        }
+        self.write_raw(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Stdin(_) => Ok(()),
+            Self::Stdout(f) => f.flush(),
+            Self::Stderr(f) => f.flush(),
+            Self::File(f) => f.as_ref().flush(),
+            Self::PipeReader(_) => Ok(()),
+            Self::PipeWriter(writer) => writer.as_ref().flush(),
+            Self::Stream(s) => s.flush(),
+        }
+    }
+}
+
+impl OpenFile {
+    fn write_raw_all(&mut self, mut bytes: &[u8]) -> std::io::Result<()> {
+        while !bytes.is_empty() {
+            match self.write_raw(bytes) {
+                Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
+                Ok(count) => bytes = &bytes[count..],
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    fn write_raw(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        use std::io::Write as _;
         match self {
             Self::Stdin(_) => Err(std::io::Error::other(
                 error::ErrorKind::OpenFileNotWritable("stdin"),
@@ -302,18 +347,6 @@ impl std::io::Write for OpenFile {
             )),
             Self::PipeWriter(writer) => writer.as_ref().write(buf),
             Self::Stream(s) => s.write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        match self {
-            Self::Stdin(_) => Ok(()),
-            Self::Stdout(f) => f.flush(),
-            Self::Stderr(f) => f.flush(),
-            Self::File(f) => f.as_ref().flush(),
-            Self::PipeReader(_) => Ok(()),
-            Self::PipeWriter(writer) => writer.as_ref().flush(),
-            Self::Stream(s) => s.flush(),
         }
     }
 }

@@ -1,3 +1,4 @@
+use crate::bytes::ToShellText as _;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -231,7 +232,7 @@ pub(crate) fn init_well_known_vars(
                 shell
                     .directory_stack()
                     .iter()
-                    .map(|p| p.to_string_lossy().to_string())
+                    .map(|p| p.to_shell_text().to_string())
                     .collect::<Vec<_>>()
                     .into()
             },
@@ -328,7 +329,7 @@ pub(crate) fn init_well_known_vars(
         let histfile = home_dir.join(".brush_history");
         shell.env_mut().set_global(
             "HISTFILE",
-            ShellVariable::new(ShellValue::String(histfile.to_string_lossy().to_string())),
+            ShellVariable::new(ShellValue::String(histfile.to_shell_text().to_string())),
         )?;
     }
 
@@ -338,7 +339,7 @@ pub(crate) fn init_well_known_vars(
         ShellVariable::new(
             sys::network::get_hostname()
                 .unwrap_or_default()
-                .to_string_lossy()
+                .to_shell_text()
                 .to_string(),
         ),
     )?;
@@ -470,7 +471,7 @@ pub(crate) fn init_well_known_vars(
         if let Some(default_shell) = sys::users::get_current_user_default_shell() {
             shell.env_mut().set_global(
                 "SHELL",
-                ShellVariable::new(default_shell.to_string_lossy().to_string()),
+                ShellVariable::new(default_shell.to_shell_text().to_string()),
             )?;
         }
     }
@@ -527,7 +528,7 @@ pub(crate) fn init_well_known_vars(
     // we inherited an out-of-sync version of the variable. Future updates
     // will be handled by set_working_dir().
     //
-    let pwd = shell.working_dir().to_string_lossy().to_string();
+    let pwd = shell.working_dir().to_shell_text().to_string();
     let mut pwd_var = ShellVariable::new(pwd);
     pwd_var.export();
     shell.env_mut().set_global("PWD", pwd_var)?;

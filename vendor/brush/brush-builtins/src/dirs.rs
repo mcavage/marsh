@@ -1,3 +1,4 @@
+use brush_core::bytes::ToShellText as _;
 use clap::Parser;
 use std::io::Write;
 
@@ -80,7 +81,7 @@ impl builtins::Command for DirsCommand {
                     write!(context.stdout(), "{i:2}  ")?;
                 }
 
-                let mut dir_str = dir.to_string_lossy().to_string();
+                let mut dir_str = dir.to_shell_text().to_string();
 
                 if !self.tilde_long {
                     dir_str = context.shell.tilde_shorten(dir_str);

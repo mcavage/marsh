@@ -1,5 +1,6 @@
 //! Word expansion utilities.
 
+use crate::bytes::ToShellText as _;
 use std::borrow::Cow;
 use std::cmp::min;
 use std::io::Write as _;
@@ -428,11 +429,9 @@ impl ExpansionPiece {
         }
     }
 
-    const fn len(&self) -> usize {
-        match self {
-            Self::Unsplittable(s) => s.len(),
-            Self::Splittable(s) | Self::Literal(s) => s.len(),
-        }
+    /// The number of bytes the piece stands for.
+    fn len(&self) -> usize {
+        crate::bytes::byte_len(self.as_str())
     }
 
     fn make_unsplittable(self) -> Self {
@@ -1060,9 +1059,9 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
                     s.as_str(),
                     escape::EscapeExpansionMode::AnsiCQuotes,
                 )?;
-                Expansion::from(ExpansionPiece::Unsplittable(
-                    String::from_utf8_lossy(expanded.as_slice()).into_owned(),
-                ))
+                Expansion::from(ExpansionPiece::Unsplittable(crate::bytes::decode_vec(
+                    expanded,
+                )))
             }
             brush_parser::word::WordPiece::DoubleQuotedSequence(pieces)
             | brush_parser::word::WordPiece::GettextDoubleQuotedSequence(pieces) => {
@@ -1126,7 +1125,8 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
                 if cmd_output.contains('\0') {
                     writeln!(
                         self.params.stderr(self.shell),
-                        "warning: command substitution: ignored null byte in input",
+                        "{}warning: command substitution: ignored null byte in input",
+                        self.shell.diagnostic_prefix()
                     )?;
                     cmd_output.retain(|c| c != '\0');
                 }
@@ -1148,7 +1148,8 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
                     if value.contains('\0') {
                         writeln!(
                             self.params.stderr(self.shell),
-                            "warning: command substitution: ignored null byte in input",
+                            "{}warning: command substitution: ignored null byte in input",
+                            self.shell.diagnostic_prefix()
                         )?;
                         value.retain(|c| c != '\0');
                     }
@@ -1211,7 +1212,7 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
         match tilde_expr {
             brush_parser::word::TildeExpr::Home => {
                 if let Some(home_dir) = self.shell.home_dir() {
-                    Ok(Cow::Owned(home_dir.to_string_lossy().to_string()))
+                    Ok(Cow::Owned(home_dir.to_shell_text().to_string()))
                 } else {
                     Err(error::ErrorKind::TildeWithoutValidHome.into())
                 }
@@ -1219,11 +1220,11 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
             brush_parser::word::TildeExpr::UserHome(username) => {
                 Ok(sys::users::get_user_home_dir(username).map_or_else(
                     || Cow::Owned(std::format!("~{username}")),
-                    |p| Cow::Owned(p.to_string_lossy().to_string()),
+                    |p| Cow::Owned(p.to_shell_text().to_string()),
                 ))
             }
             brush_parser::word::TildeExpr::WorkingDir => {
-                Ok(self.shell.working_dir().to_string_lossy())
+                Ok(self.shell.working_dir().to_shell_text())
             }
             brush_parser::word::TildeExpr::OldWorkingDir => {
                 if let Some(old_pwd) = self.shell.env_str("OLDPWD") {
@@ -1236,23 +1237,23 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
                 let dir_stack_count = self.shell.directory_stack().len();
 
                 if let Some(dir) = self.shell.directory_stack().get(*n) {
-                    Ok(dir.to_string_lossy())
+                    Ok(dir.to_shell_text())
                 } else if *n == dir_stack_count {
-                    Ok(self.shell.working_dir().to_string_lossy())
+                    Ok(self.shell.working_dir().to_shell_text())
                 } else {
                     Ok(Cow::Owned(std::format!("~-{n}")))
                 }
             }
             brush_parser::word::TildeExpr::NthDirFromTopOfDirStack { n, plus_used } => {
                 if *n == 0 {
-                    return Ok(self.shell.working_dir().to_string_lossy());
+                    return Ok(self.shell.working_dir().to_shell_text());
                 }
 
                 let dir_stack_count = self.shell.directory_stack().len();
                 if dir_stack_count >= *n
                     && let Some(dir) = self.shell.directory_stack().get(dir_stack_count - *n)
                 {
-                    return Ok(dir.to_string_lossy());
+                    return Ok(dir.to_shell_text());
                 }
 
                 let plus_or_nothing = if *plus_used { "+" } else { "" };
@@ -2239,7 +2240,7 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
             brush_parser::word::ParameterTransformOp::ExpandEscapeSequences => {
                 let (result, _) =
                     escape::expand_backslash_escapes(s, escape::EscapeExpansionMode::AnsiCQuotes)?;
-                Ok(String::from_utf8_lossy(result.as_slice()).into_owned())
+                Ok(crate::bytes::decode_vec(result))
             }
             brush_parser::word::ParameterTransformOp::PossiblyQuoteWithArraysExpanded {
                 separate_words: _separate_words,

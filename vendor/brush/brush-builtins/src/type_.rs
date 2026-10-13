@@ -1,3 +1,4 @@
+use brush_core::bytes::ToShellText as _;
 use std::io::Write;
 
 use clap::Parser;
@@ -80,7 +81,7 @@ impl builtins::Command for TypeCommand {
                         }
                         Resolved::File { path, .. } => {
                             if self.show_path_only || self.force_path_search {
-                                writeln!(context.stdout(), "{}", path.to_string_lossy())?;
+                                writeln!(context.stdout(), "{}", path.to_shell_text())?;
                             } else {
                                 writeln!(context.stdout(), "file")?;
                             }
@@ -94,7 +95,7 @@ impl builtins::Command for TypeCommand {
                         Resolved::File { path, .. }
                             if self.show_path_only || self.force_path_search =>
                         {
-                            writeln!(context.stdout(), "{}", path.to_string_lossy())?;
+                            writeln!(context.stdout(), "{}", path.to_shell_text())?;
                         }
                         _ => lookup::describe(context.stdout(), name, &resolved_type)?,
                     }

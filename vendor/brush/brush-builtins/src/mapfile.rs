@@ -139,9 +139,7 @@ impl MapFileCommand {
 
             loop {
                 match input_file.read(&mut buf) {
-                    Ok(0) => break,                                         // End of input
-                    Ok(1) if buf[0] == b'\x03' => break,                    // Ctrl+C
-                    Ok(1) if buf[0] == b'\x04' && line.is_empty() => break, // Ctrl+D
+                    Ok(0) => break, // End of input
                     Ok(1) => {
                         let byte = buf[0];
                         line.push(byte);
@@ -168,7 +166,11 @@ impl MapFileCommand {
                 line.pop();
             }
 
-            let line_str = String::from_utf8_lossy(&line).to_string();
+            // A shell value ends at its first NUL, as in Bash.
+            if let Some(end) = line.iter().position(|byte| *byte == 0) {
+                line.truncate(end);
+            }
+            let line_str = brush_core::bytes::decode_vec(line);
 
             entries.push((None, line_str));
         }

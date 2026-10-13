@@ -1,5 +1,6 @@
 //! Implements programmable command completion support.
 
+use crate::bytes::ToShellText as _;
 use clap::ValueEnum;
 use itertools::Itertools;
 use std::{
@@ -577,7 +578,7 @@ impl Spec {
                 CompleteAction::HostName => {
                     // N.B. We only retrieve one hostname.
                     if let Ok(name) = sys::network::get_hostname() {
-                        let name = name.to_string_lossy();
+                        let name = name.to_shell_text();
                         if name.starts_with(token) {
                             candidates.push(name.to_string());
                         }
@@ -1167,7 +1168,7 @@ impl Config {
                     if let Some(spec) = shell
                         .completion_config()
                         .commands
-                        .get(&file_name.to_string_lossy().to_string())
+                        .get(&file_name.to_shell_text().to_string())
                     {
                         found_spec = Some(spec);
                     }
@@ -1274,7 +1275,7 @@ fn get_external_command_completions(
         )
         .filter_map(|path| {
             path.file_name()
-                .map(|name| name.to_string_lossy().into_owned())
+                .map(|name| name.to_shell_text().into_owned())
         })
 }
 
