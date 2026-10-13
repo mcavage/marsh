@@ -521,6 +521,16 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   `REPLY`. `exit`, `break` and `continue` end the enclosing command
   (`ErrorKind::SubstitutionControlFlow`). Covered by
   `function_substitutions_run_in_the_current_shell`.
+- `0072` treats NUL bytes in shell input as Bash does. The script, standard
+  input and interactive line readers drop them. A script run by the shell is
+  refused as binary (Bash's `check_binary_file`: a NUL on the first line, or
+  the first two after `#!`, within 80 bytes) with status 126 and no `EXIT`
+  trap; an ENOEXEC file run as a command or by `exec` is checked on its first
+  128 bytes in the child before the shell is exec'd on it. `.` and startup
+  files follow `_evalfile`, which keeps every second of consecutive NULs and
+  stops at the first one left; `.` refuses a file with more than 256. A
+  syntax error in a sourced file fails only `.` (it was fatal), and
+  `printf -v` stops at a NUL. Covered by `nul_bytes_in_shell_input_follow_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

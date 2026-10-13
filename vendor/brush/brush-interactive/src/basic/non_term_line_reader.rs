@@ -18,6 +18,8 @@ impl super::LineReader for NonTermLineReader {
         let bytes_read = std::io::stdin()
             .read_line(&mut input)
             .map_err(ShellError::InputError)?;
+        // Bash ignores NUL bytes in its input.
+        input.retain(|c| c != '\0');
 
         if bytes_read == 0 {
             Ok(ReadResult::Eof)

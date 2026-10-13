@@ -78,3 +78,25 @@ impl From<FailingReaderWriter> for openfiles::OpenFile {
         Self::Stream(Box::new(frw))
     }
 }
+
+/// Bash's `check_binary_file`: an ELF header, or a NUL in the sample's first
+/// line (its first two when it starts with `#!`).
+pub(crate) fn is_binary_sample(sample: &[u8]) -> bool {
+    if sample.starts_with(b"\x7fELF") {
+        return true;
+    }
+    let mut lines = if sample.starts_with(b"#!") { 2 } else { 1 };
+    for byte in sample {
+        match byte {
+            b'\n' => {
+                lines -= 1;
+                if lines == 0 {
+                    return false;
+                }
+            }
+            0 => return true,
+            _ => {}
+        }
+    }
+    false
+}
