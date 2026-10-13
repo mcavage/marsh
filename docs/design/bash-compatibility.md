@@ -1,9 +1,9 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 79 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 63 fix Bash
-compatibility: redirection expansion order, job control, job lines and `disown`, function substitutions, NUL bytes in input, byte strings that are not UTF-8, pattern substitution, interactive shells without a terminal, signals and traps, `wait`, aliases,
+`vendor/brush/UPSTREAM_REVISION`) plus the 80 patches in
+[`docs/upstream/brush/`](../upstream/brush/README.md). 64 fix Bash
+compatibility: `getopts` and `OPTIND`, redirection expansion order, job control, job lines and `disown`, function substitutions, NUL bytes in input, byte strings that are not UTF-8, pattern substitution, interactive shells without a terminal, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
 formats, startup files, option order, field splitting, `read`, `[[ ]]`
 patterns, prompts, and input typed ahead at the prompt. The other 16 add marsh's registered
@@ -30,7 +30,7 @@ The focused executable corpus covers these regressions:
 | Bytes that are not UTF-8 | Arguments, `-c` and script text, standard input, command substitution, the environment, `$'\NNN'`, `echo -e`, `printf` (format, arguments, `-v`), external arguments and environment, `read` and `mapfile` (byte by byte, leaving the rest of the input unread), here-documents, and file names in globs, redirections, `cd` and command names keep every byte; `${#v}` counts bytes |
 | NUL bytes in input | Dropped from scripts, standard input and interactive input; a script whose first line (two after `#!`) has a NUL within 80 bytes is refused (`NAME: PATH: cannot execute binary file`, 126, no `EXIT` trap), within 128 bytes for a file run as a command or by `exec` (`cannot execute binary file: Exec format error`); `.` and startup files remove NULs as Bash's `_evalfile` does (every second of consecutive NULs stays and ends the text) and `.` refuses more than 256; a syntax error in a sourced file fails only `.`; `printf -v` stops at a NUL |
 | Function substitutions | Bash 5.3 `${ cmd; }` runs in the current shell (side effects persist, `local` and `return` work, positional parameters are shared, `exit` exits) and yields its output without trailing newlines; `${\| cmd; }` yields a local `REPLY`; the closing brace counts only in command position (`${ echo x}y; }`, `${ echo hi;}x`); nested substitutions, groups, here-documents, double quotes and here-document bodies; xtrace depth |
-| Common idioms | Arrays and slices, `printf %q`, `read -r -a`, `read -d ''`, `read -t` end of file versus timeout, `printf '%(fmt)T'`, `((count[$key]++))`, `mapfile`, `getopts`, `${x//a/b}`, `${x^^}`, `${x@Q}`, `${!prefix@}`, `BASH_REMATCH`, `pipefail` with `||`, here-strings, `<( )`, brace sequences, nested `( ( ) )` |
+| Common idioms | Arrays and slices, `printf %q`, `read -r -a`, `read -d ''`, `read -t` end of file versus timeout, `printf '%(fmt)T'`, `((count[$key]++))`, `mapfile`, `getopts` (and `OPTIND=1` restarting it), `${x//a/b}`, `${x^^}`, `${x@Q}`, `${!prefix@}`, `BASH_REMATCH`, `pipefail` with `||`, here-strings, `<( )`, brace sequences, nested `( ( ) )` |
 | Job ownership | Real-PID `$!` for background lists, `jobs -p`/`-l`, inherited `jobs` metadata in pipelines and substitutions, cleared explicit/background subshell jobs, saved PID statuses and missing-child status 127; `disown` (`-a`, `-h`, `-r`, `%N`, `%name`, `%?name`, PIDs) with Bash's diagnostics, and jobs collected by `wait` kept listed until the next `jobs`, `wait` or process; `huponexit` hangs up jobs not marked by `disown -h` |
 | Interactive job lines (PTY) | The launch line is `[1] 467` (no `+`, no tab); completion notifications are `[1]+  Done<pad>CMD` and `[1]+  Exit 3<pad>CMD` with Bash's 27-column state field; `jobs` lists `[1]-  Running<pad>CMD &` with one `+` and one `-`; job numbers restart at one past the highest job still listed. Divergence: a background job killed by a signal is reported `Exit 143`, where Bash names the signal (`Terminated`) |
 | Descriptors and pipelines | `exec {fd}>file` allocation from 10 and `{fd}>&-` closure, ordered redirections, closed stdio, inherited high descriptors and later closure, mixed builtin/function/external stages, launch-time `pipefail`, canceled waits and polling |
@@ -54,7 +54,7 @@ One explicit oracle-version divergence is classified: command-substitution
 marsh's exact `127`; the parent's subsequent wait must still return its child
 status. Candidate failures are not normalized away.
 
-The current corpus has 62 differential test functions (all enabled), a split
+The current corpus has 63 differential test functions (all enabled), a split
 `PIPESTATUS` check,
 and 55 smoke journeys (53 on Linux, where two macOS `script(1)` job-control
 journeys are compiled out; 54 on macOS, without one that reads `/proc`), run on macOS ARM64 with Rust
@@ -241,7 +241,6 @@ behavior that needs more than a small Brush patch.
 | PROMPT | Prompt strings get quote removal and brace expansion (`'"` and `{a,b}`), `\7`-style short octal escapes and `\001`/`\002` are treated differently, `\w` does not make control characters visible (`^A`), `strftime` conversions are chrono's (`%f`) | `prompt` | Brush's two-pass prompt expansion |
 | READ | `read` without `-r` treats a backslash-escaped IFS character as a delimiter; `read -t 0` at end of file reports ready; `read -n 1` from a terminal returns nothing for `^D` | `byte-builtins`, `readiness` | `read` builtin details |
 | PRINTF | `%b` drops the backslash of `\"`, `\c` in `%b` does not stop all output, empty arguments to numeric conversions are not errors | `byte-builtins` | `printf` details |
-| GETOPTS | `getopts` ignores `OPTIND` changes between calls | `byte-builtins` | Parser state kept outside `OPTIND` |
 | MAPFILE-CALLBACK | `mapfile -C`/`-c` are unimplemented | `byte-builtins` | Not implemented |
 | UNSET-READONLY | `unset a b` stops at a readonly `a` | `byte-builtins` | Error handling stops the builtin |
 | ECHO-XPG | `echo` under `xpg_echo` and posix mode handles options and escapes differently | `byte-builtins` | Not implemented |

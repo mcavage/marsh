@@ -121,14 +121,16 @@ impl builtins::Command for GetOptsCommand {
             .and_then(|s| brush_core::int_utils::parse::<i32>(s.as_ref(), 10).ok())
             .unwrap_or(1);
 
-        // Detect external OPTIND modifications (e.g., `OPTIND=1` to restart
-        // parsing). If the current OPTIND differs from what we last set, clear
-        // the internal char index so we don't resume mid-arg.
+        // As in Bash, any assignment to OPTIND since the last call (even of the
+        // value it had, `OPTIND=1`) restarts parsing at that argument: clear
+        // the internal char index so we don't resume mid-cluster.
         let last_optind = context
             .shell
             .env_str(VAR_GETOPTS_LAST_OPTIND)
-            .and_then(|s| s.parse::<i32>().ok());
-        if last_optind != Some(next_index_signed) {
+            .map(|s| s.into_owned());
+        // Only OPTIND=1 (or less) restarts parsing: another value takes effect
+        // once the cluster being parsed (`-xyz`) is done, as in Bash.
+        if last_optind != Some(optind_record(&context)) && next_index_signed <= 1 {
             context.shell.env_mut().unset(VAR_GETOPTS_NEXT_CHAR_INDEX)?;
         }
 
@@ -175,7 +177,27 @@ fn parse_next_option<SE: brush_core::ShellExtensions>(
         });
     }
 
-    let arg = args_to_parse[next_index - 1].as_str();
+    // Inside a cluster, the argument is the cluster's, even if OPTIND changed.
+    let position = context
+        .shell
+        .env_str(VAR_GETOPTS_NEXT_CHAR_INDEX)
+        .and_then(|s| {
+            let (arg, char) = s.split_once(':')?;
+            Some((arg.parse::<usize>().ok()?, char.parse::<usize>().ok()?))
+        });
+    let arg_index = position.map_or(next_index, |(arg, _)| arg);
+    let Some(arg) = args_to_parse
+        .get(arg_index.wrapping_sub(1))
+        .map(String::as_str)
+    else {
+        context.shell.env_mut().unset(VAR_GETOPTS_NEXT_CHAR_INDEX)?;
+        return Ok(GetOptsResult {
+            variable_value: String::from("?"),
+            optarg: None,
+            optind: args_to_parse.len() + 1,
+            exit_code: ExecutionResult::general_error(),
+        });
+    };
 
     // See if this is an option.
     if !arg.starts_with('-') || arg == "--" || arg == "-" {
@@ -193,12 +215,7 @@ fn parse_next_option<SE: brush_core::ShellExtensions>(
     }
 
     // Figure out how far into this option we are.
-    let mut next_char_index = context
-        .shell
-        .env_str(VAR_GETOPTS_NEXT_CHAR_INDEX)
-        .map_or(DEFAULT_NEXT_CHAR_INDEX, |s| {
-            s.parse().unwrap_or(DEFAULT_NEXT_CHAR_INDEX)
-        });
+    let mut next_char_index = position.map_or(DEFAULT_NEXT_CHAR_INDEX, |(_, char)| char);
 
     // Find the char. If the index is stale (exceeds this arg's length),
     // reset to the default index, mirroring bash behavior.
@@ -255,7 +272,10 @@ fn parse_next_option<SE: brush_core::ShellExtensions>(
         // and request that OPTIND not be updated.
         context.shell.env_mut().update_or_add(
             VAR_GETOPTS_NEXT_CHAR_INDEX,
-            variables::ShellValueLiteral::Scalar((next_char_index + 1).to_string()),
+            variables::ShellValueLiteral::Scalar(std::format!(
+                "{arg_index}:{}",
+                next_char_index + 1
+            )),
             |v| {
                 v.hide_from_enumeration();
                 Ok(())
@@ -371,14 +391,15 @@ fn update_variables<SE: brush_core::ShellExtensions>(
     let optind_str = result.optind.to_string();
     context.shell.env_mut().update_or_add(
         "OPTIND",
-        variables::ShellValueLiteral::Scalar(optind_str.clone()),
+        variables::ShellValueLiteral::Scalar(optind_str),
         |_| Ok(()),
         brush_core::env::EnvironmentLookup::Anywhere,
         brush_core::env::EnvironmentScope::Global,
     )?;
+    let record = optind_record(context);
     context.shell.env_mut().update_or_add(
         VAR_GETOPTS_LAST_OPTIND,
-        variables::ShellValueLiteral::Scalar(optind_str),
+        variables::ShellValueLiteral::Scalar(record),
         |v| {
             v.hide_from_enumeration();
             Ok(())
@@ -399,4 +420,21 @@ fn is_opterr_enabled<SE: brush_core::ShellExtensions>(
         .shell
         .env_str("OPTERR")
         .is_none_or(|s| s.parse::<i64>().unwrap_or(1) != 0)
+}
+
+/// OPTIND's value and assignment stamp, which change when anything assigns it.
+fn optind_record<SE: brush_core::ShellExtensions>(
+    context: &brush_core::ExecutionContext<'_, SE>,
+) -> String {
+    context
+        .shell
+        .env()
+        .get("OPTIND")
+        .map_or_else(String::new, |(_, var)| {
+            std::format!(
+                "{}:{}",
+                var.value().to_cow_str(context.shell),
+                var.assignment_stamp()
+            )
+        })
 }

@@ -103,13 +103,14 @@ Patch `0076` expands redirections after assignments, and those of a
 command that runs as a process in a copy of the shell.
 Patch `0077` gives each `fanout` branch one process group that a stopped
 branch kills whole.
+Patch `0078` makes `getopts` notice every assignment to OPTIND.
 
 This directory contains only the runtime crate source, manifests, licenses,
 and build metadata needed by marsh. Upstream integration tests, snapshots,
 examples, benches, and development tooling are intentionally omitted. Each
 local delta is covered by focused tests in `crates/marsh/tests/smoke.rs` or,
 for `0010`, `0012`-`0016`, `0018`-`0032`, `0036`, `0038`, `0039`, `0042`,
-`0052`, `0053`, `0055`-`0067`, and `0070`-`0076`,
+`0052`, `0053`, `0055`-`0067`, and `0070`-`0078`,
 `crates/marsh/tests/bash_audit.rs` (`0017`, `0036`, `0037`, `0040`, `0041`, `0043`, `0044`, `0054`, `0068`, and `0069` are in `smoke.rs`, and `0070` also is; `0033` and `0034` are in `split_join.rs` and `bash_audit.rs`, with
 parser cases in `brush-parser/src/parser/tests/composition.rs`). The earlier patch series was
 also checked against the full upstream compatibility suite

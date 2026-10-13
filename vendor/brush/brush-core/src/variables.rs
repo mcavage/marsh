@@ -29,7 +29,13 @@ pub struct ShellVariable {
     treat_as_integer: bool,
     /// Whether or not the variable should be treated as a name reference.
     treat_as_nameref: bool,
+    /// Distinct for every assignment (see [`ShellVariable::assignment_stamp`]).
+    #[cfg_attr(feature = "serde", serde(default))]
+    stamp: u64,
 }
+
+/// Source of [`ShellVariable::assignment_stamp`] values.
+static ASSIGNMENTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Kind of transformation to apply to a variable's value when it is updated.
 #[derive(Clone, Copy, Debug)]
@@ -56,6 +62,7 @@ impl Default for ShellVariable {
             trace: false,
             treat_as_integer: false,
             treat_as_nameref: false,
+            stamp: 0,
         }
     }
 }
@@ -71,6 +78,12 @@ impl ShellVariable {
             value: value.into(),
             ..Self::default()
         }
+    }
+
+    /// A value that changes with every assignment to the variable, even of
+    /// the value it already has (`getopts` notices `OPTIND=1` this way).
+    pub const fn assignment_stamp(&self) -> u64 {
+        self.stamp
     }
 
     /// Returns the value associated with the variable.
@@ -237,6 +250,7 @@ impl ShellVariable {
         if self.is_readonly() {
             return Err(error::ErrorKind::ReadonlyVariable.into());
         }
+        self.stamp = ASSIGNMENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
 
         let value = self.convert_value_literal_for_assignment(value);
 

@@ -593,6 +593,12 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   its capture threads instead of joining them, so a stop also reaches a branch
   whose command has exited while a background descendant still writes to its
   output. Covered by `fanout_output_limit_stops_the_branch_process_tree`.
+- `0078` makes `getopts` notice every assignment to OPTIND, even of the
+  value it holds: each variable assignment now gets a distinct stamp
+  (`ShellVariable::assignment_stamp`), which `getopts` records with OPTIND.
+  As in Bash's `sv_optind`, `OPTIND=1` (or less) restarts parsing, and
+  another value takes effect once the cluster being parsed is done. Covered
+  by `getopts_notices_every_assignment_to_optind`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

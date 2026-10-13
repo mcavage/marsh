@@ -2002,3 +2002,26 @@ echo "v=$v"; /bin/echo l >missing/m; echo "status=$?""#;
     assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
     assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
 }
+
+/// `getopts` notices every assignment to OPTIND, even of the value it has:
+/// `OPTIND=1` restarts parsing, and another value takes effect once the
+/// cluster being parsed (`-xyz`) is done.
+#[test]
+fn getopts_notices_every_assignment_to_optind() {
+    for (script, stdout) in [
+        (
+            "set -- -abc; getopts abc v; printf %s \"$v\"; OPTIND=1; getopts abc v; echo \"$v|$OPTIND\"",
+            b"aa|1\n".as_slice(),
+        ),
+        (
+            "set -- -xyz -abc; getopts xyzabc v; printf %s: \"$v\"; OPTIND=2; getopts xyzabc v; printf %s:%s \"$v\" \"$OPTIND\"; getopts xyzabc v; printf :%s:%s \"$v\" \"$OPTIND\"; getopts xyzabc v; echo \":$v:$OPTIND\"",
+            b"x:y:2:z:3:?:3\n",
+        ),
+        (
+            "f() { local OPTIND; getopts ab v; echo \"$v$OPTIND\"; }; set -- -ab; f; f",
+            b"?1\n?1\n",
+        ),
+    ] {
+        differential(script, 0, stdout);
+    }
+}

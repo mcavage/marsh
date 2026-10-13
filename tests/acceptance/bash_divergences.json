@@ -551,14 +551,6 @@
     "terminal-nullable-C.utf8-2a40287c6129-ff-replace-/"
    ]
   }},
-  {"id": "GETOPTS", "summary": "getopts ignores OPTIND changes made between calls", "cases": {
-   "byte-builtins": [
-    "getopts-optind-change-midcluster@C",
-    "getopts-optind-change-midcluster@C.utf8",
-    "getopts-reset-optind@C",
-    "getopts-reset-optind@C.utf8"
-   ]
-  }},
   {"id": "GLOBIGNORE", "summary": "GLOBIGNORE is not implemented", "cases": {
    "tck": [
     "patterns/filename_expansion.yaml#37",
