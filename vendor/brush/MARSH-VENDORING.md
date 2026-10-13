@@ -93,7 +93,8 @@ Patch `0070` implements `disown`, `%name` job specs, Bash's retention of
 jobs collected by `wait` until the next cleanup, and `huponexit`.
 Patch `0071` implements Bash 5.3 function substitutions (`${ cmd; }`,
 `${| cmd; }`); `0071a` keeps a late runtime dispatch of a delivered TERM
-from running its trap again. Patch `0072` treats NUL bytes in shell input as Bash does.
+from running its trap again; `0071b` adds a single-threaded runtime option
+for tests. Patch `0072` treats NUL bytes in shell input as Bash does.
 Patch `0073` keeps byte strings that are not UTF-8 losslessly
 (`brush_core::bytes`). Patch `0074` replaces `${v/pat/rep}` matches as
 Bash's `pat_subst` does. Patch `0075` gives an interactive shell without a

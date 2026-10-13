@@ -1911,3 +1911,30 @@ fn huponexit_hangs_up_jobs_except_those_disowned_with_h() {
         );
     }
 }
+
+/// One TERM runs its trap once. On a single-threaded runtime the runtime only
+/// dispatches a signal when the shell next waits, so `kill -TERM $$` has its
+/// trap run at the command boundary first, from the handler's record, and the
+/// late dispatch reaches the idle input read afterwards; that dispatch must
+/// not run the trap again (patch `0071a`; it printed `TAT`).
+#[cfg(unix)]
+#[test]
+fn a_term_trap_delivered_at_a_command_boundary_runs_once() {
+    use std::io::Write as _;
+    let mut child = common::spawn_group(
+        marsh()
+            .env("MARSH_TEST_CURRENT_THREAD_RUNTIME", "1")
+            .args(["--no-config", "--noprofile", "--norc", "-s"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
+    let mut stdin = child.stdin.take().unwrap();
+    stdin
+        .write_all(b"trap 'printf T' TERM\nkill -TERM $$\nprintf A\n")
+        .unwrap();
+    drop(stdin);
+    let output = common::wait_for_exit(child, "TERM trap once", Duration::from_secs(20));
+    assert_eq!(output.stdout, b"TA", "{:?}", output.stderr);
+    assert_eq!(output.status.code(), Some(0));
+}

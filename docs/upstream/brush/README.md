@@ -529,6 +529,12 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   dispatch only if the handler's record of it is still unconsumed (waits that
   run alongside a command keep counting every dispatch, as several may wait
   at once).
+- `0071b` lets an embedder run the shell on a single-threaded Tokio runtime
+  (`brush_shell::entry::use_current_thread_runtime`), whose signal driver
+  then runs only when the shell waits. The test driver turns it on with
+  `MARSH_TEST_CURRENT_THREAD_RUNTIME`, which makes `0071a`'s late dispatch
+  happen every time: `a_term_trap_delivered_at_a_command_boundary_runs_once`
+  (smoke) printed `TAT` on every run without `0071a`.
 - `0072` treats NUL bytes in shell input as Bash does. The script, standard
   input and interactive line readers drop them. A script run by the shell is
   refused as binary (Bash's `check_binary_file`: a NUL on the first line, or

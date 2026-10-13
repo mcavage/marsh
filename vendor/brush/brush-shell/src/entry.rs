@@ -6,12 +6,22 @@ use crate::brushctl::ShellBuilderBrushBuiltinExt as _;
 use crate::bundled;
 
 static MARSH_EXTENSIONS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether to run on a single-threaded runtime (see [`use_current_thread_runtime`]).
+static CURRENT_THREAD_RUNTIME: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 static MARSH_EXTERNAL_COMMANDS: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
 
 /// Enables the marsh parser and evaluator additions for subsequently created shells.
 /// Embedders must opt in explicitly; ordinary Brush behavior is unchanged.
 pub fn enable_marsh_extensions() {
     MARSH_EXTENSIONS.store(true, std::sync::atomic::Ordering::Release);
+}
+
+/// Runs the shell on a single-threaded Tokio runtime, whose I/O and signal
+/// drivers then only run when the shell waits. Tests use it to make the
+/// runtime's dispatch of a signal come at a known point.
+pub fn use_current_thread_runtime() {
+    CURRENT_THREAD_RUNTIME.store(true, std::sync::atomic::Ordering::Release);
 }
 
 /// Export a session's command directory and authority context to descendants.
@@ -321,7 +331,11 @@ pub fn run_from(mut args: Vec<String>) -> i32 {
     // Run.
     //
     #[cfg(any(unix, windows))]
-    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    let mut builder = if CURRENT_THREAD_RUNTIME.load(std::sync::atomic::Ordering::Acquire) {
+        tokio::runtime::Builder::new_current_thread()
+    } else {
+        tokio::runtime::Builder::new_multi_thread()
+    };
     #[cfg(not(any(unix, windows)))]
     let mut builder = tokio::runtime::Builder::new_current_thread();
 
