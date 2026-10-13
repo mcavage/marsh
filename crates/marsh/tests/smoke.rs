@@ -899,6 +899,9 @@ fn fanout_enforces_prefix_and_combined_output_bounds_before_delivery() {
     assert!(String::from_utf8_lossy(&prefix.stderr).contains("input exceeds 64 MiB"));
 
     // The branch would run for five minutes; collect must stop it at the bound.
+    // Stopping a branch kills its command, not that command's own children, so
+    // the sleep replaces `sh` (a forked `sleep` outlived the test whenever
+    // `head` finished before the bound was seen).
     let child = common::spawn_group(
         composition_shell()
             .args([
@@ -906,7 +909,7 @@ fn fanout_enforces_prefix_and_combined_output_bounds_before_delivery() {
                 "--noprofile",
                 "--norc",
                 "-c",
-                "fanout { noisy: sh -c 'head -c 17825792 /dev/zero; sleep 300' } | collect",
+                "fanout { noisy: sh -c 'head -c 17825792 /dev/zero; exec sleep 300' } | collect",
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()),
