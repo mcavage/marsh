@@ -16,11 +16,11 @@
   </g>
   <text x="146" y="108" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="38" font-weight="700" fill="#ecebe4" letter-spacing="-1">marsh</text>
   <g font-family="'SF Pro Display', -apple-system, 'Helvetica Neue', Arial, sans-serif" font-weight="800" letter-spacing="-6">
-    <text x="66" y="290" font-size="136" fill="#ecebe4">Compose agents</text>
-    <text x="66" y="430" font-size="136" fill="url(#hl)">in Bash.</text>
+    <text x="66" y="290" font-size="112" fill="#ecebe4">A shell for</text>
+    <text x="66" y="430" font-size="112" fill="#c5f467">composing agents.</text>
   </g>
   <rect x="72" y="486" width="760" height="70" rx="14" fill="#070908" stroke="#2a312c" stroke-width="2"/>
   <text x="100" y="531" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="25" fill="#e4e6df" xml:space="preserve"><tspan fill="#6fd6e2">split</tspan> { <tspan fill="#d3a8ff">a:</tspan> <tspan fill="#6fd6e2">claude</tspan> … &amp;&amp; make test; … } | <tspan fill="#6fd6e2">join</tspan></text>
   <text x="1128" y="531" text-anchor="end" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="30" font-weight="600" fill="#c5f467">runmar.sh</text>
-  <text x="1128" y="108" text-anchor="end" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="26" fill="#a3a89f">Code mode for agents</text>
+  <text x="1128" y="108" text-anchor="end" font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif" font-size="26" fill="#a3a89f">Apple Silicon · Linux arm64</text>
 </svg>
