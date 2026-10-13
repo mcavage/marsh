@@ -767,11 +767,23 @@ mod imp {
         } else {
             libc::SIG_DFL
         };
+        // The shell may catch any signal it has a trap for; the child starts
+        // with the default action, as Bash resets traps in a subshell.
         for (signal, handler) in [
             (libc::SIGINT, interrupt),
             (libc::SIGQUIT, interrupt),
             (libc::SIGTERM, libc::SIG_DFL),
             (libc::SIGPIPE, libc::SIG_DFL),
+            (libc::SIGHUP, libc::SIG_DFL),
+            (libc::SIGUSR1, libc::SIG_DFL),
+            (libc::SIGUSR2, libc::SIG_DFL),
+            (libc::SIGALRM, libc::SIG_DFL),
+            (libc::SIGVTALRM, libc::SIG_DFL),
+            (libc::SIGPROF, libc::SIG_DFL),
+            (libc::SIGXCPU, libc::SIG_DFL),
+            (libc::SIGXFSZ, libc::SIG_DFL),
+            (libc::SIGWINCH, libc::SIG_DFL),
+            (libc::SIGURG, libc::SIG_DFL),
         ] {
             let handler = if signals.ignored.contains(&signal) {
                 libc::SIG_IGN

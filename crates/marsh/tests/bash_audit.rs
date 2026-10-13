@@ -2409,3 +2409,16 @@ fn invocation_options_follow_bash_order() {
         assert_eq!(brush.stderr, bash.stderr, "{args:?}: {brush:?}");
     }
 }
+
+/// Any catchable signal can be trapped (the trap runs at the next command
+/// boundary) or ignored with an empty trap; the shell ignores SIGQUIT itself.
+#[test]
+fn every_catchable_signal_can_be_trapped_or_ignored() {
+    differential(
+        r#"for sig in USR1 USR2 HUP ALRM QUIT; do trap "echo got $sig" $sig; kill -$sig $$; trap '' $sig; kill -$sig $$; done
+kill -QUIT $$; trap 'echo T' USR1; ( sleep 0.2; kill -USR1 $$ ) & sleep 1; echo slept; wait; trap - USR1; trap - QUIT; kill -QUIT $$
+trap 'echo W' WINCH; trap - WINCH; kill -WINCH $$; trap - HUP; exec 2>/dev/null; ( kill -HUP $BASHPID; echo unreachable ); echo "status=$?""#,
+        0,
+        b"got USR1\ngot USR2\ngot HUP\ngot ALRM\ngot QUIT\nT\nslept\nstatus=129\n",
+    );
+}

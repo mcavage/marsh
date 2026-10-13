@@ -1,9 +1,9 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 94 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 78 fix Bash
-compatibility: invocation option order, name references to array elements, small builtin details (`set`, `$!`, empty `PATH` entries, `local -`, `@K`), DEBUG and ERR traps, `set -v`, common diagnostics, `CHLD` traps, GLOBIGNORE, `[[ =~ ]]` as POSIX extended regular expressions, negative subscripts, `{fd}` lifetime, posix special-builtin assignments, noninteractive `history`, `read` splitting and assignment, `printf` conversions and errors, `unset` of readonly names, `xpg_echo`, `mapfile -C`, `getopts` and `OPTIND`, redirection expansion order, job control, job lines and `disown`, function substitutions, NUL bytes in input, byte strings that are not UTF-8, pattern substitution, interactive shells without a terminal, signals and traps, `wait`, aliases,
+`vendor/brush/UPSTREAM_REVISION`) plus the 95 patches in
+[`docs/upstream/brush/`](../upstream/brush/README.md). 79 fix Bash
+compatibility: signal traps and SIGHUP, invocation option order, name references to array elements, small builtin details (`set`, `$!`, empty `PATH` entries, `local -`, `@K`), DEBUG and ERR traps, `set -v`, common diagnostics, `CHLD` traps, GLOBIGNORE, `[[ =~ ]]` as POSIX extended regular expressions, negative subscripts, `{fd}` lifetime, posix special-builtin assignments, noninteractive `history`, `read` splitting and assignment, `printf` conversions and errors, `unset` of readonly names, `xpg_echo`, `mapfile -C`, `getopts` and `OPTIND`, redirection expansion order, job control, job lines and `disown`, function substitutions, NUL bytes in input, byte strings that are not UTF-8, pattern substitution, interactive shells without a terminal, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
 formats, startup files, option order, field splitting, `read`, `[[ ]]`
 patterns, prompts, and input typed ahead at the prompt. The other 16 add marsh's registered
@@ -31,6 +31,7 @@ The focused executable corpus covers these regressions:
 | NUL bytes in input | Dropped from scripts, standard input and interactive input; a script whose first line (two after `#!`) has a NUL within 80 bytes is refused (`NAME: PATH: cannot execute binary file`, 126, no `EXIT` trap), within 128 bytes for a file run as a command or by `exec` (`cannot execute binary file: Exec format error`); `.` and startup files remove NULs as Bash's `_evalfile` does (every second of consecutive NULs stays and ends the text) and `.` refuses more than 256; a syntax error in a sourced file fails only `.`; `printf -v` stops at a NUL |
 | Function substitutions | Bash 5.3 `${ cmd; }` runs in the current shell (side effects persist, `local` and `return` work, positional parameters are shared, `exit` exits) and yields its output without trailing newlines; `${\| cmd; }` yields a local `REPLY`; the closing brace counts only in command position (`${ echo x}y; }`, `${ echo hi;}x`); nested substitutions, groups, here-documents, double quotes and here-document bodies; xtrace depth |
 | `[[ =~ ]]` | Matched with the C library's POSIX extended regular expressions, as Bash does (leftmost-longest alternation, the libc's classes, `nocasematch` as `REG_ICASE`), in the locale `LC_ALL`/`LC_CTYPE`/`LC_COLLATE`/`LANG` name; quoted parts keep only ERE special characters escaped, which xtrace shows (`x\[\.]y`); an invalid regex is status 2 with `[[: invalid regular expression ...` and the libc's reason, leaving `BASH_REMATCH`; `&&`/`\|\|` pass the 2 on |
+| Signal traps | Every catchable signal can be trapped (`trap 'cmd' USR1`, `HUP`, `QUIT`, `ALRM`, ...; the trap runs at the next command boundary, after a foreground command) or ignored (`trap '' SIG`); the shell itself ignores SIGQUIT; at an interactive prompt a SIGHUP without a trap saves the history, runs the EXIT trap and ends the shell by the signal, and with a trap runs it (then exits if a line editor was reading); the line the hangup cut short is dropped |
 | `CHLD` traps and GLOBIGNORE | A `CHLD` trap runs once for each child the shell reaps (at the next command boundary, never for the trap's own children, not in subshells); a non-empty GLOBIGNORE removes glob results matching its `:`-separated patterns (whole paths, `*` not crossing `/`), and `.`/`..`, and implies dotglob |
 | Diagnostics | `NAME: command not found`; `${v:?msg}` as `v: msg` (`parameter null or not set`, `parameter not set`); `local` outside a function, invalid identifiers (`` `bad-name=1' ``, `` `e[0]' ``), `declare +a` on an array, `export -f` of a missing function, `read -u` of a closed descriptor, and `help` of unknown topics (only when none matches) as Bash words them |
 | `set -v` | Each input line is written to standard error as it is read, before the commands it completes run (scripts, `-c`, standard input, `.`, `eval` and trap strings; comments and trailing lines too); lines read before `set -v` took effect are not |
@@ -61,7 +62,7 @@ One explicit oracle-version divergence is classified: command-substitution
 marsh's exact `127`; the parent's subsequent wait must still return its child
 status. Candidate failures are not normalized away.
 
-The current corpus has 76 differential test functions (all enabled), a split
+The current corpus has 77 differential test functions (all enabled), a split
 `PIPESTATUS` check,
 and 55 smoke journeys (53 on Linux, where two macOS `script(1)` job-control
 journeys are compiled out; 54 on macOS, without one that reads `/proc`), run on macOS ARM64 with Rust
@@ -247,7 +248,7 @@ behavior that needs more than a small Brush patch.
 | HISTORY-EXPANSION | History expansion (`!!`, `!x`, `:p`) inside double quotes, command substitutions, aliases and pastes, and its error/print-only status, differ | history-input `context-*`, `paste`, `policy` | Partial history expansion |
 | HISTVERIFY | `histverify` and `histreedit` are not implemented | history-input `edit` | Not implemented |
 | STDIN-READAHEAD | A script read from stdin is read ahead, so `exec 0<file` or `exec 0<&-` inside it does not change what the shell reads next | readline `reader-*` | Buffered input reader |
-| HUP | SIGHUP at an interactive prompt neither runs the `EXIT` trap nor saves history | history-input `hup` | Signal handling at the prompt |
+| HUP | A noninteractive shell with an EXIT trap dies by SIGHUP without running it (Bash catches the fatal signals once an EXIT trap is set); a trapped HUP that arrives while a script, or an `-i` shell without line editing, is reading a line runs after that line instead of at once | `history-input` | Signals are delivered at command boundaries |
 | EOF-INCOMPLETE | End of input in the middle of a line of an interactive shell on a pipe: PROMPT_COMMAND and PS2 run a different number of times, and unterminated quotes are reported differently | history-input `eof` | Reader and diagnostics |
 
 ## Run focused comparisons

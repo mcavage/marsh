@@ -14,6 +14,48 @@ pub async fn await_undelivered_term() -> Result<(), crate::error::Error> {
     crate::sys::signal::await_undelivered_term().await
 }
 
+/// Waits for SIGHUP (from then on it is recorded for delivery between commands).
+#[cfg(unix)]
+pub async fn await_hangup() -> Result<(), crate::error::Error> {
+    crate::sys::signal::await_hangup().await
+}
+
+/// Ignores the signals that have empty traps, just before `exec` replaces the
+/// shell, so the program starts with them ignored, as in Bash.
+#[cfg(unix)]
+pub fn ignore_trap_ignored_signals_for_exec() {
+    for signal in 1..65 {
+        if crate::signals::ignored_by_trap(signal) {
+            // SAFETY: installs SIG_IGN, which runs no code.
+            unsafe { libc::signal(signal, libc::SIG_IGN) };
+        }
+    }
+}
+
+/// Makes the shell itself ignore SIGQUIT, as Bash does (its commands still get
+/// the default action): it is caught, and dropped between commands unless
+/// trapped.
+#[cfg(unix)]
+pub fn ignore_quit() {
+    crate::signals::listen(libc::SIGQUIT);
+}
+
+/// Returns (and consumes) whether a SIGHUP was recorded since the last call,
+/// such as one that hung up the terminal while a line was being read.
+#[cfg(unix)]
+pub fn take_pending_hangup() -> bool {
+    crate::signals::take(libc::SIGHUP)
+}
+
+/// Ends the shell for an untrapped SIGHUP, as Bash does: it saves the
+/// history, runs the EXIT trap, and dies by the signal.
+#[cfg(unix)]
+pub async fn die_by_hangup(shell: &mut crate::Shell<impl crate::extensions::ShellExtensions>) -> ! {
+    let _ = shell.save_history();
+    let _ = shell.on_exit().await;
+    crate::subshell::die_by_signal(libc::SIGHUP)
+}
+
 /// Wait for SIGINT without executing shell code in the OS signal handler.
 /// Embedding builtins use this to interrupt an asynchronous wait.
 #[cfg(unix)]
@@ -258,13 +300,18 @@ impl TrapHandlerConfig {
         match signal_type {
             TrapSignal::Signal(signal) => {
                 crate::subshell::restore_trapped_signal(signal as i32);
-                // Catch the signal from now on, so the trap also runs between commands.
-                if matches!(
+                // Catch the signal from now on, so the trap runs between commands
+                // (an empty one ignores it there). CHLD traps count reaped
+                // children instead, and KILL and STOP cannot be caught.
+                if !matches!(
                     signal,
-                    crate::sys::signal::Signal::SIGINT | crate::sys::signal::Signal::SIGTERM
+                    crate::sys::signal::Signal::SIGCHLD
+                        | crate::sys::signal::Signal::SIGKILL
+                        | crate::sys::signal::Signal::SIGSTOP
                 ) {
                     crate::signals::listen(signal as i32);
                 }
+                crate::signals::set_ignored_by_trap(signal as i32, command.is_empty());
             }
             _ => {}
         }
@@ -284,6 +331,10 @@ impl TrapHandlerConfig {
     /// * `signal_type` - The type of signal to remove handlers for.
     pub fn remove_handlers(&mut self, signal_type: TrapSignal) {
         self.generation += 1;
+        #[cfg(unix)]
+        if let TrapSignal::Signal(signal) = signal_type {
+            crate::signals::set_ignored_by_trap(signal as i32, false);
+        }
         self.handlers.remove(&signal_type);
     }
 }

@@ -2,6 +2,14 @@
  "doc": "docs/design/bash-compatibility.md#classified-differential-divergences",
  "divergences": [
   {"id": "BYTES", "summary": "Non-UTF-8 bytes: Brush's words, values and input are UTF-8 text (known bug: rejected, panics, or U+FFFD/Latin-1 re-encoding)", "cases": {
+   "history-input": [
+    "hup:basic-ignored-raw@C",
+    "hup:basic-noedit-ignored-raw@C",
+    "hup:basic-noedit-trapped-raw@C",
+    "hup:reedline-ignored-raw@C",
+    "hup:reedline-noedit-ignored-raw@C",
+    "hup:reedline-noedit-trapped-raw@C"
+   ],
    "readline": [
     "completion-raw-basic@C",
     "completion-raw-basic@C.utf8",
@@ -560,48 +568,12 @@
     "edit:verify-utf8@C"
    ]
   }},
-  {"id": "HUP", "summary": "SIGHUP at an interactive prompt does not run the EXIT trap or save history", "cases": {
+  {"id": "HUP", "summary": "SIGHUP: a noninteractive shell with an EXIT trap dies without running it (Bash catches fatal signals then); a trapped HUP while a script or a non-editing -i shell reads a line runs at the next command boundary, after that line, instead of at once", "cases": {
    "history-input": [
-    "hup:basic-default-ascii@C",
-    "hup:basic-default-raw@C",
-    "hup:basic-ignored-ascii@C",
-    "hup:basic-ignored-raw@C",
-    "hup:basic-noedit-default-ascii@C",
-    "hup:basic-noedit-default-raw@C",
-    "hup:basic-noedit-ignored-ascii@C",
-    "hup:basic-noedit-ignored-raw@C",
-    "hup:basic-noedit-trapped-ascii@C",
-    "hup:basic-noedit-trapped-raw@C",
-    "hup:basic-trapped-ascii@C",
-    "hup:basic-trapped-raw@C",
-    "hup:pipe-edit-default-ascii@C",
-    "hup:pipe-edit-default-raw@C",
-    "hup:pipe-edit-ignored-ascii@C",
-    "hup:pipe-edit-ignored-raw@C",
-    "hup:pipe-edit-trapped-ascii@C",
-    "hup:pipe-edit-trapped-raw@C",
-    "hup:pipe-noedit-default-ascii@C",
-    "hup:pipe-noedit-default-raw@C",
-    "hup:pipe-noedit-ignored-ascii@C",
-    "hup:pipe-noedit-ignored-raw@C",
     "hup:pipe-noedit-trapped-ascii@C",
     "hup:pipe-noedit-trapped-raw@C",
-    "hup:reedline-default-ascii@C",
-    "hup:reedline-default-raw@C",
-    "hup:reedline-ignored-ascii@C",
-    "hup:reedline-ignored-raw@C",
-    "hup:reedline-noedit-default-ascii@C",
-    "hup:reedline-noedit-default-raw@C",
-    "hup:reedline-noedit-ignored-ascii@C",
-    "hup:reedline-noedit-ignored-raw@C",
-    "hup:reedline-noedit-trapped-ascii@C",
-    "hup:reedline-noedit-trapped-raw@C",
-    "hup:reedline-trapped-ascii@C",
-    "hup:reedline-trapped-raw@C",
     "hup:script-default-ascii@C",
     "hup:script-default-raw@C",
-    "hup:script-ignored-ascii@C",
-    "hup:script-ignored-raw@C",
     "hup:script-trapped-ascii@C",
     "hup:script-trapped-raw@C"
    ]
@@ -1055,6 +1027,14 @@
    ]
   }},
   {"id": "STDIN-READAHEAD", "summary": "A script read from stdin is read ahead, so exec 0< or closing stdin does not change the script's input", "cases": {
+   "history-input": [
+    "hup:pipe-edit-default-ascii@C",
+    "hup:pipe-edit-default-raw@C",
+    "hup:pipe-edit-ignored-ascii@C",
+    "hup:pipe-edit-ignored-raw@C",
+    "hup:pipe-edit-trapped-ascii@C",
+    "hup:pipe-edit-trapped-raw@C"
+   ],
    "readline": [
     "reader-close-basic-pty@C",
     "reader-close-basic-stdin@C",

@@ -209,10 +209,34 @@ impl<'a, IB: InputBackend, SE: brush_core::ShellExtensions> InteractiveShell<'a,
         // thread. Keep a TERM receiver active while input is idle so a registered
         // cleanup trap runs even when no further line arrives.
         #[cfg(unix)]
-        let read_result = {
+        let (read_result, watch_hangup) = {
             let term_signal: brush_core::traps::TrapSignal = "TERM".parse()?;
-            let term_trapped = self.shell.lock().await.traps().handles(term_signal);
-            if term_trapped {
+            let hup_signal: brush_core::traps::TrapSignal = "HUP".parse()?;
+            let (term_trapped, watch_hangup, editing) = {
+                let shell = self.shell.lock().await;
+                let hup_ignored = shell
+                    .traps()
+                    .get_handler(hup_signal)
+                    .is_some_and(|handler| handler.command.is_empty());
+                (
+                    shell.traps().handles(term_signal),
+                    shell.options().interactive && !hup_ignored,
+                    shell.options().emacs_mode || shell.options().vi_mode,
+                )
+            };
+            // Like Bash, a hangup at the prompt runs a HUP trap, or else ends the
+            // shell. The line editors block this task while they read, so a task
+            // of its own waits for it.
+            let hangup_watch = watch_hangup.then(|| {
+                let shell = self.shell.clone();
+                tokio::spawn(async move {
+                    if brush_core::traps::await_hangup().await.is_ok() {
+                        let mut shell = shell.lock().await;
+                        Self::on_hangup(&mut shell, editing).await;
+                    }
+                })
+            });
+            let read_result = if term_trapped {
                 tokio::select! {
                     biased;
                     result = brush_core::traps::await_undelivered_term() => {
@@ -233,10 +257,26 @@ impl<'a, IB: InputBackend, SE: brush_core::ShellExtensions> InteractiveShell<'a,
                 }
             } else {
                 self.input.read_line_async(&self.shell, prompt).await?
+            };
+            if let Some(watch) = hangup_watch {
+                watch.abort();
             }
+            (read_result, watch_hangup)
         };
         #[cfg(not(unix))]
         let read_result = self.input.read_line_async(&self.shell, prompt).await?;
+
+        // A hangup can end the read first (the terminal returns what was
+        // typed, or end of file) before the signal is seen above.
+        #[cfg(unix)]
+        if watch_hangup && brush_core::traps::take_pending_hangup() {
+            let mut shell = self.shell.lock().await;
+            let editing = shell.options().emacs_mode || shell.options().vi_mode;
+            Self::on_hangup(&mut shell, editing).await;
+            return Ok(InteractiveExecutionResult::Executed(
+                brush_core::ExecutionResult::new(shell.last_exit_status()),
+            ));
+        }
 
         match read_result {
             ReadResult::Input(read_result) => {
@@ -261,6 +301,29 @@ impl<'a, IB: InputBackend, SE: brush_core::ShellExtensions> InteractiveShell<'a,
                     .set_last_exit_status(result.exit_code.into());
                 Ok(InteractiveExecutionResult::Executed(result))
             }
+        }
+    }
+
+    /// Handles a SIGHUP that arrived at the prompt, as Bash does: without a HUP
+    /// trap the shell saves its history, runs its EXIT trap and dies by the
+    /// signal; with one it runs the trap, and then, if a line editor was
+    /// reading, exits (with the last status); otherwise reading goes on. The line
+    /// being read, which the hangup cut short, is dropped.
+    #[cfg(unix)]
+    async fn on_hangup(shell: &mut brush_core::Shell<SE>, editing: bool) {
+        let Ok(hup_signal) = "HUP".parse::<brush_core::traps::TrapSignal>() else {
+            return;
+        };
+        if !shell.traps().handles(hup_signal) {
+            brush_core::traps::die_by_hangup(shell).await;
+        }
+        let params = shell.default_exec_params();
+        let _ = shell.invoke_trap_handler(hup_signal, &params).await;
+        if editing {
+            let status = shell.last_exit_status();
+            let _ = shell.save_history();
+            let _ = shell.on_exit().await;
+            std::process::exit(i32::from(status));
         }
     }
 

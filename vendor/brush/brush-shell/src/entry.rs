@@ -928,6 +928,10 @@ async fn instantiate_shell_from_args(
     // Build the shell.
     let mut shell = shell.build().await?;
 
+    // Like Bash, the shell ignores SIGQUIT.
+    #[cfg(unix)]
+    brush_core::traps::ignore_quit();
+
     if let Some((path, session)) = MARSH_EXTERNAL_COMMANDS.get() {
         let current = shell.env_str("PATH").map(|value| value.into_owned());
         let value = prepend_external_path(path, current.as_deref());
