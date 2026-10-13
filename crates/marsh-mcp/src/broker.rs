@@ -557,11 +557,23 @@ async fn stop(options: &BrokerOptions, identity: &Result<Identity, String>) -> R
         return Ok(());
     }
     let token = load_token(&options.token_path())?;
+    // The broker removes its endpoint before it exits, but holds the scope
+    // root's lease until then: a replacement started in between cannot take
+    // the lease and never becomes ready. Wait for the process too.
+    // (A broker run in this process, as in tests, ends with its task.)
+    let pid = fs::read_to_string(options.pid_path())
+        .ok()
+        .and_then(|pid| pid.trim().parse::<i32>().ok())
+        .filter(|pid| u32::try_from(*pid).ok() != Some(std::process::id()))
+        .and_then(rustix::process::Pid::from_raw);
     let stream = connect_handshake(options, identity, &token, HandshakePurpose::Stop).await?;
     drop(stream);
     let deadline = tokio::time::Instant::now() + START_TIMEOUT;
     while tokio::time::Instant::now() < deadline {
-        if !options.endpoint().exists() {
+        let exited = pid.is_none_or(|pid| {
+            rustix::process::test_kill_process(pid) == Err(rustix::io::Errno::SRCH)
+        });
+        if !options.endpoint().exists() && exited {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
