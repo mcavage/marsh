@@ -2128,3 +2128,20 @@ printf 'a\cb\n'"#;
     assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
     assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
 }
+
+/// `read` splits as Bash does: a backslash-escaped IFS character is data, IFS
+/// whitespace around one other IFS character is one delimiter (arrays too),
+/// and the last name's trailing IFS whitespace goes even when escaped. `read
+/// -t 0` assigns nothing; a readonly name stops `read` with status 2.
+#[test]
+fn read_splitting_and_assignment_match_bash() {
+    differential(
+        r#"IFS=', '; read a b <<< 'a\ b c'; printf '<%s><%s>' "$a" "$b"; read a b <<< 'a\,b,c'; printf '<%s><%s>\n' "$a" "$b"
+IFS=': '; read -a arr <<< 'a : b\ c::d \ '; printf '[%s]' "${arr[@]}"; echo
+IFS=' '; read x y <<< 'p\  q  \ '; printf '<%s><%s>' "$x" "$y"; read x y <<< 'p q\ '; printf '<%s><%s>\n' "$x" "$y"
+readonly first=one; read -r first second <<< 'a b' 2>/dev/null; printf '<%s><%s>|%s\n' "$first" "$second" "$?"
+v=old; exec <<<data; read -t 0 v; echo "$v $?""#,
+        0,
+        b"<a b><c><a,b><c>\n[a][b c][][d][ ]\n<p ><q><p><q >\n<one><>|2\nold 0\n",
+    );
+}
