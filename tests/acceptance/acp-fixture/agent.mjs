@@ -61,12 +61,15 @@ for await (const line of inputLines) {
         } });
       }
       if (text === "control-flood") {
-        // Stop reading stdin until the caller creates the release file. The
+        // Stop reading stdin until the caller creates the release file, or
+        // exit without reading it if the caller creates the exit file. The
         // 60 s bound only keeps a failed caller from leaving a stuck peer.
         inputLines.pause();
         const release = process.env.MARSH_FIXTURE_RELEASE;
+        const exit = process.env.MARSH_FIXTURE_EXIT;
         const started = Date.now();
         const timer = setInterval(() => {
+          if (exit && fs.existsSync(exit)) process.exit(0);
           if ((release && fs.existsSync(release)) || Date.now() - started > 60000) {
             clearInterval(timer);
             inputLines.resume();

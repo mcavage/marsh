@@ -802,15 +802,9 @@ fn retained_cancel_finishes_started_frame_before_terminal() {
         }
     };
     assert_eq!(report.execution, ExecutionOutcome::Exited { code: 42 });
-    // The cancel also wakes the blocked output writer, so the attempt may
-    // record the interrupted delivery before it reads the cancel itself.
-    assert!(
-        matches!(
-            report.delivery,
-            DeliveryOutcome::Cancelled | DeliveryOutcome::Failed
-        ),
-        "{report:?}"
-    );
+    // The cancel also wakes the blocked output writer; the interrupted
+    // delivery it causes is still reported as the cancel.
+    assert_eq!(report.delivery, DeliveryOutcome::Cancelled, "{report:?}");
     fixture.assert_reaped();
     // Routine attempt cancellation leaves the transport serving.
     write_frame(

@@ -3182,6 +3182,20 @@ impl Server {
         self
     }
 
+    /// Replace the ACP cancel dispatch deadline, which also bounds each
+    /// outbound write to an agent (default 10 seconds), e.g. to prove that
+    /// something other than its expiry ends a blocked cancel.
+    ///
+    /// # Panics
+    /// If the server is already serving.
+    #[must_use]
+    pub fn with_acp_cancel_timeout(mut self, timeout: Duration) -> Self {
+        Arc::get_mut(&mut self.acp)
+            .expect("the ACP manager is configured before serving")
+            .set_cancel_timeout(timeout);
+        self
+    }
+
     /// Replace how long a publication waits for another operation's scope
     /// admission (default 30 seconds).
     #[must_use]

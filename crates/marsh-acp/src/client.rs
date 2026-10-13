@@ -94,6 +94,13 @@ impl PermissionHandler for DefaultDenyPermissionHandler {
     }
 }
 
+/// Bytes of replies to agent requests that may wait for the outbound queue.
+/// The reader never waits for that queue, so an agent that floods requests
+/// while not reading its stdin cannot stop the reader from consuming its
+/// output, including the end of its stream. Past this bound the agent has
+/// left that much unread, and the transport ends.
+const READER_REPLY_SPOOL_BYTES: usize = 16 * 1024 * 1024;
+
 /// Item queued for outbound writing.
 struct OutboundItem {
     message: JsonRpcMessage,
@@ -305,9 +312,37 @@ struct ClientShared {
     closed: CancellationToken,
     dropped_updates: AtomicU64,
     out_of_turn_updates: AtomicU64,
+    reader_replies: Arc<tokio::sync::Semaphore>,
 }
 
 impl ClientShared {
+    /// Queues a reply the reader produced without making the reader wait for
+    /// the writer: a writer stalled behind an agent that is not reading must
+    /// not keep the reader from observing that agent's output and exit.
+    fn reply_from_reader(self: &Arc<Self>, response: JsonRpcResponse) {
+        let message = JsonRpcMessage::Response(response);
+        let size = serde_json::to_vec(&message).map_or(usize::MAX, |bytes| bytes.len());
+        let permit = u32::try_from(size).ok().and_then(|size| {
+            Arc::clone(&self.reader_replies)
+                .try_acquire_many_owned(size)
+                .ok()
+        });
+        let shared = Arc::clone(self);
+        tokio::spawn(async move {
+            let Some(permit) = permit else {
+                tracing::warn!("agent left too many replies unread; ending the ACP transport");
+                shared.terminate_transport().await;
+                return;
+            };
+            // Hold the bytes against the bound until they are written.
+            let (written, wrote) = oneshot::channel();
+            if shared.send_outbound(message, Some(written)).await.is_ok() {
+                let _ = wrote.await;
+            }
+            drop(permit);
+        });
+    }
+
     async fn terminate_transport(&self) {
         // Registration and termination share this lock. A request can either
         // register before the drain or observe termination, never miss both.
@@ -564,6 +599,7 @@ impl AcpClient {
             closed: CancellationToken::new(),
             dropped_updates: AtomicU64::new(0),
             out_of_turn_updates: AtomicU64::new(0),
+            reader_replies: Arc::new(tokio::sync::Semaphore::new(READER_REPLY_SPOOL_BYTES)),
         });
 
         let mut msg_reader = MessageReader::new(reader, config.max_frame_bytes);
@@ -769,9 +805,7 @@ impl AcpClient {
         if method.starts_with("terminal/") {
             let error = JsonRpcError::method_not_found(method);
             let response = JsonRpcResponse::err(req.id, error);
-            let _ = shared
-                .send_outbound(JsonRpcMessage::Response(response), None)
-                .await;
+            shared.reply_from_reader(response);
             return;
         }
 
@@ -779,9 +813,7 @@ impl AcpClient {
         if method.starts_with("fs/") {
             let error = JsonRpcError::method_not_found(method);
             let response = JsonRpcResponse::err(req.id, error);
-            let _ = shared
-                .send_outbound(JsonRpcMessage::Response(response), None)
-                .await;
+            shared.reply_from_reader(response);
             return;
         }
 
@@ -795,9 +827,7 @@ impl AcpClient {
                         "missing permission request params",
                     ),
                 );
-                let _ = shared
-                    .send_outbound(JsonRpcMessage::Response(response), None)
-                    .await;
+                shared.reply_from_reader(response);
                 return;
             };
 
@@ -809,9 +839,7 @@ impl AcpClient {
                         "invalid permission request params",
                     ),
                 );
-                let _ = shared
-                    .send_outbound(JsonRpcMessage::Response(response), None)
-                    .await;
+                shared.reply_from_reader(response);
                 return;
             };
 
@@ -839,9 +867,7 @@ impl AcpClient {
                 };
                 if let Ok(val) = serde_json::to_value(resp_payload) {
                     let response = JsonRpcResponse::ok(req_id, val);
-                    let _ = shared
-                        .send_outbound(JsonRpcMessage::Response(response), None)
-                        .await;
+                    shared.reply_from_reader(response);
                 }
                 return;
             };
@@ -856,9 +882,7 @@ impl AcpClient {
                 };
                 if let Ok(val) = serde_json::to_value(resp_payload) {
                     let response = JsonRpcResponse::ok(req_id, val);
-                    let _ = shared
-                        .send_outbound(JsonRpcMessage::Response(response), None)
-                        .await;
+                    shared.reply_from_reader(response);
                 }
                 return;
             }
@@ -901,9 +925,7 @@ impl AcpClient {
         // Unknown or unsupported agent-to-client method
         let error = JsonRpcError::method_not_found(method);
         let response = JsonRpcResponse::err(req.id, error);
-        let _ = shared
-            .send_outbound(JsonRpcMessage::Response(response), None)
-            .await;
+        shared.reply_from_reader(response);
     }
 
     /// Performs the ACP v1 initialization handshake with the agent.

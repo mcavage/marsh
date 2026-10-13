@@ -835,3 +835,56 @@ async fn agent_terminal_and_filesystem_requests_are_refused() {
         assert_eq!(answer["error"]["code"], -32601, "{method} was not refused");
     }
 }
+
+/// An agent that floods requests while never reading its stdin cannot stall
+/// the client's reader: the reader keeps consuming its output (here, an end of
+/// stream behind the flood), and once the agent has left more than the client's
+/// reply spool unread, the transport ends. Every write deadline is beyond the
+/// test's wait, so only those two can end it.
+#[tokio::test]
+async fn flooding_agent_neither_stalls_the_reader_nor_spools_without_bound() {
+    let config = AcpClientConfig {
+        cancel_timeout: Duration::from_hours(1),
+        ..AcpClientConfig::default()
+    };
+    // Each reply echoes its ~100 KiB method name. The first flood's replies
+    // outnumber the outbound queue but fit the client's 16 MiB spool; the
+    // second flood's do not.
+    let method = format!("future/{}", "x".repeat(100 * 1024));
+    let flood = move |first: u64, count: u64| {
+        let mut lines = String::new();
+        for id in first..first + count {
+            lines.push_str(&json!({"jsonrpc": "2.0", "id": id, "method": method}).to_string());
+            lines.push('\n');
+        }
+        lines
+    };
+
+    // The reader consumes everything behind the flood and sees the agent end.
+    let (client, mut agent) = connected(config.clone(), None).await;
+    let mut ended = client.transport_termination();
+    let first = flood(1, 100);
+    let writer = tokio::spawn(async move {
+        agent.write_raw(first.as_bytes()).await;
+        agent.writer.shutdown().await.unwrap();
+        agent
+    });
+    tokio::time::timeout(CONDITION_DEADLINE, ended.wait_for(|ended| *ended))
+        .await
+        .expect("the reader stalled behind replies the agent never read")
+        .unwrap();
+    drop(writer);
+
+    // The agent keeps writing and never reads: the spool bound ends it.
+    let (client, mut agent) = connected(config, None).await;
+    let mut ended = client.transport_termination();
+    let writer = tokio::spawn(async move {
+        let _ = agent.writer.write_all(flood(1, 200).as_bytes()).await;
+        agent
+    });
+    tokio::time::timeout(CONDITION_DEADLINE, ended.wait_for(|ended| *ended))
+        .await
+        .expect("replies the agent never read were spooled without bound")
+        .unwrap();
+    drop(writer);
+}

@@ -1,7 +1,8 @@
 use super::{
     CleanupOutcome, ControlSource, DeliveryOutcome, ExecutionOutcome, InterruptibleWriter,
     JobStreams, MAX_STREAM_CHUNK, ResourceLimit, SupervisionLimits, Supervisor, ThreadSupervisor,
-    WorkerControl, WorkerError, classify_runtime_exit, reserve_output,
+    WORKER_CONTROL_SPOOL_MESSAGES, WorkerControl, WorkerError, classify_runtime_exit,
+    reserve_output,
 };
 use crate::control::{ControlOwner, Operation};
 use marsh_contracts::{ContainerId, JobSignal};
@@ -168,6 +169,14 @@ impl Supervisor for ThreadSupervisor {
             let pumps_done = state.wait_done && state.streams_done == 2 && state.input_done;
             if pumps_done {
                 if state.stopping.is_some() {
+                    // A stop published since the last control read (the one
+                    // that interrupted delivery is published before it wakes
+                    // the output writers) is the cause to report.
+                    for _ in 0..WORKER_CONTROL_SPOOL_MESSAGES {
+                        if state.control_closed || !state.control(controls, &control_owner) {
+                            break;
+                        }
+                    }
                     break;
                 }
                 match attachment.process.try_wait() {
@@ -268,8 +277,11 @@ impl DrainState {
             self.control_errors = self.control_errors.saturating_add(1);
         }
     }
-    fn control(&mut self, controls: &mut dyn ControlSource, owner: &ControlOwner) {
-        match controls.receive(Duration::ZERO) {
+    /// Handles at most one queued control; returns whether there was one.
+    fn control(&mut self, controls: &mut dyn ControlSource, owner: &ControlOwner) -> bool {
+        let received = controls.receive(Duration::ZERO);
+        let handled = !matches!(received, Ok(None));
+        match received {
             Ok(Some(WorkerControl::Input { bytes })) => {
                 let length = bytes.len();
                 if self.input.is_none() {
@@ -320,6 +332,7 @@ impl DrainState {
             }
             Err(_) => self.fail(DeliveryOutcome::Failed),
         }
+        handled
     }
     fn event(&mut self, event: PumpEvent, controls: &mut dyn ControlSource, writable_limit: u64) {
         match event {

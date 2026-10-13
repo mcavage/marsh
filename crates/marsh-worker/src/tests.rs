@@ -1884,6 +1884,123 @@ fn supervisor_forwards_controls_closes_stdin_and_copies_raw_streams() {
     assert_eq!(state.resizes, [size]);
 }
 
+/// Publishes a Kill at the second input release: the one that begins the
+/// stop after an interrupted delivery, once every other pump has finished.
+/// The first release (container stdin finished, which follows the reported
+/// exit) lets the stdout writer fail. So the stop lands in the window between
+/// the drain's last control read and its end, deterministically.
+struct StopAsTheDrainEnds {
+    releases: usize,
+    stdout_may_fail: Arc<(Mutex<bool>, Condvar)>,
+    stop: Option<WorkerControl>,
+}
+
+impl ControlSource for StopAsTheDrainEnds {
+    fn receive(&mut self, _timeout: Duration) -> Result<Option<WorkerControl>, WorkerError> {
+        Ok(self.stop.take())
+    }
+    fn release_all_input(&mut self) {
+        self.releases += 1;
+        if self.releases == 1 {
+            let (may_fail, changed) = &*self.stdout_may_fail;
+            *may_fail.lock().unwrap() = true;
+            changed.notify_all();
+        } else if self.releases == 2 {
+            self.stop = Some(WorkerControl::Signal {
+                signal: JobSignal::Kill,
+            });
+        }
+    }
+}
+
+/// A delivery that fails once allowed to.
+struct FailsWhenAllowed(Arc<(Mutex<bool>, Condvar)>);
+
+impl Write for FailsWhenAllowed {
+    fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
+        let (may_fail, changed) = &*self.0;
+        let mut allowed = may_fail.lock().unwrap();
+        while !*allowed {
+            allowed = changed.wait(allowed).unwrap();
+        }
+        Err(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "the caller stopped reading",
+        ))
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Completes the modelled container once its stream is finished, so the
+/// exit is reported after this stream's end.
+struct CompletesContainerOnDrop(Arc<RecordingRuntime>);
+
+impl Write for CompletesContainerOnDrop {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for CompletesContainerOnDrop {
+    fn drop(&mut self) {
+        self.0.state.lock().unwrap().complete = true;
+        self.0.changed.notify_all();
+    }
+}
+
+#[test]
+fn a_stop_published_as_the_drain_ends_is_reported_cancelled() {
+    let runtime = Arc::new(RecordingRuntime::default());
+    let stdout_may_fail = Arc::new((Mutex::new(false), Condvar::new()));
+    let mut controls = StopAsTheDrainEnds {
+        releases: 0,
+        stdout_may_fail: Arc::clone(&stdout_may_fail),
+        stop: None,
+    };
+    let attachment = Attachment {
+        stdin: Box::new(io::sink()),
+        stdout: Box::new(Cursor::new(b"output".to_vec())),
+        stderr: Box::new(Cursor::new(Vec::new())),
+        process: Box::new(CancellableMemoryProcess(
+            marsh_runtime::Cancellation::default(),
+        )),
+        control: no_attachment_control(),
+    };
+    let streams = JobStreams {
+        stdout: InterruptibleWriter::new(
+            Box::new(FailsWhenAllowed(stdout_may_fail)),
+            marsh_runtime::Cancellation::default(),
+        ),
+        stderr: InterruptibleWriter::new(
+            Box::new(CompletesContainerOnDrop(Arc::clone(&runtime))),
+            marsh_runtime::Cancellation::default(),
+        ),
+    };
+    let outcome = ThreadSupervisor::default().supervise(
+        runtime,
+        &ContainerId::parse("c".repeat(64)).unwrap(),
+        attachment,
+        &mut controls,
+        streams,
+        SupervisionLimits {
+            wall_time: Duration::from_mins(1),
+            output_bytes: 1024,
+            writable_bytes: 1024,
+        },
+    );
+    assert_eq!(
+        controls.releases, 3,
+        "the stop was not published as modelled"
+    );
+    assert_eq!(outcome.execution, ExecutionOutcome::Exited { code: 7 });
+    assert_eq!(outcome.delivery, DeliveryOutcome::Cancelled);
+}
+
 #[test]
 fn blocked_container_stdin_cannot_prevent_explicit_cancellation() {
     let runtime = Arc::new(RecordingRuntime::default());
