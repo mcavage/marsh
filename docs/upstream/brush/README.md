@@ -756,6 +756,12 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   written, shown after the directory part as written. `-A command` lists
   aliases and leaves out directories and disabled builtins. Covered by
   `compgen_keeps_the_words_spelling`.
+- `0095` keeps `{name}` redirections off descriptors the shell inherited: the
+  descriptors above 2 open at startup (`subshell::inherited_descriptor_open`,
+  recorded with `note_descriptors_before_runtime`) are skipped while they stay
+  open, as Bash skips descriptors in use. Brush allocated from its own table,
+  so with fd 10 inherited, `exec {x}>file` took 10 and clobbered it. Covered by
+  `named_descriptors_skip_inherited_ones`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

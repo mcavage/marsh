@@ -67,6 +67,8 @@ pub(crate) struct Forked {
 }
 
 #[cfg(unix)]
+pub(crate) use imp::inherited_descriptor_open;
+#[cfg(unix)]
 pub(crate) use imp::standard_descriptor_closed_at_startup;
 #[cfg(unix)]
 pub(crate) use imp::{
@@ -78,6 +80,11 @@ pub use imp::{
     mark_standard_descriptor_closed, note_descriptors_after_runtime,
     note_descriptors_before_runtime,
 };
+
+#[cfg(not(unix))]
+pub(crate) const fn inherited_descriptor_open(_fd: i32) -> bool {
+    false
+}
 
 #[cfg(not(unix))]
 /// Records descriptors before the runtime is built (no-op on this platform).
@@ -120,6 +127,16 @@ mod imp {
 
     static SHELL_PID: AtomicU32 = AtomicU32::new(0);
     static DESCRIPTORS_BEFORE_RUNTIME: Mutex<Option<HashSet<RawFd>>> = Mutex::new(None);
+    /// Descriptors above the standard ones that the shell inherited.
+    static INHERITED_DESCRIPTORS: OnceLock<Vec<RawFd>> = OnceLock::new();
+
+    /// Whether `fd` is a descriptor the shell inherited (above 2) that is still
+    /// open: like Bash, `{name}` redirections do not take it.
+    pub(crate) fn inherited_descriptor_open(fd: RawFd) -> bool {
+        INHERITED_DESCRIPTORS.get().is_some_and(|inherited| inherited.contains(&fd))
+            // SAFETY: F_GETFD only inspects the descriptor.
+            && unsafe { libc::fcntl(fd, libc::F_GETFD) } != -1
+    }
     /// The runtime signal socket pair, grouped by socket (each end may have duplicates).
     static SIGNAL_SOCKETS: OnceLock<Option<[Vec<RawFd>; 2]>> = OnceLock::new();
     /// Dispositions a forked child replaced, restored if it traps the signal.
@@ -272,8 +289,10 @@ mod imp {
     /// Records the descriptors open before the embedding builds its Tokio runtime.
     pub fn note_descriptors_before_runtime() {
         let _ = shell_pid();
+        let open = open_descriptors();
+        let _ = INHERITED_DESCRIPTORS.set(open.iter().copied().filter(|fd| *fd > 2).collect());
         if let Ok(mut before) = DESCRIPTORS_BEFORE_RUNTIME.lock() {
-            *before = Some(open_descriptors().into_iter().collect());
+            *before = Some(open.into_iter().collect());
         }
     }
 
