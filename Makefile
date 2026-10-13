@@ -24,7 +24,8 @@ BUILD_CACHE_ID ?= marsh-$(shell pwd -P | cksum | cut -d' ' -f1)
 ACCEPTANCE_EVIDENCE ?=
 ACCEPTANCE_HOST_FEATURES ?=
 # The acceptance fixture Kit: a local `make kit-publish-fixture` output, else
-# the ref fetched by `make fixture-ref` (published by release CI).
+# the ref fetched by `make fixture-ref` (the newest release, nightly or stable,
+# that publishes one).
 FIXTURE_REF_FILE ?= $(TARGET_DIR)/fixture-ref
 ACCEPTANCE_KIT ?= $(shell $(PYTHON) -c 'import json,pathlib; p=pathlib.Path("$(KIT_FIXTURE_COMMANDS)"); r=pathlib.Path("$(FIXTURE_REF_FILE)"); print(json.loads(p.read_text())["fixture"] if p.is_file() else (r.read_text().strip() if r.is_file() else ""))')
 PERF_KIT ?= $(ACCEPTANCE_KIT)
@@ -345,7 +346,10 @@ formula:
 
 fixture-ref:
 	@mkdir -p "$(dir $(FIXTURE_REF_FILE))"
-	curl -fsSL "https://github.com/$(GITHUB_REPOSITORY)/releases/latest/download/fixture-ref.txt" -o "$(FIXTURE_REF_FILE).tmp"
+	@# The newest release that publishes one, nightlies included: dev tests
+	@# want the fixture built from the newest code, and a stable release's
+	@# pinned image is not guaranteed to outlive the next ones.
+	curl -fsSL "$$(curl -fsSL "https://api.github.com/repos/$(GITHUB_REPOSITORY)/releases?per_page=30" | $(PYTHON) -c 'import json,sys; print(next(a["browser_download_url"] for r in json.load(sys.stdin) if not r["draft"] for a in r["assets"] if a["name"] == "fixture-ref.txt"))')" -o "$(FIXTURE_REF_FILE).tmp"
 	@grep -Eq '^[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}$$' "$(FIXTURE_REF_FILE).tmp" || { echo 'make fixture-ref: downloaded file is not an immutable reference' >&2; rm -f "$(FIXTURE_REF_FILE).tmp"; exit 1; }
 	@mv "$(FIXTURE_REF_FILE).tmp" "$(FIXTURE_REF_FILE)"
 	@cat "$(FIXTURE_REF_FILE)"
