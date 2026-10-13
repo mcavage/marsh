@@ -183,7 +183,11 @@ impl DeclareCommand {
         let name = match declaration {
             brush_core::CommandArg::String(s) => s,
             brush_core::CommandArg::Assignment(_) => {
-                writeln!(context.stderr(), "declare: {declaration}: not found")?;
+                writeln!(
+                    context.stderr(),
+                    "{}declare: {declaration}: not found",
+                    context.shell.diagnostic_prefix()
+                )?;
                 return Ok(false);
             }
         };
@@ -231,7 +235,11 @@ impl DeclareCommand {
 
             Ok(true)
         } else {
-            writeln!(context.stderr(), "declare: {name}: not found")?;
+            writeln!(
+                context.stderr(),
+                "{}declare: {name}: not found",
+                context.shell.diagnostic_prefix()
+            )?;
             Ok(false)
         }
     }
@@ -290,14 +298,12 @@ impl DeclareCommand {
 
         // Special-case: `local -`
         if name == "-" && matches!(verb, DeclareVerb::Local) {
-            // TODO(local): `local -` allows shadowing the current `set` options (i.e., $-), with
-            // subsequent updates getting discarded when the current local scope is popped.
-            tracing::warn!("not yet implemented: local -");
+            context.shell.save_set_options_until_return()?;
             return Ok(true);
         }
 
-        // Make sure it's a valid name.
-        if !env::valid_variable_name(name.as_str()) {
+        // Make sure it's a valid name (and, as in Bash, not an empty subscript).
+        if !env::valid_variable_name(name.as_str()) || assigned_index.as_deref() == Some("") {
             writeln!(
                 context.stderr(),
                 "{}{}: `{declaration}': not a valid identifier",

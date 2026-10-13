@@ -2313,3 +2313,36 @@ fn debug_and_err_traps_see_the_command_as_written() {
         b"D:2:printf '[%s]\\n' \"a b\" > /dev/null\nD:3:x=1 y=$(echo 2) true\nD:4:trap - DEBUG\nERR:7\n",
     );
 }
+
+/// Small builtin details from the upstream TCK: `set` with an empty value,
+/// `$!` unset under `set -u`, an empty PATH entry as `./`, `declare 'b[]'`,
+/// `shopt -o` columns, `local -`, `${a[@]@K}`/`@k`, and `exec` without `_`.
+#[test]
+fn small_builtin_details_match_bash() {
+    let directory = tempfile::tempdir().unwrap();
+    write_executable(directory.path().join("prog"), "#!/bin/sh\necho ran\n");
+    let script = r#"q1=; set | grep '^q1='; ( set -u; echo "${!}" ) 2>&1 | sed 's/^[^:]*: line [0-9]*: //'
+PATH=":$PATH"; type prog; command -v prog; hash prog; hash -t prog
+declare 'b[]' 2>/dev/null; echo "s=$?"; shopt -o errexit | od -c | head -1; shopt -o | grep errexit | od -c | head -1
+f() { local -; set -u; }; f; echo "$-"; a=(x y); printf '<%s>' "${a[@]@K}" "${a[@]@k}"; echo
+(exec /usr/bin/env) | grep -c '^_='"#;
+    let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+        let mut command = shell(program);
+        if program != "bash" {
+            command.arg("--no-config");
+        }
+        command
+            .args(["--noprofile", "--norc", "-c", script, "audit"])
+            .current_dir(directory.path())
+            .output()
+            .unwrap()
+    });
+    let [bash, brush] = &outputs;
+    assert!(
+        bash.stdout
+            .starts_with(b"q1=\n!: unbound variable\nprog is ./prog\n./prog\n./prog\ns=1\n"),
+        "Bash: {bash:?}"
+    );
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
+}

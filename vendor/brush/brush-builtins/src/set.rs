@@ -452,12 +452,12 @@ fn display_all(
             continue;
         }
 
-        writeln!(
-            context.stdout(),
-            "{name}={}",
-            var.value()
-                .format(variables::FormatStyle::Basic, context.shell)?,
-        )?;
+        // Bash leaves an empty value unquoted (`v=`).
+        let value = match var.value() {
+            variables::ShellValue::String(value) if value.is_empty() => Default::default(),
+            value => value.format(variables::FormatStyle::Basic, context.shell)?,
+        };
+        writeln!(context.stdout(), "{name}={value}")?;
     }
 
     // Display functions... unless we're in posix compliance mode.

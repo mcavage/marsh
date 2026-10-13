@@ -1714,6 +1714,45 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
                 indirect,
                 op,
             } => {
+                // Like Bash 5.3, `${a[@]@K}` on an array is its subscripts and
+                // quoted values, and `${a[@]@k}` the same as separate words.
+                if let (
+                    ParameterTransformOp::PossiblyQuoteWithArraysExpanded { separate_words },
+                    brush_parser::word::Parameter::NamedWithAllIndices { name, concatenate },
+                    false,
+                ) = (&op, &parameter, indirect)
+                    && let Some((pairs, associative)) = self.array_subscripts_and_values(name)
+                {
+                    let fields = if *separate_words {
+                        pairs
+                            .into_iter()
+                            .flat_map(|(key, value)| [key, value])
+                            .map(|word| WordField::from(word))
+                            .collect()
+                    } else {
+                        let mut listed = pairs
+                            .iter()
+                            .map(|(key, value)| {
+                                std::format!(
+                                    "{} {}",
+                                    escape::quote_if_needed(key, escape::QuoteMode::DoubleQuote),
+                                    escape::force_quote(value, escape::QuoteMode::DoubleQuote)
+                                )
+                            })
+                            .join(" ");
+                        if associative && !listed.is_empty() {
+                            listed.push(' ');
+                        }
+                        vec![WordField::from(listed)]
+                    };
+                    return Ok(Expansion {
+                        fields,
+                        concatenate: *concatenate,
+                        kind: ExpansionKind::ElementList,
+                        undefined: false,
+                    });
+                }
+
                 let expanded_parameter = self.expand_parameter(&parameter, indirect).await?;
                 let came_from_undefined = expanded_parameter.undefined;
 
@@ -1977,6 +2016,28 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
         (name, index, var)
     }
 
+    /// An array's subscripts and values, in order, and whether it is associative.
+    fn array_subscripts_and_values(&self, name: &str) -> Option<(Vec<(String, String)>, bool)> {
+        let (_, var) = self.shell.env().get(name)?;
+        match var.value() {
+            ShellValue::IndexedArray(values) => Some((
+                values
+                    .iter()
+                    .map(|(key, value)| (key.to_string(), value.clone()))
+                    .collect(),
+                false,
+            )),
+            ShellValue::AssociativeArray(values) => Some((
+                values
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+                true,
+            )),
+            _ => None,
+        }
+    }
+
     fn undefined_expansion(
         &self,
         parameter: &brush_parser::word::Parameter,
@@ -2047,6 +2108,12 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
                 } else {
                     self.undefined_expansion(parameter, allow_unset_vars)
                 }
+            }
+            // Like Bash, `$!` is unset until a job starts in the background.
+            brush_parser::word::Parameter::Special(
+                brush_parser::word::SpecialParameter::LastBackgroundProcessId,
+            ) if self.shell.jobs().last_background_pid().is_none() => {
+                self.undefined_expansion(parameter, allow_unset_vars)
             }
             brush_parser::word::Parameter::Special(s) => Ok(self.expand_special_parameter(s)),
             brush_parser::word::Parameter::Named(n) => {
