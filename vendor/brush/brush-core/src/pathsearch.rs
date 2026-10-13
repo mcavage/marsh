@@ -23,7 +23,10 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(path) = self.paths.pop_front() {
-            let path = PathBuf::from(path.as_ref()).join(self.filename.as_ref());
+            let path = crate::bytes::shell_path(
+                &PathBuf::from(path.as_ref()).join(self.filename.as_ref()),
+            )
+            .into_owned();
 
             // Ask the platform to resolve the path to an actual executable file, which on
             // Windows may involve appending a PATHEXT extension. The helper takes ownership

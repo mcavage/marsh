@@ -1,3 +1,4 @@
+use crate::bytes::ToShellText as _;
 use crate::{error, trace_categories};
 use std::path::PathBuf;
 
@@ -57,7 +58,7 @@ pub(crate) fn get_effective_gid() -> Result<u32, error::Error> {
 
 pub(crate) fn get_current_username() -> Result<String, error::Error> {
     let username = uzers::get_current_username().ok_or_else(|| error::ErrorKind::NoCurrentUser)?;
-    Ok(username.to_string_lossy().to_string())
+    Ok(username.to_shell_text().to_string())
 }
 
 pub(crate) fn get_user_group_ids() -> Result<Vec<u32>, error::Error> {
@@ -78,7 +79,7 @@ pub(crate) fn get_all_groups() -> Result<Vec<String>, error::Error> {
     let groups = get_current_user_groups()?;
     let group_names = groups
         .into_iter()
-        .map(|g| g.name().to_string_lossy().to_string());
+        .map(|g| g.name().to_shell_text().to_string());
     Ok(group_names.collect())
 }
 

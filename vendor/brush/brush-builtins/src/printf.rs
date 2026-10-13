@@ -1,7 +1,9 @@
+use brush_core::bytes::ToShellText as _;
 use clap::Parser;
 use std::{ffi::OsString, io::Write, ops::ControlFlow};
 use uucore::format;
 
+use brush_core::bytes;
 use brush_core::{Error, ErrorKind, ExecutionResult, builtins, escape, expansion};
 
 /// Format a string.
@@ -39,9 +41,7 @@ impl builtins::Command for PrintfCommand {
             }
 
             // Convert to a string.
-            let result_str = String::from_utf8(result).map_err(|_| {
-                brush_core::ErrorKind::PrintfInvalidUsage("invalid UTF-8 output".into())
-            })?;
+            let result_str = bytes::decode(&bytes::encode_output(&result)).into_owned();
 
             // Assign to the selected variable.
             expansion::assign_to_named_parameter(
@@ -52,8 +52,13 @@ impl builtins::Command for PrintfCommand {
             )
             .await?;
         } else {
-            format(self.format_and_args.as_slice(), context.stdout())?;
+            // Formatted whole, so raw bytes in the format survive (uucore writes
+            // literal text a byte at a time).
+            let mut result: Vec<u8> = vec![];
+            let formatted = format(self.format_and_args.as_slice(), &mut result);
+            context.stdout().write_all(&bytes::encode_output(&result))?;
             context.stdout().flush()?;
+            formatted?;
         }
 
         Ok(ExecutionResult::success())
@@ -65,10 +70,16 @@ fn format(format_and_args: &[String], writer: impl Write) -> Result<(), brush_co
         // `%(fmt)T` conversions are rendered here; uucore formats the rest.
         [fmt, args @ ..] if fmt.contains(")T") => {
             let (fmt, args) = render_time_conversions(fmt, args);
-            format_via_uucore(&fmt, args.iter(), writer)
+            format_via_uucore(
+                &fmt,
+                args.iter().map(|arg| bytes::to_os_string(arg)),
+                writer,
+            )
         }
-        // Handle format string with arguments using uucore
-        [fmt, args @ ..] => format_via_uucore(fmt, args.iter(), writer),
+        // Handle format string with arguments using uucore; arguments are the bytes they stand for.
+        [fmt, args @ ..] => {
+            format_via_uucore(fmt, args.iter().map(|arg| bytes::to_os_string(arg)), writer)
+        }
         // Handle case with no format string (we shouldn't be able to get here since clap will
         // fail parsing when the format string is missing)
         [] => Err(ErrorKind::PrintfInvalidUsage("missing operand".into()).into()),
@@ -194,7 +205,7 @@ fn format_via_uucore(
             if let (format::FormatItem::Spec(format::Spec::QuotedString { position }), true) =
                 (item, *backslash_quote)
             {
-                let arg = format_args_wrapper.next_string(*position).to_string_lossy();
+                let arg = format_args_wrapper.next_string(*position).to_shell_text();
                 let quoted = quote_printf_q(&arg);
                 write!(writer, "{quoted}")?;
                 continue;

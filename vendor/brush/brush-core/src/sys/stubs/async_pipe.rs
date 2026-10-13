@@ -20,9 +20,9 @@ impl AsyncPipeReader {
         };
 
         tokio::task::spawn_blocking(move || {
-            let mut s = String::new();
-            { reader }.read_to_string(&mut s)?;
-            Ok(s)
+            let mut bytes = Vec::new();
+            { reader }.read_to_end(&mut bytes)?;
+            Ok(crate::bytes::decode_vec(bytes))
         })
         .await
         .map_err(io::Error::other)?

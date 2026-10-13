@@ -1,3 +1,4 @@
+use brush_core::bytes::ToShellText as _;
 use clap::Parser;
 use std::{io::Write, path::PathBuf};
 
@@ -55,7 +56,7 @@ impl builtins::Command for HashCommand {
                         writeln!(
                             context.stdout(),
                             "builtin hash -p {} {name}",
-                            path.to_string_lossy()
+                            path.to_shell_text()
                         )?;
                     } else {
                         let mut prefix = String::new();
@@ -68,7 +69,7 @@ impl builtins::Command for HashCommand {
                         writeln!(
                             context.stdout(),
                             "{prefix}{}",
-                            path.to_string_lossy().as_ref()
+                            path.to_shell_text().as_ref()
                         )?;
                     }
                 } else {

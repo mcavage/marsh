@@ -1803,3 +1803,68 @@ fn nul_bytes_in_shell_input_follow_bash() {
         }
     }
 }
+
+/// Bytes that are not UTF-8 survive every boundary as in Bash: arguments,
+/// `-c` and script text, command substitution, `$'\NNN'`, `echo -e`,
+/// `printf` (format, `%s`, `-v`), the environment, external arguments,
+/// `read` and `mapfile` (which read byte by byte and leave the rest),
+/// here-documents, file names in globs, redirections, `cd` and command
+/// names, and `${#v}` counts bytes in the C locale.
+#[test]
+fn non_utf8_bytes_survive_every_boundary() {
+    use std::os::unix::ffi::OsStrExt as _;
+    let directory = tempfile::tempdir().unwrap();
+    let script =
+        br#"v=$(printf '\377\376'); w=$'\377'; printf '%s|%s|' "$v" "$w"; echo -ne '\0375|'
+printf "$v:%s|" ok; printf -v p '%s\374' "$v"; printf '%s|%s|%s|' "$p" "${#v}" "${#p}"
+export RAW="$v"; /bin/sh -c 'printf "%s|" "$RAW" "$1"' sh "$v$1"
+cat <<E
+here $v
+E
+printf 'a\377 b\376\nrest\n' | { read -r x y; printf '[%s][%s]' "$x" "$y"; cat; }
+printf '\303X\376' | { IFS= read -r -n 1 c; printf '(%s)' "$c"; cat; }
+printf '\377\n\376\n' | { mapfile -t m; printf '{%s}' "${m[@]}"; }
+case $v in ??) echo two;; esac; echo "${v#?}" | od -An -tx1
+"#;
+    // macOS refuses file names that are not UTF-8.
+    let files: &[u8] = if cfg!(target_os = "linux") {
+        br#"printf '%s\n' "$v" >"f$v"; cat "f$v"; for f in f*; do printf '<%s>' "$f"; done
+mkdir "d$v"; cd d*; pwd | od -An -c | tr -s ' ' | tr -d '\n'; cd ..
+printf '#!/bin/sh\necho ran\n' >"x$v"; chmod +x "x$v"; ./x*
+"#
+    } else {
+        b""
+    };
+    let path = directory.path().join("script");
+    std::fs::write(&path, [script.as_slice(), files].concat()).unwrap();
+    let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+        let mut command = shell(program);
+        if program != "bash" {
+            command.arg("--no-config");
+        }
+        command
+            .args(["--noprofile", "--norc"])
+            .arg(&path)
+            .arg(std::ffi::OsStr::from_bytes(b"\xfb"))
+            .current_dir(directory.path())
+            .env_remove("BASH_ENV")
+            .env("LC_ALL", "C");
+        for entry in std::fs::read_dir(directory.path()).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name() != "script" {
+                let _ = std::fs::remove_dir_all(entry.path())
+                    .or_else(|_| std::fs::remove_file(entry.path()));
+            }
+        }
+        command.output().unwrap()
+    });
+    let [bash, brush] = &outputs;
+    assert!(bash.status.success(), "Bash: {bash:?}");
+    assert!(
+        bash.stdout.starts_with(b"\xff\xfe|\xff|\xfd|\xff\xfe:ok|"),
+        "Bash: {bash:?}"
+    );
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
+    assert_eq!(brush.status.code(), bash.status.code());
+}

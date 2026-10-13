@@ -1,3 +1,4 @@
+use crate::bytes::ToShellText as _;
 use crate::{
     ExecutionParameters, error, expansion, extensions,
     shell::Shell,
@@ -133,7 +134,7 @@ fn format_prompt_piece(
         } => {
             let hn = sys::network::get_hostname()
                 .unwrap_or_default()
-                .to_string_lossy()
+                .to_shell_text()
                 .to_string();
             if only_up_to_first_dot && let Some((first, _)) = hn.split_once('.') {
                 return Ok(first.to_owned());
@@ -148,7 +149,7 @@ fn format_prompt_piece(
             if let Some(shell_name) = shell.current_shell_name() {
                 Path::new(shell_name.as_ref())
                     .file_name()
-                    .map(|name| name.to_string_lossy().to_string())
+                    .map(|name| name.to_shell_text().to_string())
                     .unwrap_or_default()
             } else {
                 String::new()
@@ -170,7 +171,7 @@ fn format_prompt_piece(
         }
         brush_parser::prompt::PromptPiece::TerminalDeviceBaseName => {
             sys::terminal::try_get_terminal_device_path()
-                .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
+                .and_then(|p| p.file_name().map(|s| s.to_shell_text().to_string()))
                 .unwrap_or_default()
         }
         brush_parser::prompt::PromptPiece::Time(time_fmt) => {
@@ -186,14 +187,14 @@ fn format_current_working_directory(
     tilde_replaced: bool,
     basename: bool,
 ) -> String {
-    let mut working_dir_str = shell.working_dir().to_string_lossy().to_string();
+    let mut working_dir_str = shell.working_dir().to_shell_text().to_string();
 
     if tilde_replaced {
         working_dir_str = shell.tilde_shorten(working_dir_str);
     }
 
     if basename && let Some(filename) = Path::new(&working_dir_str).file_name() {
-        working_dir_str = filename.to_string_lossy().to_string();
+        working_dir_str = filename.to_shell_text().to_string();
     }
 
     if cfg!(windows) {

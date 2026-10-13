@@ -761,13 +761,9 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
             brush_shell::entry::enable_marsh_extensions();
             let brush_args = prepared
                 .brush_args
-                .into_iter()
-                .map(|argument| {
-                    argument
-                        .into_string()
-                        .map_err(|_| RunError::new("shell arguments must be valid UTF-8", 2))
-                })
-                .collect::<Result<Vec<String>, _>>()?;
+                .iter()
+                .map(|argument| brush_core::bytes::from_os_str(argument).into_owned())
+                .collect::<Vec<String>>();
             let status = brush_shell::entry::run_from(brush_args);
             drop(links);
             Ok(status)

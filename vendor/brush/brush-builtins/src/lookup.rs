@@ -1,5 +1,6 @@
 //! Shared command-name resolution, used by the `type` and `command` builtins.
 
+use brush_core::bytes::ToShellText as _;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -189,7 +190,7 @@ pub(crate) fn describe(
         Resolved::Function(def) => writeln!(writer, "{name} is a function\n{def}"),
         Resolved::Builtin => writeln!(writer, "{name} is a shell builtin"),
         Resolved::File { path, hashed } => {
-            let path = path.to_string_lossy();
+            let path = path.to_shell_text();
             if *hashed {
                 writeln!(writer, "{name} is hashed ({path})")
             } else {

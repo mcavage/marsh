@@ -1,3 +1,4 @@
+use brush_core::bytes::ToShellText as _;
 use clap::Parser;
 use std::io::Write;
 use std::path::PathBuf;
@@ -75,7 +76,7 @@ impl CommandCommand {
                         writeln!(context.stdout(), "{name}")?;
                     }
                     Resolved::File { path, .. } => {
-                        writeln!(context.stdout(), "{}", path.to_string_lossy())?;
+                        writeln!(context.stdout(), "{}", path.to_shell_text())?;
                     }
                 }
             } else {

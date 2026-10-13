@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 use brush_core::{ErrorKind, builtins, env, error, variables};
 
 use std::io::{Read, Write};
-use utf8_chars::BufReadCharsExt;
 
 /// Exit code returned when `read` times out.
 /// This is 128 + SIGALRM (14) = 142, matching bash behavior.
@@ -332,15 +331,9 @@ enum ReadResult {
 struct InputReader {
     /// The input source.
     input: std::io::BufReader<PolledInput>,
-    /// Bytes from a malformed UTF-8 sequence, still owed to the caller one at a time.
-    pending: VecDeque<char>,
-    /// Terminal mode guard - kept alive for RAII cleanup on drop.
-    /// The guard restores original terminal settings when dropped, even though
-    /// we don't access the field directly after construction.
-    ///
-    /// The leading underscore suppresses the "unused field" warning while making
-    /// it explicit this field exists solely for its `Drop` implementation.
-    _term_mode: Option<brush_core::terminal::AutoModeGuard>,
+    /// Terminal mode guard, restoring the terminal's settings when dropped. It is
+    /// present when reading from a terminal, where `^C` and `^D` are keys.
+    term_mode: Option<brush_core::terminal::AutoModeGuard>,
 }
 
 /// Events that can occur when reading input.
@@ -372,8 +365,7 @@ impl InputReader {
                     deadline: timeout.map(|t| Instant::now() + t),
                 },
             ),
-            pending: VecDeque::new(),
-            _term_mode: term_mode,
+            term_mode,
         }
     }
 
@@ -384,38 +376,28 @@ impl InputReader {
             .unwrap_or(false)
     }
 
-    /// Reads the next input event, handling timeout and control characters.
+    /// Reads the next input event, handling timeout and control characters. Input is
+    /// read a byte at a time, as Bash does, so the bytes after the line stay unread;
+    /// a byte above 0x7f is its raw character until [`finish_line`] decodes the line.
     fn read_event(&mut self) -> Result<InputEvent, brush_core::Error> {
+        let mut byte = [0_u8; 1];
         let ch = loop {
-            if let Some(ch) = self.pending.pop_front() {
-                break ch;
-            }
-
-            match self.input.read_char_raw() {
-                Ok(Some(ch)) => break ch,
-                Ok(None) => return Ok(InputEvent::Eof),
-                Err(e) => {
-                    // Hand back the bytes it consumed, one at a time; the byte that broke
-                    // the sequence was left unconsumed, for the next call to re-read.
-                    //
-                    // TODO(utf-8): `line` is a `String`, so an invalid byte can't
-                    // round-trip; bash preserves it verbatim, we re-encode it.
-                    if e.as_bytes().is_empty() {
-                        if e.as_io_error().kind() == std::io::ErrorKind::TimedOut {
-                            return Ok(InputEvent::Timeout);
-                        }
-                        return Err(e.into_io_error().into());
-                    }
-                    self.pending
-                        .extend(e.as_bytes().iter().copied().map(char::from));
+            match self.input.read(&mut byte) {
+                Ok(0) => return Ok(InputEvent::Eof),
+                Ok(_) if byte[0].is_ascii() => break char::from(byte[0]),
+                Ok(_) => break brush_core::bytes::raw_char(byte[0]),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                    return Ok(InputEvent::Timeout);
                 }
+                Err(e) => return Err(e.into()),
             }
         };
 
-        // Map control characters to events.
+        // Map control characters to events; only a terminal sends them as keys.
         Ok(match ch {
-            CTRL_C => InputEvent::CtrlC,
-            CTRL_D => InputEvent::CtrlD,
+            CTRL_C if self.term_mode.is_some() => InputEvent::CtrlC,
+            CTRL_D if self.term_mode.is_some() => InputEvent::CtrlD,
             _ => InputEvent::Char(ch),
         })
     }
@@ -446,6 +428,11 @@ impl Read for PolledInput {
         }
         self.input.read(buf)
     }
+}
+
+/// Decodes a line read byte by byte (see [`InputReader::read_event`]) as shell text.
+fn finish_line(line: &str) -> String {
+    brush_core::bytes::decode(&brush_core::bytes::encode(line)).into_owned()
 }
 
 /// Configuration for line reading behavior.
@@ -555,8 +542,8 @@ fn read_line_with_reader(
                     return Ok(ReadResult::Line(line));
                 }
 
-                // Ignore non-whitespace control characters.
-                if ch.is_ascii_control() && !ch.is_ascii_whitespace() {
+                // Bash drops NUL bytes; other control characters are data.
+                if ch == '\0' {
                     continue;
                 }
 
@@ -601,10 +588,11 @@ impl ReadCommand {
         let delimiter = if self.return_after_n_chars_no_delimiter.is_some() {
             None
         } else if let Some(delimiter_str) = &self.delimiter {
-            if delimiter_str.is_empty() {
-                Some(NUL_DELIMITER)
-            } else {
-                delimiter_str.chars().next()
+            // Bash's delimiter is the first byte of the argument.
+            match brush_core::bytes::encode(delimiter_str).first() {
+                None => Some(NUL_DELIMITER),
+                Some(byte) if byte.is_ascii() => Some(char::from(*byte)),
+                Some(byte) => Some(brush_core::bytes::raw_char(*byte)),
             }
         } else {
             Some(DEFAULT_DELIMITER)
@@ -633,7 +621,12 @@ impl ReadCommand {
             process_escapes: !self.raw_mode,
         };
 
-        read_line_with_reader(&mut reader, &config)
+        Ok(match read_line_with_reader(&mut reader, &config)? {
+            ReadResult::Line(line) => ReadResult::Line(finish_line(&line)),
+            ReadResult::Eof(line) => ReadResult::Eof(line.as_deref().map(finish_line)),
+            ReadResult::TimedOut(line) => ReadResult::TimedOut(line.as_deref().map(finish_line)),
+            other => other,
+        })
     }
 
     fn setup_terminal_settings(
@@ -791,7 +784,9 @@ mod tests {
         let result = read_line_with_reader(&mut reader, &config).unwrap();
         drop(tx);
 
-        assert!(matches!(result, ReadResult::TimedOut(Some(line)) if line == "\u{c3}"));
+        assert!(
+            matches!(result, ReadResult::TimedOut(Some(line)) if line == brush_core::bytes::raw_char(0xc3).to_string())
+        );
     }
 
     // ==================== split_line_by_ifs tests ====================

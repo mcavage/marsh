@@ -64,16 +64,14 @@ impl InputBackend for MinimalInputBackend {
             if !line_complete {
                 continue;
             }
-            let line = String::from_utf8(std::mem::take(&mut self.pending_line))
-                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+            let line = brush_core::bytes::decode_vec(std::mem::take(&mut self.pending_line));
             self.pending_program.push_str(&line);
             if !crate::completeness::needs_more_input(shell_ref, &self.pending_program) {
                 break;
             }
         }
         if !self.pending_line.is_empty() {
-            let line = String::from_utf8(std::mem::take(&mut self.pending_line))
-                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+            let line = brush_core::bytes::decode_vec(std::mem::take(&mut self.pending_line));
             self.pending_program.push_str(&line);
         }
         if self.pending_program.is_empty() {
@@ -137,14 +135,14 @@ impl MinimalInputBackend {
 
     /// Reads a single line, returning `None` at end of input.
     fn read_input_line<R: BufRead>(reader: &mut R) -> Result<Option<String>, ShellError> {
-        let mut input = String::new();
+        let mut input = Vec::new();
         let bytes_read = reader
-            .read_line(&mut input)
+            .read_until(b'\n', &mut input)
             .map_err(ShellError::InputError)?;
         // Bash ignores NUL bytes in its input.
-        input.retain(|c| c != '\0');
+        input.retain(|byte| *byte != 0);
 
-        Ok((bytes_read > 0).then_some(input))
+        Ok((bytes_read > 0).then(|| brush_core::bytes::decode_vec(input)))
     }
 }
 

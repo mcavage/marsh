@@ -31,7 +31,7 @@ pub fn expand_backslash_escapes(
     while let Some(c) = it.next() {
         if c != '\\' {
             // Not a backslash, add and move on.
-            result.append(c.to_string().into_bytes().as_mut());
+            push_char(&mut result, c);
             continue;
         }
 
@@ -250,7 +250,7 @@ pub fn expand_backslash_escapes(
             unknown => {
                 // Not a valid escape sequence.
                 result.push(b'\\');
-                result.append(unknown.to_string().into_bytes().as_mut());
+                push_char(&mut result, unknown);
             }
         }
     }
@@ -263,6 +263,14 @@ pub fn expand_backslash_escapes(
     }
 
     Ok((result, true))
+}
+
+/// Appends the bytes a character of shell text stands for.
+fn push_char(result: &mut Vec<u8>, c: char) {
+    match crate::bytes::raw_byte(c) {
+        Some(byte) => result.push(byte),
+        None => result.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
+    }
 }
 
 /// Quoting mode to use for escaping.

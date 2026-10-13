@@ -1,3 +1,4 @@
+use brush_core::bytes::ToShellText as _;
 use clap::Parser;
 use std::{borrow::Cow, io::Write as _, os::unix::process::CommandExt};
 
@@ -68,13 +69,13 @@ impl builtins::Command for ExecCommand {
         // how a found file is run, including ENOEXEC files.
         let name = &self.args[0];
         let path = if name.contains('/') {
-            Some(std::path::PathBuf::from(name))
+            Some(brush_core::bytes::to_path(name))
         } else {
             context.shell.find_first_executable_in_path(name)
         };
 
         let error = if let Some(path) = path {
-            let path = path.to_string_lossy().into_owned();
+            let path = path.to_shell_text().into_owned();
             let mut cmd = commands::compose_std_command(
                 &context,
                 &path,
@@ -92,14 +93,14 @@ impl builtins::Command for ExecCommand {
                     .shell
                     .working_dir()
                     .join(relative)
-                    .to_string_lossy()
+                    .to_shell_text()
                     .into_owned()
             };
             #[cfg(unix)]
             brush_core::sys::commands::exec_with_script_fallback(
                 &mut cmd,
-                argv0.as_ref().as_ref(),
-                path.as_ref(),
+                &brush_core::bytes::to_os_string(argv0.as_ref()),
+                &brush_core::bytes::to_os_string(&path),
                 context.iter_fds().map(|(fd, _)| fd),
                 &std::format!("{}{full_path}: ", context.shell.diagnostic_prefix()),
             )?;

@@ -1,5 +1,6 @@
 //! Command execution
 
+use crate::bytes::ToShellText as _;
 use std::{
     borrow::Cow,
     ffi::OsStr,
@@ -205,14 +206,17 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
     args: &[S],
     empty_env: bool,
 ) -> Result<std::process::Command, error::Error> {
-    let mut cmd = std::process::Command::new(command_name);
+    let mut cmd = std::process::Command::new(crate::bytes::to_os_string(command_name));
 
     // Override argv[0].
     // NOTE: Not supported on all platforms.
-    cmd.arg0(argv0);
+    cmd.arg0(crate::bytes::to_os_string(argv0));
 
-    // Pass through args.
-    cmd.args(args);
+    // Pass through args, as the bytes they stand for.
+    cmd.args(args.iter().map(|arg| match arg.as_ref().to_str() {
+        Some(text) => crate::bytes::to_os_string(text),
+        None => arg.as_ref().to_owned(),
+    }));
 
     // Use the shell's current working dir.
     cmd.current_dir(context.shell.working_dir());
@@ -228,12 +232,10 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
             // shows up in `declare -p` but has no *set* value will be omitted.
             if v.value().is_set() {
                 let value = v.value().to_cow_str(context.shell);
-                #[cfg(unix)]
-                if let Some(raw) = sys::env::inherited_bytes(k.as_str(), value.as_ref()) {
-                    cmd.env(k.as_str(), raw);
-                    continue;
-                }
-                cmd.env(k.as_str(), value.as_ref());
+                cmd.env(
+                    crate::bytes::to_os_string(k),
+                    crate::bytes::to_os_string(value.as_ref()),
+                );
             }
         }
         #[cfg(unix)]
@@ -241,7 +243,7 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
             cmd.env(k, v);
         }
         // Set _ to the resolved command path for external commands.
-        cmd.env("_", command_name);
+        cmd.env("_", crate::bytes::to_os_string(command_name));
     }
 
     // Add in exported functions.
@@ -250,7 +252,10 @@ pub fn compose_std_command<S: AsRef<OsStr>, SE: extensions::ShellExtensions>(
             if registration.is_exported() {
                 let var_name = std::format!("BASH_FUNC_{func_name}%%");
                 let value = std::format!("() {}", registration.definition().body);
-                cmd.env(var_name, value);
+                cmd.env(
+                    crate::bytes::to_os_string(&var_name),
+                    crate::bytes::to_os_string(&value),
+                );
             }
         }
     }
@@ -491,7 +496,7 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
                 Err(ErrorKind::CommandNotFound(self.command_name).into())
             }
         } else {
-            let command_name = PathBuf::from(self.command_name.clone());
+            let command_name = crate::bytes::to_path(&self.command_name);
             self.execute_via_external(command_name.as_path())
         }
     }
@@ -615,7 +620,7 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
             params: self.params,
         };
 
-        let resolved_path = path.to_string_lossy();
+        let resolved_path = path.to_shell_text();
         let result = if self.exec_in_place {
             exec_external_command_in_place(
                 cmd_context,
@@ -687,8 +692,8 @@ fn exec_external_command_in_place(
     )?;
     sys::commands::exec_with_script_fallback(
         &mut cmd,
-        OsStr::new(argv0),
-        OsStr::new(executable_path),
+        &crate::bytes::to_os_string(argv0),
+        &crate::bytes::to_os_string(executable_path),
         context.iter_fds().map(|(fd, _)| fd),
         &std::format!("{}{executable_path}: ", context.shell.diagnostic_prefix()),
     )?;
@@ -786,9 +791,9 @@ pub(crate) fn execute_external_command(
     tracing::debug!(
         target: trace_categories::COMMANDS,
         "Spawning: cmd='{} {}'",
-        cmd.get_program().to_string_lossy().to_string(),
+        cmd.get_program().to_shell_text().to_string(),
         cmd.get_args()
-            .map(|a| a.to_string_lossy().to_string())
+            .map(|a| a.to_shell_text().to_string())
             .join(" ")
     );
 
@@ -812,8 +817,8 @@ pub(crate) fn execute_external_command(
     #[cfg(unix)]
     sys::commands::exec_with_script_fallback(
         &mut cmd,
-        OsStr::new(argv0),
-        OsStr::new(executable_path),
+        &crate::bytes::to_os_string(argv0),
+        &crate::bytes::to_os_string(executable_path),
         context.iter_fds().map(|(fd, _)| fd),
         &std::format!("{}{executable_path}: ", context.shell.diagnostic_prefix()),
     )?;
@@ -1099,7 +1104,7 @@ pub(crate) async fn invoke_function_substitution(
     file.seek(std::io::SeekFrom::Start(0))?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    Ok(crate::bytes::decode_vec(bytes))
 }
 
 /// A new temporary file, already removed from its directory.

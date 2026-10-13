@@ -1,3 +1,4 @@
+use crate::bytes::ToShellText as _;
 use brush_parser::ast::{self, CommandPrefixOrSuffixItem};
 use itertools::Itertools;
 use std::borrow::Cow;
@@ -3040,7 +3041,7 @@ pub(crate) async fn setup_redirect(
                         .open_file(&options, &expanded_file_path, params)
                         .map_err(|err| {
                             error::ErrorKind::RedirectionFailure(
-                                expanded_file_path.to_string_lossy().to_string(),
+                                expanded_file_path.to_shell_text().to_string(),
                                 err.to_string(),
                             )
                         })?;
@@ -3209,7 +3210,7 @@ fn setup_redirect_output_and_error_to(
         .open_file(&file_options, &abs_file_path, params)
         .map_err(|err| {
             error::ErrorKind::RedirectionFailure(
-                abs_file_path.to_string_lossy().to_string(),
+                abs_file_path.to_shell_text().to_string(),
                 err.to_string(),
             )
         })?;
@@ -3323,7 +3324,8 @@ fn free_substitution_fd(params: &ExecutionParameters) -> Result<ShellFd, error::
 fn setup_open_file_with_contents(contents: &str) -> Result<OpenFile, error::Error> {
     let (reader, mut writer) = std::io::pipe()?;
 
-    let bytes = contents.as_bytes();
+    let bytes = crate::bytes::encode(contents);
+    let bytes = bytes.as_ref();
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {

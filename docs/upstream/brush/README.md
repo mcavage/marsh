@@ -539,6 +539,21 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   stops at the first one left; `.` refuses a file with more than 256. A
   syntax error in a sourced file fails only `.` (it was fatal), and
   `printf -v` stops at a NUL. Covered by `nul_bytes_in_shell_input_follow_bash`.
+- `0073` makes shell text byte-preserving with lossless conversions at the
+  edges (`brush_core::bytes`). Decoding keeps valid UTF-8 and turns each
+  other byte into one character from the end of plane 16 (`U+10FF80` stands
+  for `0x80` ... `U+10FFFF` for `0xFF`); valid input already holding one of
+  those is decoded byte by byte, so decoding then encoding is the identity on
+  every byte string. Decoded: arguments, script, sourced and standard input,
+  command and function substitution output, the inherited environment,
+  `$'...'`, `echo -e`, `printf -v`, `read` (now byte by byte, so the rest of
+  the input stays for the next command, and control characters other than
+  NUL are data; `^C`/`^D` are keys only on a terminal), `mapfile`, file
+  names. Encoded: external command names, arguments and environment, every
+  write through the shell's open files, here-documents, and paths built from
+  text (`absolute_path`, PATH search, globs, command names). `${#v}` counts
+  bytes. The `0055` raw-environment side table is gone. Covered by
+  `non_utf8_bytes_survive_every_boundary`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

@@ -260,7 +260,11 @@ pub fn run() {
     if let Ok(path) = std::env::current_exe() {
         install_script_interpreter(&path, &[]);
     }
-    std::process::exit(run_from(std::env::args().collect()));
+    std::process::exit(run_from(
+        std::env::args_os()
+            .map(|arg| brush_core::bytes::from_os_str(&arg).into_owned())
+            .collect(),
+    ));
 }
 
 /// Main entry point with an explicitly supplied argument vector.
