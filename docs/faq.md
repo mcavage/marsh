@@ -1,7 +1,8 @@
 # FAQ
 
-marsh is Bash with `split`, `fanout`, `join`, and `collect` for running agents
-in parallel, each command in its own sandbox. This is what it does:
+marsh is a Bash-compatible Linux shell for composing agents. Brush is the
+default shell; registered agent commands run in fresh containers inside Docker
+Sandbox VMs. Here is one way to use it:
 
 ```console
 marsh-0.5$ marsh split -n ::: a claude -p 'fix the flaky test' \

@@ -118,11 +118,15 @@ cd ~/src/your-project
 marsh                                   # a Linux shell at the same path
 claude -p 'what does this repo do?'     # an agent, in a fresh container
 marsh jobs --tree                       # what ran
-marsh stop                              # remove marsh's VMs
+exit                                    # return to your Mac terminal
+marsh stop                              # remove marsh's VMs from the Mac
 ```
 
 The first call to each agent boots its VM and downloads its image, about
 600 MB, which takes a few minutes. Later calls start in seconds.
+
+`marsh stop` refuses while any marsh shells or jobs are active. It preserves
+your project and guest home.
 
 Then follow a guide:
 
