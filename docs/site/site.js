@@ -1,4 +1,4 @@
-// runmar.sh: theme toggle, copy buttons, and the docs
+// runmar.sh: theme toggle, copy buttons, shell-session replay, and the docs
 // on-page TOC highlight. Everything works without it.
 (function () {
   "use strict";
@@ -64,6 +64,73 @@
     });
     pre.appendChild(b);
   });
+
+  // Replay highlights the shell commands and their filesystem effects together.
+  // The complete session remains readable, including during playback.
+  var session = document.querySelector(".shell-session");
+  if (session) {
+    var replay = session.querySelector(".session-replay");
+    var stage = session.querySelector(".session-stage");
+    var motion = matchMedia("(prefers-reduced-motion: reduce)");
+    var phases = [
+      { label: "A Linux shell at your project's path.", delay: 1100 },
+      { label: "split snapshots the project and creates private copies.", delay: 1300 },
+      { label: "Both branches run, each on its own files.", delay: 1500 },
+      { label: "join returns each branch's output, status, and patch.", delay: 1100 },
+      { label: "Back at the prompt: inspect, apply, and test.", delay: 1400 }
+    ];
+    var timer = null;
+    var playing = false;
+
+    function clearHighlights() {
+      session.querySelectorAll(".is-active, .is-cursor").forEach(function (el) {
+        el.classList.remove("is-active", "is-cursor");
+      });
+    }
+    function finish() {
+      clearTimeout(timer);
+      timer = null;
+      playing = false;
+      clearHighlights();
+      replay.textContent = "Replay";
+      replay.setAttribute("aria-label", "Replay shell session animation");
+      stage.textContent = "A Linux shell. Private copies. Patches you choose.";
+    }
+    function step(index) {
+      if (!playing) return;
+      if (index === phases.length) { finish(); return; }
+      clearHighlights();
+      var lines = session.querySelectorAll('[data-session-phase="' + index + '"]');
+      lines.forEach(function (line) { line.classList.add("is-active"); });
+      if (lines.length) lines[lines.length - 1].classList.add("is-cursor");
+      session.querySelectorAll('[data-file-phase="' + index + '"]').forEach(function (el) {
+        el.classList.add("is-active");
+      });
+      stage.textContent = phases[index].label;
+      timer = setTimeout(function () { step(index + 1); }, phases[index].delay);
+    }
+    function play() {
+      if (motion.matches || document.hidden) return;
+      finish();
+      playing = true;
+      replay.textContent = "Stop";
+      replay.setAttribute("aria-label", "Stop shell session animation");
+      step(0);
+    }
+    replay.addEventListener("click", function () { if (playing) finish(); else play(); });
+    replay.hidden = motion.matches;
+    if (motion.addEventListener) motion.addEventListener("change", function () {
+      finish();
+      replay.hidden = motion.matches;
+    });
+    document.addEventListener("visibilitychange", function () { if (document.hidden) finish(); });
+    if ("IntersectionObserver" in window) {
+      var start = new IntersectionObserver(function (entries) {
+        if (entries[0].isIntersecting) { start.disconnect(); play(); }
+      }, { threshold: 0.2 });
+      start.observe(session.querySelector(".session-window"));
+    }
+  }
 
   // On-page TOC: mark the section being read.
   var toc = document.querySelectorAll(".toc a");

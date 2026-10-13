@@ -63,45 +63,73 @@
   </section>
 
   <section class="demo" aria-labelledby="parallel-h">
-    <div class="wrap demo-layout">
-      <div class="demo-copy">
-        <h2 id="parallel-h">Parallel work. Separate copies.</h2>
-        <p>
-          Both branches run at once, each on its own copy of your working tree,
-          including uncommitted edits. Each <code>make test</code> checks that
-          branch's changes.
-        </p>
-        <p>
-          <code>join</code> shows output, status, and patches. Inspect and apply
-          the changes you want, then rerun tests on the combined tree.
-          marsh does not merge automatically.
-        </p>
-        <p>
-          For work on shared files, <a href="docs/fanout.html"><code>fanout</code>
-          and <code>collect</code></a> run commands together, gather their output
-          in order, and return a failing status if any branch fails.
-        </p>
-        <a class="more" href="docs/split.html">Split and join →</a>
-      </div>
-      <div class="demo-example">
-        <div class="window">
-          <div class="bar">
-            <i></i><i></i><i></i>
-            <span class="title">Inside your marsh shell</span>
+    <div class="wrap">
+      <h2 id="parallel-h">Parallel work, built into the shell.</h2>
+      <p>
+        <code>split</code> and <code>join</code> are part of the marsh shell.
+        Each branch is ordinary shell code, with agents and tests run as commands.
+      </p>
+      <figure class="shell-session">
+        <div class="session-grid">
+          <div class="window session-window">
+            <div class="bar">
+              <i></i><i></i><i></i>
+              <span class="title">Your terminal</span>
+              <button class="session-replay" type="button" aria-label="Replay shell session">Replay</button>
+            </div>
+<pre class="term session-transcript" tabindex="0" aria-label="Illustrated marsh shell session"><code><span class="session-line" data-session-phase="0"><span class="hp">~/events $</span> marsh</span>
+<span class="session-line" data-session-phase="1"><span class="p">marsh$</span> <span class="k">split</span> {</span>
+<span class="session-line" data-session-phase="2"><span class="p">&gt;</span>   <span class="lb">api:</span> <span class="k">claude</span> -p \</span>
+<span class="session-line" data-session-phase="2"><span class="p">&gt;</span>     <span class="s">"Add cursor pagination."</span> &amp;&amp;</span>
+<span class="session-line" data-session-phase="2"><span class="p">&gt;</span>     make test</span>
+<span class="session-line" data-session-phase="2"><span class="p">&gt;</span>   <span class="lb">cli:</span> <span class="k">codex</span> exec \</span>
+<span class="session-line" data-session-phase="2"><span class="p">&gt;</span>     <span class="s">"Add --json output."</span> &amp;&amp;</span>
+<span class="session-line" data-session-phase="2"><span class="p">&gt;</span>     make test</span>
+<span class="session-line" data-session-phase="3"><span class="p">&gt;</span> } | <span class="k">join</span> --keep</span>
+<span class="session-line session-note" data-session-phase="3"># join returns output, statuses, and patches</span>
+<span class="session-line" data-session-phase="4"><span class="p">marsh$</span> less \</span>
+<span class="session-line" data-session-phase="4"><span class="p">&gt;</span> .marsh/split/ID/out/api/diff.patch</span>
+<span class="session-line" data-session-phase="4"><span class="p">marsh$</span> git apply \</span>
+<span class="session-line" data-session-phase="4"><span class="p">&gt;</span> .marsh/split/ID/out/api/diff.patch</span>
+<span class="session-line" data-session-phase="4"><span class="p">marsh$</span> make test</span>
+<span class="session-line" data-session-phase="4"><span class="p">marsh$</span></span></code></pre>
           </div>
-<pre class="term example" tabindex="0" aria-label="Illustrative parallel-edit recipe"><code><span class="k">split</span> {
-  <span class="lb">api:</span> <span class="k">claude</span> -p \
-    <span class="s">"Add cursor pagination."</span> &amp;&amp;
-    make test
-  <span class="lb">cli:</span> <span class="k">codex</span> exec \
-    <span class="s">"Add --json output."</span> &amp;&amp;
-    make test
-} | <span class="k">join</span> --keep</code></pre>
+          <div class="session-files" role="group" aria-label="How the project files branch">
+            <p class="session-stage" aria-hidden="true">A Linux shell at your project’s path.</p>
+            <div class="file-source" data-file-phase="1">
+              <strong>Your working tree</strong>
+              <small>Uncommitted changes included</small>
+            </div>
+            <div class="file-forks" data-file-phase="2">
+              <div class="file-fork">
+                <code>api</code>
+                <small>Private project copy</small>
+                <span>Claude + make test</span>
+              </div>
+              <div class="file-fork">
+                <code>cli</code>
+                <small>Private project copy</small>
+                <span>Codex + make test</span>
+              </div>
+            </div>
+            <div class="file-patches" data-file-phase="3">
+              <code>api/diff.patch</code>
+              <code>cli/diff.patch</code>
+              <small>join returns both patches</small>
+            </div>
+            <div class="file-apply" data-file-phase="4">
+              <strong>Your choice, back in the shell</strong>
+              <p>Inspect, apply, then test the combined tree.</p>
+            </div>
+          </div>
         </div>
-        <p class="caption">
-          Example for an events project with an API, a CLI, and a make test target.
-        </p>
-      </div>
+        <figcaption class="caption">Illustrated session, not a timing measurement. Agent output is omitted; ID is the split ID printed by join.</figcaption>
+      </figure>
+      <p class="demo-followup">
+        marsh does not merge automatically. <a href="docs/split.html">Split and join</a>
+        keep edits separate; <a href="docs/fanout.html"><code>fanout</code> and
+        <code>collect</code></a> run parallel commands on shared files instead.
+      </p>
     </div>
   </section>
 
@@ -138,21 +166,36 @@
       <h2 id="rationale-h">Why not scripts and worktrees?</h2>
       <p>
         Scripts already compose agent CLIs. Worktrees already separate edits.
-        marsh manages execution and job lifetime alongside that composition.
+        marsh is built for fast repeat use: VMs stay warm, project copies use
+        copy-on-write where supported, and branches run concurrently.
       </p>
       <dl class="reasons">
-        <dt>Execution</dt>
+        <dt>Warm execution</dt>
         <dd>
-          Fresh nonroot containers inside Docker Sandbox VMs, with your project
-          at its Mac path. Your real Mac home is not mounted.
+          A fresh container, not a fresh VM boot. Each registered command runs
+          as a nonroot process in its own container inside a warm Docker Sandbox VM, with
+          your project at its Mac path. Your real Mac home is not mounted.
           <a href="docs/kits.html#adding-a-command">Register your own commands</a>
           through Kits to use the same execution model for other tools.
         </dd>
 
-        <dt>Parallel edits</dt>
+        <dt>Filesystem branching</dt>
         <dd>
-          Copies include uncommitted changes and return inspectable patches,
-          without adding Git branches or worktrees.
+          <code>split</code> snapshots your current project files, including
+          uncommitted edits and nonignored new files, then gives each branch a
+          private copy. macOS copy-on-write clones avoid copying file contents
+          up front where supported. When cloning is unsupported, marsh copies
+          the files.
+          <code>join</code> returns patches against that starting snapshot.
+          marsh creates no branches in your original repository and leaves its
+          <code>.git</code> alone. You choose what to apply.
+        </dd>
+
+        <dt>Parallel execution</dt>
+        <dd>
+          Branches run at the same time, rather than waiting for one agent to
+          finish before starting the next. Each branch's
+          <code>agent &amp;&amp; make test</code> is still ordinary shell sequencing.
         </dd>
 
         <dt>Job lifetime</dt>

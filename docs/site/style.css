@@ -294,6 +294,64 @@ pre:hover .copy, .copy:focus-visible, .copy.done { opacity: 1; }
 }
 .home .term.example code { min-width: max-content; }
 .home .caption { text-align: left; line-height: 1.55; }
+.demo > .wrap > p { max-width: 48rem; color: var(--muted); margin: 0 0 1.5rem; }
+.shell-session { margin: 0; }
+.session-grid {
+  display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: clamp(1.5rem, 4vw, 3rem); align-items: start;
+}
+.session-replay {
+  display: none; flex: none; border: 1px solid var(--rule); border-radius: 5px;
+  padding: 0.3rem 0.6rem; background: var(--t-bar); color: var(--t-fg);
+  font: 600 0.75rem var(--sans); cursor: pointer;
+}
+.js .session-replay { display: inline-block; }
+.session-replay[hidden] { display: none; }
+.session-transcript { font-size: 0.82rem; line-height: 1.65; }
+.session-transcript code { min-width: 0; }
+.session-line { border-radius: 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.session-line.is-active { background: color-mix(in srgb, var(--t-green) 12%, var(--t-bg)); }
+.session-line.is-cursor::after {
+  content: ""; display: inline-block; width: 0.5em; height: 1em;
+  margin-left: 0.3em; vertical-align: -0.1em; background: var(--t-green);
+}
+.session-note { white-space: normal; color: var(--t-dim); }
+.session-files { min-width: 0; font-size: 0.92rem; }
+.session-stage { color: var(--muted); min-height: 3.2em; margin: 0 0 1rem; }
+.file-source, .file-fork, .file-patches, .file-apply {
+  border: 1px solid var(--rule); border-radius: 7px; padding: 0.8rem 0.9rem;
+  background: var(--bg-2);
+}
+.session-files strong, .session-files small { display: block; }
+.session-files small { color: var(--muted); margin-top: 0.3rem; line-height: 1.5; }
+.file-forks {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem; position: relative; margin-top: 1.5rem;
+}
+.file-forks::before {
+  content: ""; position: absolute; top: -0.8rem; left: 25%; right: 25%;
+  border-top: 1px solid var(--rule);
+}
+.file-source { position: relative; }
+.file-source::after {
+  content: ""; position: absolute; bottom: -0.8rem; left: 50%;
+  height: 0.8rem; border-left: 1px solid var(--rule);
+}
+.file-fork { position: relative; }
+.file-fork::before {
+  content: ""; position: absolute; top: -0.8rem; left: 50%;
+  height: 0.8rem; border-left: 1px solid var(--rule);
+}
+.file-fork code { color: var(--link); }
+.file-fork span { display: block; margin-top: 0.45rem; font-size: 0.82em; }
+.file-patches { margin-top: 1rem; }
+.file-patches code { display: inline-block; margin: 0 0.4rem 0.3rem 0; font-size: 0.8em; }
+.file-apply { margin-top: 1rem; background: none; border-style: dashed; }
+.file-apply p { color: var(--muted); margin: 0.3rem 0 0; }
+.session-files .is-active, .file-forks.is-active .file-fork {
+  border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--bg-2));
+}
+.demo > .wrap > .demo-followup { margin: 1.5rem 0 0; }
 .reasons {
   display: grid; grid-template-columns: minmax(0, 0.55fr) minmax(0, 1.65fr);
   margin: 1.75rem 0 0; column-gap: clamp(1.5rem, 4vw, 3.5rem);
@@ -380,6 +438,8 @@ tr:last-child td { border-bottom: 0; }
   body { font-size: 16px; }
   .feature, .how { grid-template-columns: minmax(0, 1fr); }
   .demo-layout { grid-template-columns: minmax(0, 1fr); row-gap: 1rem; }
+  .session-grid { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; }
+  .session-files { max-width: 30rem; }
   .demo-copy { display: contents; }
   .demo-example { order: 1; }
   .demo-copy p { order: 2; margin: 0; }
@@ -403,6 +463,7 @@ tr:last-child td { border-bottom: 0; }
   .reasons dt { padding-bottom: 0.4rem; }
   .reasons dd { border-top: 0; padding-top: 0; }
   .home .term.example { font-size: 0.78rem; padding-left: 1rem; padding-right: 1rem; }
+  .session-transcript { font-size: 0.74rem; padding-left: 0.7rem; padding-right: 0.7rem; }
   .install { font-size: 0.8rem; padding-left: 0.75rem; }
   .eyebrow { font-size: 0.7rem; white-space: nowrap; }
   .cta .btn { flex: 1; justify-content: center; }
