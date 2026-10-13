@@ -852,18 +852,6 @@
     "repeat-c3a9ff3e-stderr@C"
    ]
   }},
-  {"id": "NAMEREF-SUBSCRIPT", "summary": "A name reference to an array element (declare -n r='a[2]') is an ordinary variable: read, getopts, export and unset through it change r, not the element", "cases": {
-   "byte-builtins": [
-    "export-quoted-ref-element@C",
-    "export-quoted-ref-element@C.utf8",
-    "getopts-subscripted-ref@C",
-    "getopts-subscripted-ref@C.utf8",
-    "read-nameref-index@C",
-    "read-nameref-index@C.utf8",
-    "unset-ref-raw-index@C",
-    "unset-ref-raw-index@C.utf8"
-   ]
-  }},
   {"id": "PROMPT", "summary": "Prompt strings: quote removal and brace expansion are applied, \\nnn and \\001/\\002 handled differently, controls not made visible", "cases": {
    "prompt": [
     "braces-tilde-glob-expand@C",

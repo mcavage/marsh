@@ -151,7 +151,7 @@ impl builtins::Command for GetOptsCommand {
 
         let result = parse_next_option(&mut context, &spec, args_to_parse, next_index)?;
 
-        update_variables(&mut context, &self.variable_name, result)
+        update_variables(&mut context, &self.variable_name, result).await
     }
 }
 
@@ -360,19 +360,30 @@ fn report_unknown_option<SE: brush_core::ShellExtensions>(
 
 /// Writes the parsing result back into shell variables: the target variable,
 /// OPTARG, OPTIND, and the internal `__GETOPTS_LAST_OPTIND` tracker.
-fn update_variables<SE: brush_core::ShellExtensions>(
+async fn update_variables<SE: brush_core::ShellExtensions>(
     context: &mut brush_core::ExecutionContext<'_, SE>,
     variable_name: &str,
     result: GetOptsResult,
 ) -> Result<ExecutionResult, brush_core::Error> {
-    // Update variable value.
-    context.shell.env_mut().update_or_add(
-        variable_name,
-        variables::ShellValueLiteral::Scalar(result.variable_value),
-        |_| Ok(()),
-        brush_core::env::EnvironmentLookup::Anywhere,
-        brush_core::env::EnvironmentScope::Global,
-    )?;
+    // Update variable value (through a reference to an array element, with its
+    // subscript expanded).
+    if context.shell.env().nameref_element(variable_name).is_some() {
+        brush_core::expansion::assign_to_named_parameter(
+            context.shell,
+            &context.params,
+            variable_name,
+            result.variable_value,
+        )
+        .await?;
+    } else {
+        context.shell.env_mut().update_or_add(
+            variable_name,
+            variables::ShellValueLiteral::Scalar(result.variable_value),
+            |_| Ok(()),
+            brush_core::env::EnvironmentLookup::Anywhere,
+            brush_core::env::EnvironmentScope::Global,
+        )?;
+    }
 
     // Update OPTARG
     if let Some(optarg) = result.optarg {

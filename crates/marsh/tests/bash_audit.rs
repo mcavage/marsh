@@ -2346,3 +2346,16 @@ f() { local -; set -u; }; f; echo "$-"; a=(x y); printf '<%s>' "${a[@]@K}" "${a[
     assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
     assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
 }
+
+/// A name reference to an array element reads, assigns, `read`s, `getopts`,
+/// `printf -v`s and `unset`s the element, its subscript expanded at use.
+#[test]
+fn name_references_to_array_elements_match_bash() {
+    differential(
+        r#"a=(x y z); declare -n r="a[1]"; echo "$r"; r=Q; r+=W; echo "${a[*]}"; i=2; declare -n s="a[i]"; s=I; echo "${a[2]}"
+IFS= read -r r <<< rd; getopts b: s -b val; printf -v r '%s!' "${a[1]}"; echo "${a[*]}"
+declare -A h; k='the key'; h[$k]=v; declare -n hr='h["$k"]'; echo "[$hr]"; unset hr; echo "${#h[@]}""#,
+        0,
+        b"y\nx QW z\nI\nx rd! b\n[v]\n0\n",
+    );
+}

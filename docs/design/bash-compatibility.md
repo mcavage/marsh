@@ -1,9 +1,9 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 92 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 76 fix Bash
-compatibility: small builtin details (`set`, `$!`, empty `PATH` entries, `local -`, `@K`), DEBUG and ERR traps, `set -v`, common diagnostics, `CHLD` traps, GLOBIGNORE, `[[ =~ ]]` as POSIX extended regular expressions, negative subscripts, `{fd}` lifetime, posix special-builtin assignments, noninteractive `history`, `read` splitting and assignment, `printf` conversions and errors, `unset` of readonly names, `xpg_echo`, `mapfile -C`, `getopts` and `OPTIND`, redirection expansion order, job control, job lines and `disown`, function substitutions, NUL bytes in input, byte strings that are not UTF-8, pattern substitution, interactive shells without a terminal, signals and traps, `wait`, aliases,
+`vendor/brush/UPSTREAM_REVISION`) plus the 93 patches in
+[`docs/upstream/brush/`](../upstream/brush/README.md). 77 fix Bash
+compatibility: name references to array elements, small builtin details (`set`, `$!`, empty `PATH` entries, `local -`, `@K`), DEBUG and ERR traps, `set -v`, common diagnostics, `CHLD` traps, GLOBIGNORE, `[[ =~ ]]` as POSIX extended regular expressions, negative subscripts, `{fd}` lifetime, posix special-builtin assignments, noninteractive `history`, `read` splitting and assignment, `printf` conversions and errors, `unset` of readonly names, `xpg_echo`, `mapfile -C`, `getopts` and `OPTIND`, redirection expansion order, job control, job lines and `disown`, function substitutions, NUL bytes in input, byte strings that are not UTF-8, pattern substitution, interactive shells without a terminal, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
 formats, startup files, option order, field splitting, `read`, `[[ ]]`
 patterns, prompts, and input typed ahead at the prompt. The other 16 add marsh's registered
@@ -22,7 +22,7 @@ The focused executable corpus covers these regressions:
 | Aliases | Escaped/quoted/dynamically expanded command names, operator bodies, chains, trailing blanks, recursion, function-definition timing, same-line read timing, reserved syntax and here documents |
 | Shell state isolation | Subshells, background lists, command substitutions and pipeline stages keep their variable/function/option/umask/directory changes out of the parent |
 | Process identity | `( )`, `&` lists, pipeline stages, coprocesses and process substitutions are forked processes: `$BASHPID` is the child (and `$!`/`$NAME_PID`), `$$` is unchanged, `$BASH_SUBSHELL` increments as in Bash, a single external command replaces the child, `exec` in a subshell keeps its PID, function pipeline stages die of `SIGPIPE`, and only an `EXIT` trap set inside the subshell runs there. `$( )` forks only when its text mentions `BASHPID` |
-| Name references | `local -n`/`declare -n` reads, scalar/array/associative assignments, `+=`, `read`, `printf -v`, `mapfile`, `unset`/`unset -n`, `declare -p` and `[[ -R ]]` |
+| Name references | `local -n`/`declare -n` reads (and references to array elements, `declare -n r='a[i]'`, through `$r`, assignment, `read`, `getopts`, `printf -v`, `export` and `unset`), scalar/array/associative assignments, `+=`, `read`, `printf -v`, `mapfile`, `unset`/`unset -n`, `declare -p` and `[[ -R ]]` |
 | Globbing | `globstar` (`**`, `**/`, `dir/**`, with `dotglob`), extglob `+( )`/`!( )` |
 | Redirection expansion | A command's words expand first, then its assignments (each seeing the previous one), then its redirections, which do not see the command's variables; an external command's redirections and here-documents expand as in its child (`>"$((++i))"`, `>"${v:=x}"`, `{fd}>file`, `>"${ exit 3; }"` leave the shell alone); failed redirections use Bash's message |
 | Interactive shell without a terminal | `-i` with standard error not a terminal and no controlling terminal: `NAME: cannot set terminal process group (-1): Inappropriate ioctl for device` and `NAME: no job control in this shell`, no `m` in `$-`, PS1 and PS2 on standard error for every line read (minimal, basic and Reedline backends; Reedline reads as the minimal backend without a terminal), `exit` at end of input |
@@ -60,7 +60,7 @@ One explicit oracle-version divergence is classified: command-substitution
 marsh's exact `127`; the parent's subsequent wait must still return its child
 status. Candidate failures are not normalized away.
 
-The current corpus has 74 differential test functions (all enabled), a split
+The current corpus has 75 differential test functions (all enabled), a split
 `PIPESTATUS` check,
 and 55 smoke journeys (53 on Linux, where two macOS `script(1)` job-control
 journeys are compiled out; 54 on macOS, without one that reads `/proc`), run on macOS ARM64 with Rust
@@ -228,7 +228,6 @@ behavior that needs more than a small Brush patch.
 | ID | Difference from Bash | Scope | Reason |
 | --- | --- | --- | --- |
 | BYTES | Text that is not UTF-8 is held losslessly (patches `0073`, `0079`), except in Reedline: keys typed as bytes that are not UTF-8, editing over them, `READLINE_POINT` and completion of such names | `readline` | Reedline (and crossterm) read and edit text as UTF-8 |
-| NAMEREF-SUBSCRIPT | A name reference to an array element (`declare -n r='a[2]'`) is an ordinary variable: `read`, `getopts`, `export` and `unset` through it change `r` | `byte-builtins` | Name references resolve only to variable names; elements need every lookup to resolve subscripts |
 | LOCALE | No locale model: in the C locale `?`, `${v:i:n}`, and `[[:alpha:]]` in globs take a valid multibyte character as one (`${#v}` counts bytes in every locale), IFS characters are whole characters, case conversion changes non-ASCII letters, and `\u00e9` prints UTF-8; in UTF-8 Rust's full Unicode case mapping is used (`ß` upper-cases to `SS`, `ı`/`İ` differ) and `nocasematch` classes differ | Byte matcher and builtin cases with non-ASCII text | Brush text is Unicode regardless of `LC_ALL` |
 | EXTGLOB-GNU-OPTIMIZATION | GNU's matcher gives non-POSIX results for `*` followed by a nullable extglob (`[[ b == *@(\|a) ]]` fails, `${v#*@(\|a)}` removes the whole value); Brush matches by the pattern's language | `byte-matchers` `terminal-nullable-*` | GNU optimization artifacts; copying them is not ordinary behavior |
 | STARTUP-OPTIONS | Invocation options: `+x` short options other than `+o`/`+O`, `-a -B -E -h -T` and `-s` with `-c`, `-` and `+` terminators, invalid `-o`/`-O` names (Brush runs the command), bare `-o`/`-O` listings, and clap's error wording and statuses | `startup` | Brush's clap-based command line; agents use `-c`, `-l`, `-e`, `-o NAME` |

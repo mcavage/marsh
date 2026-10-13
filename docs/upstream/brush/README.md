@@ -708,6 +708,13 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   `${a[@]@K}`/`${a[@]@k}` list an array's subscripts and values; and `exec`
   does not set `_` (the program gets the shell's only if exported). Covered by
   `small_builtin_details_match_bash`.
+- `0090` supports name references to array elements (`declare -n r='a[i]'`):
+  `Environment::nameref_element` gives the array and subscript a reference
+  chain ends at; `$r` expands the element, assignment (`r=`, `r+=`), `read`,
+  `getopts` and `printf -v` assign it with the subscript expanded at use,
+  `unset r` unsets it, and `export` assigns it and reports it as Bash does;
+  `update_or_add` assigns the element with the subscript as written for other
+  callers. Covered by `name_references_to_array_elements_match_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

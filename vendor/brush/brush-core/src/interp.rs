@@ -3018,12 +3018,22 @@ async fn apply_assignment(
     // Figure out if we are trying to assign to a variable or assign to an element of an existing
     // array.
     let mut array_index;
-    let variable_name = match &assignment.name {
-        ast::AssignmentName::VariableName(name) => {
+    let element = match &assignment.name {
+        ast::AssignmentName::VariableName(name) => shell.env().nameref_element(name),
+        ast::AssignmentName::ArrayElementName(..) => None,
+    };
+    let variable_name = match (&assignment.name, &element) {
+        // A reference to an array element assigns the element.
+        (_, Some((array, index))) => {
+            let index = ast::Word::from(index.clone());
+            array_index = Some(expansion::basic_expand_word(shell, params, &index).await?);
+            array
+        }
+        (ast::AssignmentName::VariableName(name), None) => {
             array_index = None;
             name
         }
-        ast::AssignmentName::ArrayElementName(name, index) => {
+        (ast::AssignmentName::ArrayElementName(name, index), None) => {
             let expanded = expansion::basic_expand_word(shell, params, index).await?;
             array_index = Some(expanded);
             name
