@@ -1,9 +1,9 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 82 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 66 fix Bash
-compatibility: `getopts` and `OPTIND`, redirection expansion order, job control, job lines and `disown`, function substitutions, NUL bytes in input, byte strings that are not UTF-8, pattern substitution, interactive shells without a terminal, signals and traps, `wait`, aliases,
+`vendor/brush/UPSTREAM_REVISION`) plus the 83 patches in
+[`docs/upstream/brush/`](../upstream/brush/README.md). 67 fix Bash
+compatibility: `unset` of readonly names, `xpg_echo`, `mapfile -C`, `getopts` and `OPTIND`, redirection expansion order, job control, job lines and `disown`, function substitutions, NUL bytes in input, byte strings that are not UTF-8, pattern substitution, interactive shells without a terminal, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
 formats, startup files, option order, field splitting, `read`, `[[ ]]`
 patterns, prompts, and input typed ahead at the prompt. The other 16 add marsh's registered
@@ -54,7 +54,7 @@ One explicit oracle-version divergence is classified: command-substitution
 marsh's exact `127`; the parent's subsequent wait must still return its child
 status. Candidate failures are not normalized away.
 
-The current corpus has 64 differential test functions (all enabled), a split
+The current corpus has 65 differential test functions (all enabled), a split
 `PIPESTATUS` check,
 and 55 smoke journeys (53 on Linux, where two macOS `script(1)` job-control
 journeys are compiled out; 54 on macOS, without one that reads `/proc`), run on macOS ARM64 with Rust
@@ -242,9 +242,6 @@ behavior that needs more than a small Brush patch.
 | PROMPT | Prompt strings get quote removal and brace expansion (`'"` and `{a,b}`), `\7`-style short octal escapes and `\001`/`\002` are treated differently, `strftime` conversions are chrono's (`%f`) | `prompt` | Brush's two-pass prompt expansion |
 | READ | `read` without `-r` treats a backslash-escaped IFS character as a delimiter; `read -t 0` at end of file reports ready; `read -n 1` from a terminal returns nothing for `^D` | `byte-builtins`, `readiness` | `read` builtin details |
 | PRINTF | `%b` drops the backslash of `\"`, `\c` in `%b` does not stop all output, empty arguments to numeric conversions are not errors | `byte-builtins` | `printf` details |
-| MAPFILE-CALLBACK | `mapfile -C`/`-c` are unimplemented | `byte-builtins` | Not implemented |
-| UNSET-READONLY | `unset a b` stops at a readonly `a` | `byte-builtins` | Error handling stops the builtin |
-| ECHO-XPG | `echo` under `xpg_echo` and posix mode handles options and escapes differently | `byte-builtins` | Not implemented |
 | SPARSE-NEGATIVE-INDEX | `a[-1]` on a sparse array counts from the element count, not the highest index | `bytes` | Array indexing |
 | HISTORY-NONINTERACTIVE | `history -r`/`history` refuse to run in a noninteractive shell | `bytes` | History is enabled only interactively |
 | READLINE-VARIABLES | `bind -x`: `READLINE_POINT` counts characters, not bytes; out-of-range and invalid points are handled differently; unsetting `READLINE_LINE`/`POINT` in the command, their values before and after a binding, and the line seen during a continuation (PS2) read differ; PS2 is expanded more often | `readline` | Reedline's editor model, not GNU Readline |

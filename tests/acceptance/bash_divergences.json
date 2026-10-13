@@ -102,12 +102,6 @@
     "nameref.yaml#100"
    ]
   }},
-  {"id": "ECHO-XPG", "summary": "echo under xpg_echo and posix mode treats options and escapes differently", "cases": {
-   "byte-builtins": [
-    "echo-posix-xpg-options@C",
-    "echo-posix-xpg-options@C.utf8"
-   ]
-  }},
   {"id": "EOF-INCOMPLETE", "summary": "End of input in an incomplete line of an interactive shell on a pipe: prompts and diagnostics differ", "cases": {
    "history-input": [
     "eof:basic-0-continuation@C",
@@ -918,14 +912,6 @@
     "repeat-c3a9ff3e-stderr@C"
    ]
   }},
-  {"id": "MAPFILE-CALLBACK", "summary": "mapfile -C/-c is not implemented", "cases": {
-   "byte-builtins": [
-    "mapfile-callback-consumes-input@C",
-    "mapfile-callback-consumes-input@C.utf8",
-    "mapfile-callback-status@C",
-    "mapfile-callback-status@C.utf8"
-   ]
-  }},
   {"id": "NAMED-FD-LIFETIME", "summary": "A {fd}>file redirection on a builtin is closed after the command; Bash keeps it open", "cases": {
    "external-redirects": [
     "builtin-variable-fd"
@@ -1289,12 +1275,6 @@
    "regex": [
     "chld-user-child",
     "chld-user-function-child"
-   ]
-  }},
-  {"id": "UNSET-READONLY", "summary": "unset stops at a readonly name instead of continuing with the rest", "cases": {
-   "byte-builtins": [
-    "unset-readonly-continues@C",
-    "unset-readonly-continues@C.utf8"
    ]
   }},
   {"id": "VERBOSE", "summary": "set -v does not echo input lines", "cases": {

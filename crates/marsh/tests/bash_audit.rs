@@ -2081,3 +2081,22 @@ PS4='\101\w> '; set -x; : traced; set +x
     );
     assert_eq!(brush_script.stdout, bash_script.stdout, "{brush_script:?}");
 }
+
+/// `unset` reports a readonly name and unsets the rest; `echo` follows
+/// `xpg_echo` (and takes no options with it in posix mode); `mapfile -C`
+/// runs its callback every `-c` lines with the index and the line about to be
+/// stored, and the callback can read the same input.
+#[test]
+fn unset_echo_and_mapfile_callback_details_match_bash() {
+    differential(
+        r#"readonly first=one; second=two; unset first second 2>/dev/null; echo "$? $first ${second-unset}"
+shopt -s xpg_echo; echo 'a\tb'; echo -E 'a\tb'; set -o posix; echo -nE 'c\td'; set +o posix; shopt -u xpg_echo
+cb() { printf 'cb<%s><%s>[%s]' "$1" "$2" "${#a[@]}"; return 7; }
+printf 'x\ny\nz\n' | { mapfile -t -C cb -c 2 a; echo "|$?|${a[*]}"; }
+take() { IFS= read -r d; printf '<%s>' "$d"; }
+printf "a\nconsumed\nb\nlast\no'k\n" | { mapfile -t -C take -c 1 a; echo "|${a[*]}"; }
+printf "o'k\n" | mapfile -t -C cb -c 1 a; echo"#,
+        0,
+        b"1 one unset\na\tb\na\\tb\n-nE c\td\ncb<1><y>[1]|0|x y z\n<consumed><last><>|a b o'k\ncb<0><o'k>[0]\n",
+    );
+}

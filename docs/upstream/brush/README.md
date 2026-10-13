@@ -615,6 +615,13 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   of an ENOEXEC file by its full path, `echo` options in order, `read -n 0`, and
   `export` of an expanded `NAME=value` word with Bash's invalid-name and
   readonly diagnostics. Covered by `byte_and_builtin_details_match_bash`.
+- `0080` makes `unset` report a readonly name (`unset: NAME: cannot unset:
+  readonly variable`) and go on with the other names; makes `echo` follow
+  `xpg_echo` (escapes by default, `-E` turns them off, and in posix mode no
+  options at all); and implements `mapfile -C`/`-c`: as in Bash's
+  `mapfile.def`, every `-c` lines the callback runs as `CALLBACK INDEX 'LINE'`
+  before the line is stored, its status ignored, and elements are stored as
+  they are read. Covered by `unset_echo_and_mapfile_callback_details_match_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
