@@ -451,6 +451,18 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
         std::format!("{name}: line {line}: ")
     }
 
+    /// Whether the shell's character locale (`LC_ALL`, else `LC_CTYPE`, else
+    /// `LANG`) is a UTF-8 one.
+    pub fn is_utf8_locale(&self) -> bool {
+        ["LC_ALL", "LC_CTYPE", "LANG"]
+            .iter()
+            .find_map(|name| self.env_str(name).filter(|value| !value.is_empty()))
+            .is_some_and(|value| {
+                let value = value.to_ascii_lowercase();
+                value.contains("utf-8") || value.contains("utf8")
+            })
+    }
+
     pub(crate) const fn call_stack_mut(&mut self) -> &mut crate::callstack::CallStack {
         &mut self.call_stack
     }

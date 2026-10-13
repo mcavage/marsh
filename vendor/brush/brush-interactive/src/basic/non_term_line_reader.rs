@@ -17,7 +17,7 @@ impl super::LineReader for NonTermLineReader {
         if let Some(prompt) = prompt {
             use std::io::Write as _;
             let mut stderr = std::io::stderr();
-            write!(stderr, "{prompt}")?;
+            stderr.write_all(&brush_core::bytes::encode(prompt))?;
             stderr.flush()?;
         }
         let mut input = Vec::new();

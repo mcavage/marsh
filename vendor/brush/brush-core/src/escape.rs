@@ -445,7 +445,8 @@ fn ansi_c_quote(s: &str) -> String {
             '\\' => result.push_str("\\\\"),
             '\'' => result.push_str("\\'"),
             c if needs_ansi_c_quoting(c) => {
-                result.push_str(std::format!("\\{:03o}", c as u8).as_str());
+                let byte = crate::bytes::raw_byte(c).unwrap_or(c as u8);
+                result.push_str(std::format!("\\{byte:03o}").as_str());
             }
             _ => result.push(c),
         }
@@ -485,8 +486,10 @@ const fn needs_escaping(c: char) -> bool {
     )
 }
 
-const fn needs_ansi_c_quoting(c: char) -> bool {
-    c.is_ascii_control()
+/// Control characters, and bytes that are not part of valid UTF-8 (which Bash
+/// writes as `\NNN`).
+fn needs_ansi_c_quoting(c: char) -> bool {
+    c.is_ascii_control() || crate::bytes::raw_byte(c).is_some()
 }
 
 #[cfg(test)]

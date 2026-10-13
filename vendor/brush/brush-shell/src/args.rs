@@ -341,11 +341,7 @@ mod tests {
             (vec!["-s", "myarg"], true),
             (vec!["-i", "-s", "myarg"], true),
             (vec!["-si", "myarg"], true),
-            // N.B. `--` is presently kept as an ordinary positional rather than consumed
-            // as an end-of-options marker, so it lands in `script_args` -- a separate,
-            // pre-existing bug (bash runs `bash -- script.sh`; brush tries to source
-            // `--`). Classification comes out right either way, and pinning that here
-            // means fixing the parse can't silently change which branch these take.
+            // `--` ends the options.
             (vec!["--", "script.sh"], false),
             (vec!["-s", "--", "myarg"], true),
         ];

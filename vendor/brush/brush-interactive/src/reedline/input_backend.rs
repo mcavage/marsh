@@ -489,7 +489,7 @@ fn read_plain_line(
             &prompt.continuation_prompt
         };
         let mut stderr = std::io::stderr();
-        write!(stderr, "{shown}")?;
+        stderr.write_all(&brush_core::bytes::encode(shown))?;
         stderr.flush()?;
 
         let mut line = String::new();

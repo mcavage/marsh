@@ -464,6 +464,11 @@ fn read_line_with_reader(
     let mut output_chars = 0usize;
     let mut pending_backslash = false;
 
+    // `-n 0` and `-N 0` read nothing.
+    if config.char_limit == Some(0) {
+        return Ok(ReadResult::Line(line));
+    }
+
     loop {
         let event = reader.read_event()?;
 

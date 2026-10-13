@@ -2029,3 +2029,55 @@ fn getopts_notices_every_assignment_to_optind() {
         differential(script, 0, stdout);
     }
 }
+
+/// Small byte and builtin details: `echo` options in order (`-eE`), `read -n 0`,
+/// `export` of an expanded `NAME=value` word (and its diagnostics), `printf %q`
+/// of bytes that are not UTF-8, `\NNN` in a prompt, `\w` showing control
+/// characters, and `bash -- script`.
+#[test]
+fn byte_and_builtin_details_match_bash() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("s.sh"), "echo \"zero=$0 n=$# $*\"\n").unwrap();
+    let script = r#"echo -eE '\0101'; echo -Ee 'a\tb'; echo -- -n; echo '' | { read -r -n 0 v; echo "[$v]"; }
+a="X=1"; export "$a"; sh -c 'echo "X=$X"'; export "b-c=2"; echo $?; readonly R=1; export R=2 S=3; echo "$? $R $S"
+printf '%q %#q %q\n' "$(printf 'a\377b')" "a b" "a b"
+PS4='\101\w> '; set -x; : traced; set +x
+"#;
+    let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+        let mut command = shell(program);
+        if program != "bash" {
+            command.arg("--no-config");
+        }
+        let in_dir = command
+            .args(["--noprofile", "--norc", "-c", script, "audit"])
+            .current_dir(directory.path())
+            .env("HOME", directory.path())
+            .env("LC_ALL", "C")
+            .env_remove("BASH_ENV")
+            .output()
+            .unwrap();
+        let mut command = shell(program);
+        if program != "bash" {
+            command.arg("--no-config");
+        }
+        let script_operand = command
+            .args(["--noprofile", "--norc", "--", "s.sh", "a", "--"])
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        (in_dir, script_operand)
+    });
+    let [(bash, bash_script), (brush, brush_script)] = &outputs;
+    assert!(
+        bash.stdout
+            .starts_with(b"\\0101\na\tb\n-- -n\n[]\nX=1\n1\n1 1 3\n$'a\\377b' 'a b' a\\ b\n"),
+        "Bash: {bash:?}"
+    );
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
+    assert_eq!(
+        bash_script.stdout, b"zero=s.sh n=2 a --\n",
+        "Bash: {bash_script:?}"
+    );
+    assert_eq!(brush_script.stdout, bash_script.stdout, "{brush_script:?}");
+}

@@ -201,12 +201,18 @@ fn format_via_uucore(
     // even if there's no format arguments.
     while format_args.is_empty() || !format_args_wrapper.is_exhausted() {
         // Process all format items, in order. We'll bail when we're told to stop.
-        for (item, backslash_quote) in &format_items {
-            if let (format::FormatItem::Spec(format::Spec::QuotedString { position }), true) =
-                (item, *backslash_quote)
+        for (item, quoting) in &format_items {
+            if let (
+                format::FormatItem::Spec(format::Spec::QuotedString { position }),
+                Some(alternate),
+            ) = (item, *quoting)
             {
                 let arg = format_args_wrapper.next_string(*position).to_shell_text();
-                let quoted = quote_printf_q(&arg);
+                let quoted = if alternate {
+                    escape::quote_if_needed(&arg, escape::QuoteMode::SingleQuote).into_owned()
+                } else {
+                    quote_printf_q(&arg)
+                };
                 write!(writer, "{quoted}")?;
                 continue;
             }
@@ -259,15 +265,16 @@ fn quote_printf_q(s: &str) -> String {
     quoted
 }
 
-type ParsedFormatItem = (format::FormatItem<format::EscapedChar>, bool);
+/// A format item, and for a `%q` one whether it is `%#q` (quote with single quotes).
+type ParsedFormatItem = (format::FormatItem<format::EscapedChar>, Option<bool>);
 
 fn parse_format_string(format_string: &str) -> Result<Vec<ParsedFormatItem>, brush_core::Error> {
     let format_items: Result<Vec<_>, _> = format::parse_spec_and_escape(format_string.as_bytes())
         .map(|result| match result {
             Ok(item @ format::FormatItem::Spec(format::Spec::QuotedString { .. })) => {
-                Ok((item, true))
+                Ok((item, Some(false)))
             }
-            Ok(item) => Ok((item, false)),
+            Ok(item) => Ok((item, None)),
             // Fixed q/Q modifiers are deliberately ignored; dynamic modifiers remain unsupported
             // until uucore exposes quoted-string metadata.
             Err(format::FormatError::SpecError(spec))
@@ -279,7 +286,7 @@ fn parse_format_string(format_string: &str) -> Result<Vec<ParsedFormatItem>, bru
                 let item = format::Spec::parse(&mut bare_q)
                     .map(format::FormatItem::Spec)
                     .map_err(|spec| format::FormatError::SpecError(spec.to_vec()))?;
-                Ok((item, !spec.contains(&b'#')))
+                Ok((item, Some(spec.contains(&b'#'))))
             }
             Err(error) => Err(error),
         })

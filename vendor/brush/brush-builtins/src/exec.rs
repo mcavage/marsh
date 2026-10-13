@@ -83,7 +83,8 @@ impl builtins::Command for ExecCommand {
                 &self.args[1..],
                 self.empty_environment,
             )?;
-            // Bash's diagnostics name the file by its full path (`full_pathname`).
+            // Bash execs the file by its full path (`full_pathname`), which is also
+            // what an ENOEXEC script sees as `$0` and what diagnostics name.
             #[cfg(unix)]
             let full_path = if path.starts_with('/') {
                 path.clone()
@@ -100,7 +101,7 @@ impl builtins::Command for ExecCommand {
             brush_core::sys::commands::exec_with_script_fallback(
                 &mut cmd,
                 &brush_core::bytes::to_os_string(argv0.as_ref()),
-                &brush_core::bytes::to_os_string(&path),
+                &brush_core::bytes::to_os_string(&full_path),
                 context.iter_fds().map(|(fd, _)| fd),
                 &std::format!("{}{full_path}: ", context.shell.diagnostic_prefix()),
             )?;
