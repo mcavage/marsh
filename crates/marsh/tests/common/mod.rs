@@ -276,3 +276,39 @@ pub fn require_bash_oracle() {
         "the Bash oracle must be GNU Bash 5.3 first on PATH, found {version:?}"
     );
 }
+
+/// Panics if `script` opens a FIFO it creates with a blocking `open` in the
+/// shell under test (outside the single-quoted scripts it hands to children).
+///
+/// On macOS a signal that interrupts a blocked FIFO `open` (the shell's own
+/// `SIGCHLD` when one of its children exits) backs the opener out after the
+/// peer may already have opened: the peer reads end-of-file and leaves, and
+/// the retried `open` (Bash and Rust both retry `EINTR`) waits forever for a
+/// peer that is gone. Linux has no such window. So a script opens its gate
+/// read-write before any child starts (`exec 3<>gate`), which never blocks,
+/// and releases it through that descriptor (`echo >&3`).
+pub fn assert_no_blocking_fifo_open(script: &str) {
+    let fifos = script
+        .split([';', '\n'])
+        .filter_map(|command| command.trim().strip_prefix("mkfifo "))
+        .flat_map(str::split_whitespace)
+        .collect::<Vec<_>>();
+    let shell_text = script.split('\'').step_by(2).collect::<Vec<_>>().join(" ");
+    for fifo in fifos {
+        for (at, _) in shell_text.match_indices(fifo) {
+            let before = shell_text[..at].trim_end();
+            let whole_word = shell_text[at + fifo.len()..]
+                .chars()
+                .next()
+                .is_none_or(|next| !(next.is_alphanumeric() || "_-.".contains(next)));
+            let blocking =
+                before.ends_with('<') || (before.ends_with('>') && !before.ends_with("<>"));
+            assert!(
+                !(whole_word && blocking),
+                "the shell under test opens FIFO {fifo} with a blocking open, which macOS can \
+                 leave waiting forever when a child exits meanwhile; open it read-write before \
+                 starting children (exec 3<>{fifo}) and write to that descriptor: {script}"
+            );
+        }
+    }
+}
