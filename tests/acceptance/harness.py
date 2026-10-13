@@ -508,6 +508,21 @@ STOCK_EXEC_NOTICE = re.compile(
     rb"Sandbox [a-z0-9][a-z0-9-]* started successfully"
     rb"|WARN: docker hub refresh lock held by another process: [ -~]+"
 )
+# The same notices as sbx's structured log lines (sbx 0.47+):
+# {"time":...,"level":"WARN","msg":"docker hub refresh lock held by another process",...}
+STOCK_EXEC_LOG_NOTICES = {"docker hub refresh lock held by another process"}
+
+
+def is_stock_exec_notice(line: bytes) -> bool:
+    line = line.strip()
+    if STOCK_EXEC_NOTICE.fullmatch(line):
+        return True
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return False
+    return (isinstance(record, dict) and record.get("level") in {"INFO", "WARN"}
+            and record.get("msg") in STOCK_EXEC_LOG_NOTICES)
 
 
 def verify_container_deleted(
@@ -528,7 +543,7 @@ def verify_container_deleted(
     # a Docker Hub refresh lock held by a concurrent sbx process). Only those
     # recognized notices may precede Docker's absent message.
     lines = inspected.stderr.strip().splitlines()
-    notices_ok = all(STOCK_EXEC_NOTICE.fullmatch(line.strip()) for line in lines[:-1])
+    notices_ok = all(is_stock_exec_notice(line) for line in lines[:-1])
     if (inspected.returncode != 1 or not lines or not notices_ok
             or lines[-1].strip().lower() not in absent
             or inspected.stdout.strip() not in {b"", b"[]"}):
