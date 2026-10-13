@@ -79,6 +79,23 @@ class DryRun(unittest.TestCase):
         self.assertEqual(record["branches"]["claude"]["touched_tests"], ["tests/test_gate.py"])
 
 
+class FakeAgentPlan(unittest.TestCase):
+    def test_concurrent_calls_to_one_agent_each_take_the_next_action(self) -> None:
+        # Race and retry branches call the same fake agent at once; every call
+        # must get its own step of the plan (and none may crash).
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="marsh-bench-plan-"))
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(tmp)])
+        n = 24
+        (tmp / "plan.json").write_text(json.dumps({"claude": [{"do": "say", "text": f"step{i}"} for i in range(n)]}))
+        env = dict(os.environ, FAKEMARSH_STATE=str(tmp / "state"), FAKEMARSH_PLAN=str(tmp / "plan.json"))
+        calls = [subprocess.Popen([sys.executable, str(FAKE), str(tmp / "bin" / "claude"), "-p", "x"], cwd=tmp, env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for _ in range(n)]
+        outputs = [call.communicate(timeout=60) for call in calls]
+        self.assertEqual([call.returncode for call in calls], [0] * n, [err for _, err in outputs])
+        steps = sorted(out.strip() for out, _ in outputs)
+        self.assertEqual(steps, sorted(f"step{i}" for i in range(n)))
+
+
 class Parsing(unittest.TestCase):
     def test_usage_from_claude_and_codex_streams(self) -> None:
         claude = run.usage_from(['{"type":"result","total_cost_usd":0.5,"usage":{"input_tokens":10,'
