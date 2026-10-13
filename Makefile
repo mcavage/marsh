@@ -223,7 +223,8 @@ kits:
 # Regenerate every record the image gate checks (checksums, agent and adapter
 # notice records, npm overrides, image inventories and Go notices) from the pins
 # in the tree, then print the license delta against REFRESH_BASE (default
-# origin/main). Exit 0 OK, 2 NEEDS-OWNER, 1 failure. Needs network, Buildx with
+# origin/main); scripts/refresh-pins.py exits 0 OK, 2 NEEDS-OWNER, 1 failure
+# (through make, any non-zero is 2). Needs network, Buildx with
 # dhi.io access, git and Go (docs/design/supply-chain.md).
 REFRESH_BASE ?= origin/main
 refresh-pins:

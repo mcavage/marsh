@@ -239,6 +239,17 @@ def follow_override(name, old, new, entries, canonical):
     return result, mappings
 
 
+def check_locks():
+    """Locks resolve from the public registry: a private mirror's URLs would
+    be unreachable for the image build and every other caller."""
+    for lock in sorted(ROOT.glob("kits/*/package-lock.json")) + [ROOT / "packaging/shell/pi/package-lock.json"]:
+        for path, row in json.loads(lock.read_text())["packages"].items():
+            resolved = row.get("resolved", "")
+            if resolved and not resolved.startswith("https://registry.npmjs.org/"):
+                raise ValueError(f"{lock.relative_to(ROOT)}: {path} resolves from {resolved.split('/-/')[0]}, "
+                                 "not https://registry.npmjs.org/; regenerate the lock against the public registry")
+
+
 def refresh_overrides(base):
     for kit in NPM_KITS:
         path = ROOT / "kits" / kit / "notices/overrides.json"
@@ -414,6 +425,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="marsh-refresh-pins-") as temporary:
         work = private(pathlib.Path(temporary))
         before = base_tree(args.base, work / "base")
+        check_locks()
         run(sys.executable, ROOT / "scripts/refresh-agent-checksums.py")
         agent_records(cache, work)
         refresh_overrides(before)
