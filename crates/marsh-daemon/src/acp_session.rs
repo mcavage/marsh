@@ -727,6 +727,8 @@ pub(crate) struct AcpSessionManager {
     starting: AtomicUsize,
     pending: Mutex<BTreeMap<String, PendingAcp>>,
     publications: Mutex<()>,
+    /// Bounds a cancel's dispatch and each outbound write to the agent.
+    cancel_timeout: Duration,
 }
 
 struct StartPermit<'a>(&'a AtomicUsize);
@@ -820,7 +822,12 @@ impl AcpSessionManager {
             starting: AtomicUsize::new(0),
             pending: Mutex::new(BTreeMap::new()),
             publications: Mutex::new(()),
+            cancel_timeout: AcpClientConfig::default().cancel_timeout,
         })
+    }
+
+    pub(crate) fn set_cancel_timeout(&mut self, timeout: Duration) {
+        self.cancel_timeout = timeout;
     }
 
     pub fn reserve(&self, adapter: &str, caller: SessionSpec) -> Result<String, DaemonError> {
@@ -1004,6 +1011,7 @@ impl AcpSessionManager {
             // would discard a still-running provider turn and strand cancel.
             turn_timeout: Duration::ZERO,
             permission_timeout: Duration::from_mins(5),
+            cancel_timeout: self.cancel_timeout,
             ..Default::default()
         };
         let (client, _) = match self.runtime.block_on(AcpClient::connect_registered(

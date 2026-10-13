@@ -24,8 +24,11 @@ use uuid::Uuid;
 
 static HOST_INIT: std::sync::Once = std::sync::Once::new();
 
-/// Created in the project to let a `control-flood` agent exit.
+/// Created in the project to let a `control-flood` agent read stdin again.
 const RELEASE_FLOOD: &str = ".release-control-flood";
+
+/// Created in the project to make a `control-flood` agent exit unread.
+const EXIT_FLOOD: &str = ".exit-control-flood";
 
 /// Bounds a wait for a condition that holds quickly on an idle machine.
 const CONDITION_DEADLINE: Duration = Duration::from_secs(30);
@@ -111,6 +114,10 @@ impl DaemonBackend for Fixture {
             .env(
                 "MARSH_FIXTURE_RELEASE",
                 request.session.launch_directory.join(RELEASE_FLOOD),
+            )
+            .env(
+                "MARSH_FIXTURE_EXIT",
+                request.session.launch_directory.join(EXIT_FLOOD),
             )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1058,51 +1065,55 @@ fn failed_publication_revokes_its_grant_even_after_project_replacement() {
     );
 }
 
-#[test]
-fn status_remains_available_during_blocked_cancel_dispatch() {
-    let rig = Rig::new();
+/// Prompts a `control-flood` agent, which echoes the prompt, then stops
+/// reading stdin while flooding the daemon with requests whose replies fill
+/// that stdin. Cancels until one cancel stays in flight, requires status to
+/// answer while it still is, and returns that pending cancel's result.
+fn block_a_cancel<'scope>(
+    rig: &'scope Rig,
+    scope: &'scope thread::Scope<'scope, '_>,
+) -> std::sync::mpsc::Receiver<Result<String, DaemonError>> {
     rig.prompt("control-flood");
-    // The agent echoes the prompt, then stops reading stdin until released
-    // while flooding the daemon with requests whose replies fill that stdin.
     let deadline = Instant::now() + CONDITION_DEADLINE;
-
     while rig.status(0).updates.is_empty() {
         assert!(Instant::now() < deadline, "agent never received the prompt");
         thread::sleep(Duration::from_millis(5));
     }
+    // A cancel blocks once the agent's unread stdin is full; until then a
+    // cancel just adds its frame to the pipe and returns.
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "status never answered while a cancel was in flight"
+        );
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        scope.spawn(move || {
+            let result = rig.client.acp_cancel(rig.id.clone(), rig.shell.clone());
+            done_tx.send(result).unwrap();
+        });
+        while !rig.status(0).cancel_requested {
+            assert!(Instant::now() < deadline, "cancel never reached dispatch");
+            thread::sleep(Duration::from_millis(1));
+        }
+        if done_rx.recv_timeout(Duration::from_millis(250)).is_ok() {
+            continue;
+        }
+        let status = rig.status(0);
+        assert!(status.cancel_requested);
+        if matches!(
+            done_rx.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        ) {
+            return done_rx;
+        }
+    }
+}
+
+#[test]
+fn status_remains_available_during_blocked_cancel_dispatch() {
+    let rig = Rig::new();
     thread::scope(|scope| {
-        let rig_ref = &rig;
-        // A cancel blocks once the agent's unread stdin is full; until then a
-        // cancel just adds its frame to the pipe and returns. Cancel until one
-        // stays in flight, then require status to answer while it still is.
-        let pending = loop {
-            assert!(
-                Instant::now() < deadline,
-                "status never answered while a cancel was in flight"
-            );
-            let (done_tx, done_rx) = std::sync::mpsc::channel();
-            scope.spawn(move || {
-                let result = rig_ref
-                    .client
-                    .acp_cancel(rig_ref.id.clone(), rig_ref.shell.clone());
-                done_tx.send(result).unwrap();
-            });
-            while !rig.status(0).cancel_requested {
-                assert!(Instant::now() < deadline, "cancel never reached dispatch");
-                thread::sleep(Duration::from_millis(1));
-            }
-            if done_rx.recv_timeout(Duration::from_millis(250)).is_ok() {
-                continue;
-            }
-            let status = rig.status(0);
-            assert!(status.cancel_requested);
-            if matches!(
-                done_rx.try_recv(),
-                Err(std::sync::mpsc::TryRecvError::Empty)
-            ) {
-                break done_rx;
-            }
-        };
+        let pending = block_a_cancel(&rig, scope);
         fs::write(rig.shell.launch_directory.join(RELEASE_FLOOD), b"").unwrap();
         // Once the agent reads its stdin again, the cancel is delivered.
         pending
@@ -1113,6 +1124,44 @@ fn status_remains_available_during_blocked_cancel_dispatch() {
     assert_eq!(
         rig.done().last_stop_reason,
         Some(marsh_acp::StopReason::Cancelled)
+    );
+}
+
+/// An agent that exits while a cancel is blocked behind its unread stdin
+/// ends the cancel and the session at its exit, not at the dispatch deadline.
+/// The deadline is set past the test's wait, so only the exit can end them.
+#[test]
+fn agent_exit_ends_a_blocked_cancel_without_its_deadline() {
+    let rig = Rig::build(false, false, |server| {
+        server.with_acp_cancel_timeout(CONDITION_DEADLINE * 4)
+    });
+    thread::scope(|scope| {
+        let pending = block_a_cancel(&rig, scope);
+        fs::write(rig.shell.launch_directory.join(EXIT_FLOOD), b"").unwrap();
+        let result = pending
+            .recv_timeout(CONDITION_DEADLINE)
+            .expect("a blocked cancel outlived the agent that blocked it");
+        // The daemon's own answer, not this client's request deadline.
+        assert!(
+            matches!(&result, Err(DaemonError::Remote(message)) if message.contains("ACP transport lost")),
+            "a cancel the agent never read must end with the lost transport: {result:?}"
+        );
+    });
+    let deadline = Instant::now() + CONDITION_DEADLINE;
+    let status = loop {
+        let status = rig.status(0);
+        if status.attachment.terminal.is_some() && !status.turn_active {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the session never ended after its agent exited"
+        );
+        thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(
+        status.receipt.as_ref().unwrap().cleanup,
+        CleanupState::Verified
     );
 }
 
