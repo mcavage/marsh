@@ -19,9 +19,13 @@ pub(crate) struct EchoCommand {
     #[arg(short = 'E')]
     no_interpret_backslash_escapes: bool,
 
-    /// Tokens to echo to standard output.
+    /// Tokens to echo to standard output, options included.
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
+
+    /// How many of `args` are options.
+    #[clap(skip)]
+    option_words: usize,
 }
 
 impl builtins::Command for EchoCommand {
@@ -29,7 +33,8 @@ impl builtins::Command for EchoCommand {
 
     /// Parses options as Bash's `echo` does: leading words made only of
     /// `-n`, `-e` and `-E` letters, in order (the last of `-e`/`-E` wins);
-    /// anything else, `--` included, starts the text.
+    /// anything else, `--` included, starts the text. With `xpg_echo` in
+    /// posix mode there are no options.
     fn new<I>(args: I) -> Result<Self, clap::Error>
     where
         I: IntoIterator<Item = String>,
@@ -38,9 +43,10 @@ impl builtins::Command for EchoCommand {
             no_trailing_newline: false,
             interpret_backslash_escapes: false,
             no_interpret_backslash_escapes: false,
-            args: vec![],
+            args: args.into_iter().skip(1).collect(),
+            option_words: 0,
         };
-        let mut words = args.into_iter().skip(1).peekable();
+        let mut words = this.args.iter().peekable();
         while let Some(word) = words.next_if(|word| {
             word.len() > 1
                 && word.starts_with('-')
@@ -49,12 +55,18 @@ impl builtins::Command for EchoCommand {
             for letter in word[1..].chars() {
                 match letter {
                     'n' => this.no_trailing_newline = true,
-                    'e' => this.interpret_backslash_escapes = true,
-                    _ => this.interpret_backslash_escapes = false,
+                    'e' => {
+                        this.interpret_backslash_escapes = true;
+                        this.no_interpret_backslash_escapes = false;
+                    }
+                    _ => {
+                        this.interpret_backslash_escapes = false;
+                        this.no_interpret_backslash_escapes = true;
+                    }
                 }
             }
+            this.option_words += 1;
         }
-        this.args = words.collect();
         Ok(this)
     }
 
@@ -62,11 +74,25 @@ impl builtins::Command for EchoCommand {
         &self,
         context: brush_core::ExecutionContext<'_, SE>,
     ) -> Result<brush_core::ExecutionResult, Self::Error> {
-        let mut trailing_newline = !self.no_trailing_newline;
+        let xpg_echo = context
+            .shell
+            .options()
+            .echo_builtin_expands_escape_sequences;
+        let (text, mut trailing_newline, escapes) =
+            if xpg_echo && context.shell.options().posix_mode {
+                (self.args.as_slice(), true, true)
+            } else {
+                (
+                    &self.args[self.option_words..],
+                    !self.no_trailing_newline,
+                    self.interpret_backslash_escapes
+                        || (xpg_echo && !self.no_interpret_backslash_escapes),
+                )
+            };
         let mut s;
-        if self.interpret_backslash_escapes {
+        if escapes {
             s = String::new();
-            for (i, arg) in self.args.iter().enumerate() {
+            for (i, arg) in text.iter().enumerate() {
                 if i > 0 {
                     s.push(' ');
                 }
@@ -83,7 +109,7 @@ impl builtins::Command for EchoCommand {
                 }
             }
         } else {
-            s = self.args.join(" ");
+            s = text.join(" ");
         }
 
         if trailing_newline {

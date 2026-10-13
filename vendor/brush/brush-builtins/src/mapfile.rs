@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use clap::Parser;
 
-use brush_core::{ErrorKind, ExecutionExitCode, ExecutionResult, builtins, env, error, variables};
+use brush_core::{ErrorKind, ExecutionExitCode, ExecutionResult, builtins, env, variables};
 
 /// Read lines from standard input into an indexed array variable.
 #[derive(Parser)]
@@ -51,10 +51,6 @@ impl builtins::Command for MapFileCommand {
         &self,
         context: brush_core::ExecutionContext<'_, SE>,
     ) -> Result<brush_core::ExecutionResult, Self::Error> {
-        if self.callback_group_size != 5000 || self.callback.is_some() {
-            return error::unimp("mapfile -C/-c is not yet implemented");
-        }
-
         if let Some(origin) = self.origin {
             if origin < 0 {
                 writeln!(
@@ -78,104 +74,103 @@ impl builtins::Command for MapFileCommand {
             }
         }
 
-        let input_file = context
+        let mut input_file = context
             .try_fd(self.fd)
             .ok_or_else(|| ErrorKind::BadFileDescriptor(self.fd))?;
 
-        // Read!
-        let results = self.read_entries(input_file)?;
-
-        if let Some(origin) = self.origin {
-            // -O: preserve existing array, assign at offset.
-            for (elem_idx, (_key, value)) in results.0.into_iter().enumerate() {
-                // If the user is getting to wraparounds in *bash*, they got bigger problems.
-                #[allow(clippy::cast_possible_wrap)]
-                let elem_idx = elem_idx as i64;
-                context.shell.env_mut().update_or_add_array_element(
-                    &self.array_var_name,
-                    (elem_idx + origin).to_string(),
-                    value,
-                    |_| Ok(()),
-                    env::EnvironmentLookup::Anywhere,
-                    env::EnvironmentScope::Global,
-                )?;
-            }
-        } else {
-            // No -O: replace the entire variable (clears existing).
+        // Without -O the array starts empty.
+        if self.origin.is_none() {
             context.shell.env_mut().update_or_add(
                 &self.array_var_name,
-                variables::ShellValueLiteral::Array(results),
+                variables::ShellValueLiteral::Array(variables::ArrayLiteral(vec![])),
                 |_| Ok(()),
                 env::EnvironmentLookup::Anywhere,
                 env::EnvironmentScope::Global,
             )?;
         }
 
-        Ok(ExecutionResult::success())
-    }
-}
-
-impl MapFileCommand {
-    fn read_entries(
-        &self,
-        mut input_file: brush_core::openfiles::OpenFile,
-    ) -> Result<variables::ArrayLiteral, brush_core::Error> {
         let _term_mode = setup_terminal_settings(&input_file)?;
-
-        let mut entries = vec![];
-        let mut read_count = 0;
-        let max_count = self.max_count.try_into()?;
         let delimiter = match &self.delimiter {
             Some(d) if d.is_empty() => b'\0',
             Some(d) => d.as_bytes().first().copied().unwrap_or(b'\n'),
             None => b'\n',
         };
-
-        let mut buf = [0u8; 1];
-
-        while max_count == 0 || entries.len() < max_count {
-            let mut line = vec![];
-            let mut saw_delimiter = false;
-
-            loop {
-                match input_file.read(&mut buf) {
-                    Ok(0) => break, // End of input
-                    Ok(1) => {
-                        let byte = buf[0];
-                        line.push(byte);
-                        if byte == delimiter {
-                            saw_delimiter = true;
-                            break;
-                        }
-                    }
-                    Ok(_) => unreachable!("input can only be 0, 1, or error"),
-                    Err(e) => return Err(e.into()),
-                }
-            }
-
-            if line.is_empty() && !saw_delimiter {
+        let max_count: usize = self.max_count.try_into()?;
+        for _ in 0..self.skip_count {
+            if read_line(&mut input_file, delimiter)?.is_none() {
                 break;
             }
+        }
 
-            if read_count < self.skip_count {
-                read_count += 1;
-                continue;
-            }
-
+        let mut index = self.origin.unwrap_or(0);
+        let mut count = 0;
+        while max_count == 0 || count < max_count {
+            let Some(mut line) = read_line(&mut input_file, delimiter)? else {
+                break;
+            };
+            count += 1;
             if self.remove_delimiter && line.ends_with(&[delimiter]) {
                 line.pop();
             }
-
             // A shell value ends at its first NUL, as in Bash.
             if let Some(end) = line.iter().position(|byte| *byte == 0) {
                 line.truncate(end);
             }
-            let line_str = brush_core::bytes::decode_vec(line);
+            let line = brush_core::bytes::decode_vec(line);
 
-            entries.push((None, line_str));
+            // As in Bash, every `-c` lines the callback runs with the index and
+            // the line about to be stored; its status is ignored. The input is
+            // read a byte at a time, so the callback may read from it too.
+            if let Some(callback) = &self.callback
+                && i64::try_from(count).is_ok_and(|count| count % self.callback_group_size == 0)
+            {
+                let command = std::format!(
+                    "{callback} {index} {}",
+                    brush_core::escape::force_quote(
+                        &line,
+                        brush_core::escape::QuoteMode::SingleQuote
+                    )
+                );
+                let source_info = context.shell.call_stack().current_pos_as_source_info();
+                context
+                    .shell
+                    .run_string(command, &source_info, &context.params)
+                    .await?;
+            }
+
+            context.shell.env_mut().update_or_add_array_element(
+                &self.array_var_name,
+                index.to_string(),
+                line,
+                |_| Ok(()),
+                env::EnvironmentLookup::Anywhere,
+                env::EnvironmentScope::Global,
+            )?;
+            index += 1;
         }
 
-        Ok(variables::ArrayLiteral(entries))
+        Ok(ExecutionResult::success())
+    }
+}
+
+/// Reads one line, delimiter included; `None` at the end of the input.
+fn read_line(
+    input_file: &mut brush_core::openfiles::OpenFile,
+    delimiter: u8,
+) -> Result<Option<Vec<u8>>, brush_core::Error> {
+    let mut line = vec![];
+    let mut buf = [0u8; 1];
+    loop {
+        match input_file.read(&mut buf)? {
+            0 if line.is_empty() => return Ok(None),
+            0 => return Ok(Some(line)),
+            _ => {
+                line.push(buf[0]);
+                if buf[0] == delimiter {
+                    return Ok(Some(line));
+                }
+            }
+        }
     }
 }
 

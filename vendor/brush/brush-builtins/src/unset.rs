@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use clap::Parser;
+use std::io::Write;
 
 use brush_core::{ExecutionResult, Shell, builtins};
 
@@ -53,6 +54,7 @@ impl builtins::Command for UnsetCommand {
 
         let unspecified = self.name_interpretation.unspecified();
 
+        let mut result = ExecutionResult::success();
         #[expect(clippy::needless_continue)]
         for name in &self.names {
             if unspecified || self.name_interpretation.shell_variables {
@@ -64,6 +66,24 @@ impl builtins::Command for UnsetCommand {
                     let result = match parameter {
                         brush_parser::word::Parameter::Positional(_) => continue,
                         brush_parser::word::Parameter::Special(_) => continue,
+                        // Like Bash, a readonly variable is reported and the
+                        // other names are still unset.
+                        brush_parser::word::Parameter::Named(name)
+                            if context
+                                .shell
+                                .env()
+                                .get(name.as_str())
+                                .is_some_and(|(_, var)| var.is_readonly()) =>
+                        {
+                            writeln!(
+                                context.stderr(),
+                                "{}{}: {name}: cannot unset: readonly variable",
+                                context.shell.diagnostic_prefix(),
+                                context.command_name
+                            )?;
+                            result = ExecutionResult::general_error();
+                            continue;
+                        }
                         brush_parser::word::Parameter::Named(name) => {
                             context.shell.env_mut().unset(name.as_str())?.is_some()
                         }
@@ -90,7 +110,7 @@ impl builtins::Command for UnsetCommand {
             }
         }
 
-        Ok(ExecutionResult::success())
+        Ok(result)
     }
 }
 
