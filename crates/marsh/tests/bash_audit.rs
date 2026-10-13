@@ -12,7 +12,7 @@ fn shell(program: &str) -> Command {
     if program == "bash" {
         common::require_bash_oracle();
     }
-    Command::new(program)
+    common::command(program)
 }
 
 fn run(program: &str, script: &str, from_stdin: bool) -> Output {
@@ -58,6 +58,18 @@ fn run_named(program: &str, script: &str, from_stdin: bool, name: Option<&str>) 
         &format!("{program}: {script}"),
         Duration::from_mins(1),
     )
+}
+
+/// The oracle and the candidate start from a cleared environment plus an
+/// allowlist, never the developer's credentials (`make test` exports a
+/// credential-shaped canary to prove it).
+#[test]
+fn oracle_and_candidate_start_without_credentials() {
+    for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
+        let names = run(program, "env | cut -d= -f1", false);
+        assert!(names.status.success(), "{program}: {names:?}");
+        common::assert_no_credential_names(program, &String::from_utf8_lossy(&names.stdout));
+    }
 }
 
 fn differential(script: &str, status: i32, stdout: &[u8]) {
@@ -467,7 +479,7 @@ fn executable_without_shebang_uses_brush_and_preserves_state_arguments_and_fds()
     );
     assert_eq!(outputs[1], outputs[0]);
     std::fs::write(&path, "test -n \"$BRUSH_VERSION\" || exit 91; printf brush").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_marsh-local"))
+    let output = shell(env!("CARGO_BIN_EXE_marsh-local"))
         .args(["--no-config", "--noprofile", "--norc", "-c", "./plain"])
         .current_dir(directory.path())
         .output()
@@ -888,7 +900,7 @@ fn failed_exec_restores_descriptors_and_respects_execfail() {
         std::fs::Permissions::from_mode(0o755),
     )
     .unwrap();
-    let output = Command::new(&runner)
+    let output = common::command(&runner)
         .args(["--no-config", "--noprofile", "--norc", "-c", "shopt -s execfail; rm \"$0\"; exec ./plain 13>&1 1>out 2>/dev/null; r=$?; printf 'status:%s:restored' \"$r\"; cat out"])
         .arg(&runner)
         .env_remove("BASH_ENV").env_remove("ENV")

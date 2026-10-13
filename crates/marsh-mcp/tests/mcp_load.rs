@@ -90,8 +90,13 @@ elif a[1]!='load': sys.exit(64)
             .arg("mcp")
             .args(args)
             .current_dir(&project)
-            .env_remove("MARSH_DAEMON_SOCKET")
-            .env_remove("MARSH_DAEMON_TOKEN")
+            // The developer's environment (credentials included) stays out.
+            .env_clear()
+            .envs(std::env::vars_os().filter(|(name, _)| {
+                ["PATH", "TMPDIR", "MARSH_TEST_RUN"]
+                    .iter()
+                    .any(|keep| name == keep)
+            }))
             .env("HOME", &host)
             .env("MARSH_HOME", &home)
             .env("MARSH_SBX", &sbx)

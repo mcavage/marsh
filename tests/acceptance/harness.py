@@ -37,6 +37,7 @@ import time
 import traceback
 from typing import Any, Callable
 
+from launch_env import clean_environment
 from provenance import (candidate_environment, host_only_path, remove_owned_stock_vm, source_identity, stock_baseline,
                         stock_cleanup_errors, stock_vm_inventory, stock_vm_names, verify_candidate)
 
@@ -149,7 +150,7 @@ def stable_process_identity(pid: int) -> tuple[int, str] | None:
 
     completed = subprocess.run(
         ["/bin/ps", "-p", str(pid), "-o", "uid=,lstart=,comm="],
-        env={**os.environ, "LC_ALL": "C"},
+        env={**clean_environment(), "LC_ALL": "C"},
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -642,8 +643,7 @@ class ProductScope(IsolatedScope):
         except Exception:
             shutil.rmtree(self.root, ignore_errors=True)
             raise
-        self.environment = os.environ.copy()
-        self.environment.pop("MARSH_LOCAL_SHELL_AUTHORITY", None)
+        self.environment = clean_environment()
         self.environment.update(runtime_environment)
         self.environment["MARSH_HOME"] = str(self.home)
         self.environment["MARSH_CONTROL_HOME"] = str(self.control_root)
@@ -846,7 +846,7 @@ class ScenarioSuite(ProductScope):
         completed = subprocess.run(
             ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
              "-c", "commit.gpgsign=false", *args],
-            cwd=cwd, env={**os.environ, **GIT_ENV, "HOME": str(self.root)},
+            cwd=cwd, env={**clean_environment(), **GIT_ENV, "HOME": str(self.root)},
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             timeout=60, check=False)
         if check and completed.returncode != 0:
@@ -1215,7 +1215,7 @@ class AcpScope(IsolatedScope):
                 "required_capabilities": [],
             }]) + "\n", encoding="utf-8"
         )
-        self.environment = os.environ.copy()
+        self.environment = clean_environment()
         shell_history = self.project / ".marsh-uat-history"
         shell_history.touch(mode=0o600, exist_ok=False)
         self.environment["HISTFILE"] = str(shell_history)

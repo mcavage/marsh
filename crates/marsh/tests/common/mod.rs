@@ -1,6 +1,7 @@
 //! Process observation shared by the shell test binaries.
 #![allow(dead_code)]
 
+use std::ffi::OsStr;
 use std::os::unix::process::CommandExt as _;
 use std::process::{Child, Command, ExitStatus, Output};
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
@@ -311,4 +312,79 @@ pub fn assert_no_blocking_fifo_open(script: &str) {
             );
         }
     }
+}
+
+/// The only variables a test shell (or anything else a test starts) inherits
+/// from the test process: never the developer's whole login environment, which
+/// holds credentials. `LC_*` is inherited too; a test adds what it needs.
+/// `MARSH_TEST_RUN` marks the run's processes for `tests/leaked_processes.py`.
+const INHERITED: &[&str] = &[
+    "PATH",
+    "HOME",
+    "TERM",
+    "LANG",
+    "TMPDIR",
+    "USER",
+    "LOGNAME",
+    "MARSH_TEST_RUN",
+];
+
+/// `program` with a cleared environment plus the [`INHERITED`] allowlist.
+pub fn command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    command
+        .env_clear()
+        .envs(std::env::vars_os().filter(|(name, _)| {
+            name.to_str()
+                .is_some_and(|name| INHERITED.contains(&name) || name.starts_with("LC_"))
+        }));
+    command
+}
+
+/// Whether a variable name looks like it holds a credential.
+pub fn credential_shaped(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    ["_API_KEY", "_TOKEN", "_PASSWORD"]
+        .iter()
+        .any(|suffix| name.ends_with(suffix))
+        || name.contains("SECRET")
+}
+
+/// The canary `make test` exports to every test process.
+pub const CANARY: &str = "MARSH_TEST_CANARY_API_KEY";
+
+/// Panics if `names` (a shell's environment names, one per line, as `env |
+/// cut -d= -f1` prints them) holds a credential-shaped one. Under `make test`
+/// (`MARSH_TEST_RUN` set) the canary must be in this process's environment,
+/// so the check is not vacuous. Only names are ever read, never values.
+pub fn assert_no_credential_names(what: &str, names: &str) {
+    if std::env::var_os("MARSH_TEST_RUN").is_some() {
+        assert!(
+            std::env::var_os(CANARY).is_some(),
+            "make test exports {CANARY}; without it this check proves nothing"
+        );
+    }
+    assert!(
+        names.lines().any(|name| name == "PATH"),
+        "{what}: no PATH in {names:?}"
+    );
+    let leaked = names
+        .lines()
+        .filter(|name| credential_shaped(name))
+        .collect::<Vec<_>>();
+    assert!(
+        leaked.is_empty(),
+        "{what} received credential-shaped variables: {leaked:?}"
+    );
+}
+
+/// Runs `command`, which prints its environment's names one per line, and
+/// checks them with [`assert_no_credential_names`].
+pub fn assert_no_credentials_reach(what: &str, command: &mut Command) {
+    let output = command
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap_or_else(|error| panic!("{what}: {error}"));
+    assert!(output.status.success(), "{what}: {output:?}");
+    assert_no_credential_names(what, &String::from_utf8_lossy(&output.stdout));
 }

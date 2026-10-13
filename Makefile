@@ -62,6 +62,10 @@ CALLER_HOME = $(abspath $(TARGET_DIR))/caller-home
 # killed, and the run fails.
 TEST_RUN_TOKEN := $(shell od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
 TEST_RUN_START := $(shell date +%s)
+# A credential-shaped canary (not a credential) exported to the tests and the
+# harnesses. Test shells start from an allowlisted environment; their checks
+# fail if a credential-shaped name, this one included, reaches them.
+TEST_CANARY = MARSH_TEST_CANARY_API_KEY=canary-not-a-credential
 LEAK_CHECK = $(PYTHON) tests/leaked_processes.py --bin "$(TEST_BIN)" --token "$(TEST_RUN_TOKEN)" --since $(TEST_RUN_START)
 # Export serving is a Mac host boundary, not a Linux contributor capability.
 MCP_TEST_FILES := test_stdio_protocol.py test_guest_export_boundary.py test_publication_cli.py \
@@ -139,17 +143,17 @@ test-rust:
 	@$(CARGO) nextest --version >/dev/null 2>&1 || { echo 'make test: cargo-nextest is required: brew install cargo-nextest (or cargo install --locked cargo-nextest)' >&2; exit 1; }
 	$(CARGO) fmt --all -- --check
 	$(CARGO) clippy --workspace --all-targets --locked --target-dir "$(TARGET_DIR)" -- -D warnings
-	MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" \
+	$(TEST_CANARY) MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" \
 		--profile "$(NEXTEST_PROFILE)" || { $(LEAK_CHECK); exit 1; }
 	$(LEAK_CHECK)
 	$(CARGO) test --workspace --doc --locked --target-dir "$(TARGET_DIR)"
 	$(CARGO) build --workspace --bins --locked --target-dir "$(TARGET_DIR)"
 	rm -rf "$(CALLER_HOME)" && mkdir -m 700 "$(CALLER_HOME)"
 	CARGO_HOME="$${CARGO_HOME:-$$HOME/.cargo}" RUSTUP_HOME="$${RUSTUP_HOME:-$$HOME/.rustup}" HOME="$(CALLER_HOME)" \
-		MARSH_LOAD_TEST_BIN="$(TEST_BIN)/marsh" MARSH_ACP_CALLER_BIN="$(TEST_BIN)/marsh" MARSH_TEST_RUN=$(TEST_RUN_TOKEN) \
+		MARSH_LOAD_TEST_BIN="$(TEST_BIN)/marsh" MARSH_ACP_CALLER_BIN="$(TEST_BIN)/marsh" MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(TEST_CANARY) \
 		$(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" \
 		--profile "$(NEXTEST_PROFILE)" --run-ignored only -E '$(BINARY_CALLERS)' || { $(LEAK_CHECK); exit 1; }
-	MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(PYTHON) tests/acceptance/acp-fixture/typed_host_caller.py \
+	$(TEST_CANARY) MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(PYTHON) tests/acceptance/acp-fixture/typed_host_caller.py \
 		--marsh "$(TEST_BIN)/marsh" || { $(LEAK_CHECK); exit 1; }
 	$(LEAK_CHECK)
 
@@ -489,14 +493,14 @@ dev-kit-images:
 .PHONY: check check-reset regress verify
 check:
 	@test -n "$(DEV_KIT)" || { echo 'make check: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
-	@$(PYTHON) tests/check.py --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)"
+	@$(TEST_CANARY) $(PYTHON) tests/check.py --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)"
 
 check-reset:
 	@$(PYTHON) tests/check.py --reset --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)"
 
 VERIFY_DEPS ?= dev
 REGRESS_JOBS ?= 3
-REGRESS = $(PYTHON) tests/regress.py --jobs $(REGRESS_JOBS) --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" \
+REGRESS = $(TEST_CANARY) $(PYTHON) tests/regress.py --jobs $(REGRESS_JOBS) --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" \
 	--kit "$(DEV_KIT)" $(foreach s,$(ONLY),--only $(s)) $(foreach s,$(SKIP),--skip $(s))
 verify: $(VERIFY_DEPS)
 	@test -n "$(DEV_KIT)" || { echo 'make verify: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }

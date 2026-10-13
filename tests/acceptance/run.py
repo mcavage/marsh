@@ -28,6 +28,7 @@ from typing import Any, Callable
 from harness import (APT_UPDATE_READY, CONTAINER, IsolatedScope, disposable_root, kit_profile_matches, now,
                      resolve_executable, resolve_kit_reference, scoped_control_home, unexpected_failure,
                      verify_container_deleted)
+from launch_env import clean_environment
 from provenance import (candidate_arguments, candidate_environment, host_only_path, source_identity, verify_candidate,
                         stock_vm_inventory, stock_baseline, stock_cleanup_errors)
 
@@ -266,8 +267,7 @@ class Harness(IsolatedScope):
         except Exception:
             shutil.rmtree(self.root, ignore_errors=True)
             raise
-        self.environment = os.environ.copy()
-        self.environment.pop("MARSH_LOCAL_SHELL_AUTHORITY", None)
+        self.environment = clean_environment()
         self.environment.update(runtime_environment)
         self.environment["MARSH_HOME"] = str(self.home)
         self.environment["MARSH_CONTROL_HOME"] = str(self.control_root)

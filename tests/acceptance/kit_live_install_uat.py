@@ -20,6 +20,7 @@ import traceback
 
 from harness import (CONTAINER, IMAGE, disposable_root, product_owned_vm_names, scoped_control_home,
                      verify_container_deleted)
+from launch_env import clean_environment
 from provenance import (candidate_arguments, host_only_path, stock_baseline, stock_cleanup_errors,
                         stock_vm_names, verify_candidate)
 
@@ -75,7 +76,7 @@ def main() -> None:
     registry = control_home / "commands.json"
     registry.write_text(json.dumps({"fixture": args.initial_kit}) + "\n")
     registry.chmod(0o600)
-    environment = {**os.environ,
+    environment = {**clean_environment(),
                    "MARSH_HOME": str(home), "MARSH_CONTROL_HOME": str(control),
                    "MARSH_GUEST_ARTIFACTS": str(guest), "MARSH_SBX": str(sbx),
                    "MARSH_PLACE": "local"}

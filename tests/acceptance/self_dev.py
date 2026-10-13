@@ -21,6 +21,7 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from harness import product_owned_vm_names  # noqa: E402
+from launch_env import clean_environment  # noqa: E402
 from provenance import SharedBaseline, stock_baseline  # noqa: E402
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -74,11 +75,8 @@ def stage(prefix_dir: str, sbx: str, prefix: str) -> tuple[str, dict, pathlib.Pa
     home, control, cache = root / "home", root / "control", root / "devcache"
     for path in (home, control, cache):
         path.mkdir(mode=0o700)
-    env = dict(os.environ, MARSH_HOME=str(home), MARSH_CONTROL_HOME=str(control),
+    env = dict(clean_environment(), MARSH_HOME=str(home), MARSH_CONTROL_HOME=str(control),
                MARSH_SBX=sbx, MARSH_DEV_CACHE_ROOT=str(cache))
-    for name in ("MARSH_DAEMON_SOCKET", "MARSH_DAEMON_TOKEN", "MARSH_VM_PREFIX", "MARSH_DEV_DEPTH",
-                 "MARSH_GUEST_ARTIFACTS", "MARSH_ENABLE_DEV_SCOPES", "MARSH_DEV_SHELL_IMAGE"):
-        env.pop(name, None)
     return str(install / "bin/marsh"), env, control
 
 
