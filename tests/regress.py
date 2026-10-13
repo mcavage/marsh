@@ -295,13 +295,6 @@ def host_load_ok(cores: int) -> tuple[bool, str]:
 QUIET_LOAD_PER_CORE = 0.5
 QUIET_WAIT_S = 180
 
-# Failure signatures of host-wide contention that is not about the product.
-EXTERNAL_SIGNATURES = {
-    "docker hub refresh lock held by another process":
-        "stock `sbx mcp` registry lock held by another process on this host (not a marsh failure; rerun)",
-}
-
-
 def stock_inventory(sbx: str) -> dict[str, str]:
     from provenance import stock_vm_inventory
     return stock_vm_inventory(sbx)
@@ -493,12 +486,6 @@ def execute(plan: Plan, suites: list[Suite]) -> tuple[int, dict[str, Any]]:
                     held[group] -= 1
                 done.append(suite)
                 tail = "" if suite.status == "PASS" else f"  last: {tail_line(suite.log)}"
-                if suite.status != "PASS":
-                    blob = suite.log.read_text(errors="replace") if suite.log else ""
-                    hits = [why for sig, why in EXTERNAL_SIGNATURES.items() if sig in blob]
-                    if hits:
-                        suite.note = "; ".join(hits)
-                        tail += f"\n           note: {suite.note}"
                 print(f"[{stamp()}] {len(done):>2}/{len(suites)} {suite.status:<7} {suite.name:<16} "
                       f"{suite.seconds:6.0f}s  (running: {', '.join(r.name for r in running) or '-'}){tail}",
                       flush=True)
