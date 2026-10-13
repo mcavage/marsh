@@ -82,12 +82,26 @@ impl builtins::Command for ExecCommand {
                 &self.args[1..],
                 self.empty_environment,
             )?;
+            // Bash's diagnostics name the file by its full path (`full_pathname`).
+            #[cfg(unix)]
+            let full_path = if path.starts_with('/') {
+                path.clone()
+            } else {
+                let relative = path.strip_prefix("./").unwrap_or(&path);
+                context
+                    .shell
+                    .working_dir()
+                    .join(relative)
+                    .to_string_lossy()
+                    .into_owned()
+            };
             #[cfg(unix)]
             brush_core::sys::commands::exec_with_script_fallback(
                 &mut cmd,
                 argv0.as_ref().as_ref(),
                 path.as_ref(),
                 context.iter_fds().map(|(fd, _)| fd),
+                &std::format!("{}{full_path}: ", context.shell.diagnostic_prefix()),
             )?;
 
             // A failed exec must leave the shell's own descriptors in place.

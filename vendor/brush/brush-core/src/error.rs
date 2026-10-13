@@ -21,6 +21,10 @@ pub struct Error {
 /// Monolithic error type for the shell
 #[derive(thiserror::Error, Debug)]
 pub enum ErrorKind {
+    /// A script or sourced file is binary (Bash's `check_binary_file`).
+    #[error("{}: cannot execute binary file", .0.display())]
+    BinaryFile(PathBuf),
+
     /// A function substitution ran `exit`, `break` or `continue`: the
     /// command around it ends with this result. Nothing is reported.
     #[error("function substitution control flow")]
@@ -372,6 +376,7 @@ impl From<&ErrorKind> for results::ExecutionExitCode {
             ErrorKind::IoError(io_err) => io_err.into(),
             ErrorKind::BuiltinError(inner, ..) => inner.as_exit_code(),
             ErrorKind::SubstitutionControlFlow(result) => result.0.exit_code,
+            ErrorKind::BinaryFile(..) => Self::CannotExecute,
             _ => Self::GeneralError,
         }
     }

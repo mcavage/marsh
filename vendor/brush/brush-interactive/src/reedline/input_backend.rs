@@ -515,6 +515,8 @@ fn read_plain_line(
         if read == 0 {
             break;
         }
+        // Bash ignores NUL bytes in its input.
+        line.retain(|c| c != '\0');
         program.push_str(&line);
         if !crate::completeness::needs_more_input(shell, &program) {
             break;

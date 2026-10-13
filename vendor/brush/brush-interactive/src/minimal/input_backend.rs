@@ -57,7 +57,9 @@ impl InputBackend for MinimalInputBackend {
                 .position(|byte| *byte == b'\n')
                 .map_or(available.len(), |index| index + 1);
             let line_complete = available[count - 1] == b'\n';
-            self.pending_line.extend_from_slice(&available[..count]);
+            // Bash ignores NUL bytes in its input.
+            self.pending_line
+                .extend(available[..count].iter().filter(|byte| **byte != 0));
             reader.consume(count);
             if !line_complete {
                 continue;
@@ -139,6 +141,8 @@ impl MinimalInputBackend {
         let bytes_read = reader
             .read_line(&mut input)
             .map_err(ShellError::InputError)?;
+        // Bash ignores NUL bytes in its input.
+        input.retain(|c| c != '\0');
 
         Ok((bytes_read > 0).then_some(input))
     }

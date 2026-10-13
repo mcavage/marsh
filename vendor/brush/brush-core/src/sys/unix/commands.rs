@@ -77,6 +77,11 @@ pub fn set_script_interpreter(
 /// descriptors, and environment. Returns false (leaving the command
 /// untouched) when no interpreter is configured.
 ///
+/// As Bash, an ENOEXEC file whose first 128 bytes look binary (see
+/// `check_binary_file`) is not run: `binary_diagnostic` (Bash's
+/// `NAME: line N: PATH: `) and `cannot execute binary file: Exec format
+/// error` go to standard error and the process exits 126.
+///
 /// Must be called after every other pre-exec setup and the environment are in
 /// place. The environment is taken from the command's explicit variables, so
 /// it requires the caller to have cleared the inherited environment.
@@ -85,6 +90,7 @@ pub fn exec_with_script_fallback(
     argv0: &std::ffi::OsStr,
     script: &std::ffi::OsStr,
     inherited_fds: impl Iterator<Item = crate::ShellFd>,
+    binary_diagnostic: &str,
 ) -> std::io::Result<bool> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt as _;
@@ -122,6 +128,8 @@ pub fn exec_with_script_fallback(
         )
         .map(|arg| CString::new(arg).map_err(std::io::Error::other))
         .collect::<std::io::Result<Vec<_>>>()?;
+    let mut binary_message = binary_diagnostic.as_bytes().to_vec();
+    binary_message.extend_from_slice(b"cannot execute binary file: Exec format error\n");
     let argv0 = cstring(argv0)?;
     let script = cstring(script)?;
     let pointers = |items: Vec<&CString>| {
@@ -144,16 +152,32 @@ pub fn exec_with_script_fallback(
     let envp = pointers(env.iter().collect());
     // Everything the child touches is allocated here; the closure only makes
     // async-signal-safe calls on immutable, null-terminated pointer arrays.
-    let storage = (program, args, env, argv0, script, inherited);
+    let storage = (program, args, env, argv0, script, inherited, binary_message);
     let pointers = (argv, fallback_argv, envp);
     let exec = move || {
-        let (program, ..) = &storage;
+        let (program, _, _, _, script, _, binary_message) = &storage;
         let (argv, fallback_argv, envp) = &pointers;
         // SAFETY: see above. The CStrings backing every pointer move into this
         // closure together with the pointer arrays and live as long as it does.
         unsafe { libc::execve(program.as_ptr(), argv.as_ptr().cast(), envp.as_ptr().cast()) };
         let error = std::io::Error::last_os_error();
         if error.raw_os_error() == Some(libc::ENOEXEC) {
+            let mut sample = [0_u8; 128];
+            // SAFETY: open, read, write, close and _exit are async-signal-safe; the
+            // buffers are owned by this closure.
+            unsafe {
+                let fd = libc::open(script.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC);
+                if fd >= 0 {
+                    let read = libc::read(fd, sample.as_mut_ptr().cast(), sample.len());
+                    libc::close(fd);
+                    if let Ok(read) = usize::try_from(read)
+                        && crate::ioutils::is_binary_sample(&sample[..read])
+                    {
+                        libc::write(2, binary_message.as_ptr().cast(), binary_message.len());
+                        libc::_exit(126);
+                    }
+                }
+            }
             // SAFETY: as above; the interpreter path is a static CString.
             unsafe {
                 libc::execve(

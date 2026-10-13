@@ -690,6 +690,7 @@ fn exec_external_command_in_place(
         OsStr::new(argv0),
         OsStr::new(executable_path),
         context.iter_fds().map(|(fd, _)| fd),
+        &std::format!("{}{executable_path}: ", context.shell.diagnostic_prefix()),
     )?;
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
@@ -814,6 +815,7 @@ pub(crate) fn execute_external_command(
         OsStr::new(argv0),
         OsStr::new(executable_path),
         context.iter_fds().map(|(fd, _)| fd),
+        &std::format!("{}{executable_path}: ", context.shell.diagnostic_prefix()),
     )?;
 
     let spawned = sys::process::spawn(cmd, context.shell.options().kill_external_commands_on_drop);

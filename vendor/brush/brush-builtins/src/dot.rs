@@ -1,3 +1,4 @@
+use std::io::Write as _;
 use std::path::Path;
 
 use brush_core::builtins;
@@ -22,13 +23,26 @@ impl builtins::Command for DotCommand {
         context: brush_core::ExecutionContext<'_, SE>,
     ) -> Result<brush_core::ExecutionResult, Self::Error> {
         // TODO(dot): Handle trap inheritance.
-        context
+        let result = context
             .shell
             .source_script(
                 Path::new(&self.script_path),
                 self.script_args.iter(),
                 &context.params,
             )
-            .await
+            .await;
+        match result {
+            Err(error) if matches!(error.kind(), brush_core::ErrorKind::BinaryFile(_)) => {
+                writeln!(
+                    context.stderr(),
+                    "{}{}: {}: cannot execute binary file",
+                    context.shell.diagnostic_prefix(),
+                    context.command_name,
+                    self.script_path
+                )?;
+                Ok(brush_core::ExecutionExitCode::CannotExecute.into())
+            }
+            result => result,
+        }
     }
 }

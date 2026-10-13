@@ -33,6 +33,10 @@ impl builtins::Command for PrintfCommand {
             // Format to a u8 vector.
             let mut result: Vec<u8> = vec![];
             format(self.format_and_args.as_slice(), &mut result)?;
+            // A shell value ends at its first NUL, as in Bash.
+            if let Some(end) = result.iter().position(|byte| *byte == 0) {
+                result.truncate(end);
+            }
 
             // Convert to a string.
             let result_str = String::from_utf8(result).map_err(|_| {

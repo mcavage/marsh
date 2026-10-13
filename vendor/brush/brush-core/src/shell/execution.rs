@@ -1,6 +1,9 @@
 //! Execution support for shell.
 
-use std::{io::Read, path::Path};
+use std::{
+    io::{Read, Write as _},
+    path::Path,
+};
 
 use crate::{
     ExecutionControlFlow, ExecutionParameters, ExecutionResult, ProcessGroupPolicy, SourceInfo,
@@ -29,8 +32,14 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     ) -> Result<bool, error::Error> {
         let path = path.as_ref();
         if path.exists() {
-            self.source_script(path, std::iter::empty::<String>(), params)
-                .await?;
+            self.parse_and_execute_script_file(
+                path,
+                std::iter::empty::<String>(),
+                params,
+                callstack::ScriptCallType::Source,
+                NulInput::Startup,
+            )
+            .await?;
             Ok(true)
         } else {
             tracing::debug!("skipping non-existent file: {}", path.display());
@@ -56,6 +65,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
             args,
             params,
             callstack::ScriptCallType::Source,
+            NulInput::Builtin,
         )
         .await
     }
@@ -78,9 +88,11 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         args: I,
         params: &ExecutionParameters,
         call_type: callstack::ScriptCallType,
+        nul: NulInput,
     ) -> Result<ExecutionResult, error::Error> {
         let path = path.as_ref();
         tracing::debug!("sourcing: {}", path.display());
+        let mut opened_path = path.to_owned();
 
         let mut options = std::fs::File::options();
         options.read(true);
@@ -101,6 +113,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
                 .find(|candidate| candidate.is_file())
             {
                 opened = self.open_file(&options, &found, params);
+                opened_path = found;
             }
         }
         let opened_file: openfiles::OpenFile =
@@ -117,8 +130,14 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         let source_info = crate::SourceInfo::from(path.to_owned());
 
         let mut result = self
-            .source_file(opened_file, &source_info, args, params, call_type)
-            .await?;
+            .source_file(opened_file, &source_info, args, params, call_type, nul)
+            .await
+            .map_err(|error| match error.kind() {
+                error::ErrorKind::BinaryFile(_) => {
+                    error::Error::from(error::ErrorKind::BinaryFile(opened_path))
+                }
+                _ => error,
+            })?;
 
         // Handle control flow at script execution boundary. If execution completed
         // with a `return`, we need to clear it since it's already been "used". All
@@ -149,10 +168,12 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         args: I,
         params: &ExecutionParameters,
         call_type: callstack::ScriptCallType,
+        nul: NulInput,
     ) -> Result<ExecutionResult, error::Error> {
         let mut file = file;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)?;
+        nul.apply(&mut bytes)?;
 
         tracing::debug!(target: trace_categories::PARSE, "Parsing sourced file: {}", source_info.source);
         let parse_result = self.parse(bytes.as_slice());
@@ -282,14 +303,30 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         args: I,
     ) -> Result<ExecutionResult, error::Error> {
         let params = self.default_exec_params();
-        let result = self
+        let result = match self
             .parse_and_execute_script_file(
                 script_path.as_ref(),
                 args,
                 &params,
                 callstack::ScriptCallType::Run,
+                NulInput::Script,
             )
-            .await?;
+            .await
+        {
+            // Like Bash, refuse a binary file before running anything, EXIT trap included.
+            Err(error) if matches!(error.kind(), error::ErrorKind::BinaryFile(_)) => {
+                if let error::ErrorKind::BinaryFile(path) = error.kind() {
+                    let path = path.to_string_lossy();
+                    let _ = writeln!(
+                        params.stderr(self),
+                        "{path}: {path}: cannot execute binary file"
+                    );
+                }
+                self.set_last_exit_status(126);
+                return Ok(ExecutionResult::new(126));
+            }
+            result => result?,
+        };
 
         // Give the shell a chance to run on-exit tasks, but ignore the result.
         let _ = self.on_exit().await;
@@ -306,11 +343,22 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         // If parsing succeeded, run the program. If there's a parse error, it's fatal (per spec).
         let result = match parse_result {
             Ok(prog) => self.run_program(prog, params).await,
-            Err(parse_err) => Err(error::Error::from(error::ErrorKind::ParseError(
-                parse_err,
-                source_info.clone(),
-            ))
-            .into_fatal()),
+            Err(parse_err) => {
+                let error = error::Error::from(error::ErrorKind::ParseError(
+                    parse_err,
+                    source_info.clone(),
+                ));
+                // As in Bash, a syntax error in a sourced file fails only `.`.
+                if self
+                    .call_stack
+                    .current_frame()
+                    .is_some_and(|frame| frame.frame_type.is_sourced_script())
+                {
+                    Err(error)
+                } else {
+                    Err(error.into_fatal())
+                }
+            }
         };
 
         // Report any errors.
@@ -404,4 +452,67 @@ fn is_complete_read_unit(
         Err(brush_parser::ParseError::ParsingAtEndOfInput(_)) => false,
         Err(brush_parser::ParseError::ParsingNear { .. }) => true,
     }
+}
+
+/// How Bash treats NUL bytes in a file it reads as shell input.
+#[derive(Clone, Copy)]
+enum NulInput {
+    /// A script run by the shell: refused as binary when its first line (two,
+    /// after `#!`) within the first 80 bytes has a NUL; otherwise every NUL
+    /// is dropped, as the input reader drops them.
+    Script,
+    /// A file read by `.`/`source`; see [`strip_sourced_nuls`].
+    Builtin,
+    /// A startup file, as `.` without the binary-file limit.
+    Startup,
+}
+
+impl NulInput {
+    fn apply(self, bytes: &mut Vec<u8>) -> Result<(), error::Error> {
+        match self {
+            Self::Script => {
+                if crate::ioutils::is_binary_sample(&bytes[..bytes.len().min(80)]) {
+                    return Err(error::ErrorKind::BinaryFile(std::path::PathBuf::new()).into());
+                }
+                bytes.retain(|b| *b != 0);
+            }
+            Self::Builtin | Self::Startup => {
+                if !strip_sourced_nuls(bytes, matches!(self, Self::Builtin)) {
+                    return Err(error::ErrorKind::BinaryFile(std::path::PathBuf::new()).into());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Bash's `_evalfile` NUL handling: each NUL is removed, but the byte that
+/// moves into its place is not examined, so of consecutive NULs every second
+/// one stays, and the first one left ends the text. Returns false when
+/// `limited` (the `.` builtin) and more than 256 were removed: a binary file.
+fn strip_sourced_nuls(bytes: &mut Vec<u8>, limited: bool) -> bool {
+    if !bytes.contains(&0) {
+        return true;
+    }
+    let mut kept = Vec::with_capacity(bytes.len());
+    let mut removed = 0_usize;
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == 0 {
+            removed += 1;
+            if limited && removed > 256 {
+                return false;
+            }
+            kept.extend(bytes.get(index + 1));
+            index += 2;
+        } else {
+            kept.push(bytes[index]);
+            index += 1;
+        }
+    }
+    if let Some(end) = kept.iter().position(|b| *b == 0) {
+        kept.truncate(end);
+    }
+    *bytes = kept;
+    true
 }

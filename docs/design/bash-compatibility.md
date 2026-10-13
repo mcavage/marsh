@@ -1,9 +1,9 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 72 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 57 fix Bash
-compatibility: job control, job lines and `disown`, function substitutions, signals and traps, `wait`, aliases,
+`vendor/brush/UPSTREAM_REVISION`) plus the 73 patches in
+[`docs/upstream/brush/`](../upstream/brush/README.md). 58 fix Bash
+compatibility: job control, job lines and `disown`, function substitutions, NUL bytes in input, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
 formats, startup files, option order, field splitting, `read`, `[[ ]]`
 patterns, prompts, and input typed ahead at the prompt. The other 15 add marsh's registered
@@ -24,6 +24,7 @@ The focused executable corpus covers these regressions:
 | Process identity | `( )`, `&` lists, pipeline stages, coprocesses and process substitutions are forked processes: `$BASHPID` is the child (and `$!`/`$NAME_PID`), `$$` is unchanged, `$BASH_SUBSHELL` increments as in Bash, a single external command replaces the child, `exec` in a subshell keeps its PID, function pipeline stages die of `SIGPIPE`, and only an `EXIT` trap set inside the subshell runs there. `$( )` forks only when its text mentions `BASHPID` |
 | Name references | `local -n`/`declare -n` reads, scalar/array/associative assignments, `+=`, `read`, `printf -v`, `mapfile`, `unset`/`unset -n`, `declare -p` and `[[ -R ]]` |
 | Globbing | `globstar` (`**`, `**/`, `dir/**`, with `dotglob`), extglob `+( )`/`!( )` |
+| NUL bytes in input | Dropped from scripts, standard input and interactive input; a script whose first line (two after `#!`) has a NUL within 80 bytes is refused (`NAME: PATH: cannot execute binary file`, 126, no `EXIT` trap), within 128 bytes for a file run as a command or by `exec` (`cannot execute binary file: Exec format error`); `.` and startup files remove NULs as Bash's `_evalfile` does (every second of consecutive NULs stays and ends the text) and `.` refuses more than 256; a syntax error in a sourced file fails only `.`; `printf -v` stops at a NUL |
 | Function substitutions | Bash 5.3 `${ cmd; }` runs in the current shell (side effects persist, `local` and `return` work, positional parameters are shared, `exit` exits) and yields its output without trailing newlines; `${\| cmd; }` yields a local `REPLY`; the closing brace counts only in command position (`${ echo x}y; }`, `${ echo hi;}x`); nested substitutions, groups, here-documents, double quotes and here-document bodies; xtrace depth |
 | Common idioms | Arrays and slices, `printf %q`, `read -r -a`, `read -d ''`, `read -t` end of file versus timeout, `printf '%(fmt)T'`, `((count[$key]++))`, `mapfile`, `getopts`, `${x//a/b}`, `${x^^}`, `${x@Q}`, `${!prefix@}`, `BASH_REMATCH`, `pipefail` with `||`, here-strings, `<( )`, brace sequences, nested `( ( ) )` |
 | Job ownership | Real-PID `$!` for background lists, `jobs -p`/`-l`, inherited `jobs` metadata in pipelines and substitutions, cleared explicit/background subshell jobs, saved PID statuses and missing-child status 127; `disown` (`-a`, `-h`, `-r`, `%N`, `%name`, `%?name`, PIDs) with Bash's diagnostics, and jobs collected by `wait` kept listed until the next `jobs`, `wait` or process; `huponexit` hangs up jobs not marked by `disown -h` |
@@ -49,7 +50,7 @@ One explicit oracle-version divergence is classified: command-substitution
 marsh's exact `127`; the parent's subsequent wait must still return its child
 status. Candidate failures are not normalized away.
 
-The current corpus has 57 differential test functions (all enabled), a split
+The current corpus has 58 differential test functions (all enabled), a split
 `PIPESTATUS` check,
 and 55 smoke journeys (53 on Linux, where two macOS `script(1)` job-control
 journeys are compiled out; 54 on macOS, without one that reads `/proc`), run on macOS ARM64 with Rust
@@ -217,12 +218,11 @@ behavior that needs more than a small Brush patch.
 | ID | Difference from Bash | Scope | Reason |
 | --- | --- | --- | --- |
 | BYTES | **Known bug.** Brush's words, variables and input are UTF-8 text. A non-UTF-8 command-line argument or `-c` string panics (status 101); a script, sourced file or stdin with invalid UTF-8 is rejected ("failed to decode UTF-8"); `$(...)` of non-UTF-8 output is an error ("stream did not contain valid UTF-8"); `read`, `mapfile` and `read -N` re-encode each invalid byte as a Latin-1 character (`\xff` becomes `\xc3\xbf`) or drop it; `$'\377'`, `echo -e '\0377'` and prompt `\377` produce U+FFFD or U+00FF; inherited environment values and file names that are not UTF-8 are U+FFFD text inside the shell (patch `0055` passes unchanged inherited values on to commands) | Every suite case with invalid UTF-8 data | Byte-string values are a change to Brush's whole value model |
-| NUL | NUL bytes in shell input are kept as word characters (`pri\0ntf` is not `printf`, `\0printf` is a command name) and a script with a NUL in its first line runs instead of being refused as binary; `printf -v v 'a\0b'` keeps the bytes after the NUL; `\000` in a prompt is kept | `nul-input`, history-input `nul`, a few byte cases | Input handling would need to drop NULs at the reader and track binary files |
 | LOCALE | No locale model: in the C locale `?` and `${#v}` count characters, not bytes, case conversion changes non-ASCII letters, and `\u00e9` prints UTF-8; in UTF-8 Rust's full Unicode case mapping is used (`ß` upper-cases to `SS`, `ı`/`İ` differ) and `nocasematch` classes differ | Byte matcher and builtin cases with non-ASCII text | Brush text is Unicode regardless of `LC_ALL` |
 | REGEX | `[[ =~ ]]` uses fancy-regex: alternation is leftmost-first (`(a\|ab)` on `ab` captures `a`, POSIX takes `ab`); an invalid regex returns 1 with a log line instead of 2 with Bash's message, and clears `BASH_REMATCH` | `byte-matchers` `ere-*`, `regex` | A POSIX ERE engine is a large change |
 | EXTGLOB-GNU-OPTIMIZATION | GNU's matcher gives non-POSIX results for `*` followed by a nullable extglob (`[[ b == *@(\|a) ]]` fails, `${v#*@(\|a)}` removes the whole value); Brush matches by the pattern's language | `byte-matchers` `terminal-nullable-*` | GNU optimization artifacts; copying them is not ordinary behavior |
 | STARTUP-OPTIONS | Invocation options: `+x` short options other than `+o`/`+O`, `-a -B -E -h -T` and `-s` with `-c`, `-` and `+` terminators, invalid `-o`/`-O` names (Brush runs the command), bare `-o`/`-O` listings, and clap's error wording and statuses | `startup` | Brush's clap-based command line; agents use `-c`, `-l`, `-e`, `-o NAME` |
-| INTERACTIVE-WITHOUT-TERMINAL | `-i` without a terminal: Bash warns "cannot set terminal process group" and "no job control", keeps `m` out of `$-`, and echoes prompts and `exit` to stderr | `startup`, readline `exit-announcement-*` | Brush's minimal reader does not emulate Readline on a pipe |
+| INTERACTIVE-WITHOUT-TERMINAL | `-i` without a terminal: Bash warns "cannot set terminal process group" and "no job control", keeps `m` out of `$-`, and echoes prompts and `exit` to stderr; the Reedline backend fails to start | `startup`, readline `exit-announcement-*`, history-input `nul` | Brush's minimal reader does not emulate Readline on a pipe |
 | REDIRECT-EXPANSION | An external command's redirection words (and here-document bodies) are expanded by the shell, so `>"$((++i))"`, `>"${v:=x}"` and `>"${ v=x; }"` change shell state, `exit` in a function substitution there exits the shell, and `{fd}>file` sets `fd`; Bash expands them in the forked child | `external-redirects` | Brush expands before spawning |
 | ASSIGNMENT-REDIRECT-ORDER | A simple command's redirections are expanded before its assignment prefixes, so `W=${ v=x; } cmd >"$v"` writes to the old `$v`; Bash expands the assignments first | `external-redirects` | Brush applies prefix assignments when it runs the command |
 | NAMED-FD-LIFETIME | `printf hi {fd}>out` closes `fd` after the builtin; Bash leaves it open | `external-redirects` | Redirection scopes |

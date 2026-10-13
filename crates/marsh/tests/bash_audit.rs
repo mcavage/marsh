@@ -1718,3 +1718,88 @@ echo "${ exit 5; }"; echo after"#,
         b"hi after\n[1] 3 x=unset\na c\nhi unset\nx o\nout\n <>\n[a]\n2\n 4\n1\na b\ng\nx}y\nhix\ntab nl } a }\ninner yes ca\n\ng:0\nhere reply\nbg\n",
     );
 }
+
+/// NUL bytes in shell input, as Bash treats them: dropped from scripts and
+/// standard input; refused as a binary file when one is on a script's first
+/// line (first 80 bytes; 128 for a file run by `exec` or as a command); for
+/// `.`, Bash's removal that keeps every second of consecutive NULs (ending
+/// the text) and refuses more than 256; `printf -v` stops at a NUL.
+#[test]
+fn nul_bytes_in_shell_input_follow_bash() {
+    let directory = tempfile::tempdir().unwrap();
+    let files: &[(&str, &[u8])] = &[
+        ("dropped", b"printf FIRST\n\0printf SECOND\npri\0ntf ' %s' a\\\0\nb\ncat <<E\nx\nE\0\nprintf END\0"),
+        ("binary", b"#\0comment\nprintf AFTER\n"),
+        ("late", b"#xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\0\nprintf LATE\n"),
+        ("pairs", b"printf A\n\0\0\nprintf B\n"),
+        ("syntax", b"printf one\nif\n"),
+    ];
+    for (name, bytes) in files {
+        let path = directory.path().join(name);
+        std::fs::write(&path, bytes).unwrap();
+        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+    }
+    let many: Vec<u8> = b"printf X\n"
+        .iter()
+        .copied()
+        .chain(std::iter::repeat_n(b"#\0\n".iter().copied(), 257).flatten())
+        .collect();
+    std::fs::write(directory.path().join("many"), many).unwrap();
+    let runs: &[&[&str]] = &[
+        &["dropped"],
+        &["binary"],
+        &["late"],
+        &[
+            "-c",
+            ". ./dropped; echo \" $?\"; . ./pairs; echo \" $?\"; . ./many; echo \" $?\"; . ./syntax; echo \" $?\"",
+            "audit",
+        ],
+        &[
+            "-c",
+            "./binary; echo \" $?\"; ./late; echo \" $?\"; printf -v v 'a\\0b'; echo \"$v\"; exec ./late",
+            "audit",
+        ],
+        &["-s"],
+    ];
+    for args in runs {
+        let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+            let mut command = shell(program);
+            if program != "bash" {
+                command.arg("--no-config");
+            }
+            command
+                .args(["--noprofile", "--norc"])
+                .args(*args)
+                .current_dir(directory.path())
+                .env_remove("BASH_ENV")
+                .env("LC_ALL", "C")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let mut child = common::spawn_group(&mut command);
+            let mut stdin = child.stdin.take().unwrap();
+            stdin.write_all(b"printf IN\0PUT\n").unwrap();
+            drop(stdin);
+            common::wait_for_exit(
+                child,
+                &format!("{program} {args:?}"),
+                Duration::from_mins(1),
+            )
+        });
+        let [bash, brush] = &outputs;
+        let stderr = |output: &Output| {
+            String::from_utf8_lossy(&output.stderr)
+                .replace(directory.path().to_str().unwrap(), "DIR")
+        };
+        assert_eq!(
+            brush.status.code(),
+            bash.status.code(),
+            "{args:?}: {brush:?} vs {bash:?}"
+        );
+        assert_eq!(brush.stdout, bash.stdout, "{args:?}: {brush:?} vs {bash:?}");
+        if !args.iter().any(|arg| arg.contains("syntax")) {
+            assert_eq!(stderr(brush), stderr(bash), "{args:?}");
+        }
+    }
+}
