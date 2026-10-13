@@ -2482,6 +2482,31 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
         mut context: PipelineExecutionContext<'_, SE>,
         mut params: ExecutionParameters,
     ) -> Result<ExecutionSpawnResult, error::Error> {
+        // Like Bash, the DEBUG trap runs before the command's words are
+        // expanded or its redirections set up, with `BASH_COMMAND` the command
+        // as written.
+        if context
+            .shell
+            .traps()
+            .handles(crate::traps::TrapSignal::Debug)
+            && !context
+                .shell
+                .call_stack()
+                .is_trap_signal_active(crate::traps::TrapSignal::Debug)
+        {
+            context.shell.env_mut().update_or_add(
+                "BASH_COMMAND",
+                ShellValueLiteral::Scalar(self.to_string()),
+                |_| Ok(()),
+                EnvironmentLookup::Anywhere,
+                EnvironmentScope::Global,
+            )?;
+            context
+                .shell
+                .invoke_trap_handler(crate::traps::TrapSignal::Debug, &params)
+                .await?;
+        }
+
         // Only this command (not one it runs) may replace a forked child's process.
         let exec_in_place = context.shell.take_exec_in_place();
         let prefix_iter = self.prefix.as_ref().map(|s| s.0.iter()).unwrap_or_default();
@@ -2647,6 +2672,7 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
                 &assignments,
                 &args,
                 exec_in_place,
+                self.to_string(),
             )
             .await
             {
@@ -2702,6 +2728,7 @@ async fn execute_command<T: Into<String>>(
     assignments: &[&ast::Assignment],
     args: &[CommandArg],
     exec_in_place: bool,
+    source_text: String,
 ) -> Result<ExecutionSpawnResult, error::Error> {
     // Push a new ephemeral environment scope for the duration of the command. We'll
     // set command-scoped variable assignments after doing so, and revert them before
@@ -2753,6 +2780,7 @@ async fn execute_command<T: Into<String>>(
         commands::SimpleCommand::new(context.shell, params, cmd_name, args.iter().cloned());
     cmd.process_group_id = context.process_group_id;
     cmd.exec_in_place = exec_in_place;
+    cmd.source_text = Some(source_text);
 
     // Arrange to pop off that ephemeral environment scope.
     cmd.post_execute = Some(|shell| shell.env_mut().pop_scope(EnvironmentScope::Command));

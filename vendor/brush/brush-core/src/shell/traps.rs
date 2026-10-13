@@ -73,7 +73,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
             return Ok(ExecutionResult::success());
         }
 
-        let Some(handler) = self.traps.get_handler(signal).cloned() else {
+        let Some(mut handler) = self.traps.get_handler(signal).cloned() else {
             return Ok(ExecutionResult::success());
         };
 
@@ -88,6 +88,11 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         // would need to hold `&mut Shell`, preventing the mutable borrow required by
         // `run_string()`. This is safe because `result` is captured into a variable
         // (never early-returned with `?`), so `leave_trap_handler()` always runs.
+        // Like Bash, `LINENO` in a DEBUG or ERR trap is the line of the command
+        // it runs for.
+        if matches!(signal, TrapSignal::Debug | TrapSignal::Err) {
+            handler.source_info = self.call_stack().current_pos_as_source_info();
+        }
         self.enter_trap_handler(signal, Some(&handler));
 
         let result = self
