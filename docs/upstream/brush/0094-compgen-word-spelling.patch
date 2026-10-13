@@ -1,0 +1,148 @@
+diff --git a/brush-core/src/completion.rs b/brush-core/src/completion.rs
+index dd81833..e6fcc59 100644
+--- a/brush-core/src/completion.rs
++++ b/brush-core/src/completion.rs
+@@ -284,6 +284,15 @@ pub struct Context<'a> {
+     pub trigger: CompletionTrigger,
+ }
+ 
++impl Context<'_> {
++    /// The word being completed as written (with its quoting).
++    fn raw_token(&self) -> &str {
++        self.tokens
++            .get(self.token_index)
++            .map_or(self.token_to_complete, |token| token.text)
++    }
++}
++
+ impl Spec {
+     /// Generates completion candidates using this specification.
+     ///
+@@ -503,11 +512,18 @@ impl Spec {
+                     }
+                 }
+                 CompleteAction::Command => {
++                    // Like Bash: aliases, executables (not directories), enabled
++                    // builtins, keywords and functions.
+                     let command_completions =
+                         get_external_command_completions(shell, context.token_to_complete);
+                     candidates.extend(command_completions);
+-                    for name in shell.builtins().keys() {
++                    for name in shell.aliases().keys().sorted() {
+                         if name.starts_with(token) {
++                            candidates.push(name.clone());
++                        }
++                    }
++                    for (name, registration) in shell.builtins() {
++                        if !registration.disabled && name.starts_with(token) {
+                             candidates.push(name.to_owned());
+                         }
+                     }
+@@ -525,7 +541,11 @@ impl Spec {
+                 }
+                 CompleteAction::Directory => {
+                     let mut file_completions =
+-                        get_file_completions(shell, context.token_to_complete, true).await;
++                        if matches!(context.trigger, CompletionTrigger::Programmatic) {
++                            get_compgen_file_completions(shell, context.raw_token(), true).await
++                        } else {
++                            get_file_completions(shell, context.token_to_complete, true).await
++                        };
+                     candidates.append(&mut file_completions);
+                 }
+                 CompleteAction::Disabled => {
+@@ -551,7 +571,11 @@ impl Spec {
+                 }
+                 CompleteAction::File => {
+                     let mut file_completions =
+-                        get_file_completions(shell, context.token_to_complete, false).await;
++                        if matches!(context.trigger, CompletionTrigger::Programmatic) {
++                            get_compgen_file_completions(shell, context.raw_token(), false).await
++                        } else {
++                            get_file_completions(shell, context.token_to_complete, false).await
++                        };
+                     candidates.append(&mut file_completions);
+                 }
+                 CompleteAction::Function => {
+@@ -1264,6 +1288,73 @@ async fn get_file_completions(
+     completions
+ }
+ 
++/// `compgen -f`/`-d` as Bash does: names in the word's directory (its part up
++/// to the last `/`) that start with the rest of the word as written, each
++/// shown after the directory part as written. A directory of that literal
++/// name is used as it is; otherwise the part is dequoted, tilde- and
++/// parameter-expanded (never a command substitution, which matches nothing),
++/// though `~` always expands.
++async fn get_compgen_file_completions(
++    shell: &Shell<impl extensions::ShellExtensions>,
++    word: &str,
++    must_be_dir: bool,
++) -> Vec<String> {
++    let (dir_text, base) = match word.rfind('/') {
++        Some(slash) => (&word[..=slash], &word[slash + 1..]),
++        None => ("", word),
++    };
++    let dir = if dir_text.is_empty() {
++        shell.working_dir().to_path_buf()
++    } else if dir_text.contains("$(") || dir_text.contains('`') {
++        return vec![];
++    } else {
++        let literal = shell.absolute_path(Path::new(dir_text));
++        if !dir_text.starts_with('~') && literal.is_dir() {
++            literal
++        } else {
++            let mut throwaway_shell = shell.clone();
++            let params = throwaway_shell.default_exec_params();
++            let options = expansion::ExpanderOptions {
++                execute_command_substitutions: false,
++                ..Default::default()
++            };
++            let Ok(expanded) = expansion::basic_expand_word_with_options(
++                &mut throwaway_shell,
++                &params,
++                dir_text,
++                &options,
++            )
++            .await
++            else {
++                return vec![];
++            };
++            shell.absolute_path(Path::new(&expanded))
++        }
++    };
++    let Ok(entries) = std::fs::read_dir(&dir) else {
++        return vec![];
++    };
++    let mut completions: Vec<String> = entries
++        .filter_map(Result::ok)
++        .filter_map(|entry| {
++            let name = entry.file_name().to_shell_text().into_owned();
++            let wanted = name.starts_with(base)
++                && (!name.starts_with('.') || base.starts_with('.'))
++                && (!must_be_dir || dir.join(&name).is_dir());
++            wanted.then(|| std::format!("{dir_text}{name}"))
++        })
++        .collect();
++    if base == "." || base == ".." {
++        completions.push(std::format!("{dir_text}.."));
++        if base == "." {
++            completions.push(std::format!("{dir_text}."));
++        }
++    }
++    completions.sort();
++    completions.dedup();
++    completions
++}
++
+ fn get_external_command_completions(
+     shell: &Shell<impl extensions::ShellExtensions>,
+     prefix: &str,
+@@ -1273,6 +1364,7 @@ fn get_external_command_completions(
+             prefix,
+             shell.options().case_insensitive_pathname_expansion,
+         )
++        .filter(|path| !path.is_dir())
+         .filter_map(|path| {
+             path.file_name()
+                 .map(|name| name.to_shell_text().into_owned())

@@ -748,6 +748,14 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   quotes, braces, `~` and globs are literal), with `\\"` resolved before it;
   and `\\D{fmt}` is the C library's `strftime`. Covered by
   `prompt_strings_decode_as_in_bash`.
+- `0094` makes `compgen -f`/`-d` keep the word's spelling, as Bash does
+  (`get_compgen_file_completions`, for programmatic completion only; Tab
+  completion is unchanged): names in the word's directory part (a literal
+  directory of that name first, else dequoted with `~` and parameters expanded,
+  never a command substitution) that start with the rest of the word as
+  written, shown after the directory part as written. `-A command` lists
+  aliases and leaves out directories and disabled builtins. Covered by
+  `compgen_keeps_the_words_spelling`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
