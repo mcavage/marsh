@@ -35,13 +35,16 @@ cases={
 'subshell':b'/bin/sleep .02 & (disown; printf "R:%s\\n" "$?"); wait',
 'function':b'f(){ /bin/sleep .02 & }; f; disown; printf "D:%s\\n" "$?"; jobs; wait',
 }
+# Bash makes a new job current only if it is still alive when the shell
+# records it (a job that already died is never current), so the cases that
+# use the current job start one that outlives that moment.
 cases.update({
-'after-wait-default':b'/usr/bin/true & p=$!; wait "$p"; disown; printf "D:%s\\n" "$?"',
+'after-wait-default':b'/bin/sleep .2 & p=$!; wait "$p"; disown; printf "D:%s\\n" "$?"',
 'after-jobs':b'/usr/bin/true & p=$!; wait "$p"; jobs; disown %1; printf "D:%s\\n" "$?"',
 'after-double-disown':b'/usr/bin/true & p=$!; wait "$p"; disown %1; printf "A:%s\\n" "$?"; disown %1; printf "B:%s\\n" "$?"',
 'after-wait-pid':b'/usr/bin/true & p=$!; wait "$p"; disown "$p"; printf "D:%s\\n" "$?"',
 'after-false-wait':b'(exit 7) & p=$!; wait "$p"; disown %1; printf "D:%s\\n" "$?"',
-'disowned-wait-status':b'(exit 7) & p=$!; disown; wait "$p"; printf "W:%s\\n" "$?"',
+'disowned-wait-status':b'(/bin/sleep .2; exit 7) & p=$!; disown; wait "$p"; printf "W:%s\\n" "$?"',
 })
 cases.update({
  'after-wait-hup-repeat':b'/usr/bin/true & p=$!; wait "$p"; disown -h %1; printf "A:%s\\n" "$?"; disown %1; printf "B:%s\\n" "$?"',
