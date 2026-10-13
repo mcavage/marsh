@@ -21,6 +21,11 @@ pub struct Error {
 /// Monolithic error type for the shell
 #[derive(thiserror::Error, Debug)]
 pub enum ErrorKind {
+    /// A function substitution ran `exit`, `break` or `continue`: the
+    /// command around it ends with this result. Nothing is reported.
+    #[error("function substitution control flow")]
+    SubstitutionControlFlow(SubstitutionResult),
+
     /// A tilde expression was used without a valid HOME variable
     #[error("cannot expand tilde expression with HOME not set")]
     TildeWithoutValidHome,
@@ -366,6 +371,7 @@ impl From<&ErrorKind> for results::ExecutionExitCode {
             ErrorKind::FunctionNameShadowsSpecialBuiltin { .. } => Self::InvalidUsage,
             ErrorKind::IoError(io_err) => io_err.into(),
             ErrorKind::BuiltinError(inner, ..) => inner.as_exit_code(),
+            ErrorKind::SubstitutionControlFlow(result) => result.0.exit_code,
             _ => Self::GeneralError,
         }
     }
@@ -396,6 +402,16 @@ where
             kind: convertible_to_kind.into(),
             fatal: false,
         }
+    }
+}
+
+/// The result a function substitution's `exit`, `break` or `continue` carries out.
+#[derive(Clone, Copy)]
+pub struct SubstitutionResult(pub results::ExecutionResult);
+
+impl std::fmt::Debug for SubstitutionResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "status {}", u8::from(self.0.exit_code))
     }
 }
 
@@ -436,7 +452,9 @@ impl Error {
         &self,
         shell: &Shell<impl extensions::ShellExtensions>,
     ) -> results::ExecutionControlFlow {
-        if self.is_fatal() && !shell.options().interactive {
+        if let ErrorKind::SubstitutionControlFlow(result) = &self.kind {
+            result.0.next_control_flow
+        } else if self.is_fatal() && !shell.options().interactive {
             results::ExecutionControlFlow::ExitShell
         } else {
             results::ExecutionControlFlow::Normal

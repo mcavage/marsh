@@ -1686,3 +1686,35 @@ fn disown_removes_jobs_as_bash_does() {
         assert_eq!(brush.stderr, bash.stderr, "{script}: {brush:?}");
     }
 }
+
+/// Bash 5.3 function substitutions: `${ cmd; }` runs `cmd` in the current
+/// shell (side effects persist, `local` and `return` work, positional
+/// parameters are shared) and yields its output; `${| cmd; }` yields a local
+/// `REPLY` and leaves the output alone. The closing brace counts only where a
+/// reserved word could be.
+#[test]
+fn function_substitutions_run_in_the_current_shell() {
+    differential(
+        r#"v=before; echo "${ v=after; printf hi; }" "$v"
+echo "[${ local x=1; echo $x; return 3; echo no; }] $? x=${x-unset}"
+set -- a b; echo "${ echo $1; set -- c; }" $1
+echo "${| REPLY=hi; }" ${REPLY-unset}; REPLY=o; echo "${| REPLY=x; }" $REPLY; echo "${| echo out; }" "<${| :; }>"
+x=${ printf "a
+
+"; }; echo "[$x]"; set -- ${ echo a b; }; echo $#; echo "${ (exit 4); }" $?; v=${ false; }; echo $?
+a=${ echo {a,b}; }; echo $a; b=${ { echo g; }; }; echo $b; c=${ echo x}y; }; echo $c; echo ${ echo hi;}x
+echo "${	echo tab; }" "${
+echo nl
+}" "${ printf '}'; }" "${ echo 'a }' ; }"
+y=${ echo ${ echo inner; }; }; z=${ if true; then echo yes; fi; }; w=${ case a in a) echo ca;; esac; }; echo $y $z $w
+g(){ echo "${ return 7; }"; echo "g:$?"; }; g
+cat <<E
+${ echo here; } ${| REPLY=reply; }
+E
+t=${ sleep 3 & echo bg; }; echo "$t"; kill %1
+set -x; W=${ v=traced; echo t; } :; set +x
+echo "${ exit 5; }"; echo after"#,
+        5,
+        b"hi after\n[1] 3 x=unset\na c\nhi unset\nx o\nout\n <>\n[a]\n2\n 4\n1\na b\ng\nx}y\nhix\ntab nl } a }\ninner yes ca\n\ng:0\nhere reply\nbg\n",
+    );
+}

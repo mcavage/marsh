@@ -289,6 +289,7 @@ pub struct CallStack {
     script_source_depth: usize,
     active_trap_signals: HashSet<traps::TrapSignal>,
     trap_delivery_suppress_count: usize,
+    function_substitution_depth: usize,
 }
 
 impl CallStack {
@@ -634,8 +635,23 @@ impl CallStack {
     }
 
     /// Returns whether or not the shell is actively executing in a shell function.
+    /// A function substitution (`${ cmd; }`) counts: `local` and `return` work there.
     pub fn in_function(&self) -> bool {
-        self.iter_function_calls().next().is_some()
+        self.function_substitution_depth > 0 || self.iter_function_calls().next().is_some()
+    }
+
+    /// How many function substitutions (`${ cmd; }`) are running.
+    pub const fn function_substitution_depth(&self) -> usize {
+        self.function_substitution_depth
+    }
+
+    /// Records entering (`true`) or leaving a function substitution.
+    pub(crate) const fn set_in_function_substitution(&mut self, entering: bool) {
+        if entering {
+            self.function_substitution_depth += 1;
+        } else {
+            self.function_substitution_depth = self.function_substitution_depth.saturating_sub(1);
+        }
     }
 
     /// Returns the current depth of the call stack.

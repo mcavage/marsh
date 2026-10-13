@@ -512,6 +512,15 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   on exit, skipping those marked by `disown -h`. Covered by
   `disown_removes_jobs_as_bash_does` (bash_audit) and
   `huponexit_hangs_up_jobs_except_those_disowned_with_h` (smoke, PTY).
+- `0071` implements Bash 5.3 function substitutions, `${ cmd; }` and
+  `${| cmd; }`. The tokenizer ends one at a `}` in command position (not
+  inside a word or among arguments, counting nested `{ }` groups); the word
+  parser finds the same brace through the tokenizer. The command runs in the
+  current shell with a local scope (`local`, `return`), its output captured
+  in an unlinked temporary file as Bash does; `${| }` yields a local
+  `REPLY`. `exit`, `break` and `continue` end the enclosing command
+  (`ErrorKind::SubstitutionControlFlow`). Covered by
+  `function_substitutions_run_in_the_current_shell`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

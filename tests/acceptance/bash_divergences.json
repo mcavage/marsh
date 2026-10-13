@@ -1,6 +1,13 @@
 {
  "doc": "docs/design/bash-compatibility.md#classified-differential-divergences",
  "divergences": [
+  {"id": "ASSIGNMENT-REDIRECT-ORDER", "summary": "A simple command's redirections are expanded before its assignment prefixes; Bash expands the assignments first", "cases": {
+   "external-redirects": [
+    "builtin-prefix-redir",
+    "prefix-before-dynamic",
+    "prefix-failed-literal"
+   ]
+  }},
   {"id": "BYTES", "summary": "Non-UTF-8 bytes: Brush's words, values and input are UTF-8 text (known bug: rejected, panics, or U+FFFD/Latin-1 re-encoding)", "cases": {
    "byte-builtins": [
     "dot-raw-name-data@C",
@@ -1846,7 +1853,8 @@
     "raw-text"
    ],
    "external-redirects": [
-    "raw-here"
+    "raw-here",
+    "raw-prefix"
    ],
    "history-input": [
     "nul:basic-1-debug-command-raw@C",
@@ -2253,30 +2261,6 @@
     "terminal-nullable-C.utf8-2a40287c6129-c3a9",
     "terminal-nullable-C.utf8-2a40287c6129-c3a9-remove-##",
     "terminal-nullable-C.utf8-2a40287c6129-c3a9-remove-%%"
-   ]
-  }},
-  {"id": "FUNSUB", "summary": "Bash 5.3 ${ cmd; } and ${| cmd; } command substitutions are not implemented (printed literally)", "cases": {
-   "external-redirects": [
-    "args-parent",
-    "assignment-redir",
-    "builtin-prefix-redir",
-    "command-output-state",
-    "exit-no-parent-trap",
-    "here-pid",
-    "here-reply",
-    "here-state",
-    "herestring-pid",
-    "local-exit-trap",
-    "output-state",
-    "pipeline-redir",
-    "prefix-before-dynamic",
-    "prefix-before-literal",
-    "prefix-failed-literal",
-    "prefix-parent",
-    "prefix-trace",
-    "raw-prefix",
-    "redirect-order",
-    "variable-fd-dynamic"
    ]
   }},
   {"id": "GETOPTS", "summary": "getopts ignores OPTIND changes made between calls", "cases": {
@@ -2949,8 +2933,18 @@
   {"id": "REDIRECT-EXPANSION", "summary": "An external command's redirection words are expanded in the shell, so their side effects persist", "cases": {
    "external-redirects": [
     "arithmetic-state",
+    "command-output-state",
+    "exit-no-parent-trap",
+    "here-pid",
+    "here-reply",
+    "here-state",
+    "herestring-pid",
+    "local-exit-trap",
+    "output-state",
     "parameter-state",
-    "variable-fd"
+    "redirect-order",
+    "variable-fd",
+    "variable-fd-dynamic"
    ]
   }},
   {"id": "REGEX", "summary": "[[ =~ ]] uses fancy-regex, not POSIX ERE: leftmost-first alternation; an invalid regex is status 1 with a log line", "cases": {

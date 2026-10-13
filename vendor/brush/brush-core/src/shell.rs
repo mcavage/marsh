@@ -450,6 +450,10 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
             .unwrap_or(1);
         std::format!("{name}: line {line}: ")
     }
+
+    pub(crate) const fn call_stack_mut(&mut self) -> &mut crate::callstack::CallStack {
+        &mut self.call_stack
+    }
 }
 
 /// Snapshot of the state the last command left behind: `$?`, `PIPESTATUS`, and `$_`.

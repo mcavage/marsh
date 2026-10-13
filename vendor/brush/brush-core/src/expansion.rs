@@ -1137,6 +1137,25 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
 
                 Expansion::from(ExpansionPiece::Splittable(cmd_output))
             }
+            brush_parser::word::WordPiece::FunctionSubstitution { command, reply } => {
+                let mut value = if self.disable_command_substitutions {
+                    String::new()
+                } else {
+                    commands::invoke_function_substitution(self.shell, self.params, command, reply)
+                        .await?
+                };
+                if !reply {
+                    if value.contains('\0') {
+                        writeln!(
+                            self.params.stderr(self.shell),
+                            "warning: command substitution: ignored null byte in input",
+                        )?;
+                        value.retain(|c| c != '\0');
+                    }
+                    value.truncate(value.trim_end_matches('\n').len());
+                }
+                Expansion::from(ExpansionPiece::Splittable(value))
+            }
             brush_parser::word::WordPiece::EscapeSequence(s) => {
                 let Some(escaped) = s.strip_prefix('\\') else {
                     // We don't ever expect this case, as it breaks our invariant--but
