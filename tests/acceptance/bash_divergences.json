@@ -81,10 +81,6 @@
    ]
   }},
   {"id": "DIAGNOSTICS", "summary": "Error message wording, and the status of some usage errors, differ from Bash", "cases": {
-   "byte-builtins": [
-    "read-readonly-continues@C",
-    "read-readonly-continues@C.utf8"
-   ],
    "external-redirects": [
     "unknown-command"
    ],
@@ -968,18 +964,10 @@
     "quotes-variable-expand@C.utf8"
    ]
   }},
-  {"id": "READ", "summary": "read: backslash-escaped IFS characters, read -t 0 at end of file, read -n 1 of ^D from a terminal", "cases": {
+  {"id": "READ", "summary": "read -t: when the timeout comes right after a backslash, Bash stores its internal CTLESC marker (\\x01) in the variable; Brush stores the backslash", "cases": {
    "byte-builtins": [
-    "read-ifs-615c206220630a@C",
-    "read-ifs-615c206220630a@C.utf8",
-    "read-ifs-615c2c622c630a@C",
-    "read-ifs-615c2c622c630a@C.utf8",
-    "read-t0-noassign@C",
-    "read-t0-noassign@C.utf8",
     "read-timeout-backslash@C",
-    "read-timeout-backslash@C.utf8",
-    "tty-read-n-eot-data@C",
-    "tty-read-n-eot-data@C.utf8"
+    "read-timeout-backslash@C.utf8"
    ]
   }},
   {"id": "READLINE-BINDINGS", "summary": "bind: macro bindings and some key-sequence spellings are not supported by the reedline editor", "cases": {

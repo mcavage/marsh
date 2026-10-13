@@ -635,6 +635,13 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   literal. Diagnostics go to the builtin's standard error after the output's
   complete lines so far, as Bash's line-buffered output has it. Covered by
   `printf_conversions_and_errors_match_bash`.
+- `0082` makes `read` split and assign as Bash does: it notes which characters a
+  backslash escaped, and those are never delimiters; one splitter serves names
+  and `-a` (IFS whitespace around one other IFS character is one delimiter,
+  which `-a` got wrong), and the last name's trailing IFS whitespace goes even
+  if escaped. `read -t 0` assigns nothing; `-n`/`-N` take `^D` from a terminal
+  as data; a readonly name stops `read` with `NAME: readonly variable`,
+  status 2. Covered by `read_splitting_and_assignment_match_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
