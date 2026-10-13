@@ -188,6 +188,7 @@ fn wait_n_can_collect_each_job_once_and_reports_empty_set() {
 
 fn matches_bash_in_a_fresh_directory(script: &str, expected: &[u8]) {
     common::require_bash_oracle();
+    common::assert_no_blocking_fifo_open(script);
     let run = |shell: &str, mut command: Command| {
         let directory = tempfile::tempdir().unwrap();
         let child = common::spawn_group(
@@ -216,7 +217,7 @@ fn matches_bash_in_a_fresh_directory(script: &str, expected: &[u8]) {
 #[test]
 fn wait_n_preserves_unselected_pipeline_status() {
     matches_bash_in_a_fresh_directory(
-        "mkfifo gate; sh -c 'read x < gate' | sh -c 'exit 7' & slow=$!; true & fast=$!; wait -n \"$slow\" \"$fast\"; echo >gate; wait \"$slow\"; printf 'slow-status=%s\\n' \"$?\"",
+        "mkfifo gate; exec 3<>gate; sh -c 'read x < gate' | sh -c 'exit 7' & slow=$!; true & fast=$!; wait -n \"$slow\" \"$fast\"; echo >&3; wait \"$slow\"; printf 'slow-status=%s\\n' \"$?\"",
         b"slow-status=7\n",
     );
 }
@@ -225,7 +226,7 @@ fn wait_n_preserves_unselected_pipeline_status() {
 #[test]
 fn wait_by_original_pipeline_pid_survives_completed_first_stage() {
     matches_bash_in_a_fresh_directory(
-        "mkfifo gate; sh -c ': > first-done' | sh -c 'read x < gate; exit 7' & pid=$!; until test -e first-done; do sleep .01; done; echo >gate; wait \"$pid\"; printf 'status=%s\\n' \"$?\"",
+        "mkfifo gate; exec 3<>gate; sh -c ': > first-done' | sh -c 'read x < gate; exit 7' & pid=$!; until test -e first-done; do sleep .01; done; echo >&3; wait \"$pid\"; printf 'status=%s\\n' \"$?\"",
         b"status=7\n",
     );
 }

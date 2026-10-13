@@ -21,6 +21,7 @@ fn run(program: &str, script: &str, from_stdin: bool) -> Output {
 
 /// As [`run`]; with `-c`, `name` is `$0`, which prefixes Bash's diagnostics.
 fn run_named(program: &str, script: &str, from_stdin: bool, name: Option<&str>) -> Output {
+    common::assert_no_blocking_fifo_open(script);
     let directory = tempfile::tempdir().unwrap();
     let mut command = shell(program);
     command
@@ -233,7 +234,7 @@ fn background_pipefail_survives_input_loop_polling() {
     // `-s` goes through the real input loop, which polls jobs before reading each line.
     // Poll the first failure while the last stage is still running, then collect after reap.
     differential_with_input_mode(
-        "mkfifo gate\nset -o pipefail\nsh -c ': >left-done; exit 7' | sh -c 'read x <gate; : >right-done; exit 0' & pid=$!\nuntil test -e left-done; do sleep .005; done\nset +o pipefail\necho >gate\nuntil test -e right-done; do sleep .005; done\nwait \"$pid\"\n",
+        "mkfifo gate\nexec 3<>gate\nset -o pipefail\nsh -c ': >left-done; exit 7' | sh -c 'read x <gate; : >right-done; exit 0' & pid=$!\nuntil test -e left-done; do sleep .005; done\nset +o pipefail\necho >&3\nuntil test -e right-done; do sleep .005; done\nwait \"$pid\"\n",
         7,
         b"",
         true,
@@ -255,13 +256,13 @@ fn jobs_p_names_group_leader_while_background_pid_names_rightmost() {
     // Each stage reports its actual PID; no comparison of nondeterministic raw PIDs.
     // Both stages stay alive until `jobs` has run.
     differential(
-        "mkfifo gl gr; sh -c 'echo $$ >left; read x <gl' | sh -c 'echo $$ >right; read x <gr; exit 23' & pid=$!; jobs -p >group; echo >gl; echo >gr; wait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; test \"$(cat left)\" != \"$pid\" || exit 93; exit \"$status\"",
+        "mkfifo gl gr; exec 3<>gl 4<>gr; sh -c 'echo $$ >left; read x <gl' | sh -c 'echo $$ >right; read x <gr; exit 23' & pid=$!; jobs -p >group; echo >&3; echo >&4; wait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; test \"$(cat left)\" != \"$pid\" || exit 93; exit \"$status\"",
         23,
         b"",
     );
     // Polling may remove the group leader before jobs prints it; its identity must remain.
     differential_with_input_mode(
-        "mkfifo gate\nsh -c 'echo $$ >left; exit 7' | sh -c 'echo $$ >right; read x <gate; exit 23' & pid=$!\nuntil test -s left && test -s right; do sleep 0.01; done\njobs -p >group\necho >gate\nwait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; exit \"$status\"\n",
+        "mkfifo gate\nexec 3<>gate\nsh -c 'echo $$ >left; exit 7' | sh -c 'echo $$ >right; read x <gate; exit 23' & pid=$!\nuntil test -s left && test -s right; do sleep 0.01; done\njobs -p >group\necho >&3\nwait \"$pid\"; status=$?; test \"$(cat left)\" = \"$(cat group)\" || exit 90; test \"$(cat right)\" = \"$pid\" || exit 91; test \"$!\" = \"$pid\" || exit 92; exit \"$status\"\n",
         23,
         b"",
         true,
@@ -342,7 +343,7 @@ fn mixed_builtin_function_group_pipelines_preserve_streams_and_pipefail() {
 #[test]
 fn jobs_in_subshells_observe_parent_metadata_without_wait_ownership() {
     differential(
-        "mkfifo gate; sh -c 'read x <gate; :' & pid=$!; jobs -p >expected; jobs -p | cat >actual; cmp expected actual || exit 90; printf '%s\\n' \"$(jobs -p)\" >actual; cmp expected actual || exit 91; (jobs -p) >actual; test ! -s actual || exit 92; echo >gate; wait \"$pid\"",
+        "mkfifo gate; exec 3<>gate; sh -c 'read x <gate; :' & pid=$!; jobs -p >expected; jobs -p | cat >actual; cmp expected actual || exit 90; printf '%s\\n' \"$(jobs -p)\" >actual; cmp expected actual || exit 91; (jobs -p) >actual; test ! -s actual || exit 92; echo >&3; wait \"$pid\"",
         0,
         b"",
     );
@@ -1061,7 +1062,7 @@ fn arithmetic_on_associative_elements_uses_the_key_text() {
 #[test]
 fn read_timeouts_distinguish_end_of_file_from_silence() {
     differential(
-        "mkfifo gate; read -t 1 x < /dev/null; echo $?; read -t 0 < /dev/null; echo $?; printf '' | { read -t 1 x; echo $?; }; sh -c 'read y < gate' | { read -t 0.05 x; echo $?; echo >gate; }",
+        "mkfifo gate; exec 3<>gate; read -t 1 x < /dev/null; echo $?; read -t 0 < /dev/null; echo $?; printf '' | { read -t 1 x; echo $?; }; sh -c 'read y < gate' | { read -t 0.05 x; echo $?; echo >&3; }",
         0,
         b"1\n0\n1\n142\n",
     );
