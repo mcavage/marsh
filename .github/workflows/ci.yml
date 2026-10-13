@@ -73,6 +73,14 @@ jobs:
         run: make test-rust NEXTEST_PROFILE=ci
       - name: make test-harness (onboarding, MCP callers, publisher, tool self-tests)
         run: make test-harness
+      # The Bash differential suites' per-case observations, to diagnose a mismatch.
+      - name: Bash suite evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bash-suites-evidence
+          path: target/bash-suites
+          if-no-files-found: ignore
 
   macos:
     name: macOS arm64 (host build and tests)
