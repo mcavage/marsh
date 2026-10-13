@@ -1339,6 +1339,11 @@ impl PtyShell {
 
     /// As [`Self::spawn`], with the shell run by `wrapper` (words before it).
     fn spawn_wrapped(program: &str, answer_cursor: bool, wrapper: &[&str]) -> Self {
+        Self::spawn_with(program, answer_cursor, wrapper, &[])
+    }
+
+    /// As [`Self::spawn_wrapped`], with `options` added to the shell's own.
+    fn spawn_with(program: &str, answer_cursor: bool, wrapper: &[&str], options: &[&str]) -> Self {
         use std::io::{Read as _, Write as _};
         if program == "bash" {
             common::require_bash_oracle();
@@ -1350,6 +1355,7 @@ impl PtyShell {
             shell.push("--no-config");
         }
         shell.extend(["--noprofile", "--norc", "-i"]);
+        shell.extend(options);
         let mut command = isolated_command("script");
         if cfg!(target_os = "linux") {
             // util-linux: one command string, run by $SHELL -c.
@@ -1843,5 +1849,60 @@ fn an_exited_job_is_reported_at_the_next_prompt_without_sigchld() {
         shell.send(b"exit 0\r");
         let (status, output) = shell.finish();
         assert_eq!(status, Some(0), "{program}: {output:?}");
+    }
+}
+
+/// An interactive login shell with `huponexit` sends SIGHUP to its jobs as it
+/// exits, except a job marked by `disown -h`, as Bash does.
+#[cfg(unix)]
+#[test]
+fn huponexit_hangs_up_jobs_except_those_disowned_with_h() {
+    fn alive(pid: i32) -> bool {
+        let table = Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        let stat = String::from_utf8_lossy(&table.stdout);
+        !stat.trim().is_empty() && !stat.trim_start().starts_with('Z')
+    }
+    fn number_after(output: &str, label: &str) -> i32 {
+        let (_, tail) = output.rsplit_once(label).unwrap();
+        let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
+        digits
+            .parse()
+            .unwrap_or_else(|_| panic!("no {label} in {output:?}"))
+    }
+    for program in ["bash", env!("CARGO_BIN_EXE_marsh-brush-test-driver")] {
+        let mut shell = PtyShell::spawn_with(program, true, &[], &["-l"]);
+        shell.expect_prompts(1);
+        shell.send(
+            b"shopt -s huponexit; sleep 60 & echo hup=$!; sleep 60 & echo kept=$!; disown -h\r",
+        );
+        shell.expect("kept=", 2);
+        shell.expect_prompts(2);
+        let output = shell.output();
+        let (hup, kept) = (
+            number_after(&output, "hup="),
+            number_after(&output, "kept="),
+        );
+        shell.send(b"exit\r");
+        let (status, output) = shell.finish();
+        let deadline = std::time::Instant::now() + Duration::from_secs(15);
+        while alive(hup) && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        let (hup_alive, kept_alive) = (alive(hup), alive(kept));
+        for pid in [hup, kept] {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(pid),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+        assert_eq!(status, Some(0), "{program}: {output:?}");
+        assert!(!hup_alive, "{program}: the job got no SIGHUP: {output:?}");
+        assert!(
+            kept_alive,
+            "{program}: the `disown -h` job got SIGHUP: {output:?}"
+        );
     }
 }

@@ -42,10 +42,15 @@ impl builtins::Command for JobsCommand {
             return error::unimp("jobs -n");
         }
 
+        context.shell.jobs_mut().cleanup_dead_jobs();
         if self.job_specs.is_empty() {
+            let mut reported = vec![];
             for job in context.shell.jobs().listed_jobs() {
-                self.display_job(&context, job)?;
+                if self.display_job(&context, job)? && matches!(job.state, jobs::JobState::Done) {
+                    reported.push(job.id);
+                }
             }
+            context.shell.jobs_mut().forget_reported(&reported);
         } else {
             return error::unimp("jobs with job specs");
         }
@@ -59,12 +64,12 @@ impl JobsCommand {
         &self,
         context: &brush_core::ExecutionContext<'_, impl brush_core::ShellExtensions>,
         job: &jobs::Job,
-    ) -> Result<(), brush_core::Error> {
+    ) -> Result<bool, brush_core::Error> {
         if self.running_jobs_only && !matches!(job.state, jobs::JobState::Running) {
-            return Ok(());
+            return Ok(false);
         }
         if self.stopped_jobs_only && !matches!(job.state, jobs::JobState::Stopped) {
-            return Ok(());
+            return Ok(false);
         }
 
         if self.show_pids_only {
@@ -77,6 +82,6 @@ impl JobsCommand {
             writeln!(context.stdout(), "{job}")?;
         }
 
-        Ok(())
+        Ok(true)
     }
 }
