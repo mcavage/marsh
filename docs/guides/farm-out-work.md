@@ -145,7 +145,9 @@ What the gate does and does not do:
   patch first, so the calling agent can read the one it applied.
 - It runs in the calling agent's container, so `make test` needs the tools
   your tests use there. The packaged claude, codex, and pi Kits include git,
-  make, gcc, Python 3, and Node.js.
+  make, gcc, Python 3, Node.js 24, and ripgrep, but not Go or Java, and a Kit
+  container has no package manager. A gate that needs more needs a Kit that
+  ships it ([Kits](../kits.md)).
 - When it exits 0, marsh deletes the split's copies. Otherwise it keeps them
   and prints `inspect, then: marsh splits rm ID`.
 

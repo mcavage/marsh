@@ -9,6 +9,7 @@ for command in dockerd containerd runc docker git curl bash tar "$@"; do
   "$command" --version >/dev/null
 done
 test -x /bin/sh && test -x /bin/bash
+test -d /usr/lib/locale/C.utf8
 # Docker Sandboxes installs its proxy CA this way at VM start.
 test -d /usr/local/share/ca-certificates
 update-ca-certificates >/dev/null

@@ -1,14 +1,15 @@
 # Pi Kit: the DHI Node.js runtime base plus the Kit VM floor (Docker Engine,
-# which runs this Kit's jobs from this same image), the POSIX tools and
-# ripgrep, assembled from Debian packages in a -dev build stage
-# (image-base/assemble-packages.sh). npm runs only in the Node -dev stage.
+# which runs this Kit's jobs from this same image), the POSIX tools, the build
+# toolchain a project's gate needs (make, gcc, python3) and ripgrep, assembled
+# from Debian packages in a -dev build stage (image-base/assemble-packages.sh).
+# npm runs only in the Node -dev stage.
 FROM dhi.io/node:24-debian13@sha256:f3575cf1e68ffe163703b691c465af833fd2d94cccc1e825d052c943018f2aa3 AS base
 
 FROM dhi.io/debian-base:trixie-dev@sha256:c6fc0de84b65bc20346cee5f071fd976ccf383431515db2a4d9721ca936feb9f AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
-RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland ripgrep
+RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
 
 # Pi, its MCP Gateway extension, and (for ACP mode, `pi --acp`) the community
 # pi-acp adapter, all pinned by package-lock.json.
@@ -45,7 +46,7 @@ ENTRYPOINT ["/usr/local/bin/marsh-pi"]
 # npm metadata/retained notices, not all npm code bytes.
 FROM image AS smoke
 USER root
-RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg pi
+RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 pi
 
 FROM packages AS verify
 RUN sh /tmp/marsh-image-base/verifier.sh

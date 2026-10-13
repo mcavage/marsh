@@ -51,10 +51,11 @@ There are two kinds of place where commands run:
   container in that Kit's microVM, with the project at its usual path, and
   the container is deleted when the call exits. Packages installed in the
   shell VM are not in these containers. The claude, codex, and pi Kits
-  include git, make, gcc, Python 3, and Node.js.
+  include git, make, gcc, Python 3, Node.js 24, and ripgrep (no Go, no Java,
+  no package manager).
 
 The first call to each registered command boots its VM and may download about
-3.5 GB; expect a few minutes and the notice `[starting NAME worker VM…]`.
+600 MB; expect a few minutes and the notice `[starting NAME worker VM…]`.
 `marsh --load claude,codex` boots VMs ahead of time. Agents run with their own
 permission prompts and sandboxes turned off; the container is the sandbox. An
 agent called directly can edit or delete project files. Agents in marsh do not

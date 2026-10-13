@@ -116,7 +116,7 @@ tree. If you edited the same lines while the agents worked, use
 |---|---|---|
 | Both branches `exited 1` or `exited 2` | Neither fix passed | Read both stderr sections. Sharpen the prompt (name the file, paste the error) and race again |
 | A branch exits nonzero with an authentication error | No credential for that agent | `sbx secret set anthropic` or `sbx secret set openai`, then rerun |
-| `[starting codex worker VM…]` and a long wait | First use of that agent boots its VM and may download its image (about 3.5 GB) | Wait once; later runs reuse the warm VM. `marsh --load claude,codex` starts them ahead of time |
+| `[starting codex worker VM…]` and a long wait | First use of that agent boots its VM and may download its image (about 600 MB) | Wait once; later runs reuse the warm VM. `marsh --load claude,codex` starts them ahead of time |
 | One branch never finishes | An agent is stuck | Ctrl-C stops every branch and anything they started |
 | `capacity: 8 jobs` in a branch's stderr | Eight jobs were already running on this daemon, so that agent never started | Wait for some to finish and rerun |
 | `git apply` fails | Your tree moved since the split | `git apply --3way`, as above |

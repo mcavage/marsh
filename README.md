@@ -122,7 +122,7 @@ marsh stop                              # remove marsh's VMs
 ```
 
 The first call to each agent boots its VM and downloads its image, about
-3.5 GB, which takes a few minutes. Later calls start in seconds.
+600 MB, which takes a few minutes. Later calls start in seconds.
 
 Then follow a guide:
 

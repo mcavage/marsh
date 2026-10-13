@@ -1029,7 +1029,7 @@ pub fn cold_boot_notice(kit: &str, download: bool) -> String {
                 .into()
         }
         (true, _) => format!(
-            "[starting {kit} worker VM… first use downloads the Kit image (~3.5 GB), this takes a few minutes]"
+            "[starting {kit} worker VM… first use downloads the Kit image (~600 MB), this takes a few minutes]"
         ),
     }
 }
