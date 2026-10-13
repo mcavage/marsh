@@ -690,6 +690,13 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   last one, writing them to standard error while `-v` is on; lines read while
   it was off are not written later. Covered by
   `verbose_writes_input_lines_as_they_are_read`.
+- `0088` runs a DEBUG trap before a simple command's words are expanded and its
+  redirections set up, as Bash does, with `BASH_COMMAND` the command as written
+  (its `Display`; `SimpleCommand::source_text` keeps it set for the command,
+  while the embedder's pre-execute hook still sees the expanded words), and not
+  for the trap's own commands. A DEBUG or ERR trap's frame takes the source
+  position of the command it runs for, so `LINENO` there is that command's
+  line. Covered by `debug_and_err_traps_see_the_command_as_written`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

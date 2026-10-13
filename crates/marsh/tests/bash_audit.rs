@@ -2301,3 +2301,15 @@ fn verbose_writes_input_lines_as_they_are_read() {
     );
     assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
 }
+
+/// A DEBUG trap runs before the command expands or redirects, sees the command
+/// as written in `BASH_COMMAND` and its line in `LINENO`; ERR traps see the
+/// failing command's line.
+#[test]
+fn debug_and_err_traps_see_the_command_as_written() {
+    differential(
+        "trap 'printf \"D:%s:%s\\n\" \"$LINENO\" \"$BASH_COMMAND\"' DEBUG\nprintf '[%s]\\n' \"a b\" >/dev/null\nx=1 y=$(echo 2) true\ntrap - DEBUG\ntrap 'echo ERR:$LINENO' ERR\n\nfalse",
+        1,
+        b"D:2:printf '[%s]\\n' \"a b\" > /dev/null\nD:3:x=1 y=$(echo 2) true\nD:4:trap - DEBUG\nERR:7\n",
+    );
+}

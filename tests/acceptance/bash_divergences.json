@@ -62,24 +62,6 @@
     "unexpanded-basename"
    ]
   }},
-  {"id": "DEBUG-TRAP", "summary": "In a DEBUG trap, $BASH_COMMAND is the command's expanded words rather than its source text, and $LINENO is one less", "cases": {
-   "history-input": [
-    "nul:basic-1-debug-command-raw@C",
-    "nul:basic-1-debug-command-without-nul@C",
-    "nul:minimal-1-debug-command-raw@C",
-    "nul:minimal-1-debug-command-without-nul@C",
-    "nul:reedline-1-debug-command-raw@C",
-    "nul:reedline-1-debug-command-without-nul@C"
-   ],
-   "nul-input": [
-    "debug-command@script@raw",
-    "debug-command@script@without-nul",
-    "debug-command@source@raw",
-    "debug-command@source@without-nul",
-    "debug-command@stdin@raw",
-    "debug-command@stdin@without-nul"
-   ]
-  }},
   {"id": "DIAGNOSTICS", "summary": "Bad array subscripts (read: silent, not `a: bad array subscript`; write: `array index out of range`) and syntax errors in sourced files (`unterminated single quote at L,C`, not `unexpected EOF while looking for matching`) use Brush's wording", "cases": {
    "nul-input": [
     "source-quote-consecutive@source-alias@raw",

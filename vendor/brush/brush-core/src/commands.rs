@@ -332,16 +332,25 @@ pub(crate) async fn on_preexecute(
     if let Some(hook) = PREEXECUTE_HOOK.get() {
         hook(&full_cmd);
     }
-    cmd.shell.env_mut().update_or_add(
-        "BASH_COMMAND",
-        variables::ShellValueLiteral::Scalar(full_cmd),
-        |_| Ok(()),
-        env::EnvironmentLookup::Anywhere,
-        env::EnvironmentScope::Global,
-    )?;
+    // Inside a DEBUG trap, `BASH_COMMAND` stays the command the trap runs for.
+    if !cmd
+        .shell
+        .call_stack()
+        .is_trap_signal_active(traps::TrapSignal::Debug)
+    {
+        let shown = cmd.source_text.clone().unwrap_or(full_cmd);
+        cmd.shell.env_mut().update_or_add(
+            "BASH_COMMAND",
+            variables::ShellValueLiteral::Scalar(shown),
+            |_| Ok(()),
+            env::EnvironmentLookup::Anywhere,
+            env::EnvironmentScope::Global,
+        )?;
+    }
 
-    // Fire the DEBUG trap if one is registered.
-    if cmd.shell.traps().handles(traps::TrapSignal::Debug) {
+    // Fire the DEBUG trap if one is registered; a command with its source
+    // text had it fired before its words were expanded, as in Bash.
+    if cmd.source_text.is_none() && cmd.shell.traps().handles(traps::TrapSignal::Debug) {
         let _ = cmd
             .shell
             .invoke_trap_handler(traps::TrapSignal::Debug, &cmd.params)
@@ -390,6 +399,10 @@ pub struct SimpleCommand<'a, SE: extensions::ShellExtensions> {
     /// process.
     #[allow(clippy::type_complexity)]
     pub post_execute: Option<fn(&mut Shell<SE>) -> Result<(), error::Error>>,
+
+    /// The command as written, which `BASH_COMMAND` holds, as in Bash; without
+    /// it, `BASH_COMMAND` is the expanded words.
+    pub source_text: Option<String>,
 }
 
 impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
@@ -421,6 +434,7 @@ impl<'a, SE: extensions::ShellExtensions> SimpleCommand<'a, SE> {
             argv0: None,
             exec_in_place: false,
             post_execute: None,
+            source_text: None,
         }
     }
 
