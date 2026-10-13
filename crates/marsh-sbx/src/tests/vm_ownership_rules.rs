@@ -158,3 +158,54 @@ fn create_intent_persists_before_create_and_restart_adopts_present_or_drops_abse
     );
     assert!(model.vm_names().is_empty());
 }
+
+#[test]
+fn ownership_mirror_holds_every_intent_before_create_and_tracks_removal() {
+    let control = scratch();
+    let registry = scratch();
+    let map = control.path().join("vm-ownership.json");
+    fs::set_permissions(registry.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let mirror = registry.path().join("vm-ownership.json");
+    let model = StockModel::new();
+    let first = StockSbx::new("sbx", Arc::clone(&model) as Arc<dyn CommandRunner>)
+        .with_vm_ownership(map.clone())
+        .unwrap();
+    let kept = first.vm_name(VmPurpose::Kit, "kit-a").unwrap();
+    drop(first);
+    // A restarted daemon given a mirror copies the existing map at once.
+    let adapter = StockSbx::new("sbx", Arc::clone(&model) as Arc<dyn CommandRunner>)
+        .with_vm_ownership(map.clone())
+        .unwrap()
+        .with_vm_ownership_mirror(mirror.clone())
+        .unwrap();
+    assert!(fs::read_to_string(&mirror).unwrap().contains(&kept));
+    // A new intent reaches the mirror before any stock call.
+    let name = adapter.vm_name(VmPurpose::Kit, "kit-b").unwrap();
+    assert!(model.calls().is_empty());
+    assert!(fs::read_to_string(&mirror).unwrap().contains(&name));
+    let uuid = model.seed_vm(&name);
+    adapter.adopt_created(&name).unwrap();
+    assert!(fs::read_to_string(&mirror).unwrap().contains(&uuid));
+    assert_eq!(fs::read(&mirror).unwrap(), fs::read(&map).unwrap());
+    assert!(
+        adapter
+            .remove_owned_vm(&name, Instant::now() + Duration::from_secs(5))
+            .unwrap()
+    );
+    assert!(!fs::read_to_string(&mirror).unwrap().contains(&name));
+    assert_eq!(fs::read(&mirror).unwrap(), fs::read(&map).unwrap());
+    let mode = fs::metadata(&mirror).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+
+    // A mirror in a group- or world-accessible directory is refused.
+    let open = registry.path().join("open");
+    fs::create_dir(&open).unwrap();
+    fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(matches!(
+        StockSbx::new("sbx", Arc::clone(&model) as Arc<dyn CommandRunner>)
+            .with_vm_ownership(map)
+            .unwrap()
+            .with_vm_ownership_mirror(open.join("vm-ownership.json")),
+        Err(SbxError::HostGrantFence(_))
+    ));
+}

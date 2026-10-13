@@ -95,6 +95,17 @@ names, families, or scenario ids: `make regress ONLY=smoke`,
 `make regress` runs just those suites. `VERIFY_DEPS=` skips the `make dev`
 rebuild.
 
+`make check` keeps its scope warm between runs: a daemon and VMs behind
+`target/check/`. Run `make check-reset` before you delete a checkout or
+`git worktree remove` one; otherwise the scope's daemon and VMs outlive its
+ownership map. Each warm scope is also registered outside the checkout (one
+entry per scope under `~/Library/Application Support/marsh-dev/scopes`, holding
+its home path and a copy of its VM ownership map that the daemon itself keeps
+current), so if you forget, `make check-gc` (also run at the start of
+`make check`, `make verify` and `make regress`) stops that scope's processes and
+removes its VMs, only by the recorded VM name and UUID
+(`tests/acceptance/scope_registry.py`).
+
 ### What CI covers, and what needs your Mac
 
 CI runs `make test-rust` and `make test-harness` on Linux arm64 and on macOS,

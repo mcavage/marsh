@@ -81,7 +81,8 @@ help:
 		'make test-harness      Python/shell harnesses: onboarding, MCP callers, publisher, tool self-tests' \
 		'make test-model        Quick TLA+ sweep (MODEL_FLAGS= for every config)' \
 		'make check [DEV_KIT=ref]  Mac: fast real smoke of the installed dev product (warm scope in target/check)' \
-		'make check-reset       Mac: stop the make check scope and delete target/check' \
+		'make check-reset       Mac: stop the make check scope and delete target/check (run before removing a worktree)' \
+		'make check-gc          Mac: retire warm check scopes whose checkout was deleted (also run by check/verify/regress)' \
 		'make verify [DEV_KIT=ref]  Mac, before pushing: check + the highest-signal sbx suites, concurrently' \
 		'make regress [DEV_KIT=ref]  Mac, before a release: every sbx suite, then make test with the full model' \
 		'                        ONLY=/SKIP= suites, families or scenario ids; REGRESS_JOBS=1 one at a time' \
@@ -490,13 +491,18 @@ dev-kit-images:
 # scenario ids (ONLY=smoke, ONLY=workspaces, ONLY=W01-plain-bash,P02-self-spawn-bash-c;
 # python3 tests/regress.py --list --kit REF). With ONLY, make regress runs just
 # those suites. VERIFY_DEPS= skips the incremental `make dev` rebuild.
-.PHONY: check check-reset regress verify
+.PHONY: check check-reset check-gc regress verify
 check:
 	@test -n "$(DEV_KIT)" || { echo 'make check: run make fixture-ref, or set DEV_KIT to an immutable fixture Kit OCI reference'; exit 1; }
 	@$(TEST_CANARY) $(PYTHON) tests/check.py --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)" --kit "$(DEV_KIT)"
 
 check-reset:
 	@$(PYTHON) tests/check.py --reset --prefix "$(DEV_PREFIX)" --sbx "$(SBX_EXECUTABLE)"
+
+# Warm scopes are registered outside the checkout; this retires (by recorded
+# VM name and UUID only) those whose home was deleted with its worktree.
+check-gc:
+	@$(PYTHON) tests/acceptance/scope_registry.py gc --sbx "$(SBX_EXECUTABLE)"
 
 VERIFY_DEPS ?= dev
 REGRESS_JOBS ?= 3

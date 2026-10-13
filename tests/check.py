@@ -7,6 +7,11 @@ daemon and VMs stay warm between runs; when the installed daemon or guest
 binaries change, the scope is stopped (`marsh stop`) first. `--reset` stops
 the scope and deletes target/check. No fakes: every check observes public
 outputs of the real product and stock SBX.
+
+The scope is registered outside the checkout before its daemon starts, and the
+daemon mirrors its VM ownership map there (tests/acceptance/scope_registry.py),
+so a checkout deleted without `--reset` leaves VMs that `make check-gc` (run at
+the start of every check) can still prove it owns and retire.
 """
 from __future__ import annotations
 
@@ -41,6 +46,7 @@ sys.path.insert(0, str(ACCEPTANCE))
 from harness import (Fail as Failure, daemon_endpoint_paths, product_owned_vm_names, require,  # noqa: E402
                      resolve_executable, text, verify_container_deleted)
 from provenance import stock_vm_inventory  # noqa: E402
+import scope_registry  # noqa: E402
 from harness import stage_acp_fixture, wait_until  # noqa: E402
 from mcp_harness import gateway_call, gateway_data  # noqa: E402
 
@@ -52,6 +58,25 @@ WRITABLE_LIMIT = 32 * 1024 * 1024
 STAMPED = ["bin/marshd", "libexec/marsh/marsh-linux-arm64", "libexec/marsh/marsh-worker-linux-arm64",
            "libexec/marsh/marsh-relay-linux-arm64", "libexec/marsh/marshd-linux-arm64",
            "libexec/marsh/marsh-local-linux-arm64", "libexec/marsh/shell-image"]
+
+
+def linked_worktree() -> bool:
+    def git(*args: str) -> str:
+        return subprocess.run(["git", "-C", str(CHECKOUT), "rev-parse", *args], capture_output=True, text=True,
+                              timeout=30).stdout.strip()
+    common = git("--path-format=absolute", "--git-common-dir")
+    return bool(common) and common != git("--path-format=absolute", "--git-dir")
+
+
+def collect_garbage(sbx: str) -> None:
+    """`make check-gc`, advisory: retire registered scopes whose home is gone."""
+    try:
+        reports = scope_registry.collect(scope_registry.registry_root(), sbx_run=scope_registry.sbx_runner(sbx))
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+        print(f"check-gc: skipped: {error}", file=sys.stderr)
+        return
+    for report in reports:
+        print("\n".join(scope_registry.describe(report)), file=sys.stderr if report["errors"] else sys.stdout)
 
 
 def digest(path: pathlib.Path) -> str:
@@ -74,6 +99,7 @@ class Scope:
         self.control_root = ROOT / "control"
         self.project = ROOT / "project"
         self.stamp_path = ROOT / "stamp.json"
+        self.registry = scope_registry.registry_root()
         self.environment = clean_environment()
         self.environment.update({
             "MARSH_HOME": str(self.home),
@@ -140,26 +166,52 @@ class Scope:
         return errors
 
     def reset(self) -> list[str]:
+        if self.home.exists():
+            mirror = self.registry / scope_registry.scope_id(self.home.resolve()) / scope_registry.MIRROR_FILE
+            if mirror.parent.is_dir():
+                self.environment[scope_registry.MIRROR_ENV] = str(mirror)
         errors = self.stop()
-        if not errors and self.root.exists():
-            shutil.rmtree(self.root)
+        if not errors:
+            home = self.home.resolve() if self.home.exists() else None
+            if self.root.exists():
+                shutil.rmtree(self.root)
+            if home is not None:
+                scope_registry.unregister(self.registry, home)
         return errors
+
+    def register(self) -> pathlib.Path:
+        """Record the scope outside the checkout; its daemon mirrors its VM map there."""
+        try:
+            mirror = scope_registry.register(
+                self.registry, home=self.home, control_root=self.control_root, prefix=self.prefix,
+                creator="tests/check.py", checkout=CHECKOUT, seed_map=self.control_home / "vm-ownership.json")
+        except (OSError, RuntimeError, ValueError) as error:
+            raise Failure(f"refusing to run a warm scope that is not registered in {self.registry}: {error}")
+        self.environment[scope_registry.MIRROR_ENV] = str(mirror)
+        return mirror
 
     def prepare(self) -> dict[str, Any]:
         """Create or reuse the persistent scope; stop it when binaries changed."""
         info: dict[str, Any] = {"reused": self.root.exists()}
+        for path in (self.root, self.home, self.home / "home", self.control_root, self.project):
+            path.mkdir(mode=0o700, parents=True, exist_ok=True)
+            path.chmod(0o700)
+        self.control_home.mkdir(mode=0o700, exist_ok=True)
         current = self.stamp()
-        if self.root.exists():
+        # A daemon started before the scope was registered does not mirror
+        # its map: a new registration restarts it.
+        current["scope-registry"] = str(self.register())
+        info["registry"] = current["scope-registry"]
+        if not info["reused"] and linked_worktree():
+            print(f"check: warm scope in {ROOT}; run `make check-reset` before removing this worktree "
+                  "(`make check-gc` recovers its VMs if you forget)")
+        if info["reused"]:
             previous = json.loads(self.stamp_path.read_text()) if self.stamp_path.exists() else {}
             if previous != current:
                 info["restarted_for_changed_binaries"] = sorted(
                     name for name in set(previous) | set(current) if previous.get(name) != current.get(name))
                 errors = self.stop()
                 require(not errors, f"could not stop stale scope: {errors}")
-        for path in (self.root, self.home, self.home / "home", self.control_root, self.project):
-            path.mkdir(mode=0o700, parents=True, exist_ok=True)
-            path.chmod(0o700)
-        self.control_home.mkdir(mode=0o700, exist_ok=True)
         commands = {"fixture": self.kit, "fixture-acp": str(stage_acp_fixture(self.root / "kits"))}
         agents = [{"schema_version": 1, "name": "fixture-session", "protocol": "acp_v1",
                    "command": "fixture-acp", "required_capabilities": []}]
@@ -493,6 +545,7 @@ def main() -> int:
         return 1 if errors else 0
     if not re.fullmatch(r"[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}", args.kit):
         parser.error("--kit must be an immutable fixture Kit OCI reference (make fixture-ref, or DEV_KIT=...)")
+    collect_garbage(scope.sbx)
     wall = time.monotonic()
     run_id = uuid.uuid4().hex[:8]
     report: dict[str, Any] = {"schema": "marsh.check/v1", "run_id": run_id, "prefix": str(scope.prefix),

@@ -18,6 +18,10 @@
 //!
 //! The inventory view is refreshed (one `sbx ls --json`) only on cold start,
 //! after a lifecycle change, or after a failure. Warm requests use the cache.
+//!
+//! A test scope may also name a mirror file outside its control home: every
+//! write of the map (intents included, so before any create) is copied there
+//! first, so the map outlives a deleted scope directory (`make check-gc`).
 
 use super::{SbxError, StockInventory};
 use serde::{Deserialize, Serialize};
@@ -26,7 +30,7 @@ use std::{
     fs,
     io::Write,
     os::unix::fs::{MetadataExt, OpenOptionsExt},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 
@@ -154,8 +158,23 @@ struct State {
 
 pub(crate) struct VmOwnership {
     path: Option<PathBuf>,
+    mirror: Option<PathBuf>,
     state: Mutex<State>,
     view: Mutex<Option<Arc<StockInventory>>>,
+}
+
+fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), SbxError> {
+    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+    let _ = fs::remove_file(&temporary);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&temporary)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    fs::rename(&temporary, path)?;
+    Ok(())
 }
 
 /// Fresh random name: fixed prefix plus 8 lowercase base36 characters.
@@ -174,6 +193,7 @@ impl VmOwnership {
     pub(crate) fn in_memory() -> Self {
         Self {
             path: None,
+            mirror: None,
             state: Mutex::new(State::default()),
             view: Mutex::new(None),
         }
@@ -234,6 +254,7 @@ impl VmOwnership {
             .collect();
         Ok(Self {
             path: Some(path),
+            mirror: None,
             state: Mutex::new(State {
                 entries,
                 unclaimed_intents,
@@ -250,6 +271,28 @@ impl VmOwnership {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
+    /// Copy every write of the map to `mirror` (in an existing owner-only
+    /// directory), starting with the current map.
+    pub(crate) fn with_mirror(mut self, mirror: PathBuf) -> Result<Self, SbxError> {
+        let parent = mirror.parent().unwrap_or(Path::new("/"));
+        let metadata = fs::symlink_metadata(parent)?;
+        if !metadata.is_dir()
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.mode() & 0o077 != 0
+        {
+            return Err(SbxError::HostGrantFence(format!(
+                "VM ownership mirror directory {} is not an owner-only directory",
+                parent.display()
+            )));
+        }
+        self.mirror = Some(mirror);
+        {
+            let state = self.lock();
+            self.persist(&state)?;
+        }
+        Ok(self)
+    }
+
     fn persist(&self, state: &State) -> Result<(), SbxError> {
         let Some(path) = &self.path else {
             return Ok(());
@@ -259,17 +302,11 @@ impl VmOwnership {
             vms: state.entries.clone(),
             grants: state.grants.clone(),
         })?;
-        let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-        let _ = fs::remove_file(&temporary);
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        fs::rename(&temporary, path)?;
-        Ok(())
+        // The mirror is written first: it never names fewer VMs than the map.
+        if let Some(mirror) = &self.mirror {
+            write_atomically(mirror, &bytes)?;
+        }
+        write_atomically(path, &bytes)
     }
 
     /// Name for `(purpose, key)`. An existing entry is reused; otherwise a

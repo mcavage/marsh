@@ -984,6 +984,17 @@ impl StockSbx {
         Ok(self)
     }
 
+    /// Mirror every write of the ownership map to `path` as well (a test
+    /// scope's registry entry outside its control home). Call after
+    /// [`Self::with_vm_ownership`]; the current map is written immediately.
+    ///
+    /// # Errors
+    /// Rejects a mirror directory that is not owner-only, or a failed write.
+    pub fn with_vm_ownership_mirror(mut self, path: PathBuf) -> Result<Self, SbxError> {
+        self.ownership = self.ownership.with_mirror(path)?;
+        Ok(self)
+    }
+
     /// The owned VM name for `(purpose, key)`. The ownership map is the only
     /// source of names: an unknown pair gets a fresh random name
     /// (`marsh-k-<id>` / `marsh-s-<id>`) persisted as an intent before any
