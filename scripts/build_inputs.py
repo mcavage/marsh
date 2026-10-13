@@ -3,6 +3,7 @@
 Shared by image and native Kit preparation; stdlib only, no Docker effects.
 """
 from contextlib import contextmanager
+import contextvars
 import hashlib
 import json
 import os
@@ -25,36 +26,120 @@ def parts(value):
     return value.split("/")
 
 
+def _check_owner_controlled(fd, path):
+    info = os.fstat(fd)
+    # Root-owned system ancestors (including sticky /tmp) are trusted.
+    if (info.st_uid not in (0, os.getuid()) or
+            (info.st_mode & 0o022 and not (info.st_uid == 0 and info.st_mode & stat.S_ISVTX))):
+        raise ValueError(f"directory is not owner-controlled: {path}")
+
+
+def _open_child(fd, component, path, create):
+    try:
+        child = os.open(component, DIRECTORY_FLAGS, dir_fd=fd)
+    except FileNotFoundError:
+        if not create:
+            raise
+        try:
+            os.mkdir(component, 0o700, dir_fd=fd)
+        except FileExistsError:
+            pass
+        child = os.open(component, DIRECTORY_FLAGS, dir_fd=fd)
+    try:
+        _check_owner_controlled(child, path)
+    except BaseException:
+        os.close(child)
+        raise
+    return child
+
+
+class _Walks:
+    """Directories retained by one `retained_walks()` scope: the chain of the
+    most recently opened path, from the filesystem root. A later path reopens
+    only the components below the part it shares with that chain, and
+    rechecks every retained component's ownership and mode by descriptor."""
+
+    def __init__(self):
+        self.chain = []  # [component, fd, pins], from the root
+        self.detached = []
+
+    def drop(self, entry):
+        if entry[2]:
+            self.detached.append(entry)
+        else:
+            os.close(entry[1])
+
+    def unpin(self, entry):
+        entry[2] -= 1
+        if not entry[2] and any(item is entry for item in self.detached):
+            self.detached = [item for item in self.detached if item is not entry]
+            os.close(entry[1])
+
+    def close(self):
+        for entry in self.chain:
+            self.drop(entry)
+        self.chain = []
+
+
+_WALKS = contextvars.ContextVar("build_inputs_walks", default=None)
+
+
 @contextmanager
-def directory(path, *, create=False):
-    """Retain each real directory while walking; never follow a parent symlink."""
+def retained_walks():
+    """Within this scope, reading many inputs below one directory walks its
+    ancestors once instead of once per input. Only the identities seen inside
+    the scope are bound; a later scope walks from the root again."""
+    walks = _Walks()
+    token = _WALKS.set(walks)
+    try:
+        yield
+    finally:
+        _WALKS.reset(token)
+        walks.close()
+
+
+@contextmanager
+def directory(path, *, create=False, fresh=False):
+    """Retain each real directory while walking; never follow a parent symlink.
+
+    `fresh` walks from the root even inside a `retained_walks()` scope."""
     if ".." in Path(path).parts:
         raise ValueError("directory paths must not contain '..'; use a canonical path")
     path = Path(os.path.abspath(path))
-    fd = os.open(path.anchor, DIRECTORY_FLAGS)
-    try:
-        for component in path.parts[1:]:
-            try:
-                child = os.open(component, DIRECTORY_FLAGS, dir_fd=fd)
-            except FileNotFoundError:
-                if not create:
-                    raise
-                try:
-                    os.mkdir(component, 0o700, dir_fd=fd)
-                except FileExistsError:
-                    pass
-                child = os.open(component, DIRECTORY_FLAGS, dir_fd=fd)
-            info = os.fstat(child)
-            # Root-owned system ancestors (including sticky /tmp) are trusted.
-            if (info.st_uid not in (0, os.getuid()) or
-                    (info.st_mode & 0o022 and not (info.st_uid == 0 and info.st_mode & stat.S_ISVTX))):
-                os.close(child)
-                raise ValueError(f"directory is not owner-controlled: {path}")
+    walks = None if fresh else _WALKS.get()
+    if walks is None:
+        fd = os.open(path.anchor, DIRECTORY_FLAGS)
+        try:
+            for component in path.parts[1:]:
+                child = _open_child(fd, component, path, create)
+                os.close(fd)
+                fd = child
+            yield fd
+        finally:
             os.close(fd)
-            fd = child
-        yield fd
+        return
+    components = [path.anchor, *path.parts[1:]]
+    shared = 0
+    while (shared < len(walks.chain) and shared < len(components)
+           and walks.chain[shared][0] == components[shared]):
+        shared += 1
+    for entry in walks.chain[shared:]:
+        walks.drop(entry)
+    del walks.chain[shared:]
+    for entry in walks.chain[1:]:
+        _check_owner_controlled(entry[1], path)
+    for component in components[len(walks.chain):]:
+        if walks.chain:
+            fd = _open_child(walks.chain[-1][1], component, path, create)
+        else:
+            fd = os.open(component, DIRECTORY_FLAGS)
+        walks.chain.append([component, fd, 0])
+    entry = walks.chain[-1]
+    entry[2] += 1
+    try:
+        yield entry[1]
     finally:
-        os.close(fd)
+        walks.unpin(entry)
 
 
 def fingerprint(metadata):
@@ -68,19 +153,25 @@ def regular_file(path, limit):
     if ".." in Path(path).parts:
         raise ValueError("input paths must not contain '..'; use a canonical path")
     path = Path(os.path.abspath(path))
-    with directory(path.parent) as parent:
-        fd = os.open(path.name, FILE_FLAGS, dir_fd=parent)
-        with os.fdopen(fd, "rb") as stream:
-            before = os.fstat(stream.fileno())
-            if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
-                    or before.st_mode & 0o022 or before.st_nlink != 1 or before.st_size > limit):
-                raise ValueError(f"expected owner-controlled single-link regular file (limit {limit} bytes): {path}")
-            yield stream, before
-            if fingerprint(before) != fingerprint(os.fstat(stream.fileno())):
-                raise ValueError(f"input changed while reading: {path}")
-            current = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
-            if fingerprint(before) != fingerprint(current):
-                raise ValueError(f"input replaced while reading: {path}")
+    with directory(path.parent) as parent, _regular_file_at(parent, path, limit) as opened:
+        yield opened
+
+
+@contextmanager
+def _regular_file_at(parent, path, limit):
+    """`path`'s final component, read below the retained `parent` directory."""
+    fd = os.open(path.name, FILE_FLAGS, dir_fd=parent)
+    with os.fdopen(fd, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                or before.st_mode & 0o022 or before.st_nlink != 1 or before.st_size > limit):
+            raise ValueError(f"expected owner-controlled single-link regular file (limit {limit} bytes): {path}")
+        yield stream, before
+        if fingerprint(before) != fingerprint(os.fstat(stream.fileno())):
+            raise ValueError(f"input changed while reading: {path}")
+        current = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+        if fingerprint(before) != fingerprint(current):
+            raise ValueError(f"input replaced while reading: {path}")
 
 
 def read_file(path, limit=JSON_LIMIT):
@@ -119,22 +210,27 @@ def sha(data):
 
 
 def file_record(path, *, budget=None):
-    with regular_file(path, FILE_LIMIT) as (stream, info):
-        if budget is not None:
-            if info.st_size > budget[0]:
-                raise ValueError("combined input tree exceeds 512 MiB byte limit")
-            budget[0] -= info.st_size
-        digest = hashlib.sha256()
-        size = 0
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            size += len(chunk)
-            if size > info.st_size:
-                raise ValueError(f"input grew during hashing: {path}")
-            digest.update(chunk)
-        if size != info.st_size:
-            raise ValueError(f"input truncated during hashing: {path}")
-        return {"sha256": "sha256:" + digest.hexdigest(), "size": size,
-                "mode": stat.S_IMODE(info.st_mode)}
+    with regular_file(path, FILE_LIMIT) as opened:
+        return _record(path, opened, budget)
+
+
+def _record(path, opened, budget):
+    stream, info = opened
+    if budget is not None:
+        if info.st_size > budget[0]:
+            raise ValueError("combined input tree exceeds 512 MiB byte limit")
+        budget[0] -= info.st_size
+    digest = hashlib.sha256()
+    size = 0
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        size += len(chunk)
+        if size > info.st_size:
+            raise ValueError(f"input grew during hashing: {path}")
+        digest.update(chunk)
+    if size != info.st_size:
+        raise ValueError(f"input truncated during hashing: {path}")
+    return {"sha256": "sha256:" + digest.hexdigest(), "size": size,
+            "mode": stat.S_IMODE(info.st_mode)}
 
 
 def tree_inventory(root):
@@ -142,46 +238,56 @@ def tree_inventory(root):
 
     Returns {files: {relative: {sha256, size, mode}}, directories: [relative]}.
     Every directory and file must be caller-owned, no group/world writes.
+    Below the root, each entry is opened relative to its retained parent.
     """
     root = Path(os.path.abspath(root))
     files, directories = {}, []
     budget, count = STAGE_LIMIT, 0
 
-    def visit(path, depth=0):
+    def visit(path, fd, depth):
         nonlocal budget, count
         if depth > 64:
             raise ValueError("input tree directory depth exceeds 64")
-        with directory(path) as fd:
-            before = os.fstat(fd)
-            if before.st_uid != os.getuid() or before.st_mode & 0o022:
-                raise ValueError(f"input directory must be caller-owned without other writers: {path}")
-            names = []
-            with os.scandir(fd) as entries:
-                for entry in entries:
-                    count += 1
-                    if count > MAX_FILES:
-                        raise ValueError("input tree file/directory-count limit exceeded")
-                    names.append(entry.name)
-            for name in sorted(names):
-                child = path / name
-                relative = str(child.relative_to(root))
-                parts(relative)
-                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
-                if stat.S_ISDIR(info.st_mode):
-                    directories.append(relative)
-                    visit(child, depth + 1)
-                elif stat.S_ISREG(info.st_mode):
-                    if info.st_size > budget:
-                        raise ValueError("input tree exceeds 512 MiB byte limit")
-                    record = file_record(child)
-                    budget -= record["size"]
-                    files[relative] = record
-                else:
-                    raise ValueError(f"canonical build input must be regular: {child}")
-            if fingerprint(before) != fingerprint(os.fstat(fd)):
-                raise ValueError(f"input tree changed during scan: {path}")
-            with directory(path) as current:
-                if fingerprint(before) != fingerprint(os.fstat(current)):
-                    raise ValueError(f"input directory replaced during scan: {path}")
-    visit(root)
+        before = os.fstat(fd)
+        if before.st_uid != os.getuid() or before.st_mode & 0o022:
+            raise ValueError(f"input directory must be caller-owned without other writers: {path}")
+        names = []
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                count += 1
+                if count > MAX_FILES:
+                    raise ValueError("input tree file/directory-count limit exceeded")
+                names.append(entry.name)
+        for name in sorted(names):
+            child = path / name
+            relative = str(child.relative_to(root))
+            parts(relative)
+            info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISDIR(info.st_mode):
+                directories.append(relative)
+                child_fd = _open_child(fd, name, child, False)
+                try:
+                    scanned = visit(child, child_fd, depth + 1)
+                finally:
+                    os.close(child_fd)
+                if scanned != fingerprint(os.stat(name, dir_fd=fd, follow_symlinks=False)):
+                    raise ValueError(f"input directory replaced during scan: {child}")
+            elif stat.S_ISREG(info.st_mode):
+                if info.st_size > budget:
+                    raise ValueError("input tree exceeds 512 MiB byte limit")
+                with _regular_file_at(fd, child, FILE_LIMIT) as opened:
+                    record = _record(child, opened, None)
+                budget -= record["size"]
+                files[relative] = record
+            else:
+                raise ValueError(f"canonical build input must be regular: {child}")
+        if fingerprint(before) != fingerprint(os.fstat(fd)):
+            raise ValueError(f"input tree changed during scan: {path}")
+        return fingerprint(before)
+
+    with directory(root) as fd:
+        scanned = visit(root, fd, 0)
+    with directory(root, fresh=True) as current:
+        if scanned != fingerprint(os.fstat(current)):
+            raise ValueError(f"input directory replaced during scan: {root}")
     return {"files": files, "directories": sorted(directories)}
