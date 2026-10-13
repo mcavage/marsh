@@ -587,10 +587,21 @@ async fn deliver_pending_signals<SE: extensions::ShellExtensions>(
                     return Ok(Some(result));
                 }
             }
+            // A signal whose trap was removed takes its default action: none
+            // for these, which a caught one would otherwise not get.
+            None if matches!(
+                signal,
+                libc::SIGCHLD | libc::SIGCONT | libc::SIGURG | libc::SIGWINCH
+                    | libc::SIGTSTP | libc::SIGTTIN | libc::SIGTTOU
+                    // The shell itself ignores QUIT, as Bash does.
+                    | libc::SIGQUIT
+            ) => {}
             None if !shell.options().interactive => {
                 let _ = shell.on_exit().await;
                 crate::subshell::die_by_signal(signal);
             }
+            // An interactive shell hung up between commands ends as at a prompt.
+            None if signal == libc::SIGHUP => crate::traps::die_by_hangup(shell).await,
             // An interactive shell abandons the command line on an untrapped INT.
             None if signal == libc::SIGINT => {
                 // End the echoed `^C` line, as Bash does.

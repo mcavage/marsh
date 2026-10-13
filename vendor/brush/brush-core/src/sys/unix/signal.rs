@@ -84,6 +84,17 @@ pub(crate) async fn await_term() -> Result<(), error::Error> {
 /// after a command boundary already ran its trap from the handler's record;
 /// that dispatch must not run the trap again. The handler records every
 /// arrival before the runtime's dispatch, so only a recorded one is new.
+pub(crate) async fn await_hangup() -> Result<(), error::Error> {
+    crate::signals::listen(libc::SIGHUP);
+    let mut listener = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
+    if crate::signals::take(libc::SIGHUP) {
+        return Ok(());
+    }
+    let _ = listener.recv().await;
+    let _ = crate::signals::take(libc::SIGHUP);
+    Ok(())
+}
+
 pub(crate) async fn await_undelivered_term() -> Result<(), error::Error> {
     crate::signals::listen(libc::SIGTERM);
     let mut listener = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -154,7 +165,12 @@ pub(crate) fn restore_defaults_after_fork(previous: &libc::sigset_t) {
                 && current.sa_sigaction != libc::SIG_IGN
             {
                 let mut default: libc::sigaction = std::mem::zeroed();
-                default.sa_sigaction = libc::SIG_DFL;
+                // A signal with an empty trap stays ignored, as in Bash.
+                default.sa_sigaction = if crate::signals::ignored_by_trap(signal) {
+                    libc::SIG_IGN
+                } else {
+                    libc::SIG_DFL
+                };
                 libc::sigaction(signal, &raw const default, std::ptr::null_mut());
             }
         }

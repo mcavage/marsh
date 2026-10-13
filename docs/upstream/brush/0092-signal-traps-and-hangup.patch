@@ -1,0 +1,349 @@
+diff --git a/brush-builtins/src/exec.rs b/brush-builtins/src/exec.rs
+index ae7750a..ffcdfa1 100644
+--- a/brush-builtins/src/exec.rs
++++ b/brush-builtins/src/exec.rs
+@@ -120,6 +120,7 @@ impl builtins::Command for ExecCommand {
+             let backup = brush_core::sys::commands::DescriptorBackup::save(
+                 context.iter_fds().map(|(fd, _)| fd),
+             )?;
++            brush_core::traps::ignore_trap_ignored_signals_for_exec();
+             let error = cmd.exec();
+             backup.restore();
+             let missing = error.kind() == std::io::ErrorKind::NotFound
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index fb9b754..5361c56 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -587,10 +587,21 @@ async fn deliver_pending_signals<SE: extensions::ShellExtensions>(
+                     return Ok(Some(result));
+                 }
+             }
++            // A signal whose trap was removed takes its default action: none
++            // for these, which a caught one would otherwise not get.
++            None if matches!(
++                signal,
++                libc::SIGCHLD | libc::SIGCONT | libc::SIGURG | libc::SIGWINCH
++                    | libc::SIGTSTP | libc::SIGTTIN | libc::SIGTTOU
++                    // The shell itself ignores QUIT, as Bash does.
++                    | libc::SIGQUIT
++            ) => {}
+             None if !shell.options().interactive => {
+                 let _ = shell.on_exit().await;
+                 crate::subshell::die_by_signal(signal);
+             }
++            // An interactive shell hung up between commands ends as at a prompt.
++            None if signal == libc::SIGHUP => crate::traps::die_by_hangup(shell).await,
+             // An interactive shell abandons the command line on an untrapped INT.
+             None if signal == libc::SIGINT => {
+                 // End the echoed `^C` line, as Bash does.
+diff --git a/brush-core/src/signals.rs b/brush-core/src/signals.rs
+index 438af4e..ccb7ff0 100644
+--- a/brush-core/src/signals.rs
++++ b/brush-core/src/signals.rs
+@@ -16,8 +16,8 @@
+ 
+ #[cfg(unix)]
+ pub(crate) use imp::{
+-    arrived, discard, forget_after_fork, is_recorded, listen, note_child_reaped, take,
+-    take_pending, take_reaped_children,
++    arrived, discard, forget_after_fork, ignored_by_trap, is_recorded, listen, note_child_reaped,
++    set_ignored_by_trap, take, take_pending, take_reaped_children,
+ };
+ 
+ #[cfg(not(unix))]
+@@ -52,6 +52,30 @@ mod imp {
+     /// Children reaped since the last [`take_reaped_children`] (for `CHLD` traps).
+     static REAPED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+ 
++    /// Signals with an empty trap (`trap '' SIG`), one bit each. The shell
++    /// drops them; programs it runs start with them ignored, as in Bash.
++    static IGNORED_BY_TRAP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
++
++    /// Records whether `signal` has an empty trap.
++    pub(crate) fn set_ignored_by_trap(signal: i32, ignored: bool) {
++        let Some(bit) = u32::try_from(signal).ok().and_then(|n| 1u64.checked_shl(n)) else {
++            return;
++        };
++        if ignored {
++            IGNORED_BY_TRAP.fetch_or(bit, Ordering::AcqRel);
++        } else {
++            IGNORED_BY_TRAP.fetch_and(!bit, Ordering::AcqRel);
++        }
++    }
++
++    /// Whether `signal` has an empty trap (safe in a forked child).
++    pub(crate) fn ignored_by_trap(signal: i32) -> bool {
++        u32::try_from(signal)
++            .ok()
++            .and_then(|n| 1u64.checked_shl(n))
++            .is_some_and(|bit| IGNORED_BY_TRAP.load(Ordering::Acquire) & bit != 0)
++    }
++
+     /// Notes that the shell reaped a child process.
+     pub(crate) fn note_child_reaped() {
+         REAPED.fetch_add(1, Ordering::AcqRel);
+diff --git a/brush-core/src/subshell.rs b/brush-core/src/subshell.rs
+index 78ff3ab..d2ed523 100644
+--- a/brush-core/src/subshell.rs
++++ b/brush-core/src/subshell.rs
+@@ -767,11 +767,23 @@ mod imp {
+         } else {
+             libc::SIG_DFL
+         };
++        // The shell may catch any signal it has a trap for; the child starts
++        // with the default action, as Bash resets traps in a subshell.
+         for (signal, handler) in [
+             (libc::SIGINT, interrupt),
+             (libc::SIGQUIT, interrupt),
+             (libc::SIGTERM, libc::SIG_DFL),
+             (libc::SIGPIPE, libc::SIG_DFL),
++            (libc::SIGHUP, libc::SIG_DFL),
++            (libc::SIGUSR1, libc::SIG_DFL),
++            (libc::SIGUSR2, libc::SIG_DFL),
++            (libc::SIGALRM, libc::SIG_DFL),
++            (libc::SIGVTALRM, libc::SIG_DFL),
++            (libc::SIGPROF, libc::SIG_DFL),
++            (libc::SIGXCPU, libc::SIG_DFL),
++            (libc::SIGXFSZ, libc::SIG_DFL),
++            (libc::SIGWINCH, libc::SIG_DFL),
++            (libc::SIGURG, libc::SIG_DFL),
+         ] {
+             let handler = if signals.ignored.contains(&signal) {
+                 libc::SIG_IGN
+diff --git a/brush-core/src/sys/unix/signal.rs b/brush-core/src/sys/unix/signal.rs
+index 9824583..df322f0 100644
+--- a/brush-core/src/sys/unix/signal.rs
++++ b/brush-core/src/sys/unix/signal.rs
+@@ -84,6 +84,17 @@ pub(crate) async fn await_term() -> Result<(), error::Error> {
+ /// after a command boundary already ran its trap from the handler's record;
+ /// that dispatch must not run the trap again. The handler records every
+ /// arrival before the runtime's dispatch, so only a recorded one is new.
++pub(crate) async fn await_hangup() -> Result<(), error::Error> {
++    crate::signals::listen(libc::SIGHUP);
++    let mut listener = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())?;
++    if crate::signals::take(libc::SIGHUP) {
++        return Ok(());
++    }
++    let _ = listener.recv().await;
++    let _ = crate::signals::take(libc::SIGHUP);
++    Ok(())
++}
++
+ pub(crate) async fn await_undelivered_term() -> Result<(), error::Error> {
+     crate::signals::listen(libc::SIGTERM);
+     let mut listener = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+@@ -154,7 +165,12 @@ pub(crate) fn restore_defaults_after_fork(previous: &libc::sigset_t) {
+                 && current.sa_sigaction != libc::SIG_IGN
+             {
+                 let mut default: libc::sigaction = std::mem::zeroed();
+-                default.sa_sigaction = libc::SIG_DFL;
++                // A signal with an empty trap stays ignored, as in Bash.
++                default.sa_sigaction = if crate::signals::ignored_by_trap(signal) {
++                    libc::SIG_IGN
++                } else {
++                    libc::SIG_DFL
++                };
+                 libc::sigaction(signal, &raw const default, std::ptr::null_mut());
+             }
+         }
+diff --git a/brush-core/src/traps.rs b/brush-core/src/traps.rs
+index 08cb996..e2e7031 100644
+--- a/brush-core/src/traps.rs
++++ b/brush-core/src/traps.rs
+@@ -14,6 +14,48 @@ pub async fn await_undelivered_term() -> Result<(), crate::error::Error> {
+     crate::sys::signal::await_undelivered_term().await
+ }
+ 
++/// Waits for SIGHUP (from then on it is recorded for delivery between commands).
++#[cfg(unix)]
++pub async fn await_hangup() -> Result<(), crate::error::Error> {
++    crate::sys::signal::await_hangup().await
++}
++
++/// Ignores the signals that have empty traps, just before `exec` replaces the
++/// shell, so the program starts with them ignored, as in Bash.
++#[cfg(unix)]
++pub fn ignore_trap_ignored_signals_for_exec() {
++    for signal in 1..65 {
++        if crate::signals::ignored_by_trap(signal) {
++            // SAFETY: installs SIG_IGN, which runs no code.
++            unsafe { libc::signal(signal, libc::SIG_IGN) };
++        }
++    }
++}
++
++/// Makes the shell itself ignore SIGQUIT, as Bash does (its commands still get
++/// the default action): it is caught, and dropped between commands unless
++/// trapped.
++#[cfg(unix)]
++pub fn ignore_quit() {
++    crate::signals::listen(libc::SIGQUIT);
++}
++
++/// Returns (and consumes) whether a SIGHUP was recorded since the last call,
++/// such as one that hung up the terminal while a line was being read.
++#[cfg(unix)]
++pub fn take_pending_hangup() -> bool {
++    crate::signals::take(libc::SIGHUP)
++}
++
++/// Ends the shell for an untrapped SIGHUP, as Bash does: it saves the
++/// history, runs the EXIT trap, and dies by the signal.
++#[cfg(unix)]
++pub async fn die_by_hangup(shell: &mut crate::Shell<impl crate::extensions::ShellExtensions>) -> ! {
++    let _ = shell.save_history();
++    let _ = shell.on_exit().await;
++    crate::subshell::die_by_signal(libc::SIGHUP)
++}
++
+ /// Wait for SIGINT without executing shell code in the OS signal handler.
+ /// Embedding builtins use this to interrupt an asynchronous wait.
+ #[cfg(unix)]
+@@ -258,13 +300,18 @@ impl TrapHandlerConfig {
+         match signal_type {
+             TrapSignal::Signal(signal) => {
+                 crate::subshell::restore_trapped_signal(signal as i32);
+-                // Catch the signal from now on, so the trap also runs between commands.
+-                if matches!(
++                // Catch the signal from now on, so the trap runs between commands
++                // (an empty one ignores it there). CHLD traps count reaped
++                // children instead, and KILL and STOP cannot be caught.
++                if !matches!(
+                     signal,
+-                    crate::sys::signal::Signal::SIGINT | crate::sys::signal::Signal::SIGTERM
++                    crate::sys::signal::Signal::SIGCHLD
++                        | crate::sys::signal::Signal::SIGKILL
++                        | crate::sys::signal::Signal::SIGSTOP
+                 ) {
+                     crate::signals::listen(signal as i32);
+                 }
++                crate::signals::set_ignored_by_trap(signal as i32, command.is_empty());
+             }
+             _ => {}
+         }
+@@ -284,6 +331,10 @@ impl TrapHandlerConfig {
+     /// * `signal_type` - The type of signal to remove handlers for.
+     pub fn remove_handlers(&mut self, signal_type: TrapSignal) {
+         self.generation += 1;
++        #[cfg(unix)]
++        if let TrapSignal::Signal(signal) = signal_type {
++            crate::signals::set_ignored_by_trap(signal as i32, false);
++        }
+         self.handlers.remove(&signal_type);
+     }
+ }
+diff --git a/brush-interactive/src/interactive_shell.rs b/brush-interactive/src/interactive_shell.rs
+index 7d05887..9f65733 100644
+--- a/brush-interactive/src/interactive_shell.rs
++++ b/brush-interactive/src/interactive_shell.rs
+@@ -209,10 +209,34 @@ impl<'a, IB: InputBackend, SE: brush_core::ShellExtensions> InteractiveShell<'a,
+         // thread. Keep a TERM receiver active while input is idle so a registered
+         // cleanup trap runs even when no further line arrives.
+         #[cfg(unix)]
+-        let read_result = {
++        let (read_result, watch_hangup) = {
+             let term_signal: brush_core::traps::TrapSignal = "TERM".parse()?;
+-            let term_trapped = self.shell.lock().await.traps().handles(term_signal);
+-            if term_trapped {
++            let hup_signal: brush_core::traps::TrapSignal = "HUP".parse()?;
++            let (term_trapped, watch_hangup, editing) = {
++                let shell = self.shell.lock().await;
++                let hup_ignored = shell
++                    .traps()
++                    .get_handler(hup_signal)
++                    .is_some_and(|handler| handler.command.is_empty());
++                (
++                    shell.traps().handles(term_signal),
++                    shell.options().interactive && !hup_ignored,
++                    shell.options().emacs_mode || shell.options().vi_mode,
++                )
++            };
++            // Like Bash, a hangup at the prompt runs a HUP trap, or else ends the
++            // shell. The line editors block this task while they read, so a task
++            // of its own waits for it.
++            let hangup_watch = watch_hangup.then(|| {
++                let shell = self.shell.clone();
++                tokio::spawn(async move {
++                    if brush_core::traps::await_hangup().await.is_ok() {
++                        let mut shell = shell.lock().await;
++                        Self::on_hangup(&mut shell, editing).await;
++                    }
++                })
++            });
++            let read_result = if term_trapped {
+                 tokio::select! {
+                     biased;
+                     result = brush_core::traps::await_undelivered_term() => {
+@@ -233,11 +257,27 @@ impl<'a, IB: InputBackend, SE: brush_core::ShellExtensions> InteractiveShell<'a,
+                 }
+             } else {
+                 self.input.read_line_async(&self.shell, prompt).await?
++            };
++            if let Some(watch) = hangup_watch {
++                watch.abort();
+             }
++            (read_result, watch_hangup)
+         };
+         #[cfg(not(unix))]
+         let read_result = self.input.read_line_async(&self.shell, prompt).await?;
+ 
++        // A hangup can end the read first (the terminal returns what was
++        // typed, or end of file) before the signal is seen above.
++        #[cfg(unix)]
++        if watch_hangup && brush_core::traps::take_pending_hangup() {
++            let mut shell = self.shell.lock().await;
++            let editing = shell.options().emacs_mode || shell.options().vi_mode;
++            Self::on_hangup(&mut shell, editing).await;
++            return Ok(InteractiveExecutionResult::Executed(
++                brush_core::ExecutionResult::new(shell.last_exit_status()),
++            ));
++        }
++
+         match read_result {
+             ReadResult::Input(read_result) => {
+                 // We got a line of input -- execute it.
+@@ -264,6 +304,29 @@ impl<'a, IB: InputBackend, SE: brush_core::ShellExtensions> InteractiveShell<'a,
+         }
+     }
+ 
++    /// Handles a SIGHUP that arrived at the prompt, as Bash does: without a HUP
++    /// trap the shell saves its history, runs its EXIT trap and dies by the
++    /// signal; with one it runs the trap, and then, if a line editor was
++    /// reading, exits (with the last status); otherwise reading goes on. The line
++    /// being read, which the hangup cut short, is dropped.
++    #[cfg(unix)]
++    async fn on_hangup(shell: &mut brush_core::Shell<SE>, editing: bool) {
++        let Ok(hup_signal) = "HUP".parse::<brush_core::traps::TrapSignal>() else {
++            return;
++        };
++        if !shell.traps().handles(hup_signal) {
++            brush_core::traps::die_by_hangup(shell).await;
++        }
++        let params = shell.default_exec_params();
++        let _ = shell.invoke_trap_handler(hup_signal, &params).await;
++        if editing {
++            let status = shell.last_exit_status();
++            let _ = shell.save_history();
++            let _ = shell.on_exit().await;
++            std::process::exit(i32::from(status));
++        }
++    }
++
+     async fn compose_prompt(
+         shell: &mut brush_core::Shell<SE>,
+         terminal_integration: Option<&crate::term_integration::TerminalIntegration>,
+diff --git a/brush-shell/src/entry.rs b/brush-shell/src/entry.rs
+index 6d67821..ac77345 100644
+--- a/brush-shell/src/entry.rs
++++ b/brush-shell/src/entry.rs
+@@ -928,6 +928,10 @@ async fn instantiate_shell_from_args(
+     // Build the shell.
+     let mut shell = shell.build().await?;
+ 
++    // Like Bash, the shell ignores SIGQUIT.
++    #[cfg(unix)]
++    brush_core::traps::ignore_quit();
++
+     if let Some((path, session)) = MARSH_EXTERNAL_COMMANDS.get() {
+         let current = shell.env_str("PATH").map(|value| value.into_owned());
+         let value = prepend_external_path(path, current.as_deref());

@@ -16,8 +16,8 @@
 
 #[cfg(unix)]
 pub(crate) use imp::{
-    arrived, discard, forget_after_fork, is_recorded, listen, note_child_reaped, take,
-    take_pending, take_reaped_children,
+    arrived, discard, forget_after_fork, ignored_by_trap, is_recorded, listen, note_child_reaped,
+    set_ignored_by_trap, take, take_pending, take_reaped_children,
 };
 
 #[cfg(not(unix))]
@@ -51,6 +51,30 @@ mod imp {
     static LISTENING: AtomicBool = AtomicBool::new(false);
     /// Children reaped since the last [`take_reaped_children`] (for `CHLD` traps).
     static REAPED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// Signals with an empty trap (`trap '' SIG`), one bit each. The shell
+    /// drops them; programs it runs start with them ignored, as in Bash.
+    static IGNORED_BY_TRAP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    /// Records whether `signal` has an empty trap.
+    pub(crate) fn set_ignored_by_trap(signal: i32, ignored: bool) {
+        let Some(bit) = u32::try_from(signal).ok().and_then(|n| 1u64.checked_shl(n)) else {
+            return;
+        };
+        if ignored {
+            IGNORED_BY_TRAP.fetch_or(bit, Ordering::AcqRel);
+        } else {
+            IGNORED_BY_TRAP.fetch_and(!bit, Ordering::AcqRel);
+        }
+    }
+
+    /// Whether `signal` has an empty trap (safe in a forked child).
+    pub(crate) fn ignored_by_trap(signal: i32) -> bool {
+        u32::try_from(signal)
+            .ok()
+            .and_then(|n| 1u64.checked_shl(n))
+            .is_some_and(|bit| IGNORED_BY_TRAP.load(Ordering::Acquire) & bit != 0)
+    }
 
     /// Notes that the shell reaped a child process.
     pub(crate) fn note_child_reaped() {

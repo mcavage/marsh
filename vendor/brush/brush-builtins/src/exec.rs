@@ -120,6 +120,7 @@ impl builtins::Command for ExecCommand {
             let backup = brush_core::sys::commands::DescriptorBackup::save(
                 context.iter_fds().map(|(fd, _)| fd),
             )?;
+            brush_core::traps::ignore_trap_ignored_signals_for_exec();
             let error = cmd.exec();
             backup.restore();
             let missing = error.kind() == std::io::ErrorKind::NotFound

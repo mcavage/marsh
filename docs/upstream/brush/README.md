@@ -724,6 +724,20 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   flag); `-i`/`+i` keep the last; a lone `-` ends the options and a lone `+`
   is ignored. Unknown `-o`/`-O` names and `-c` with no command print Bash's
   error and exit 2. Covered by `invocation_options_follow_bash_order`.
+- `0092` lets every catchable signal be trapped and handles SIGHUP at the
+  prompt. `register_handler` records any signal it traps (not CHLD, KILL,
+  STOP), so its trap runs at the next command boundary like INT and TERM ones,
+  and an empty trap drops it there; programs the shell runs, and forked
+  subshells, start with an empty-trapped signal ignored and the others at their
+  default action (`signals::set_ignored_by_trap`). A removed trap leaves the
+  default action, none for CHLD, CONT, URG, WINCH, the stop signals and QUIT,
+  which the shell ignores itself, as Bash does (`traps::ignore_quit`). At an
+  interactive prompt a task waits for SIGHUP (the line editors block the
+  reading task): without a trap the shell saves its history, runs the EXIT
+  trap and dies by the signal (`traps::die_by_hangup`, also used between
+  commands); with one it runs the trap and, if a line editor was reading,
+  exits with the last status. A line the hangup cut short is dropped. Covered
+  by `every_catchable_signal_can_be_trapped_or_ignored`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
