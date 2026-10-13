@@ -55,7 +55,8 @@ cases.update({
  # `wait`, or long done).
  'after-wait-all':b'/bin/sleep .3 & wait; disown %1; printf "R:%s\\n" "$?"',
  'after-wait-all-finished':b'/usr/bin/true & /bin/sleep .3; wait; disown %1; printf "R:%s\\n" "$?"',
- 'after-wait-all-finished-jobs':b'/usr/bin/true & /bin/sleep .3; wait; jobs; disown %1; printf "R:%s\\n" "$?"',
+ # The job is current (alive when recorded), so `jobs` marks it `+`.
+ 'after-wait-all-finished-jobs':b'/bin/sleep .1 & /bin/sleep .4; wait; jobs; disown %1; printf "R:%s\\n" "$?"',
  'after-wait-all-finished-earlier':b'/usr/bin/true & /usr/bin/true & /bin/sleep .3; wait; disown %1; printf "A:%s\\n" "$?"; disown %2; printf "B:%s\\n" "$?"',
  'after-wait-jobs-r':b'/usr/bin/true & p=$!; wait "$p"; jobs -r; disown %1; printf "R:%s\\n" "$?"',
  'after-wait-disown-all':b'/usr/bin/true & p=$!; wait "$p"; disown -a; disown %1; printf "R:%s\\n" "$?"',
