@@ -46,6 +46,14 @@ impl builtins::Command for HelpCommand {
         if any_matched {
             Ok(ExecutionResult::success())
         } else {
+            // Like Bash, only a help that matches nothing reports it, naming
+            // the last topic.
+            let topic = self.topic_patterns.last().map_or("", String::as_str);
+            writeln!(
+                context.stderr(),
+                "{}help: no help topics match `{topic}'.  Try `help help' or `man -k {topic}' or `info {topic}'.",
+                context.shell.diagnostic_prefix()
+            )?;
             Ok(ExecutionResult::general_error())
         }
     }
@@ -104,10 +112,6 @@ impl HelpCommand {
                 )?;
                 matched = true;
             }
-        }
-
-        if !matched {
-            writeln!(context.stderr(), "No help topics match '{topic_pattern}'")?;
         }
 
         Ok(matched)

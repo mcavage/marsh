@@ -80,22 +80,13 @@
     "debug-command@stdin@without-nul"
    ]
   }},
-  {"id": "DIAGNOSTICS", "summary": "Error message wording, and the status of some usage errors, differ from Bash", "cases": {
-   "external-redirects": [
-    "unknown-command"
-   ],
+  {"id": "DIAGNOSTICS", "summary": "Bad array subscripts (read: silent, not `a: bad array subscript`; write: `array index out of range`) and syntax errors in sourced files (`unterminated single quote at L,C`, not `unexpected EOF while looking for matching`) use Brush's wording", "cases": {
    "nul-input": [
     "source-quote-consecutive@source-alias@raw",
     "source-quote-consecutive@source@raw"
    ],
-   "readiness": [
-    "high-closed"
-   ],
    "tck": [
-    "builtins/declare.yaml#124",
-    "core-byte-controls#0",
-    "core-byte-controls#5",
-    "nameref.yaml#100"
+    "core-byte-controls#0"
    ]
   }},
   {"id": "EOF-INCOMPLETE", "summary": "End of input in an incomplete line of an interactive shell on a pipe: prompts and diagnostics differ", "cases": {

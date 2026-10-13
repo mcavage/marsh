@@ -433,6 +433,16 @@ impl Error {
         self.fatal
     }
 
+    /// The message Bash prints for this error, after its `NAME: line N: `
+    /// prefix, where Bash has a fixed form for it.
+    pub fn bash_message(&self) -> Option<String> {
+        match &self.kind {
+            ErrorKind::CommandNotFound(name) => Some(std::format!("{name}: command not found")),
+            ErrorKind::CheckedExpansionError(message) => Some(message.clone()),
+            _ => None,
+        }
+    }
+
     /// Returns a reference to the error kind.
     pub const fn kind(&self) -> &ErrorKind {
         &self.kind

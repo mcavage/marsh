@@ -102,9 +102,17 @@ impl builtins::Command for ReadCommand {
         );
 
         // Retrieve the file.
-        let input_stream = context
-            .try_fd(fd_num)
-            .ok_or_else(|| ErrorKind::BadFileDescriptor(fd_num))?;
+        let Some(input_stream) = context.try_fd(fd_num) else {
+            if self.fd_num_to_read.is_none() {
+                return Err(ErrorKind::BadFileDescriptor(fd_num).into());
+            }
+            writeln!(
+                context.stderr(),
+                "{}read: {fd_num}: invalid file descriptor: Bad file descriptor",
+                context.shell.diagnostic_prefix()
+            )?;
+            return Ok(brush_core::ExecutionResult::general_error());
+        };
 
         // Retrieve effective value of IFS for splitting.
         // We convert to owned String to release the borrow before the mutable borrow
