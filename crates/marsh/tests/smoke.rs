@@ -899,9 +899,6 @@ fn fanout_enforces_prefix_and_combined_output_bounds_before_delivery() {
     assert!(String::from_utf8_lossy(&prefix.stderr).contains("input exceeds 64 MiB"));
 
     // The branch would run for five minutes; collect must stop it at the bound.
-    // Stopping a branch kills its command, not that command's own children, so
-    // the sleep replaces `sh` (a forked `sleep` outlived the test whenever
-    // `head` finished before the bound was seen).
     let child = common::spawn_group(
         composition_shell()
             .args([
@@ -918,6 +915,68 @@ fn fanout_enforces_prefix_and_combined_output_bounds_before_delivery() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("combined output exceeds 16 MiB"));
+}
+
+#[test]
+fn fanout_output_limit_stops_the_branch_process_tree() {
+    let directory = tempfile::tempdir().unwrap();
+    // Each branch's flood comes from a descendant of the command the branch
+    // runs: one while that command is still running, one after it has exited
+    // (a background grandchild keeps the branch's output open). Each records
+    // the PID of a process that would otherwise live for five minutes.
+    let cases = [
+        (
+            "running",
+            "sh -c 'sleep 300 & echo $! > \"$0\"; head -c 17825792 /dev/zero; wait'",
+        ),
+        (
+            "exited",
+            "sh -c 'sh -c \"echo \\$\\$ > \\\"\\$0\\\"; head -c 17825792 /dev/zero; exec sleep 300\" \"$0\" &'",
+        ),
+    ];
+    for (case, command) in cases {
+        let pid_file = directory.path().join(case);
+        let script = format!(
+            "fanout {{ noisy: {command} {} }} | collect",
+            pid_file.display()
+        );
+        let child = common::spawn_group(
+            composition_shell()
+                .args(["--no-config", "--noprofile", "--norc", "-c", &script])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped()),
+        );
+        let output = common::wait_for_exit(child, case, Duration::from_mins(1));
+        assert!(!output.status.success(), "{case}");
+        assert!(output.stdout.is_empty(), "{case}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("combined output exceeds 16 MiB"),
+            "{case}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let pid: i32 = std::fs::read_to_string(&pid_file)
+            .unwrap_or_else(|error| panic!("{case}: no descendant PID: {error}"))
+            .trim()
+            .parse()
+            .unwrap();
+        let pid = nix::unistd::Pid::from_raw(pid);
+        let survived = std::iter::repeat_with(|| {
+            let alive = nix::sys::signal::kill(pid, None).is_ok();
+            if alive {
+                thread::sleep(Duration::from_millis(20));
+            }
+            alive
+        })
+        .take(250)
+        .all(|alive| alive);
+        if survived {
+            let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGKILL);
+        }
+        assert!(
+            !survived,
+            "{case}: the stopped branch's descendant {pid} survived it"
+        );
+    }
 }
 
 #[test]

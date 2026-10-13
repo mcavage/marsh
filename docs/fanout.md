@@ -25,8 +25,9 @@ None found: every goroutine in net/ exits on ctx.Done().
 --- FAIL: TestDialTimeout (0.31s)
 ```
 
-Ctrl-C stops every branch. The exit status of `fanout | collect` is the first
-nonzero branch status in the order written, here 2.
+Ctrl-C stops every branch, along with every process the branch started. The
+exit status of `fanout | collect` is the first nonzero branch status in the
+order written, here 2.
 
 Each agent branch is a job in its own container and authenticates as it does
 when you run it directly, through Docker Sandboxes ([Kits](kits.md#signing-in)).
@@ -124,8 +125,8 @@ Two nesting cases:
 | Input | 64 MiB |
 | Output, all branches together | 16 MiB |
 
-Crossing a limit cancels every branch and prints nothing. More than 16
-branches fails with `fanout: at most 16 branches`.
+Crossing a limit cancels every branch, with every process it started, and
+prints nothing. More than 16 branches fails with `fanout: at most 16 branches`.
 
 The daemon runs only 8 jobs at once, across all callers. If more than 8
 branches call registered commands, the extra branches are refused with

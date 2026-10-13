@@ -468,6 +468,10 @@ pub(crate) fn fork_child<SE: extensions::ShellExtensions>(
     if !crate::subshell::available() {
         return Ok(None);
     }
+    let group = child_shell
+        .options()
+        .process_group
+        .map_or(group, crate::subshell::ChildGroup::Join);
     let term_trapped = child_shell
         .traps()
         .handles(crate::traps::TrapSignal::Signal(
@@ -969,6 +973,17 @@ fn spawn_running<T: Send + 'static>(
     handle
 }
 
+/// Runs `work` on a running thread whose result the caller can await.
+fn spawn_awaitable<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> tokio::sync::oneshot::Receiver<T> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    drop(spawn_running(move || {
+        let _ = sender.send(work());
+    }));
+    receiver
+}
+
 pub(crate) fn capture_bounded(
     mut reader: impl Read,
     remaining: &AtomicU64,
@@ -1316,10 +1331,23 @@ async fn execute_fanout_branch<SE: extensions::ShellExtensions>(
     output_exceeded: Arc<AtomicBool>,
     output_limit_reached: Arc<tokio::sync::Notify>,
 ) -> Result<BranchResult, error::Error> {
+    // Every process the branch starts joins one process group, so a branch
+    // stopped before it finishes (the output limit, an interrupt, an error)
+    // takes all of them with it, descendants included, not just the commands
+    // it is waiting for. A branch that finishes leaves its group alone.
+    #[cfg(unix)]
+    let mut group = crate::subshell::GroupAnchor::new()?;
+    #[cfg(unix)]
+    {
+        group.stop_group_on_drop(true);
+        shell.options_mut().process_group = Some(group.pgid());
+    }
     let (input_reader, mut input_writer) = std::io::pipe()?;
     let (stdout_reader, stdout_writer) = std::io::pipe()?;
     let (stderr_reader, stderr_writer) = std::io::pipe()?;
-    let input_pump = spawn_running(move || match input_writer.write_all(&input) {
+    // The branch awaits these threads rather than joining them, so a stop can
+    // still be delivered while a descendant holds the branch's pipes open.
+    let input_pump = spawn_awaitable(move || match input_writer.write_all(&input) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
         Err(error) => Err(error),
@@ -1328,9 +1356,11 @@ async fn execute_fanout_branch<SE: extensions::ShellExtensions>(
         let remaining = Arc::clone(&remaining_output);
         let exceeded = Arc::clone(&output_exceeded);
         let limit_reached = Arc::clone(&output_limit_reached);
-        spawn_running(move || capture_bounded(stdout_reader, &remaining, &exceeded, &limit_reached))
+        spawn_awaitable(move || {
+            capture_bounded(stdout_reader, &remaining, &exceeded, &limit_reached)
+        })
     };
-    let stderr_capture = spawn_running(move || {
+    let stderr_capture = spawn_awaitable(move || {
         capture_bounded(
             stderr_reader,
             &remaining_output,
@@ -1347,11 +1377,12 @@ async fn execute_fanout_branch<SE: extensions::ShellExtensions>(
     let result = branch.body.execute(&mut shell, &params).await?;
     drop(params);
     drop(shell);
-    input_pump
-        .join()
-        .map_err(|_| std::io::Error::other("composition input thread panicked"))??;
-    let stdout = join_capture(stdout_capture)?;
-    let stderr = join_capture(stderr_capture)?;
+    let thread_ended = |_| std::io::Error::other("composition capture thread panicked");
+    input_pump.await.map_err(thread_ended)??;
+    let stdout = stdout_capture.await.map_err(thread_ended)??;
+    let stderr = stderr_capture.await.map_err(thread_ended)??;
+    #[cfg(unix)]
+    group.stop_group_on_drop(false);
     Ok(BranchResult {
         label: branch.label.clone(),
         status: result.exit_code.into(),
