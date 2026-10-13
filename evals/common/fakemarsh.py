@@ -23,6 +23,7 @@ uses it fails here and must be graded against the real product.
 from __future__ import annotations
 
 import concurrent.futures
+import fcntl
 import json
 import os
 import pathlib
@@ -275,10 +276,18 @@ def next_action(agent: str) -> dict[str, object]:
     cwd = pathlib.Path.cwd()
     key = f"{agent}@{cwd.name}" if cwd.parent.name == "forks" and f"{agent}@{cwd.name}" in plan else agent
     actions = plan.get(key) or [{"do": "say", "text": f"{agent}: nothing to do"}]
-    counter = pathlib.Path(plan_path + f".{key}.count") if plan_path else None
-    count = int(counter.read_text()) if counter and counter.exists() else 0
-    if counter:
-        counter.write_text(str(count + 1))
+    count = 0
+    if plan_path:
+        # Concurrent branches may call the same agent: count under a lock (an
+        # unlocked read-modify-write let one call read the file while another
+        # had just truncated it, crash, and leave its fork untouched).
+        with open(plan_path + f".{key}.count", "a+") as counter:
+            fcntl.flock(counter, fcntl.LOCK_EX)
+            counter.seek(0)
+            count = int(counter.read() or 0)
+            counter.seek(0)
+            counter.truncate()
+            counter.write(str(count + 1))
     return actions[min(count, len(actions) - 1)]
 
 
