@@ -683,6 +683,13 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   (refused), `export -f` of a missing function (status 1), `read -u` of a
   closed descriptor (status 1), and `help` reporting only when no topic
   matches. Covered by `common_diagnostics_are_worded_as_in_bash`.
+- `0087` implements `set -v` (`print_shell_input_lines`) where Brush runs
+  source text (`run_source_text`: scripts, `-c`, standard input, `.`, `eval`,
+  traps): a `VerboseInput` over the text reads lines through the end of each
+  complete command before it runs, and through the end of the text after the
+  last one, writing them to standard error while `-v` is on; lines read while
+  it was off are not written later. Covered by
+  `verbose_writes_input_lines_as_they_are_read`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
