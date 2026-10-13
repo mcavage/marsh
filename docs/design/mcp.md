@@ -167,7 +167,9 @@ shared broker and registers the bounded `connect` proxy with its gateway for
 later `sbx mcp load`. Registrations for different workspaces and clients
 coexist. `marsh mcp start` restores the broker after a host restart without
 changing the registration. `marsh mcp stop` stops an idle broker and refuses
-while any sandbox proxy is attached. `marsh mcp install sbx` is explicitly
+while any sandbox proxy is attached; a session whose proxy has gone is not
+attached, and the stop waits (bounded) for its cleanup. A `connect` proxy that
+loses its broker exits non-zero. `marsh mcp install sbx` is explicitly
 replacing: it runs
 `sbx mcp rm --force NAME` before adding the current definition. It accepts
 success or the exact `MCP server "NAME" not found` diagnostic for that

@@ -46,6 +46,9 @@ use uuid::Uuid;
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MAX_TIMEOUT_MS: u64 = 900_000;
+/// How long a session's (or the server's) shutdown waits for its operations'
+/// cleanup to become terminal.
+pub const SESSION_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_CAPTURE_BYTES: usize = 262_144;
 const MAX_COMMAND_BYTES: usize = 65_536;
 const MAX_OPERATIONS: usize = 4;
@@ -1010,7 +1013,7 @@ impl HostMcp {
                 let _ = operation.cancel.as_ref().map(|cancel| cancel.send(true));
             }
         }
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        let deadline = tokio::time::Instant::now() + SESSION_SHUTDOWN_TIMEOUT;
         loop {
             let complete = self.operations.lock().await.values().all(|operation| {
                 operation.owner_session != self.session_id
@@ -1049,7 +1052,7 @@ impl HostMcp {
                 }
             }
         }
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        let deadline = tokio::time::Instant::now() + SESSION_SHUTDOWN_TIMEOUT;
         loop {
             let complete = self.operations.lock().await.values().all(|operation| {
                 matches!(

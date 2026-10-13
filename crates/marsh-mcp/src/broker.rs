@@ -9,14 +9,18 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     fs,
     io::{Read, Write},
-    os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+    os::{
+        fd::{AsFd, OwnedFd},
+        unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt},
+    },
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -28,7 +32,7 @@ use tokio::{
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
 use uuid::Uuid;
 
-use crate::{HostConfig, HostMcp, prepare_scope_root};
+use crate::{HostConfig, HostMcp, SESSION_SHUTDOWN_TIMEOUT, prepare_scope_root};
 
 const PROTOCOL_VERSION: u32 = 1;
 const MAX_HANDSHAKE_BYTES: usize = 16 * 1024;
@@ -37,6 +41,9 @@ const MAX_SESSIONS: usize = 16;
 const MAX_CONNECTIONS: usize = 32;
 const START_TIMEOUT: Duration = Duration::from_secs(10);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long a stop waits for sessions whose clients have gone to finish their
+/// cleanup: the session shutdown bound plus time to release the session.
+const STOP_ADMISSION_WAIT: Duration = SESSION_SHUTDOWN_TIMEOUT.saturating_add(HANDSHAKE_TIMEOUT);
 
 #[derive(Clone, Debug)]
 pub struct BrokerOptions {
@@ -158,14 +165,110 @@ struct HandshakeReply {
     pid: u32,
 }
 
+/// What a client asserts in its handshake: the build of this marsh-mcp and
+/// the configuration fingerprint. Both hash whole executables, so one command
+/// computes them once and reuses them for every connection it makes.
+struct Identity {
+    build: String,
+    fingerprint: String,
+}
+
+impl Identity {
+    fn of(options: &BrokerOptions) -> Result<Self, String> {
+        Ok(Self {
+            build: build_id()?,
+            fingerprint: options.fingerprint()?,
+        })
+    }
+}
+
 #[derive(Clone)]
 struct BrokerContext {
     expected_build: String,
     expected_fingerprint: String,
     expected_token: String,
     session_permits: Arc<Semaphore>,
+    sessions: Arc<AdmittedSessions>,
     stopping: Arc<AtomicBool>,
     shutdown: Arc<Notify>,
+}
+
+/// The connection of every session holding a permit. Admission and stop
+/// admission take the lock, so a stop sees every permit holder.
+#[derive(Default)]
+struct AdmittedSessions {
+    connections: Mutex<BTreeMap<u64, OwnedFd>>,
+    next: AtomicU64,
+}
+
+/// A session's permit and its registered connection, released together.
+struct AdmittedSession {
+    sessions: Arc<AdmittedSessions>,
+    id: u64,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl Drop for AdmittedSession {
+    fn drop(&mut self) {
+        self.sessions
+            .connections
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.id);
+    }
+}
+
+impl AdmittedSessions {
+    /// `Ok(Err(reason))` refuses the session.
+    fn admit(
+        self: &Arc<Self>,
+        context: &BrokerContext,
+        stream: &UnixStream,
+    ) -> Result<Result<AdmittedSession, String>, String> {
+        let mut connections = self
+            .connections
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Under the lock: a stop that has looked at the admitted sessions is
+        // never followed by another admission.
+        if context.stopping.load(Ordering::SeqCst) {
+            return Ok(Err("resident MCP broker is stopping".into()));
+        }
+        let Ok(permit) = Arc::clone(&context.session_permits).try_acquire_owned() else {
+            return Ok(Err(format!(
+                "broker session capacity ({MAX_SESSIONS}) is busy; retry later"
+            )));
+        };
+        // Close-on-exec atomically: sessions spawn host commands.
+        let connection = rustix::io::fcntl_dupfd_cloexec(stream.as_fd(), 0)
+            .map_err(|error| format!("cannot retain MCP session connection: {error}"))?;
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        connections.insert(id, connection);
+        Ok(Ok(AdmittedSession {
+            sessions: Arc::clone(self),
+            id,
+            _permit: permit,
+        }))
+    }
+
+    /// Whether any session's client is still connected. A client that has
+    /// closed its end has left: its session is only finishing its cleanup.
+    fn any_client_connected(connections: &BTreeMap<u64, OwnedFd>) -> bool {
+        connections.values().any(|connection| {
+            let mut byte = [0_u8; 1];
+            match rustix::net::recv(
+                connection,
+                &mut byte,
+                rustix::net::RecvFlags::PEEK | rustix::net::RecvFlags::DONTWAIT,
+            ) {
+                // End of stream: the client closed its end.
+                Ok((0, _)) => false,
+                // Pending bytes, or nothing yet on an open connection.
+                Ok(_) => true,
+                Err(error) => error == rustix::io::Errno::AGAIN,
+            }
+        })
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -187,13 +290,14 @@ pub async fn broker_start(options: BrokerOptions) -> Result<(), String> {
         .ok_or_else(|| "broker endpoint has no parent".to_owned())?;
     prepare_private_root(endpoint_parent)?;
     let token = load_or_create_token(&options.token_path())?;
-    match connect_handshake(&options, &token, HandshakePurpose::Probe).await {
+    let identity = Identity::of(&options);
+    match connect_handshake(&options, &identity, &token, HandshakePurpose::Probe).await {
         Ok(stream) => {
             drop(stream);
             return Ok(());
         }
         Err(error) if error.starts_with("broker rejected connection:") => {
-            broker_stop(options.clone()).await.map_err(|stop_error| {
+            stop(&options, &identity).await.map_err(|stop_error| {
                 format!("{error}; cannot replace resident broker: {stop_error}")
             })?;
         }
@@ -232,7 +336,7 @@ pub async fn broker_start(options: BrokerOptions) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + START_TIMEOUT;
     let mut last_error = "broker did not create its endpoint".to_owned();
     while tokio::time::Instant::now() < deadline {
-        match connect_handshake(&options, &token, HandshakePurpose::Probe).await {
+        match connect_handshake(&options, &identity, &token, HandshakePurpose::Probe).await {
             Ok(stream) => {
                 drop(stream);
                 return Ok(());
@@ -291,6 +395,7 @@ pub async fn broker_run(options: BrokerOptions) -> Result<(), String> {
         expected_fingerprint,
         expected_token: token,
         session_permits: Arc::new(Semaphore::new(MAX_SESSIONS)),
+        sessions: Arc::default(),
         stopping: Arc::new(AtomicBool::new(false)),
         shutdown: Arc::new(Notify::new()),
     };
@@ -360,13 +465,23 @@ async fn accept_fenced(
 /// Returns an error on handshake mismatch, oversized frames, or transport I/O.
 pub async fn connect(options: BrokerOptions) -> Result<(), String> {
     let token = load_token(&options.token_path())?;
-    let stream = connect_handshake(&options, &token, HandshakePurpose::Session).await?;
+    let stream = connect_handshake(
+        &options,
+        &Identity::of(&options),
+        &token,
+        HandshakePurpose::Session,
+    )
+    .await?;
     let (read, write) = stream.into_split();
     let mut from_client = FramedRead::new(
         tokio::io::stdin(),
         LinesCodec::new_with_max_length(MAX_MCP_FRAME_BYTES),
     );
     let mut to_broker = FramedWrite::new(write, LinesCodec::new());
+    // Set before the broker can see the end of client input, so the end of
+    // the broker's stream after it is never mistaken for a lost broker.
+    let client_ended = Arc::new(AtomicBool::new(false));
+    let upload_ended = Arc::clone(&client_ended);
     let upload = tokio::spawn(async move {
         while let Some(frame) = from_client.next().await {
             let frame = frame.map_err(|error| format!("invalid MCP input frame: {error}"))?;
@@ -375,6 +490,8 @@ pub async fn connect(options: BrokerOptions) -> Result<(), String> {
                 .await
                 .map_err(|error| format!("cannot send MCP frame to broker: {error}"))?;
         }
+        upload_ended.store(true, Ordering::Release);
+        drop(to_broker);
         Ok::<(), String>(())
     });
     let mut from_broker =
@@ -398,8 +515,19 @@ pub async fn connect(options: BrokerOptions) -> Result<(), String> {
             download.await.map_err(|error| format!("MCP proxy download task failed: {error}"))?
         }
         downloaded = &mut download => {
+            downloaded.map_err(|error| format!("MCP proxy download task failed: {error}"))??;
+            if client_ended.load(Ordering::Acquire) {
+                return upload
+                    .await
+                    .map_err(|error| format!("MCP proxy upload task failed: {error}"))?;
+            }
             upload.as_mut().abort();
-            downloaded.map_err(|error| format!("MCP proxy download task failed: {error}"))?
+            // The broker ended the session while its client still had it
+            // open: a lost broker, not a clean end of the session.
+            Err(format!(
+                "lost its connection to the resident MCP broker; inspect {}",
+                options.log_path().display()
+            ))
         }
     }
 }
@@ -410,11 +538,15 @@ pub async fn connect(options: BrokerOptions) -> Result<(), String> {
 /// Returns an error when authentication fails, the broker is busy, or it does
 /// not terminate within the bounded timeout.
 pub async fn broker_stop(options: BrokerOptions) -> Result<(), String> {
+    stop(&options, &Identity::of(&options)).await
+}
+
+async fn stop(options: &BrokerOptions, identity: &Result<Identity, String>) -> Result<(), String> {
     if !options.endpoint().exists() {
         return Ok(());
     }
     let token = load_token(&options.token_path())?;
-    let stream = connect_handshake(&options, &token, HandshakePurpose::Stop).await?;
+    let stream = connect_handshake(options, identity, &token, HandshakePurpose::Stop).await?;
     drop(stream);
     let deadline = tokio::time::Instant::now() + START_TIMEOUT;
     while tokio::time::Instant::now() < deadline {
@@ -477,19 +609,20 @@ async fn serve_connection(
         .await?;
         return Ok(());
     }
-    let Ok(_session_permit) = Arc::clone(&context.session_permits).try_acquire_owned() else {
-        write_reply(
-            &mut stream,
-            HandshakeReply {
-                ok: false,
-                error: Some(format!(
-                    "broker session capacity ({MAX_SESSIONS}) is busy; retry later"
-                )),
-                pid: std::process::id(),
-            },
-        )
-        .await?;
-        return Ok(());
+    let _session = match context.sessions.admit(context, &stream)? {
+        Ok(session) => session,
+        Err(refusal) => {
+            write_reply(
+                &mut stream,
+                HandshakeReply {
+                    ok: false,
+                    error: Some(refusal),
+                    pid: std::process::id(),
+                },
+            )
+            .await?;
+            return Ok(());
+        }
     };
     write_reply(
         &mut stream,
@@ -504,7 +637,7 @@ async fn serve_connection(
 }
 
 async fn handle_stop(stream: &mut UnixStream, context: &BrokerContext) -> Result<(), String> {
-    let shutdown_permits = match try_begin_stop(context) {
+    let shutdown_permits = match begin_stop(context, STOP_ADMISSION_WAIT).await {
         Ok(permits) => permits,
         Err(error) => {
             let message = match error {
@@ -542,8 +675,11 @@ async fn handle_stop(stream: &mut UnixStream, context: &BrokerContext) -> Result
     reply
 }
 
-fn try_begin_stop(
+/// Admit a stop only when no session's client is connected. Sessions whose
+/// clients have gone are waited for (up to `wait`) while they clean up.
+async fn begin_stop(
     context: &BrokerContext,
+    wait: Duration,
 ) -> Result<tokio::sync::OwnedSemaphorePermit, StopAdmissionError> {
     if context
         .stopping
@@ -552,9 +688,25 @@ fn try_begin_stop(
     {
         return Err(StopAdmissionError::AlreadyStopping);
     }
-    if let Ok(permits) = Arc::clone(&context.session_permits)
-        .try_acquire_many_owned(u32::try_from(MAX_SESSIONS).expect("session limit fits u32"))
-    {
+    let all = u32::try_from(MAX_SESSIONS).expect("session limit fits u32");
+    let releasing = {
+        let connections = context
+            .sessions
+            .connections
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Ok(permits) = Arc::clone(&context.session_permits).try_acquire_many_owned(all) {
+            return Ok(permits);
+        }
+        if AdmittedSessions::any_client_connected(&connections) {
+            context.stopping.store(false, Ordering::SeqCst);
+            return Err(StopAdmissionError::SessionsAttached);
+        }
+        // Every permit holder is releasing, and `stopping` (set before the
+        // lock) refuses any later admission.
+        Arc::clone(&context.session_permits).acquire_many_owned(all)
+    };
+    if let Ok(Ok(permits)) = tokio::time::timeout(wait, releasing).await {
         Ok(permits)
     } else {
         context.stopping.store(false, Ordering::SeqCst);
@@ -617,14 +769,15 @@ fn handshake_error(request: &Handshake, context: &BrokerContext, pid: u32) -> Op
 
 async fn connect_handshake(
     options: &BrokerOptions,
+    identity: &Result<Identity, String>,
     token: &str,
     purpose: HandshakePurpose,
 ) -> Result<UnixStream, String> {
-    // Compute file identities before opening the socket. Hashing a large SBX
-    // executable can be slower than the broker's wire-handshake deadline and
-    // must not consume a server connection while no bytes can yet be sent.
-    let build = build_id()?;
-    let fingerprint = options.fingerprint()?;
+    // File identities are computed before the socket is opened. Hashing a
+    // large SBX executable can be slower than the broker's wire-handshake
+    // deadline and must not consume a server connection while no bytes can
+    // yet be sent.
+    let Identity { build, fingerprint } = identity.as_ref().map_err(Clone::clone)?;
     let endpoint = options.endpoint();
     validate_private_endpoint(&endpoint)?;
     let mut stream = tokio::time::timeout(HANDSHAKE_TIMEOUT, UnixStream::connect(&endpoint))
@@ -636,8 +789,8 @@ async fn connect_handshake(
             &mut stream,
             Handshake {
                 protocol: PROTOCOL_VERSION,
-                build,
-                fingerprint,
+                build: build.clone(),
+                fingerprint: fingerprint.clone(),
                 token: token.to_owned(),
                 purpose,
             },
@@ -645,7 +798,13 @@ async fn connect_handshake(
         .await?;
         read_packet(&mut stream).await
     };
-    let reply: HandshakeReply = tokio::time::timeout(HANDSHAKE_TIMEOUT, exchange)
+    // A stop's reply waits for sessions whose clients have gone to clean up.
+    let reply_timeout = if purpose == HandshakePurpose::Stop {
+        HANDSHAKE_TIMEOUT.saturating_add(STOP_ADMISSION_WAIT)
+    } else {
+        HANDSHAKE_TIMEOUT
+    };
+    let reply: HandshakeReply = tokio::time::timeout(reply_timeout, exchange)
         .await
         .map_err(|_| "resident MCP broker handshake timed out".to_owned())??;
     if !reply.ok {
@@ -704,17 +863,24 @@ async fn read_packet<T: for<'de> Deserialize<'de>>(stream: &mut UnixStream) -> R
     serde_json::from_slice(&bytes).map_err(|error| format!("invalid broker handshake: {error}"))
 }
 
+/// This process's build: computed once, so replacing the installed
+/// executable later cannot change the identity of a live process.
 fn build_id() -> Result<String, String> {
+    static BUILD: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    if let Some(build) = BUILD.get() {
+        return Ok(build.clone());
+    }
     let current = std::env::current_exe()
         .map_err(|error| format!("cannot locate marsh-mcp executable: {error}"))?;
     let mut digest = Sha256::new();
     hash_path(&current, &mut digest)?;
-    Ok(format!(
+    let build = format!(
         "{}:{}:{:x}",
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION"),
         digest.finalize()
-    ))
+    );
+    Ok(BUILD.get_or_init(|| build).clone())
 }
 
 fn hash_path(path: &Path, digest: &mut Sha256) -> Result<(), String> {
@@ -1018,9 +1184,14 @@ mod tests {
         prepare_private_root(endpoint.parent().unwrap()).unwrap();
         let listener = UnixListener::bind(endpoint).unwrap();
 
-        let error = connect_handshake(&options, "unused", HandshakePurpose::Probe)
-            .await
-            .unwrap_err();
+        let error = connect_handshake(
+            &options,
+            &Identity::of(&options),
+            "unused",
+            HandshakePurpose::Probe,
+        )
+        .await
+        .unwrap_err();
         assert!(error.contains("missing-sbx"));
         assert!(
             tokio::time::timeout(Duration::from_millis(50), listener.accept())
@@ -1074,7 +1245,13 @@ mod tests {
             })
         };
         holding.recv().unwrap();
-        let probe = connect_handshake(&options, &token, HandshakePurpose::Probe).await;
+        let probe = connect_handshake(
+            &options,
+            &Identity::of(&options),
+            &token,
+            HandshakePurpose::Probe,
+        )
+        .await;
         let accepted_after_release = released.load(Ordering::Acquire);
         creator.join().unwrap();
         drop(probe.unwrap());
@@ -1086,6 +1263,42 @@ mod tests {
         );
     }
 
+    /// The fingerprint hashes the pinned executables' bytes: replacing their
+    /// contents changes it even when size and modification time are kept.
+    #[test]
+    fn fingerprint_binds_executable_bytes_not_their_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        for (name, bytes) in [("marsh", "marsh"), ("marshd", "marshd"), ("sbx", "sbx-1")] {
+            fs::write(root.path().join(name), bytes).unwrap();
+        }
+        let options = BrokerOptions {
+            workspace: root.path().to_path_buf(),
+            home: root.path().join("home"),
+            scope_root: root.path().join("scope"),
+            marsh: root.path().join("marsh"),
+            sbx: root.path().join("sbx"),
+            allow_full_sbx_control: false,
+        };
+        let before = options.fingerprint().unwrap();
+        for name in ["marsh", "marshd", "sbx"] {
+            let path = root.path().join(name);
+            let original = fs::read(&path).unwrap();
+            let modified = fs::metadata(&path).unwrap().modified().unwrap();
+            let mut replaced = original.clone();
+            *replaced.last_mut().unwrap() ^= 1;
+            fs::write(&path, &replaced).unwrap();
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(modified)
+                .unwrap();
+            assert_ne!(options.fingerprint().unwrap(), before, "{name}");
+            fs::write(&path, &original).unwrap();
+        }
+        assert_eq!(options.fingerprint().unwrap(), before);
+    }
+
     #[test]
     fn handshake_rejects_auth_config_protocol_and_build_mismatches() {
         let build = build_id().unwrap();
@@ -1094,6 +1307,7 @@ mod tests {
             expected_fingerprint: "config".into(),
             expected_token: "secret".into(),
             session_permits: Arc::new(Semaphore::new(MAX_SESSIONS)),
+            sessions: Arc::default(),
             stopping: Arc::new(AtomicBool::new(false)),
             shutdown: Arc::new(Notify::new()),
         };
@@ -1151,31 +1365,48 @@ mod tests {
         assert_eq!(handshake_error(&stop, &context, 42), None);
     }
 
+    /// A stop is refused while a session's client is connected, waits for a
+    /// session whose client has gone to release, and admits no session in
+    /// between.
     #[tokio::test]
-    async fn stop_admission_is_atomic_with_session_admission() {
-        let context = BrokerContext {
+    async fn stop_admission_refuses_connected_clients_and_waits_for_departed_ones() {
+        let context = Arc::new(BrokerContext {
             expected_build: "build".into(),
             expected_fingerprint: "config".into(),
             expected_token: "secret".into(),
             session_permits: Arc::new(Semaphore::new(MAX_SESSIONS)),
+            sessions: Arc::default(),
             stopping: Arc::new(AtomicBool::new(false)),
             shutdown: Arc::new(Notify::new()),
-        };
-
-        let session = Arc::clone(&context.session_permits)
-            .try_acquire_owned()
+        });
+        let (client, connection) = UnixStream::pair().unwrap();
+        let session = context
+            .sessions
+            .admit(&context, &connection)
+            .unwrap()
             .unwrap();
-        assert!(matches!(
-            try_begin_stop(&context),
-            Err(StopAdmissionError::SessionsAttached)
-        ));
+        // The wait is out of reach: a connected client is refused at once.
+        assert_eq!(
+            begin_stop(&context, Duration::from_hours(1)).await.err(),
+            Some(StopAdmissionError::SessionsAttached)
+        );
         assert!(!context.stopping.load(Ordering::SeqCst));
 
+        drop(client);
+        let stopping = Arc::clone(&context);
+        let stop =
+            tokio::spawn(async move { begin_stop(&stopping, Duration::from_hours(1)).await });
+        while !context.stopping.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+        let (_late_client, late) = UnixStream::pair().unwrap();
+        assert_eq!(
+            context.sessions.admit(&context, &late).unwrap().err(),
+            Some("resident MCP broker is stopping".to_owned())
+        );
         drop(session);
-        let shutdown_permits = try_begin_stop(&context).unwrap();
-        assert!(context.stopping.load(Ordering::SeqCst));
+        let shutdown_permits = stop.await.unwrap().unwrap();
         assert_eq!(context.session_permits.available_permits(), 0);
-
         drop(shutdown_permits);
     }
 }

@@ -112,6 +112,12 @@ case "${1-}" in
       sleep-marker)
         sleep 30
         ;;
+      hold-until-killed)
+        # Cancellation must escalate to SIGKILL (about 10 s) to end it.
+        trap '' INT TERM
+        : > "$TMPDIR/hold-started"
+        while :; do sleep 0.01; done
+        ;;
       write-home-sentinel)
         printf 'preserved\n' > "$MARSH_HOME/durable-result-sentinel"
         ;;
@@ -418,10 +424,13 @@ class HostMcpBlackBoxTests(unittest.TestCase):
                 return state == "" or state.startswith("Z")
 
             self.wait_until(broker_gone, f"exit of killed broker {second_pid}")
-            # The client learns of the loss when it next forwards a request.
+            # A proxy that lost its broker fails: its MCP client must not
+            # mistake the loss for a clean end of the session.
+            status, stderr = lost.exited()
+            self.assertNotEqual(status, 0, stderr)
+            self.assertIn("lost its connection to the resident MCP broker", stderr)
             with self.assertRaises((EOFError, BrokenPipeError)):
                 lost.request("tools/list", {})
-            lost.process.wait(timeout=WAIT_TIMEOUT)
         finally:
             lost.close()
         restarted = self.run_cli(self.broker_args("broker-start"))
@@ -435,6 +444,31 @@ class HostMcpBlackBoxTests(unittest.TestCase):
             )
         finally:
             fresh.close()
+        stopped = self.run_cli(self.broker_args("broker-stop"))
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertFalse((self.broker_state_dir() / "broker.sock").exists())
+
+    def test_broker_stop_waits_for_a_disconnected_session_to_clean_up(self) -> None:
+        # A session whose client has gone is not attached: stop admission
+        # waits for its operation cleanup instead of refusing it (a stop with
+        # a connected client is still refused: the test above). The held
+        # operation ends only at the cleanup's SIGKILL, so the stop arrives
+        # while that cleanup still holds the session.
+        self.addCleanup(shutil.rmtree, self.broker_state_dir(), ignore_errors=True)
+        root = Path(self.environment["TMPDIR"])
+        started = self.run_cli(self.broker_args("broker-start"))
+        self.assertEqual(started.returncode, 0, started.stderr)
+        client = JsonRpcPeer(self.broker_args("connect"), self.environment)
+        try:
+            client.initialize()
+            held = client.request(
+                "tools/call",
+                {"name": "shell_run", "arguments": {"command": "hold-until-killed"}},
+            )["result"]["structuredContent"]
+            self.assertTrue(held["ok"], held)
+            self.wait_until((root / "hold-started").exists, "the held operation's start")
+        finally:
+            client.close()
         stopped = self.run_cli(self.broker_args("broker-stop"))
         self.assertEqual(stopped.returncode, 0, stopped.stderr)
         self.assertFalse((self.broker_state_dir() / "broker.sock").exists())
