@@ -530,6 +530,22 @@ pub(crate) async fn basic_expand_heredoc_word(
     expander.basic_expand_to_str(word_str.as_ref()).await
 }
 
+/// Expands a prompt string after its escapes are decoded, as Bash does: like a
+/// here-document (quotes are literal; no brace, tilde or pathname expansion),
+/// with a backslash consumed only before a character it escapes in double
+/// quotes.
+pub(crate) async fn basic_expand_prompt_word(
+    shell: &mut Shell<impl extensions::ShellExtensions>,
+    params: &ExecutionParameters,
+    word_str: impl AsRef<str>,
+) -> Result<String, error::Error> {
+    let mut expander = WordExpander::new(shell, params);
+    expander.heredoc_mode = true;
+    expander.disable_brace_expansion = true;
+    expander.unquoted_backslash_handling = UnquotedBackslashHandling::DoubleQuoted;
+    expander.basic_expand_to_str(word_str.as_ref()).await
+}
+
 /// Applies all basic expansion to the given word (represented as a string),
 /// with custom expander options.
 ///

@@ -144,7 +144,7 @@ peg::parser! {
             s:$([c if c != '}']*) { s.to_owned() }
 
         rule octal_number() -> u32 =
-            s:$(['0'..='7']*<1,3>) {? u32::from_str_radix(s, 8).or(Err("invalid octal number")) }
+            s:$(['0'..='7']*<3,3>) {? u32::from_str_radix(s, 8).or(Err("invalid octal number")) }
     }
 }
 

@@ -1488,22 +1488,17 @@ fn read_splits_fields_for_names_like_bash() {
     );
 }
 
-/// An unknown `\D{...}` conversion in a prompt is shown as written instead of
-/// ending the shell (patch `0061`). Not a differential: which conversions
-/// exist is the platform `strftime`'s, and the panic is what is tested.
+/// An unknown `\D{...}` conversion in a prompt does not end the shell (patch
+/// `0061`); `\D{}` is the C library's `strftime`, as in Bash, so the platform
+/// decides how it shows one it does not know.
 #[test]
 fn unknown_prompt_date_conversion_does_not_end_the_shell() {
-    let output = run(
-        env!("CARGO_BIN_EXE_marsh-local"),
-        "PS4='\\D{%Q}x '; set -x; :; set +x; echo after",
-        false,
-    );
-    assert_eq!(output.status.code(), Some(0), "{output:?}");
-    assert_eq!(output.stdout, b"after\n", "{output:?}");
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("%Qx :\n"),
-        "{output:?}"
-    );
+    let script = "PS4='\\D{%Q}x '; set -x; :; set +x; echo after";
+    let bash = run("bash", script, false);
+    let brush = run(env!("CARGO_BIN_EXE_marsh-local"), script, false);
+    assert_eq!(brush.status.code(), Some(0), "{brush:?}");
+    assert_eq!(brush.stdout, b"after\n", "{brush:?}");
+    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
 }
 
 /// `\w` and `\W` show the directory name as data: a `$(...)` in it is not run
@@ -2420,5 +2415,32 @@ kill -QUIT $$; trap 'echo T' USR1; ( sleep 0.2; kill -USR1 $$ ) & sleep 1; echo 
 trap 'echo W' WINCH; trap - WINCH; kill -WINCH $$; trap - HUP; exec 2>/dev/null; ( kill -HUP $BASHPID; echo unreachable ); echo "status=$?""#,
         0,
         b"got USR1\ngot USR2\ngot HUP\ngot ALRM\ngot QUIT\nT\nslept\nstatus=129\n",
+    );
+}
+
+/// Prompts decode as Bash's `decode_prompt_string`: three-digit octal bytes
+/// feed the expansion pass, other escapes' text is protected from it, quotes,
+/// braces, `~` and globs stay literal, and `\[`/`\]` show nothing without line
+/// editing.
+#[test]
+fn prompt_strings_decode_as_in_bash() {
+    for prefix in [
+        r"\7\77\101 ",
+        r"A\000B ",
+        r"\044HOME\134$HOME ",
+        r#"'" {a,b} ~ * "#,
+        r"\[x\] \D{$HOME} ",
+        r#"a\"b\\c\$ \q "#,
+        r"\\$HOME ",
+    ] {
+        let script = std::format!("PS4='{}'; set -x; : traced", prefix.replace('\'', r"'\''"));
+        let bash = run("bash", &script, false);
+        let brush = run(env!("CARGO_BIN_EXE_marsh-local"), &script, false);
+        assert_eq!(brush.stderr, bash.stderr, "{prefix}: {brush:?} {bash:?}");
+    }
+    assert_eq!(
+        run("bash", r"PS4='\044HOME\134$HOME '; set -x; :", false).stderr,
+        std::format!("{}$HOME :\n", std::env::var("HOME").unwrap_or_default()).as_bytes(),
+        "the Bash oracle decodes octal into the expansion pass"
     );
 }

@@ -64,9 +64,12 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
         self.restore_command_status(saved_status);
 
         // Strip out special characters that readline would typically drop:
-        // \001 and \002 (start and end of non-printing sequences).
+        // \001 and \002 (start and end of non-printing sequences). Other prompts
+        // (PS0, PS4) are written as they are, as Bash writes them.
         let mut expanded = result?;
-        expanded.retain(|c| c != '\x01' && c != '\x02');
+        if matches!(var_name, "PS1" | "PS2" | "BRUSH_PS_ALT") {
+            expanded.retain(|c| c != '\x01' && c != '\x02');
+        }
 
         Ok(expanded)
     }

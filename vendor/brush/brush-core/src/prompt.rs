@@ -26,20 +26,34 @@ pub(crate) async fn expand_prompt(
         // prepend a `\` so pass 2 consumes it and leaves the char alone.
         let semantically_literal =
             matches!(piece, brush_parser::prompt::PromptPiece::DollarOrPound);
-        // Names from the system (the working directory, the shell's name) are
-        // data: as in Bash, pass 2 must not expand a `$(...)` in a directory name.
-        let quoted_data = matches!(
+        // What an escape stands for is data: as in Bash, pass 2 must not expand
+        // a `$(...)` in a directory name or a `$x` a `\D{}` format shows.
+        // (An unknown escape, `\\` and `\NNN` are passed on as written: `\\$x`
+        // shows `$x`, `\044x` expands `$x`. Pass 2 takes `\"` as double quotes
+        // do, but quotes are otherwise literal in it, so that one is resolved
+        // here.)
+        let quoted_data = !matches!(
             piece,
-            brush_parser::prompt::PromptPiece::CurrentWorkingDirectory { .. }
-                | brush_parser::prompt::PromptPiece::ShellBaseName
+            brush_parser::prompt::PromptPiece::Literal(_)
+                | brush_parser::prompt::PromptPiece::DollarOrPound
+                | brush_parser::prompt::PromptPiece::EscapedSequence(_)
+                | brush_parser::prompt::PromptPiece::Backslash
+                | brush_parser::prompt::PromptPiece::AsciiCharacter(_)
         );
+        if shell.options().expand_prompt_strings
+            && matches!(&piece, brush_parser::prompt::PromptPiece::EscapedSequence(s) if s == "\\\"")
+        {
+            formatted_prompt.push('"');
+            continue;
+        }
 
         let mut formatted_piece = format_prompt_piece(shell, piece)?;
         if shell.options().expand_prompt_strings && quoted_data {
             formatted_piece = formatted_piece
                 .chars()
                 .flat_map(|c| {
-                    let escape = expansion::DOUBLE_QUOTED_ESCAPE_CHARS.contains(&c) && c != '\n';
+                    // What pass 2 would take as an expansion or an escape.
+                    let escape = matches!(c, '$' | '`' | '\\');
                     escape.then_some('\\').into_iter().chain(std::iter::once(c))
                 })
                 .collect();
@@ -58,18 +72,11 @@ pub(crate) async fn expand_prompt(
     }
 
     if shell.options().expand_prompt_strings {
-        // Now expand any remaining escape sequences, but without tilde-expansion.
-        // Use double-quote escape rules so that backslashes emitted in the
-        // previous step survive intact unless they precede a character that
-        // would also be escapable inside a double-quoted string.
-        let options = expansion::ExpanderOptions {
-            tilde_expand: false,
-            unquoted_backslash_handling: expansion::UnquotedBackslashHandling::DoubleQuoted,
-            ..Default::default()
-        };
+        // Then parameters, commands and arithmetic expand, as in a here-document:
+        // as in Bash, quotes are literal, and nothing is brace-, tilde- or
+        // pathname-expanded.
         formatted_prompt =
-            expansion::basic_expand_word_with_options(shell, params, &formatted_prompt, &options)
-                .await?;
+            expansion::basic_expand_prompt_word(shell, params, &formatted_prompt).await?;
     }
 
     Ok(formatted_prompt)
@@ -89,10 +96,13 @@ fn format_prompt_piece(
     let formatted = match piece {
         brush_parser::prompt::PromptPiece::EscapedSequence(s) => s,
         brush_parser::prompt::PromptPiece::Literal(l) => l,
-        // `\NNN` is a byte.
-        brush_parser::prompt::PromptPiece::AsciiCharacter(c) => match u8::try_from(c) {
-            Ok(byte) if byte >= 0x80 => crate::bytes::raw_char(byte).to_string(),
-            _ => char::from_u32(c).map_or_else(String::new, |c| c.to_string()),
+        // `\NNN` (exactly three digits, as in Bash) is a byte; NUL ends nothing
+        // and shows nothing.
+        #[allow(clippy::cast_possible_truncation)]
+        brush_parser::prompt::PromptPiece::AsciiCharacter(c) => match (c & 0xff) as u8 {
+            0 => String::new(),
+            byte if byte >= 0x80 => crate::bytes::raw_char(byte).to_string(),
+            byte => char::from(byte).to_string(),
         },
         brush_parser::prompt::PromptPiece::Backslash => "\\".to_owned(),
         brush_parser::prompt::PromptPiece::BellCharacter => "\x07".to_owned(),
@@ -260,7 +270,45 @@ where
         brush_parser::prompt::PromptDateFormat::WeekdayMonthDate => {
             datetime.format("%a %b %d").to_string()
         }
+        #[cfg(unix)]
+        brush_parser::prompt::PromptDateFormat::Custom(fmt) => {
+            libc_strftime(fmt).unwrap_or_else(|| format_strftime(datetime, fmt))
+        }
+        #[cfg(not(unix))]
         brush_parser::prompt::PromptDateFormat::Custom(fmt) => format_strftime(datetime, fmt),
+    }
+}
+
+/// `\D{fmt}` as Bash formats it: the C library's `strftime` of the local
+/// time (an empty format is `%X`), which shows a conversion it does not know
+/// as written.
+#[cfg(unix)]
+fn libc_strftime(fmt: &str) -> Option<String> {
+    let fmt = if fmt.is_empty() { "%X" } else { fmt };
+    let c_fmt = std::ffi::CString::new(crate::bytes::encode(fmt).into_owned()).ok()?;
+    // SAFETY: `time` and `localtime_r` fill the provided values; `strftime`
+    // writes at most `buffer.len()` bytes and the format is NUL-terminated.
+    unsafe {
+        let now = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        if libc::localtime_r(&raw const now, &raw mut tm).is_null() {
+            return None;
+        }
+        let mut size = 256;
+        while size <= 65536 {
+            let mut buffer = vec![0u8; size];
+            let written = libc::strftime(
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                c_fmt.as_ptr(),
+                &raw const tm,
+            );
+            if written > 0 || size >= 65536 {
+                return Some(crate::bytes::decode(&buffer[..written]).into_owned());
+            }
+            size *= 4;
+        }
+        None
     }
 }
 
