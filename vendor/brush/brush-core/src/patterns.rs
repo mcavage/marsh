@@ -176,6 +176,27 @@ impl Pattern {
         self
     }
 
+    /// Returns whether the pattern uses an extended glob operator (`?( )`,
+    /// `*( )`, `+( )`, `@( )`, `!( )`).
+    pub fn has_extended_glob(&self) -> bool {
+        self.enable_extended_globbing
+            && self.pieces.iter().any(|piece| {
+                matches!(piece, PatternPiece::Pattern(_))
+                    && ["?(", "*(", "+(", "@(", "!("]
+                        .iter()
+                        .any(|op| piece.as_str().contains(op))
+            })
+    }
+
+    /// Returns whether the pattern starts with an unquoted `*`, the only
+    /// patterns Bash's matcher tries against empty text.
+    pub fn starts_with_star(&self) -> bool {
+        self.pieces
+            .iter()
+            .find(|piece| !piece.as_str().is_empty())
+            .is_some_and(|piece| matches!(piece, PatternPiece::Pattern(s) if s.starts_with('*')))
+    }
+
     /// Returns whether or not the pattern is empty.
     pub fn is_empty(&self) -> bool {
         self.pieces.iter().all(|p| p.as_str().is_empty())
