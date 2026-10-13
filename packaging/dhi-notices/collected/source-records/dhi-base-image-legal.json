@@ -3,38 +3,32 @@
   "scope": "The DHI image-level license file each built image carries in place, observed by inventory.py from docker export; it covers DHI definitions, patches and build scripts, not the included packages.",
   "observations": [
     {
-      "image": "marsh-dhi-shell:final",
-      "id": "sha256:4efabfbfc42fdc4897b807fd42f286d7a83ec5c031659d18e74e78257022204b",
+      "image": "marsh-shell",
       "path": "/opt/docker/.license.txt",
       "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
     },
     {
-      "image": "marsh-dhi-pi:final",
-      "id": "sha256:fc00454a0f1b60d740658e3125a4bc2756ddce21e6e9f467b26ba1bdaf4a991b",
+      "image": "marsh-pi",
       "path": "/opt/docker/.license.txt",
       "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
     },
     {
-      "image": "marsh-dhi-claude:final",
-      "id": "sha256:0737963ffe8550a5647c28b88813d2571524705cec1c117bd965ecf6564ee960",
+      "image": "marsh-claude",
       "path": "/opt/docker/.license.txt",
       "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
     },
     {
-      "image": "marsh-dhi-codex:final",
-      "id": "sha256:249fe81f89f44f8c3310002de655b35eb7d9abde851dc9fda1f911ba6fea2d23",
+      "image": "marsh-codex",
       "path": "/opt/docker/.license.txt",
       "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
     },
     {
-      "image": "marsh-dhi-fixture:final",
-      "id": "sha256:c0d440d662e372613876563195abdc7c6de04c0c947515a996952515992435d2",
+      "image": "marsh-fixture",
       "path": "/opt/docker/.license.txt",
       "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
     },
     {
-      "image": "marsh-dhi-shelltemplate:final",
-      "id": "sha256:5d6754b393b301a472ec67be4be5d56171f43df62970d8eef413292b398b69fe",
+      "image": "marsh-shell-template",
       "path": "/opt/docker/.license.txt",
       "sha256": "275b26f050a435abb80728febf135acb4b2aa39fa1ac3b8b984afd21df95e19a"
     }

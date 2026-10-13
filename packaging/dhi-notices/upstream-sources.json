@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "scope": "Where the legal texts of a DHI-built package that ships no Debian copyright file come from: the upstream repository, the release tag for the package's upstream version ({upstream} is the Debian version without epoch or revision), and the legal files at that tag's commit. inventory.py acquires them for a new package version.",
+  "packages": {
+    "containerd.io": {"repository": "containerd/containerd", "tag": "v{upstream}", "files": ["LICENSE", "NOTICE"]},
+    "docker-ce": {"repository": "moby/moby", "tag": "docker-v{upstream}", "files": ["LICENSE", "NOTICE"]},
+    "docker-ce-cli": {"repository": "docker/cli", "tag": "v{upstream}", "files": ["LICENSE", "NOTICE"]},
+    "docker-buildx-plugin": {"repository": "docker/buildx", "tag": "v{upstream}", "files": ["LICENSE"]},
+    "nodejs-24": {"repository": "nodejs/node", "tag": "v{upstream}", "files": ["LICENSE"]}
+  }
+}

@@ -4,10 +4,12 @@
 // .github/workflows/renovate.yml and .github/renovate-global.js.
 //
 // Nothing here merges itself. The builds take pinned inputs on purpose
-// (docs/design/supply-chain.md), so a bump is a reviewed change: CI builds the
-// images on the PR (the `images` job), and a bump that needs more than a
-// version edit (new license notices, Pi's brace-expansion patch) goes red until
-// a person does the rest.
+// (docs/design/supply-chain.md), so a bump is a reviewed change. Renovate only
+// edits the pins: .github/workflows/renovate-refresh.yml then runs `make
+// refresh-pins` on the branch, commits the regenerated records (checksums,
+// notices, inventories) as refresh-pins@users.noreply.github.com, and posts the
+// license delta. CI builds the images on the completed head; the "License
+// review" status is red only when the delta needs the owner.
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["config:recommended", "helpers:pinGitHubActionDigests"],
@@ -20,6 +22,9 @@
   // within days). Security updates ignore this.
   minimumReleaseAge: "3 days",
   internalChecksFilter: "strict",
+  // The refresh-pins workflow's commit completes the branch; Renovate keeps
+  // managing (and may rebase) it rather than treating it as edited by a person.
+  gitIgnoredAuthors: ["refresh-pins@users.noreply.github.com"],
   ignorePaths: ["vendor/**", "packaging/dhi-notices/**", "**/node_modules/**", "docs/**"],
   enabledManagers: ["github-actions", "cargo", "npm", "dockerfile", "pip_requirements", "custom.regex"],
   // scripts/requirements-publish.txt is not named requirements.txt.
@@ -40,6 +45,18 @@
       managerFilePatterns: ["/^Makefile$/"],
       matchStrings: ["RUST_IMAGE \\?= (?<depName>[^:\\s]+):(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})"],
       datasourceTemplate: "docker",
+    },
+    {
+      // DHI's own apt repository (public, Debian format): Docker Engine and the
+      // shell template's Node.js, npm and Python ship no Debian copyright file,
+      // so they are pinned by version and refresh-pins indexes each version.
+      description: "DHI-built apt packages pinned by version (Kit VM floor, shell template)",
+      customType: "regex",
+      managerFilePatterns: ["/^packaging/image-base/[^/]+\\.packages$/", "/^packaging/shell/Dockerfile$/"],
+      matchStrings: ["(?<depName>[a-z0-9][a-z0-9.+-]*)=(?<currentValue>[0-9][^\\s]*)"],
+      datasourceTemplate: "deb",
+      versioningTemplate: "deb",
+      registryUrlTemplate: "http://dhi.io/deb/debian/main?suite=trixie&components=main&binaryArch=arm64",
     },
     // Each Kit declares its CLI once (args.version.default) and its ACP adapter
     // in `provides`. The adapter is also in package.json, so Renovate's npm
@@ -119,15 +136,20 @@
       schedule: ["at any time"],
     },
     {
-      description: "The CLI release and its checksum file move together",
+      description: "DHI-built apt packages in one PR, with the DHI base images' cadence",
+      matchDatasources: ["deb"],
+      groupName: "DHI packages",
+      // The Debian index carries no release date.
+      minimumReleaseAge: null,
+      schedule: ["at any time"],
+    },
+    {
+      // refresh-pins regenerates release-checksums.txt and the release's notice
+      // records on the branch.
+      description: "Agent CLI releases",
       matchPackageNames: ["@anthropic-ai/claude-code", "openai/codex"],
       minimumReleaseAge: "1 day",
       schedule: ["at any time"],
-      postUpgradeTasks: {
-        commands: ["python3 scripts/refresh-agent-checksums.py"],
-        fileFilters: ["kits/*/release-checksums.txt"],
-        executionMode: "branch",
-      },
     },
     {
       description: "A package that is both in a Kit descriptor and package.json updates in one PR",

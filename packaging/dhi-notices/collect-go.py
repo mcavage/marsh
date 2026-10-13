@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import tempfile
+import time
 import zipfile
 from notice_rules import notice_document
 
@@ -46,10 +47,18 @@ def main():
             spec = module["path"] + "@" + module["version"]
             if not re.fullmatch(r"[A-Za-z0-9._~+/!@-]+", spec):
                 raise ValueError("unexpected public module identifier")
-            process = subprocess.run(
-                [str(args.go), "mod", "download", "-json", spec],
-                cwd=cache, env=env, capture_output=True, text=True, timeout=180,
-            )
+            # The module proxy and checksum database are remote: a transient
+            # network error is retried; a verification failure is not.
+            for attempt in range(3):
+                process = subprocess.run(
+                    [str(args.go), "mod", "download", "-json", spec],
+                    cwd=cache, env=env, capture_output=True, text=True, timeout=180,
+                )
+                transient = re.search(r"timeout|connection reset|TLS handshake|i/o timeout|50[234]",
+                                      process.stdout + process.stderr)
+                if not process.returncode or not transient:
+                    break
+                time.sleep(5 * (attempt + 1))
             if process.returncode:
                 raise RuntimeError(f"download failed for {spec}: {process.stdout} {process.stderr}")
             item = json.loads(process.stdout)

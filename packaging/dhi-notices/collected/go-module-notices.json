@@ -1,30 +1,12 @@
 {
   "schema": 2,
   "images": [
-    {
-      "image": "marsh-dhi-shell:final",
-      "id": "sha256:4efabfbfc42fdc4897b807fd42f286d7a83ec5c031659d18e74e78257022204b"
-    },
-    {
-      "image": "marsh-dhi-pi:final",
-      "id": "sha256:fc00454a0f1b60d740658e3125a4bc2756ddce21e6e9f467b26ba1bdaf4a991b"
-    },
-    {
-      "image": "marsh-dhi-claude:final",
-      "id": "sha256:0737963ffe8550a5647c28b88813d2571524705cec1c117bd965ecf6564ee960"
-    },
-    {
-      "image": "marsh-dhi-codex:final",
-      "id": "sha256:249fe81f89f44f8c3310002de655b35eb7d9abde851dc9fda1f911ba6fea2d23"
-    },
-    {
-      "image": "marsh-dhi-fixture:final",
-      "id": "sha256:c0d440d662e372613876563195abdc7c6de04c0c947515a996952515992435d2"
-    },
-    {
-      "image": "marsh-dhi-shelltemplate:final",
-      "id": "sha256:5d6754b393b301a472ec67be4be5d56171f43df62970d8eef413292b398b69fe"
-    }
+    "marsh-shell",
+    "marsh-pi",
+    "marsh-claude",
+    "marsh-codex",
+    "marsh-fixture",
+    "marsh-shell-template"
   ],
   "scope": "Go dependency modules from actual compiled binary build information of OS-package Go binaries; main components are indexed with their packages",
   "binaries": [
@@ -61,7 +43,7 @@
       "sha256": "5780f10b145daf7d41d6146bd66c907bdf0a7ec4ccb1a67d0753eb269aa0cd23"
     }
   ],
-  "input_sha256": "75a6f01258d115809256cc1c7794920c2af52c445a7a0cb26c08db1786e2c3dc",
+  "input_sha256": "055ef456bf4a84cc81fb23fab4f150884552a45fcbc624a96422848036712e75",
   "checksum_database": "sum.golang.org",
   "modules": [
     {

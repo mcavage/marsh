@@ -160,7 +160,8 @@ def main():
     index_path = bundle / args.index
     index = json.loads(index_path.read_text())
     names = {c["name"] for c in collections}
-    index["collections"] = [c for c in index["collections"] if c["name"] not in names] + collections
+    index["collections"] = sorted([c for c in index["collections"] if c["name"] not in names] + collections,
+                                  key=lambda c: c["name"])
     index_path.write_bytes(encode(index))
 
     providers_path = bundle / "agent-notices.json"
@@ -183,6 +184,7 @@ def main():
             "scope": "Exact source archive member; URL identifies the same immutable source, not a separate raw-URL acquisition or redistribution approval.",
         })
         required.append({"file": "provider-notices/" + file, "sha256": digest})
+    providers["notices"].sort(key=lambda n: n["file"])
     providers_path.write_bytes(encode(providers))
     required.sort(key=lambda r: r["file"])
     if args.kit_profile:

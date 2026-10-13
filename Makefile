@@ -220,6 +220,15 @@ kits:
 	$(PYTHON) scripts/publish-kits.py --validate-only --commands tests/acceptance/fixture/commands.json \
 		--build-inputs "$(KIT_FIXTURE_INPUTS)"
 
+# Regenerate every record the image gate checks (checksums, agent and adapter
+# notice records, npm overrides, image inventories and Go notices) from the pins
+# in the tree, then print the license delta against REFRESH_BASE (default
+# origin/main). Exit 0 OK, 2 NEEDS-OWNER, 1 failure. Needs network, Buildx with
+# dhi.io access, git and Go (docs/design/supply-chain.md).
+REFRESH_BASE ?= origin/main
+refresh-pins:
+	$(PYTHON) scripts/refresh-pins.py --base "$(REFRESH_BASE)" $(REFRESH_FLAGS)
+
 kit-publish:
 	@test -n "$(KIT_REPOSITORY_PREFIX)" || { echo 'make kit-publish: set KIT_REPOSITORY_PREFIX=registry/repository'; exit 1; }
 	$(PYTHON) scripts/prepare-kit-inputs.py --commands "$(KIT_COMMANDS)" --output "$(KIT_PREPARED_INPUTS)" \
@@ -414,6 +423,7 @@ DEV_SHELL_IMAGE_INPUTS := packaging/shell-image packaging/shell/Dockerfile $(DEV
 DEV_KIT_INPUTS := $(KIT_COMMANDS) scripts/stage-kits.py scripts/publish-kits.py scripts/npm-notices.mjs \
 	$(DEV_CANONICAL_INPUTS) $(wildcard $(shell git ls-files kits 2>/dev/null))
 
+.PHONY: refresh-pins
 .PHONY: dev dev-artifacts dev-host dev-guest dev-install dev-kit-images
 dev:
 	@$(MAKE) --no-print-directory -j$(DEV_PARALLEL) dev-artifacts

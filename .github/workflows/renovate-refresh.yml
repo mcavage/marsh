@@ -1,0 +1,130 @@
+name: Refresh pins
+# Completes a Renovate PR: on every push to a renovate/** branch, `make
+# refresh-pins` regenerates everything the image gate checks from the bumped
+# pins (checksums, agent and adapter notice records, npm notice overrides, image
+# inventories, Go notices), commits the result back to the branch, and posts the
+# license delta as one PR comment (updated in place). The verdict is the
+# "License review" commit status on the branch head: success when the delta is
+# OK, failure when it NEEDS-OWNER (a new license family, a changed proprietary
+# license text, a new proprietary component) or when a record could not be
+# regenerated. CI then runs on the completed head as usual.
+#
+# Secrets:
+#   RENOVATE_TOKEN          pushes the regenerated records, so CI runs on them
+#                           (a GITHUB_TOKEN push would not trigger it), sets the
+#                           commit status and writes the PR comment
+#                           (Contents, Pull requests, Issues, Commit statuses
+#                           read/write; see renovate.yml)
+#   DOCKERHUB_USERNAME      the Docker account
+#   DOCKERHUB_READ_TOKEN    its read-only token: pulls the dhi.io bases
+#
+# The commit is authored by refresh-pins@users.noreply.github.com, which
+# .github/renovate.json5 lists in gitIgnoredAuthors, so Renovate keeps managing
+# the branch. A run on that commit is skipped: it would regenerate nothing.
+on:
+  push:
+    branches: ['renovate/**']
+permissions:
+  contents: read
+concurrency:
+  group: refresh-pins-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  BOT_NAME: marsh refresh-pins
+  BOT_EMAIL: refresh-pins@users.noreply.github.com
+jobs:
+  refresh:
+    name: Refresh pins
+    if: github.repository == 'mcavage/marsh' && github.event.head_commit.author.email != 'refresh-pins@users.noreply.github.com'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RENOVATE_TOKEN }}
+      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: stable
+          cache: false
+      - name: Log in to Docker Hub and Docker Hardened Images
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_READ_TOKEN: ${{ secrets.DOCKERHUB_READ_TOKEN }}
+        run: |
+          for registry in docker.io dhi.io; do
+            printf '%s' "$DOCKERHUB_READ_TOKEN" | docker login "$registry" --username "$DOCKERHUB_USERNAME" --password-stdin
+          done
+      - name: Publisher dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --require-hashes --no-deps --only-binary=:all: -r scripts/requirements-publish.txt
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: make refresh-pins
+        id: refresh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REFRESH_CACHE: ${{ runner.temp }}/refresh-cache
+        run: |
+          set +e
+          git fetch --no-tags origin main
+          make refresh-pins REFRESH_BASE=origin/main 2>&1 | tee "$RUNNER_TEMP/refresh.log"
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [ -f target/refresh-pins/license-delta.md ]; then
+            cat target/refresh-pins/license-delta.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            { echo '<!-- marsh-refresh-pins -->'; echo '## License delta'; echo
+              echo '**make refresh-pins failed**; the records are not regenerated. Last lines:'
+              echo; echo '```'; tail -40 "$RUNNER_TEMP/refresh.log"; echo '```'; } > "$RUNNER_TEMP/failed.md"
+            cat "$RUNNER_TEMP/failed.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Commit the regenerated records
+        id: commit
+        if: steps.refresh.outputs.status == '0' || steps.refresh.outputs.status == '2'
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Records are current."; echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git add -A
+          git -c user.name="$BOT_NAME" -c user.email="$BOT_EMAIL" -c commit.gpgsign=false \
+            commit -q -m "Regenerate pinned records (make refresh-pins)" \
+            -m "License delta: $(grep -m1 -o 'Verdict: [A-Z-]*' target/refresh-pins/license-delta.md)"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: License review status and PR comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+          STATUS: ${{ steps.refresh.outputs.status }}
+          SHA: ${{ steps.commit.outputs.sha || github.sha }}
+        run: |
+          case "$STATUS" in
+            0) state=success; description="License delta OK" ;;
+            2) state=failure; description="License delta NEEDS-OWNER: see the PR comment" ;;
+            *) state=error; description="make refresh-pins failed: records not regenerated" ;;
+          esac
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$state" -f context="License review" \
+            -f description="$description" -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          body=target/refresh-pins/license-delta.md
+          [ -f "$body" ] || body="$RUNNER_TEMP/failed.md"
+          # Renovate opens the PR just after its first push.
+          for attempt in $(seq 1 12); do
+            pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$GITHUB_REF_NAME" --state open --json number --jq '.[0].number')
+            [ -n "$pr" ] && break
+            sleep 15
+          done
+          if [ -z "$pr" ]; then echo "No open PR for $GITHUB_REF_NAME; the report is in the job summary."; exit 0; fi
+          comment=$(gh api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate \
+            --jq '[.[] | select(.body | startswith("<!-- marsh-refresh-pins -->"))][0].id')
+          if [ -n "$comment" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment" -F body=@"$body" >/dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" -F body=@"$body" >/dev/null
+          fi
+      - name: Verdict
+        if: steps.refresh.outputs.status != '0'
+        run: |
+          echo "make refresh-pins exited ${{ steps.refresh.outputs.status }} (2 = NEEDS-OWNER, 1 = failed)"
+          exit 1

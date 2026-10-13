@@ -14,7 +14,7 @@
       }
     ],
     "acquisition_receipt": "source-records/dhi-base-image-legal.json",
-    "receipt_sha256": "a4550e923f2cc23291a1c23c0997725a1614cd01aa2eed0f068b9ec2d171938d",
+    "receipt_sha256": "87670726704d48ea63cedf200ffdf9da249b7aae07436993a7f0b941b9ca5b99",
     "scope": "DHI definitions (Dockerfiles), patches and build scripts are Apache-2.0. Included packages/binaries retain their own upstream terms. Every DHI base carries this text at /opt/docker/.license.txt; the verifier checks it in place.",
     "image_files": [
       {

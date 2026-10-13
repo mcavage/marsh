@@ -115,5 +115,17 @@
       }
     ],
     "scope": "Identifies the upstream source and terms for each LGPL component; it does not claim the upstream archives reproduce the shipped binaries."
-  }
+  },
+  "proprietary_components": [
+    {
+      "kind": "agent",
+      "name": "claude-code",
+      "scope": "Native Claude Code in the Claude Kit (provider-notices/claude-VERSION-package-LICENSE.md)"
+    },
+    {
+      "kind": "npm",
+      "name": "@anthropic-ai/claude-agent-sdk*",
+      "scope": "The Claude Agent SDK and its platform packages in the Claude Kit's ACP adapter, which carry Claude Code"
+    }
+  ]
 }

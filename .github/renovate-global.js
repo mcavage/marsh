@@ -21,7 +21,6 @@ module.exports = {
   onboarding: false,
   requireConfig: 'required',
   hostRules,
-  // The only command a bump may run: regenerate a Kit's release-checksums.txt
-  // from the publisher's metadata (scripts/refresh-agent-checksums.py).
-  allowedCommands: ['^python3 scripts/refresh-agent-checksums\\.py$'],
+  // Renovate runs no command: .github/workflows/renovate-refresh.yml
+  // regenerates the records on each renovate/** branch.
 };
