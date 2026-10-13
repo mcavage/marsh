@@ -35,11 +35,19 @@ impl BasicInputBackend {
         reader: &R,
         prompt: &InteractivePrompt,
     ) -> Result<ReadResult, ShellError> {
-        let mut prompt_to_use = self.should_display_prompt().then_some(&prompt);
+        let terminal = std::io::stdin().is_terminal();
+        // An interactive shell prompts even when its input is not a terminal,
+        // and then prompts with PS2 for each continuation line as well.
+        let interactive = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(shell_ref.lock())
+        })
+        .options()
+        .interactive;
+        let mut prompt_to_use = (terminal || interactive).then_some(prompt.prompt.as_str());
         let mut result = String::new();
 
         loop {
-            match reader.read_line(prompt_to_use.map(|p| p.prompt.as_str()), |line, cursor| {
+            match reader.read_line(prompt_to_use, |line, cursor| {
                 let mut shell = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(shell_ref.lock())
                 });
@@ -53,7 +61,8 @@ impl BasicInputBackend {
                         break;
                     }
 
-                    prompt_to_use = None;
+                    prompt_to_use =
+                        (!terminal && interactive).then_some(prompt.continuation_prompt.as_str());
                 }
                 ReadResult::BoundCommand(s) => {
                     result.push_str(s.as_str());
@@ -70,11 +79,6 @@ impl BasicInputBackend {
         }
 
         Ok(ReadResult::Input(result))
-    }
-
-    #[expect(clippy::unused_self)]
-    fn should_display_prompt(&self) -> bool {
-        std::io::stdin().is_terminal()
     }
 
     fn generate_completions(

@@ -561,6 +561,13 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   pattern changes nothing, and `patsub_replacement` makes an unquoted `&`
   the match. The replacement is no longer a regex replacement string, so
   `$0` is text. Covered by `pattern_substitution_matches_like_bash`.
+- `0075` makes an interactive shell without a terminal behave as Bash's: when
+  standard error is not a terminal and `/dev/tty` cannot be opened, it prints
+  Bash's two job-control warnings and runs without job control; the minimal
+  and basic backends prompt with PS1 and PS2 on standard error for every line
+  they read even when input is not a terminal; and `--input-backend reedline`
+  without a terminal reads as the minimal backend (Reedline needs one). Covered
+  by `interactive_shell_without_a_terminal_prompts_on_standard_error`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

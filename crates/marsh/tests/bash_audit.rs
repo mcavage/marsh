@@ -1865,7 +1865,22 @@ printf '#!/bin/sh\necho ran\n' >"x$v"; chmod +x "x$v"; ./x*
         "Bash: {bash:?}"
     );
     assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
-    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
+    // Without a controlling terminal (CI) both warn; Bash's warning names the
+    // process group it could not hand the terminal, which depends on the caller.
+    let after_warning = |stderr: &[u8]| {
+        let text = String::from_utf8_lossy(stderr).into_owned();
+        let warned = text.contains("shell: cannot set terminal process group (")
+            && text.contains("shell: no job control in this shell\n");
+        let rest = text
+            .rsplit_once("no job control in this shell\n")
+            .map_or(text.clone(), |(_, rest)| rest.to_owned());
+        (warned, rest)
+    };
+    assert_eq!(
+        after_warning(&brush.stderr),
+        after_warning(&bash.stderr),
+        "{brush:?}"
+    );
     assert_eq!(brush.status.code(), bash.status.code());
 }
 
@@ -1884,4 +1899,61 @@ e=; echo "[${e/*/r}][${e/@(|a)/r}][${e/%?(a)/r}]"; shopt -u patsub_replacement; 
         0,
         b"r r rrbrbr rrbrbr abba rabba abbar <a><b><b><a>\na&&a a&&a abba a&&a a$0$0a abbar\n[r][][r]\na&&a\n",
     );
+}
+
+/// An interactive shell whose input and standard error are not a terminal
+/// (and that has no controlling terminal) says it cannot use job control,
+/// leaves `m` out of `$-`, prompts with PS1 and PS2 on standard error for
+/// every line it reads, and announces `exit` at the end of input.
+#[test]
+fn interactive_shell_without_a_terminal_prompts_on_standard_error() {
+    use std::os::unix::process::CommandExt as _;
+    let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+        let mut command = shell(program);
+        command.arg0("shell");
+        if program != "bash" {
+            command.args(["--no-config", "--input-backend", "basic"]);
+        }
+        command
+            .args(["--noprofile", "--norc", "--noediting", "-i", "-s"])
+            .env("PS1", "P1> ")
+            .env("PS2", "P2> ")
+            .env("LC_ALL", "C")
+            .env_remove("BASH_ENV")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"printf A\nif true; then\nprintf B\nfi\necho \"$-\"\n")
+            .unwrap();
+        child.wait_with_output().unwrap()
+    });
+    let [bash, brush] = &outputs;
+    assert_eq!(bash.stdout, b"ABhiBHs\n", "Bash: {bash:?}");
+    assert!(
+        bash.stderr.ends_with(b"P1> P1> P2> P2> P1> P1> exit\n"),
+        "Bash: {bash:?}"
+    );
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+    // Without a controlling terminal (CI) both warn; Bash's warning names the
+    // process group it could not hand the terminal, which depends on the caller.
+    let after_warning = |stderr: &[u8]| {
+        let text = String::from_utf8_lossy(stderr).into_owned();
+        let warned = text.contains("shell: cannot set terminal process group (")
+            && text.contains("shell: no job control in this shell\n");
+        let rest = text
+            .rsplit_once("no job control in this shell\n")
+            .map_or(text.clone(), |(_, rest)| rest.to_owned());
+        (warned, rest)
+    };
+    assert_eq!(
+        after_warning(&brush.stderr),
+        after_warning(&bash.stderr),
+        "{brush:?}"
+    );
+    assert_eq!(brush.status.code(), bash.status.code());
 }

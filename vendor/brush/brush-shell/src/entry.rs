@@ -418,7 +418,13 @@ async fn run_async(
     // Run with the selected input backend. Each branch instantiates the concrete
     // backend type and calls `run_in_shell`, preserving static dispatch.
     let default_backend = get_default_input_backend_type(&args);
-    let selected_backend = args.input_backend.unwrap_or(default_backend);
+    // Reedline needs a terminal; without one, read as the minimal backend does.
+    let selected_backend = match args.input_backend {
+        Some(InputBackendType::Reedline) if !std::io::stdin().is_terminal() => {
+            InputBackendType::Minimal
+        }
+        selected => selected.unwrap_or(default_backend),
+    };
 
     // Build UI options by merging config file with CLI args.
     #[allow(unused_variables, reason = "not used when no backend features enabled")]
@@ -487,6 +493,33 @@ async fn run_in_shell(
 ) -> Result<u8, brush_interactive::ShellError> {
     let read_commands_from_stdin = args.will_read_commands_from_stdin();
     let interactive_options: brush_interactive::InteractiveOptions = ui_options.into();
+
+    // Like Bash, an interactive shell without a terminal (standard error is not
+    // one and there is no controlling terminal) says so and runs without job
+    // control.
+    #[cfg(unix)]
+    {
+        let mut shell = shell_ref.lock().await;
+        if shell.options().interactive
+            && !std::io::stderr().is_terminal()
+            && std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open("/dev/tty")
+                .is_err()
+        {
+            shell.options_mut().enable_job_control = false;
+            let name = shell.current_shell_name().unwrap_or_default().into_owned();
+            let name = name.rsplit('/').next().unwrap_or_default();
+            let _ = std::io::Write::write_fmt(
+                &mut shell.stderr(),
+                format_args!(
+                    "{name}: cannot set terminal process group (-1): Inappropriate ioctl for device\n\
+                 {name}: no job control in this shell\n"
+                ),
+            );
+        }
+    }
 
     // Load profile and rc files as appropriate.
     initialize_shell(shell_ref, &args).await?;

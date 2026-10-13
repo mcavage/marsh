@@ -1,0 +1,155 @@
+diff --git a/brush-interactive/src/basic/input_backend.rs b/brush-interactive/src/basic/input_backend.rs
+index 5eb9831..f3a36dc 100644
+--- a/brush-interactive/src/basic/input_backend.rs
++++ b/brush-interactive/src/basic/input_backend.rs
+@@ -35,11 +35,19 @@ impl BasicInputBackend {
+         reader: &R,
+         prompt: &InteractivePrompt,
+     ) -> Result<ReadResult, ShellError> {
+-        let mut prompt_to_use = self.should_display_prompt().then_some(&prompt);
++        let terminal = std::io::stdin().is_terminal();
++        // An interactive shell prompts even when its input is not a terminal,
++        // and then prompts with PS2 for each continuation line as well.
++        let interactive = tokio::task::block_in_place(|| {
++            tokio::runtime::Handle::current().block_on(shell_ref.lock())
++        })
++        .options()
++        .interactive;
++        let mut prompt_to_use = (terminal || interactive).then_some(prompt.prompt.as_str());
+         let mut result = String::new();
+ 
+         loop {
+-            match reader.read_line(prompt_to_use.map(|p| p.prompt.as_str()), |line, cursor| {
++            match reader.read_line(prompt_to_use, |line, cursor| {
+                 let mut shell = tokio::task::block_in_place(|| {
+                     tokio::runtime::Handle::current().block_on(shell_ref.lock())
+                 });
+@@ -53,7 +61,8 @@ impl BasicInputBackend {
+                         break;
+                     }
+ 
+-                    prompt_to_use = None;
++                    prompt_to_use =
++                        (!terminal && interactive).then_some(prompt.continuation_prompt.as_str());
+                 }
+                 ReadResult::BoundCommand(s) => {
+                     result.push_str(s.as_str());
+@@ -72,11 +81,6 @@ impl BasicInputBackend {
+         Ok(ReadResult::Input(result))
+     }
+ 
+-    #[expect(clippy::unused_self)]
+-    fn should_display_prompt(&self) -> bool {
+-        std::io::stdin().is_terminal()
+-    }
+-
+     fn generate_completions(
+         shell: &mut Shell<impl brush_core::ShellExtensions>,
+         line: &str,
+diff --git a/brush-interactive/src/basic/non_term_line_reader.rs b/brush-interactive/src/basic/non_term_line_reader.rs
+index c026185..7c3f646 100644
+--- a/brush-interactive/src/basic/non_term_line_reader.rs
++++ b/brush-interactive/src/basic/non_term_line_reader.rs
+@@ -5,7 +5,7 @@ pub(crate) struct NonTermLineReader;
+ impl super::LineReader for NonTermLineReader {
+     fn read_line(
+         &self,
+-        _prompt: Option<&str>,
++        prompt: Option<&str>,
+         _completion_handler: impl FnMut(
+             &str,
+             usize,
+@@ -14,6 +14,12 @@ impl super::LineReader for NonTermLineReader {
+             crate::ShellError,
+         >,
+     ) -> Result<crate::ReadResult, crate::ShellError> {
++        if let Some(prompt) = prompt {
++            use std::io::Write as _;
++            let mut stderr = std::io::stderr();
++            write!(stderr, "{prompt}")?;
++            stderr.flush()?;
++        }
+         let mut input = Vec::new();
+         let bytes_read =
+             std::io::BufRead::read_until(&mut std::io::stdin().lock(), b'\n', &mut input)
+diff --git a/brush-interactive/src/minimal/input_backend.rs b/brush-interactive/src/minimal/input_backend.rs
+index f063a42..095778a 100644
+--- a/brush-interactive/src/minimal/input_backend.rs
++++ b/brush-interactive/src/minimal/input_backend.rs
+@@ -21,7 +21,11 @@ impl InputBackend for MinimalInputBackend {
+         prompt: InteractivePrompt,
+     ) -> Result<ReadResult, ShellError> {
+         let stdin = std::io::stdin();
+-        let prompt = stdin.is_terminal().then_some(&prompt);
++        // An interactive shell prompts even when its input is not a terminal.
++        let interactive = shell_ref
++            .try_lock()
++            .is_ok_and(|shell| shell.options().interactive);
++        let prompt = (stdin.is_terminal() || interactive).then_some(&prompt);
+ 
+         Self::read_program_from(shell_ref, prompt, &mut stdin.lock(), &mut std::io::stderr())
+     }
+@@ -31,7 +35,9 @@ impl InputBackend for MinimalInputBackend {
+         shell_ref: &crate::ShellRef<impl brush_core::ShellExtensions>,
+         prompt: InteractivePrompt,
+     ) -> Result<ReadResult, ShellError> {
+-        let display_prompt = std::io::stdin().is_terminal();
++        // An interactive shell prompts even when its input is not a terminal.
++        let display_prompt =
++            std::io::stdin().is_terminal() || shell_ref.lock().await.options().interactive;
+         let reader = self
+             .async_stdin
+             .get_or_insert_with(|| tokio::io::BufReader::new(tokio::io::stdin()));
+diff --git a/brush-shell/src/entry.rs b/brush-shell/src/entry.rs
+index 8f947dd..7f76c23 100644
+--- a/brush-shell/src/entry.rs
++++ b/brush-shell/src/entry.rs
+@@ -418,7 +418,13 @@ async fn run_async(
+     // Run with the selected input backend. Each branch instantiates the concrete
+     // backend type and calls `run_in_shell`, preserving static dispatch.
+     let default_backend = get_default_input_backend_type(&args);
+-    let selected_backend = args.input_backend.unwrap_or(default_backend);
++    // Reedline needs a terminal; without one, read as the minimal backend does.
++    let selected_backend = match args.input_backend {
++        Some(InputBackendType::Reedline) if !std::io::stdin().is_terminal() => {
++            InputBackendType::Minimal
++        }
++        selected => selected.unwrap_or(default_backend),
++    };
+ 
+     // Build UI options by merging config file with CLI args.
+     #[allow(unused_variables, reason = "not used when no backend features enabled")]
+@@ -488,6 +494,33 @@ async fn run_in_shell(
+     let read_commands_from_stdin = args.will_read_commands_from_stdin();
+     let interactive_options: brush_interactive::InteractiveOptions = ui_options.into();
+ 
++    // Like Bash, an interactive shell without a terminal (standard error is not
++    // one and there is no controlling terminal) says so and runs without job
++    // control.
++    #[cfg(unix)]
++    {
++        let mut shell = shell_ref.lock().await;
++        if shell.options().interactive
++            && !std::io::stderr().is_terminal()
++            && std::fs::OpenOptions::new()
++                .read(true)
++                .write(true)
++                .open("/dev/tty")
++                .is_err()
++        {
++            shell.options_mut().enable_job_control = false;
++            let name = shell.current_shell_name().unwrap_or_default().into_owned();
++            let name = name.rsplit('/').next().unwrap_or_default();
++            let _ = std::io::Write::write_fmt(
++                &mut shell.stderr(),
++                format_args!(
++                    "{name}: cannot set terminal process group (-1): Inappropriate ioctl for device\n\
++                 {name}: no job control in this shell\n"
++                ),
++            );
++        }
++    }
++
+     // Load profile and rc files as appropriate.
+     initialize_shell(shell_ref, &args).await?;
+     bundled::notify_initialized();

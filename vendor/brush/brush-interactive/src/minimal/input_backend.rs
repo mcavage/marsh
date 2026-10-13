@@ -21,7 +21,11 @@ impl InputBackend for MinimalInputBackend {
         prompt: InteractivePrompt,
     ) -> Result<ReadResult, ShellError> {
         let stdin = std::io::stdin();
-        let prompt = stdin.is_terminal().then_some(&prompt);
+        // An interactive shell prompts even when its input is not a terminal.
+        let interactive = shell_ref
+            .try_lock()
+            .is_ok_and(|shell| shell.options().interactive);
+        let prompt = (stdin.is_terminal() || interactive).then_some(&prompt);
 
         Self::read_program_from(shell_ref, prompt, &mut stdin.lock(), &mut std::io::stderr())
     }
@@ -31,7 +35,9 @@ impl InputBackend for MinimalInputBackend {
         shell_ref: &crate::ShellRef<impl brush_core::ShellExtensions>,
         prompt: InteractivePrompt,
     ) -> Result<ReadResult, ShellError> {
-        let display_prompt = std::io::stdin().is_terminal();
+        // An interactive shell prompts even when its input is not a terminal.
+        let display_prompt =
+            std::io::stdin().is_terminal() || shell_ref.lock().await.options().interactive;
         let reader = self
             .async_stdin
             .get_or_insert_with(|| tokio::io::BufReader::new(tokio::io::stdin()));
