@@ -27,7 +27,8 @@ class DryRun(unittest.TestCase):
 
     def dry_run(self, plan: dict) -> dict:
         (self.tmp / "plan.json").write_text(json.dumps(plan))
-        env = dict(os.environ, FAKEMARSH_STATE=str(self.tmp / "state"), FAKEMARSH_PLAN=str(self.tmp / "plan.json"))
+        env = dict(os.environ, FAKEMARSH_STATE=str(self.tmp / "state"), FAKEMARSH_PLAN=str(self.tmp / "plan.json"),
+                   FAKEMARSH_STDIN_LOG=str(self.tmp / "judge-input"))
         out = self.tmp / "out"
         done = subprocess.run([sys.executable, "-W", "error", str(HERE / "run.py"),
                                "--config", str(HERE / "config.example.json"), "--tasks", str(HERE / "fixtures"),
@@ -37,12 +38,16 @@ class DryRun(unittest.TestCase):
         return json.loads((out / "toy-slugify.rep0.json").read_text())
 
     def test_arms_are_scored_on_hidden_tests_not_the_gate(self) -> None:
+        config = json.loads((HERE / "config.example.json").read_text())
+        labels = run.race_labels(config, "toy-slugify", 0)
+        codex_label = next(label for label, agent in labels.items() if agent == "codex")
         record = self.dry_run({
-            "claude@claude": [{"do": "apply", "patch": str(TASK / "overfit.patch")}],
-            "codex@codex": [{"do": "apply", "patch": str(TASK / "solution.patch")}],
+            **{f"claude@{label}": [{"do": "apply", "patch": str(TASK / "overfit.patch")}] for label in "ab"},
+            **{f"codex@{label}": [{"do": "apply", "patch": str(TASK / "solution.patch")}] for label in "ab"},
             "claude@retry": [{"do": "say", "text": "looked"}, {"do": "apply", "patch": str(TASK / "solution.patch")}],
-            "pi": [{"do": "say", "text": "codex\nmore general"}],
+            "pi": [{"do": "say", "text": f"{codex_label}\nmore general"}],
         })
+        self.assertEqual(record["race_labels"], labels)
         arms = record["arms"]
         # The overfit patch passes the visible gate and fails the hidden tests.
         self.assertTrue(arms["a_claude"]["gate_pass"])
@@ -51,11 +56,16 @@ class DryRun(unittest.TestCase):
         self.assertEqual(arms["b_retry"]["attempts"], 2)
         self.assertTrue(arms["b_retry"]["hidden_pass"])
         self.assertTrue(record["judge"]["invoked"])
-        self.assertEqual(record["judge"]["pick"], "codex")
+        self.assertEqual(record["judge"]["pick"], codex_label)
         self.assertTrue(arms["d_judge"]["hidden_pass"])
         self.assertEqual(record["branches"]["claude"]["files"], ["M\tslug.py"])
         self.assertEqual(record["branches"]["codex"]["touched_tests"], [])
         self.assertGreater(arms["c_race"]["cost_usd"], arms["a_claude"]["cost_usd"])
+        # The judge's input names neither agent: markers and agent output
+        # go to stderr, which join hides for passing branches.
+        judged = (pathlib.Path(self.tmp) / "judge-input").read_text()
+        self.assertNotIn("claude", judged)
+        self.assertNotIn("codex", judged)
 
     def test_no_passing_branch_skips_the_judge_and_exhausts_retries(self) -> None:
         record = self.dry_run({"claude": [{"do": "say", "text": "nothing"}],
@@ -77,6 +87,39 @@ class DryRun(unittest.TestCase):
         self.assertTrue(claude["gate_pass"])
         self.assertFalse(claude["hidden_pass"])
         self.assertEqual(record["branches"]["claude"]["touched_tests"], ["tests/test_gate.py"])
+
+
+class BudgetCap(unittest.TestCase):
+    """The runner launches a run only if the spend so far plus the worst case
+    for one more run (reserve_per_run_usd) stays within budget_usd."""
+
+    def attempt(self, spent: float) -> tuple[int, list[str]]:
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="marsh-bench-cap-"))
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(tmp)])
+        out = tmp / "out"
+        out.mkdir()
+        (out / "earlier.rep0.json").write_text(json.dumps(
+            {"branches": {"claude": {"cost_usd": spent}}, "judge": {"invoked": False}}))
+        (tmp / "plan.json").write_text(json.dumps({}))
+        env = dict(os.environ, FAKEMARSH_STATE=str(tmp / "state"), FAKEMARSH_PLAN=str(tmp / "plan.json"))
+        done = subprocess.run([sys.executable, "-W", "error", str(HERE / "run.py"),
+                               "--config", str(HERE / "config.example.json"), "--tasks", str(HERE / "fixtures"),
+                               "--out", str(out), "--marsh", str(FAKE), "--reps", "1"],
+                              env=env, capture_output=True, text=True, timeout=120)
+        return done.returncode, sorted(p.name for p in out.glob("*.rep*.json"))
+
+    def test_refuses_a_run_it_cannot_afford_in_the_worst_case(self) -> None:
+        config = json.loads((HERE / "config.example.json").read_text())
+        just_over = config["budget_usd"] - config["reserve_per_run_usd"] + 0.01
+        code, records = self.attempt(just_over)
+        self.assertEqual(code, 3)
+        self.assertEqual(records, ["earlier.rep0.json"])
+
+    def test_launches_a_run_it_can_afford(self) -> None:
+        config = json.loads((HERE / "config.example.json").read_text())
+        code, records = self.attempt(config["budget_usd"] - config["reserve_per_run_usd"] - 0.5)
+        self.assertEqual(code, 0)
+        self.assertEqual(records, ["earlier.rep0.json", "toy-slugify.rep0.json"])
 
 
 class FakeAgentPlan(unittest.TestCase):
@@ -110,7 +153,10 @@ class Parsing(unittest.TestCase):
     def test_estimate_fits_the_budget_in_expectation(self) -> None:
         config = json.loads((HERE / "config.example.json").read_text())
         estimate = run.estimate(config, 16, 2)
-        self.assertLess(estimate["expected_total_usd"] + estimate["calibration_usd"], config["budget_usd"])
+        self.assertLess(estimate["expected_total_usd"], config["budget_usd"])
+        # The reserve the runner holds back covers a run whose every agent
+        # call runs to the timeout at the highest calibrated spend rate.
+        self.assertTrue(estimate["reserve_covers_worst_case"])
 
 
 class Scoring(unittest.TestCase):

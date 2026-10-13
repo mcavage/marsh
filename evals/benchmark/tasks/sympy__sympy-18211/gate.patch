@@ -1,0 +1,16 @@
+diff --git a/test_eval_gate.py b/test_eval_gate.py
+new file mode 100644
+index 0000000..4ed9469
+--- /dev/null
++++ b/test_eval_gate.py
+@@ -0,0 +1,10 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from sympy import Eq, S, Symbol, cos, sin
++from sympy.sets.conditionset import ConditionSet
++
++n = Symbol("n")
++
++
++def test_as_set_returns_a_conditionset_instead_of_raising():
++    eq = Eq(n*cos(n) - 3*sin(n), 0)
++    assert eq.as_set() == ConditionSet(n, eq, S.Reals)

@@ -1,0 +1,21 @@
+diff --git a/tests/xor_lookups/test_eval_gate.py b/tests/xor_lookups/test_eval_gate.py
+new file mode 100644
+index 0000000..a6f6175
+--- /dev/null
++++ b/tests/xor_lookups/test_eval_gate.py
+@@ -0,0 +1,15 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from functools import reduce
++from operator import xor
++
++from django.db.models import Q
++from django.test import TestCase
++
++from .models import Number
++
++
++class XorParityTests(TestCase):
++    def test_xor_of_more_than_two_terms_is_parity(self):
++        number = Number.objects.create(num=37)
++        counts = [Number.objects.filter(reduce(xor, [Q(pk=number.pk)] * k)).count() for k in range(1, 6)]
++        self.assertEqual(counts, [1, 0, 1, 0, 1])

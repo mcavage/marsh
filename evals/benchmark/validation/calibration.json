@@ -1,0 +1,922 @@
+{
+  "note": "Calibration runs are not analysed. The first 3 ran on g871a6bf, where Claude's `git stash`/`git stash pop` made capture reject its branch (admin AUTO_MERGE); fixed in #76 and rerun on g854e312.",
+  "summary": {
+    "runs": 7,
+    "claude_attempt_usd": {
+      "min": 0.0295,
+      "mean": 0.0572,
+      "max": 0.1085
+    },
+    "codex_attempt_usd": {
+      "min": 0.0503,
+      "mean": 0.0623,
+      "max": 0.086
+    },
+    "max_usd_per_agent_second": 0.0037,
+    "first_attempt_gate_failures": 0,
+    "per_run_usd_mean": 0.186,
+    "race_wall_s": {
+      "min": 19.6,
+      "max": 68.7
+    },
+    "retry_wall_s": {
+      "min": 10.0,
+      "max": 60.9
+    },
+    "end_to_end_s_per_run": "about 75 (3 runs in 3m38s; 4 runs in 5m17s, including hidden scoring)",
+    "total_usd": 1.3
+  },
+  "runs": [
+    {
+      "task": "django__django-16901",
+      "marsh": "marsh 0.1.4-nightly.20261013155429.g871a6bf",
+      "race_wall_s": 24.4,
+      "retry_wall_s": 22.5,
+      "judge": {
+        "invoked": true,
+        "pick": "a",
+        "cost_usd": 0.012388,
+        "wall_s": 12.414498805999756
+      },
+      "branches": {
+        "claude": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tdjango/db/models/sql/where.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 22,
+              "cost_usd": 0.0462,
+              "usage": {
+                "cache_write": 9052,
+                "cached": 83671,
+                "input": 10,
+                "output": 1519,
+                "reported_cost_usd": 0.04620709999999999
+              }
+            }
+          ]
+        },
+        "codex": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tdjango/db/models/sql/where.py"
+          ],
+          "attempts": [
+            {
+              "agent": "codex",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 16,
+              "cost_usd": 0.0503,
+              "usage": {
+                "cache_write": 16226,
+                "cached": 44509,
+                "input": 12,
+                "output": 528,
+                "reported_cost_usd": null
+              }
+            }
+          ]
+        },
+        "retry": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tdjango/db/models/sql/where.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 19,
+              "cost_usd": 0.0417,
+              "usage": {
+                "cache_write": 8728,
+                "cached": 83511,
+                "input": 10,
+                "output": 1154,
+                "reported_cost_usd": 0.0417311
+              }
+            }
+          ]
+        }
+      },
+      "arms": {
+        "a_claude": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0462,
+          "wall_s": 22
+        },
+        "a_codex": {
+          "label": "codex",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0503,
+          "wall_s": 17
+        },
+        "b_retry": {
+          "label": "retry",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0417,
+          "wall_s": 20
+        },
+        "c_race": {
+          "label": "codex",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0965,
+          "wall_s": 24.4
+        },
+        "d_judge": {
+          "label": "codex",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.1089,
+          "wall_s": 36.8
+        },
+        "e_fallback": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0462,
+          "wall_s": 22
+        }
+      }
+    },
+    {
+      "task": "selfmade__tomlkit-599",
+      "marsh": "marsh 0.1.4-nightly.20261013155429.g871a6bf",
+      "race_wall_s": 21.4,
+      "retry_wall_s": 10.0,
+      "judge": {
+        "invoked": true,
+        "pick": "a",
+        "cost_usd": 0.007328,
+        "wall_s": 7.179569721221924
+      },
+      "branches": {
+        "claude": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\ttomlkit/items.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 15,
+              "cost_usd": 0.0328,
+              "usage": {
+                "cache_write": 8741,
+                "cached": 46707,
+                "input": 6,
+                "output": 631,
+                "reported_cost_usd": 0.032845200000000005
+              }
+            }
+          ]
+        },
+        "codex": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\ttomlkit/items.py"
+          ],
+          "attempts": [
+            {
+              "agent": "codex",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 20,
+              "cost_usd": 0.0561,
+              "usage": {
+                "cache_write": 17247,
+                "cached": 77292,
+                "input": 18,
+                "output": 519,
+                "reported_cost_usd": null
+              }
+            }
+          ]
+        },
+        "retry": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\ttomlkit/items.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 9,
+              "cost_usd": 0.0333,
+              "usage": {
+                "cache_write": 8753,
+                "cached": 46715,
+                "input": 6,
+                "output": 669,
+                "reported_cost_usd": 0.033256
+              }
+            }
+          ]
+        }
+      },
+      "arms": {
+        "a_claude": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0328,
+          "wall_s": 16
+        },
+        "a_codex": {
+          "label": "codex",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0561,
+          "wall_s": 20
+        },
+        "b_retry": {
+          "label": "retry",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0333,
+          "wall_s": 10
+        },
+        "c_race": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0889,
+          "wall_s": 21.4
+        },
+        "d_judge": {
+          "label": "codex",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0962,
+          "wall_s": 28.6
+        },
+        "e_fallback": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0328,
+          "wall_s": 16
+        }
+      }
+    },
+    {
+      "task": "sympy__sympy-15017",
+      "marsh": "marsh 0.1.4-nightly.20261013155429.g871a6bf",
+      "race_wall_s": 60.9,
+      "retry_wall_s": 55.0,
+      "judge": {
+        "invoked": true,
+        "pick": "b",
+        "cost_usd": 0.010624,
+        "wall_s": 17.08174204826355
+      },
+      "branches": {
+        "claude": {
+          "status": "rejected: admin AUTO_MERGE is not allowed",
+          "gate_passed": true,
+          "files": [],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 59,
+              "cost_usd": 0.1085,
+              "usage": {
+                "cache_write": 17321,
+                "cached": 328604,
+                "input": 30,
+                "output": 3225,
+                "reported_cost_usd": 0.10847290000000001
+              }
+            }
+          ]
+        },
+        "codex": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tsympy/tensor/array/ndim_array.py"
+          ],
+          "attempts": [
+            {
+              "agent": "codex",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 27,
+              "cost_usd": 0.0603,
+              "usage": {
+                "cache_write": 18412,
+                "cached": 78842,
+                "input": 18,
+                "output": 631,
+                "reported_cost_usd": null
+              }
+            }
+          ]
+        },
+        "retry": {
+          "status": "rejected: admin AUTO_MERGE is not allowed",
+          "gate_passed": true,
+          "files": [],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 54,
+              "cost_usd": 0.0989,
+              "usage": {
+                "cache_write": 16242,
+                "cached": 275865,
+                "input": 26,
+                "output": 3069,
+                "reported_cost_usd": 0.09893350000000001
+              }
+            }
+          ]
+        }
+      },
+      "arms": {
+        "a_claude": {
+          "label": "claude",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.1085,
+          "wall_s": 59
+        },
+        "a_codex": {
+          "label": "codex",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.0603,
+          "wall_s": 28
+        },
+        "b_retry": {
+          "label": "retry",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.0989,
+          "wall_s": 55
+        },
+        "c_race": {
+          "label": "codex",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.1687,
+          "wall_s": 60.9
+        },
+        "d_judge": {
+          "label": "codex",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.1794,
+          "wall_s": 78.0
+        },
+        "e_fallback": {
+          "label": "claude",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.1085,
+          "wall_s": 59
+        }
+      }
+    },
+    {
+      "task": "django__django-17087",
+      "marsh": "marsh 0.1.4-nightly.20261013173603.g854e312",
+      "race_wall_s": 19.6,
+      "retry_wall_s": 16.1,
+      "judge": {
+        "invoked": true,
+        "pick": "a",
+        "cost_usd": 0.007292,
+        "wall_s": 6.36941123008728
+      },
+      "branches": {
+        "claude": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tdjango/db/migrations/serializer.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 14,
+              "cost_usd": 0.0346,
+              "usage": {
+                "cache_write": 8385,
+                "cached": 64638,
+                "input": 8,
+                "output": 713,
+                "reported_cost_usd": 0.0345723
+              }
+            }
+          ]
+        },
+        "codex": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tdjango/db/migrations/serializer.py"
+          ],
+          "attempts": [
+            {
+              "agent": "codex",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 17,
+              "cost_usd": 0.0508,
+              "usage": {
+                "cache_write": 16037,
+                "cached": 60059,
+                "input": 15,
+                "output": 464,
+                "reported_cost_usd": null
+              }
+            }
+          ]
+        },
+        "retry": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tdjango/db/migrations/serializer.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 13,
+              "cost_usd": 0.0315,
+              "usage": {
+                "cache_write": 8021,
+                "cached": 64528,
+                "input": 8,
+                "output": 499,
+                "reported_cost_usd": 0.031511300000000006
+              }
+            }
+          ]
+        }
+      },
+      "arms": {
+        "a_claude": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0346,
+          "wall_s": 15
+        },
+        "a_codex": {
+          "label": "codex",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0508,
+          "wall_s": 18
+        },
+        "b_retry": {
+          "label": "retry",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0315,
+          "wall_s": 14
+        },
+        "c_race": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0853,
+          "wall_s": 19.6
+        },
+        "d_judge": {
+          "label": "codex",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0926,
+          "wall_s": 26.0
+        },
+        "e_fallback": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0346,
+          "wall_s": 15
+        }
+      }
+    },
+    {
+      "task": "selfmade__packaging-1430",
+      "marsh": "marsh 0.1.4-nightly.20261013173603.g854e312",
+      "race_wall_s": 68.7,
+      "retry_wall_s": 60.9,
+      "judge": {
+        "invoked": true,
+        "pick": "a",
+        "cost_usd": 0.006436,
+        "wall_s": 26.01352071762085
+      },
+      "branches": {
+        "claude": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tsrc/packaging/specifiers.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 63,
+              "cost_usd": 0.0751,
+              "usage": {
+                "cache_write": 21562,
+                "cached": 98346,
+                "input": 12,
+                "output": 1129,
+                "reported_cost_usd": 0.0750536
+              }
+            }
+          ]
+        },
+        "codex": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tsrc/packaging/specifiers.py"
+          ],
+          "attempts": [
+            {
+              "agent": "codex",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 67,
+              "cost_usd": 0.0671,
+              "usage": {
+                "cache_write": 20798,
+                "cached": 85971,
+                "input": 18,
+                "output": 647,
+                "reported_cost_usd": null
+              }
+            }
+          ]
+        },
+        "retry": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tsrc/packaging/specifiers.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 60,
+              "cost_usd": 0.0866,
+              "usage": {
+                "cache_write": 23088,
+                "cached": 143993,
+                "input": 16,
+                "output": 1441,
+                "reported_cost_usd": 0.0865613
+              }
+            }
+          ]
+        }
+      },
+      "arms": {
+        "a_claude": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0751,
+          "wall_s": 64
+        },
+        "a_codex": {
+          "label": "codex",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0671,
+          "wall_s": 67
+        },
+        "b_retry": {
+          "label": "retry",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0866,
+          "wall_s": 60
+        },
+        "c_race": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.1422,
+          "wall_s": 68.7
+        },
+        "d_judge": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.1486,
+          "wall_s": 94.8
+        },
+        "e_fallback": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0751,
+          "wall_s": 64
+        }
+      }
+    },
+    {
+      "task": "sympy__sympy-15017",
+      "marsh": "marsh 0.1.4-nightly.20261013173603.g854e312",
+      "race_wall_s": 22.1,
+      "retry_wall_s": 18.3,
+      "judge": {
+        "invoked": true,
+        "pick": "a",
+        "cost_usd": 0.0086,
+        "wall_s": 10.128053903579712
+      },
+      "branches": {
+        "claude": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tsympy/tensor/array/dense_ndim_array.py",
+            "M\tsympy/tensor/array/sparse_ndim_array.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 9,
+              "cost_usd": 0.0295,
+              "usage": {
+                "cache_write": 8178,
+                "cached": 46414,
+                "input": 6,
+                "output": 439,
+                "reported_cost_usd": 0.029488399999999998
+              }
+            }
+          ]
+        },
+        "codex": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tsympy/tensor/array/ndim_array.py"
+          ],
+          "attempts": [
+            {
+              "agent": "codex",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 20,
+              "cost_usd": 0.0656,
+              "usage": {
+                "cache_write": 20480,
+                "cached": 85705,
+                "input": 18,
+                "output": 577,
+                "reported_cost_usd": null
+              }
+            }
+          ]
+        },
+        "retry": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tsympy/tensor/array/dense_ndim_array.py",
+            "M\tsympy/tensor/array/sparse_ndim_array.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 16,
+              "cost_usd": 0.0387,
+              "usage": {
+                "cache_write": 9359,
+                "cached": 84183,
+                "input": 10,
+                "output": 683,
+                "reported_cost_usd": 0.0386658
+              }
+            }
+          ]
+        }
+      },
+      "arms": {
+        "a_claude": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0295,
+          "wall_s": 10
+        },
+        "a_codex": {
+          "label": "codex",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.0656,
+          "wall_s": 21
+        },
+        "b_retry": {
+          "label": "retry",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0387,
+          "wall_s": 17
+        },
+        "c_race": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0951,
+          "wall_s": 22.1
+        },
+        "d_judge": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.1037,
+          "wall_s": 32.2
+        },
+        "e_fallback": {
+          "label": "claude",
+          "hidden_pass": true,
+          "gate_pass": true,
+          "cost_usd": 0.0295,
+          "wall_s": 10
+        }
+      }
+    },
+    {
+      "task": "sympy__sympy-20438",
+      "marsh": "marsh 0.1.4-nightly.20261013173603.g854e312",
+      "race_wall_s": 48.0,
+      "retry_wall_s": 31.7,
+      "judge": {
+        "invoked": true,
+        "pick": "a",
+        "cost_usd": 0.013056,
+        "wall_s": 20.072412252426147
+      },
+      "branches": {
+        "claude": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tsympy/sets/handlers/comparison.py",
+            "M\tsympy/sets/handlers/issubset.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 46,
+              "cost_usd": 0.0818,
+              "usage": {
+                "cache_write": 14827,
+                "cached": 204893,
+                "input": 20,
+                "output": 2422,
+                "reported_cost_usd": 0.0818168
+              }
+            }
+          ]
+        },
+        "codex": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tsympy/sets/handlers/comparison.py",
+            "M\tsympy/sets/handlers/issubset.py",
+            "M\tsympy/sets/sets.py"
+          ],
+          "attempts": [
+            {
+              "agent": "codex",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 31,
+              "cost_usd": 0.086,
+              "usage": {
+                "cache_write": 24112,
+                "cached": 133520,
+                "input": 24,
+                "output": 1235,
+                "reported_cost_usd": null
+              }
+            }
+          ]
+        },
+        "retry": {
+          "status": "exited 0",
+          "gate_passed": true,
+          "files": [
+            "M\tsympy/core/relational.py",
+            "M\tsympy/sets/handlers/issubset.py"
+          ],
+          "attempts": [
+            {
+              "agent": "claude",
+              "exit": 0,
+              "gate": 0,
+              "agent_s": 30,
+              "cost_usd": 0.061,
+              "usage": {
+                "cache_write": 12208,
+                "cached": 132096,
+                "input": 14,
+                "output": 1725,
+                "reported_cost_usd": 0.0610076
+              }
+            }
+          ]
+        }
+      },
+      "arms": {
+        "a_claude": {
+          "label": "claude",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.0818,
+          "wall_s": 47
+        },
+        "a_codex": {
+          "label": "codex",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.086,
+          "wall_s": 33
+        },
+        "b_retry": {
+          "label": "retry",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.061,
+          "wall_s": 31
+        },
+        "c_race": {
+          "label": "codex",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.1678,
+          "wall_s": 48.0
+        },
+        "d_judge": {
+          "label": "codex",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.1809,
+          "wall_s": 68.0
+        },
+        "e_fallback": {
+          "label": "claude",
+          "hidden_pass": false,
+          "gate_pass": true,
+          "cost_usd": 0.0818,
+          "wall_s": 47
+        }
+      }
+    }
+  ]
+}

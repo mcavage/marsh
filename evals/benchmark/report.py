@@ -139,6 +139,9 @@ def summarize(records: list[dict[str, Any]], baseline: str) -> dict[str, Any]:
     out["judge"] = {
         "invoked": len(judged),
         "unparseable": sum(1 for r in judged if r["judge"].get("pick") is None),
+        # The judge is blind (branches a/b), but may still favour a style.
+        "picked_claude": sum(1 for r in judged if r["judge"].get("pick") and r["arms"]["d_judge"]["label"] == "claude"),
+        "picked_codex": sum(1 for r in judged if r["judge"].get("pick") and r["arms"]["d_judge"]["label"] == "codex"),
         # Runs where both race patches passed the gate but exactly one passed
         # the hidden tests: the only runs where the pick can matter.
         "decisive": sum(1 for r in judged
@@ -184,7 +187,8 @@ def markdown(summary: dict[str, Any], baseline: str) -> str:
     j = summary["judge"]
     lines += ["", "p-values are task-level paired sign-flip tests; with few tasks, read the CIs and the "
               "task counts, not significance.", "",
-              f"Judge: invoked {j['invoked']}, unparseable {j['unparseable']}, decisive {j['decisive']}, "
+              f"Judge: invoked {j['invoked']}, unparseable {j['unparseable']}, picked Claude {j['picked_claude']}, "
+              f"picked Codex {j['picked_codex']}, decisive {j['decisive']}, "
               f"decisive and correct {j['decisive_correct']}.", "",
               f"Branches that touched test files: {summary['touched_tests']}. Spend: ${summary['spend_usd']:.2f}.", ""]
     return "\n".join(lines)

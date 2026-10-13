@@ -1,7 +1,9 @@
 # Benchmark pilot: does a marsh workflow fix more bugs?
 
-Status: designed and dry-run against `evals/common/fakemarsh.py`. Not yet run
-against real agents.
+Status: 16 tasks gated and validated in the shell Kit
+([validation/](validation/)), and a calibration run with real agents done
+([validation/calibration.json](validation/calibration.json)). The full pilot
+has not been run; see "Running it".
 
 ## Question
 
@@ -17,8 +19,8 @@ below) separates what parallelism buys from what a second vendor buys.
 |---|---|---|
 | `a_claude`, `a_codex` | one attempt by one agent | one branch: `AGENT && GATE` |
 | `b_retry` | one agent; if the gate fails, try again with its output, up to N=3 | one branch: a loop of `claude -p "$P$FEEDBACK"; GATE` |
-| `c_race` | Claude and Codex at once on private forks, each gated; first passing branch wins | `marsh split -n -b claude='claude … && GATE' -b codex='codex exec … && GATE' \| marsh join --keep` ([race guide](../../docs/guides/race-two-agents.md)) |
-| `d_judge` | the same race; when both pass, a third agent picks | `… \| marsh join --keep \| pi -p "choose …"` ([judge guide](../../docs/guides/add-a-judge.md)) |
+| `c_race` | Claude and Codex at once on private forks, each gated; first passing branch wins | `marsh split -n -b a='claude … && GATE' -b b='codex exec … && GATE' \| marsh join --keep` ([race guide](../../docs/guides/race-two-agents.md)) |
+| `d_judge` | the same race; when both pass, a judge agent picks | `… \| marsh join --keep \| pi -p "choose a or b …"` ([judge guide](../../docs/guides/add-a-judge.md)) |
 | `e_fallback` (derived) | Claude; Codex only if Claude's gate failed | computed from the race's draws: same outcomes, sequential time, Codex billed only when needed |
 
 GATE is a visible check that reproduces the bug (the "failing test you have"
@@ -27,46 +29,83 @@ only at scoring time in a separate checkout.
 
 ## Tasks
 
-16 tasks: 12 from SWE-bench Verified and 4 self-made.
+16 tasks: 12 from SWE-bench Verified (9 `sympy/sympy`, 3 `django/django`)
+and 4 self-made (more-itertools, tomlkit, packaging, tenacity). The list, and
+every candidate that was skipped with its reason, is in
+[validation/selection.json](validation/selection.json).
 
-- **SWE-bench Verified, `sympy/sympy` and `pytest-dev/pytest` only.** Both are
-  pure Python and need no compiled extensions or network, so they run in
-  marsh's Debian arm64 shell VM after one `apt-get`/`pip` setup. The hidden
-  tests are the dataset's `test_patch` (FAIL_TO_PASS and PASS_TO_PASS), so
-  scoring follows established methodology and the tasks were screened by human
-  annotators for solvability. Eligible: difficulty "<15 min" or "15 min–1 h",
-  at most 5 FAIL_TO_PASS tests (82 instances on 2026-10-12).
-  `curate_swebench.py pool` prints them in a seeded order. The curator takes
-  them in that order and skips, with a recorded reason, any that fail
-  `curate_swebench.py validate`. That stops anyone hand-picking easy or
-  marsh-friendly tasks. Require at least 3 pytest tasks.
-- **4 self-made tasks** from bug-fix commits merged after the newest model's
-  training cutoff, in small pure-Python repositories, in the same format.
-  SWE-bench is likely in the training data, and memorization can differ by
-  model, so it can shift the differences between arms too (a race wins
-  whenever either model remembers the fix). Report SWE-bench and self-made
-  results separately. Four tasks are a sensitivity check, not proof of
-  robustness.
+**Test environment.** The agent Kits and the shell Kit are minimal DHI images
+with Debian's Python **3.13.5**, but no pip, venv, or package manager. The shell
+VM itself has Python 3.14. So the gate and the hidden tests run where the
+agents do: the config's `test_runner` is `shell -c {cmd}`, the shell Kit,
+whose `python3` is the same Debian build as the agent Kits'. Each task's
+pure-Python test dependencies are pinned with hashes in `task.json` (`env.deps`,
+`py3-none-any` wheels only). `run.py` downloads them once (`pip download
+--require-hashes`) and unpacks them into `.eval-deps/` in the task repository,
+in an `eval: test environment` commit. Every command then uses
+`PYTHONPATH=.eval-deps` (plus `src` or `.` where the project needs it). The
+same files are therefore importable by the agents in their containers, by the
+gate, and by the hidden run, with no network access and no install step. Old
+sympy imports `distutils`, which was removed in 3.12. setuptools' shim provides
+it: `.eval-deps/sitecustomize.py` runs `site.addsitedir` so that setuptools'
+`.pth` file is honoured. That file is generated with the deps.
+
+- **SWE-bench Verified.** Eligible: sympy and pytest instances at difficulty
+  "<15 min" or "15 min–1 h" with at most 5 FAIL_TO_PASS tests (82 instances),
+  and the same filter on Django 5.0 (21). `curate_swebench.py pool` prints
+  them in a seeded order (seed 20261012). The curator took them in that order
+  and skipped any that failed validation, recording the reason:
+  - **sympy:** the first 9 that validate. The 6 skipped on the way are
+    sympy 1.0–1.1, which do not import on Python 3.13 (`collections.Mapping`).
+  - **pytest-dev/pytest: dropped.** Every eligible base predates Python 3.10
+    support. pytest's assertion rewriting fails to compile on 3.13 (`required
+    field "lineno" missing from alias`), and fixing that would mean patching
+    the code under test. **Django 5.0 replaces it** as the second repository:
+    it is pure Python (asgiref and sqlparse as deps), and its runner's verbose
+    log is parsed SWE-bench's way (`format: unittest-verbose`). The first 3
+    validated, and none were skipped. Later Django candidates that need Pillow
+    or Jinja2 (not pure Python) fail validation because their FAIL_TO_PASS
+    tests are skipped.
+- **4 self-made tasks** from bug-fix commits merged **after 2026-09-29**, the
+  release date of the newest model in the pilot (so after every model's
+  training cutoff). Each comes from a different small pure-Python repository,
+  and `curate_swebench.py self-made` builds it. The base is the fix's parent;
+  `hidden.patch` is the commit's test changes and `gold.patch` the rest. The
+  FAIL_TO_PASS and PASS_TO_PASS lists are computed the way SWE-bench defines
+  them, by running the hidden test files at the base and with gold on Python
+  3.13, then frozen. The problem statement (`issue.md`) is written from the
+  observed behaviour at the base, not from the fix. SWE-bench is likely in the
+  training data, and memorization can differ by model, so it can shift the
+  differences between arms too (a race wins whenever either model remembers
+  the fix). Report SWE-bench and self-made results separately. Four tasks are
+  a sensitivity check, not proof of robustness.
 - Why not the stock SWE-bench harness: it is per-instance x86 Docker images
   scored outside the workflow, and the point here is the workflow inside
   marsh. Why not Terminal-Bench: its tasks are terminal chores with their own
   container harness, not "fix this bug with these agents", so its numbers are
   not comparable.
 
-Selection is published: the full eligible pool, the seed, every skipped
-instance with its reason, and each gate, all frozen and reviewed by a second
-person before any agent runs. Gate rubric: the gate reproduces the issue's
-own example; it does not copy, paraphrase, or import the hidden tests; it
-fails at base and passes with gold; and it runs in under a minute.
+**Gates.** Each task has a visible gate: `gate.patch` adds one test file
+(`test_eval_gate.py`; for Django, `tests/<app>/test_eval_gate.py`), and
+`gate.cmd` runs only that file. Both are committed to the base as `eval:
+visible gate`. Gate rubric:
 
-Each task directory holds `task.json`, `gate.patch` (the visible check,
-committed to the base as `eval: visible gate`), `hidden.patch`, and for
-SWE-bench `gold.patch`. The curator writes each gate from the issue's own
-reproduction, not from the hidden tests. Validation, run in the shell VM with no
-agent, requires four things: the gate fails at base, the gate passes with gold,
-hidden fails at base, and hidden passes with gold. Scoring deviates from
-SWE-bench in one way: it runs whole hidden test files rather than parsing
-per-test logs. That is stricter, and validation shows the files pass with gold.
+- It encodes the issue's own example, with the outcome the maintainers chose
+  (where the issue only guesses, as in sympy-20801).
+- Often upstream turned the same example into a hidden test, so some overlap
+  is unavoidable. The gate never covers the hidden tests' other cases or the
+  PASS_TO_PASS regressions.
+- It fails at the base, passes with gold, and runs in seconds.
+
+The gate is the "failing test you have"; the hidden tests check that the fix
+is general and breaks nothing.
+
+**Validation** runs in the shell Kit with no agent
+(`curate_swebench.py validate`). It checks SWE-bench's own conditions (at the
+base every FAIL_TO_PASS test fails and every PASS_TO_PASS test passes; with
+gold all pass) and the gate's (fails at the base, passes with gold). All 16 pass
+([validation/kit-validation.json](validation/kit-validation.json), marsh
+0.1.4-nightly.20261013155429.g871a6bf).
 
 The **primary endpoint is SWE-bench's**: every FAIL_TO_PASS test passes and
 no PASS_TO_PASS test fails. These are read per test from pytest's junit XML
@@ -82,8 +121,15 @@ That case and a hidden run with no results are recorded with their reasons
 
 - Claude Code (`claude`, marsh-claude Kit) on `claude-sonnet-5-5`
 - Codex (`codex`, marsh-codex Kit) on `gpt-6.1-sol`
-- Judge: Pi (`pi`, marsh-pi Kit) on `google/gemini-3.8-flash`, a third vendor,
-  so the judge is not grading its own model's style (judge guide advice)
+- Judge: Pi (`pi`, marsh-pi Kit) on `claude-opus-5-5`. The marsh-pi Kit's
+  network and credential grants cover Anthropic only, so a third vendor is not
+  available without a custom Kit. Instead the judge is **blind**: the race's
+  branches are labelled `a` and `b`, assigned to Claude and Codex at random per
+  run from the seed. Each branch writes its markers and the agent's own output
+  to stderr, which `join` hides for a passing branch, and the judge is only
+  asked when both passed. So the judge sees each branch's gate output and
+  patch, but not which agent wrote it. A model's preference for its own
+  style remains possible; report judge picks by agent.
 
 The commands are templates in `config.example.json`. Each Kit's own defaults
 stay untouched (the Kits already skip permission prompts). The runner records
@@ -99,22 +145,28 @@ and the model ids.
    so per-project agent state does not carry over. Real runs use a dedicated
    selected home (`--marsh-home`), so the guest home's agent settings start
    empty and nobody's own configuration leaks in.
-2. Concurrently: the race split (`claude`, `codex`) and the retry split
-   (`retry`). That is three agent jobs, within marsh's limit of 8. Each branch
-   prints `@@eval` marker lines (attempt start and end, agent exit, gate exit,
-   epoch seconds) around the agent's JSON output, so token usage comes from
-   `claude --output-format json` / `codex exec --json`.
+2. Concurrently: the race split (`a`, `b`) and the retry split (`retry`).
+   That is three agent jobs, within marsh's limit of 8, plus a shell-Kit job
+   per gate. Each branch writes `@@eval` marker lines (attempt start and end,
+   agent exit, gate exit, epoch seconds) around the agent's JSON output to its
+   stderr, so token usage comes from `claude --output-format json` /
+   `codex exec --json`.
 3. The gate command is embedded in the branch script, not read from the fork,
    so an agent cannot rewrite which command gates it. An agent can still
    weaken the test file. That is realistic. The hidden checkout restores test
    files, and `touched_tests` records it.
 4. If both race branches passed the gate, the judge reads `join`'s rendering on
-   stdin through `marsh -c`. Branch order in the split, and so in the
-   rendering, is shuffled per run from the seed to cancel position bias.
+   stdin through `marsh -c` (blind, as above). The random a/b assignment also
+   randomizes which agent is rendered first.
 5. Each distinct patch is scored once. Apply it to a clean clone, reset any
    test files the hidden patch touches, apply the hidden patch, and run the
-   hidden command with `marsh -c` in the shell VM.
+   hidden command with `marsh -c` through the shell Kit.
 6. `marsh splits rm`, delete the clones, and write `TASK.repN.json`.
+
+Every project, scoring, and gate directory gets a name that has never been
+used (`fresh_name`). marsh keeps the shell VM's mount of each project path,
+and it refuses a path that was deleted and recreated ("overlaps active
+grant"), so reusing a path, even on a rerun, would fail.
 
 Selection rules, fixed in advance: c = the passing branch whose gate finished
 first, else Claude's patch. d = the judge's pick when both passed (falling
@@ -218,59 +270,86 @@ up with one task.
   contention; compare arms within a run, not against other benchmarks.
 - **Nondeterminism and drift.** Two repetitions estimate within-task variance.
   Record the model ids, Kit refs (`run-meta.json` keeps `marsh status --json`),
-  `marsh --version`, and each task's setup; finish the run within a few days.
+  and `marsh --version`; finish the run within a few days.
 - **Prompt.** One prompt for every arm (issue text plus a fixed instruction
   that names the gate). Retry feedback appends the gate's output tail only.
 
-## Cost model (fits under $100)
+## Cost model (calibrated; fits under $100)
 
-Prices per million tokens (input / cache read / output): Sonnet 5.5
-$2 / $0.10 / $10, GPT-6.1-Sol $2 / $0.10 / $10, Gemini 3.8 Flash $0.75 / $0.075 / $3.75.
-A Claude Code attempt on a SWE-bench-sized fix is about 1M input tokens
-(mostly cache reads), 100k cache writes, and 15k output, roughly **$0.60**.
-A Codex attempt is roughly **$0.50**. A judge call is about **$0.03**.
+**Calibration** (2026-10-13, 7 runs on 6 tasks, $1.30 in total; not analysed;
+[validation/calibration.json](validation/calibration.json)):
+
+| | min | mean | max |
+|---|---|---|---|
+| Claude attempt (Sonnet 5.5, own report) | $0.029 | $0.057 | $0.108 |
+| Codex attempt (GPT-6.1-Sol, tokens × price) | $0.050 | $0.062 | $0.086 |
+| judge (Pi, Opus 5.5, from characters) | | ≈ $0.01 | |
+| race split, wall | 20 s | | 69 s |
+| retry split, wall | 10 s | | 61 s |
+| one run end to end, with hidden scoring | | ≈ 75 s | |
+
+No first attempt failed its gate, and the judge ran in all 7 runs because
+both branches always passed. The hidden tests failed for some arm in 3 runs.
+On sympy-15017, Codex's fix was overfit twice, and on the old nightly Claude's
+branches were also rejected. On sympy-20438, both fixes passed the gate and
+failed the hidden tests. The
+SWE-bench tasks were annotated "<1 h for a human", and they are easy for these
+agents. Expect retry to behave like a single attempt on most tasks, and expect
+arm differences to come mainly from runs where the gate passes but the hidden
+tests fail. That limits the pilot. A confirmatory study needs harder tasks.
+
+**Model** (`config.example.json`, `run.py --estimate`): per-attempt cost twice
+the observed means ($0.12 each), the gate-failure rate kept at a pessimistic
+0.45 (so 1.65 expected retry attempts), and the judge in 90% of runs:
 
 | Item | Per run | × 32 runs (16 tasks × 2) |
 |---|---|---|
-| race: Claude + Codex | $1.10 | $35 |
-| retry: 1.65 expected Claude attempts (assumes each attempt's gate fails with p = 0.45: 1 + 0.45 + 0.45²) | $0.99 | $32 |
-| judge, when both pass (≈35%) | $0.01 | $0.3 |
-| **expected** | **$2.10** | **$67** |
-| calibration: 2 tasks × 1 rep first, then update `cost_model` | | $4–6 |
-| worst case (every retry runs 3 attempts; every attempt costs 1.5× the estimate) | $4.40 | $141 |
+| race: Claude + Codex | $0.24 | $7.7 |
+| retry: 1.65 expected Claude attempts | $0.20 | $6.3 |
+| judge | $0.02 | $0.6 |
+| **expected** | **$0.46** | **$14.6** |
+| at the observed means | $0.19 | $6 |
 
-`run.py --estimate --task-count 16` prints this from `config.example.json`.
-The runner checks spend before each run and stops at **`budget_usd` = $90**.
-Before each run, the runner checks that spend plus `reserve_per_run_usd`
-($4.40, the modelled worst case per run) stays under the cap. That is still not
-a hard ceiling. The agent CLIs have no enforceable dollar limit; the per-agent
-timeout bounds time, not tokens. Calibration replaces the 1.5× worst-case
-assumption with the observed maximum per attempt, and the reserve is raised
-to match. Rep 0 alone costs $34 expected and $70 at the modelled worst case,
-inside the cap. A rep 1 cut short by the cap is reported
-separately from the complete rep 0. Calibration runs are not analysed. Fixed
-rule: if calibration shows attempts costing more than $0.80, drop to 12 tasks
-before starting. Claude's figure is its own report; Codex's is tokens × price
-(cache writes priced as in the table); the judge's is estimated from
-characters. Reconcile with the provider dashboards.
+**Cap.** `budget_usd` is $90. Before each run, the runner checks that spend plus
+`reserve_per_run_usd` stays under the cap. The reserve is $17: the time-bounded
+worst case of one run, in which all five agent calls (2 race + 3 retry) run to
+`agent_timeout_s`, 900 s (13× the longest observed attempt), at the highest
+calibrated rate of $0.0037 per agent-second. So, as long as no agent spends
+faster than calibration saw, no run can take the total past $90. The agent CLIs
+have no enforceable dollar limit, and the timeout bounds time, not tokens.
+`test_benchmark.py` checks that the runner refuses a run it cannot afford
+(and starts one it can) and that the reserve covers the modelled worst case.
+On the real calibration output, a $14.50 cap with $0.74 spent refused the next
+run (exit 3) before any agent started. Claude's figure is its own report;
+Codex's is tokens × price, with cached reads and cache writes priced
+separately; the judge's is estimated from characters. Reconcile with the
+provider dashboards.
 
-## Running it (later; bills real models)
+## Running it (bills real models)
+
+The tasks, gates, and calibrated config are in this directory. The only
+prerequisites are credentials in `sbx secret` (`anthropic`, `openai`) and a
+marsh that includes #76 (0.1.4-nightly.20261013173603.g854e312 or later). From
+a checkout of `main`:
 
 ```sh
-brew install mcavage/tap/marsh && sbx login
-sbx secret set anthropic && sbx secret set openai && sbx secret set google
-cp evals/benchmark/config.example.json evals/benchmark/config.json
+MARSH=/path/to/marsh sh evals/benchmark/start-pilot.sh
+```
+
+It prints the estimate, runs every (task, rep) into `target/bench-pilot/`
+(rerunning resumes), writes `REPORT.md`, and stops its dedicated selected home
+(`~/.marsh-bench`). Run it when no other real-VM suites share the Mac, since
+wall time is a metric.
+
+Curating more tasks:
+
+```sh
 python3 evals/benchmark/curate_swebench.py pool > pool.txt
-python3 evals/benchmark/curate_swebench.py fetch --tasks evals/benchmark/tasks $(head -20 pool.txt)
-# write each gate.patch + gate.cmd + setup, then:
+python3 evals/benchmark/curate_swebench.py fetch --tasks evals/benchmark/tasks ID...
+python3 evals/benchmark/curate_swebench.py self-made --tasks evals/benchmark/tasks --id ID \
+  --repo URL --fix SHA --tests tests/ --prompt issue.md
+# write gate.patch and gate.cmd, then (shell Kit, no agents):
 python3 evals/benchmark/curate_swebench.py validate --tasks evals/benchmark/tasks ID...
-MARSH_HOME=~/.marsh-evals marsh --load claude,codex,pi -c true
-python3 evals/benchmark/run.py --config evals/benchmark/config.json --tasks evals/benchmark/tasks \
-  --out results/pilot --marsh-home ~/.marsh-evals --only ID1 --only ID2 --reps 1   # calibrate
-python3 evals/benchmark/run.py --config evals/benchmark/config.json --tasks evals/benchmark/tasks \
-  --out results/pilot --marsh-home ~/.marsh-evals
-python3 evals/benchmark/report.py results/pilot > results/pilot/REPORT.md
-MARSH_HOME=~/.marsh-evals marsh stop
 ```
 
 Dry run, no VM or credentials (also what `test_benchmark.py` does):

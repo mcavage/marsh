@@ -1,0 +1,14 @@
+diff --git a/test_eval_gate.py b/test_eval_gate.py
+new file mode 100644
+index 0000000..c9cfbde
+--- /dev/null
++++ b/test_eval_gate.py
+@@ -0,0 +1,8 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from sympy import Array
++
++
++def test_len_of_rank_zero_array_counts_its_element():
++    a = Array(3)
++    assert len(a) == 1
++    assert len(a) == len(list(a))

@@ -1,14 +1,14 @@
 ---
 title: MARSH
 section: 1
-date: October 13, 2026
+date: October 7, 2026
 source: marsh
 manual: User Commands
 ---
 
 # NAME
 
-marsh, msh - a Bash-compatible Linux shell for composing agents
+marsh, msh - Bash with split, fanout, join, and collect for running agents in parallel, each command in its own sandbox
 
 # SYNOPSIS
 
@@ -268,12 +268,10 @@ Start a shell in a project:
 Ask two agents for independent fixes in private copies and look at both:
 
     marsh split -n ::: a claude -p 'fix the flaky test' \
-                   ::: b pi -p 'fix the flaky test' | marsh join --keep
+                   ::: b pi -p 'fix the flaky test' | marsh join
 
 **join** prints, for each branch, a header, its output, and a line giving the
-files changed and the path of its **diff.patch**. **--keep** retains the patches
-for inspection and **git apply**; a successful bare **join** removes them.
-After applying a patch, remove the retained split with **marsh splits rm** *ID*.
+files changed and the path of its **diff.patch**. Apply one with **git apply**.
 Sample output: https://runmar.sh/docs/split.html.
 
 Talk to one agent across turns, inside the shell:

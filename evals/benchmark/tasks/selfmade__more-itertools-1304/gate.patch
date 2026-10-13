@@ -1,0 +1,17 @@
+diff --git a/tests/test_eval_gate.py b/tests/test_eval_gate.py
+new file mode 100644
+index 0000000..5d57fd7
+--- /dev/null
++++ b/tests/test_eval_gate.py
+@@ -0,0 +1,11 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from unittest import TestCase
++
++import more_itertools as mi
++
++
++class IchunkedZeroTests(TestCase):
++    def test_zero_yields_nothing_and_leaves_the_source_alone(self):
++        source = iter([1, 2, 3])
++        self.assertEqual([list(c) for c in mi.ichunked(source, 0)], [])
++        self.assertEqual(list(source), [1, 2, 3])

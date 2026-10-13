@@ -1,0 +1,16 @@
+diff --git a/test_eval_gate.py b/test_eval_gate.py
+new file mode 100644
+index 0000000..a111da1
+--- /dev/null
++++ b/test_eval_gate.py
+@@ -0,0 +1,10 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from sympy import sqf_list, symbols
++
++x = symbols("x")
++
++
++def test_sqf_list_factors_of_equal_multiplicity_are_combined():
++    p = (x**2 + 1) * (x - 1)**2 * (x - 2)**3 * (x - 3)**3
++    assert sqf_list(p) == (1, [(x**2 + 1, 1), (x - 1, 2), (x**2 - 5*x + 6, 3)])
++    assert sqf_list(x**5 - 2*x**4 - 2*x**3 + 4*x**2 + x - 2) == (1, [(x - 2, 1), (x**2 - 1, 2)])

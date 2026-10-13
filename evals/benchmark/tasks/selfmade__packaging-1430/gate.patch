@@ -1,0 +1,15 @@
+diff --git a/tests/test_eval_gate.py b/tests/test_eval_gate.py
+new file mode 100644
+index 0000000..59dedc6
+--- /dev/null
++++ b/tests/test_eval_gate.py
+@@ -0,0 +1,9 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++import pytest
++
++from packaging.specifiers import InvalidSpecifier, Specifier
++
++
++def test_empty_arbitrary_equality_specifier_is_rejected():
++    with pytest.raises(InvalidSpecifier):
++        Specifier("===")

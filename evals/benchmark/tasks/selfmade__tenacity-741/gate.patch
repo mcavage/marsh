@@ -1,0 +1,27 @@
+diff --git a/tests/test_eval_gate.py b/tests/test_eval_gate.py
+new file mode 100644
+index 0000000..8ea6754
+--- /dev/null
++++ b/tests/test_eval_gate.py
+@@ -0,0 +1,21 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++import pytest
++
++import tenacity
++
++
++class FalsyWait:
++    def __bool__(self):
++        return False
++
++    def __call__(self, retry_state):
++        return 1.5
++
++
++def test_a_falsy_callable_wait_strategy_is_called():
++    sleeps = []
++    retrying = tenacity.Retrying(wait=FalsyWait(), stop=tenacity.stop_after_attempt(2), sleep=sleeps.append,
++                                 reraise=True)
++    with pytest.raises(ZeroDivisionError):
++        retrying(lambda: 1 / 0)
++    assert sleeps == [1.5]
