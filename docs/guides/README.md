@@ -1,18 +1,24 @@
 # Guides
 
-The manual pages describe each command. These guides show how to do a job with
-them, start to finish, and say what to do and what to watch for. Every example
-runs in the test suite, with a stand-in command where a guide calls a model.
+Each guide does one job from start to finish: the commands, what comes back,
+what it costs, and what goes wrong. The output shown comes from real runs.
+Every marked example also runs in marsh's test suite, with a stand-in command
+where the guide calls a model.
 
-- [Race two agents on one bug](race-two-agents.md): run two agents at once on
-  private copies of your project, let each prove its fix with your tests, and
-  apply the patch you choose. Start here.
-- [Let a judge pick the winner](add-a-judge.md): when both attempts pass, a
-  third agent reads the results and names the patch to apply, or applies it.
-- [Review a change with a panel](review-with-a-panel.md): one reviewer per
-  concern, plus your own checks, at once and without touching your files.
+| Guide | Use it when |
+|---|---|
+| [Race two agents on one bug](race-two-agents.md) | A test fails and a second attempt is worth a second model run |
+| [Let a judge pick the winner](add-a-judge.md) | Both attempts pass and you want a reasoned choice |
+| [Review a change with a panel](review-with-a-panel.md) | A risky change needs several reviewers and your checks, at once |
+| [Let an agent farm out work](farm-out-work.md) | You want an agent to run races, reviews, and subtasks itself |
 
-All three use the same shape: `split` for the work that needs a private copy,
-`join` to read it and choose, and ordinary Bash in between. For what each
-command does on its own, see [Split and join](../split.md) and
-[Fanout and collect](../fanout.md).
+They use four commands:
+
+- `split { ... } | join` runs each branch on a private copy of your project and
+  prints each branch's output and patch. See [Split and join](../split.md).
+- `fanout { ... } | collect` runs branches side by side on your real files.
+  See [Fanout and collect](../fanout.md).
+
+From inside an agent, or from bash or zsh, the same commands are
+`marsh split ::: LABEL CMD ARG... | marsh join` and
+`marsh fanout ::: LABEL CMD ARG... | marsh collect`.

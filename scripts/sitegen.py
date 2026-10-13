@@ -12,8 +12,9 @@ Layout of DIR:
   docs/design/...       docs/design/*.md, docs/architecture.md
   docs/marsh.1.html     docs/man/marsh.1.md
   docs/NAME.md          the same pages as Markdown for agents (links rewritten)
-  llms.txt              index of the manual, one line per page (llmstxt.org format)
-  llms-full.txt         the manual's pages concatenated in nav order
+  llms.txt              docs/site/llms-intro.md (a self-contained primer), then an index of
+                        the manual, one line per page (llmstxt.org format)
+  llms-full.txt         the primer, then the manual's pages concatenated in nav order
   install               scripts/install.sh (curl -fsSL https://runmar.sh/install | sh)
   style.css, site.js, favicon.svg, og.png, apple-touch-icon.png, CNAME,
   404.html, .nojekyll
@@ -401,7 +402,8 @@ NAV_GROUPS = [
                ("Quickstart", "docs/quickstart.html")]),
     ("Guides", [("Overview", "docs/guides/index.html"), ("Race two agents", "docs/guides/race-two-agents.html"),
                 ("Let a judge pick", "docs/guides/add-a-judge.html"),
-                ("Review with a panel", "docs/guides/review-with-a-panel.html")]),
+                ("Review with a panel", "docs/guides/review-with-a-panel.html"),
+                ("Let an agent farm out work", "docs/guides/farm-out-work.html")]),
     ("Use", [("The shell", "docs/shell.html"), ("Choosing a shell", "docs/shells.html"),
              ("Commands and Kits", "docs/kits.html")]),
     ("Compose", [("Agents running agents", "docs/agents.html"), ("Split and join", "docs/split.html"),
@@ -419,11 +421,12 @@ NAV = [item for _, items in NAV_GROUPS for item in items]
 DESCRIPTIONS = {
     "docs/index.html": "Manual index: what marsh is and where each topic lives.",
     "docs/install.html": "Install marsh and Docker Sandboxes with Homebrew or the install script. Upgrade, uninstall, build from source.",
-    "docs/quickstart.html": "Open a shell, run an agent, split work across two agents, and read the results, in about ten minutes.",
-    "docs/guides/index.html": "Task-shaped walkthroughs: race agents on a bug, have a judge pick, review a change with a panel.",
-    "docs/guides/race-two-agents.html": "Run two agents on the same failing test at once, each on a private copy, gate each on your tests, and apply the one that passes.",
-    "docs/guides/add-a-judge.html": "Add a judge agent after join: it reads every branch's result and names the patch to apply, or applies it.",
-    "docs/guides/review-with-a-panel.html": "Run one reviewer agent per concern plus your own checks at once, in forks, before you merge.",
+    "docs/quickstart.html": "Open a shell, run an agent, split work across two agents, apply a patch, and set up credentials.",
+    "docs/guides/index.html": "Guides: race agents on a bug, have a judge pick, review with a panel, and let an agent farm out work.",
+    "docs/guides/race-two-agents.html": "Two agents fix one failing test at once, each on a private copy that runs your tests. Apply the patch you choose.",
+    "docs/guides/add-a-judge.html": "Pipe join's output to a third agent that names the patch to apply. Optionally apply it after checking the label and branch status.",
+    "docs/guides/review-with-a-panel.html": "One reviewer agent per concern plus your tests, at once, on copies of your working tree.",
+    "docs/guides/farm-out-work.html": "An agent in marsh starts other agents from its shell: subtasks, parallel reviews, and races gated on tests. With an AGENTS.md snippet.",
     "docs/shell.html": "The Bash-compatible shell: where it runs, startup files, and the documented differences from Bash.",
     "docs/shells.html": "Use the shell VM's own bash or zsh instead of Brush, and what you lose.",
     "docs/kits.html": "Registered commands and Kits: the default claude, codex, and pi commands, signing in, adding your own, and limits.",
@@ -438,6 +441,7 @@ DESCRIPTIONS = {
     "docs/faq.html": "Common questions: what marsh is, how it works, what it costs, and what can go wrong.",
     "docs/marsh.1.html": "The marsh(1) manual page: every command, option, and exit status.",
     "docs/design/index.html": "Design documents: architecture, contracts, and the TLA+ model.",
+    "docs/architecture.html": "How the current implementation is built: crates, data flow, and trust boundaries.",
 }
 
 
@@ -574,15 +578,20 @@ def agent_markdown(text: str, source: pathlib.Path, site_path: str,
 
 
 LLMS_SUMMARY = (
-    "marsh is a Bash-compatible shell for Apple Silicon Macs. It adds `split`, `fanout`, `join`, "
-    "and `collect` for running agents in parallel, each on its own copy of your repo, and runs "
-    "every agent and tool in its own Docker Sandbox microVM."
+    "marsh is a Bash-compatible shell for Apple Silicon Macs in which agent CLIs (claude, codex, pi) "
+    "are shell commands. Each call runs in a fresh container in a Docker Sandbox microVM, with the "
+    "project at its Mac path. `split { } | join` runs branches on private copies and returns patches; "
+    "`fanout { } | collect` runs branches on the same files. Agents inside marsh can use the same "
+    "commands to start other agents."
 )
+# Hand-written: enough to install and use marsh with no other context.
+LLMS_INTRO = SITE_SRC / "llms-intro.md"
 
 
 def llms_txt(base_url: str, entries: dict[str, tuple[str, str]]) -> str:
     """entries: site path -> (title, description)."""
-    lines = ["# marsh", "", "> " + LLMS_SUMMARY, "",
+    lines = ["# marsh", "", "> " + LLMS_SUMMARY, "", LLMS_INTRO.read_text().strip(), "",
+             "## Manual", "",
              f"Every manual page is also available as Markdown at the same path with a .md "
              f"extension. The whole manual is in one file: [llms-full.txt]({base_url}/llms-full.txt).", ""]
     listed: set[str] = set()
@@ -594,7 +603,8 @@ def llms_txt(base_url: str, entries: dict[str, tuple[str, str]]) -> str:
                 lines.append(f"- [{label}]({base_url}/{md_path(target)}): {entries[target][1]}")
                 listed.add(target)
         lines.append("")
-    rest = sorted(t for t in entries if t not in listed)
+    # Design documents are listed by their index, not one by one.
+    rest = sorted(t for t in entries if t not in listed and not t.startswith("docs/design/"))
     if rest:
         lines.append("## Optional")
         lines.append("")
@@ -678,7 +688,8 @@ def build(out: pathlib.Path, base_url: str) -> None:
     for _, target in NAV:
         if target in markdown_copies and not target.startswith("docs/design/"):
             full.append(f"<!-- Source: {base_url}/{md_path(target)} -->\n\n{markdown_copies[target]}")
-    (out / "llms-full.txt").write_text("# marsh manual\n\n> " + LLMS_SUMMARY + "\n\n---\n\n" +
+    (out / "llms-full.txt").write_text("# marsh manual\n\n> " + LLMS_SUMMARY + "\n\n" +
+                                      LLMS_INTRO.read_text().strip() + "\n\n---\n\n" +
                                       "\n---\n\n".join(full))
     shutil.copy(ROOT / "scripts/install.sh", out / "install")
     (out / "CNAME").write_text(base_url.split("://", 1)[1].rstrip("/") + "\n")
