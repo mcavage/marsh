@@ -1665,8 +1665,8 @@ fn disown_removes_jobs_as_bash_does() {
         ),
         // `wait` keeps the `$!` job only if it had already finished, until `jobs` reports it.
         (
-            "/usr/bin/true & /bin/sleep .3; wait; disown %1; echo $?; /bin/sleep .3 & wait; disown %1; echo $?; /usr/bin/true & /bin/sleep .3; wait; jobs",
-            b"0\n1\n[1]+  Done                       /usr/bin/true\n",
+            "/usr/bin/true & /bin/sleep .3; wait; disown %1; echo $?; /bin/sleep .3 & wait; disown %1; echo $?; /bin/sleep .1 & /bin/sleep .4; wait; jobs",
+            b"0\n1\n[1]+  Done                       /bin/sleep .1\n",
         ),
     ] {
         let bash = run_named("bash", script, false, Some("audit"));
