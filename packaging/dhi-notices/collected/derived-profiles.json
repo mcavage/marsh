@@ -2,7 +2,6 @@
   "claude-kit": {
     "2.1.296": {
       "arm64": {
-        "base_agent": "claude",
         "required_notices": [
           {
             "file": "provider-notices/claude-2.1.296-package-LICENSE.md",
@@ -13,17 +12,7 @@
             "sha256": "da7cf15ce4e35bad6a107acd6a36b4fe052083068bb9e564b1aa3f2078b5d0ce"
           }
         ],
-        "replacements": {
-          "/home/agent/.local/bin/claude": {
-            "path": "/home/agent/.local/bin/claude",
-            "type": "symlink",
-            "mode": 511,
-            "uid": 1000,
-            "gid": 1000,
-            "target": "/home/agent/.local/share/claude/versions/2.1.296"
-          }
-        },
-        "additions": [
+        "files": [
           {
             "path": "/home/agent/.local/share/claude/versions/2.1.296",
             "type": "file",
@@ -32,6 +21,14 @@
             "gid": 1000,
             "sha256": "f1f6e96e0d8342b9dbf41d7e88255397a6a52ce3d8736ad6a4c6b59c9b62fefa",
             "size": 256434168
+          },
+          {
+            "path": "/home/agent/.local/bin/claude",
+            "type": "symlink",
+            "mode": 511,
+            "uid": 1000,
+            "gid": 1000,
+            "target": "/home/agent/.local/share/claude/versions/2.1.296"
           }
         ],
         "exact_trees": [
@@ -44,7 +41,6 @@
         ]
       },
       "amd64": {
-        "base_agent": "claude",
         "required_notices": [
           {
             "file": "provider-notices/claude-2.1.296-package-LICENSE.md",
@@ -55,17 +51,7 @@
             "sha256": "da7cf15ce4e35bad6a107acd6a36b4fe052083068bb9e564b1aa3f2078b5d0ce"
           }
         ],
-        "replacements": {
-          "/home/agent/.local/bin/claude": {
-            "path": "/home/agent/.local/bin/claude",
-            "type": "symlink",
-            "mode": 511,
-            "uid": 1000,
-            "gid": 1000,
-            "target": "/home/agent/.local/share/claude/versions/2.1.296"
-          }
-        },
-        "additions": [
+        "files": [
           {
             "path": "/home/agent/.local/share/claude/versions/2.1.296",
             "type": "file",
@@ -74,6 +60,14 @@
             "gid": 1000,
             "sha256": "24972e3bc859fab2b46ed4c1e51f7d6130f06d3bd550811a114640de3370d0de",
             "size": 257068216
+          },
+          {
+            "path": "/home/agent/.local/bin/claude",
+            "type": "symlink",
+            "mode": 511,
+            "uid": 1000,
+            "gid": 1000,
+            "target": "/home/agent/.local/share/claude/versions/2.1.296"
           }
         ],
         "exact_trees": [
@@ -90,7 +84,6 @@
   "codex-kit": {
     "0.162.1": {
       "arm64": {
-        "base_agent": "codex",
         "required_notices": [
           {
             "file": "provider-notices/codex-0.162.1-LICENSE",
@@ -161,8 +154,7 @@
             "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
           }
         ],
-        "replacements": {},
-        "additions": [
+        "files": [
           {
             "path": "/usr/local/bin/codex",
             "type": "file",
@@ -184,7 +176,6 @@
         ]
       },
       "amd64": {
-        "base_agent": "codex",
         "required_notices": [
           {
             "file": "provider-notices/codex-0.162.1-LICENSE",
@@ -255,8 +246,7 @@
             "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
           }
         ],
-        "replacements": {},
-        "additions": [
+        "files": [
           {
             "path": "/usr/local/bin/codex",
             "type": "file",

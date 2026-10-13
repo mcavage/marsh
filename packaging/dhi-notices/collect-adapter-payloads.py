@@ -15,13 +15,11 @@ ADAPTERS = {
     "codex-acp": {
         "kit": "marsh-codex",
         "root": "/opt/marsh/codex-acp",
-        "base_agent": "codex",
         "packages": ["@openai/codex", "@openai/codex-linux-{arch}"],
     },
     "claude-acp": {
         "kit": "marsh-claude",
         "root": "/opt/marsh/claude-acp",
-        "base_agent": "claude",
         "packages": [
             "@anthropic-ai/claude-agent-sdk",
             "@anthropic-ai/claude-agent-sdk-linux-{arch}",
@@ -56,7 +54,6 @@ def main():
         lock = json.loads(lock_bytes)
         spec = dict(spec, version=lock["packages"]["node_modules/" + spec["packages"][0]]["version"])
         result = {
-            "base_agent": spec["base_agent"],
             "root": spec["root"],
             "lock_sha256": hashlib.sha256(lock_bytes).hexdigest(),
             "notice_root": "/usr/local/share/licenses/marsh-" + adapter,
@@ -210,7 +207,6 @@ def main():
         )
         records[adapter] = {
             "root": root,
-            "base_agent": "claude",
             "lock_sha256": hashlib.sha256(read_input(lock_path)).hexdigest(),
             "notice_root": "/usr/local/share/licenses/marsh-" + adapter,
             "architectures": {

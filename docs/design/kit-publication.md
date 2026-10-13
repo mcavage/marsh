@@ -39,12 +39,13 @@ change. Every selected cache-only build must succeed before any push starts.
 Every default Kit and the acceptance fixture receives:
 
 - `packaging/dhi-notices/collected` as `dhi-notices/`;
-- `packaging/image-repair` as `image-repair/`.
+- `packaging/image-base` as `image-base/` (the package assembler that builds
+  each image on its DHI runtime base, and the smoke test).
 
-The four npm-based Kits receive `scripts/npm-notices.mjs` as
+The npm-based Kits receive `scripts/npm-notices.mjs` as
 `collect-notices.mjs`. Provider legal texts are indexed in the canonical DHI
-bundle. There are no independent Kit-local repair, collector, or Claude/Codex
-notice copies to keep synchronized.
+bundle. There are no independent Kit-local assembler, collector, or
+Claude/Codex notice copies to keep synchronized.
 
 The publisher expands these sources once by their bundled source identity. It
 reserves their **entire destination namespaces**, including case/Unicode variants:

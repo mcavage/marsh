@@ -60,6 +60,34 @@ def resolve_executable(value: str) -> str:
     return str(pathlib.Path(resolved).resolve())
 
 
+ACP_FIXTURE_FILES = ("acp-fixture.yaml", "acp-fixture.dockerfile", "agent.mjs")
+
+
+def stage_acp_fixture(destination: pathlib.Path) -> pathlib.Path:
+    """The ACP fixture Kit source plus the canonical packaging/image-base inputs
+    its Dockerfile assembles from, staged under DESTINATION in a directory
+    named by their content: changed inputs get a new path (a registry change),
+    so a warm daemon's captured source is never rewritten under it."""
+    here = pathlib.Path(__file__).resolve().parent
+    image_base = here.parents[1] / "packaging" / "image-base"
+    files = {name: (here / "acp-fixture" / name).read_bytes() for name in ACP_FIXTURE_FILES}
+    files.update({"image-base/" + path.name: path.read_bytes()
+                  for path in sorted(image_base.iterdir()) if path.is_file()})
+    hasher = hashlib.sha256()
+    for name in sorted(files):
+        hasher.update(name.encode() + b"\0" + hashlib.sha256(files[name]).digest())
+    kit = destination / hasher.hexdigest()[:16] / "acp-fixture"
+    if not kit.exists():
+        destination.mkdir(parents=True, exist_ok=True)
+        staging = pathlib.Path(tempfile.mkdtemp(prefix=".acp-fixture-", dir=destination))
+        for name, data in files.items():
+            (staging / name).parent.mkdir(parents=True, exist_ok=True)
+            (staging / name).write_bytes(data)
+        kit.parent.mkdir(exist_ok=True)
+        os.rename(staging, kit)
+    return kit
+
+
 def disposable_root(prefix: str) -> pathlib.Path:
     """Create mutable acceptance state outside the user's natural home tree."""
     parent = pathlib.Path("/private/tmp") if sys.platform == "darwin" else pathlib.Path(tempfile.gettempdir())
@@ -1174,7 +1202,7 @@ class AcpScope(IsolatedScope):
         self.control_root.mkdir(mode=0o700)
         self.control_home = scoped_control_home(self.control_root, self.home)
         self.project.mkdir()
-        kit = pathlib.Path(__file__).with_name("acp-fixture").resolve(strict=True)
+        kit = stage_acp_fixture(self.root / "kits")
         (self.control_home / "commands.json").write_text(
             json.dumps({"fixture-acp": str(kit)}) + "\n", encoding="utf-8"
         )

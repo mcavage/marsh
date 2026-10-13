@@ -271,8 +271,6 @@ def main():
                         "from pip._vendor import urllib3; assert urllib3.__version__ == '2.8.0'"], check=True)
         subprocess.run([str(environment / "bin/python"), "-I", "-m", "pip", "--version"], check=True)
     shutil.copyfile(HERE / "artifacts.json", NOTICE / "artifacts.json")
-    if (HERE / "base-images.json").exists():
-        shutil.copyfile(HERE / "base-images.json", NOTICE / "base-images.json")
     (NOTICE / "repair-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(json.dumps(receipt, indent=2))
 

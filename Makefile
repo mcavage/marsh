@@ -404,7 +404,7 @@ DEV_PARALLEL ?= 5
 DEV_CACHE_ID ?= marsh-dev-$(shell pwd -P | cksum | cut -d' ' -f1)
 DEV_KIT ?= $(ACCEPTANCE_KIT)
 DEV_SUPPORT_SCRIPTS := $(addprefix scripts/,prepare-shell-image.py build_inputs.py image_observations.py owned_process.py stock_sdk.py)
-DEV_CANONICAL_INPUTS := $(shell find packaging/image-repair packaging/dhi-notices/collected -type f 2>/dev/null)
+DEV_CANONICAL_INPUTS := $(shell find packaging/image-base packaging/image-repair packaging/dhi-notices/collected -type f 2>/dev/null)
 DEV_SHELL_IMAGE_INPUTS := packaging/shell-image packaging/shell/Dockerfile $(DEV_SUPPORT_SCRIPTS) $(DEV_CANONICAL_INPUTS) \
 	$(shell find packaging/shell/pi -type f 2>/dev/null)
 DEV_KIT_INPUTS := $(KIT_COMMANDS) scripts/stage-kits.py scripts/publish-kits.py scripts/npm-notices.mjs \

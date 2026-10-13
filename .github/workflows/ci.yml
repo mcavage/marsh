@@ -235,7 +235,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then range="origin/$BASE_REF...HEAD"
           elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then range="$BEFORE...HEAD"
           else echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          inputs='^(kits/|packaging/(shell|shell-image|commands\.json|agents\.json|image-repair|dhi-notices|notice-overrides)|tests/acceptance/[a-z-]*fixture/|scripts/(publish-kits|prepare-shell-image|prepare-kit-inputs|build_inputs|image_observations|stage-kits|owned_process|stock_sdk)\.py|scripts/requirements-publish\.txt|Makefile$|\.github/workflows/ci\.yml$)'
+          inputs='^(kits/|packaging/(shell|shell-image|commands\.json|agents\.json|image-base|image-repair|dhi-notices|notice-overrides)|tests/acceptance/[a-z-]*fixture/|scripts/(publish-kits|prepare-shell-image|prepare-kit-inputs|build_inputs|image_observations|stage-kits|owned_process|stock_sdk)\.py|scripts/requirements-publish\.txt|Makefile$|\.github/workflows/ci\.yml$)'
           if git diff --name-only "$range" | grep -Eq "$inputs"; then echo "run=true" >> "$GITHUB_OUTPUT"
           else echo "run=false" >> "$GITHUB_OUTPUT"; echo "No image input changed; nothing to build."; fi
       - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0

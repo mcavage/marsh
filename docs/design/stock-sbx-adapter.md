@@ -68,7 +68,8 @@ receive no raw credentials, worker environment, or Docker/SBX socket.
 
 ## Shell VM and relay
 
-The shell VM uses the packaged DHI Debian ARM64 template. The adapter installs
+The shell VM uses the packaged shell template, built on the DHI Debian ARM64
+base. The adapter installs
 the Linux `marsh` and relay binaries, creates the Mac user's UID/GID, and
 mounts the launch directory at its identical path and the selected home backing
 (`MARSH_HOME/home`, or an ephemeral slot) at `/Users/<user>`. The real Mac home

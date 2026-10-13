@@ -20,7 +20,7 @@ To work on marsh with Pi, after `make dev`, from the Mac checkout:
 
 `make dev` builds, in parallel and incrementally, the host binaries, the linux/arm64 guest,
 the shell template (one image for every shell VM, dev tooling included), and the packaged source Kits
-(`scripts/stage-kits.py`: each Kit's Git files plus the canonical `image-repair/`,
+(`scripts/stage-kits.py`: each Kit's Git files plus the canonical `image-base/`,
 `dhi-notices/` and `collect-notices.mjs` inputs that `publish-kits.py` adds, so stock SBX
 builds them as is). It then installs to `DEV_PREFIX` (default `~/.marsh-dev`: `bin/` and
 `libexec/marsh/`) and runs `marshd --prebuild-kit-images DEV_PREFIX/libexec/marsh`: the
@@ -50,8 +50,8 @@ no separate dev image.
 
 `marsh --dev` attaches to one warm dev shell VM per daemon (`vm_name(Shell, "dev")`, kept
 apart from the ordinary shell VM because it holds the broker grant) made from the one shell
-template (`libexec/marsh/shell-image`, built from `packaging/shell`): the repaired DHI shell,
-which already has gcc/make/git/python3/node/npm, plus Rust 1.95 with the aarch64 gnu and musl
+template (`libexec/marsh/shell-image`, built from `packaging/shell`): the DHI Debian base
+with gcc/make/git/python3/node/npm and Docker Engine installed, plus Rust 1.95 with the aarch64 gnu and musl
 targets, plus `pi-dev` (see [Pi in the dev shell](#pi-in-the-dev-shell)). Ordinary shells have
 the same tools. Its VM-local cargo target survives sessions. Kit jobs (ACP
 agents included) still get no daemon socket or relay. Grants exist only on a dev install's

@@ -1710,8 +1710,8 @@ impl StockSbx {
             .remove(spec.workload_kit.identity());
     }
 
-    /// Reuses an exactly-owned VM or creates one from the stock shell-docker
-    /// template, then installs the trusted worker and waits for Docker.
+    /// Reuses an exactly-owned VM or creates one from the Kit's own image,
+    /// then installs the trusted worker and waits for Docker.
     ///
     /// # Errors
     /// Fails closed if an existing name lacks matching marsh ownership data.

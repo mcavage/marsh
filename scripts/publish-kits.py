@@ -288,7 +288,7 @@ def canonical_inputs(root, selected, configs):
     canonical = {}
     if any(name in BUNDLED or name == FIXTURE for name in sources.values()):
         for destination, origin in (("dhi-notices", root / "packaging/dhi-notices/collected"),
-                                    ("image-repair", root / "packaging/image-repair")):
+                                    ("image-base", root / "packaging/image-base")):
             inventory = tree_inventory(origin)
             if not inventory["files"]:
                 raise ValueError(f"canonical tree is empty: {origin}")
@@ -302,7 +302,7 @@ def canonical_inputs(root, selected, configs):
         files = dict(config["files"])
         reserved = []
         if name in BUNDLED or name == FIXTURE:
-            reserved = ["dhi-notices", "image-repair"]
+            reserved = ["dhi-notices", "image-base"]
             if name in COLLECTORS:
                 reserved.append("collect-notices.mjs")
         # Reserve entire namespaces (NFKC/case variants too), not only known files.

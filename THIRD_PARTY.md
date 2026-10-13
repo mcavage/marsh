@@ -26,11 +26,13 @@ Crates whose published packages omit a required text get it from
 ## Container images
 
 The shell image and the Kit images are built on Docker Hardened Images
-(`dhi.io/sbx-templates`, `dhi.io/debian-base`), pinned by digest in
-`packaging/shell-image` and the Kit Dockerfiles under `kits/`. They add
-agent CLIs and their ACP adapters (Claude Code, Codex, Pi, and npm packages
-locked in each Kit's `package-lock.json`). Each image carries its notices; the
-canonical collection they are built from is `packaging/dhi-notices/collected/`.
+(`dhi.io/debian-base`, and `dhi.io/node` for the Node.js Kits), pinned by
+digest in `packaging/shell-image` and the Kit Dockerfiles under `kits/`, plus
+Debian and DHI packages (Docker Engine and the tools each image needs). The
+Kits add agent CLIs and their ACP adapters (Claude Code, Codex, Pi, and npm
+packages locked in each Kit's `package-lock.json`). Each image carries its
+notices: every Debian package's own copyright file, and the canonical
+collection under `packaging/dhi-notices/collected/` for the rest.
 Release CI publishes these images to `docker.io/mcavage/marsh-*`; see
 [docs/design/supply-chain.md](docs/design/supply-chain.md#published-images).
 

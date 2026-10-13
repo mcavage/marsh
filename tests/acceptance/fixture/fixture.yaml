@@ -7,8 +7,8 @@ provides: ["marsh-acceptance-fixture@1.0.0"]
 dockerfile: ./fixture.dockerfile
 args:
   shellImage:
-    description: Immutable shell base; canonical dependency repair runs during the build
-    default: dhi.io/sbx-templates:shell-docker@sha256:ff0fe56f7fbc14a969131c52d8e7233862a4810196fbc0e2d8d88441204081a9
+    description: Immutable DHI runtime base the Kit VM floor is assembled onto
+    default: dhi.io/debian-base:trixie@sha256:20079b51710f0397da5e056bfc7156b6aafc7ff3aa4ef4cbcb0b0f1df99cd8c4
     pattern: '^[a-z0-9][a-z0-9._:/-]+@sha256:[a-f0-9]{64}$'
     buildArg: SHELL_IMAGE
 capabilities:

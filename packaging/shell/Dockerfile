@@ -1,11 +1,13 @@
 # syntax=docker/dockerfile:1
-# The one shell VM template: the repaired DHI shell (gcc, make, git, python3,
-# node, npm, docker) plus the pinned Rust 1.95 toolchain with the aarch64 gnu
-# and musl targets `make dev-inner` needs, plus the Pi coding agent 1.1.0
-# (`pi-dev`, locked by pi/package-lock.json). `marsh --dev` uses this same image;
-# it only adds the dev broker. The caller supplies the exact reviewed upstream
-# DHI digest. The exported reference names this repaired image, never the
-# upstream input. No agent image, host profile or credential is a build input.
+# The one shell VM template: the DHI Debian base (its -dev variant: the shell
+# user has sudo and apt for their own tools) with Docker Engine, the build
+# tools `make dev` needs (gcc, make, git, python3, node, npm), zsh, the pinned
+# Rust 1.95 toolchain with the aarch64 gnu and musl targets `make dev-inner`
+# needs, and the Pi coding agent 1.1.0 (`pi-dev`, locked by
+# pi/package-lock.json). `marsh --dev` uses this same image; it only adds the
+# dev broker. The caller supplies the exact reviewed upstream DHI digest. The
+# exported reference names this image, never the upstream input. No agent
+# image, host profile or credential is a build input.
 ARG SHELL_BASE_IMAGE
 FROM rust:1.95-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1 AS rust
 RUN rustup component add --toolchain 1.95.0 rustfmt clippy \
@@ -14,28 +16,60 @@ RUN rustup component add --toolchain 1.95.0 rustfmt clippy \
 
 FROM ${SHELL_BASE_IMAGE}
 USER root
-COPY image-repair /tmp/marsh-image-repair
-COPY dhi-notices /usr/local/share/licenses/marsh-dhi
-RUN python3 -I -S /tmp/marsh-image-repair/repair.py \
- && python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --receipt \
- && rm -rf /tmp/marsh-image-repair \
- && command -v sudo \
- && command -v docker \
- && command -v dockerd \
- && command -v gcc && command -v node && command -v npm && command -v make
-# The stock template prints an ASCII banner from /etc/profile.d/01-dhi.sh on
-# interactive shells (also via /etc/bash.bashrc). marsh is quiet by default:
-# the banner shows only when MARSH_BANNER=1 is set in the shell VM.
-RUN test -f /etc/profile.d/01-dhi.sh \
- && sed -i '1a [ "${MARSH_BANNER:-0}" = 1 ] || { return 0 2>/dev/null || exit 0; }' /etc/profile.d/01-dhi.sh \
- && sh -c '. /etc/profile.d/01-dhi.sh' | wc -c | grep -qx 0
-# zsh for `marsh --shell zsh` (docs/shells.md), from the base image's Debian
-# trixie apt sources; recommended extras are not installed.
+# The DHI-built Engine, Node.js and Python packages carry no Debian copyright
+# file: their notices are indexed by exact version in dhi-notices, so they are
+# pinned here. zsh is for `marsh --shell zsh` (docs/shells.md). Recommended
+# extras are not installed.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends zsh \
+ && apt-get install -y --no-install-recommends \
+      docker-ce=5:29.8.2-1 docker-ce-cli=5:29.9.0-0 containerd.io=2.4.1-3 \
+      docker-buildx-plugin=0.38.0-1 \
+      nodejs-24=24.21.0-1 npm=11.20.0-0 \
+      python-3.14=3.14.8-0 python3-pip=26.2.1-2 \
+      sudo passwd ca-certificates curl git openssh-client less procps jq \
+      gcc libc6-dev make zsh \
  && rm -rf /var/lib/apt/lists/* \
  && /usr/bin/zsh -fc 'echo $ZSH_VERSION' \
  && test -x /usr/bin/bash
+# The sandbox account Docker Sandboxes expects (uid 1000 `agent`), in the
+# docker and sudo groups, and the persistent environment file it writes at VM
+# start, sourced by every shell (bash.bashrc and profile below) and named by
+# BASH_ENV.
+RUN { getent group docker >/dev/null || groupadd -r docker; } \
+ && { getent group sudo >/dev/null || groupadd -g 27 sudo; } \
+ && groupadd -g 1000 agent \
+ && useradd -u 1000 -g 1000 -G docker,sudo -d /home/agent -m -s /bin/bash agent \
+ && install -d -o agent -g agent /home/agent/workspace \
+ && printf 'agent ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/agent \
+ && chmod 0440 /etc/sudoers.d/agent && visudo -cf /etc/sudoers.d/agent \
+ && touch /etc/sandbox-persistent.sh
+COPY --chmod=0644 <<'EOF' /etc/bash.bashrc
+if [ -f /etc/sandbox-persistent.sh ]; then
+    . /etc/sandbox-persistent.sh
+fi
+export BASH_ENV=/etc/sandbox-persistent.sh
+EOF
+COPY --chmod=0644 <<'EOF' /etc/profile.d/sandbox-persistent.sh
+if [ -f /etc/sandbox-persistent.sh ]; then
+    . /etc/sandbox-persistent.sh
+fi
+export BASH_ENV=/etc/sandbox-persistent.sh
+EOF
+COPY --chmod=0644 <<'EOF' /etc/profile
+if [ -d /etc/profile.d ]; then
+    for _f in /etc/profile.d/*.sh; do
+        [ -r "$_f" ] && . "$_f"
+    done
+    unset _f
+fi
+EOF
+COPY image-repair /tmp/marsh-image-repair
+COPY dhi-notices /usr/local/share/licenses/marsh-dhi
+RUN python3 -I -S /tmp/marsh-image-repair/repair.py \
+ && rm -rf /tmp/marsh-image-repair \
+ && command -v sudo && command -v visudo && command -v useradd && command -v getent \
+ && command -v docker && command -v dockerd \
+ && command -v gcc && command -v node && command -v npm && command -v make && command -v python3
 COPY --from=rust /usr/local/cargo/ /usr/local/cargo/
 COPY --from=rust /usr/local/rustup/ /usr/local/rustup/
 # Any shell UID (the Mac user's) may use the shared registry cache.
@@ -47,9 +81,14 @@ COPY pi/package.json pi/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
  && test "$(node_modules/.bin/pi --version)" = "$(node -p 'require("./package.json").dependencies["@earendil-works/pi-coding-agent"]')"
 COPY --chmod=0755 pi/pi-dev /usr/local/bin/pi-dev
+# The final verification follows every mutation.
+RUN python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --receipt-dir /usr/local/share/licenses/marsh-dhi
 WORKDIR /
+LABEL com.docker.sandboxes.start-docker=true
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
     RUSTUP_TOOLCHAIN=1.95.0 \
+    HOME=/home/agent \
+    BASH_ENV=/etc/sandbox-persistent.sh \
     PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 USER agent

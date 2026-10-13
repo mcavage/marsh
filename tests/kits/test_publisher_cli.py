@@ -414,7 +414,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
                          'scripts/build_inputs.py', 'scripts/npm-notices.mjs', '.gitignore',
                          'crates/marsh-contracts/src/command_registry_rules.json',
                          'packaging/commands.json', notices,
-                         'packaging/image-repair', 'tests/acceptance/fixture',
+                         'packaging/image-base', 'tests/acceptance/fixture',
                          *['kits/' + name for name in ('marsh-shell', 'marsh-claude',
                            'marsh-codex', 'marsh-pi')]):
             origin, dest = ROOT / relative, self.source / relative
@@ -436,7 +436,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
     def assert_canonical_bytes(self, records):
         # Independent oracle: hash the actual canonical files, never receipt claims.
         for prefix, tree in (('dhi-notices', 'packaging/dhi-notices/collected'),
-                             ('image-repair', 'packaging/image-repair')):
+                             ('image-base', 'packaging/image-base')):
             expected = {prefix + '/' + str(path.relative_to(self.source / tree)):
                         hashlib.sha256(path.read_bytes()).hexdigest()
                         for path in (self.source / tree).rglob('*') if path.is_file()}
@@ -497,7 +497,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
         self.output.write_bytes(b'previous registry\n')
         prior = self.inputs.read_bytes()
         changed = ['packaging/dhi-notices/collected/README.md',
-                   'packaging/image-repair/artifacts.json', 'scripts/npm-notices.mjs',
+                   'packaging/image-base/kit-vm.packages', 'scripts/npm-notices.mjs',
                    'kits/marsh-shell/shell.yaml', 'kits/marsh-shell/marsh-entrypoint.sh',
                    'scripts/prepare-kit-inputs.py', 'scripts/build_inputs.py',
                    'scripts/publish-kits.py', 'packaging/commands.json',
@@ -514,7 +514,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
                 self.assertEqual(self.output.read_bytes(), b'previous registry\n')
                 self.assertEqual(self.inputs.read_bytes(), prior)
         for relative in ('packaging/dhi-notices/collected/added.txt',
-                         'packaging/image-repair/added.txt', 'kits/marsh-shell/scratch.env'):
+                         'packaging/image-base/added.txt', 'kits/marsh-shell/scratch.env'):
             path = self.source / relative
             with self.subTest(added=relative):
                 path.write_text('not a credential')
@@ -540,7 +540,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
         extra = self.root / 'extra.json'
         artifact = self.root / 'artifact'
         artifact.write_text('not secret')
-        for name in ('dhi-notices/extra', 'image-repair/extra', 'DHI-NOTICES/extra'):
+        for name in ('dhi-notices/extra', 'image-base/extra', 'DHI-NOTICES/extra'):
             extra.write_text(json.dumps({'kits/marsh-shell': {'files': {name: str(artifact)}}}))
             result = self.prepare('--extra-inputs', extra)
             self.assertNotEqual(result.returncode, 0, result)
@@ -626,7 +626,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
             digest = hashlib.sha256((json.dumps(actual, sort_keys=True, indent=2) + '\n').encode()).hexdigest()
             self.assertEqual(source['staged_tree'], 'sha256:' + digest)
         before_registry, before_proof = self.output.read_bytes(), proof_path.read_bytes()
-        self.env.update(MUTATE_INPUT=str(self.source / 'packaging/image-repair/artifacts.json'), MUTATE_ON_PUSH='1')
+        self.env.update(MUTATE_INPUT=str(self.source / 'packaging/image-base/kit-vm.packages'), MUTATE_ON_PUSH='1')
         self.log.unlink()
         result = self.call()
         self.assertNotEqual(result.returncode, 0, result)
@@ -657,7 +657,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
 
     def test_umask077_source_readability_and_actual_tree_entry_bound(self):
         self.canonical_checkout()
-        for tree in ('packaging/dhi-notices/collected', 'packaging/image-repair', 'kits'):
+        for tree in ('packaging/dhi-notices/collected', 'packaging/image-base', 'kits'):
             for path in (self.source / tree).rglob('*'):
                 path.chmod(0o700 if path.is_dir() else 0o600)
             (self.source / tree).chmod(0o700)
@@ -667,7 +667,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
         self.assert_canonical_bytes(self.records())
         self.log.unlink()
         previous = self.inputs.read_bytes()
-        crowded = self.source / 'packaging/image-repair/crowded'
+        crowded = self.source / 'packaging/image-base/crowded'
         crowded.mkdir()
         for number in range(10001):
             (crowded / str(number)).mkdir()

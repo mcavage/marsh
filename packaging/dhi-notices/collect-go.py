@@ -93,7 +93,7 @@ def main():
                 except Exception as error:
                     failures.append({"module": pending[future], "error": str(error)})
         record = {
-            "schema": 1, "image": document["image"], "scope": document["scope"],
+            "schema": 2, "images": document["images"], "scope": document["scope"], "binaries": document["binaries"],
             "input_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
             "checksum_database": "sum.golang.org",
             "modules": sorted(results, key=lambda row: (row["path"], row["version"])),

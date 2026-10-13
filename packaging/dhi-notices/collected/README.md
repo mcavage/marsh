@@ -2,13 +2,26 @@
 
 This directory is copied into every marsh image at
 `/usr/local/share/licenses/marsh-dhi`. It holds the license texts and notices
-for the Docker Hardened Image (DHI) base, the agents and ACP adapters the Kits
-add, and the machine-readable inventories that `verify.py` checks them against.
-The preparation tools one level up produce it; this is the only README for it.
+for the parts of an image that do not carry their own: the DHI-built packages,
+the Go modules compiled into Docker Engine, the agents and ACP adapters the
+Kits add, and the machine-readable inventories that `verify.py` checks them
+against. The preparation tools one level up produce it; this is the only README
+for it.
 
 `verify.py` checks bytes, metadata, package versions and the presence of every
 required notice. A passing run is not a legal opinion, a build signature, or a
 grant of redistribution rights.
+
+## What each image is
+
+Each image starts from a pinned Docker Hardened Image: `dhi.io/debian-base`
+(the shell Kit, the acceptance fixture and, in its `-dev` variant, the shell VM
+template) or `dhi.io/node` (the Pi, Claude and Codex Kits and the ACP
+fixture). Kit images are also their Kit VM's root filesystem, so each one adds
+Docker Engine and the tools a Kit VM needs. The runtime bases have no package
+manager: `packaging/image-base/assemble-packages.sh` installs the packages in a
+`debian-base` `-dev` build stage and copies each one's files, file list,
+md5sums, copyright file and dpkg status entry onto the runtime base.
 
 ## Layout
 
@@ -17,84 +30,72 @@ grant of redistribution rights.
 | `texts/` | License and notice texts, named by SHA-256 |
 | `provider-notices/` | Agent and adapter legal files, named by component and version |
 | `source-records/` | Upstream source identities, locks and acquisition records the indexes cite |
-| `*-notices.json` | Notice indexes: installed OS packages, Go modules, Rust crates, npm packages, native sources |
-| `adapter-payloads.json`, `agent-payload-deltas.json`, `derived-profiles.json`, `payload-obligations.json` | Expected payload files, hashes and the notices each one requires |
+| `installed-package-notices.json` | Installed packages that ship no Debian copyright file (DHI-built Engine, Node.js, npm, Python), by exact version |
+| `go-module-notices.json` | Go dependency modules of the Engine's Go binaries, with each binary's hash |
+| `image-primary-notices.json` | The DHI license text every base carries at `/opt/docker/.license.txt` |
+| `main-component-notices.json`, `public-component-notices.json`, `native-build-notices.json` | Components inside packages and agent payloads (runc; Codex's bundled ripgrep and zsh; Codex native build inputs) |
+| `rust-notices.json`, `selected-rust-notices.json`, `primary-source-notices.json` | Rust and native source notices for the shipped Codex releases and ripgrep |
+| `adapter-payloads.json`, `derived-profiles.json` | Expected payload files, hashes and the notices each one requires |
+| `agent-notices.json` | Provider legal files of the shipped agent and adapter releases |
 | `notice-rules.json` | Shared vocabulary for what counts as a legal document |
-| `notice-regeneration.json` | Changes made by `rebuild-notice-indexes.py` |
 | `qualification-boundaries.json` | What the verifier does and does not establish, and open source-delivery obligations |
-| `verify.py` | The in-image verifier |
+| `verify.py` | The verifier |
 
 ## Running the verifier
 
-A bare `verify.py --receipt` checks base scope and writes
-`base-image-verification.json`. Recipes pass `--stage base` explicitly.
-`--expect-agent none|claude|codex` makes a missing expected agent fail.
-
-Final scopes run after every payload addition:
+Runtime images have no Python, so each Kit and fixture recipe verifies its
+finished `image` stage read-only from a build stage and copies only the receipt
+into the final image:
 
 ```sh
-python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --copied-agents --receipt
-python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --profile claude-kit --version 2.1.296 --adapter claude-acp --receipt
-python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --profile codex-kit --version 0.162.1 --adapter codex-acp --receipt
-python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --adapter pi --stage final --receipt
+python3 -I -S /image/usr/local/share/licenses/marsh-dhi/verify.py --root /image --receipt-dir /receipt
+python3 -I -S /image/usr/local/share/licenses/marsh-dhi/verify.py --root /image --adapter pi --receipt-dir /receipt
+python3 -I -S /image/usr/local/share/licenses/marsh-dhi/verify.py --root /image --profile claude-kit --version 2.1.296 --adapter claude-acp --receipt-dir /receipt
+python3 -I -S /image/usr/local/share/licenses/marsh-dhi/verify.py --root /image --profile codex-kit --version 0.162.1 --adapter codex-acp --receipt-dir /receipt
 ```
 
-There is one Kit per agent. The claude and codex Kits ship the native CLI and
-the agent's ACP adapter, so their final gate combines the Kit profile with that
-adapter's scope (`scope_kind` `native-kit+adapter`); a profile accepts only its
-own agent's adapter. The pi Kit's single lock carries Pi and pi-acp
-(`--adapter pi`). Each recipe writes a base receipt first and runs the final
-gate after installation, repair and the last `COPY`.
+The shell VM template has Python and runs the verifier in place (`--root /`)
+after its last mutation. The receipt is `image-verification.json` in the
+bundle directory.
 
-`stage` names the caller's verification point; `scope_kind` and
-`adapter_scope` describe what was covered. `check-receipt-order.py` checks the
-order of these steps in the known recipes, using the bounded Dockerfile reader
-in `recipe_instructions.py` (backslash continuations only; other parser
-directives, heredocs and repeated trailing escapes are refused).
+What a run checks:
 
-What each scope checks:
-
-- **Base:** installed package versions, common binary identities, the exact
-  clipboard and Corepack variants, and maintained agent additions when present.
-  Extra packages are reported, not counted as covered.
-- **Copied development agents:** Claude 2.1.296 at `/usr/local/bin/claude` and
-  the Codex 0.162.0 npm-global tree: bytes, type, mode, owner, link targets and
-  tree equality.
-- **Native Kits:** the selected Claude 2.1.296 and Codex 0.162.1 hashes and
-  their allowed mutations. The Codex recipe also checks `command -v codex` and
-  `codex --version` before the final receipt.
-- **ACP adapters:** SHA-512-checked public package members for codex-acp
-  0.160.1 and the Claude Agent SDK 0.3.293, with tree, mode, owner, link and
-  required-text checks. The SDK's own legal notice is retained as published.
+- **Every installed package** (dpkg `status` and DHI `status.d`): its own
+  `/usr/share/doc/PACKAGE/copyright`, or an indexed row for its exact version
+  whose in-image legal files (and the legal members of the wheels it installs)
+  still match. A package with neither fails the build.
+- **Go binaries** under `/usr/bin`, `/usr/sbin`, `/usr/libexec` and
+  `/usr/lib/docker` (found by their Go build information): each must be indexed
+  with its hash, so its module notices apply.
+- **The DHI license file** at `/opt/docker/.license.txt`.
+- **Native Kits:** the selected Claude 2.1.296 and Codex 0.162.1 files, modes,
+  owners and links, and the selected `versions/` tree.
+- **ACP adapters:** SHA-512-checked public package members for codex-acp's
+  Codex 0.160.1 and the Claude Agent SDK 0.3.293, with tree, mode, owner, link
+  and required-text checks. The SDK's own legal notice is retained as published.
 - **Other npm packages:** lock identity, installed package metadata and
   collected notice hashes. This does not cover every executable byte.
+- **The bundle itself:** every text is indexed and every indexed text is
+  present, byte for byte.
 
 Receipts record the verifier hash and a hash of the whole bundle tree (path,
-SHA-256, size and mode of every file except the two receipt files).
-
-## Host proof
-
-`host-proof.py` runs on the host. It compares the bundle against an external
-`--reviewed-source` manifest, so a consistent edit to both an index and its
-texts is still caught.
-
-- `--supporting-base-bind` binds the bundle read-only onto a public base image.
-- `--baked` runs the image's own verifier with no bind, compares its tree and
-  verifier hashes with the manifest, and checks the baked receipt and the
-  image-repair inputs.
-
-`capture-index.py` captures the raw OCI index of each pinned `FROM` image with
-`docker buildx imagetools inspect --raw`; `host-proof.py` checks those bytes
-against the pinned digests.
+SHA-256, size and mode of every file except the receipt).
 
 ## Regenerating
 
-`rebuild-notice-indexes.py` rebuilds the active indexes from a retained seed
-and exact source acquisitions and records its changes in
-`notice-regeneration.json`. The collectors (`collect-*.py`,
-`complete-rust-notices.py`, `supplement-rust-notices.py`, and
-`scripts/npm-notices.mjs` for npm) share `notice-rules.json` and
-`notice_rules.py`:
+`inventory.py` streams `docker export` of locally built image stages (it runs
+no image code) and rewrites `installed-package-notices.json`,
+`../go-input.json` and `source-records/dhi-base-image-legal.json`. Rows are
+reused from the previous inventory only for the identical package version; a
+DHI-built package at a new version needs its upstream legal texts acquired
+first. `collect-go.py --go GO --output DIR` then acquires the Go module notices
+through the Go checksum database. `add-claude-release.py` and
+`add-codex-release.py` record agent releases; `collect-adapter-payloads.py`
+records the ACP adapters' native payloads.
+
+The collectors (`collect-*.py`, `complete-rust-notices.py`,
+`supplement-rust-notices.py`, and `scripts/npm-notices.mjs` for npm) share
+`notice-rules.json` and `notice_rules.py`:
 
 - a file is a legal document by name (`LICENSE`, `COPYING`, `NOTICE`, ...) or
   by location (`licenses/`);
@@ -112,9 +113,10 @@ and exact source acquisitions and records its changes in
   `891f1f4c8584a082fc4658cabd48f1a8b01354e0`, upstream zsh
   `77045ef899e53b9598bebc5a41db93a548a40ca6`) and its patch.
 - **Rust dependencies of Codex:** notices are a superset collected from each
-  release's `Cargo.lock`, the V8 producer inputs, LLVM, ICU, the voice
-  libraries, libcap, OpenSSL, musl and the Rust 1.95 compiler distribution.
-  This is not a record of what is actually linked.
+  shipped release's `Cargo.lock` (0.162.1 native, 0.160.1 in codex-acp), the V8
+  producer inputs, LLVM, ICU, the voice libraries, libcap, OpenSSL, musl and the
+  Rust 1.95 compiler distribution. This is not a record of what is actually
+  linked.
 - **Missing upstream full texts:** `debugserver-types` 0.5.0 and
   `deno_core_icudata` 0.77.0 declare MIT but ship no license file; the
   declaration is kept with the standard MIT text for information. ICU 77 data
@@ -122,11 +124,8 @@ and exact source acquisitions and records its changes in
   come from upstream with version caveats recorded in the index.
 - **Claude Code and the Claude Agent SDK** are proprietary to Anthropic and
   are distributed under Anthropic's terms, not an open-source license.
-- **Docker clipboard-bridge** (in the DHI base) is proprietary to Docker; its
-  SPDX document is kept unchanged and reconciled in
-  `source-records/clipboard-spdx-reconciliation.json`. The DHI license text
-  covers DHI definitions, patches and build scripts (Apache-2.0); included
-  binaries keep their own terms.
+- **DHI:** the DHI license text covers DHI definitions, patches and build
+  scripts (Apache-2.0); included packages and binaries keep their own terms.
 - **LGPL components:** the Codex voice libraries (GLib, GStreamer,
   proxy-libintl) and bubblewrap are under the GNU LGPL / Library GPL. The
   upstream source archives and license texts are identified in

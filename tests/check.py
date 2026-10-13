@@ -38,7 +38,7 @@ sys.path.insert(0, str(ACCEPTANCE))
 from harness import (Fail as Failure, daemon_endpoint_paths, product_owned_vm_names, require,  # noqa: E402
                      resolve_executable, text, verify_container_deleted)
 from provenance import stock_vm_inventory  # noqa: E402
-from harness import wait_until  # noqa: E402
+from harness import stage_acp_fixture, wait_until  # noqa: E402
 from mcp_harness import gateway_call, gateway_data  # noqa: E402
 
 CHECKOUT = pathlib.Path(__file__).resolve().parents[1]
@@ -159,7 +159,7 @@ class Scope:
             path.mkdir(mode=0o700, parents=True, exist_ok=True)
             path.chmod(0o700)
         self.control_home.mkdir(mode=0o700, exist_ok=True)
-        commands = {"fixture": self.kit, "fixture-acp": str(ACCEPTANCE / "acp-fixture")}
+        commands = {"fixture": self.kit, "fixture-acp": str(stage_acp_fixture(self.root / "kits"))}
         agents = [{"schema_version": 1, "name": "fixture-session", "protocol": "acp_v1",
                    "command": "fixture-acp", "required_capabilities": []}]
         for name, value in (("commands.json", commands), ("agents.json", agents)):
