@@ -1,6 +1,7 @@
 # v2's sandbox.image, as content: the DHI Node.js runtime base plus the Kit VM
 # floor (Docker Engine, which runs this Kit's jobs from this same image), the
-# POSIX tools and ripgrep, assembled from Debian packages in a -dev build stage
+# POSIX tools, the build toolchain a project's gate needs (make, gcc, python3)
+# and ripgrep, assembled from Debian packages in a -dev build stage
 # (image-base/assemble-packages.sh), plus the Codex release this Kit
 # publishes, so the provide cannot claim a version the image does not ship.
 # codex-code-mode-host rides along: codex spawns it as a sibling executable
@@ -11,7 +12,7 @@ FROM dhi.io/debian-base:trixie-dev@sha256:c6fc0de84b65bc20346cee5f071fd976ccf383
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
-RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland ripgrep
+RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
 
 FROM dhi.io/debian-base:trixie-dev@sha256:c6fc0de84b65bc20346cee5f071fd976ccf383431515db2a4d9721ca936feb9f AS build
 ARG CODEX_VERSION
@@ -81,7 +82,7 @@ ENTRYPOINT ["/usr/local/bin/marsh-codex"]
 FROM image AS smoke
 ARG CODEX_VERSION
 USER root
-RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg \
+RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 \
  && test "$(command -v codex)" = /usr/local/bin/codex \
  && test "$(codex --version 2>/dev/null)" = "codex-cli ${CODEX_VERSION}"
 

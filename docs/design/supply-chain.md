@@ -90,7 +90,10 @@ proxy's CA at VM start, `git`, `curl`, and the
 `dockerd`. `packaging/image-base/assemble-packages.sh` installs these from the
 Debian and DHI apt repositories in a `debian-base` `-dev` build stage and copies
 each package, with its dpkg records and copyright file, onto the runtime base;
-`kit-vm.packages` and `userland.packages` list them. The agent Kits add ripgrep;
+`kit-vm.packages` and `userland.packages` list them. The agent Kits add the
+toolchain an ordinary project gate runs in their containers
+(`devtools.packages`: make, gcc, libc6-dev, python3) and ripgrep; Go and Java
+are not bundled;
 the shell Kit and the fixture add `python3`. npm runs only in a `dhi.io/node`
 `-dev` build stage, and the Claude and Codex downloads in a `debian-base` `-dev`
 stage. Each recipe smoke-tests the finished image in a throwaway stage and
