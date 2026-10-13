@@ -88,8 +88,9 @@ pub(super) const MCP_LOAD_HELP: &str = text!("v0.47.0/mcp-load-help.stdout");
 /// Not captured (needs a mutating command); see the README.
 pub(super) const UNVERIFIED_ALREADY_MOUNTED: &str =
     text!("unverified/mount-already-mounted.stderr");
-pub(super) const UNVERIFIED_UMOUNT_NOT_MOUNTED: &str =
-    text!("unverified/umount-not-mounted.stderr");
+pub(super) const UNVERIFIED_UMOUNT_NOT_EXPOSED: &str =
+    text!("unverified/umount-not-exposed.stderr");
+pub(super) const UNVERIFIED_UMOUNT_NOT_BOUND: &str = text!("unverified/umount-not-bound.stderr");
 
 /// The stock missing-VM diagnostic for `name`.
 pub(super) fn missing_vm_stderr(name: &str) -> Vec<u8> {

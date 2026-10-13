@@ -269,6 +269,50 @@ fn grant_rollback_is_complete_only_when_every_partial_mount_is_revoked() {
     }
 }
 
+/// A mount stock refused before any effect leaves nothing to roll back. The
+/// rollback's `umount` answers "nothing to unmount", which proves the target
+/// is not bound: the rollback is complete, and the VM is neither quarantined
+/// nor stopped. A rollback `umount` that fails otherwise stays uncertain
+/// (`failed_session_pin_rollback_quarantines_and_stops_the_exact_vm`).
+#[test]
+fn a_mount_refused_before_effect_rolls_back_completely_without_quarantine() {
+    let root = scratch();
+    let first = directory(root.path(), "first");
+    let refused = directory(root.path(), "refused");
+    let later = directory(root.path(), "later");
+    let model = StockModel::new();
+    let (adapter, vm) = seeded(&model);
+    for (grants, retained) in [
+        (vec![rw(&refused, "/Users/alice/refused")], false),
+        // The refused target's host is unexposed; another one stays bound.
+        (
+            vec![
+                rw(&first, "/Users/alice/first"),
+                rw(&refused, "/Users/alice/refused"),
+            ],
+            true,
+        ),
+    ] {
+        model.fault(
+            verb_in("mount", refused.clone()),
+            Fault::Respond(failure("Error: mount policy denied")),
+        );
+        let error = adapter
+            .prepare_grants(&vm, "attempt-refused", &grants)
+            .unwrap_err();
+        assert_eq!(error.grant_rollback_complete(), Some(true), "{error}");
+        assert!(error.to_string().contains("mount policy denied"), "{error}");
+        let mounts = model.vm(KIT).unwrap().mounts;
+        assert_eq!(mounts.values().any(|(host, _)| host == &first), retained);
+        assert!(!mounts.values().any(|(host, _)| host == &refused));
+    }
+    assert_eq!(model.count("umount"), 2);
+    assert!(model.vm(KIT).unwrap().running);
+    adapter
+        .prepare_session_grants(&vm, "session-later", &[rw(&later, "/Users/alice/later")])
+        .unwrap();
+}
+
 #[test]
 fn failed_session_pin_rollback_quarantines_and_stops_the_exact_vm() {
     let root = scratch();
