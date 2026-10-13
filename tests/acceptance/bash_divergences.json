@@ -569,12 +569,6 @@
     "history-format-physical-heredoc@C"
    ]
   }},
-  {"id": "HISTORY-NONINTERACTIVE", "summary": "The history builtin refuses to work in a noninteractive shell", "cases": {
-   "bytes": [
-    "history-raw-load",
-    "history-raw-save"
-   ]
-  }},
   {"id": "HISTVERIFY", "summary": "histverify and histreedit are not implemented", "cases": {
    "history-input": [
     "edit:no-reedit-raw-paste@C",
@@ -908,11 +902,6 @@
     "repeat-c3a9ff3e-stderr@C"
    ]
   }},
-  {"id": "NAMED-FD-LIFETIME", "summary": "A {fd}>file redirection on a builtin is closed after the command; Bash keeps it open", "cases": {
-   "external-redirects": [
-    "builtin-variable-fd"
-   ]
-  }},
   {"id": "NAMEREF-SUBSCRIPT", "summary": "A name reference to an array element (declare -n r='a[2]') is an ordinary variable: read, getopts, export and unset through it change r, not the element", "cases": {
    "byte-builtins": [
     "export-quoted-ref-element@C",
@@ -923,11 +912,6 @@
     "read-nameref-index@C.utf8",
     "unset-ref-raw-index@C",
     "unset-ref-raw-index@C.utf8"
-   ]
-  }},
-  {"id": "POSIX-SPECIAL-ASSIGNMENT", "summary": "In posix mode an assignment before a special builtin does not persist", "cases": {
-   "external-redirects": [
-    "special-prefix-hidden"
    ]
   }},
   {"id": "PROMPT", "summary": "Prompt strings: quote removal and brace expansion are applied, \\nnn and \\001/\\002 handled differently, controls not made visible", "cases": {
@@ -1105,11 +1089,6 @@
    "regex": [
     "chld-invalid",
     "invalid-retention"
-   ]
-  }},
-  {"id": "SPARSE-NEGATIVE-INDEX", "summary": "A negative subscript on a sparse array counts from the element count, not the highest index", "cases": {
-   "bytes": [
-    "sparse-negative-index"
    ]
   }},
   {"id": "STARTUP-OPTIONS", "summary": "Invocation options: +x short options, -a/-B/-E/-T/-h, - and + terminators, invalid -o/-O names, option listings", "cases": {

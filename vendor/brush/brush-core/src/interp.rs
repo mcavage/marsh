@@ -2687,15 +2687,29 @@ async fn execute_command<T: Into<String>>(
     // returning.
     let mut guard = crate::env::ScopeGuard::new(&mut context.shell, EnvironmentScope::Command);
 
+    // In posix mode, assignments before a special builtin outlive it (still
+    // exported), as in Bash.
+    let cmd_name = cmd_name.into();
+    let persist = guard.shell().options().posix_mode
+        && guard
+            .shell()
+            .builtins()
+            .get(&cmd_name)
+            .is_some_and(|builtin| !builtin.disabled && builtin.special_builtin);
     for assignment in assignments {
         // Ensure it's tagged as exported and created in the command scope.
+        let (required_scope, creation_scope) = if persist {
+            (None, EnvironmentScope::Global)
+        } else {
+            (Some(EnvironmentScope::Command), EnvironmentScope::Command)
+        };
         apply_assignment(
             assignment,
             guard.shell(),
             &params,
             true,
-            Some(EnvironmentScope::Command),
-            EnvironmentScope::Command,
+            required_scope,
+            creation_scope,
         )
         .await?;
     }
@@ -2715,7 +2729,7 @@ async fn execute_command<T: Into<String>>(
 
     // Construct the command struct.
     let mut cmd =
-        commands::SimpleCommand::new(context.shell, params, cmd_name.into(), args.iter().cloned());
+        commands::SimpleCommand::new(context.shell, params, cmd_name, args.iter().cloned());
     cmd.process_group_id = context.process_group_id;
     cmd.exec_in_place = exec_in_place;
 
@@ -3141,6 +3155,14 @@ pub(crate) async fn setup_redirect(
             };
             let numbered = ast::IoRedirect::File(Some(fd), kind.clone(), target.clone());
             Box::pin(setup_redirect(shell, params, &numbered)).await?;
+            // Like Bash, the descriptor stays open in the shell after the
+            // command, unless `varredir_close` is set.
+            if !closing
+                && !shell.options().var_redir_close
+                && let Some(file) = params.open_files.try_fd(fd).cloned()
+            {
+                shell.open_files_mut().set_fd(fd, file);
+            }
             if !closing {
                 shell.env_mut().update_or_add(
                     name.as_str(),
