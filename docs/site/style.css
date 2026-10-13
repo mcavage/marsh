@@ -226,6 +226,10 @@ pre:hover .copy, .copy:focus-visible, .copy.done { opacity: 1; }
 }
 .term code { display: block; min-width: max-content; }
 .term.anim { max-height: min(26rem, 49vh); overflow-y: auto; scrollbar-width: thin; }
+/* The demo wraps long output; table rows and commands still scroll. */
+.term.anim { white-space: pre-wrap; overflow-wrap: anywhere; }
+.term.anim code { min-width: 0; }
+.term.anim .row, .term.anim .cmd { white-space: pre; }
 .term .p { color: var(--t-green); font-weight: 600; }
 .term .hp { color: var(--t-cyan); font-weight: 600; }
 .term .c { color: var(--t-dim); font-style: italic; }
@@ -395,10 +399,6 @@ tr:last-child td { border-bottom: 0; }
   .top nav .hide-s { display: none; }
 }
 @media (max-width: 520px) {
-  /* The demo wraps long output on phones; table rows still scroll. */
-  .term.anim { white-space: pre-wrap; overflow-wrap: anywhere; }
-  .term.anim code { min-width: 0; }
-  .term.anim .row, .term.anim .cmd { white-space: pre; }
   .install { font-size: 0.8rem; padding-left: 0.75rem; }
   .eyebrow { font-size: 0.7rem; white-space: nowrap; }
   .cta .btn { flex: 1; justify-content: center; }

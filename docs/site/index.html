@@ -69,33 +69,58 @@
     <div class="wrap">
       <h2 id="demo-h" class="sr">A recorded session</h2>
       <div class="window">
-        <div class="bar"><i></i><i></i><i></i><span class="title">marsh — ~/src/slug</span><button class="replay" type="button">Replay</button></div>
-<pre class="term anim" tabindex="0" aria-label="Terminal transcript: a test fails; Claude, following the project's AGENTS.md, races Codex and a second Claude on private copies, applies the first patch that passes make test, and marsh jobs --tree shows the two child jobs"><code><span class="ln cmd" data-wait="500"><span class="hp">~/src/slug $ </span><span class="tx">marsh</span></span>
-<span class="ln cmd"><span class="p">marsh-0.5$ </span><span class="tx">make test 2&gt;&amp;1 | grep FAILED</span></span>
-<span class="ln" data-wait="600"><span class="r">FAILED (failures=2)</span></span>
-<span class="ln cmd" data-wait="2200"><span class="p">marsh-0.5$ </span><span class="tx"><span class="k">claude</span> -p <span class="s">"make test fails. Fix it the way AGENTS.md describes for competing fixes. Report in five lines or fewer."</span></span></span>
-<span class="ln">`marsh split` ran codex and claude on private copies; both produced the byte-identical one-line patch to `slug.py` (only file touched, no test files).</span>
+        <div class="bar"><i></i><i></i><i></i><span class="title">marsh — ttlcache</span><button class="replay" type="button">Replay</button></div>
+<pre class="term anim" tabindex="0" aria-label="Terminal transcript of a real run: make test fails. A split runs two branches, each on a private copy of the project. The fix branch runs Claude, then make test. The review branch runs a fanout of two reviewers, Codex and Claude, piped into collect. join prints both branches, the fix's patch, and both reviews, and is piped into a third Claude, which applies the patch and the thread-safety finding. make test passes, and marsh jobs --tree shows the split, the nested fanout, and every job."><code><span class="ln cmd" data-wait="500"><span class="hp">ttlcache $ </span><span class="tx">marsh</span></span>
+<span class="ln cmd"><span class="p">marsh-0.5$ </span><span class="tx">make test 2&gt;&amp;1 | grep FAIL</span></span>
+<span class="ln">FAIL: test_evicts_least_recently_used (test_cache.TTLCacheTest.test_evicts_least_recently_used)</span>
+<span class="ln" data-wait="600"><span class="r">FAILED (failures=1)</span></span>
+<span class="ln cmd"><span class="p">marsh-0.5$ </span><span class="tx"><span class="k">split</span> {</span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">  <span class="lb">fix:</span> <span class="k">claude</span> -p <span class="s">"make test fails; make the smallest fix. One line."</span> &amp;&amp; make test</span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">  <span class="lb">review:</span> <span class="k">fanout</span> {</span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">    <span class="lb">races:</span> <span class="k">codex</span> exec <span class="s">"Is cache.py thread-safe? No edits. Two lines."</span></span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">    <span class="lb">tests:</span> <span class="k">claude</span> -p <span class="s">"Name one case the tests miss. No edits. One line."</span></span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">  } | <span class="k">collect</span></span></span>
+<span class="ln cmd cont"><span class="p">&gt; </span><span class="tx">} | <span class="k">join</span> | tee /dev/tty |</span></span>
+<span class="ln cmd cont" data-wait="1800"><span class="p">&gt; </span><span class="tx"><span class="k">claude</span> -p <span class="s">"Apply fix's patch and the races finding. Two lines."</span></span></span>
+<span class="ln"><span class="d"># split 3cefb454a1f9: 2 branches; manifest …/out/manifest.json</span></span>
 <span class="ln"> </span>
-<span class="ln">Join applied codex's patch first and `make test` passed, so claude's was not needed.</span>
+<span class="ln"><span class="h">== fix (exited 0, shell-vm) ==</span></span>
+<span class="ln">`cache.py:20` — `popitem()` → `popitem(last=False)`. All 3 tests pass.</span>
+<span class="ln">python3 -m unittest -q</span>
+<span class="ln"><span class="lb">-- fix: 1 file (M cache.py); diff …/out/fix/diff.patch --</span></span>
+<span class="ln"><span class="d">…</span></span>
+<span class="ln"><span class="r">-                self._data.popitem()</span></span>
+<span class="ln"><span class="g">+                self._data.popitem(last=False)</span></span>
+<span class="ln"><span class="d">…</span></span>
+<span class="ln"><span class="h">== review (exited 0, shell-vm) ==</span></span>
+<span class="ln"><span class="h">== races (complete) ==</span></span>
+<span class="ln">No. `set()` locks `_data`, but `get()` reads, deletes, and reorders entries without locking.</span>
+<span class="ln">Concurrent calls can raise `KeyError` or delete a freshly replaced entry; `__len__()` is also unlocked.</span>
 <span class="ln"> </span>
-<span class="ln">Applied change: `re.sub(r"[^a-z0-9]", ...)` → `re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")` — collapses runs of non-alphanumerics and trims edge hyphens.</span>
-<span class="ln"> </span>
-<span class="ln">Verified in the working tree: `make test` runs 3 tests, OK. Change is uncommitted.</span>
-<span class="ln"> </span>
-<span class="ln" data-wait="900">Split dir kept at `.marsh/split/b8aa7b4db45f` (remove with `marsh splits rm b8aa7b4db45f`).</span>
-<span class="ln cmd" data-wait="400"><span class="p">marsh-0.5$ </span><span class="tx">marsh jobs --tree</span></span>
-<span class="ln row"><span class="h">ID        STARTED   STATE      EXIT      RUN  COMMAND</span></span>
-<span class="ln row"><span class="d">708d0681</span>  27s ago   <span class="g">finished</span>      0    27.2s  claude -p "make test fails. Fix it the way AGENTS.md describes …</span>
-<span class="ln row"><span class="d">85f5c50a</span>  18s ago   <span class="g">finished</span>      0    10.0s  <span class="tr">├─</span> claude -p "make test fails with this output:?FAIL: test_punctua…</span>
-<span class="ln row"><span class="d">59bb822e</span>  18s ago   <span class="g">finished</span>      0    11.1s  <span class="tr">└─</span> codex exec "make test fails with this output:?FAIL: test_punctu…</span>
+<span class="ln"><span class="h">== tests (complete) ==</span></span>
+<span class="ln">`get()` mutates `_data` (`del`, `move_to_end`) without holding `self._lock`, and no test exercises concurrent get/set — a race there is invisible to the suite (cache.py:22-31).</span>
+<span class="ln"><span class="d">…</span></span>
+<span class="ln" data-wait="1400"><span class="lb">-- review: no changes --</span></span>
+<span class="ln">`cache.py:20` now evicts the LRU (`popitem(last=False)`), and `get()`/`__len__()` hold `self._lock` around their reads and mutations.</span>
+<span class="ln" data-wait="700">All 3 tests pass; no test covers the concurrency fix, so that one is unverified by the suite.</span>
 <span class="ln cmd"><span class="p">marsh-0.5$ </span><span class="tx">make test 2&gt;&amp;1 | tail -1</span></span>
 <span class="ln" data-wait="600"><span class="g">OK</span></span>
+<span class="ln cmd" data-wait="400"><span class="p">marsh-0.5$ </span><span class="tx">marsh jobs --tree</span></span>
+<span class="ln row"><span class="h">ID               STARTED   STATE      EXIT      RUN  COMMAND</span></span>
+<span class="ln row"><span class="d">8a29aaee</span>         11s ago   <span class="g">finished</span>      0    11.2s  claude -p "Apply fix's patch and the races finding. Two lines."  <span class="d">(consumes split 3cefb454)</span></span>
+<span class="ln row"><span class="d">3cefb454</span>         29s ago   <span class="g">joined</span>        0    17.5s  <span class="k">split</span> (fix, review)</span>
+<span class="ln row"><span class="d">3cefb454/fix</span>     29s ago   <span class="g">finished</span>      0    11.6s  <span class="tr">├─</span> <span class="lb">fix:</span> claude -p "make test fails; make the smallest fix. One lin…</span>
+<span class="ln row"><span class="d">931a93d5</span>         29s ago   <span class="g">finished</span>      0    11.4s  <span class="tr">│  └─</span> claude -p "make test fails; make the smallest fix. One line."</span>
+<span class="ln row"><span class="d">3cefb454/review</span>  29s ago   <span class="g">finished</span>      0    17.5s  <span class="tr">└─</span> <span class="lb">review:</span> fanout { races: codex exec "Is cache.py thread-safe? No…</span>
+<span class="ln row"><span class="d">9ca2c432</span>         29s ago   <span class="g">finished</span>      0    17.3s  <span class="tr">   └─</span> <span class="k">fanout</span> (tests, races)</span>
+<span class="ln row"><span class="d">d8bb9472</span>         29s ago   <span class="g">finished</span>      0    17.3s  <span class="tr">      ├─</span> <span class="lb">tests:</span> claude -p "Name one case the tests miss. No edits. One l…</span>
+<span class="ln row"><span class="d">ab4d3921</span>         29s ago   <span class="g">finished</span>      0     7.3s  <span class="tr">      └─</span> <span class="lb">races:</span> codex exec "Is cache.py thread-safe? No edits. Two lines…</span>
 <span class="ln end"><span class="p">marsh-0.5$ </span></span></code></pre>
       </div>
-      <p class="caption">A real run on a three-test project, with warm VMs. Claude followed
-      <a href="docs/guides/farm-out-work.html#the-agentsmd-snippet">a snippet in the project's <code>AGENTS.md</code></a>:
-      it ran <code>marsh split</code> from its Bash tool and kept the first patch that passed <code>make test</code>.
-      Each child was a separate job in its own container, on its own copy of the project.</p>
+      <p class="caption">A real run, with warm VMs; <code>…</code> marks trimmed output. Each branch got its own copy of
+      the project: on one, Claude fixed the failing test and <code>make test</code> passed; on the other, Codex and a
+      second Claude reviewed side by side. A third Claude read <code>join</code>'s output and applied the fix and the
+      reviewers' finding to the real tree. The pipeline took 31 seconds; every agent ran as its own job.</p>
     </div>
   </section>
 
