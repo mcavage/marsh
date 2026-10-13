@@ -5,8 +5,10 @@ This page covers building, testing, and sending changes. The
 [AGENTS.md](AGENTS.md) is the short version of the project rules.
 
 Open an issue first for a large or cross-component change. Small fixes can go
-straight to a pull request. Doc fixes are welcome: every guide example runs in
-the test suite, so a broken example is a bug. To share a Kit, a pipeline, or an
+straight to a pull request. Doc fixes are welcome. The workspace acceptance suite
+runs marked guide examples, replacing agent calls with deterministic fixtures
+where specified. It does not verify every transcript or a fresh install-to-agent
+journey. A broken example is still a bug. To share a Kit, a pipeline, or an
 AGENTS.md recipe instead of code, post it in
 [Show and tell](https://github.com/mcavage/marsh/discussions).
 
