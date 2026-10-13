@@ -57,7 +57,13 @@ if [ "${1:-}" = --one ]; then
     java $JAVA_OPTS -cp "$JAR" tlc2.TLC -noGenerateSpecTE -deadlock -workers "$workers" \
       -metadir "$OUT/meta-$base" -config "$cfg" "$module" >"$log" 2>&1
   else
-    docker run --rm --label "marsh-tlc=$OUT" --cpus "$workers" -v "$PWD:/m" -v "$JAR:/tla2tools.jar:ro" -w /m "$IMAGE" \
+    # A memory slice in proportion to the workers: TLC's default heap is a
+    # quarter of what the JVM sees, and without a limit every container sees the
+    # whole Docker VM, so a full sweep's concurrent JVMs overcommitted it and the
+    # kernel killed TLC mid-run (Docker Desktop's VM is 8 GB by default).
+    docker run --rm --label "marsh-tlc=$OUT" --cpus "$workers" \
+      ${TLC_MEM_PER_WORKER:+--memory "$(( TLC_MEM_PER_WORKER * workers ))m"} \
+      -e JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=50" -v "$PWD:/m" -v "$JAR:/tla2tools.jar:ro" -w /m "$IMAGE" \
       java $JAVA_OPTS -cp /tla2tools.jar tlc2.TLC -noGenerateSpecTE -deadlock -workers "$workers" \
       -metadir "/tmp/tlc-$base" -config "$cfg" "$module" >"$log" 2>&1
   fi
@@ -110,6 +116,10 @@ if [ -z "$cores" ]; then
   cores=$detected; [ "$cores" -gt 8 ] && cores=8
 fi
 case "$cores" in ''|*[!0-9]*|0) echo "check.sh: cores must be a positive number" >&2; exit 2 ;; esac
+if [ "$RUNNER" != java ] && [ "$list" != 1 ]; then
+  mem=$(docker info --format '{{.MemTotal}}' 2>/dev/null)
+  case "$mem" in ''|*[!0-9]*) ;; *) TLC_MEM_PER_WORKER=$(( mem / 1048576 * 9 / 10 / cores )); export TLC_MEM_PER_WORKER ;; esac
+fi
 
 marker() { grep -Eq "^\\\\\\* marsh-check:.*[[:space:]]$2([[:space:]]|\$)" "$1"; } # cfg word
 hint() { sed -n 's/^\\\* marsh-check:.* \([0-9][0-9]*\)s\( .*\)\{0,1\}$/\1/p' "$1" | head -1; } # measured seconds, if any
