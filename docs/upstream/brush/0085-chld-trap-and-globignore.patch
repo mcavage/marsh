@@ -1,0 +1,195 @@
+diff --git a/brush-core/src/expansion.rs b/brush-core/src/expansion.rs
+index f98989b..c2479c0 100644
+--- a/brush-core/src/expansion.rs
++++ b/brush-core/src/expansion.rs
+@@ -1010,8 +1010,15 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+             .set_extended_globbing(self.parser_options.enable_extended_globbing)
+             .set_case_insensitive(self.shell.options().case_insensitive_pathname_expansion);
+ 
++        // Like Bash, a non-empty GLOBIGNORE implies dotglob.
++        let ignore = self
++            .shell
++            .env_str("GLOBIGNORE")
++            .filter(|ignore| !ignore.is_empty())
++            .map(|ignore| ignore.into_owned());
+         let options = patterns::FilenameExpansionOptions {
+-            require_dot_in_pattern_to_match_dot_files: !self.shell.options().glob_matches_dotfiles,
++            require_dot_in_pattern_to_match_dot_files: !self.shell.options().glob_matches_dotfiles
++                && ignore.is_none(),
+             globstar: self.shell.options().enable_star_star_glob,
+         };
+ 
+@@ -1024,6 +1031,15 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                 &options,
+             )
+             .unwrap_or_default();
++        let expansion = match (ignore, expansion) {
++            (Some(ignore), patterns::PatternExpansionResult::Expanded(mut paths))
++                if pattern.has_glob() =>
++            {
++                paths.retain(|path| !self.globignore_rejects(&ignore, path));
++                patterns::PatternExpansionResult::Expanded(paths)
++            }
++            (_, expansion) => expansion,
++        };
+ 
+         if expansion.is_unmatched_glob()
+             && self.shell.options().fail_expansion_on_globs_without_match
+@@ -1044,6 +1060,29 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+         }
+     }
+ 
++    /// Whether GLOBIGNORE removes `path` from a glob's results, as in Bash:
++    /// a `.` or `..` name, or a whole-path match for one of its `:`-separated
++    /// patterns, where `*` and `?` do not match `/`.
++    fn globignore_rejects(&self, ignore: &str, path: &str) -> bool {
++        if matches!(path.rsplit('/').next(), Some("." | "..")) {
++            return true;
++        }
++        let names: Vec<&str> = path.split('/').collect();
++        ignore
++            .split(':')
++            .filter(|pattern| !pattern.is_empty())
++            .any(|pattern| {
++                let parts: Vec<&str> = pattern.split('/').collect();
++                parts.len() == names.len()
++                    && parts.iter().zip(&names).all(|(part, name)| {
++                        patterns::Pattern::from(*part)
++                            .set_extended_globbing(self.parser_options.enable_extended_globbing)
++                            .exactly_matches(name)
++                            .unwrap_or(false)
++                    })
++            })
++    }
++
+     #[async_recursion::async_recursion]
+     async fn expand_word_piece(
+         &mut self,
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 5275ebf..f324839 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -543,6 +543,33 @@ async fn deliver_pending_signals<SE: extensions::ShellExtensions>(
+     shell: &mut Shell<SE>,
+     params: &ExecutionParameters,
+ ) -> Result<Option<ExecutionResult>, error::Error> {
++    // Like Bash, a `CHLD` trap runs once for each child the shell reaped, and
++    // not for the children its own commands start. Subshells, which Bash
++    // starts with the trap reset, leave the children they reap to the shell.
++    static RUNNING_CHLD_TRAP: std::sync::atomic::AtomicBool =
++        std::sync::atomic::AtomicBool::new(false);
++    let chld = crate::traps::TrapSignal::Signal(sys::signal::Signal::SIGCHLD);
++    if !shell.is_subshell() && !RUNNING_CHLD_TRAP.load(std::sync::atomic::Ordering::Acquire) {
++        let reaped = crate::signals::take_reaped_children();
++        if reaped > 0 && shell.traps().handles(chld) {
++            RUNNING_CHLD_TRAP.store(true, std::sync::atomic::Ordering::Release);
++            let mut outcome = Ok(None);
++            for _ in 0..reaped {
++                match shell.invoke_trap_handler(chld, params).await {
++                    Ok(result) if result.is_normal_flow() => {}
++                    other => {
++                        outcome = other.map(Some);
++                        break;
++                    }
++                }
++            }
++            let _ = crate::signals::take_reaped_children();
++            RUNNING_CHLD_TRAP.store(false, std::sync::atomic::Ordering::Release);
++            if !matches!(outcome, Ok(None)) {
++                return outcome;
++            }
++        }
++    }
+     for signal in crate::signals::take_pending() {
+         let Ok(caught) = sys::signal::Signal::try_from(signal) else {
+             continue;
+diff --git a/brush-core/src/patterns.rs b/brush-core/src/patterns.rs
+index 8b50258..c168e7c 100644
+--- a/brush-core/src/patterns.rs
++++ b/brush-core/src/patterns.rs
+@@ -202,6 +202,14 @@ impl Pattern {
+         self.pieces.iter().all(|p| p.as_str().is_empty())
+     }
+ 
++    /// Whether the pattern has glob characters to expand.
++    pub(crate) fn has_glob(&self) -> bool {
++        self.pieces.iter().any(|piece| {
++            matches!(piece, PatternPiece::Pattern(_))
++                && requires_expansion(piece.as_str(), self.enable_extended_globbing)
++        })
++    }
++
+     /// Placeholder function that always returns true.
+     pub(crate) const fn accept_all_expand_filter(_path: &Path) -> bool {
+         true
+diff --git a/brush-core/src/processes.rs b/brush-core/src/processes.rs
+index 5796d45..2264728 100644
+--- a/brush-core/src/processes.rs
++++ b/brush-core/src/processes.rs
+@@ -92,6 +92,8 @@ impl ChildProcess {
+                     self.interrupted = true;
+                 },
+                 output = &mut self.exec_future => {
++                    #[cfg(unix)]
++                    crate::signals::note_child_reaped();
+                     break Ok(ProcessWaitResult::Completed {
+                         output: output?,
+                         interrupted: std::mem::take(&mut self.interrupted),
+@@ -112,9 +114,14 @@ impl ChildProcess {
+ 
+     pub(crate) fn poll(&mut self) -> Option<Result<std::process::Output, error::Error>> {
+         let checkable_future = &mut self.exec_future;
+-        checkable_future
++        let result = checkable_future
+             .now_or_never()
+-            .map(|result| result.map_err(Into::into))
++            .map(|result| result.map_err(Into::into));
++        #[cfg(unix)]
++        if result.is_some() {
++            crate::signals::note_child_reaped();
++        }
++        result
+     }
+ }
+ 
+diff --git a/brush-core/src/signals.rs b/brush-core/src/signals.rs
+index 6661158..438af4e 100644
+--- a/brush-core/src/signals.rs
++++ b/brush-core/src/signals.rs
+@@ -16,7 +16,8 @@
+ 
+ #[cfg(unix)]
+ pub(crate) use imp::{
+-    arrived, discard, forget_after_fork, is_recorded, listen, take, take_pending,
++    arrived, discard, forget_after_fork, is_recorded, listen, note_child_reaped, take,
++    take_pending, take_reaped_children,
+ };
+ 
+ #[cfg(not(unix))]
+@@ -48,6 +49,18 @@ mod imp {
+     }
+ 
+     static LISTENING: AtomicBool = AtomicBool::new(false);
++    /// Children reaped since the last [`take_reaped_children`] (for `CHLD` traps).
++    static REAPED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
++
++    /// Notes that the shell reaped a child process.
++    pub(crate) fn note_child_reaped() {
++        REAPED.fetch_add(1, Ordering::AcqRel);
++    }
++
++    /// Returns (and consumes) how many children were reaped since the last call.
++    pub(crate) fn take_reaped_children() -> usize {
++        REAPED.swap(0, Ordering::AcqRel)
++    }
+     static RECORDED: Mutex<Vec<Recorded>> = Mutex::new(Vec::new());
+ 
+     /// Starts recording `signal` for delivery between commands. This installs
+@@ -155,6 +168,7 @@ mod imp {
+     /// enter the signal registry, whose lock another parent thread may hold).
+     pub(crate) fn forget_after_fork() {
+         LISTENING.store(false, Ordering::Release);
++        REAPED.store(0, Ordering::Release);
+         if let Ok(mut recorded) = RECORDED.try_lock() {
+             for entry in recorded.iter_mut() {
+                 entry.armed = false;

@@ -202,6 +202,14 @@ impl Pattern {
         self.pieces.iter().all(|p| p.as_str().is_empty())
     }
 
+    /// Whether the pattern has glob characters to expand.
+    pub(crate) fn has_glob(&self) -> bool {
+        self.pieces.iter().any(|piece| {
+            matches!(piece, PatternPiece::Pattern(_))
+                && requires_expansion(piece.as_str(), self.enable_extended_globbing)
+        })
+    }
+
     /// Placeholder function that always returns true.
     pub(crate) const fn accept_all_expand_filter(_path: &Path) -> bool {
         true

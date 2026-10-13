@@ -112,13 +112,14 @@ Patch `0082` makes `read` split and assign as Bash does.
 Patch `0083` fixes negative subscripts, `{fd}` lifetime, posix special-builtin
 assignments, and noninteractive `history`.
 Patch `0084` matches `[[ =~ ]]` with the C library's POSIX regular expressions.
+Patch `0085` runs `CHLD` traps and implements GLOBIGNORE.
 
 This directory contains only the runtime crate source, manifests, licenses,
 and build metadata needed by marsh. Upstream integration tests, snapshots,
 examples, benches, and development tooling are intentionally omitted. Each
 local delta is covered by focused tests in `crates/marsh/tests/smoke.rs` or,
 for `0010`, `0012`-`0016`, `0018`-`0032`, `0036`, `0038`, `0039`, `0042`,
-`0052`, `0053`, `0055`-`0067`, and `0070`-`0084`,
+`0052`, `0053`, `0055`-`0067`, and `0070`-`0085`,
 `crates/marsh/tests/bash_audit.rs` (`0017`, `0036`, `0037`, `0040`, `0041`, `0043`, `0044`, `0054`, `0068`, and `0069` are in `smoke.rs`, and `0070` also is; `0033` and `0034` are in `split_join.rs` and `bash_audit.rs`, with
 parser cases in `brush-parser/src/parser/tests/composition.rs`). The earlier patch series was
 also checked against the full upstream compatibility suite

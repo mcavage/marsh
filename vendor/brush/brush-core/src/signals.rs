@@ -16,7 +16,8 @@
 
 #[cfg(unix)]
 pub(crate) use imp::{
-    arrived, discard, forget_after_fork, is_recorded, listen, take, take_pending,
+    arrived, discard, forget_after_fork, is_recorded, listen, note_child_reaped, take,
+    take_pending, take_reaped_children,
 };
 
 #[cfg(not(unix))]
@@ -48,6 +49,18 @@ mod imp {
     }
 
     static LISTENING: AtomicBool = AtomicBool::new(false);
+    /// Children reaped since the last [`take_reaped_children`] (for `CHLD` traps).
+    static REAPED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    /// Notes that the shell reaped a child process.
+    pub(crate) fn note_child_reaped() {
+        REAPED.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Returns (and consumes) how many children were reaped since the last call.
+    pub(crate) fn take_reaped_children() -> usize {
+        REAPED.swap(0, Ordering::AcqRel)
+    }
     static RECORDED: Mutex<Vec<Recorded>> = Mutex::new(Vec::new());
 
     /// Starts recording `signal` for delivery between commands. This installs
@@ -155,6 +168,7 @@ mod imp {
     /// enter the signal registry, whose lock another parent thread may hold).
     pub(crate) fn forget_after_fork() {
         LISTENING.store(false, Ordering::Release);
+        REAPED.store(0, Ordering::Release);
         if let Ok(mut recorded) = RECORDED.try_lock() {
             for entry in recorded.iter_mut() {
                 entry.armed = false;

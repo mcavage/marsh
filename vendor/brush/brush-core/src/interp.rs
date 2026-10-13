@@ -543,6 +543,33 @@ async fn deliver_pending_signals<SE: extensions::ShellExtensions>(
     shell: &mut Shell<SE>,
     params: &ExecutionParameters,
 ) -> Result<Option<ExecutionResult>, error::Error> {
+    // Like Bash, a `CHLD` trap runs once for each child the shell reaped, and
+    // not for the children its own commands start. Subshells, which Bash
+    // starts with the trap reset, leave the children they reap to the shell.
+    static RUNNING_CHLD_TRAP: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    let chld = crate::traps::TrapSignal::Signal(sys::signal::Signal::SIGCHLD);
+    if !shell.is_subshell() && !RUNNING_CHLD_TRAP.load(std::sync::atomic::Ordering::Acquire) {
+        let reaped = crate::signals::take_reaped_children();
+        if reaped > 0 && shell.traps().handles(chld) {
+            RUNNING_CHLD_TRAP.store(true, std::sync::atomic::Ordering::Release);
+            let mut outcome = Ok(None);
+            for _ in 0..reaped {
+                match shell.invoke_trap_handler(chld, params).await {
+                    Ok(result) if result.is_normal_flow() => {}
+                    other => {
+                        outcome = other.map(Some);
+                        break;
+                    }
+                }
+            }
+            let _ = crate::signals::take_reaped_children();
+            RUNNING_CHLD_TRAP.store(false, std::sync::atomic::Ordering::Release);
+            if !matches!(outcome, Ok(None)) {
+                return outcome;
+            }
+        }
+    }
     for signal in crate::signals::take_pending() {
         let Ok(caught) = sys::signal::Signal::try_from(signal) else {
             continue;
