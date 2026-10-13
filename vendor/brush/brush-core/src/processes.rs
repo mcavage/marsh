@@ -70,6 +70,13 @@ impl ChildProcess {
         #[allow(unused_mut, reason = "only mutated on some platforms")]
         let mut sigchld = sys::signal::chld_signal_listener()?;
 
+        // An INT recorded since the child started arrived before the runtime's
+        // listener below existed, which would not see it.
+        #[cfg(unix)]
+        if crate::signals::arrived(libc::SIGINT) {
+            self.interrupted = true;
+        }
+
         #[allow(clippy::ignored_unit_patterns)]
         loop {
             tokio::select! {

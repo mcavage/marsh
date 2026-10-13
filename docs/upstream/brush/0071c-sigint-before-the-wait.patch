@@ -1,0 +1,68 @@
+diff --git a/brush-core/src/commands.rs b/brush-core/src/commands.rs
+index 5d3470f..6e0ed45 100644
+--- a/brush-core/src/commands.rs
++++ b/brush-core/src/commands.rs
+@@ -801,6 +801,13 @@ pub(crate) fn execute_external_command(
+             .join(" ")
+     );
+ 
++    // An INT sent to the group as the child starts, before the shell awaits
++    // it, must not take the shell's default action: record it, and the wait
++    // treats it as arriving during the wait (Bash's handler is in place for a
++    // foreground child too).
++    #[cfg(unix)]
++    crate::signals::listen(libc::SIGINT);
++
+     // Signals stay blocked from the fork until the child has default
+     // dispositions, so one sent before it execs is not lost to our handlers.
+     #[cfg(unix)]
+diff --git a/brush-core/src/processes.rs b/brush-core/src/processes.rs
+index 990dc88..5796d45 100644
+--- a/brush-core/src/processes.rs
++++ b/brush-core/src/processes.rs
+@@ -70,6 +70,13 @@ impl ChildProcess {
+         #[allow(unused_mut, reason = "only mutated on some platforms")]
+         let mut sigchld = sys::signal::chld_signal_listener()?;
+ 
++        // An INT recorded since the child started arrived before the runtime's
++        // listener below existed, which would not see it.
++        #[cfg(unix)]
++        if crate::signals::arrived(libc::SIGINT) {
++            self.interrupted = true;
++        }
++
+         #[allow(clippy::ignored_unit_patterns)]
+         loop {
+             tokio::select! {
+diff --git a/brush-core/src/signals.rs b/brush-core/src/signals.rs
+index 38dc578..6661158 100644
+--- a/brush-core/src/signals.rs
++++ b/brush-core/src/signals.rs
+@@ -15,7 +15,9 @@
+ //! would miss it and run another command before the shell died.
+ 
+ #[cfg(unix)]
+-pub(crate) use imp::{discard, forget_after_fork, is_recorded, listen, take, take_pending};
++pub(crate) use imp::{
++    arrived, discard, forget_after_fork, is_recorded, listen, take, take_pending,
++};
+ 
+ #[cfg(not(unix))]
+ pub(crate) fn take_pending() -> Vec<i32> {
+@@ -115,6 +117,16 @@ mod imp {
+             })
+     }
+ 
++    /// Whether `signal` arrived since it was last taken, leaving the record.
++    pub(crate) fn arrived(signal: i32) -> bool {
++        LISTENING.load(Ordering::Acquire)
++            && RECORDED.lock().is_ok_and(|recorded| {
++                recorded.iter().any(|entry| {
++                    entry.armed && entry.signal == signal && entry.arrived.load(Ordering::Acquire)
++                })
++            })
++    }
++
+     /// Whether arrivals of `signal` are being recorded in this process.
+     pub(crate) fn is_recorded(signal: i32) -> bool {
+         LISTENING.load(Ordering::Acquire)
