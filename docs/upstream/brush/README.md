@@ -642,6 +642,16 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   if escaped. `read -t 0` assigns nothing; `-n`/`-N` take `^D` from a terminal
   as data; a readonly name stops `read` with `NAME: readonly variable`,
   status 2. Covered by `read_splitting_and_assignment_match_bash`.
+- `0083` fixes four small differences: a negative subscript of an indexed array
+  counts back from one past its highest index, not from its element count;
+  `{fd}>file` on a builtin, function or compound command leaves the descriptor
+  open in the shell afterwards (not with `varredir_close`; a close stays
+  scoped); in posix mode, assignments before a special builtin persist and stay
+  exported; and a shell that records no commands still has a history list for
+  the `history` builtin (`Shell::history_list_mut`), with `history -r`
+  (readline's rules: `#`-digit lines are timestamps only in an interactive
+  shell or a file that starts with one) and `-w` keeping every byte. Covered by
+  `subscripts_named_descriptors_special_assignments_and_history_match_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

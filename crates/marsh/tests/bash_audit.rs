@@ -2145,3 +2145,45 @@ v=old; exec <<<data; read -t 0 v; echo "$v $?""#,
         b"<a b><c><a,b><c>\n[a][b c][][d][ ]\n<p ><q><p><q >\n<one><>|2\nold 0\n",
     );
 }
+
+/// Negative subscripts count back from one past the highest index; `{fd}>file`
+/// on a builtin or function leaves the descriptor open in the shell (not with
+/// `varredir_close`, nor for an external command); in posix mode, assignments
+/// before a special builtin persist, still exported; a noninteractive shell's
+/// `history` keeps a list (`-r` takes `#comment` lines as entries, `-w` keeps
+/// bytes).
+#[test]
+fn subscripts_named_descriptors_special_assignments_and_history_match_bash() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("hist"),
+        "#comment\nprintf a\n#1234567890\n",
+    )
+    .unwrap();
+    let script = r#"a=([4]=old [9]=last); a[-1]+=x; a[-2]=y; echo "${a[-1]} ${!a[*]}"
+f() { :; }; f {g}>o1; echo g >&$g; printf p {p}>o2; echo q >&$p; cat o1 o2
+shopt -s varredir_close; /bin/echo e {k}>o4; echo "k=${k-unset}"
+set -o posix; W=val : >"${W-none}"; A=1 eval 'echo in=$A'; sh -c 'echo "W=$W A=$A"'; C=3 command :; echo "C=${C-unset}"; set +o posix
+history -c; history -r hist; history -s "$(printf 'b\377')"; history; history -w saved; cat saved"#;
+    let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+        let mut command = shell(program);
+        if program != "bash" {
+            command.arg("--no-config");
+        }
+        command
+            .args(["--noprofile", "--norc", "-c", script, "audit"])
+            .env("HISTFILE", "")
+            .current_dir(directory.path())
+            .output()
+            .unwrap()
+    });
+    let [bash, brush] = &outputs;
+    assert_eq!(
+        bash.stdout,
+        b"lastx 4 8 9\npg\nq\ne\nk=unset\nin=1\nW=val A=1\nC=unset\n    1  #comment\n    2  printf a\n    3  #1234567890\n    4  b\xff\n#comment\nprintf a\n#1234567890\nb\xff\n",
+        "Bash: {bash:?}"
+    );
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
+    assert_eq!(brush.status.code(), bash.status.code());
+}

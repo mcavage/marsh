@@ -211,6 +211,14 @@ impl<SE: extensions::ShellExtensions> Clone for Shell<SE> {
 }
 
 impl<SE: extensions::ShellExtensions> Shell<SE> {
+    /// Returns the shell's history list, made empty if the shell keeps none:
+    /// as in Bash, a shell that records no commands (a noninteractive one)
+    /// still has a list for the `history` builtin. Only an interactive shell
+    /// adds commands to it or saves it on exit.
+    pub fn history_list_mut(&mut self) -> &mut crate::history::History {
+        self.history.get_or_insert_with(Default::default)
+    }
+
     /// Sets the subshell depth (`$BASH_SUBSHELL`); a forked pipeline stage keeps its parent's.
     pub(crate) fn set_depth(&mut self, depth: usize) {
         self.depth = depth;

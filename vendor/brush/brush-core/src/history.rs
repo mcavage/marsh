@@ -77,6 +77,44 @@ impl History {
         Ok(history)
     }
 
+    /// Appends the lines of `reader` (`history -r`), as readline reads a history
+    /// file: a `#` and a digit starts a timestamp line if `timestamps` is set
+    /// (Bash's comment character is `#`) or the file starts with one; every
+    /// other line, a `#comment` too, is an entry. Lines keep every byte.
+    pub fn append_lines(
+        &mut self,
+        mut reader: impl Read,
+        timestamps: bool,
+    ) -> Result<(), error::Error> {
+        let mut text = vec![];
+        reader.read_to_end(&mut text)?;
+        let stamp = |line: &[u8]| {
+            line.first() == Some(&b'#') && line.get(1).is_some_and(u8::is_ascii_digit)
+        };
+        let mut lines: Vec<&[u8]> = text.split(|byte| *byte == b'\n').collect();
+        if text.ends_with(b"\n") {
+            lines.pop();
+        }
+        let timestamps = timestamps || lines.first().is_some_and(|line| stamp(line));
+        let mut next_timestamp = None;
+        for line in lines {
+            if timestamps && stamp(line) {
+                next_timestamp = std::str::from_utf8(&line[1..])
+                    .ok()
+                    .and_then(|seconds| seconds.trim().parse().ok())
+                    .and_then(|seconds| ItemTimestamp::from_timestamp(seconds, 0));
+                continue;
+            }
+            self.add(Item {
+                id: self.next_id,
+                command_line: crate::bytes::decode(line).into_owned(),
+                timestamp: next_timestamp.take(),
+                dirty: false,
+            })?;
+        }
+        Ok(())
+    }
+
     /// Tries to retrieve a history item by its unique identifier. Returns `None` if no item is
     /// found.
     ///
@@ -202,7 +240,8 @@ impl History {
                     writeln!(file, "#{}", timestamp.timestamp())?;
                 }
 
-                writeln!(file, "{}", item.command_line)?;
+                file.write_all(&crate::bytes::encode(&item.command_line))?;
+                file.write_all(b"\n")?;
 
                 if unsaved_items_only {
                     item.dirty = false;

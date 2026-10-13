@@ -51,6 +51,8 @@ pub(crate) struct HistoryCommand {
 struct HistoryConfig {
     default_history_file_path: Option<PathBuf>,
     time_format: Option<String>,
+    /// Whether the shell is interactive (Bash's comment character is then set).
+    interactive: bool,
 }
 
 impl builtins::Command for HistoryCommand {
@@ -64,16 +66,14 @@ impl builtins::Command for HistoryCommand {
         let config = HistoryConfig {
             default_history_file_path: context.shell.history_file_path(),
             time_format: context.shell.history_time_format(),
+            interactive: context.shell.options().interactive,
         };
 
         let stdout = context.stdout();
         let stderr = context.stderr();
 
-        if let Some(history) = context.shell.history_mut() {
-            self.execute_with_history(history, &config, stdout, stderr)
-        } else {
-            Err(brush_core::ErrorKind::HistoryNotEnabled.into())
-        }
+        let history = context.shell.history_list_mut();
+        self.execute_with_history(history, &config, stdout, stderr)
     }
 }
 
@@ -139,8 +139,16 @@ impl HistoryCommand {
             return error::unimp("history -n is not yet implemented");
         }
 
-        if self.append_file_to_session.is_some() {
-            return error::unimp("history -r is not yet implemented");
+        if let Some(read_option) = &self.append_file_to_session {
+            if let Some(file_path) = get_effective_history_file_path(
+                config.default_history_file_path.as_deref(),
+                read_option.as_deref(),
+            ) {
+                let file = std::fs::File::open(file_path)?;
+                history.append_lines(file, config.interactive)?;
+            }
+
+            return Ok(ExecutionResult::success());
         }
 
         if let Some(write_option) = &self.write_session_to_file {
