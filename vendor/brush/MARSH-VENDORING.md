@@ -100,6 +100,8 @@ Bash's `pat_subst` does. Patch `0075` gives an interactive shell without a
 terminal Bash's warnings, prompts and job-control state.
 Patch `0076` expands redirections after assignments, and those of a
 command that runs as a process in a copy of the shell.
+Patch `0077` gives each `fanout` branch one process group that a stopped
+branch kills whole.
 
 This directory contains only the runtime crate source, manifests, licenses,
 and build metadata needed by marsh. Upstream integration tests, snapshots,

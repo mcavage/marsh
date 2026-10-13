@@ -70,7 +70,8 @@ pub(crate) struct Forked {
 pub(crate) use imp::standard_descriptor_closed_at_startup;
 #[cfg(unix)]
 pub(crate) use imp::{
-    available, die_by_signal, exec_in_place, fork, restore_trapped_signal, shell_pid, wait_for_pid,
+    GroupAnchor, available, die_by_signal, exec_in_place, fork, restore_trapped_signal, shell_pid,
+    wait_for_pid,
 };
 #[cfg(unix)]
 pub use imp::{
@@ -550,6 +551,105 @@ mod imp {
             while libc::waitpid(pid, &raw mut status, 0) == -1
                 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
             {
+            }
+        }
+    }
+
+    /// A process that only holds a new process group open, so every process
+    /// started into the group (and their descendants) can be killed together
+    /// for as long as the anchor lives. The group ID is the anchor's PID, which
+    /// stays reserved until the anchor is reaped, so signaling it never reaches
+    /// another process. Dropping the anchor kills it (with the whole group if
+    /// [`GroupAnchor::stop_group_on_drop`] is set) and reaps it. The anchor
+    /// also exits when this shell dies (its pipe reaches end-of-file).
+    pub(crate) struct GroupAnchor {
+        pid: i32,
+        _alive: std::os::fd::OwnedFd,
+        stop_group: bool,
+    }
+
+    impl GroupAnchor {
+        pub(crate) fn new() -> std::io::Result<Self> {
+            use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
+            let mut fds = [-1; 2];
+            // SAFETY: creates a pipe into a live array.
+            if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // SAFETY: `pipe` returned two fresh descriptors that nothing else owns.
+            let (alive_read, alive_write) =
+                unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) };
+            for fd in fds {
+                // SAFETY: marks a descriptor this process owns close-on-exec, so
+                // commands do not hold the anchor's pipe (forked shells close
+                // close-on-exec pipes they do not use).
+                unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+            }
+            let keep = alive_read.as_raw_fd();
+            // Descriptors another thread opens after this listing are above
+            // its highest, and the anchor closes a margin past it.
+            let highest = open_descriptors().into_iter().max().unwrap_or(2).max(keep) + 64;
+            let blocked = crate::sys::signal::BlockedForFork::new();
+            // SAFETY: the child runs only async-signal-safe calls (setpgid,
+            // close, read, _exit) with every signal blocked; it holds no lock,
+            // allocates nothing, and starts no thread.
+            let pid = unsafe { libc::fork() };
+            if pid == 0 {
+                // SAFETY: as above; only async-signal-safe calls follow.
+                unsafe {
+                    libc::setpgid(0, 0);
+                    for fd in 0..=highest {
+                        if fd != keep {
+                            libc::close(fd);
+                        }
+                    }
+                    let mut byte = 0_u8;
+                    while libc::read(keep, (&raw mut byte).cast(), 1) < 0
+                        && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
+                    {
+                    }
+                    libc::_exit(0)
+                }
+            }
+            drop(blocked);
+            if pid < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            // SAFETY: mirrors the child's own setpgid so either order wins the race.
+            unsafe { libc::setpgid(pid, pid) };
+            drop(alive_read);
+            Ok(Self {
+                pid,
+                _alive: alive_write,
+                stop_group: false,
+            })
+        }
+
+        /// The group's ID.
+        pub(crate) const fn pgid(&self) -> i32 {
+            self.pid
+        }
+
+        /// Whether dropping the anchor kills every process in its group.
+        pub(crate) fn stop_group_on_drop(&mut self, stop: bool) {
+            self.stop_group = stop;
+        }
+    }
+
+    impl Drop for GroupAnchor {
+        fn drop(&mut self) {
+            // SAFETY: the anchor is this process's unreaped child, so its PID
+            // (and group ID) cannot name another process until it is reaped below.
+            unsafe {
+                if self.stop_group {
+                    libc::killpg(self.pid, libc::SIGKILL);
+                }
+                libc::kill(self.pid, libc::SIGKILL);
+                let mut status = 0;
+                while libc::waitpid(self.pid, &raw mut status, 0) == -1
+                    && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
+                {
+                }
             }
         }
     }

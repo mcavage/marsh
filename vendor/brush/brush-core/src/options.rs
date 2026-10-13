@@ -200,6 +200,10 @@ pub struct RuntimeOptions {
     pub external_cmd_leads_session: bool,
     /// Whether externally spawned commands are killed when their spawning shell is dropped.
     pub kill_external_commands_on_drop: bool,
+    /// The process group every process this shell starts joins (a `fanout`
+    /// branch's, so stopping the branch stops all of them), instead of the
+    /// usual job-control choice.
+    pub process_group: Option<i32>,
     /// Maximum function call depth.
     pub max_function_call_depth: Option<usize>,
 }

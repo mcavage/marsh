@@ -748,11 +748,15 @@ pub(crate) fn execute_external_command(
         .try_fd(openfiles::OpenFiles::STDIN_FD)
         .is_some_and(|f| f.is_terminal());
 
-    // Figure out if we should be setting up a new process group.
-    let new_pg = matches!(
-        context.params.process_group_policy,
-        ProcessGroupPolicy::NewProcessGroup
-    );
+    // Figure out if we should be setting up a new process group. A shell with
+    // a fixed group (a `fanout` branch) puts every command in it.
+    let fixed_pg = context.shell.options().process_group;
+    let process_group_id = fixed_pg.or(process_group_id);
+    let new_pg = fixed_pg.is_none()
+        && matches!(
+            context.params.process_group_policy,
+            ProcessGroupPolicy::NewProcessGroup
+        );
 
     // Compose the std::process::Command that encapsulates what we want to launch.
     // argv[0] defaults to context.command_name (the user-facing name of the

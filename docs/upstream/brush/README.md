@@ -578,6 +578,15 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   out of it, as in Bash's forked child; an `exit` there ends only the command.
   A failed redirection reads `NAME: line N: WORD: No such file or directory`.
   Covered by `redirections_expand_after_assignments_and_in_the_child_of_a_process`.
+- `0077` gives each `fanout` branch one process group, held by a small anchor
+  process (`subshell::GroupAnchor`) for the branch's lifetime. Every command
+  and forked shell the branch starts joins it (`RuntimeOptions::process_group`).
+  A branch stopped before it finishes (the output limit, an interrupt, an
+  error) kills that whole group, so descendants of its commands no longer
+  outlive it; a branch that finishes leaves the group alone. The branch awaits
+  its capture threads instead of joining them, so a stop also reaches a branch
+  whose command has exited while a background descendant still writes to its
+  output. Covered by `fanout_output_limit_stops_the_branch_process_tree`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

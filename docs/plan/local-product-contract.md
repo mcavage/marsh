@@ -119,7 +119,8 @@ inside the branch, so `a: cd x; make; b: cd y; make` is two branches and an
 unlabeled `x; y` is one.
 Stdin is read once, up to 64 MiB, before any branch starts. Branches share one
 16 MiB stdout/stderr capture budget; crossing either limit cancels and reaps
-all branches and renders nothing. Per-Kit capacity (8) is independent, so more
+all branches (each branch's whole process group: every process it started)
+and renders nothing. Per-Kit capacity (8) is independent, so more
 than 8 branches on one Kit produce visible capacity failures. `collect` emits
 declaration-ordered bytes, supports `--timing` and `--json`, and is nonzero if
 a branch fails; normal `pipefail` rules apply downstream.
