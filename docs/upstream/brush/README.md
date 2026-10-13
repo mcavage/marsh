@@ -521,6 +521,14 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   `REPLY`. `exit`, `break` and `continue` end the enclosing command
   (`ErrorKind::SubstitutionControlFlow`). Covered by
   `function_substitutions_run_in_the_current_shell`.
+- `0071a` runs a TERM trap once per signal. The runtime can dispatch an
+  arrival after the shell already ran its trap at a command boundary (from
+  the arrival its handler recorded); the idle input read's next wait for TERM
+  then ran the trap a second time, about once in a hundred runs, which made
+  `idle_term_trap_can_resume_reading_commands` flake. That wait now counts a
+  dispatch only if the handler's record of it is still unconsumed (waits that
+  run alongside a command keep counting every dispatch, as several may wait
+  at once).
 - `0072` treats NUL bytes in shell input as Bash does. The script, standard
   input and interactive line readers drop them. A script run by the shell is
   refused as binary (Bash's `check_binary_file`: a NUL on the first line, or

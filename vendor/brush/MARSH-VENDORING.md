@@ -92,7 +92,8 @@ the plain line reader that takes over read the terminal itself).
 Patch `0070` implements `disown`, `%name` job specs, Bash's retention of
 jobs collected by `wait` until the next cleanup, and `huponexit`.
 Patch `0071` implements Bash 5.3 function substitutions (`${ cmd; }`,
-`${| cmd; }`). Patch `0072` treats NUL bytes in shell input as Bash does.
+`${| cmd; }`); `0071a` keeps a late runtime dispatch of a delivered TERM
+from running its trap again. Patch `0072` treats NUL bytes in shell input as Bash does.
 
 This directory contains only the runtime crate source, manifests, licenses,
 and build metadata needed by marsh. Upstream integration tests, snapshots,
