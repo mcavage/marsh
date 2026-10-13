@@ -1,0 +1,33 @@
+{
+  "reps": 2,
+  "max_attempts": 3,
+  "timeout_s": 3600,
+  "agent_timeout_s": 1800,
+  "seed": 20261012,
+  "budget_usd": 90,
+  "reserve_per_run_usd": 4.4,
+  "agents": {
+    "claude": {"cmd": "claude -p {prompt} --output-format json --model claude-sonnet-5-5", "price": "claude-sonnet-5-5"},
+    "codex": {"cmd": "codex exec --json -m gpt-6.1-sol {prompt}", "price": "gpt-6.1-sol"}
+  },
+  "judge": {
+    "cmd": "pi -p --provider google --model gemini-3.8-flash {prompt}",
+    "price": "gemini-3.8-flash",
+    "prompt": "Two agents attempted the same fix on private copies of this repository. Each one's status, output, and patch follow. Both passed the visible check. Choose the one to apply. First line: exactly one word, claude or codex. Then your reasons. Prefer the change that fixes the underlying bug in general rather than only the checked case, and reject a patch that edits tests."
+  },
+  "prices": {
+    "claude-sonnet-5-5": {"input": 2.0, "cache_read": 0.1, "cache_write": 2.5, "output": 10.0},
+    "gpt-6.1-sol": {"input": 2.0, "cache_read": 0.1, "cache_write": 2.5, "output": 10.0},
+    "gemini-3.8-flash": {"input": 0.75, "cache_read": 0.075, "cache_write": 0.75, "output": 3.75}
+  },
+  "cost_model": {
+    "claude_attempt_usd": 0.6,
+    "codex_attempt_usd": 0.5,
+    "retry_attempt_discount": 1.0,
+    "p_gate_fail_first_attempt": 0.45,
+    "p_both_pass": 0.35,
+    "judge_usd": 0.03,
+    "worst_case_multiplier": 1.5,
+    "calibration_runs": 3
+  }
+}

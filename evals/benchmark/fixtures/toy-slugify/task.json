@@ -1,0 +1,10 @@
+{
+  "id": "toy-slugify",
+  "source": "dry-run fixture",
+  "repo": "local:repo",
+  "base": null,
+  "prompt": "slugify(\"Hello,  World!\") returns \"hello,--world!\" but should return \"hello-world\". Fix slugify in slug.py: lowercase, drop punctuation, and join the words with single hyphens. The check is `python3 -m unittest -q tests.test_gate`. Do not edit the tests.",
+  "gate": {"cmd": "python3 -m unittest -q tests.test_gate", "patch": "gate.patch"},
+  "hidden": {"cmd": "python3 -m unittest -q tests.test_hidden tests.test_gate", "patch": "hidden.patch"},
+  "dry_run": {"solution": "solution.patch", "overfit": "overfit.patch"}
+}

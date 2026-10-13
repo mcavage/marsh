@@ -1,0 +1,336 @@
+{
+  "preamble": "You are helping a developer on an Apple Silicon Mac. Reply with exactly one POSIX sh script in a single ```sh fenced block, then at most three sentences. The developer will run it with `sh` in macOS Terminal from the project directory, not inside a marsh shell. It must run unattended: no prompts and no interactive shell. Use only what the documentation says.",
+  "tasks": [
+    {
+      "id": "R1-install",
+      "project": null,
+      "shim_only": true,
+      "preamble": "You are helping a developer on an Apple Silicon Mac. Reply with exactly one POSIX sh script in a single ```sh fenced block, then at most three sentences. The developer will run it with `sh` in macOS Terminal and will be at the keyboard: steps that open a browser to sign in or ask them to paste a key are fine. Use only what the documentation says.",
+      "prompt": "This Mac has Homebrew and nothing else relevant. Install marsh and everything it needs, sign in where required, and store an Anthropic API key so marsh can run Claude. Do not open a marsh shell.",
+      "checks": [
+        {
+          "type": "argv_any",
+          "pattern": "^brew install (.* )?docker/tap/sbx( |$)",
+          "critical": true,
+          "why": "installs Docker Sandboxes from its tap"
+        },
+        {
+          "type": "argv_any",
+          "pattern": "^sbx login( |$)",
+          "critical": true,
+          "why": "signs in to Docker Sandboxes"
+        },
+        {
+          "type": "any_of",
+          "critical": true,
+          "why": "installs marsh from the tap, or runs the runmar.sh install script",
+          "checks": [
+            {
+              "type": "argv_any",
+              "pattern": "^brew install (.* )?mcavage/tap/marsh(-nightly)?( |$)"
+            },
+            {
+              "type": "stdout_regex",
+              "pattern": "marsh-installer-ran"
+            }
+          ]
+        },
+        {
+          "type": "argv_any",
+          "pattern": "^sbx secret (set (-g )?anthropic|import)",
+          "critical": true,
+          "why": "stores the Anthropic credential with sbx"
+        },
+        {
+          "type": "argv_none",
+          "pattern": "^(pip3?|pipx|uv|npm|npx|cargo|gem) |^brew install (marsh|sbx)( |$)|^brew install --cask docker",
+          "critical": true,
+          "why": "no invented or unnecessary installers"
+        },
+        {
+          "type": "known_cli",
+          "critical": false,
+          "why": "only documented marsh subcommands"
+        }
+      ]
+    },
+    {
+      "id": "R2-agent-job",
+      "project": "calc",
+      "prompt": "Use marsh to ask Claude for a one-paragraph summary of README.md in this project, and save the summary to SUMMARY.md.",
+      "checks": [
+        {
+          "type": "exit_zero",
+          "critical": true,
+          "why": "the script succeeds"
+        },
+        {
+          "type": "agent_ran",
+          "agent": "claude",
+          "critical": true,
+          "why": "Claude ran as a marsh job"
+        },
+        {
+          "type": "file_regex",
+          "path": "SUMMARY.md",
+          "pattern": "(?i)calc|add|test",
+          "critical": true,
+          "outcome": true,
+          "why": "SUMMARY.md holds a summary of this README"
+        },
+        {
+          "type": "git_clean",
+          "critical": false,
+          "why": "nothing but SUMMARY.md changed"
+        },
+        {
+          "type": "known_cli",
+          "critical": false,
+          "why": "only documented marsh subcommands"
+        }
+      ]
+    },
+    {
+      "id": "R3-fanout",
+      "project": "calc",
+      "prompt": "Use marsh to run `make lint` and `make test` side by side, and print both outputs, each labelled.",
+      "checks": [
+        {
+          "type": "stdout_regex",
+          "pattern": "(?m)^== \\S*lint\\S* \\(",
+          "critical": true,
+          "why": "collect printed a lint branch"
+        },
+        {
+          "type": "stdout_regex",
+          "pattern": "(?m)^== \\S*test\\S* \\(",
+          "critical": true,
+          "why": "collect printed a test branch"
+        },
+        {
+          "type": "stdout_regex",
+          "pattern": "lint ok",
+          "critical": true,
+          "why": "make lint really ran"
+        },
+        {
+          "type": "stdout_regex",
+          "pattern": "FAIL|AssertionError|Error",
+          "critical": true,
+          "why": "make test really ran (it fails)"
+        },
+        {
+          "type": "script_regex",
+          "pattern": "fanout",
+          "critical": true,
+          "why": "uses fanout, not split, for read-only checks"
+        },
+        {
+          "type": "git_clean",
+          "critical": false,
+          "why": "the project is unchanged"
+        },
+        {
+          "type": "known_cli",
+          "critical": false,
+          "why": "only documented marsh subcommands"
+        }
+      ]
+    },
+    {
+      "id": "R4-race",
+      "project": "calc",
+      "prompt": "The test in this project fails. Use marsh to have Claude and Codex each try to fix it at the same time, each on its own private copy of the project, each checking its work with `make test`. Show me what each one did and whether it passed. Do not change my files.",
+      "checks": [
+        {
+          "type": "agent_ran",
+          "agent": "claude",
+          "critical": true,
+          "why": "Claude ran"
+        },
+        {
+          "type": "agent_ran",
+          "agent": "codex",
+          "critical": true,
+          "why": "Codex ran"
+        },
+        {
+          "type": "script_regex",
+          "pattern": "split",
+          "critical": true,
+          "why": "uses split (private copies), not fanout"
+        },
+        {
+          "type": "script_count",
+          "pattern": "(claude|codex)[^\\n]*&&\\s*make test",
+          "min": 2,
+          "critical": true,
+          "why": "each agent's branch is gated on make test"
+        },
+        {
+          "type": "stdout_count",
+          "pattern": "(?m)^== \\S+ \\((exited|failed|rejected|cancelled)",
+          "min": 2,
+          "critical": true,
+          "why": "join reported both branches"
+        },
+        {
+          "type": "stdout_regex",
+          "pattern": "(?m)^== \\S+ \\(exited 0",
+          "critical": true,
+          "outcome": true,
+          "why": "at least one branch passed"
+        },
+        {
+          "type": "git_clean",
+          "critical": true,
+          "why": "the user's files did not change"
+        },
+        {
+          "type": "known_cli",
+          "critical": false,
+          "why": "only documented marsh subcommands"
+        }
+      ]
+    },
+    {
+      "id": "R5-race-apply",
+      "project": "calc",
+      "prompt": "The test in this project fails. Use marsh to have Claude and Codex each try to fix it at the same time on private copies, each checking its work with `make test`. Then apply the change from one that passed to my files, and clean up whatever marsh kept.",
+      "checks": [
+        {
+          "type": "agent_ran",
+          "agent": "claude",
+          "critical": true,
+          "why": "Claude ran"
+        },
+        {
+          "type": "agent_ran",
+          "agent": "codex",
+          "critical": true,
+          "why": "Codex ran"
+        },
+        {
+          "type": "script_regex",
+          "pattern": "split",
+          "critical": true,
+          "why": "uses split"
+        },
+        {
+          "type": "script_count",
+          "pattern": "(claude|codex)[^\\n]*&&\\s*make test",
+          "min": 2,
+          "critical": true,
+          "why": "each agent's branch is gated on make test"
+        },
+        {
+          "type": "cmd_ok",
+          "cmd": "make test",
+          "critical": true,
+          "outcome": true,
+          "why": "the fix is applied and the tests pass"
+        },
+        {
+          "type": "only_changed",
+          "paths": [
+            "calc.py"
+          ],
+          "critical": true,
+          "outcome": true,
+          "why": "only the code changed, not the tests"
+        },
+        {
+          "type": "no_entries",
+          "path": ".marsh/split",
+          "critical": true,
+          "why": "kept split results were removed"
+        },
+        {
+          "type": "known_cli",
+          "critical": false,
+          "why": "only documented marsh subcommands"
+        }
+      ]
+    },
+    {
+      "id": "R6-results",
+      "project": "calc",
+      "seed": [
+        [
+          "-c",
+          "shell true"
+        ],
+        [
+          "-c",
+          "shell false"
+        ]
+      ],
+      "prompt": "Print the exit status and wall time of the most recent jobs that marsh ran.",
+      "checks": [
+        {
+          "type": "exit_zero",
+          "critical": true,
+          "why": "the script succeeds"
+        },
+        {
+          "type": "argv_any",
+          "pattern": "^marsh (results|jobs)( |$)",
+          "critical": true,
+          "why": "reads marsh results or jobs"
+        },
+        {
+          "type": "stdout_regex",
+          "pattern": "(?i)\\bwall\\b|\"wall",
+          "critical": true,
+          "why": "the output includes wall time"
+        },
+        {
+          "type": "stdout_regex",
+          "pattern": "(?i)\\bexit\\b|\"exit|status",
+          "critical": true,
+          "why": "the output includes exit status"
+        },
+        {
+          "type": "known_cli",
+          "critical": false,
+          "why": "only documented marsh subcommands"
+        }
+      ]
+    },
+    {
+      "id": "R7-stop",
+      "project": "calc",
+      "seed": [
+        [
+          "-c",
+          "shell true"
+        ]
+      ],
+      "prompt": "I'm done for the day. Shut down the VMs marsh started, without deleting my project or my agents' settings.",
+      "checks": [
+        {
+          "type": "argv_any",
+          "pattern": "^marsh stop( |$)",
+          "critical": true,
+          "why": "uses marsh stop (a proxy: the grader does not inspect VM state)"
+        },
+        {
+          "type": "argv_none",
+          "pattern": "^sbx (rm|stop)|^marsh (reset|recover-home)|rm -rf",
+          "critical": true,
+          "why": "does not remove VMs out from under marsh or delete state"
+        },
+        {
+          "type": "git_clean",
+          "critical": true,
+          "why": "the project is untouched"
+        },
+        {
+          "type": "known_cli",
+          "critical": false,
+          "why": "only documented marsh subcommands"
+        }
+      ]
+    }
+  ]
+}
