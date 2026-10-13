@@ -6,7 +6,9 @@ October 13, 2026. Homepage direction agreed with the user, followed by approval
 to proceed. A local homepage candidate is implemented in `docs/site/`, including
 its metadata, social card, styles, and static copyable examples. The user
 approved publishing this first pass for live review because the site has not
-been shared; deployment is pending. Guides and manual remain unchanged. This document is not authorization
+been shared. PR #77 is merged, Pages deployment succeeded, and the new homepage
+was verified at `https://runmar.sh`. A follow-up
+branch contains factual documentation repairs. This document is not authorization
 for an autonomous site-wide rewrite.
 
 Read [the audit handoff](docs-audit-handoff.md) for existing defects and evidence.
@@ -125,3 +127,71 @@ installation journey were performed. The existing quickstart's audit findings
 remain unresolved and are the next documentation phase. Publishing this first
 pass does not establish that onboarding or the illustrative agent recipe has
 been verified end to end.
+
+## Guides and manual: proposed next phase
+
+Status: under discussion, not an approved broad rewrite. Independent Pix-guided
+reviews recommend three task guides rather than the current race, judge, panel,
+and large farm-out-script sequence:
+
+- **Develop independent changes in parallel.** Separate responsibilities,
+  separate project copies, inspect both patches, apply deliberately, and test
+  the combined working tree. Passing branches are not proof that the integrated
+  result works. Competing implementations are an optional variation.
+- **Review a change from different concerns.** One exact diff target throughout;
+  focused questions; checks where appropriate; findings verified against code.
+  Distinguish prompts requesting no edits from private-copy mount enforcement.
+- **Delegate a bounded subtask from an agent.** Start with one child and ordinary
+  process I/O, then private-copy delegation for edits. Explain enforced spawn
+  restrictions and tree cancellation without requiring an orchestration script
+  or a large project instructions block.
+
+Retiring the standalone judge guide is proposed, not decided. If approved,
+preserve its URL with a moved-page stub and move its useful pipeline mechanics
+into review/delegation documentation. Existing guide URLs need not break when
+their titles and examples change.
+
+The manual entry page should be navigation, not another pitch or race
+transcript. Separate the first-session tutorial, task guides, command reference,
+and explanations of execution/files/lifetimes. Do not force reference and
+explanation pages into tutorial-shaped numbered steps.
+
+### First-run constraints
+
+Use one provider, configured before the first agent call. Distinguish Mac and
+guest commands, establish the Linux execution location, show a real successful
+agent request and inspect its result/receipt, then exit before stopping VMs.
+Do not change syntax or start a second split merely to apply the first result.
+State cold-start and model-account costs without promising a one-minute install.
+
+A deterministic shell transformation can check platform mechanics, but is not a
+convincing flagship developer workflow. Do not replace the rejected toy fix with
+an equally trivial checklist demo, or use fixture results as evidence of model
+quality. Authentication smoke checks and substantive composition examples have
+different jobs and should be labeled accordingly.
+
+Still to decide: whether the first substantive walkthrough uses a pinned real
+reference repository or a reader's existing Linux-compatible project. A pinned
+repository improves reproducibility but must contain useful work and an actual
+verified journey; an adaptable recipe must state its prerequisites and cannot
+promise the reader's dependencies or tests work. Neither decision authorizes
+provider-billed runs automatically.
+
+### Immediate corrections
+
+A separate follow-up branch repairs factual defects without choosing the new
+guide examples: keep results before applying printed patches; leave the shell
+before stopping; identify Brush correctly; qualify credential and host-authority
+claims; document split input exclusions; distinguish marked examples from
+unexecuted illustrative transcripts. These are documentation changes, not
+changes to execution guarantees or a security audit.
+
+The follow-up also keeps quickstart results for explicit application from the
+original split instead of silently launching a second split. Its broader
+two-provider, hypothetical-project narrative still needs replacement.
+
+Follow-up validation: site and repository Markdown link checks passed, man pages
+generated successfully, and all 23 marked split/guide examples parsed without
+marker or replacement errors. Those VM-backed examples were not executed. An
+independent source-based review of the factual corrections led to narrower
+development-shell versus job authority language and Git-specific ignore rules.
