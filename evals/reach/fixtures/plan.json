@@ -1,0 +1,6 @@
+{
+  "claude@claude": [{"do": "apply", "patch": "fix.patch", "text": "Fixed add: it subtracted."}],
+  "codex@codex": [{"do": "say", "text": "I could not find the bug."}],
+  "claude": [{"do": "say", "text": "calc is a tiny calculator library with one function, add, and its tests."}],
+  "codex": [{"do": "say", "text": "Nothing to do."}]
+}

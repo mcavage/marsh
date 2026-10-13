@@ -1,0 +1,24 @@
+diff --git a/tests/test_hidden.py b/tests/test_hidden.py
+new file mode 100644
+index 0000000..b200829
+--- /dev/null
++++ b/tests/test_hidden.py
+@@ -0,0 +1,18 @@
++import unittest
++
++from slug import slugify
++
++
++class HiddenTest(unittest.TestCase):
++    def test_cases(self):
++        cases = {
++            "Hello,  World!": "hello-world",
++            "  Leading and trailing  ": "leading-and-trailing",
++            "Tabs\tand\nnewlines": "tabs-and-newlines",
++            "Version 2.0 is out": "version-2-0-is-out",
++            "a -- b": "a-b",
++            "already-a-slug": "already-a-slug",
++        }
++        for text, expected in cases.items():
++            with self.subTest(text=text):
++                self.assertEqual(slugify(text), expected)

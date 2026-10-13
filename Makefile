@@ -154,7 +154,7 @@ test-rust:
 
 # Python and shell harnesses against the debug binaries: shipped-entrypoint
 # journeys (onboarding), MCP protocol callers, the Kit publisher, the
-# self-tests of the acceptance, perf and release tooling, and (Linux only) the
+# self-tests of the acceptance, perf, release and eval (fakemarsh) tooling, and (Linux only) the
 # Bash differential suites against GNU Bash 5.3.0 on PATH, gated on
 # tests/acceptance/bash_divergences.json.
 test-harness:
@@ -173,6 +173,8 @@ test-harness:
 	$(PYTHON) -W error -m unittest discover -s tests/acceptance -p 'test_*.py'
 	$(PYTHON) -W error -m unittest discover -s tests/release -p 'test_*.py'
 	$(PYTHON) -m unittest discover -s tests/perf -p 'test_*.py'
+	$(PYTHON) -W error -m unittest discover -s evals/benchmark -p 'test_*.py'
+	$(PYTHON) -W error -m unittest discover -s evals/reach -p 'test_*.py'
 	sh tests/kits/selected-home.sh
 	sh tests/kits/cli-adapters.sh
 	sh tests/kits/shell-adapter.sh

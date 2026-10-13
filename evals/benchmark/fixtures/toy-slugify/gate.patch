@@ -1,0 +1,14 @@
+diff --git a/tests/test_gate.py b/tests/test_gate.py
+new file mode 100644
+index 0000000..4c04e14
+--- /dev/null
++++ b/tests/test_gate.py
+@@ -0,0 +1,8 @@
++import unittest
++
++from slug import slugify
++
++
++class GateTest(unittest.TestCase):
++    def test_title_with_punctuation(self):
++        self.assertEqual(slugify("Hello,  World!"), "hello-world")
