@@ -717,7 +717,11 @@ pub fn gitfile(admin: &Path) -> Vec<u8> {
 
 /// What may appear in a fork's admin directory after a branch ran: Git's
 /// own state files, never `commondir`, `gitdir`, `config.worktree`, or hooks.
-const ADMIN_ALLOWED: [&str; 12] = [
+/// The pseudo-refs and messages that `git stash pop`, `merge`, `fetch`,
+/// `cherry-pick`, and `revert` leave behind (`AUTO_MERGE` and the rest) are
+/// plain state files that capture never executes or follows; refusing them
+/// rejected a branch whose agent had only stashed and restored its edits.
+const ADMIN_ALLOWED: [&str; 21] = [
     "HEAD",
     "config",
     "info",
@@ -730,6 +734,15 @@ const ADMIN_ALLOWED: [&str; 12] = [
     "ORIG_HEAD",
     "COMMIT_EDITMSG",
     "description",
+    "AUTO_MERGE",
+    "FETCH_HEAD",
+    "MERGE_HEAD",
+    "MERGE_MSG",
+    "MERGE_MODE",
+    "MERGE_AUTOSTASH",
+    "CHERRY_PICK_HEAD",
+    "REVERT_HEAD",
+    "REBASE_HEAD",
 ];
 
 /// Capture verification: the gitfile and admin files are byte-identical to
@@ -1433,6 +1446,33 @@ mod tests {
                 .success()
         );
         assert!(label.read("fifo", 1 << 20).is_err());
+    }
+
+    #[test]
+    fn capture_accepts_git_state_files_and_refuses_hooks() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(temp.path()).unwrap();
+        let admin_path = root.join("admin");
+        for dir in ["admin/refs", "admin/objects", "fork"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        fs::write(root.join("fork/.git"), gitfile(&admin_path)).unwrap();
+        // What `git stash` then `git stash pop` leaves (git 2.4x).
+        for name in ["HEAD", "index", "ORIG_HEAD", "AUTO_MERGE"] {
+            fs::write(admin_path.join(name), "0000\n").unwrap();
+        }
+        let verdict = || {
+            let top = Dir::open_root(&root).unwrap();
+            verify(
+                Some(&BTreeMap::new()),
+                Some(&top.open("admin").unwrap()),
+                &admin_path,
+                &top.open("fork").unwrap(),
+            )
+        };
+        assert_eq!(verdict(), Ok(()));
+        fs::create_dir(admin_path.join("hooks")).unwrap();
+        assert_eq!(verdict(), Err("admin hooks is not allowed".into()));
     }
 
     #[test]
