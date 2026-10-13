@@ -715,6 +715,15 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   `unset r` unsets it, and `export` assigns it and reports it as Bash does;
   `update_or_add` assigns the element with the subscript as written for other
   callers. Covered by `name_references_to_array_elements_match_bash`.
+- `0091` applies Bash's order to invocation `set` options before clap sees the
+  command line (`bash_startup_options`, replacing `qualify_plus_options`):
+  `-x`/`+x` letters (every `set` letter), `-o`/`+o NAME` and `-O`/`+O NAME`
+  (also inside a cluster, `-oe errexit`) take effect left to right, and each
+  option's final state goes to clap as `-o NAME`/`--+o NAME` (`-O`/`--+O`).
+  Other letters stay whatever their sign (`+c` is `-c`; a repeated `c` is one
+  flag); `-i`/`+i` keep the last; a lone `-` ends the options and a lone `+`
+  is ignored. Unknown `-o`/`-O` names and `-c` with no command print Bash's
+  error and exit 2. Covered by `invocation_options_follow_bash_order`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

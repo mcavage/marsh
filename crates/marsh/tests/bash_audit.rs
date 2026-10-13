@@ -2359,3 +2359,53 @@ declare -A h; k='the key'; h[$k]=v; declare -n hr='h["$k"]'; echo "[$hr]"; unset
         b"y\nx QW z\nI\nx rd! b\n[v]\n0\n",
     );
 }
+
+/// Invocation `set` options take effect left to right, `+` forms included,
+/// with `-o` names inside clusters; unknown names are Bash's errors.
+#[test]
+fn invocation_options_follow_bash_order() {
+    use std::os::unix::process::CommandExt as _;
+    let flags = "printf '%s\\n' \"$-\"";
+    for args in [
+        vec!["-e", "+e", "-c", "false; echo survived"],
+        vec!["-o", "errexit", "+e", "-c", "false; echo survived"],
+        vec!["+u", "-o", "nounset", "-c", flags],
+        vec![
+            "-B",
+            "+o",
+            "braceexpand",
+            "-a",
+            "+o",
+            "allexport",
+            "-c",
+            flags,
+        ],
+        vec!["-oe", "errexit", "-c", "false; echo survived"],
+        vec!["-c", "-c", flags],
+        vec!["-i", "+i", "-c", flags],
+        vec!["-c", "-", "echo \"$0 $#\"", "--", "+e"],
+        vec!["-o", "not_an_option", "-c", "echo ran"],
+        vec!["-O", "not_an_option", "-c", "echo ran"],
+    ] {
+        let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+            let mut command = shell(program);
+            command.arg0("shell");
+            if program != "bash" {
+                command.arg("--no-config");
+            }
+            command
+                .args(["--noprofile", "--norc"])
+                .args(&args)
+                .output()
+                .unwrap()
+        });
+        let [bash, brush] = &outputs;
+        assert_eq!(
+            brush.status.code(),
+            bash.status.code(),
+            "{args:?}: {brush:?} {bash:?}"
+        );
+        assert_eq!(brush.stdout, bash.stdout, "{args:?}: {brush:?}");
+        assert_eq!(brush.stderr, bash.stderr, "{args:?}: {brush:?}");
+    }
+}

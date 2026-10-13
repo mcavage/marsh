@@ -52,12 +52,18 @@ type BrushShell = brush_core::Shell<BrushShellExtensions>;
 
 // WARN: this implementation shadows `clap::Parser::parse_from` one so it must be defined
 // after the `use clap::Parser`
-/// Rewrites `+o`/`+O` startup options as clap long options, stopping at the
-/// first operand so command strings and script arguments are left untouched.
-fn qualify_plus_options(args: &mut [String]) {
-    const VALUE_OPTIONS: &[&str] = &[
-        "-o",
-        "-O",
+/// Applies Bash's startup option order to the `set` and `shopt` options: like
+/// `set`, `-x`/`+x` letters, `-o`/`+o NAME` and `-O`/`+O NAME` (also inside a
+/// cluster, as in `-oe errexit`) take effect left to right, so each option gets
+/// its final state, which this passes on as `-o NAME`/`--+o NAME` (and `-O`/
+/// `--+O`) for clap. Other letters (`c`, `s`, `i`, `l`, ...) stay, whichever
+/// sign they had, and a repeated `c` is the same flag. A lone `-` ends the
+/// options (as `--`); a lone `+` does nothing. The scan stops at the first
+/// operand or `--`, leaving command strings and script arguments untouched.
+/// An unknown `-o` or `-O` name, or a `-c` with no command, is Bash's error
+/// (returned for the caller to print; the shell then exits with status 2).
+fn bash_startup_options(args: &mut Vec<String>) -> Result<(), String> {
+    const LONG_VALUE_OPTIONS: &[&str] = &[
         "--config",
         "--inherit-fd",
         "--closed-fd",
@@ -71,21 +77,143 @@ fn qualify_plus_options(args: &mut [String]) {
         "--disable-event",
         "--log-disable",
     ];
+    // `set`'s option letters, by the `set -o` names Brush knows them as.
+    const LETTERS: &[(char, &str)] = &[
+        ('a', "allexport"),
+        ('b', "notify"),
+        ('e', "errexit"),
+        ('f', "noglob"),
+        ('h', "hashall"),
+        ('k', "keyword"),
+        ('m', "monitor"),
+        ('n', "noexec"),
+        ('p', "privileged"),
+        ('t', "onecmd"),
+        ('u', "nounset"),
+        ('v', "verbose"),
+        ('x', "xtrace"),
+        ('B', "braceexpand"),
+        ('C', "noclobber"),
+        ('E', "errtrace"),
+        ('H', "histexpand"),
+        ('P', "physical"),
+        ('T', "functrace"),
+    ];
+
+    let mut kept: Vec<String> = vec![args[0].clone()];
+    let mut set_o: Vec<(String, bool)> = vec![];
+    let mut shopt: Vec<(String, bool)> = vec![];
+    let mut seen_c = false;
+    // `-i`/`+i`: the last one wins.
+    let mut interactive = None;
     let mut index = 1;
-    while let Some(arg) = args.get_mut(index) {
-        if arg.starts_with("+o") || arg.starts_with("+O") {
-            let takes_value = arg.len() == 2;
-            arg.insert_str(0, "--");
-            index += if takes_value { 2 } else { 1 };
-        } else if VALUE_OPTIONS.contains(&arg.as_str()) {
-            index += 2;
-        } else if arg == "--" || !arg.starts_with('-') {
-            // `-c` is a flag (Bash option order): options after it are still options.
+    while let Some(arg) = args.get(index).cloned() {
+        index += 1;
+        if arg == "--" || !(arg.starts_with('-') || arg.starts_with('+')) {
+            index -= 1;
             break;
-        } else {
-            index += 1;
+        }
+        if arg == "-" {
+            kept.push("--".to_owned());
+            break;
+        }
+        if arg == "+" {
+            continue;
+        }
+        if arg.starts_with("--") {
+            let takes_value = LONG_VALUE_OPTIONS.contains(&arg.as_str());
+            kept.push(arg);
+            if takes_value && let Some(value) = args.get(index) {
+                kept.push(value.clone());
+                index += 1;
+            }
+            continue;
+        }
+        let on = arg.starts_with('-');
+        let mut rest = String::from("-");
+        for letter in arg.chars().skip(1) {
+            if let Some((_, name)) = LETTERS.iter().find(|(l, _)| *l == letter) {
+                set_o.push(((*name).to_owned(), on));
+            } else if letter == 'o' || letter == 'O' {
+                let Some(name) = args.get(index).cloned() else {
+                    rest.push(letter);
+                    continue;
+                };
+                index += 1;
+                if letter == 'o' {
+                    set_o.push((name, on));
+                } else {
+                    shopt.push((name, on));
+                }
+            } else if letter == 'c' {
+                if !std::mem::replace(&mut seen_c, true) {
+                    rest.push(letter);
+                }
+            } else if letter == 'i' {
+                interactive = Some(on);
+            } else {
+                rest.push(letter);
+            }
+        }
+        if rest.len() > 1 {
+            kept.push(rest);
         }
     }
+
+    let name = args[0].as_str();
+    let set_o_names =
+        brush_core::namedoptions::options(brush_core::namedoptions::ShellOptionKind::SetO);
+    if let Some((bad, _)) = set_o
+        .iter()
+        .find(|(option, _)| set_o_names.get(option).is_none())
+    {
+        return Err(std::format!(
+            "{name}: line 0: {name}: {bad}: invalid option name"
+        ));
+    }
+    let shopt_names =
+        brush_core::namedoptions::options(brush_core::namedoptions::ShellOptionKind::Shopt);
+    if let Some((bad, _)) = shopt
+        .iter()
+        .find(|(option, _)| shopt_names.get(option).is_none())
+    {
+        return Err(std::format!(
+            "{name}: line 0: {bad}: invalid shell option name"
+        ));
+    }
+    let command_follows = match args.get(index).map(String::as_str) {
+        Some("--") => args.len() > index + 1,
+        operand => operand.is_some(),
+    };
+    if seen_c && !command_follows {
+        return Err(std::format!("{name}: -c: option requires an argument"));
+    }
+    if interactive == Some(true) {
+        kept.push("-i".to_owned());
+    }
+
+    // Each option's final state, in the order the options first appear.
+    let finals = |ops: Vec<(String, bool)>| {
+        let mut finals: Vec<(String, bool)> = vec![];
+        for (name, on) in ops {
+            match finals.iter_mut().find(|(seen, _)| *seen == name) {
+                Some(entry) => entry.1 = on,
+                None => finals.push((name, on)),
+            }
+        }
+        finals
+    };
+    for (name, on) in finals(set_o) {
+        kept.push(if on { "-o" } else { "--+o" }.to_owned());
+        kept.push(name);
+    }
+    for (name, on) in finals(shopt) {
+        kept.push(if on { "-O" } else { "--+O" }.to_owned());
+        kept.push(name);
+    }
+    kept.extend(args.drain(index.min(args.len())..));
+    *args = kept;
+    Ok(())
 }
 
 impl CommandLineArgs {
@@ -313,8 +441,11 @@ pub fn run_from(mut args: Vec<String>) -> i32 {
     //
     // Parse args.
     //
-    // Work around clap's limitations handling +O/+o options.
-    qualify_plus_options(&mut args);
+    // Bash's startup option order (and `+` options, which clap lacks).
+    if let Err(message) = bash_startup_options(&mut args) {
+        eprintln!("{message}");
+        return 2;
+    }
 
     let parsed_args = match CommandLineArgs::try_parse_from(args.iter().cloned()) {
         Ok(parsed_args) => parsed_args,
