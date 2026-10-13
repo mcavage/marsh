@@ -697,6 +697,17 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   for the trap's own commands. A DEBUG or ERR trap's frame takes the source
   position of the command it runs for, so `LINENO` there is that command's
   line. Covered by `debug_and_err_traps_see_the_command_as_written`.
+- `0089` fixes small builtin details from the upstream TCK selection: `set`
+  prints an empty value unquoted; `$!` is unset until a job starts in the
+  background (so `set -u` reports `!: unbound variable`, worded as Bash words
+  every unbound variable); an empty `PATH` entry is `.` (`./prog` in `type`,
+  `command -v` and `hash`); `declare 'b[]'` is an invalid identifier, and
+  `declare -p`'s `not found` has the diagnostic prefix; `shopt -o` listing every
+  option pads names to 15 columns; `local -` saves the `set` options in a
+  hidden local named `-`, as Bash does, and `leave_function` restores them;
+  `${a[@]@K}`/`${a[@]@k}` list an array's subscripts and values; and `exec`
+  does not set `_` (the program gets the shell's only if exported). Covered by
+  `small_builtin_details_match_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

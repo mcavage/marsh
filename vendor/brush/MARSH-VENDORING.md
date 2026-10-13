@@ -116,13 +116,14 @@ Patch `0085` runs `CHLD` traps and implements GLOBIGNORE.
 Patch `0086` words common diagnostics as Bash does.
 Patch `0087` implements `set -v`.
 Patch `0088` runs DEBUG traps before expansion with Bash's `BASH_COMMAND` and `LINENO`.
+Patch `0089` fixes small builtin details from the upstream TCK selection.
 
 This directory contains only the runtime crate source, manifests, licenses,
 and build metadata needed by marsh. Upstream integration tests, snapshots,
 examples, benches, and development tooling are intentionally omitted. Each
 local delta is covered by focused tests in `crates/marsh/tests/smoke.rs` or,
 for `0010`, `0012`-`0016`, `0018`-`0032`, `0036`, `0038`, `0039`, `0042`,
-`0052`, `0053`, `0055`-`0067`, and `0070`-`0088`,
+`0052`, `0053`, `0055`-`0067`, and `0070`-`0089`,
 `crates/marsh/tests/bash_audit.rs` (`0017`, `0036`, `0037`, `0040`, `0041`, `0043`, `0044`, `0054`, `0068`, and `0069` are in `smoke.rs`, and `0070` also is; `0033` and `0034` are in `split_join.rs` and `bash_audit.rs`, with
 parser cases in `brush-parser/src/parser/tests/composition.rs`). The earlier patch series was
 also checked against the full upstream compatibility suite

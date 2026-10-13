@@ -83,6 +83,16 @@ impl builtins::Command for ExecCommand {
                 &self.args[1..],
                 self.empty_environment,
             )?;
+            // Unlike other commands, Bash's `exec` does not set `_` for the
+            // program: it gets the shell's `_` only if that is exported.
+            cmd.env_remove("_");
+            if !self.empty_environment
+                && let Some((_, underscore)) = context.shell.env().get("_")
+                && underscore.is_exported()
+            {
+                let value = underscore.value().to_cow_str(context.shell);
+                cmd.env("_", brush_core::bytes::to_os_string(value.as_ref()));
+            }
             // Bash execs the file by its full path (`full_pathname`), which is also
             // what an ENOEXEC script sees as `$0` and what diagnostics name.
             #[cfg(unix)]

@@ -82,7 +82,13 @@ impl builtins::Command for ShoptCommand {
                     }
                 } else {
                     let option_value_str = if option_value { "on" } else { "off" };
-                    writeln!(context.stdout(), "{:20}\t{option_value_str}", option.name)?;
+                    // Bash pads names to 15 columns listing every `-o` option, else 20.
+                    let width = if self.set_o_names_only { 15 } else { 20 };
+                    writeln!(
+                        context.stdout(),
+                        "{:width$}\t{option_value_str}",
+                        option.name
+                    )?;
                 }
             }
 

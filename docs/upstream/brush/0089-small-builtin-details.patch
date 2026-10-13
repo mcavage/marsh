@@ -1,0 +1,319 @@
+diff --git a/brush-builtins/src/declare.rs b/brush-builtins/src/declare.rs
+index 831bcb8..5e80264 100644
+--- a/brush-builtins/src/declare.rs
++++ b/brush-builtins/src/declare.rs
+@@ -183,7 +183,11 @@ impl DeclareCommand {
+         let name = match declaration {
+             brush_core::CommandArg::String(s) => s,
+             brush_core::CommandArg::Assignment(_) => {
+-                writeln!(context.stderr(), "declare: {declaration}: not found")?;
++                writeln!(
++                    context.stderr(),
++                    "{}declare: {declaration}: not found",
++                    context.shell.diagnostic_prefix()
++                )?;
+                 return Ok(false);
+             }
+         };
+@@ -231,7 +235,11 @@ impl DeclareCommand {
+ 
+             Ok(true)
+         } else {
+-            writeln!(context.stderr(), "declare: {name}: not found")?;
++            writeln!(
++                context.stderr(),
++                "{}declare: {name}: not found",
++                context.shell.diagnostic_prefix()
++            )?;
+             Ok(false)
+         }
+     }
+@@ -290,14 +298,12 @@ impl DeclareCommand {
+ 
+         // Special-case: `local -`
+         if name == "-" && matches!(verb, DeclareVerb::Local) {
+-            // TODO(local): `local -` allows shadowing the current `set` options (i.e., $-), with
+-            // subsequent updates getting discarded when the current local scope is popped.
+-            tracing::warn!("not yet implemented: local -");
++            context.shell.save_set_options_until_return()?;
+             return Ok(true);
+         }
+ 
+-        // Make sure it's a valid name.
+-        if !env::valid_variable_name(name.as_str()) {
++        // Make sure it's a valid name (and, as in Bash, not an empty subscript).
++        if !env::valid_variable_name(name.as_str()) || assigned_index.as_deref() == Some("") {
+             writeln!(
+                 context.stderr(),
+                 "{}{}: `{declaration}': not a valid identifier",
+diff --git a/brush-builtins/src/exec.rs b/brush-builtins/src/exec.rs
+index 757ee06..ae7750a 100644
+--- a/brush-builtins/src/exec.rs
++++ b/brush-builtins/src/exec.rs
+@@ -83,6 +83,16 @@ impl builtins::Command for ExecCommand {
+                 &self.args[1..],
+                 self.empty_environment,
+             )?;
++            // Unlike other commands, Bash's `exec` does not set `_` for the
++            // program: it gets the shell's `_` only if that is exported.
++            cmd.env_remove("_");
++            if !self.empty_environment
++                && let Some((_, underscore)) = context.shell.env().get("_")
++                && underscore.is_exported()
++            {
++                let value = underscore.value().to_cow_str(context.shell);
++                cmd.env("_", brush_core::bytes::to_os_string(value.as_ref()));
++            }
+             // Bash execs the file by its full path (`full_pathname`), which is also
+             // what an ENOEXEC script sees as `$0` and what diagnostics name.
+             #[cfg(unix)]
+diff --git a/brush-builtins/src/set.rs b/brush-builtins/src/set.rs
+index 1b2c0aa..8853bf2 100644
+--- a/brush-builtins/src/set.rs
++++ b/brush-builtins/src/set.rs
+@@ -452,12 +452,12 @@ fn display_all(
+             continue;
+         }
+ 
+-        writeln!(
+-            context.stdout(),
+-            "{name}={}",
+-            var.value()
+-                .format(variables::FormatStyle::Basic, context.shell)?,
+-        )?;
++        // Bash leaves an empty value unquoted (`v=`).
++        let value = match var.value() {
++            variables::ShellValue::String(value) if value.is_empty() => Default::default(),
++            value => value.format(variables::FormatStyle::Basic, context.shell)?,
++        };
++        writeln!(context.stdout(), "{name}={value}")?;
+     }
+ 
+     // Display functions... unless we're in posix compliance mode.
+diff --git a/brush-builtins/src/shopt.rs b/brush-builtins/src/shopt.rs
+index da86440..d151102 100644
+--- a/brush-builtins/src/shopt.rs
++++ b/brush-builtins/src/shopt.rs
+@@ -82,7 +82,13 @@ impl builtins::Command for ShoptCommand {
+                     }
+                 } else {
+                     let option_value_str = if option_value { "on" } else { "off" };
+-                    writeln!(context.stdout(), "{:20}\t{option_value_str}", option.name)?;
++                    // Bash pads names to 15 columns listing every `-o` option, else 20.
++                    let width = if self.set_o_names_only { 15 } else { 20 };
++                    writeln!(
++                        context.stdout(),
++                        "{:width$}\t{option_value_str}",
++                        option.name
++                    )?;
+                 }
+             }
+ 
+diff --git a/brush-core/src/error.rs b/brush-core/src/error.rs
+index 7718d54..4ffcd67 100644
+--- a/brush-core/src/error.rs
++++ b/brush-core/src/error.rs
+@@ -439,6 +439,14 @@ impl Error {
+         match &self.kind {
+             ErrorKind::CommandNotFound(name) => Some(std::format!("{name}: command not found")),
+             ErrorKind::CheckedExpansionError(message) => Some(message.clone()),
++            ErrorKind::ExpandingUnsetVariable(parameter) => {
++                let name = parameter
++                    .strip_prefix("${")
++                    .and_then(|name| name.strip_suffix('}'))
++                    .or_else(|| parameter.strip_prefix('$'))
++                    .unwrap_or(parameter);
++                Some(std::format!("{name}: unbound variable"))
++            }
+             _ => None,
+         }
+     }
+diff --git a/brush-core/src/expansion.rs b/brush-core/src/expansion.rs
+index f611043..79beffd 100644
+--- a/brush-core/src/expansion.rs
++++ b/brush-core/src/expansion.rs
+@@ -1714,6 +1714,45 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                 indirect,
+                 op,
+             } => {
++                // Like Bash 5.3, `${a[@]@K}` on an array is its subscripts and
++                // quoted values, and `${a[@]@k}` the same as separate words.
++                if let (
++                    ParameterTransformOp::PossiblyQuoteWithArraysExpanded { separate_words },
++                    brush_parser::word::Parameter::NamedWithAllIndices { name, concatenate },
++                    false,
++                ) = (&op, &parameter, indirect)
++                    && let Some((pairs, associative)) = self.array_subscripts_and_values(name)
++                {
++                    let fields = if *separate_words {
++                        pairs
++                            .into_iter()
++                            .flat_map(|(key, value)| [key, value])
++                            .map(|word| WordField::from(word))
++                            .collect()
++                    } else {
++                        let mut listed = pairs
++                            .iter()
++                            .map(|(key, value)| {
++                                std::format!(
++                                    "{} {}",
++                                    escape::quote_if_needed(key, escape::QuoteMode::DoubleQuote),
++                                    escape::force_quote(value, escape::QuoteMode::DoubleQuote)
++                                )
++                            })
++                            .join(" ");
++                        if associative && !listed.is_empty() {
++                            listed.push(' ');
++                        }
++                        vec![WordField::from(listed)]
++                    };
++                    return Ok(Expansion {
++                        fields,
++                        concatenate: *concatenate,
++                        kind: ExpansionKind::ElementList,
++                        undefined: false,
++                    });
++                }
++
+                 let expanded_parameter = self.expand_parameter(&parameter, indirect).await?;
+                 let came_from_undefined = expanded_parameter.undefined;
+ 
+@@ -1977,6 +2016,28 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+         (name, index, var)
+     }
+ 
++    /// An array's subscripts and values, in order, and whether it is associative.
++    fn array_subscripts_and_values(&self, name: &str) -> Option<(Vec<(String, String)>, bool)> {
++        let (_, var) = self.shell.env().get(name)?;
++        match var.value() {
++            ShellValue::IndexedArray(values) => Some((
++                values
++                    .iter()
++                    .map(|(key, value)| (key.to_string(), value.clone()))
++                    .collect(),
++                false,
++            )),
++            ShellValue::AssociativeArray(values) => Some((
++                values
++                    .iter()
++                    .map(|(key, value)| (key.clone(), value.clone()))
++                    .collect(),
++                true,
++            )),
++            _ => None,
++        }
++    }
++
+     fn undefined_expansion(
+         &self,
+         parameter: &brush_parser::word::Parameter,
+@@ -2048,6 +2109,12 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                     self.undefined_expansion(parameter, allow_unset_vars)
+                 }
+             }
++            // Like Bash, `$!` is unset until a job starts in the background.
++            brush_parser::word::Parameter::Special(
++                brush_parser::word::SpecialParameter::LastBackgroundProcessId,
++            ) if self.shell.jobs().last_background_pid().is_none() => {
++                self.undefined_expansion(parameter, allow_unset_vars)
++            }
+             brush_parser::word::Parameter::Special(s) => Ok(self.expand_special_parameter(s)),
+             brush_parser::word::Parameter::Named(n) => {
+                 if !env::valid_variable_name(n.as_str()) {
+diff --git a/brush-core/src/shell/callstack.rs b/brush-core/src/shell/callstack.rs
+index dd40cab..105adc5 100644
+--- a/brush-core/src/shell/callstack.rs
++++ b/brush-core/src/shell/callstack.rs
+@@ -99,6 +99,59 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+     /// * `function` - The function being entered.
+     /// * `args` - The arguments being passed to the function.
+     /// * `_params` - Current execution parameters.
++    /// `local -`: like Bash, saves the `set` options (in a hidden local named
++    /// `-`) so that they are restored when the function returns.
++    pub fn save_set_options_until_return(&mut self) -> Result<(), error::Error> {
++        if !self.in_function()
++            || self
++                .env
++                .get_raw_using_policy("-", env::EnvironmentLookup::OnlyInCurrentLocal)
++                .is_some()
++        {
++            return Ok(());
++        }
++        let saved = crate::namedoptions::options(crate::namedoptions::ShellOptionKind::SetO)
++            .iter()
++            .map(|option| {
++                let value = if option.definition.get(&self.options) {
++                    1
++                } else {
++                    0
++                };
++                std::format!("{}={value}", option.name)
++            })
++            .collect::<Vec<_>>()
++            .join(",");
++        let mut var = crate::variables::ShellVariable::new(saved);
++        var.hide_from_enumeration();
++        self.env.add("-", var, env::EnvironmentScope::Local)?;
++        if let Some(var) = self
++            .env
++            .get_mut_using_policy("-", env::EnvironmentLookup::OnlyInCurrentLocal)
++        {
++            var.unexport();
++        }
++        Ok(())
++    }
++
++    fn restore_saved_set_options(&mut self) {
++        let Some(saved) = self
++            .env
++            .get_raw_using_policy("-", env::EnvironmentLookup::OnlyInCurrentLocal)
++            .map(|var| var.value().to_cow_str(self).into_owned())
++        else {
++            return;
++        };
++        let options = crate::namedoptions::options(crate::namedoptions::ShellOptionKind::SetO);
++        for entry in saved.split(',') {
++            if let Some((name, value)) = entry.split_once('=')
++                && let Some(option) = options.get(name)
++            {
++                option.set(&mut self.options, value == "1");
++            }
++        }
++    }
++
+     pub(crate) fn enter_function(
+         &mut self,
+         name: &str,
+@@ -127,6 +180,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+     /// Updates the shell's internal tracking state to reflect that the shell
+     /// has exited the top-most function on its call stack.
+     pub(crate) fn leave_function(&mut self) -> Result<(), error::Error> {
++        self.restore_saved_set_options();
+         self.env.pop_scope(env::EnvironmentScope::Local)?;
+ 
+         if let Some(exited_call) = self.call_stack.pop() {
+diff --git a/brush-core/src/sys/unix/fs.rs b/brush-core/src/sys/unix/fs.rs
+index f5b6968..ce07fcc 100644
+--- a/brush-core/src/sys/unix/fs.rs
++++ b/brush-core/src/sys/unix/fs.rs
+@@ -76,8 +76,18 @@ fn try_get_file_mode(path: &Path) -> Option<u32> {
+ /// Splits a platform-specific PATH-like value into individual paths.
+ ///
+ /// On Unix, this delegates to [`std::env::split_paths`].
+-pub fn split_paths<T: AsRef<std::ffi::OsStr> + ?Sized>(s: &T) -> std::env::SplitPaths<'_> {
+-    std::env::split_paths(s)
++/// Splits a `PATH`-style list; an empty entry is the working directory,
++/// which Bash names `.` (so a command found there is `./NAME`).
++pub fn split_paths<T: AsRef<std::ffi::OsStr> + ?Sized>(
++    s: &T,
++) -> impl Iterator<Item = PathBuf> + '_ {
++    std::env::split_paths(s).map(|path| {
++        if path.as_os_str().is_empty() {
++            PathBuf::from(".")
++        } else {
++            path
++        }
++    })
+ }
+ 
+ pub(crate) fn get_default_executable_search_paths() -> Vec<PathBuf> {

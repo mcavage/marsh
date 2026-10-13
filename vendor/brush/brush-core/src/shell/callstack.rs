@@ -99,6 +99,59 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     /// * `function` - The function being entered.
     /// * `args` - The arguments being passed to the function.
     /// * `_params` - Current execution parameters.
+    /// `local -`: like Bash, saves the `set` options (in a hidden local named
+    /// `-`) so that they are restored when the function returns.
+    pub fn save_set_options_until_return(&mut self) -> Result<(), error::Error> {
+        if !self.in_function()
+            || self
+                .env
+                .get_raw_using_policy("-", env::EnvironmentLookup::OnlyInCurrentLocal)
+                .is_some()
+        {
+            return Ok(());
+        }
+        let saved = crate::namedoptions::options(crate::namedoptions::ShellOptionKind::SetO)
+            .iter()
+            .map(|option| {
+                let value = if option.definition.get(&self.options) {
+                    1
+                } else {
+                    0
+                };
+                std::format!("{}={value}", option.name)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        let mut var = crate::variables::ShellVariable::new(saved);
+        var.hide_from_enumeration();
+        self.env.add("-", var, env::EnvironmentScope::Local)?;
+        if let Some(var) = self
+            .env
+            .get_mut_using_policy("-", env::EnvironmentLookup::OnlyInCurrentLocal)
+        {
+            var.unexport();
+        }
+        Ok(())
+    }
+
+    fn restore_saved_set_options(&mut self) {
+        let Some(saved) = self
+            .env
+            .get_raw_using_policy("-", env::EnvironmentLookup::OnlyInCurrentLocal)
+            .map(|var| var.value().to_cow_str(self).into_owned())
+        else {
+            return;
+        };
+        let options = crate::namedoptions::options(crate::namedoptions::ShellOptionKind::SetO);
+        for entry in saved.split(',') {
+            if let Some((name, value)) = entry.split_once('=')
+                && let Some(option) = options.get(name)
+            {
+                option.set(&mut self.options, value == "1");
+            }
+        }
+    }
+
     pub(crate) fn enter_function(
         &mut self,
         name: &str,
@@ -127,6 +180,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     /// Updates the shell's internal tracking state to reflect that the shell
     /// has exited the top-most function on its call stack.
     pub(crate) fn leave_function(&mut self) -> Result<(), error::Error> {
+        self.restore_saved_set_options();
         self.env.pop_scope(env::EnvironmentScope::Local)?;
 
         if let Some(exited_call) = self.call_stack.pop() {

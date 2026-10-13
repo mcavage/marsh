@@ -76,8 +76,18 @@ fn try_get_file_mode(path: &Path) -> Option<u32> {
 /// Splits a platform-specific PATH-like value into individual paths.
 ///
 /// On Unix, this delegates to [`std::env::split_paths`].
-pub fn split_paths<T: AsRef<std::ffi::OsStr> + ?Sized>(s: &T) -> std::env::SplitPaths<'_> {
-    std::env::split_paths(s)
+/// Splits a `PATH`-style list; an empty entry is the working directory,
+/// which Bash names `.` (so a command found there is `./NAME`).
+pub fn split_paths<T: AsRef<std::ffi::OsStr> + ?Sized>(
+    s: &T,
+) -> impl Iterator<Item = PathBuf> + '_ {
+    std::env::split_paths(s).map(|path| {
+        if path.as_os_str().is_empty() {
+            PathBuf::from(".")
+        } else {
+            path
+        }
+    })
 }
 
 pub(crate) fn get_default_executable_search_paths() -> Vec<PathBuf> {

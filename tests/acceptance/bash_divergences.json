@@ -1140,21 +1140,12 @@
   {"id": "TCK-GAPS", "summary": "Builtin and expansion gaps from the upstream TCK selection (one line each in the doc)", "cases": {
    "tck": [
     "builtins/builtin.yaml#14",
-    "builtins/declare.yaml#117",
     "builtins/declare.yaml#121",
     "builtins/readonly.yaml#6",
-    "builtins/set.yaml#10",
     "core-byte-controls#1",
-    "core-byte-controls#2",
-    "core-byte-controls#3",
     "core-byte-controls#4",
     "core-byte-controls#6",
     "core-byte-controls#7",
-    "options/set-u.yaml#8",
-    "path_search.yaml#0",
-    "path_search.yaml#1",
-    "path_search.yaml#2",
-    "special_parameters.yaml#32",
     "word_expansion/param_transformation.yaml#2",
     "word_expansion/params.yaml#9"
    ]

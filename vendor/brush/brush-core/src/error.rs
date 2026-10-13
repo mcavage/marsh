@@ -439,6 +439,14 @@ impl Error {
         match &self.kind {
             ErrorKind::CommandNotFound(name) => Some(std::format!("{name}: command not found")),
             ErrorKind::CheckedExpansionError(message) => Some(message.clone()),
+            ErrorKind::ExpandingUnsetVariable(parameter) => {
+                let name = parameter
+                    .strip_prefix("${")
+                    .and_then(|name| name.strip_suffix('}'))
+                    .or_else(|| parameter.strip_prefix('$'))
+                    .unwrap_or(parameter);
+                Some(std::format!("{name}: unbound variable"))
+            }
             _ => None,
         }
     }
