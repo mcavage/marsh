@@ -20,10 +20,13 @@ import random
 import pathlib
 import re
 import shlex
+import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import zipfile
 from typing import Any
 from xml.etree import ElementTree
 
@@ -41,9 +44,14 @@ def sh_quote(text: str) -> str:
 
 def git(cwd: pathlib.Path, *args: str, check: bool = True, stdin: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
     env = dict(os.environ, GIT_AUTHOR_DATE="2000-01-01T00:00:00Z", GIT_COMMITTER_DATE="2000-01-01T00:00:00Z")
-    return subprocess.run(["git", "-c", "user.name=marsh-eval", "-c", "user.email=eval@example.invalid",
-                           "-c", "commit.gpgsign=false", *args], cwd=cwd, env=env, input=stdin,
-                          capture_output=True, check=check)
+    done = subprocess.run(["git", "-c", "user.name=marsh-eval", "-c", "user.email=eval@example.invalid",
+                           "-c", "commit.gpgsign=false",
+                           # No background auto-gc: it repacks a template while it is being cloned.
+                           "-c", "gc.auto=0", "-c", "maintenance.auto=false", *args],
+                          cwd=cwd, env=env, input=stdin, capture_output=True)
+    if check and done.returncode:
+        raise RuntimeError(f"git {' '.join(args)[:200]} in {cwd}: {done.stderr.decode(errors='replace')[-800:]}")
+    return done
 
 
 # ---------------------------------------------------------------- branch scripts
@@ -51,8 +59,11 @@ def git(cwd: pathlib.Path, *args: str, check: bool = True, stdin: bytes | None =
 def attempt_script(agent_cmd: str, prompt: str, gate_cmd: str, max_attempts: int, agent: str,
                    timeout_s: int = 0) -> str:
     """A shell-branch script: run the agent, then the gate; on a gate failure
-    retry with the gate's output appended, up to max_attempts. It prints
-    `@@eval` marker lines that run.py parses out of the branch's stdout.
+    retry with the gate's output appended, up to max_attempts. The `@@eval`
+    marker lines and the agent's own JSON go to the branch's stderr, which
+    run.py parses; stdout carries only the gate's output, so a judge reading
+    `join` (which hides a passing branch's stderr) sees the gate result and
+    the patch but not which agent wrote it.
 
     The gate command is embedded here rather than read from the fork, so an
     agent that edits files cannot change which command is the gate.
@@ -67,13 +78,13 @@ def attempt_script(agent_cmd: str, prompt: str, gate_cmd: str, max_attempts: int
         "FB=''",
         "i=1",
         "while :; do",
-        f"  echo \"{MARK} begin {agent} $i $(date +%s)\"",
-        f"  {command} </dev/null",
+        f"  echo \"{MARK} begin {agent} $i $(date +%s)\" >&2",
+        f"  {command} </dev/null >&2",
         "  rc=$?",
-        f"  echo \"{MARK} end {agent} $i $rc $(date +%s)\"",
+        f"  echo \"{MARK} end {agent} $i $rc $(date +%s)\" >&2",
         "  out=$( (eval \"$G\") 2>&1 )",
         "  g=$?",
-        f"  echo \"{MARK} gate $i $g $(date +%s)\"",
+        f"  echo \"{MARK} gate $i $g $(date +%s)\" >&2",
         "  printf '%s\\n' \"$out\" | tail -n 40",
         "  [ \"$g\" -eq 0 ] && exit 0",
         f"  [ \"$i\" -ge {int(max_attempts)} ] && exit 1",
@@ -88,7 +99,8 @@ def attempt_script(agent_cmd: str, prompt: str, gate_cmd: str, max_attempts: int
 
 
 def parse_branch(stdout: str) -> dict[str, Any]:
-    """Attempts, gate results and token usage from a branch's stdout."""
+    """Attempts, gate results and token usage from a branch's marker stream
+    (its stderr)."""
     attempts: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     body: list[str] = []
@@ -132,10 +144,13 @@ def usage_from(lines: list[str]) -> dict[str, Any]:
             if event.get("total_cost_usd") is not None:
                 usage["reported_cost_usd"] = (usage["reported_cost_usd"] or 0) + float(event["total_cost_usd"])
         elif event.get("type") == "turn.completed" and "usage" in event:  # codex
+            # input_tokens includes the cached reads and the cache writes.
             u = event["usage"]
             cached = int(u.get("cached_input_tokens", 0))
-            usage["input"] += int(u.get("input_tokens", 0)) - cached
+            written = int(u.get("cache_write_input_tokens", 0))
+            usage["input"] += int(u.get("input_tokens", 0)) - cached - written
             usage["cached"] += cached
+            usage["cache_write"] += written
             usage["output"] += int(u.get("output_tokens", 0))
     return usage
 
@@ -180,8 +195,8 @@ class Marsh:
 
 def branch_result(out: pathlib.Path, label: str, price_for: dict[str, dict[str, float]]) -> dict[str, Any]:
     target = out / label
-    stdout = (target / "stdout").read_text(errors="replace") if (target / "stdout").exists() else ""
-    parsed = parse_branch(stdout)
+    stderr = (target / "stderr").read_text(errors="replace") if (target / "stderr").exists() else ""
+    parsed = parse_branch(stderr)
     patch = (target / "diff.patch").read_bytes() if (target / "diff.patch").exists() else b""
     files = (target / "files").read_text().splitlines() if (target / "files").exists() else []
     for attempt in parsed["attempts"]:
@@ -198,9 +213,11 @@ def branch_result(out: pathlib.Path, label: str, price_for: dict[str, dict[str, 
 # ---------------------------------------------------------------- tasks
 
 def prepare_template(task_dir: pathlib.Path, task: dict[str, Any], cache: pathlib.Path) -> pathlib.Path:
-    """A repository holding only the task's base tree (one `base` commit, no
-    upstream history, so the fix commit is not reachable from the project)
-    plus one `eval: visible gate` commit. Projects are clones of it."""
+    """A repository holding only the task's base tree (a `base` commit with no
+    upstream history, so the fix commit is not reachable from the project), an
+    `eval: test environment` commit (vendored pure-Python test dependencies in
+    `.eval-deps/` and any generated files the tests need), and an `eval: visible
+    gate` commit. Projects are clones of it."""
     template = cache / task["id"]
     if (template / ".git").exists():
         return template
@@ -208,38 +225,102 @@ def prepare_template(task_dir: pathlib.Path, task: dict[str, Any], cache: pathli
     if repo.startswith("local:"):
         shutil.copytree(task_dir / repo[len("local:"):], template)
     else:
-        mirror = cache / f"{task['id']}.upstream"
+        mirror = cache / "mirrors" / re.sub(r"[^A-Za-z0-9]+", "_", repo)
         if not mirror.exists():
-            git(cache, "clone", "-q", "--no-checkout", repo, str(mirror))
+            mirror.parent.mkdir(parents=True, exist_ok=True)
+            git(mirror.parent, "clone", "-q", "--filter=blob:none", "--no-checkout", repo, str(mirror))
         template.mkdir(parents=True)
         archive = git(mirror, "archive", "--format=tar", task["base"]).stdout
         subprocess.run(["tar", "-x", "-f", "-"], cwd=template, input=archive, check=True)
     git(template, "init", "-q", "-b", "main")
     git(template, "add", "-A", "-f")
     git(template, "commit", "-q", "-m", "base")
-    if task["gate"].get("patch"):
+    env = task.get("env") or {}
+    if env.get("deps") or env.get("files"):
+        vendor_deps(env.get("deps") or [], template / DEPS, cache / "wheels")
+        for name, text in (env.get("files") or {}).items():
+            (template / name).parent.mkdir(parents=True, exist_ok=True)
+            (template / name).write_text(text)
+        git(template, "add", "-A", "-f")
+        git(template, "commit", "-q", "-m", "eval: test environment")
+    if task["gate"].get("patch") and (task_dir / task["gate"]["patch"]).exists():
         git(template, "apply", str(task_dir / task["gate"]["patch"]))
         git(template, "add", "-A")
         git(template, "commit", "-q", "-m", "eval: visible gate")
     return template
 
 
+DEPS = ".eval-deps"
+
+
+def vendor_deps(requirements: list[dict[str, str]], dest: pathlib.Path, wheels: pathlib.Path) -> None:
+    """Unpack pinned, hash-checked pure-Python wheels into dest, for
+    PYTHONPATH. The agent Kits and the shell Kit have python3 but no pip or
+    venv, so a task's test dependencies travel inside the project, identical
+    for the agents, the gate, and the hidden tests. Each entry is
+    {"req": "name==version", "sha256": HEX} naming a `py3-none-any` (or
+    `py2.py3-none-any`) wheel, so nothing depends on the host platform."""
+    if not requirements:
+        return
+    wheels.mkdir(parents=True, exist_ok=True)
+    dest.mkdir(parents=True, exist_ok=True)
+    for entry in requirements:
+        name, _, version = entry["req"].partition("==")
+        stem = re.sub(r"[-_.]+", "_", name).lower()
+
+        def matches() -> list[pathlib.Path]:
+            return [w for w in wheels.glob("*.whl") if re.sub(r"[-_.]+", "_", w.name.split("-")[0]).lower() == stem
+                    and w.name.split("-")[1] == version
+                    and hashlib.sha256(w.read_bytes()).hexdigest() == entry["sha256"]]
+
+        if not matches():
+            with tempfile.NamedTemporaryFile("w", suffix=".txt") as requirement:
+                requirement.write(f"{entry['req']} --hash=sha256:{entry['sha256']}\n")
+                requirement.flush()
+                subprocess.run([sys.executable, "-m", "pip", "download", "-q", "--no-deps", "--only-binary=:all:",
+                                "--require-hashes", "--dest", str(wheels), "-r", requirement.name], check=True,
+                               capture_output=True, env=dict(os.environ, PIP_REQUIRE_VIRTUALENV="0"))
+        found = matches()
+        if not found:
+            raise ValueError(f"{entry['req']}: no wheel with sha256 {entry['sha256']}")
+        if not re.search(r"-(py3|py2\.py3)-none-any\.whl$", found[0].name):
+            raise ValueError(f"{found[0].name} is not a pure-Python wheel")
+        with zipfile.ZipFile(found[0]) as archive:
+            archive.extractall(dest)
+
+
+def wrap(config: dict[str, Any], command: str) -> str:
+    """Where a gate or hidden-test command runs: `test_runner` in the config,
+    for example `shell -c {cmd}` (the shell Kit, whose Python matches the agent
+    Kits'), or `sh -c {cmd}` for the shell VM itself."""
+    return config.get("test_runner", "sh -c {cmd}").replace("{cmd}", sh_quote(command))
+
+
+def fresh_name(stem: str) -> str:
+    """A directory name never used before. The marsh daemon keeps the shell
+    VM's mount of every project path it has seen, and refuses a path that was
+    deleted and recreated ("overlaps active grant"), so no project, scoring
+    or gate directory is ever reused, even across reruns."""
+    return f"{stem}-{secrets.token_hex(4)}"
+
+
 def fresh_clone(template: pathlib.Path, dest: pathlib.Path) -> None:
     if dest.exists():
         shutil.rmtree(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    git(dest.parent, "clone", "-q", str(template), str(dest))
+    git(dest.parent, "clone", "-q", "--no-hardlinks", str(template), str(dest))
 
 
 def score_hidden(marsh: Marsh, task_dir: pathlib.Path, task: dict[str, Any], template: pathlib.Path,
-                 patch: str, work: pathlib.Path, cache: dict[str, Any]) -> dict[str, Any]:
+                 patch: str, work: pathlib.Path, cache: dict[str, Any],
+                 config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Apply a candidate patch to a clean clone, restore and apply the hidden
     tests (as SWE-bench does: test files the candidate touched are reset
     first), and run the hidden command in the shell VM. No agent runs here."""
     key = hashlib.sha256(patch.encode()).hexdigest()[:16] if patch else "empty"
     if key in cache:
         return cache[key]
-    scoring = work / "score" / key
+    scoring = work / "score" / fresh_name(key)
     fresh_clone(template, scoring)
     result: dict[str, Any] = {"patch_sha": key}
     if patch:
@@ -261,20 +342,25 @@ def score_hidden(marsh: Marsh, task_dir: pathlib.Path, task: dict[str, Any], tem
     lists = {"fail_to_pass": hidden.get("fail_to_pass") or [], "pass_to_pass": hidden.get("pass_to_pass") or []}
     command = hidden["cmd"]
     junit = scoring / ".eval-junit.xml"
-    if any(lists.values()):
+    verbose = hidden.get("format") == "unittest-verbose"
+    if any(lists.values()) and not verbose:
         command += f" --junitxml={junit.name}"
     started = time.time()
     try:
-        done = marsh.call(["-c", command], scoring, timeout=task.get("hidden_timeout_s", 900))
-        code, tail = done.returncode, (done.stdout + done.stderr).decode(errors="replace")[-3000:]
+        done = marsh.call(["-c", wrap(config or {}, command)], scoring, timeout=task.get("hidden_timeout_s", 900))
+        output = (done.stdout + done.stderr).decode(errors="replace")
+        code, tail = done.returncode, output[-3000:]
     except subprocess.TimeoutExpired:
-        code, tail = 124, "timeout"
+        code, tail, output = 124, "timeout", ""
     result.update(exit=code, tail=tail, wall_s=time.time() - started, whole_file_pass=code == 0)
     if any(lists.values()):
         # The primary endpoint, as in SWE-bench: every FAIL_TO_PASS test
         # passes and no PASS_TO_PASS test fails. The whole-file exit status
         # is kept as a secondary, stricter endpoint.
-        outcomes = junit_outcomes(junit) if junit.exists() else []
+        if verbose:
+            outcomes = verbose_outcomes(output)
+        else:
+            outcomes = junit_outcomes(junit) if junit.exists() else []
         if not outcomes:
             result["infra"] = "the hidden run produced no test results"
         f2p = {t: test_status(t, outcomes) for t in lists["fail_to_pass"]}
@@ -288,6 +374,24 @@ def score_hidden(marsh: Marsh, task_dir: pathlib.Path, task: dict[str, Any], tem
     cache[key] = result
     shutil.rmtree(scoring, ignore_errors=True)
     return result
+
+
+VERBOSE_RESULT = re.compile(r"^(.+?) \.\.\. (ok|FAIL|ERROR|skipped.*|expected failure|unexpected success)\s*$")
+
+
+def verbose_outcomes(output: str) -> list[tuple[str, str, str]]:
+    """("", key, status) from unittest's verbose log (Django's runtests.py
+    -v 2). The key is the text before " ... ", which SWE-bench uses as the
+    test id: `name (module.Class.name)`, or a docstring's first line."""
+    outcomes = []
+    for line in output.splitlines():
+        match = VERBOSE_RESULT.match(line)
+        if match:
+            word = match.group(2)
+            status = ("passed" if word in ("ok", "expected failure") else
+                      "skipped" if word.startswith("skipped") else "failed")
+            outcomes.append(("", match.group(1), status))
+    return outcomes
 
 
 def junit_outcomes(path: pathlib.Path) -> list[tuple[str, str, str]]:
@@ -318,6 +422,15 @@ def test_status(test: str, outcomes: list[tuple[str, str, str]]) -> str:
 
 # ---------------------------------------------------------------- one run
 
+def race_labels(config: dict[str, Any], task_id: str, rep: int) -> dict[str, str]:
+    """{split label: agent}. The race's branches are labelled `a` and `b`,
+    assigned at random per run (from the seed), so the judge sees neither the
+    agents' names nor a fixed order (join renders branches as written)."""
+    agents = ["claude", "codex"]
+    random.Random(f"{config.get('seed', 20261012)}:{task_id}:{rep}").shuffle(agents)
+    return {"a": agents[0], "b": agents[1]}
+
+
 def judge(marsh: Marsh, config: dict[str, Any], project: pathlib.Path, join_text: str) -> dict[str, Any]:
     prompt = config["judge"]["prompt"]
     command = config["judge"]["cmd"].replace("{prompt}", sh_quote(prompt))
@@ -325,7 +438,7 @@ def judge(marsh: Marsh, config: dict[str, Any], project: pathlib.Path, join_text
     done = marsh.call(["-c", command], project, stdin=join_text.encode())
     text = done.stdout.decode(errors="replace")
     first = next((line.strip().strip("`*").lower() for line in text.splitlines() if line.strip()), "")
-    pick = first if first in ("claude", "codex") else None
+    pick = first if first in ("a", "b") else None
     tokens_in = len(join_text) // 4 + len(prompt) // 4
     tokens_out = len(text) // 4
     price = config["prices"][config["judge"]["price"]]
@@ -339,25 +452,24 @@ def run_one(marsh: Marsh, config: dict[str, Any], task_dir: pathlib.Path, task: 
             rep: int, work: pathlib.Path, template: pathlib.Path) -> dict[str, Any]:
     agents = config["agents"]
     price_for = {name: config["prices"][spec["price"]] for name, spec in agents.items()}
-    gate = task["gate"]["cmd"]
-    prompt = task["prompt"]
+    gate = wrap(config, task["gate"]["cmd"])
+    # The prompt names the gate as the agent can run it in its own container.
+    prompt = task["prompt"].replace("{gate}", task["gate"]["cmd"])
     n = int(config.get("max_attempts", 3))
-    base = work / task["id"] / f"rep{rep}"
+    base = work / task["id"] / fresh_name(f"rep{rep}")
     race_project, retry_project = base / "race" / task["id"], base / "retry" / task["id"]
     fresh_clone(template, race_project)
     fresh_clone(template, retry_project)
     timeout = int(config.get("agent_timeout_s", 0))
-    # join renders branches in the order written; alternate it so the judge
-    # does not always read Claude first.
-    order = ["claude", "codex"]
-    random.Random(f"{config.get('seed', 20261012)}:{task['id']}:{rep}").shuffle(order)
-    race_branches = {label: attempt_script(agents[label]["cmd"], prompt, gate, 1, label, timeout) for label in order}
+    labels = race_labels(config, task["id"], rep)
+    race_branches = {label: attempt_script(agents[agent]["cmd"], prompt, gate, 1, agent, timeout)
+                     for label, agent in labels.items()}
     retry_branches = {"retry": attempt_script(agents["claude"]["cmd"], prompt, gate, n, "claude", timeout)}
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         race_future = pool.submit(marsh.split_join, race_project, race_branches)
         retry_future = pool.submit(marsh.split_join, retry_project, retry_branches)
         race, retry = race_future.result(), retry_future.result()
-    branches = {label: branch_result(race["out"], label, price_for) for label in race_branches}
+    branches = {agent: branch_result(race["out"], label, price_for) for label, agent in labels.items()}
     branches["retry"] = branch_result(retry["out"], "retry", price_for)
 
     passing = [label for label in ("claude", "codex") if branches[label]["gate_passed"]]
@@ -367,12 +479,12 @@ def run_one(marsh: Marsh, config: dict[str, Any], task_dir: pathlib.Path, task: 
     judged = winner
     if len(passing) == 2:
         judge_record = judge(marsh, config, race_project, race["join"])
-        judged = judge_record["pick"] or winner
+        judged = labels[judge_record["pick"]] if judge_record["pick"] else winner
 
     cache: dict[str, Any] = {}
 
     def hidden(label: str) -> dict[str, Any]:
-        return score_hidden(marsh, task_dir, task, template, branches[label]["patch"], base, cache)
+        return score_hidden(marsh, task_dir, task, template, branches[label]["patch"], base, cache, config)
 
     # What the race would take if marsh cancelled the loser at the first pass
     # (it does not: a split waits for every branch, which is wall_s).
@@ -410,14 +522,17 @@ def run_one(marsh: Marsh, config: dict[str, Any], task_dir: pathlib.Path, task: 
     return {"task": task["id"], "source": task.get("source"), "rep": rep, "finished": time.time(),
             "marsh_version": marsh.call(["--version"], race_project.parent).stdout.decode().strip(),
             "branches": branches,
-            "race_order": order, "judge": judge_record, "arms": arms, "hidden": cache,
+            "race_labels": labels, "judge": judge_record, "arms": arms, "hidden": cache,
             "race_wall_s": race["wall_s"], "retry_wall_s": retry["wall_s"]}
 
 
 # ---------------------------------------------------------------- cost model
 
 def estimate(config: dict[str, Any], tasks: int, reps: int) -> dict[str, Any]:
-    """Expected and worst-case spend from per-attempt cost assumptions."""
+    """Expected spend from per-attempt cost assumptions (calibrated), and the
+    time-bounded worst case per run that `reserve_per_run_usd` must cover:
+    every agent call (2 race + max_attempts retry) running to agent_timeout_s
+    at the highest spend rate seen in calibration."""
     m = config["cost_model"]
     p_fail = m["p_gate_fail_first_attempt"]
     n = int(config.get("max_attempts", 3))
@@ -425,13 +540,14 @@ def estimate(config: dict[str, Any], tasks: int, reps: int) -> dict[str, Any]:
     per_run = (m["claude_attempt_usd"] + m["codex_attempt_usd"]
                + expected_retry_attempts * m["claude_attempt_usd"] * m["retry_attempt_discount"]
                + m["p_both_pass"] * m["judge_usd"])
-    worst = (m["claude_attempt_usd"] + m["codex_attempt_usd"] + n * m["claude_attempt_usd"]
-             + m["judge_usd"]) * m["worst_case_multiplier"]
+    worst = (2 + n) * int(config.get("agent_timeout_s", 0)) * m["max_usd_per_agent_second"] + m["judge_usd"]
     runs = tasks * reps
     return {"runs": runs, "expected_retry_attempts": round(expected_retry_attempts, 2),
             "expected_per_run_usd": round(per_run, 2), "expected_total_usd": round(per_run * runs, 2),
-            "calibration_usd": round(per_run * m["calibration_runs"], 2),
-            "worst_case_total_usd": round(worst * runs, 2), "budget_cap_usd": config["budget_usd"]}
+            "worst_case_per_run_usd": round(worst, 2),
+            "reserve_per_run_usd": config.get("reserve_per_run_usd", 0),
+            "reserve_covers_worst_case": float(config.get("reserve_per_run_usd", 0)) >= worst,
+            "budget_cap_usd": config["budget_usd"]}
 
 
 def spent(out: pathlib.Path) -> float:
@@ -501,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{task['id']} rep {rep}", file=sys.stderr)
             record = run_one(marsh, config, task_dir, task, rep, work, template)
             dest.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
-            shutil.rmtree(work / task["id"] / f"rep{rep}", ignore_errors=True)
+            shutil.rmtree(work / task["id"], ignore_errors=True)
     print(f"done; spent ${spent(args.out):.2f}", file=sys.stderr)
     return 0
 

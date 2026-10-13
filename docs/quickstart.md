@@ -28,7 +28,7 @@ $ marsh
 marsh-0.5$ split {
 >   a: claude -p "fix TestDialTimeout"
 >   b: codex exec "fix TestDialTimeout"
-> } | join --keep
+> } | join
 ```
 
 Each branch runs on its own copy of the project (a *fork*). `claude` and
@@ -54,18 +54,18 @@ during the split stops every branch and anything they started.
 
 ## Apply one result
 
-The first output line gives the split ID. With `--keep`, its patches remain
-available after `join`. Inspect the changes, then apply the patch you want from
-that same split; there is no need to start another one:
+The `marsh split` form works from any shell. It prints a handle, and
+`join -- CMD` runs CMD with the patches in `$SPLIT_DIR/LABEL/diff.patch`. Here
+`:::` marks a branch that is one registered command:
 
 ```sh
-git apply .marsh/split/8d5c8fdd1563/out/b/diff.patch
-marsh splits rm 8d5c8fdd1563
+h=$(marsh split -n ::: a claude -p 'fix TestDialTimeout' \
+                   ::: b codex exec 'fix TestDialTimeout')
+marsh join -- sh -c 'cat; git apply "$SPLIT_DIR/b/diff.patch"' <<<"$h"
 ```
 
-Use the ID from your own output, not the illustrative ID above. `git apply`
-also works in a plain directory. Run your project's tests after applying the
-patch. To merge when your tree
+`git apply` needs no repository, so this also works in a plain directory. The
+split is removed when CMD exits 0 and kept otherwise. To merge when your tree
 has changed, see [Split and join](split.md#merging-when-your-tree-has-moved).
 
 Agents started by a split can write only their fork of the project. A shell branch
@@ -158,17 +158,10 @@ The exit status is the first nonzero branch status. See [Fanout](fanout.md).
 marsh status      # daemon, VMs, limits
 marsh jobs        # recent jobs
 marsh results     # finished jobs: exit status, cleanup, timing
+marsh stop        # remove every VM marsh created; stop the daemon
 ```
 
-Leave the marsh shell before stopping its VMs. From your Mac terminal:
-
-```console
-marsh-0.5$ exit
-$ marsh stop
-```
-
-`marsh stop` refuses while any marsh shells or jobs are active. It leaves your
-project, the guest home, and job results. The next
+`marsh stop` leaves your project, the guest home, and job results. The next
 `marsh` starts fresh VMs. If a command or VM seems stuck, see
 [Troubleshooting](troubleshooting.md).
 

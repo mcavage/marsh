@@ -1,0 +1,28 @@
+diff --git a/docs/versions.rst b/docs/versions.rst
+index 3be96e5..738ff67 100644
+--- a/docs/versions.rst
++++ b/docs/versions.rst
+@@ -9,6 +9,7 @@ Unreleased
+ ----------
+ 
+ * Changes to existing functions:
++    * :func:`ichunked` now matches :func:`chunked` for ``n = 0`` and negative *n*: it yields nothing for a zero chunk size (without consuming the source) and raises ``ValueError: n must be at least 0`` instead of leaking :func:`itertools.islice`'s error.
+     * :func:`running_min`, :func:`running_max`, :func:`running_mean`, and :func:`running_statistics` now consistently validate *maxlen* as an integer and support the index protocol.
+     * :func:`numeric_range` now preserves its original values and length when reversed, including floating-point ranges and ranges near datetime limits.
+     * :func:`constrained_batches` now raises ``ValueError`` for a nonpositive *max_count*.
+diff --git a/more_itertools/more.py b/more_itertools/more.py
+index c128bc9..940b800 100755
+--- a/more_itertools/more.py
++++ b/more_itertools/more.py
+@@ -3718,6 +3718,11 @@ def ichunked(iterable, n):
+     [8, 9, 10, 11]
+ 
+     """
++    if n is not None and n < 0:
++        raise ValueError('n must be at least 0')
++    if n == 0:
++        return
++
+     iterator = iter(iterable)
+     for first in iterator:
+         rest = islice(iterator, n - 1)

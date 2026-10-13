@@ -1,0 +1,27 @@
+diff --git a/tests/migrations/test_eval_gate.py b/tests/migrations/test_eval_gate.py
+new file mode 100644
+index 0000000..b2f653c
+--- /dev/null
++++ b/tests/migrations/test_eval_gate.py
+@@ -0,0 +1,21 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from django.db import models
++from django.db.migrations.serializer import serializer_factory
++from django.test import SimpleTestCase
++
++
++class Profile:
++    class Capability(models.TextChoices):
++        BASIC = ("BASIC", "Basic")
++        PROFESSIONAL = ("PROFESSIONAL", "Professional")
++
++        @classmethod
++        def default(cls):
++            return [cls.BASIC]
++
++
++class NestedClassMethodDefaultTests(SimpleTestCase):
++    def test_classmethod_of_a_nested_class_serializes_with_its_full_path(self):
++        string, imports = serializer_factory(Profile.Capability.default).serialize()
++        self.assertEqual(string, "migrations.test_eval_gate.Profile.Capability.default")
++        self.assertEqual(imports, {"import migrations.test_eval_gate"})

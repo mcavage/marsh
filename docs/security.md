@@ -1,17 +1,14 @@
 # Security model
 
 A job is an agent or tool run by marsh in a fresh container inside a Docker
-Sandbox VM. A direct job can change your project files and the shared guest
-home; a registered agent in a split mounts its private project copy instead.
-Ordinary job commands execute in Linux, not on your Mac. Proxy-managed provider
-keys stay behind the Docker Sandboxes proxy, but saved guest logins are readable
-files. Explicit integration and development grants are described below.
+Sandbox VM. It can change your project files and the shared guest home. It has
+no way to run commands on your Mac, and it never holds your real keys.
 
 | Can a job ... | Answer | What enforces it |
 |---|---|---|
-| Run a command directly on your Mac | Not through ordinary job execution | Docker Sandboxes VM boundary; no Docker, containerd, or `sbx` socket is mounted; explicit grants can add authority |
+| Run a command on your Mac | No | Docker Sandboxes VM boundary; no Docker, containerd, or `sbx` socket is mounted |
 | Read your real home directory | No | Only the project and the guest home are mounted |
-| Read proxy-managed provider keys | No | The `sbx` proxy holds them; the job sees placeholders |
+| Read your real API keys | No | The `sbx` proxy holds them; the job sees placeholders |
 | Change or delete project files | Yes | The project is mounted read/write |
 | Read other jobs' logins and history | Yes | All jobs share the guest home |
 | Start other registered commands | Yes, within limits | The job capability socket; `MARSH_SPAWN` narrows it |
@@ -22,11 +19,10 @@ vulnerability, see [SECURITY.md](../SECURITY.md).
 
 ## Keeping your files safe
 
-Direct agent calls can change or delete the project. Keep your work in Git.
-To inspect an agent's changes before applying them to your working tree, run it
-in a [`split`](split.md): that agent mounts a private copy of the project.
-Your own shell commands in a branch are not confined to that copy
-([split branches](#split-branches)).
+marsh does not protect the project from agents. Keep your work in Git. To
+review what an agent changed before it touches your files, run it in a
+[`split`](split.md): each branch edits a private fork, and nothing changes
+until you apply a patch.
 
 ## What marsh trusts
 
@@ -43,12 +39,8 @@ Your own shell commands in a branch are not confined to that copy
 
 ### Mac
 
-By default, guest commands execute inside Linux VMs, without a host-command
-channel. MCP publications grant access to the declared pipeline or agent
-session, not unrestricted host execution. The `--dev` broker grants bounded
-host authority to the development shell; Kit jobs still receive no broker
-relay ([below](#what-is-not-isolated)). The real home directory is not mounted
-as the guest home. Two directories are shared:
+marsh gives a VM no way to run a command on the Mac. The real home
+directory is never mounted. Two directories are shared:
 
 - the project you started in, read/write, at its Mac path
 - the guest home (`~/.marsh/home`), the home directory every job sees
@@ -73,8 +65,7 @@ VM for its Kit. A job sees:
 
 - the project and the guest home
 - its Kit's network policy
-- placeholders for proxy-managed credentials; the provider keys stay with the
-  `sbx` proxy. Saved agent logins live in the shared guest home.
+- placeholder credentials; the real keys stay with the `sbx` proxy
 
 A job has no Docker, containerd, or `sbx` socket. Its one channel to the daemon
 is a socket that lets it:
@@ -105,8 +96,7 @@ and history there.
 ## What is not isolated
 
 The project
-: A direct job can read and write it. An agent that deletes files deletes them.
-  Registered agents in a split mount their private project copies instead.
+: Every job can read and write it. An agent that deletes files deletes them.
 
 The guest home
 : Every job reads and writes it. Agents keep settings and history there, so an

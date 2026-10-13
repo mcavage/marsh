@@ -1,0 +1,79 @@
+diff --git a/releasenotes/notes/falsy-callable-wait-3c1e7d2a9b5f4e60.yaml b/releasenotes/notes/falsy-callable-wait-3c1e7d2a9b5f4e60.yaml
+new file mode 100644
+index 0000000..5489919
+--- /dev/null
++++ b/releasenotes/notes/falsy-callable-wait-3c1e7d2a9b5f4e60.yaml
+@@ -0,0 +1,6 @@
++---
++fixes:
++  - |
++    A callable ``wait`` strategy is now called even when it is falsy (for
++    example an empty container or an object with a custom ``__bool__``).
++    Only ``None`` and ``0`` still mean "no wait".
+diff --git a/tenacity/__init__.py b/tenacity/__init__.py
+index e466003..89eeca6 100644
+--- a/tenacity/__init__.py
++++ b/tenacity/__init__.py
+@@ -187,6 +187,15 @@ def _first_set(first: t.Any | object, second: t.Any) -> t.Any:
+     return second if first is _unset else first
+ 
+ 
++def _is_no_wait(wait: object) -> bool:
++    # `wait` is annotated as a strategy, but untyped callers legitimately
++    # pass `None` or `0` to mean "no wait", and `sum([])` over an empty list
++    # of strategies yields the int 0. Match those values explicitly rather
++    # than by truthiness, so a callable strategy that happens to be falsy is
++    # still called.
++    return wait is None or wait == 0
++
++
+ class RetryError(Exception):
+     """Encapsulates the last attempt instance right before giving up."""
+ 
+@@ -264,7 +273,7 @@ class BaseRetrying(ABC):
+     ) -> None:
+         self.sleep = sleep
+         self.stop = stop
+-        self.wait = wait
++        self.wait = wait_none() if _is_no_wait(wait) else wait
+         self.retry = retry
+         self.before = before
+         self.after = after
+@@ -418,14 +427,7 @@ class BaseRetrying(ABC):
+         self.iter_state.retry_run_result = self.retry(retry_state)
+ 
+     def _run_wait(self, retry_state: "RetryCallState") -> None:
+-        # `wait` is annotated as always set, so a type checker sees this guard
+-        # as always true -- but untyped callers legitimately pass `None` or `0`
+-        # to mean "no wait", and `sum([])` over an empty list of strategies
+-        # yields the int 0. Keep honouring those.
+-        if not self.wait:  # type: ignore[truthy-bool]
+-            retry_state.upcoming_sleep = 0.0
+-        else:
+-            retry_state.upcoming_sleep = self.wait(retry_state)
++        retry_state.upcoming_sleep = self.wait(retry_state)
+ 
+     def _run_stop(self, retry_state: "RetryCallState") -> None:
+         self.statistics["delay_since_first_attempt"] = retry_state.seconds_since_start
+diff --git a/tenacity/asyncio/__init__.py b/tenacity/asyncio/__init__.py
+index 3292a6c..27bd2f8 100644
+--- a/tenacity/asyncio/__init__.py
++++ b/tenacity/asyncio/__init__.py
+@@ -152,14 +152,9 @@ class AsyncRetrying(BaseRetrying):
+ 
+     @override
+     async def _run_wait(self, retry_state: "RetryCallState") -> None:  # type: ignore[override]
+-        # See BaseRetrying._run_wait: falsy `wait` values mean "no wait" and
+-        # reach us from untyped callers.
+-        if not self.wait:  # type: ignore[truthy-bool]
+-            retry_state.upcoming_sleep = 0.0
+-        else:
+-            retry_state.upcoming_sleep = await _utils.wrap_to_async_func(self.wait)(
+-                retry_state
+-            )
++        retry_state.upcoming_sleep = await _utils.wrap_to_async_func(self.wait)(
++            retry_state
++        )
+ 
+     @override
+     async def _run_stop(self, retry_state: "RetryCallState") -> None:  # type: ignore[override]

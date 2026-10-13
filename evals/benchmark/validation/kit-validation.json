@@ -1,0 +1,505 @@
+{
+  "note": "Shell Kit (Debian Python 3.13.5, the same build as the agent Kits), no agents. Per task: SWE-bench's hidden-test conditions and the visible gate's. Paths are the validator's scratch directories.",
+  "runner": "shell -c {cmd}",
+  "marsh": "marsh 0.1.4-nightly.20261013173603.g854e312",
+  "validated": "2026-10-13T18:06:28Z",
+  "tasks": [
+    {
+      "id": "django__django-16612",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": " '/test_admin/admin/admin_views/article/?id=123'\n- /test_admin/admin/admin_views/article/\n+ /test_admin/admin/admin_views/article/?id=123\n?                                       +++++++\n\n\n----------------------------------------------------------------------\nRan 1 test in 0.128s\n\nFAILED (failures=1)\nDestroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...\n",
+        "gold": "_default?mode=memory&cache=shared')...\ntest_append_slash_redirect_keeps_the_query_string (admin_views.test_eval_gate.CatchAllViewQueryStringTests.test_append_slash_redirect_keeps_the_query_string) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 0.131s\n\nOK\nDestroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_missing_slash_append_slash_true_query_string (admin_views.tests.AdminSiteFinalCatchAllPatternTests.test_missing_slash_append_slash_true_query_string)": "failed",
+            "test_missing_slash_append_slash_true_script_name_query_string (admin_views.tests.AdminSiteFinalCatchAllPatternTests.test_missing_slash_append_slash_true_script_name_query_string)": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 52.6
+    },
+    {
+      "id": "django__django-16901",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": "0, 1])\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: Lists differ: [1, 0, 0, 0, 0] != [1, 0, 1, 0, 1]\n\nFirst differing element 2:\n0\n1\n\n- [1, 0, 0, 0, 0]\n+ [1, 0, 1, 0, 1]\n\n----------------------------------------------------------------------\nRan 1 test in 0.002s\n\nFAILED (failures=1)\nDestroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...\n",
+        "gold": "lias 'default' ('file:memorydb_default?mode=memory&cache=shared')...\ntest_xor_of_more_than_two_terms_is_parity (xor_lookups.test_eval_gate.XorParityTests.test_xor_of_more_than_two_terms_is_parity) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 0.002s\n\nOK\nDestroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_filter_multiple (xor_lookups.tests.XorLookupsTests.test_filter_multiple)": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 17.9
+    },
+    {
+      "id": "django__django-17087",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": "^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'migrations.test_eval_gate.Capability.default' != 'migrations.test_eval_gate.Profile.Capability.default'\n- migrations.test_eval_gate.Capability.default\n+ migrations.test_eval_gate.Profile.Capability.default\n?                           ++++++++\n\n\n----------------------------------------------------------------------\nRan 1 test in 0.001s\n\nFAILED (failures=1)\n",
+        "gold": "t(s).\nSkipping setup of unused database(s): default, other.\nSystem check identified no issues (0 silenced).\ntest_classmethod_of_a_nested_class_serializes_with_its_full_path (migrations.test_eval_gate.NestedClassMethodDefaultTests.test_classmethod_of_a_nested_class_serializes_with_its_full_path) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_serialize_nested_class_method (migrations.test_writer.WriterTests.test_serialize_nested_class_method)": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 18.1
+    },
+    {
+      "id": "selfmade__more-itertools-1304",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": " iterator:\n>           rest = islice(iterator, n - 1)\nE           ValueError: Stop argument for islice() must be None or an integer: 0 <= x <= sys.maxsize.\n\nmore_itertools/more.py:3723: ValueError\n=========================== short test summary info ============================\nFAILED tests/test_eval_gate.py::IchunkedZeroTests::test_zero_yields_nothing_and_leaves_the_source_alone\n1 failed in 0.03s\n",
+        "gold": ".                                                                        [100%]\n1 passed in 0.02s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "tests/test_more.py::IchunkedTests::test_negative": "failed",
+            "tests/test_more.py::IchunkedTests::test_zero_nonempty": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 9.8
+    },
+    {
+      "id": "selfmade__packaging-1430",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": "f test_empty_arbitrary_equality_specifier_is_rejected():\n>       with pytest.raises(InvalidSpecifier):\nE       Failed: DID NOT RAISE <class 'packaging.specifiers.InvalidSpecifier'>\n\n\ntests/test_eval_gate.py:8: Failed\n=========================== short test summary info ============================\nFAILED tests/test_eval_gate.py::test_empty_arbitrary_equality_specifier_is_rejected\n1 failed in 0.01s\n",
+        "gold": ".                                                                        [100%]\n1 passed in 0.01s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "tests/test_requirements.py::TestRequirementParsing::test_error_on_missing_arbitrary_version[foo (=== )]": "failed",
+            "tests/test_requirements.py::TestRequirementParsing::test_error_on_missing_arbitrary_version[foo === ]": "failed",
+            "tests/test_requirements.py::TestRequirementParsing::test_error_on_missing_arbitrary_version[foo=== ; python_version >= \"3\"]": "failed",
+            "tests/test_requirements.py::TestRequirementParsing::test_error_on_missing_arbitrary_version[foo===,>=1]": "failed",
+            "tests/test_requirements.py::TestRequirementParsing::test_error_on_missing_arbitrary_version[foo===]": "failed",
+            "tests/test_requirements.py::TestRequirementParsing::test_error_on_missing_arbitrary_version[foo===x,===,>=1]": "failed",
+            "tests/test_requirements.py::TestRequirementParsing::test_error_on_missing_arbitrary_version[foo===x,===]": "failed",
+            "tests/test_requirements.py::TestRequirementParsing::test_error_on_missing_arbitrary_version[foo>=1,===,<=2]": "failed",
+            "tests/test_requirements.py::TestRequirementParsing::test_error_on_missing_arbitrary_version[foo>=1,===]": "failed",
+            "tests/test_specifiers.py::TestSpecifier::test_specifiers_invalid[=== ]": "failed",
+            "tests/test_specifiers.py::TestSpecifier::test_specifiers_invalid[===]": "failed",
+            "tests/test_specifiers.py::TestSpecifierSet::test_empty_arbitrary_version_invalid[===,===x]": "failed",
+            "tests/test_specifiers.py::TestSpecifierSet::test_empty_arbitrary_version_invalid[===]": "failed",
+            "tests/test_specifiers.py::TestSpecifierSet::test_empty_arbitrary_version_invalid[>=1,===]": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 10.9
+    },
+    {
+      "id": "selfmade__tenacity-741",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": "           retrying(lambda: 1 / 0)\n>       assert sleeps == [1.5]\nE       assert [0.0] == [1.5]\nE         \nE         At index 0 diff: 0.0 != 1.5\nE         Use -v to get more diff\n\ntests/test_eval_gate.py:21: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_eval_gate.py::test_a_falsy_callable_wait_strategy_is_called\n1 failed in 0.02s\n",
+        "gold": ".                                                                        [100%]\n1 passed in 0.02s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "tests/test_tenacity.py::TestWaitConditions::test_wait_falsy_callable_is_called": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 9.4
+    },
+    {
+      "id": "selfmade__tomlkit-599",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": ":0]\n        assert a == [1, 2, 3]\n>       assert a.as_string() == \"[1, 2, 3]\"\nE       AssertionError: assert '[]' == '[1, 2, 3]'\nE         \nE         - [1, 2, 3]\nE         + []\n\ntests/test_eval_gate.py:9: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_eval_gate.py::test_deleting_an_empty_slice_keeps_the_rendering\n1 failed in 0.03s\n",
+        "gold": ".                                                                        [100%]\n1 passed in 0.02s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "tests/test_items.py::test_array_slice_deletion_keeps_render_in_sync": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 5.8
+    },
+    {
+      "id": "sympy__sympy-15017",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": "/solvers/diophantine.py:3188: SyntaxWarning: \"is\" with 'int' literal. Did you mean \"==\"?\n    if feasible is 1:  # it's prime and k == 2\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED test_eval_gate.py::test_len_of_rank_zero_array_counts_its_element - as...\n1 failed, 1 warning in 0.80s\n",
+        "gold": "y ===============================\nsympy/solvers/diophantine.py:3188\n  /Users/mcavage/dev/marsh-wt/bench-work/real/runs/sympy__sympy-15017/gate-gold-f9724238/sympy/solvers/diophantine.py:3188: SyntaxWarning: \"is\" with 'int' literal. Did you mean \"==\"?\n    if feasible is 1:  # it's prime and k == 2\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 1 warning in 0.80s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_ndim_array_initiation": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 12.1
+    },
+    {
+      "id": "sympy__sympy-15809",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": "y:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED test_eval_gate.py::test_zero_argument_min_and_max - ValueError: The Ma...\n1 failed, 6 warnings in 0.02s\n",
+        "gold": "deps/_pytest/config/__init__.py:1441\n  /Users/mcavage/dev/marsh-wt/bench-work/real/runs/sympy__sympy-15809/gate-gold-f8d741f5/.eval-deps/_pytest/config/__init__.py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 6 warnings in 0.01s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_Min": "failed",
+            "test_Max": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 13.2
+    },
+    {
+      "id": "sympy__sympy-16792",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": "f4/sympy/utilities/codegen.py:279: SyntaxWarning: \"is\" with 'str' literal. Did you mean \"==\"?\n    if dt is \"float\" and not element.is_real:\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED test_eval_gate.py::test_unused_array_argument_is_passed_as_a_pointer\n1 failed, 8 warnings in 0.03s\n",
+        "gold": "t is \"int\" and not element.is_integer:\n\nsympy/utilities/codegen.py:279\n  /Users/mcavage/dev/marsh-wt/bench-work/real/runs/sympy__sympy-16792/gate-gold-24ca61fe/sympy/utilities/codegen.py:279: SyntaxWarning: \"is\" with 'str' literal. Did you mean \"==\"?\n    if dt is \"float\" and not element.is_real:\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 8 warnings in 0.02s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_ccode_unused_array_arg": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 12.8
+    },
+    {
+      "id": "sympy__sympy-18189",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": "py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED test_eval_gate.py::test_permute_does_not_depend_on_syms_order - Assert...\n1 failed, 1 warning in 0.06s\n",
+        "gold": "-deps/_pytest/config/__init__.py:1441\n  /Users/mcavage/dev/marsh-wt/bench-work/real/runs/sympy__sympy-18189/gate-gold-9c979097/.eval-deps/_pytest/config/__init__.py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 1 warning in 0.05s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_diophantine": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 25.8
+    },
+    {
+      "id": "sympy__sympy-18211",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": ".py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED test_eval_gate.py::test_as_set_returns_a_conditionset_instead_of_raising\n1 failed, 1 warning in 0.18s\n",
+        "gold": "-deps/_pytest/config/__init__.py:1441\n  /Users/mcavage/dev/marsh-wt/bench-work/real/runs/sympy__sympy-18211/gate-gold-20577f8e/.eval-deps/_pytest/config/__init__.py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 1 warning in 0.14s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_issue_18188": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 14.2
+    },
+    {
+      "id": "sympy__sympy-18698",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": ":1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED test_eval_gate.py::test_sqf_list_factors_of_equal_multiplicity_are_combined\n1 failed, 1 warning in 0.06s\n",
+        "gold": "-deps/_pytest/config/__init__.py:1441\n  /Users/mcavage/dev/marsh-wt/bench-work/real/runs/sympy__sympy-18698/gate-gold-18fb5c50/.eval-deps/_pytest/config/__init__.py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 1 warning in 0.06s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_factor_terms": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 15.4
+    },
+    {
+      "id": "sympy__sympy-20428",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": "it__.py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED test_eval_gate.py::test_clear_denoms_of_a_zero_poly_is_the_zero_poly\n1 failed, 1 warning in 2.00s\n",
+        "gold": "-deps/_pytest/config/__init__.py:1441\n  /Users/mcavage/dev/marsh-wt/bench-work/real/runs/sympy__sympy-20428/gate-gold-588f5de1/.eval-deps/_pytest/config/__init__.py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 1 warning in 1.98s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_issue_20427": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 22.1
+    },
+    {
+      "id": "sympy__sympy-20438",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": "py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED test_eval_gate.py::test_productset_is_subset_of_equal_finiteset - asse...\n1 failed, 1 warning in 0.03s\n",
+        "gold": "-deps/_pytest/config/__init__.py:1441\n  /Users/mcavage/dev/marsh-wt/bench-work/real/runs/sympy__sympy-20438/gate-gold-722bc5c7/.eval-deps/_pytest/config/__init__.py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 1 warning in 0.02s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_Eq": "failed",
+            "test_issue_19378": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 15.0
+    },
+    {
+      "id": "sympy__sympy-20801",
+      "hidden_f2p_all_fail_at_base": true,
+      "hidden_p2p_pass_at_base": true,
+      "hidden_passes_with_gold": true,
+      "gate_fails_at_base": true,
+      "gate_passes_with_gold": true,
+      "gate_tails": {
+        "base": "_.py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n=========================== short test summary info ============================\nFAILED test_eval_gate.py::test_float_zero_and_false_compare_the_same_both_ways\n1 failed, 1 warning in 0.02s\n",
+        "gold": "-deps/_pytest/config/__init__.py:1441\n  /Users/mcavage/dev/marsh-wt/bench-work/real/runs/sympy__sympy-20801/gate-gold-2db74560/.eval-deps/_pytest/config/__init__.py:1441: PytestConfigWarning: Unknown config option: doctestplus\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n1 passed, 1 warning in 0.01s\n"
+      },
+      "valid": true,
+      "details": {
+        "base": {
+          "fail_to_pass": {
+            "test_zero_not_false": "failed"
+          },
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 1
+        },
+        "gold": {
+          "fail_to_pass": {},
+          "pass_to_pass": {},
+          "infra": null,
+          "exit": 0
+        }
+      },
+      "wall_s": 15.0
+    }
+  ]
+}

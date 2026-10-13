@@ -1,0 +1,115 @@
+{
+  "seed": 20261012,
+  "rule": "take eligible instances in seeded order; skip any that fail validation, recording why",
+  "python": "3.13 (agent and shell Kits)",
+  "sympy": [
+    {
+      "id": "sympy__sympy-20801",
+      "version": "1.8",
+      "outcome": "chosen",
+      "reason": null
+    },
+    {
+      "id": "sympy__sympy-14711",
+      "version": "1.1",
+      "outcome": "skipped",
+      "reason": "does not import on Python 3.13 (collections.Mapping and similar)"
+    },
+    {
+      "id": "sympy__sympy-20438",
+      "version": "1.8",
+      "outcome": "chosen",
+      "reason": null
+    },
+    {
+      "id": "sympy__sympy-11618",
+      "version": "1.0",
+      "outcome": "skipped",
+      "reason": "does not import on Python 3.13 (collections.Mapping and similar)"
+    },
+    {
+      "id": "sympy__sympy-13551",
+      "version": "1.1",
+      "outcome": "skipped",
+      "reason": "does not import on Python 3.13 (collections.Mapping and similar)"
+    },
+    {
+      "id": "sympy__sympy-18698",
+      "version": "1.6",
+      "outcome": "chosen",
+      "reason": null
+    },
+    {
+      "id": "sympy__sympy-14531",
+      "version": "1.1",
+      "outcome": "skipped",
+      "reason": "does not import on Python 3.13 (collections.Mapping and similar)"
+    },
+    {
+      "id": "sympy__sympy-15017",
+      "version": "1.2",
+      "outcome": "chosen",
+      "reason": null
+    },
+    {
+      "id": "sympy__sympy-13031",
+      "version": "1.1",
+      "outcome": "skipped",
+      "reason": "does not import on Python 3.13 (collections.Mapping and similar)"
+    },
+    {
+      "id": "sympy__sympy-15809",
+      "version": "1.4",
+      "outcome": "chosen",
+      "reason": null
+    },
+    {
+      "id": "sympy__sympy-16792",
+      "version": "1.5",
+      "outcome": "chosen",
+      "reason": null
+    },
+    {
+      "id": "sympy__sympy-20428",
+      "version": "1.8",
+      "outcome": "chosen",
+      "reason": null
+    },
+    {
+      "id": "sympy__sympy-18211",
+      "version": "1.6",
+      "outcome": "chosen",
+      "reason": null
+    },
+    {
+      "id": "sympy__sympy-13615",
+      "version": "1.1",
+      "outcome": "skipped",
+      "reason": "does not import on Python 3.13 (collections.Mapping and similar)"
+    },
+    {
+      "id": "sympy__sympy-18189",
+      "version": "1.6",
+      "outcome": "chosen",
+      "reason": null
+    }
+  ],
+  "django_5.0": [
+    {
+      "id": "django__django-16612",
+      "outcome": "chosen",
+      "reason": null
+    },
+    {
+      "id": "django__django-17087",
+      "outcome": "chosen",
+      "reason": null
+    },
+    {
+      "id": "django__django-16901",
+      "outcome": "chosen",
+      "reason": null
+    }
+  ],
+  "pytest-dev": "dropped: every eligible instance's base predates Python 3.10 support; pytest's assertion rewriting fails to compile on 3.13 (TypeError: required field \"lineno\" missing from alias), and fixing that would mean patching the code under test"
+}

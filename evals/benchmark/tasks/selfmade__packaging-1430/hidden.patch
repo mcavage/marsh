@@ -1,0 +1,68 @@
+diff --git a/tests/test_requirements.py b/tests/test_requirements.py
+index 7e2e364..ad78c2b 100644
+--- a/tests/test_requirements.py
++++ b/tests/test_requirements.py
+@@ -278,6 +278,13 @@ class TestRequirementParsing:
+         assert req.name == "name"
+         assert req.specifier == ""
+ 
++    @pytest.mark.parametrize(
++        "specifier", ["===bar===", "===arbitrarystring,>=1", ">=1,===arbitrarystring"]
++    )
++    def test_nonempty_arbitrary_version(self, specifier: str) -> None:
++        req = Requirement(f"foo{specifier}")
++        assert req.specifier == specifier
++
+     # ----------------------------------------------------------------------------------
+     # Everything below this (in this class) should be parsing failure modes
+     # ----------------------------------------------------------------------------------
+@@ -690,6 +697,24 @@ class TestRequirementParsing:
+             "        ^"
+         )
+ 
++    @pytest.mark.parametrize(
++        "requirement_string",
++        [
++            "foo===",
++            "foo === ",
++            "foo (=== )",
++            'foo=== ; python_version >= "3"',
++            "foo===,>=1",
++            "foo>=1,===",
++            "foo>=1,===,<=2",
++            "foo===x,===",
++            "foo===x,===,>=1",
++        ],
++    )
++    def test_error_on_missing_arbitrary_version(self, requirement_string: str) -> None:
++        with pytest.raises(InvalidRequirement, match="==="):
++            Requirement(requirement_string)
++
+     def test_error_on_missing_op_after_name(self) -> None:
+         # GIVEN
+         to_parse = "name 1.0"
+diff --git a/tests/test_specifiers.py b/tests/test_specifiers.py
+index 9fb5161..37fa11e 100644
+--- a/tests/test_specifiers.py
++++ b/tests/test_specifiers.py
+@@ -61,6 +61,8 @@ class TestSpecifier:
+             "=>2.0",
+             # Version-less specifier
+             "==",
++            "===",
++            "=== ",
+             # Local segment on operators which don't support them
+             "~=1.0+5",
+             ">=1.0+deadbeef",
+@@ -1251,6 +1253,11 @@ class TestSpecifierInternal:
+ 
+ 
+ class TestSpecifierSet:
++    @pytest.mark.parametrize("specifier", ["===", ">=1,===", "===,===x"])
++    def test_empty_arbitrary_version_invalid(self, specifier: str) -> None:
++        with pytest.raises(InvalidSpecifier):
++            SpecifierSet(specifier)
++
+     @pytest.mark.parametrize("version", VERSIONS)
+     def test_empty_specifier(self, version: str) -> None:
+         spec = SpecifierSet(prereleases=True)

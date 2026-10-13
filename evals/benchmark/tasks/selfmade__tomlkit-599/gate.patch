@@ -1,0 +1,15 @@
+diff --git a/tests/test_eval_gate.py b/tests/test_eval_gate.py
+new file mode 100644
+index 0000000..af09bc9
+--- /dev/null
++++ b/tests/test_eval_gate.py
+@@ -0,0 +1,9 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from tomlkit import item
++
++
++def test_deleting_an_empty_slice_keeps_the_rendering():
++    a = item([1, 2, 3])
++    del a[:0]
++    assert a == [1, 2, 3]
++    assert a.as_string() == "[1, 2, 3]"

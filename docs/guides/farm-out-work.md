@@ -22,9 +22,6 @@ ID        STARTED   STATE      EXIT      RUN  COMMAND
 59bb822e  18s ago   finished      0    11.1s  └─ codex exec "make test fails with this output:?FAIL: test_punctu…
 ```
 
-The script passed to `marsh join --` called `git apply`; `join` itself does not
-apply patches. The agent's report above refers to that consumer script.
-
 This is a real run on a three-test Python project with warm VMs; the times
 are not a benchmark. Claude ran the `marsh split` command from the
 [AGENTS.md snippet](#the-agentsmd-snippet) below, with the failing test output

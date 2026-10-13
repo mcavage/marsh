@@ -1,0 +1,17 @@
+diff --git a/test_eval_gate.py b/test_eval_gate.py
+new file mode 100644
+index 0000000..48838ce
+--- /dev/null
++++ b/test_eval_gate.py
+@@ -0,0 +1,11 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from sympy import Poly, symbols, sympify
++
++x = symbols("x")
++
++
++def test_clear_denoms_of_a_zero_poly_is_the_zero_poly():
++    f = Poly(sympify("-117968192370600*18**(1/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) - 15720318185*2**(2/3)*3**(1/3)*(24201 + 253*sqrt(9165))**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) + 15720318185*12**(1/3)*(24201 + 253*sqrt(9165))**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3)) + 117968192370600*2**(1/3)*3**(2/3)/(217603955769048*(24201 + 253*sqrt(9165))**(1/3) + 2273005839412*sqrt(9165)*(24201 + 253*sqrt(9165))**(1/3))"), x)
++    coeff, poly = f.clear_denoms()
++    assert poly.as_expr() == 0
++    assert poly.is_zero

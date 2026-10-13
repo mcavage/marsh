@@ -37,9 +37,7 @@ split: kept …/.marsh/split/601f3cabd349 (last stage exited 2); inspect, then: 
 
 The whole panel took 7 seconds. Claude found the `eval`, Codex found the
 missing tests, and the test run showed two failures that predate the change.
-`-- LABEL: no changes --` means no project diff was captured. It does not prove
-that a reviewer made no writes: ignored files, shared guest-home files, and
-edits reverted before capture are not shown.
+`-- LABEL: no changes --` confirms that no reviewer edited a file.
 
 Use a panel on changes where a miss is expensive: auth, input parsing,
 concurrency, migrations. It is not worth it for a typo.

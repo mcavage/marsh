@@ -1,0 +1,17 @@
+diff --git a/test_eval_gate.py b/test_eval_gate.py
+new file mode 100644
+index 0000000..2420f34
+--- /dev/null
++++ b/test_eval_gate.py
+@@ -0,0 +1,11 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from sympy import Eq, FiniteSet, ProductSet
++
++
++def test_productset_is_subset_of_equal_finiteset():
++    a = FiniteSet(1, 2)
++    b = ProductSet(a, a)
++    c = FiniteSet((1, 1), (1, 2), (2, 1), (2, 2))
++    assert b.is_subset(c) is True
++    assert c.is_subset(b) is True
++    Eq(b, c).simplify()  # raised AttributeError: 'Complement' object has no attribute 'equals'

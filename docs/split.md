@@ -2,9 +2,7 @@
 
 `split` runs commands in parallel, each on its own private copy of your
 project (a *fork*). `join` prints what each one said and a patch of what it
-changed. Registered agents edit their copies, not your working tree; applying
-their patches is explicit. Your own shell commands have broader access
-([below](#shell-branches-and--branches)).
+changed. Your files and your `.git` stay as they were until you apply a patch.
 
 Two agents try to fix the same failing test:
 
@@ -12,7 +10,7 @@ Two agents try to fix the same failing test:
 marsh-0.5$ split {
 >   a: claude -p "fix TestDialTimeout"
 >   b: pi -p "fix TestDialTimeout"
-> } | join --keep
+> } | join
 # split 8d5c8fdd1563: 2 branches; manifest …/out/manifest.json
 
 == a (exited 0, shell-vm) ==
@@ -26,13 +24,11 @@ Added a retry around Dial and a longer timeout.
 diff --git a/net/dial.go b/net/dial.go
 …
 marsh-0.5$ git apply .marsh/split/8d5c8fdd1563/out/a/diff.patch
-marsh-0.5$ marsh splits rm 8d5c8fdd1563
 ```
 
 Both agents ran at once, each on its own fork. You read both answers and
 applied the patch you wanted. Ctrl-C during the split stops every branch and
-everything it started. `--keep` retains the patches for inspection and
-application; a successful bare `join` removes them. `…` marks trimmed output.
+everything it started. `…` marks trimmed output.
 
 `split` does not review patches. In the example, `claude` and `pi` are
 registered commands, so each runs in a container that mounts only its fork.
@@ -40,22 +36,17 @@ The branch's own shell code is different: plain commands run as you in the shell
 VM and can write anywhere you can, including your real project directory
 ([below](#shell-branches-and--branches)).
 
-For proxy-managed credentials, a container sees placeholder values rather than
-your provider keys. Agent logins saved inside the guest home are ordinary files
-([Kits](kits.md), [security model](security.md#what-is-not-isolated)).
+Agents authenticate through the Docker Sandboxes proxy. A container sees
+placeholder values, never your keys ([Kits](kits.md)).
 
-The marked examples below use a file `notes.txt` in a Git repository, unless a
-marker specifies a plain directory. The test suite runs those marked examples,
-not the illustrative agent transcript above.
+The examples below run in a Git repository that holds a file `notes.txt`. The
+test suite runs each of them.
 
 ## What split touches
 
 - It writes no files in your project and nothing in your `.git`, except the
   `.marsh/split/ID` directory that holds the results.
 - Branches run in the shell VM or in a Kit's VM, not on the Mac.
-- In Git repositories, ignored files are not copied into forks. A split's root
-  cannot be a linked Git worktree or a submodule checkout with a `.git` file;
-  use the main checkout.
 - `marsh split` works from the marsh shell and from plain bash on the Mac.
   `split { }` works only in the marsh shell. Inside a job, only `:::`
   branches work.

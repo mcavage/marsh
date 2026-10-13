@@ -1,8 +1,7 @@
 # Install
 
-marsh is a Bash-compatible Linux shell for composing agents on Apple Silicon
-Macs. Registered agent commands run in fresh containers inside Docker Sandbox
-VMs. The default shell is Brush, not Bash.
+marsh is Bash with `split`, `fanout`, `join`, and `collect` for running agents
+in parallel, each command in its own sandbox.
 
 ```sh
 brew install docker/tap/sbx mcavage/tap/marsh

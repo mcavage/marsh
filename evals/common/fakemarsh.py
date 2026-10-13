@@ -12,7 +12,8 @@ It implements only the documented host-side surface the harnesses drive:
     marsh results [--json] | jobs | status | stop | --version
 
 Branches run with `sh` on a copy of the project (split) or in it (fanout),
-with fake `claude`, `codex`, and `pi` first on PATH. The fake agents follow a
+with fake `claude`, `codex`, and `pi` first on PATH, and a `shell` that, like
+the shell Kit, is `sh`. The fake agents follow a
 plan file (FAKEMARSH_PLAN, JSON) so a dry run can script solves, failures and
 judge verdicts; see `agent_main`. Every invocation is appended as one JSON
 line to FAKEMARSH_LOG when it is set, so a grader can see what was called.
@@ -49,7 +50,7 @@ def agent_dir() -> pathlib.Path:
     root = pathlib.Path(os.environ.get("FAKEMARSH_STATE") or (pathlib.Path.home() / ".fakemarsh"))
     bin_dir = root / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    for name in AGENTS + ("marsh",):
+    for name in AGENTS + ("marsh", "shell"):
         link = bin_dir / name
         if not link.exists():
             link.write_text(f"#!/bin/sh\nexec {sys.executable} {HERE} \"$0\" \"$@\"\n")
@@ -315,7 +316,11 @@ def agent_main(agent: str, args: list[str]) -> int:
                                                                "output_tokens": 250}}))
     else:
         if not sys.stdin.isatty():
-            sys.stdin.read()
+            data = sys.stdin.read()
+            # FAKEMARSH_STDIN_LOG keeps what an agent was given (a judge's input).
+            if os.environ.get("FAKEMARSH_STDIN_LOG"):
+                with open(os.environ["FAKEMARSH_STDIN_LOG"], "a", encoding="utf-8") as handle:
+                    handle.write(data)
         print(text)
     return 0
 
@@ -326,6 +331,10 @@ def main(argv: list[str]) -> int:
         return agent_main(name, argv[2:])
     if name == "marsh":
         return marsh_main(argv[2:])
+    if name == "shell":
+        # The shell Kit's entrypoint is sh: `shell -c CMD` runs CMD.
+        log(["shell", *argv[2:]])
+        return subprocess.run(["sh", *argv[2:]]).returncode
     return marsh_main(argv[1:])
 
 

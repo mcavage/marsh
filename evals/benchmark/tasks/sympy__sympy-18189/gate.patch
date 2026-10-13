@@ -1,0 +1,17 @@
+diff --git a/test_eval_gate.py b/test_eval_gate.py
+new file mode 100644
+index 0000000..967dcef
+--- /dev/null
++++ b/test_eval_gate.py
+@@ -0,0 +1,11 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from sympy import diophantine, symbols
++
++m, n = symbols("m n", integer=True)
++ALL = {(-3, -2), (-3, 2), (-2, -3), (-2, 3), (2, -3), (2, 3), (3, -2), (3, 2)}
++
++
++def test_permute_does_not_depend_on_syms_order():
++    eq = n**4 + m**4 - 2**4 - 3**4
++    assert diophantine(eq, syms=(m, n), permute=True) == ALL
++    assert diophantine(eq, syms=(n, m), permute=True) == ALL

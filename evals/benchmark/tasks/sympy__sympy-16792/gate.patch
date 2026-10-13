@@ -1,0 +1,16 @@
+diff --git a/test_eval_gate.py b/test_eval_gate.py
+new file mode 100644
+index 0000000..b7ab7d0
+--- /dev/null
++++ b/test_eval_gate.py
+@@ -0,0 +1,10 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from sympy import MatrixSymbol
++from sympy.utilities.codegen import CCodeGen, codegen
++
++
++def test_unused_array_argument_is_passed_as_a_pointer():
++    x = MatrixSymbol("x", 2, 1)
++    [(_, source)] = codegen(("autofunc", 1.0), code_gen=CCodeGen(), header=False, empty=False,
++                            argument_sequence=(x,), to_files=False)[:1]
++    assert "double autofunc(double *x)" in source

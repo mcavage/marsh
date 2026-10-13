@@ -1,0 +1,22 @@
+diff --git a/tests/admin_views/test_eval_gate.py b/tests/admin_views/test_eval_gate.py
+new file mode 100644
+index 0000000..239f00d
+--- /dev/null
++++ b/tests/admin_views/test_eval_gate.py
+@@ -0,0 +1,16 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from django.contrib.auth.models import User
++from django.test import TestCase, override_settings
++from django.urls import reverse
++
++
++@override_settings(ROOT_URLCONF="admin_views.urls")
++class CatchAllViewQueryStringTests(TestCase):
++    @override_settings(APPEND_SLASH=True)
++    def test_append_slash_redirect_keeps_the_query_string(self):
++        user = User.objects.create_superuser("admin", "admin@example.com", "secret")
++        self.client.force_login(user)
++        url = reverse("admin:admin_views_article_changelist")
++        response = self.client.get(url[:-1] + "?id=123")
++        self.assertEqual(response.status_code, 301)
++        self.assertEqual(response["Location"], url + "?id=123")

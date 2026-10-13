@@ -1,0 +1,13 @@
+diff --git a/test_eval_gate.py b/test_eval_gate.py
+new file mode 100644
+index 0000000..a0e619c
+--- /dev/null
++++ b/test_eval_gate.py
+@@ -0,0 +1,7 @@
++# Visible gate for the marsh benchmark: the issue's own example, as a test.
++from sympy import S
++
++
++def test_float_zero_and_false_compare_the_same_both_ways():
++    assert (S(0.0) == S.false) == (S.false == S(0.0))
++    assert (S(0.0) == S.false) is False
