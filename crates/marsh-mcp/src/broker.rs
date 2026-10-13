@@ -29,7 +29,7 @@ use tokio::{
     net::UnixStream,
     sync::{Notify, Semaphore},
 };
-use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
+use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 use uuid::Uuid;
 
 use crate::{HostConfig, HostMcp, SESSION_SHUTDOWN_TIMEOUT, prepare_scope_root};
@@ -473,6 +473,17 @@ pub async fn connect(options: BrokerOptions) -> Result<(), String> {
     )
     .await?;
     let (read, write) = stream.into_split();
+    // Any failure of the broker connection, or its end while the client
+    // still has the session open, is a lost broker, never a clean end.
+    let log = options.log_path();
+    let lost = move |detail: &dyn std::fmt::Display| {
+        format!(
+            "lost its connection to the resident MCP broker ({detail}); inspect {}",
+            log.display()
+        )
+    };
+    let upload_lost = lost.clone();
+    let download_lost = lost.clone();
     let mut from_client = FramedRead::new(
         tokio::io::stdin(),
         LinesCodec::new_with_max_length(MAX_MCP_FRAME_BYTES),
@@ -488,7 +499,7 @@ pub async fn connect(options: BrokerOptions) -> Result<(), String> {
             to_broker
                 .send(frame)
                 .await
-                .map_err(|error| format!("cannot send MCP frame to broker: {error}"))?;
+                .map_err(|error| upload_lost(&error))?;
         }
         upload_ended.store(true, Ordering::Release);
         drop(to_broker);
@@ -499,7 +510,12 @@ pub async fn connect(options: BrokerOptions) -> Result<(), String> {
     let mut to_client = FramedWrite::new(tokio::io::stdout(), LinesCodec::new());
     let download = tokio::spawn(async move {
         while let Some(frame) = from_broker.next().await {
-            let frame = frame.map_err(|error| format!("invalid MCP broker frame: {error}"))?;
+            let frame = frame.map_err(|error| match error {
+                LinesCodecError::Io(error) => download_lost(&error),
+                LinesCodecError::MaxLineLengthExceeded => {
+                    format!("invalid MCP broker frame: {error}")
+                }
+            })?;
             to_client
                 .send(frame)
                 .await
@@ -522,12 +538,7 @@ pub async fn connect(options: BrokerOptions) -> Result<(), String> {
                     .map_err(|error| format!("MCP proxy upload task failed: {error}"))?;
             }
             upload.as_mut().abort();
-            // The broker ended the session while its client still had it
-            // open: a lost broker, not a clean end of the session.
-            Err(format!(
-                "lost its connection to the resident MCP broker; inspect {}",
-                options.log_path().display()
-            ))
+            Err(lost(&"the broker closed the session"))
         }
     }
 }
