@@ -622,6 +622,19 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   `mapfile.def`, every `-c` lines the callback runs as `CALLBACK INDEX 'LINE'`
   before the line is stored, its status ignored, and elements are stored as
   they are read. Covered by `unset_echo_and_mapfile_callback_details_match_bash`.
+- `0081` gives `printf` Bash's argument conversion and errors. Each
+  conversion's arguments (`*` width and precision, then the value, each at its
+  `N$` position or the next) are taken by `printf` itself and handed to uucore
+  converted: integers as `strtoimax`/`strtoumax` with base 0, floats checked
+  as `strtod`, `'c` as a character code. A bad one reports `ARG: invalid
+  number`, uses what was converted, and makes the status 1; out-of-range is
+  the C library's ERANGE message. An invalid conversion prints what came
+  before it, reports `\`C': invalid format character`, and fails. `%b` is
+  Bash's `bexpand` (`\\"` keeps its backslash, `\\c` ends all output,
+  `\\x`/`\\u` without digits are reported); a `\\c` in the format is
+  literal. Diagnostics go to the builtin's standard error after the output's
+  complete lines so far, as Bash's line-buffered output has it. Covered by
+  `printf_conversions_and_errors_match_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

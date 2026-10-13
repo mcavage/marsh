@@ -2100,3 +2100,31 @@ printf "o'k\n" | mapfile -t -C cb -c 1 a; echo"#,
         b"1 one unset\na\tb\na\\tb\n-nE c\td\ncb<1><y>[1]|0|x y z\n<consumed><last><>|a b o'k\ncb<0><o'k>[0]\n",
     );
 }
+
+/// `printf` converts numeric arguments as Bash does (`strtoimax`/`strtod`,
+/// `'c` character codes): a bad one is `invalid number`, uses what was
+/// converted, and makes the status 1; an invalid conversion prints what came
+/// before it and fails. `%b` is Bash's `bexpand`: `\"` keeps its backslash,
+/// `\c` ends all output, and `\x` without digits is reported. Diagnostics come
+/// before each pass's output, as Bash flushes it.
+#[test]
+fn printf_conversions_and_errors_match_bash() {
+    let script = r#"printf '%d %u %d %x|' " 12" -1 "'A" 0x1f; echo "s=$?"
+printf '%d|%d|%f|' "" 12x 1.5x 2>&1; echo "s=$?"
+printf '%.*f|%*d|\n' 2 3.14159 5 7 x 1.5 2>&1
+printf 'head%ZTAIL' x 2>&1; echo " s=$?"
+printf '<%b>X' 'a\"b\q\101\0101\x41' '\x' 'c\cd' never 2>&1; echo " s=$?"
+printf 'a\cb\n'"#;
+    let expected = b"12 18446744073709551615 65 1f|s=0\nbash: line 2: printf: : invalid number\nbash: line 2: printf: 12x: invalid number\nbash: line 2: printf: 1.5x: invalid number\n0|12|1.500000|s=1\n3.14|    7|\nbash: line 3: printf: x: invalid number\n2|0|\nbash: line 4: printf: `Z': invalid format character\nhead s=1\nbash: line 5: printf: missing hex digit for \\x\n<a\\\"b\\qAAA>X<\\x>X<c s=0\na\\cb\n";
+    let bash = run_named("bash", script, false, Some("bash"));
+    assert_eq!(bash.stdout, expected, "Bash: {bash:?}");
+    let brush = run_named(
+        env!("CARGO_BIN_EXE_marsh-local"),
+        script,
+        false,
+        Some("bash"),
+    );
+    assert_eq!(brush.status.code(), bash.status.code(), "{brush:?}");
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
+}
