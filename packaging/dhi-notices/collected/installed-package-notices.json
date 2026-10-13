@@ -2,30 +2,12 @@
   "schema": 2,
   "scope": "Installed packages that ship no /usr/share/doc/PACKAGE/copyright file, by exact version: their own in-image legal documents and the upstream legal texts retained for them. Every other installed package carries its own Debian copyright file in the image.",
   "images": [
-    {
-      "image": "marsh-dhi-shell:final",
-      "id": "sha256:4efabfbfc42fdc4897b807fd42f286d7a83ec5c031659d18e74e78257022204b"
-    },
-    {
-      "image": "marsh-dhi-pi:final",
-      "id": "sha256:fc00454a0f1b60d740658e3125a4bc2756ddce21e6e9f467b26ba1bdaf4a991b"
-    },
-    {
-      "image": "marsh-dhi-claude:final",
-      "id": "sha256:0737963ffe8550a5647c28b88813d2571524705cec1c117bd965ecf6564ee960"
-    },
-    {
-      "image": "marsh-dhi-codex:final",
-      "id": "sha256:249fe81f89f44f8c3310002de655b35eb7d9abde851dc9fda1f911ba6fea2d23"
-    },
-    {
-      "image": "marsh-dhi-fixture:final",
-      "id": "sha256:c0d440d662e372613876563195abdc7c6de04c0c947515a996952515992435d2"
-    },
-    {
-      "image": "marsh-dhi-shelltemplate:final",
-      "id": "sha256:5d6754b393b301a472ec67be4be5d56171f43df62970d8eef413292b398b69fe"
-    }
+    "marsh-shell",
+    "marsh-pi",
+    "marsh-claude",
+    "marsh-codex",
+    "marsh-fixture",
+    "marsh-shell-template"
   ],
   "packages": [
     {

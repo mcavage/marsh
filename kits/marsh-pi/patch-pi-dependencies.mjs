@@ -3,8 +3,9 @@
 // installs verbatim (root `overrides` and lock entries are ignored for it), so
 // this script used to replace that nested copy. Pi 1.1.0 no longer nests
 // brace-expansion: its minimatch resolves our separately locked fixed package.
-// Keep the guard: reject unreviewed Pi or dependency versions, any
-// reintroduced nested copy, and verify the module Pi's minimatch actually loads.
+// Keep the guard for every Pi release: require the fixed brace-expansion
+// (5.0.12 or later), reject any reintroduced nested copy, and verify the
+// module Pi's minimatch actually loads.
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -16,8 +17,13 @@ const fixed = join(modules, 'brace-expansion');
 const pi = join(modules, '@earendil-works/pi-coding-agent');
 const nested = join(pi, 'node_modules/brace-expansion');
 const version = path => JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')).version;
-if (version(pi) !== '1.1.0' || version(fixed) !== '5.0.12') {
-  throw new Error('Pi dependency check requires reviewed Pi 1.1.0 and brace-expansion 5.0.12');
+const atLeast = (actual, floor) => {
+  const [a, b] = [actual, floor].map(v => v.split('.').map(Number));
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
+  return true;
+};
+if (!/^\d+\.\d+\.\d+$/.test(version(fixed)) || !atLeast(version(fixed), '5.0.12')) {
+  throw new Error(`Pi dependency check requires the fixed brace-expansion 5.0.12 or later, not ${version(fixed)}`);
 }
 if (existsSync(nested)) {
   throw new Error('Pi bundles brace-expansion again; review the dependency repair');
@@ -32,4 +38,4 @@ const { minimatch } = fromPi('minimatch');
 if (!minimatch('src/file.rs', '{src,tests}/**/*.rs') || minimatch('secret.txt', '{src,tests}/**/*.rs')) {
   throw new Error('Pi glob behavior failed with the fixed brace-expansion');
 }
-console.log('Pi minimatch resolves brace-expansion 5.0.12; representative glob checks passed');
+console.log(`Pi ${version(pi)}: minimatch resolves brace-expansion ${version(fixed)}; representative glob checks passed`);

@@ -14,7 +14,7 @@ RUN rustup component add --toolchain 1.95.0 rustfmt clippy \
  && rustup target add --toolchain 1.95.0 aarch64-unknown-linux-musl aarch64-unknown-linux-gnu \
  && rustc --version && cargo fmt --version && cargo clippy --version
 
-FROM ${SHELL_BASE_IMAGE}
+FROM ${SHELL_BASE_IMAGE} AS image
 USER root
 # The DHI-built Engine, Node.js and Python packages carry no Debian copyright
 # file: their notices are indexed by exact version in dhi-notices, so they are
@@ -81,7 +81,10 @@ COPY pi/package.json pi/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
  && test "$(node_modules/.bin/pi --version)" = "$(node -p 'require("./package.json").dependencies["@earendil-works/pi-coding-agent"]')"
 COPY --chmod=0755 pi/pi-dev /usr/local/bin/pi-dev
-# The final verification follows every mutation.
+
+# The final verification follows every mutation (`image` is the stage
+# packaging/dhi-notices/inventory.py reads).
+FROM image
 RUN python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --receipt-dir /usr/local/share/licenses/marsh-dhi
 WORKDIR /
 LABEL com.docker.sandboxes.start-docker=true

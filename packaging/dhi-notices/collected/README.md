@@ -83,15 +83,21 @@ SHA-256, size and mode of every file except the receipt).
 
 ## Regenerating
 
-`inventory.py` streams `docker export` of locally built image stages (it runs
-no image code) and rewrites `installed-package-notices.json`,
-`../go-input.json` and `source-records/dhi-base-image-legal.json`. Rows are
-reused from the previous inventory only for the identical package version; a
-DHI-built package at a new version needs its upstream legal texts acquired
-first. `collect-go.py --go GO --output DIR` then acquires the Go module notices
-through the Go checksum database. `add-claude-release.py` and
-`add-codex-release.py` record agent releases; `collect-adapter-payloads.py`
-records the ACP adapters' native payloads.
+`make refresh-pins` regenerates every record here from the pins in the tree and
+prints the license delta (docs/design/supply-chain.md, "Keeping pins
+current"). Its steps are these tools:
+
+- `inventory.py` streams `docker export` of each image's `image` stage (it runs
+  no image code) and rewrites `installed-package-notices.json`,
+  `../go-input.json`, `../image-packages.json` and
+  `source-records/dhi-base-image-legal.json`. Rows are reused for the identical
+  package version; packages built from one source share its legal files; a new
+  version of a package in `../upstream-sources.json` gets the upstream texts at
+  its release tag's commit; runc follows the commit its binary embeds.
+- `collect-go.py --go GO --output DIR` acquires the Go module notices through
+  the Go checksum database.
+- `add-claude-release.py` and `add-codex-release.py` record agent releases;
+  `collect-adapter-payloads.py` records the ACP adapters' native payloads.
 
 The collectors (`collect-*.py`, `complete-rust-notices.py`,
 `supplement-rust-notices.py`, and `scripts/npm-notices.mjs` for npm) share

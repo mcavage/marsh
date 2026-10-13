@@ -97,6 +97,7 @@ def main():
         required.append({"file": "provider-notices/" + file, "sha256": digest})
     if wanted:
         raise ValueError("package lacks legal members: " + ", ".join(sorted(wanted)))
+    providers["notices"].sort(key=lambda n: n["file"])
     providers_path.write_bytes(encode(providers))
 
     acquisitions_path = bundle / "source-records/public-acquisitions.json"

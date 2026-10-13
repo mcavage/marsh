@@ -1,8 +1,8 @@
 {
   "$canonical_notice_files": {
     "APACHE-2.0.txt": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt",
-    "esbuild-0.28.2-LICENSE.md": "provider-notices/esbuild-0.28.2-LICENSE.md",
     "MIT-template.txt": "provider-notices/MIT-template.txt",
+    "esbuild-0.28.2-LICENSE.md": "provider-notices/esbuild-0.28.2-LICENSE.md",
     "pi-1.1.0-LICENSE": "provider-notices/pi-0.86.1-LICENSE",
     "standardwebhooks-1.1.1-LICENSE": "provider-notices/standardwebhooks-1.1.1-LICENSE"
   },
