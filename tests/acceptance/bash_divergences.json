@@ -1176,32 +1176,6 @@
     "word_expansion/param_transformation.yaml#2",
     "word_expansion/params.yaml#9"
    ]
-  }},
-  {"id": "VERBOSE", "summary": "set -v does not echo input lines", "cases": {
-   "history-input": [
-    "nul:basic-1-verbose-raw@C",
-    "nul:basic-1-verbose-without-nul@C",
-    "nul:minimal-1-verbose-raw@C",
-    "nul:minimal-1-verbose-without-nul@C",
-    "nul:reedline-1-verbose-raw@C",
-    "nul:reedline-1-verbose-without-nul@C"
-   ],
-   "nul-input": [
-    "verbose@script@raw",
-    "verbose@script@without-nul",
-    "verbose@source@raw",
-    "verbose@source@without-nul",
-    "verbose@stdin@raw",
-    "verbose@stdin@without-nul"
-   ],
-   "readline": [
-    "verbose-basic-physical@C",
-    "verbose-basic-quoted@C",
-    "verbose-basic-same-unit@C",
-    "verbose-minimal-physical@C",
-    "verbose-minimal-quoted@C",
-    "verbose-minimal-same-unit@C"
-   ]
   }}
  ]
 }

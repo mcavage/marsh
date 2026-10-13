@@ -2263,3 +2263,41 @@ help echo nosuch >/dev/null; echo $?; help nosuch; echo $?; read -t 0 -u 1000 x;
     assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
     assert_eq!(brush.status.code(), bash.status.code());
 }
+
+/// `set -v` writes each input line as it is read: the rest of the line that
+/// turned it on is not written, multi-line commands are written whole before
+/// they run, and `eval`, `.` and trap strings are input too.
+#[test]
+fn verbose_writes_input_lines_as_they_are_read() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        directory.path().join("src.sh"),
+        "echo src1\n# c\necho src2\n",
+    )
+    .unwrap();
+    let script = "set -v; echo first\nif true\nthen echo c\nfi\neval 'echo e1\necho e2'\n. ./src.sh\ntrap 'echo tr' EXIT\necho end # trailing\n# last comment";
+    let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+        let mut command = shell(program);
+        if program != "bash" {
+            command.arg("--no-config");
+        }
+        command
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                &std::format!("exec 2>&1\n{script}"),
+                "audit",
+            ])
+            .current_dir(directory.path())
+            .output()
+            .unwrap()
+    });
+    let [bash, brush] = &outputs;
+    assert_eq!(
+        bash.stdout,
+        b"first\nif true\nthen echo c\nfi\nc\neval 'echo e1\necho e2'\necho e1\ne1\necho e2\ne2\n. ./src.sh\necho src1\nsrc1\n# c\necho src2\nsrc2\ntrap 'echo tr' EXIT\necho end # trailing\nend\n# last comment\necho tr\ntr\n",
+        "Bash: {bash:?}"
+    );
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+}

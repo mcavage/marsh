@@ -1,0 +1,133 @@
+diff --git a/brush-core/src/shell/execution.rs b/brush-core/src/shell/execution.rs
+index 30fcb9f..57cdedb 100644
+--- a/brush-core/src/shell/execution.rs
++++ b/brush-core/src/shell/execution.rs
+@@ -223,10 +223,23 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         parsed: Result<brush_parser::ast::Program, brush_parser::ParseError>,
+         source_info: &crate::SourceInfo,
+         params: &ExecutionParameters,
++    ) -> Result<ExecutionResult, error::Error> {
++        let mut verbose = VerboseInput::new(text, 0);
++        self.run_source_text_from(text, parsed, source_info, params, &mut verbose)
++            .await
++    }
++
++    async fn run_source_text_from(
++        &mut self,
++        text: &str,
++        parsed: Result<brush_parser::ast::Program, brush_parser::ParseError>,
++        source_info: &crate::SourceInfo,
++        params: &ExecutionParameters,
++        verbose: &mut VerboseInput<'_>,
+     ) -> Result<ExecutionResult, error::Error> {
+         if let Ok(program) = parsed {
+             return self
+-                .run_program_reading_aliases(text, program, source_info, params)
++                .run_program_reading_aliases(text, program, source_info, params, verbose)
+                 .await;
+         }
+ 
+@@ -244,12 +257,14 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+                 continue;
+             }
+             unit.clear();
++            verbose.read_through(self, params, line_index + 1);
+             let failed = parsed.is_err();
+             result = self.run_parsed_result(parsed, source_info, params).await?;
+             if failed || !result.is_normal_flow() {
+-                break;
++                return Ok(result);
+             }
+         }
++        verbose.read_through(self, params, usize::MAX);
+         Ok(result)
+     }
+ 
+@@ -379,6 +394,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         program: brush_parser::ast::Program,
+         source_info: &crate::SourceInfo,
+         params: &ExecutionParameters,
++        verbose: &mut VerboseInput<'_>,
+     ) -> Result<ExecutionResult, error::Error> {
+         use brush_parser::ast::SourceLocation as _;
+ 
+@@ -386,6 +402,9 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+         let mut result = ExecutionResult::success();
+         let mut commands = program.complete_commands.iter().peekable();
+         while let Some(command) = commands.next() {
++            if let Some(location) = command.location() {
++                verbose.read_through(self, params, location.end.line);
++            }
+             result = crate::interp::execute_complete_command(self, command, params).await;
+             if !result.is_normal_flow() {
+                 break;
+@@ -404,7 +423,18 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+             let mut rest = "\n".repeat(next_line.saturating_sub(1));
+             rest.extend(text.split_inclusive('\n').skip(next_line.saturating_sub(1)));
+             let parsed = self.parse(rest.as_bytes());
+-            return Box::pin(self.run_source_text(&rest, parsed, source_info, params)).await;
++            let mut rest_verbose = VerboseInput::new(&rest, verbose.read);
++            return Box::pin(self.run_source_text_from(
++                &rest,
++                parsed,
++                source_info,
++                params,
++                &mut rest_verbose,
++            ))
++            .await;
++        }
++        if result.is_normal_flow() {
++            verbose.read_through(self, params, usize::MAX);
+         }
+         Ok(result)
+     }
+@@ -432,6 +462,49 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
+     }
+ }
+ 
++/// `set -v`: like Bash, the shell writes each line of its input to standard
++/// error as it reads it, before running the commands that line completes.
++/// Lines read while `-v` is off are not written later.
++struct VerboseInput<'a> {
++    lines: std::iter::Peekable<std::str::SplitInclusive<'a, char>>,
++    /// How many lines of the text have been read.
++    read: usize,
++}
++
++impl<'a> VerboseInput<'a> {
++    /// Input over `text`, of which `read` lines have been read already.
++    fn new(text: &'a str, read: usize) -> Self {
++        let mut lines = text.split_inclusive('\n').peekable();
++        for _ in 0..read {
++            lines.next();
++        }
++        Self { lines, read }
++    }
++
++    /// Reads through line `line` (1-based), writing the lines if `-v` is on.
++    fn read_through(
++        &mut self,
++        shell: &crate::Shell<impl crate::extensions::ShellExtensions>,
++        params: &ExecutionParameters,
++        line: usize,
++    ) {
++        let verbose = shell.options().print_shell_input_lines;
++        while self.read < line {
++            let Some(text) = self.lines.next() else {
++                break;
++            };
++            self.read += 1;
++            if verbose {
++                let mut stderr = params.stderr(shell);
++                let _ = stderr.write_all(&crate::bytes::encode(text));
++                if !text.ends_with('\n') {
++                    let _ = stderr.write_all(b"\n");
++                }
++            }
++        }
++    }
++}
++
+ /// Whether `unit` needs no further lines: it parsed (without a trailing line
+ /// continuation) or has an error that more input cannot repair.
+ fn is_complete_read_unit(
