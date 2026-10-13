@@ -665,6 +665,15 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   `[[ ]]` now evaluates to a status so `&&` and `||` pass the 2 on, as
   `execute_cond_node` does. Other platforms keep fancy-regex. Covered by
   `regex_matching_is_posix_extended`.
+- `0085` runs `CHLD` traps and implements GLOBIGNORE. The shell counts the
+  children it reaps (`signals::note_child_reaped`, from a process wait or poll;
+  reset in a forked child), and at the next command boundary a `CHLD` trap runs
+  once for each; reaps by the trap's own commands are dropped, and subshells
+  leave theirs to the shell (Bash starts them with the trap reset). A non-empty
+  GLOBIGNORE removes glob results (not literal words) that are `.` or `..` or
+  match one of its `:`-separated patterns as a whole path, component by
+  component (`*` does not cross `/`); it implies dotglob, and a glob it empties
+  is unmatched. Covered by `chld_traps_and_globignore_match_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

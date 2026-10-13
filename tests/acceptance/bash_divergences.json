@@ -444,14 +444,6 @@
     "terminal-nullable-C.utf8-2a40287c6129-ff-replace-/"
    ]
   }},
-  {"id": "GLOBIGNORE", "summary": "GLOBIGNORE is not implemented", "cases": {
-   "tck": [
-    "patterns/filename_expansion.yaml#37",
-    "patterns/filename_expansion.yaml#38",
-    "patterns/filename_expansion.yaml#39",
-    "patterns/filename_expansion.yaml#40"
-   ]
-  }},
   {"id": "HISTORY-EXPANSION", "summary": "History expansion (!!) inside double quotes, command substitutions and pastes, and :p/error policies differ", "cases": {
    "history-input": [
     "context-basic:alias_quote-posix@C",
@@ -1192,12 +1184,6 @@
     "special_parameters.yaml#32",
     "word_expansion/param_transformation.yaml#2",
     "word_expansion/params.yaml#9"
-   ]
-  }},
-  {"id": "TRAP-CHLD", "summary": "A CHLD trap does not run", "cases": {
-   "regex": [
-    "chld-user-child",
-    "chld-user-function-child"
    ]
   }},
   {"id": "VERBOSE", "summary": "set -v does not echo input lines", "cases": {

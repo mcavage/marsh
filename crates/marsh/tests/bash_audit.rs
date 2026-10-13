@@ -2204,3 +2204,38 @@ set -x; [[ 'x[.]y' =~ x"[.]"y ]] 2>&1; set +x"#,
         b"0|ab|ab|0|4|xy|x||y|0|B|2|B|and=2\n+ [[ x[.]y =~ x\\[\\.]y ]]\n",
     );
 }
+
+/// A `CHLD` trap runs once for each reaped child, not for its own; GLOBIGNORE
+/// filters glob results (whole paths, `.` and `..`) and implies dotglob.
+#[test]
+fn chld_traps_and_globignore_match_bash() {
+    let directory = tempfile::tempdir().unwrap();
+    for name in ["a.txt", "b.txt", ".h.txt", "d/x.txt"] {
+        let path = directory.path().join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "").unwrap();
+    }
+    let script = r#"trap 'printf "CHLD:%s\n" "$?"' CHLD; /usr/bin/true; f() { :; }; f & wait; /usr/bin/true | /usr/bin/true
+trap '/usr/bin/true; echo inner' CHLD; /usr/bin/true; trap - CHLD; /usr/bin/true; echo done
+GLOBIGNORE='a*'; echo *; GLOBIGNORE='*.txt'; echo * d/*; GLOBIGNORE='*'; echo *; GLOBIGNORE=x; echo .*; echo a.txt
+unset GLOBIGNORE; echo *"#;
+    let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+        let mut command = shell(program);
+        if program != "bash" {
+            command.arg("--no-config");
+        }
+        command
+            .args(["--noprofile", "--norc", "-c", script, "audit"])
+            .current_dir(directory.path())
+            .output()
+            .unwrap()
+    });
+    let [bash, brush] = &outputs;
+    assert_eq!(
+        bash.stdout,
+        b"CHLD:0\nCHLD:0\nCHLD:0\nCHLD:0\ninner\ndone\n.h.txt b.txt d\nd d/x.txt\n*\n.h.txt\na.txt\na.txt b.txt d\n",
+        "Bash: {bash:?}"
+    );
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
+}

@@ -1010,8 +1010,15 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
             .set_extended_globbing(self.parser_options.enable_extended_globbing)
             .set_case_insensitive(self.shell.options().case_insensitive_pathname_expansion);
 
+        // Like Bash, a non-empty GLOBIGNORE implies dotglob.
+        let ignore = self
+            .shell
+            .env_str("GLOBIGNORE")
+            .filter(|ignore| !ignore.is_empty())
+            .map(|ignore| ignore.into_owned());
         let options = patterns::FilenameExpansionOptions {
-            require_dot_in_pattern_to_match_dot_files: !self.shell.options().glob_matches_dotfiles,
+            require_dot_in_pattern_to_match_dot_files: !self.shell.options().glob_matches_dotfiles
+                && ignore.is_none(),
             globstar: self.shell.options().enable_star_star_glob,
         };
 
@@ -1024,6 +1031,15 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
                 &options,
             )
             .unwrap_or_default();
+        let expansion = match (ignore, expansion) {
+            (Some(ignore), patterns::PatternExpansionResult::Expanded(mut paths))
+                if pattern.has_glob() =>
+            {
+                paths.retain(|path| !self.globignore_rejects(&ignore, path));
+                patterns::PatternExpansionResult::Expanded(paths)
+            }
+            (_, expansion) => expansion,
+        };
 
         if expansion.is_unmatched_glob()
             && self.shell.options().fail_expansion_on_globs_without_match
@@ -1042,6 +1058,29 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
         } else {
             Ok(paths)
         }
+    }
+
+    /// Whether GLOBIGNORE removes `path` from a glob's results, as in Bash:
+    /// a `.` or `..` name, or a whole-path match for one of its `:`-separated
+    /// patterns, where `*` and `?` do not match `/`.
+    fn globignore_rejects(&self, ignore: &str, path: &str) -> bool {
+        if matches!(path.rsplit('/').next(), Some("." | "..")) {
+            return true;
+        }
+        let names: Vec<&str> = path.split('/').collect();
+        ignore
+            .split(':')
+            .filter(|pattern| !pattern.is_empty())
+            .any(|pattern| {
+                let parts: Vec<&str> = pattern.split('/').collect();
+                parts.len() == names.len()
+                    && parts.iter().zip(&names).all(|(part, name)| {
+                        patterns::Pattern::from(*part)
+                            .set_extended_globbing(self.parser_options.enable_extended_globbing)
+                            .exactly_matches(name)
+                            .unwrap_or(false)
+                    })
+            })
     }
 
     #[async_recursion::async_recursion]

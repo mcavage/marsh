@@ -92,6 +92,8 @@ impl ChildProcess {
                     self.interrupted = true;
                 },
                 output = &mut self.exec_future => {
+                    #[cfg(unix)]
+                    crate::signals::note_child_reaped();
                     break Ok(ProcessWaitResult::Completed {
                         output: output?,
                         interrupted: std::mem::take(&mut self.interrupted),
@@ -112,9 +114,14 @@ impl ChildProcess {
 
     pub(crate) fn poll(&mut self) -> Option<Result<std::process::Output, error::Error>> {
         let checkable_future = &mut self.exec_future;
-        checkable_future
+        let result = checkable_future
             .now_or_never()
-            .map(|result| result.map_err(Into::into))
+            .map(|result| result.map_err(Into::into));
+        #[cfg(unix)]
+        if result.is_some() {
+            crate::signals::note_child_reaped();
+        }
+        result
     }
 }
 
