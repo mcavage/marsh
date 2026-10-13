@@ -459,6 +459,15 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
         std::format!("{name}: line {line}: ")
     }
 
+    /// The locale for `category` (`LC_CTYPE`, `LC_COLLATE`, ...): `LC_ALL`, else
+    /// the category's variable, else `LANG`, else `C`.
+    pub(crate) fn locale_category(&self, category: &str) -> String {
+        ["LC_ALL", category, "LANG"]
+            .iter()
+            .find_map(|name| self.env_str(name).filter(|value| !value.is_empty()))
+            .map_or_else(|| String::from("C"), |value| value.into_owned())
+    }
+
     /// Whether the shell's character locale (`LC_ALL`, else `LC_CTYPE`, else
     /// `LANG`) is a UTF-8 one.
     pub fn is_utf8_locale(&self) -> bool {

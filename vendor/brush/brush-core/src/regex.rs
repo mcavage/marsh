@@ -26,6 +26,7 @@ pub(crate) enum RegexPiece {
     Literal(String),
 }
 
+#[cfg(not(unix))]
 impl RegexPiece {
     fn to_regex_str(&self) -> Cow<'_, str> {
         match self {
@@ -83,6 +84,7 @@ impl Regex {
     /// # Arguments
     ///
     /// * `value` - The string to check for a match.
+    #[cfg(not(unix))]
     pub fn matches(&self, value: &str) -> Result<Option<Vec<Option<String>>>, error::Error> {
         let regex_pattern: String = self
             .pieces
@@ -98,6 +100,199 @@ impl Regex {
                 .map(|c| c.map(|m| m.as_str().to_owned()))
                 .collect()
         }))
+    }
+}
+
+/// The outcome of matching with the C library's regular expressions.
+#[cfg(unix)]
+pub(crate) enum PosixMatch {
+    /// The match and each group (`None` for a group that took no part).
+    Matched(Vec<Option<String>>),
+    NoMatch,
+    /// `regcomp` refused the pattern; the C library's reason.
+    Invalid(String),
+}
+
+impl Regex {
+    /// The pattern as Bash hands it to `regcomp`: quoted parts keep only their
+    /// ERE special characters backslash-escaped (Bash's `ere_char`). Traces of
+    /// `[[ =~ ]]` show it.
+    pub(crate) fn bash_pattern(&self) -> String {
+        let mut pattern = String::new();
+        for piece in &self.pieces {
+            match piece {
+                RegexPiece::Pattern(s) => pattern.push_str(s),
+                RegexPiece::Literal(s) => {
+                    for c in s.chars() {
+                        if matches!(
+                            c,
+                            '.' | '[' | '\\' | '(' | ')' | '*' | '+' | '?' | '{' | '|' | '^' | '$'
+                        ) {
+                            pattern.push('\\');
+                        }
+                        pattern.push(c);
+                    }
+                }
+            }
+        }
+        pattern
+    }
+
+    /// Matches `value` with the C library's POSIX extended regular expressions,
+    /// as Bash's `[[ =~ ]]` does (leftmost-longest, the libc's classes and
+    /// messages), with the character type and collation of the named locales.
+    #[cfg(unix)]
+    pub(crate) fn posix_matches(&self, value: &str, ctype: &str, collate: &str) -> PosixMatch {
+        let pattern = self.bash_pattern();
+        let (Ok(c_pattern), Ok(c_value)) = (
+            std::ffi::CString::new(crate::bytes::encode(&pattern).into_owned()),
+            std::ffi::CString::new(crate::bytes::encode(value).into_owned()),
+        ) else {
+            return PosixMatch::NoMatch;
+        };
+        let _locale = posix::ThreadLocale::new(ctype, collate);
+        let mut flags = libc::REG_EXTENDED;
+        if self.case_insensitive {
+            flags |= libc::REG_ICASE;
+        }
+        // SAFETY: `regex` is initialized by a successful `regcomp`, used, and
+        // freed once; the strings are NUL-terminated and outlive the calls.
+        unsafe {
+            let mut regex: libc::regex_t = std::mem::zeroed();
+            let error = libc::regcomp(&raw mut regex, c_pattern.as_ptr(), flags);
+            if error != 0 {
+                let mut reason = [0u8; 256];
+                libc::regerror(
+                    error,
+                    &raw const regex,
+                    reason.as_mut_ptr().cast(),
+                    reason.len(),
+                );
+                let reason = std::ffi::CStr::from_bytes_until_nul(&reason)
+                    .map(|reason| reason.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                return PosixMatch::Invalid(reason);
+            }
+            let mut groups = vec![
+                libc::regmatch_t {
+                    rm_so: -1,
+                    rm_eo: -1
+                };
+                posix::group_count(&pattern) + 1
+            ];
+            let found = libc::regexec(
+                &raw const regex,
+                c_value.as_ptr(),
+                groups.len(),
+                groups.as_mut_ptr(),
+                0,
+            ) == 0;
+            libc::regfree(&raw mut regex);
+            if !found {
+                return PosixMatch::NoMatch;
+            }
+            let bytes = c_value.as_bytes();
+            PosixMatch::Matched(
+                groups
+                    .iter()
+                    .map(|group| {
+                        let start = usize::try_from(group.rm_so).ok()?;
+                        let end = usize::try_from(group.rm_eo).ok()?;
+                        Some(crate::bytes::decode(bytes.get(start..end)?).into_owned())
+                    })
+                    .collect(),
+            )
+        }
+    }
+}
+
+#[cfg(unix)]
+mod posix {
+    /// A locale in effect on this thread while it lives (`uselocale`).
+    pub(super) struct ThreadLocale {
+        locale: libc::locale_t,
+        previous: libc::locale_t,
+    }
+
+    impl ThreadLocale {
+        /// The named character type and collation (each falling back to `C`
+        /// where the system has no such locale, as `setlocale` leaves Bash).
+        pub(super) fn new(ctype: &str, collate: &str) -> Option<Self> {
+            let named = |name: &str| std::ffi::CString::new(name).ok();
+            // SAFETY: `newlocale` takes NUL-terminated names and a base it
+            // consumes on success; `uselocale` installs a valid locale.
+            unsafe {
+                let mut locale = std::ptr::null_mut();
+                for (mask, name) in [
+                    (libc::LC_CTYPE_MASK, ctype),
+                    (libc::LC_COLLATE_MASK, collate),
+                ] {
+                    let name = named(name)?;
+                    let updated = libc::newlocale(mask, name.as_ptr(), locale);
+                    let updated = if updated.is_null() {
+                        libc::newlocale(mask, c"C".as_ptr(), locale)
+                    } else {
+                        updated
+                    };
+                    if updated.is_null() {
+                        if !locale.is_null() {
+                            libc::freelocale(locale);
+                        }
+                        return None;
+                    }
+                    locale = updated;
+                }
+                let previous = libc::uselocale(locale);
+                Some(Self { locale, previous })
+            }
+        }
+    }
+
+    impl Drop for ThreadLocale {
+        fn drop(&mut self) {
+            // SAFETY: restores the thread's previous locale, then frees ours.
+            unsafe {
+                libc::uselocale(self.previous);
+                libc::freelocale(self.locale);
+            }
+        }
+    }
+
+    /// How many groups (`(`) an extended regular expression has, as
+    /// `regcomp`'s `re_nsub` counts them (outside bracket expressions).
+    pub(super) fn group_count(pattern: &str) -> usize {
+        let mut count = 0;
+        let mut chars = pattern.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '\\' => {
+                    chars.next();
+                }
+                '(' => count += 1,
+                '[' => {
+                    let _ = chars.next_if_eq(&'^');
+                    let _ = chars.next_if_eq(&']');
+                    while let Some(c) = chars.next() {
+                        match c {
+                            ']' => break,
+                            '[' if chars.peek().is_some_and(|c| matches!(c, ':' | '.' | '=')) => {
+                                let close = chars.next().unwrap_or_default();
+                                let mut previous = '\0';
+                                for c in chars.by_ref() {
+                                    if c == ']' && previous == close {
+                                        break;
+                                    }
+                                    previous = c;
+                                }
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+                _ => (),
+            }
+        }
+        count
     }
 }
 
@@ -209,6 +404,7 @@ fn add_missing_escape_chars_to_regex(s: &str) -> Cow<'_, str> {
     updated.into()
 }
 
+#[cfg(not(unix))]
 fn escape_literal_regex_piece(s: &str) -> Cow<'_, str> {
     let mut result = String::new();
 

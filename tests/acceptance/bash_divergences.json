@@ -777,18 +777,6 @@
     "case-C-e1ba9e-,,",
     "case-C.utf8-53747261c39f65-^^",
     "case-C.utf8-c4b0c4b1-,,",
-    "ere-C-61-28ff",
-    "ere-C-61-5bff2d615d",
-    "ere-C-61-ff5b",
-    "ere-C-78fffe5a-28ff7cfffe29",
-    "ere-C-c3a9-282e29",
-    "ere-C-efbfbd-282e29",
-    "ere-C.utf8-61-28ff",
-    "ere-C.utf8-61-5bff2d615d",
-    "ere-C.utf8-61-ff5b",
-    "ere-C.utf8-78fffe5a-28ff7cfffe29",
-    "ere-C.utf8-ff-282e2a29",
-    "ere-C.utf8-ff-2e",
     "filenames-C-3f-False",
     "filenames-C-3f-True",
     "filenames-C-3f3f-False",
@@ -804,9 +792,6 @@
     "glob-predicate-C-432",
     "nocase-match-C-c389",
     "nocase-match-C.utf8-c3a9",
-    "nocase-regex-C-c358",
-    "nocase-regex-C-c389",
-    "nocase-regex-C.utf8-c358",
     "remove-C-61ffc3a9-3f-%",
     "remove-C-61ffc3a9-3f-%%",
     "remove-C-61ffc3a9-3f3f-%",
@@ -1076,21 +1061,6 @@
     "herestring-pid"
    ]
   }},
-  {"id": "REGEX", "summary": "[[ =~ ]] uses fancy-regex, not POSIX ERE: leftmost-first alternation; an invalid regex is status 1 with a log line", "cases": {
-   "byte-matchers": [
-    "ere-C-61-28",
-    "ere-C-61-5b",
-    "ere-C-6162-28617c616229",
-    "ere-C.utf8-61-28",
-    "ere-C.utf8-61-5b",
-    "ere-C.utf8-6162-28617c616229",
-    "nocase-regex-C.utf8-c3a9"
-   ],
-   "regex": [
-    "chld-invalid",
-    "invalid-retention"
-   ]
-  }},
   {"id": "STARTUP-OPTIONS", "summary": "Invocation options: +x short options, -a/-B/-E/-T/-h, - and + terminators, invalid -o/-O names, option listings", "cases": {
    "startup": [
     "after-c-2b63",
@@ -1254,14 +1224,6 @@
     "verbose-minimal-physical@C",
     "verbose-minimal-quoted@C",
     "verbose-minimal-same-unit@C"
-   ]
-  }},
-  {"id": "XTRACE", "summary": "xtrace prints a quoted [[ =~ ]] operand as written, not in Bash's backslash-quoted form", "cases": {
-   "regex": [
-    "trace-quoted-bracket-piece",
-    "trace-quoted-close-brace",
-    "trace-quoted-close-bracket",
-    "trace-quoted-repeat"
    ]
   }}
  ]

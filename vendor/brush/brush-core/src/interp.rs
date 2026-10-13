@@ -1953,15 +1953,9 @@ impl Execute for ast::CompoundCommand {
             Self::Arithmetic(a) => a.execute(shell, params).await,
             Self::ArithmeticForClause(a) => a.execute(shell, params).await,
             Self::Coprocess(c) => c.execute(shell, params).await,
-            Self::ExtendedTest(e) => {
-                let result =
-                    if extendedtests::eval_extended_test_expr(&e.expr, shell, params).await? {
-                        0
-                    } else {
-                        1
-                    };
-                Ok(ExecutionResult::new(result))
-            }
+            Self::ExtendedTest(e) => Ok(ExecutionResult::new(
+                extendedtests::eval_extended_test_expr(&e.expr, shell, params).await?,
+            )),
         }
     }
 }
