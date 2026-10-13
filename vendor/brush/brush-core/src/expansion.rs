@@ -498,7 +498,7 @@ pub(crate) async fn basic_expand_regex(
 /// * `shell` - The shell in which to perform expansion.
 /// * `params` - The execution parameters to use during expansion.
 /// * `word_str` - The word to expand, as a string.
-pub(crate) async fn basic_expand_word(
+pub async fn basic_expand_word(
     shell: &mut Shell<impl extensions::ShellExtensions>,
     params: &ExecutionParameters,
     word_str: impl AsRef<str>,
@@ -1927,6 +1927,12 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
         value: T,
     ) -> Result<(), error::Error> {
         let (variable_name, index) = match parameter {
+            brush_parser::word::Parameter::Named(name)
+                if self.shell.env().nameref_element(name).is_some() =>
+            {
+                let element = self.element_parameter(name)?;
+                return Box::pin(self.assign_to_parameter(&element, value)).await;
+            }
             brush_parser::word::Parameter::Named(name) => (name, None),
             brush_parser::word::Parameter::NamedWithIndex { name, index } => {
                 let is_set_assoc_array = if let Some((_, var)) = self.shell.env().get(name) {
@@ -2016,6 +2022,12 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
         (name, index, var)
     }
 
+    /// The element `name` refers to (`declare -n r='a[2]'`), as a parameter.
+    fn element_parameter(&self, name: &str) -> Result<brush_parser::word::Parameter, error::Error> {
+        let (array, index) = self.shell.env().nameref_element(name).unwrap_or_default();
+        Ok(brush_parser::word::Parameter::NamedWithIndex { name: array, index })
+    }
+
     /// An array's subscripts and values, in order, and whether it is associative.
     fn array_subscripts_and_values(&self, name: &str) -> Option<(Vec<(String, String)>, bool)> {
         let (_, var) = self.shell.env().get(name)?;
@@ -2096,6 +2108,14 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
         parameter: &brush_parser::word::Parameter,
         allow_unset_vars: bool,
     ) -> Result<Expansion, error::Error> {
+        // A reference to an array element expands that element.
+        if let brush_parser::word::Parameter::Named(name) = parameter
+            && self.shell.env().nameref_element(name).is_some()
+        {
+            let element = self.element_parameter(name)?;
+            return Box::pin(self.expand_parameter_without_indirect(&element, allow_unset_vars))
+                .await;
+        }
         match parameter {
             brush_parser::word::Parameter::Positional(p) => {
                 if *p == 0 {

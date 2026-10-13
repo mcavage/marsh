@@ -270,6 +270,23 @@ impl ShellEnvironment {
         resolved
     }
 
+    /// Where `name`'s name references finally lead, when that is an array
+    /// element (`declare -n r='a[2]'`): the array's name and the subscript as
+    /// written, which the caller expands.
+    pub fn nameref_element(&self, name: &str) -> Option<(String, String)> {
+        let resolved = self.resolve_nameref(name);
+        let (_, var) = self.get_raw(resolved.as_ref())?;
+        if !var.is_treated_as_nameref() {
+            return None;
+        }
+        let ShellValue::String(target) = var.value() else {
+            return None;
+        };
+        let (array, rest) = target.split_once('[')?;
+        let index = rest.strip_suffix(']')?;
+        valid_variable_name(array).then(|| (array.to_owned(), index.to_owned()))
+    }
+
     fn nameref_target(var: &ShellVariable) -> Option<&str> {
         if !var.is_treated_as_nameref() {
             return None;
@@ -550,6 +567,20 @@ impl ShellEnvironment {
         scope_if_creating: EnvironmentScope,
     ) -> Result<(), error::Error> {
         let mut name = name.into();
+        // A reference to an element assigns the element (its subscript as
+        // written: callers that can expand it do so first).
+        if let variables::ShellValueLiteral::Scalar(value) = &value
+            && let Some((array, index)) = self.nameref_element(&name)
+        {
+            return self.update_or_add_array_element(
+                array,
+                index,
+                value.clone(),
+                |_| Ok(()),
+                EnvironmentLookup::Anywhere,
+                scope_if_creating,
+            );
+        }
         let mut lookup_policy = lookup_policy;
         if let Some(target) = self
             .get_raw_using_policy(&name, lookup_policy)

@@ -172,6 +172,24 @@ impl ExportCommand {
         value: variables::ShellValueLiteral,
         append: bool,
     ) -> Result<ExecutionResult, brush_core::Error> {
+        // Like Bash, a reference to an array element assigns the element, which
+        // cannot be exported.
+        if let Some((array, index)) = context.shell.env().nameref_element(name) {
+            context.shell.env_mut().update_or_add(
+                name,
+                value,
+                |_| Ok(()),
+                EnvironmentLookup::Anywhere,
+                EnvironmentScope::Global,
+            )?;
+            writeln!(
+                context.stderr(),
+                "{}{}: `{array}[{index}]': not a valid identifier",
+                context.shell.diagnostic_prefix(),
+                context.command_name
+            )?;
+            return Ok(ExecutionResult::success());
+        }
         if context
             .shell
             .env()

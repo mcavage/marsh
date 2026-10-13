@@ -157,12 +157,14 @@ impl builtins::Command for ReadCommand {
         // Assign input to variables based on options.
         let readonly = assign_input_to_variables(
             context.shell,
+            &context.params,
             input_line.as_deref(),
             &ifs,
             skip_ifs_splitting,
             self.array_variable.as_deref(),
             &self.variable_names,
-        )?;
+        )
+        .await?;
         if let Some(name) = readonly {
             writeln!(
                 context.stderr(),
@@ -182,8 +184,9 @@ impl builtins::Command for ReadCommand {
 /// - Array mode (`-a`): Split input by IFS and assign to array elements
 /// - Named variables: Split input by IFS and assign to each variable, with remainder to last
 /// - Default (`REPLY`): Assign entire input line to the `REPLY` variable
-fn assign_input_to_variables(
+async fn assign_input_to_variables(
     shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
+    params: &brush_core::ExecutionParameters,
     input_line: Option<&[(char, bool)]>,
     ifs: &str,
     skip_ifs_splitting: bool,
@@ -194,25 +197,33 @@ fn assign_input_to_variables(
         let literal_fields = build_array_fields(input_line, ifs, skip_ifs_splitting);
         if !assign(
             shell,
+            params,
             array_variable,
             variables::ShellValueLiteral::Array(variables::ArrayLiteral(literal_fields)),
-        )? {
+        )
+        .await?
+        {
             return Ok(Some(array_variable.to_string()));
         }
     } else if !variable_names.is_empty() {
         return assign_to_named_variables(
             shell,
+            params,
             input_line,
             ifs,
             skip_ifs_splitting,
             variable_names,
-        );
+        )
+        .await;
     } else {
         if !assign(
             shell,
+            params,
             "REPLY",
             variables::ShellValueLiteral::Scalar(text(input_line.unwrap_or_default())),
-        )? {
+        )
+        .await?
+        {
             return Ok(Some("REPLY".to_string()));
         }
     }
@@ -224,8 +235,9 @@ fn assign_input_to_variables(
 /// Fields are assigned one per variable, with any remaining fields joined by space
 /// and assigned to the last variable. If there are more variables than fields,
 /// the extra variables are set to empty strings.
-fn assign_to_named_variables(
+async fn assign_to_named_variables(
     shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
+    params: &brush_core::ExecutionParameters,
     input_line: Option<&[(char, bool)]>,
     ifs: &str,
     skip_ifs_splitting: bool,
@@ -246,7 +258,14 @@ fn assign_to_named_variables(
             fields.pop_front().unwrap_or_default()
         };
 
-        if !assign(shell, name, variables::ShellValueLiteral::Scalar(value))? {
+        if !assign(
+            shell,
+            params,
+            name,
+            variables::ShellValueLiteral::Scalar(value),
+        )
+        .await?
+        {
             return Ok(Some(name.to_string()));
         }
 
@@ -258,11 +277,19 @@ fn assign_to_named_variables(
 }
 
 /// Assigns `value` to `name`, unless it is readonly.
-fn assign(
+async fn assign(
     shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
+    params: &brush_core::ExecutionParameters,
     name: &str,
     value: variables::ShellValueLiteral,
 ) -> Result<bool, brush_core::Error> {
+    // A reference to an array element assigns it, its subscript expanded.
+    if let variables::ShellValueLiteral::Scalar(text) = &value
+        && shell.env().nameref_element(name).is_some()
+    {
+        brush_core::expansion::assign_to_named_parameter(shell, params, name, text.clone()).await?;
+        return Ok(true);
+    }
     if shell
         .env()
         .get(name)

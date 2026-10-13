@@ -66,6 +66,23 @@ impl builtins::Command for UnsetCommand {
                     let result = match parameter {
                         brush_parser::word::Parameter::Positional(_) => continue,
                         brush_parser::word::Parameter::Special(_) => continue,
+                        // A reference to an array element unsets the element.
+                        brush_parser::word::Parameter::Named(name)
+                            if context.shell.env().nameref_element(name.as_str()).is_some() =>
+                        {
+                            let (array, index) = context
+                                .shell
+                                .env()
+                                .nameref_element(name.as_str())
+                                .unwrap_or_default();
+                            let index = brush_core::expansion::basic_expand_word(
+                                context.shell,
+                                &context.params,
+                                index,
+                            )
+                            .await?;
+                            unset_array_index(context.shell, array.as_str(), index.as_str())?
+                        }
                         // Like Bash, a readonly variable is reported and the
                         // other names are still unset.
                         brush_parser::word::Parameter::Named(name)

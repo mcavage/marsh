@@ -1,0 +1,359 @@
+diff --git a/brush-builtins/src/export.rs b/brush-builtins/src/export.rs
+index 344cad8..b94bd7b 100644
+--- a/brush-builtins/src/export.rs
++++ b/brush-builtins/src/export.rs
+@@ -172,6 +172,24 @@ impl ExportCommand {
+         value: variables::ShellValueLiteral,
+         append: bool,
+     ) -> Result<ExecutionResult, brush_core::Error> {
++        // Like Bash, a reference to an array element assigns the element, which
++        // cannot be exported.
++        if let Some((array, index)) = context.shell.env().nameref_element(name) {
++            context.shell.env_mut().update_or_add(
++                name,
++                value,
++                |_| Ok(()),
++                EnvironmentLookup::Anywhere,
++                EnvironmentScope::Global,
++            )?;
++            writeln!(
++                context.stderr(),
++                "{}{}: `{array}[{index}]': not a valid identifier",
++                context.shell.diagnostic_prefix(),
++                context.command_name
++            )?;
++            return Ok(ExecutionResult::success());
++        }
+         if context
+             .shell
+             .env()
+diff --git a/brush-builtins/src/getopts.rs b/brush-builtins/src/getopts.rs
+index 7112bb7..3aa302b 100644
+--- a/brush-builtins/src/getopts.rs
++++ b/brush-builtins/src/getopts.rs
+@@ -151,7 +151,7 @@ impl builtins::Command for GetOptsCommand {
+ 
+         let result = parse_next_option(&mut context, &spec, args_to_parse, next_index)?;
+ 
+-        update_variables(&mut context, &self.variable_name, result)
++        update_variables(&mut context, &self.variable_name, result).await
+     }
+ }
+ 
+@@ -360,19 +360,30 @@ fn report_unknown_option<SE: brush_core::ShellExtensions>(
+ 
+ /// Writes the parsing result back into shell variables: the target variable,
+ /// OPTARG, OPTIND, and the internal `__GETOPTS_LAST_OPTIND` tracker.
+-fn update_variables<SE: brush_core::ShellExtensions>(
++async fn update_variables<SE: brush_core::ShellExtensions>(
+     context: &mut brush_core::ExecutionContext<'_, SE>,
+     variable_name: &str,
+     result: GetOptsResult,
+ ) -> Result<ExecutionResult, brush_core::Error> {
+-    // Update variable value.
+-    context.shell.env_mut().update_or_add(
+-        variable_name,
+-        variables::ShellValueLiteral::Scalar(result.variable_value),
+-        |_| Ok(()),
+-        brush_core::env::EnvironmentLookup::Anywhere,
+-        brush_core::env::EnvironmentScope::Global,
+-    )?;
++    // Update variable value (through a reference to an array element, with its
++    // subscript expanded).
++    if context.shell.env().nameref_element(variable_name).is_some() {
++        brush_core::expansion::assign_to_named_parameter(
++            context.shell,
++            &context.params,
++            variable_name,
++            result.variable_value,
++        )
++        .await?;
++    } else {
++        context.shell.env_mut().update_or_add(
++            variable_name,
++            variables::ShellValueLiteral::Scalar(result.variable_value),
++            |_| Ok(()),
++            brush_core::env::EnvironmentLookup::Anywhere,
++            brush_core::env::EnvironmentScope::Global,
++        )?;
++    }
+ 
+     // Update OPTARG
+     if let Some(optarg) = result.optarg {
+diff --git a/brush-builtins/src/read.rs b/brush-builtins/src/read.rs
+index 4ede604..2a8cef5 100644
+--- a/brush-builtins/src/read.rs
++++ b/brush-builtins/src/read.rs
+@@ -157,12 +157,14 @@ impl builtins::Command for ReadCommand {
+         // Assign input to variables based on options.
+         let readonly = assign_input_to_variables(
+             context.shell,
++            &context.params,
+             input_line.as_deref(),
+             &ifs,
+             skip_ifs_splitting,
+             self.array_variable.as_deref(),
+             &self.variable_names,
+-        )?;
++        )
++        .await?;
+         if let Some(name) = readonly {
+             writeln!(
+                 context.stderr(),
+@@ -182,8 +184,9 @@ impl builtins::Command for ReadCommand {
+ /// - Array mode (`-a`): Split input by IFS and assign to array elements
+ /// - Named variables: Split input by IFS and assign to each variable, with remainder to last
+ /// - Default (`REPLY`): Assign entire input line to the `REPLY` variable
+-fn assign_input_to_variables(
++async fn assign_input_to_variables(
+     shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
++    params: &brush_core::ExecutionParameters,
+     input_line: Option<&[(char, bool)]>,
+     ifs: &str,
+     skip_ifs_splitting: bool,
+@@ -194,25 +197,33 @@ fn assign_input_to_variables(
+         let literal_fields = build_array_fields(input_line, ifs, skip_ifs_splitting);
+         if !assign(
+             shell,
++            params,
+             array_variable,
+             variables::ShellValueLiteral::Array(variables::ArrayLiteral(literal_fields)),
+-        )? {
++        )
++        .await?
++        {
+             return Ok(Some(array_variable.to_string()));
+         }
+     } else if !variable_names.is_empty() {
+         return assign_to_named_variables(
+             shell,
++            params,
+             input_line,
+             ifs,
+             skip_ifs_splitting,
+             variable_names,
+-        );
++        )
++        .await;
+     } else {
+         if !assign(
+             shell,
++            params,
+             "REPLY",
+             variables::ShellValueLiteral::Scalar(text(input_line.unwrap_or_default())),
+-        )? {
++        )
++        .await?
++        {
+             return Ok(Some("REPLY".to_string()));
+         }
+     }
+@@ -224,8 +235,9 @@ fn assign_input_to_variables(
+ /// Fields are assigned one per variable, with any remaining fields joined by space
+ /// and assigned to the last variable. If there are more variables than fields,
+ /// the extra variables are set to empty strings.
+-fn assign_to_named_variables(
++async fn assign_to_named_variables(
+     shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
++    params: &brush_core::ExecutionParameters,
+     input_line: Option<&[(char, bool)]>,
+     ifs: &str,
+     skip_ifs_splitting: bool,
+@@ -246,7 +258,14 @@ fn assign_to_named_variables(
+             fields.pop_front().unwrap_or_default()
+         };
+ 
+-        if !assign(shell, name, variables::ShellValueLiteral::Scalar(value))? {
++        if !assign(
++            shell,
++            params,
++            name,
++            variables::ShellValueLiteral::Scalar(value),
++        )
++        .await?
++        {
+             return Ok(Some(name.to_string()));
+         }
+ 
+@@ -258,11 +277,19 @@ fn assign_to_named_variables(
+ }
+ 
+ /// Assigns `value` to `name`, unless it is readonly.
+-fn assign(
++async fn assign(
+     shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
++    params: &brush_core::ExecutionParameters,
+     name: &str,
+     value: variables::ShellValueLiteral,
+ ) -> Result<bool, brush_core::Error> {
++    // A reference to an array element assigns it, its subscript expanded.
++    if let variables::ShellValueLiteral::Scalar(text) = &value
++        && shell.env().nameref_element(name).is_some()
++    {
++        brush_core::expansion::assign_to_named_parameter(shell, params, name, text.clone()).await?;
++        return Ok(true);
++    }
+     if shell
+         .env()
+         .get(name)
+diff --git a/brush-builtins/src/unset.rs b/brush-builtins/src/unset.rs
+index f8007c4..a60e476 100644
+--- a/brush-builtins/src/unset.rs
++++ b/brush-builtins/src/unset.rs
+@@ -66,6 +66,23 @@ impl builtins::Command for UnsetCommand {
+                     let result = match parameter {
+                         brush_parser::word::Parameter::Positional(_) => continue,
+                         brush_parser::word::Parameter::Special(_) => continue,
++                        // A reference to an array element unsets the element.
++                        brush_parser::word::Parameter::Named(name)
++                            if context.shell.env().nameref_element(name.as_str()).is_some() =>
++                        {
++                            let (array, index) = context
++                                .shell
++                                .env()
++                                .nameref_element(name.as_str())
++                                .unwrap_or_default();
++                            let index = brush_core::expansion::basic_expand_word(
++                                context.shell,
++                                &context.params,
++                                index,
++                            )
++                            .await?;
++                            unset_array_index(context.shell, array.as_str(), index.as_str())?
++                        }
+                         // Like Bash, a readonly variable is reported and the
+                         // other names are still unset.
+                         brush_parser::word::Parameter::Named(name)
+diff --git a/brush-core/src/env.rs b/brush-core/src/env.rs
+index c0b95c7..f71d5e8 100644
+--- a/brush-core/src/env.rs
++++ b/brush-core/src/env.rs
+@@ -270,6 +270,23 @@ impl ShellEnvironment {
+         resolved
+     }
+ 
++    /// Where `name`'s name references finally lead, when that is an array
++    /// element (`declare -n r='a[2]'`): the array's name and the subscript as
++    /// written, which the caller expands.
++    pub fn nameref_element(&self, name: &str) -> Option<(String, String)> {
++        let resolved = self.resolve_nameref(name);
++        let (_, var) = self.get_raw(resolved.as_ref())?;
++        if !var.is_treated_as_nameref() {
++            return None;
++        }
++        let ShellValue::String(target) = var.value() else {
++            return None;
++        };
++        let (array, rest) = target.split_once('[')?;
++        let index = rest.strip_suffix(']')?;
++        valid_variable_name(array).then(|| (array.to_owned(), index.to_owned()))
++    }
++
+     fn nameref_target(var: &ShellVariable) -> Option<&str> {
+         if !var.is_treated_as_nameref() {
+             return None;
+@@ -550,6 +567,20 @@ impl ShellEnvironment {
+         scope_if_creating: EnvironmentScope,
+     ) -> Result<(), error::Error> {
+         let mut name = name.into();
++        // A reference to an element assigns the element (its subscript as
++        // written: callers that can expand it do so first).
++        if let variables::ShellValueLiteral::Scalar(value) = &value
++            && let Some((array, index)) = self.nameref_element(&name)
++        {
++            return self.update_or_add_array_element(
++                array,
++                index,
++                value.clone(),
++                |_| Ok(()),
++                EnvironmentLookup::Anywhere,
++                scope_if_creating,
++            );
++        }
+         let mut lookup_policy = lookup_policy;
+         if let Some(target) = self
+             .get_raw_using_policy(&name, lookup_policy)
+diff --git a/brush-core/src/expansion.rs b/brush-core/src/expansion.rs
+index 79beffd..0e3a47c 100644
+--- a/brush-core/src/expansion.rs
++++ b/brush-core/src/expansion.rs
+@@ -498,7 +498,7 @@ pub(crate) async fn basic_expand_regex(
+ /// * `shell` - The shell in which to perform expansion.
+ /// * `params` - The execution parameters to use during expansion.
+ /// * `word_str` - The word to expand, as a string.
+-pub(crate) async fn basic_expand_word(
++pub async fn basic_expand_word(
+     shell: &mut Shell<impl extensions::ShellExtensions>,
+     params: &ExecutionParameters,
+     word_str: impl AsRef<str>,
+@@ -1927,6 +1927,12 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+         value: T,
+     ) -> Result<(), error::Error> {
+         let (variable_name, index) = match parameter {
++            brush_parser::word::Parameter::Named(name)
++                if self.shell.env().nameref_element(name).is_some() =>
++            {
++                let element = self.element_parameter(name)?;
++                return Box::pin(self.assign_to_parameter(&element, value)).await;
++            }
+             brush_parser::word::Parameter::Named(name) => (name, None),
+             brush_parser::word::Parameter::NamedWithIndex { name, index } => {
+                 let is_set_assoc_array = if let Some((_, var)) = self.shell.env().get(name) {
+@@ -2016,6 +2022,12 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+         (name, index, var)
+     }
+ 
++    /// The element `name` refers to (`declare -n r='a[2]'`), as a parameter.
++    fn element_parameter(&self, name: &str) -> Result<brush_parser::word::Parameter, error::Error> {
++        let (array, index) = self.shell.env().nameref_element(name).unwrap_or_default();
++        Ok(brush_parser::word::Parameter::NamedWithIndex { name: array, index })
++    }
++
+     /// An array's subscripts and values, in order, and whether it is associative.
+     fn array_subscripts_and_values(&self, name: &str) -> Option<(Vec<(String, String)>, bool)> {
+         let (_, var) = self.shell.env().get(name)?;
+@@ -2096,6 +2108,14 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+         parameter: &brush_parser::word::Parameter,
+         allow_unset_vars: bool,
+     ) -> Result<Expansion, error::Error> {
++        // A reference to an array element expands that element.
++        if let brush_parser::word::Parameter::Named(name) = parameter
++            && self.shell.env().nameref_element(name).is_some()
++        {
++            let element = self.element_parameter(name)?;
++            return Box::pin(self.expand_parameter_without_indirect(&element, allow_unset_vars))
++                .await;
++        }
+         match parameter {
+             brush_parser::word::Parameter::Positional(p) => {
+                 if *p == 0 {
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index bddc006..fb9b754 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -3018,12 +3018,22 @@ async fn apply_assignment(
+     // Figure out if we are trying to assign to a variable or assign to an element of an existing
+     // array.
+     let mut array_index;
+-    let variable_name = match &assignment.name {
+-        ast::AssignmentName::VariableName(name) => {
++    let element = match &assignment.name {
++        ast::AssignmentName::VariableName(name) => shell.env().nameref_element(name),
++        ast::AssignmentName::ArrayElementName(..) => None,
++    };
++    let variable_name = match (&assignment.name, &element) {
++        // A reference to an array element assigns the element.
++        (_, Some((array, index))) => {
++            let index = ast::Word::from(index.clone());
++            array_index = Some(expansion::basic_expand_word(shell, params, &index).await?);
++            array
++        }
++        (ast::AssignmentName::VariableName(name), None) => {
+             array_index = None;
+             name
+         }
+-        ast::AssignmentName::ArrayElementName(name, index) => {
++        (ast::AssignmentName::ArrayElementName(name, index), None) => {
+             let expanded = expansion::basic_expand_word(shell, params, index).await?;
+             array_index = Some(expanded);
+             name
