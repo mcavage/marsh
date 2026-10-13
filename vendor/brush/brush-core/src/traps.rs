@@ -7,6 +7,13 @@ pub async fn await_term() -> Result<(), crate::error::Error> {
     crate::sys::signal::await_term().await
 }
 
+/// As [`await_term`], for a shell waiting for input while no command runs:
+/// an arrival whose trap a command boundary already ran does not count.
+#[cfg(unix)]
+pub async fn await_undelivered_term() -> Result<(), crate::error::Error> {
+    crate::sys::signal::await_undelivered_term().await
+}
+
 /// Wait for SIGINT without executing shell code in the OS signal handler.
 /// Embedding builtins use this to interrupt an asynchronous wait.
 #[cfg(unix)]

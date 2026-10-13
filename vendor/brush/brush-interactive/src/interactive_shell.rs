@@ -215,7 +215,7 @@ impl<'a, IB: InputBackend, SE: brush_core::ShellExtensions> InteractiveShell<'a,
             if term_trapped {
                 tokio::select! {
                     biased;
-                    result = brush_core::traps::await_term() => {
+                    result = brush_core::traps::await_undelivered_term() => {
                         result?;
                         let mut shell = self.shell.lock().await;
                         shell.set_last_exit_status(143);

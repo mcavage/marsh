@@ -79,6 +79,25 @@ pub(crate) async fn await_term() -> Result<(), error::Error> {
     Ok(())
 }
 
+/// As [`await_term`], for the one wait for TERM that runs while no command
+/// does (the idle input read). The runtime may dispatch an arrival late,
+/// after a command boundary already ran its trap from the handler's record;
+/// that dispatch must not run the trap again. The handler records every
+/// arrival before the runtime's dispatch, so only a recorded one is new.
+pub(crate) async fn await_undelivered_term() -> Result<(), error::Error> {
+    crate::signals::listen(libc::SIGTERM);
+    let mut listener = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    if crate::signals::take(libc::SIGTERM) {
+        return Ok(());
+    }
+    loop {
+        let _ = listener.recv().await;
+        if crate::signals::take(libc::SIGTERM) || !crate::signals::is_recorded(libc::SIGTERM) {
+            return Ok(());
+        }
+    }
+}
+
 /// Blocks every signal in the calling thread until dropped, around a `fork`.
 ///
 /// A forked child starts with the shell's handlers, so a signal sent to it

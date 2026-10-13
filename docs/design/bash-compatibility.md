@@ -1,8 +1,8 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 73 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 58 fix Bash
+`vendor/brush/UPSTREAM_REVISION`) plus the 74 patches in
+[`docs/upstream/brush/`](../upstream/brush/README.md). 59 fix Bash
 compatibility: job control, job lines and `disown`, function substitutions, NUL bytes in input, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
 formats, startup files, option order, field splitting, `read`, `[[ ]]`
