@@ -15,7 +15,9 @@
 //! would miss it and run another command before the shell died.
 
 #[cfg(unix)]
-pub(crate) use imp::{discard, forget_after_fork, is_recorded, listen, take, take_pending};
+pub(crate) use imp::{
+    arrived, discard, forget_after_fork, is_recorded, listen, take, take_pending,
+};
 
 #[cfg(not(unix))]
 pub(crate) fn take_pending() -> Vec<i32> {
@@ -112,6 +114,16 @@ mod imp {
             .filter(|entry| entry.armed && entry.signal == signal)
             .fold(false, |arrived, entry| {
                 entry.arrived.swap(false, Ordering::AcqRel) || arrived
+            })
+    }
+
+    /// Whether `signal` arrived since it was last taken, leaving the record.
+    pub(crate) fn arrived(signal: i32) -> bool {
+        LISTENING.load(Ordering::Acquire)
+            && RECORDED.lock().is_ok_and(|recorded| {
+                recorded.iter().any(|entry| {
+                    entry.armed && entry.signal == signal && entry.arrived.load(Ordering::Acquire)
+                })
             })
     }
 

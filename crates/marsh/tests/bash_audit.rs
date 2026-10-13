@@ -72,6 +72,23 @@ fn oracle_and_candidate_start_without_credentials() {
     }
 }
 
+/// Writes an executable file with `cp`, so this process never holds a
+/// descriptor open for writing on it: a child another test thread forks
+/// meanwhile would inherit that descriptor until its exec, and running the
+/// file then fails with ETXTBSY.
+#[cfg(unix)]
+fn write_executable(path: impl AsRef<std::path::Path>, contents: impl AsRef<[u8]>) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let path = path.as_ref();
+    let mut staged = path.as_os_str().to_owned();
+    staged.push(".staged");
+    std::fs::write(&staged, contents).unwrap();
+    let copied = Command::new("cp").arg(&staged).arg(path).status().unwrap();
+    assert!(copied.success(), "cp {}: {copied:?}", path.display());
+    std::fs::remove_file(&staged).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
 fn differential(script: &str, status: i32, stdout: &[u8]) {
     differential_with_input_mode(script, status, stdout, false);
 }
@@ -446,15 +463,12 @@ fn script_operands_search_path_and_keep_original_zero_without_execute_permission
 
 #[test]
 fn executable_without_shebang_uses_brush_and_preserves_state_arguments_and_fds() {
-    use std::os::unix::fs::PermissionsExt as _;
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("plain");
-    std::fs::write(
+    write_executable(
         &path,
         "printf '%s:%s:%s\\n' \"$0\" \"$1\" \"$hidden\"; helper >&3; hidden=child; exit 17\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    );
     let script = "export hidden=retained; helper(){ printf 'helper\\n'; }; export -f helper; exec 3>out; ./plain 'two words'; r=$?; exec 3>&-; cat out; printf '%s:%s\\n' \"$r\" \"$hidden\"";
     let mut outputs = Vec::new();
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
@@ -639,13 +653,14 @@ fn native_compound_children_keep_heredocs_and_close_inherited_descriptors() {
 
 #[test]
 fn no_shebang_script_starts_fresh_and_reads_bash_env_once() {
-    use std::os::unix::fs::PermissionsExt as _;
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
         let directory = tempfile::tempdir().unwrap();
         let plain = directory.path().join("plain");
         let startup = directory.path().join("startup");
-        std::fs::write(&plain, "printf '%s:' \"${hidden-unset}\"; type helper >/dev/null 2>&1; printf '%s\\n' \"$?\"\n").unwrap();
-        std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_executable(
+            &plain,
+            "printf '%s:' \"${hidden-unset}\"; type helper >/dev/null 2>&1; printf '%s\\n' \"$?\"\n",
+        );
         std::fs::write(&startup, "printf e >>events\n").unwrap();
         let output = shell(program)
             .args([
@@ -756,16 +771,13 @@ fn kill_handles_multiple_pids_and_explicit_negative_process_groups() {
 
 #[test]
 fn exec_without_shebang_keeps_pid_and_uses_brush_in_a_fresh_environment() {
-    use std::os::unix::fs::PermissionsExt as _;
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
         let directory = tempfile::tempdir().unwrap();
         let plain = directory.path().join("plain");
-        std::fs::write(
+        write_executable(
             &plain,
             "test \"$BASHPID\" = \"$1\" || exit 91; printf '%s:%s' \"${hidden-unset}\" \"$2\"\n",
-        )
-        .unwrap();
-        std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let output = shell(program)
             .args([
                 "--noprofile",
@@ -830,20 +842,13 @@ fn exec_without_shebang_keeps_pid_and_uses_brush_in_a_fresh_environment() {
 
 #[test]
 fn failed_exec_restores_descriptors_and_respects_execfail() {
-    use std::os::unix::fs::PermissionsExt as _;
     for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
         let directory = tempfile::tempdir().unwrap();
         std::fs::write(directory.path().join("denied"), "printf forbidden\n").unwrap();
-        std::fs::write(
+        write_executable(
             directory.path().join("nointerp"),
             format!("#!{}/absent-interpreter\n", directory.path().display()),
-        )
-        .unwrap();
-        std::fs::set_permissions(
-            directory.path().join("nointerp"),
-            std::fs::Permissions::from_mode(0o755),
-        )
-        .unwrap();
+        );
         for (script, status, stdout) in [
             (
                 "exec ./denied 13>&1 1>out 2>/dev/null; printf forbidden",
@@ -893,13 +898,11 @@ fn failed_exec_restores_descriptors_and_respects_execfail() {
     // second exec then fails; the restored runtime must still print on stdout.
     let directory = tempfile::tempdir().unwrap();
     let runner = directory.path().join("runner");
-    std::fs::copy(env!("CARGO_BIN_EXE_marsh-local"), &runner).unwrap();
-    std::fs::write(directory.path().join("plain"), "printf forbidden\n").unwrap();
-    std::fs::set_permissions(
-        directory.path().join("plain"),
-        std::fs::Permissions::from_mode(0o755),
-    )
-    .unwrap();
+    write_executable(
+        &runner,
+        std::fs::read(env!("CARGO_BIN_EXE_marsh-local")).unwrap(),
+    );
+    write_executable(directory.path().join("plain"), "printf forbidden\n");
     let output = common::command(&runner)
         .args(["--no-config", "--noprofile", "--norc", "-c", "shopt -s execfail; rm \"$0\"; exec ./plain 13>&1 1>out 2>/dev/null; r=$?; printf 'status:%s:restored' \"$r\"; cat out"])
         .arg(&runner)
@@ -1749,9 +1752,7 @@ fn nul_bytes_in_shell_input_follow_bash() {
     ];
     for (name, bytes) in files {
         let path = directory.path().join(name);
-        std::fs::write(&path, bytes).unwrap();
-        std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
-            .unwrap();
+        write_executable(&path, bytes);
     }
     let many: Vec<u8> = b"printf X\n"
         .iter()
@@ -1792,7 +1793,10 @@ fn nul_bytes_in_shell_input_follow_bash() {
                 .stderr(Stdio::piped());
             let mut child = common::spawn_group(&mut command);
             let mut stdin = child.stdin.take().unwrap();
-            stdin.write_all(b"printf IN\0PUT\n").unwrap();
+            // A shell running a script may exit before it reads its input.
+            if let Err(error) = stdin.write_all(b"printf IN\0PUT\n") {
+                assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe, "{error}");
+            }
             drop(stdin);
             common::wait_for_exit(
                 child,

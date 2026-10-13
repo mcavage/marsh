@@ -801,6 +801,13 @@ pub(crate) fn execute_external_command(
             .join(" ")
     );
 
+    // An INT sent to the group as the child starts, before the shell awaits
+    // it, must not take the shell's default action: record it, and the wait
+    // treats it as arriving during the wait (Bash's handler is in place for a
+    // foreground child too).
+    #[cfg(unix)]
+    crate::signals::listen(libc::SIGINT);
+
     // Signals stay blocked from the fork until the child has default
     // dispositions, so one sent before it execs is not lost to our handlers.
     #[cfg(unix)]

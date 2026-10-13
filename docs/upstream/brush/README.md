@@ -535,6 +535,14 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   `MARSH_TEST_CURRENT_THREAD_RUNTIME`, which makes `0071a`'s late dispatch
   happen every time: `a_term_trap_delivered_at_a_command_boundary_runs_once`
   (smoke) printed `TAT` on every run without `0071a`.
+- `0071c` installs the shell's `INT` recording before it starts an external
+  command, and a wait counts an `INT` recorded since then as arriving during
+  the wait. An `INT` sent to the group after the fork but before the wait
+  began (the first command a shell runs had no handler yet) killed the shell
+  by the default action instead of letting it continue when the child did not
+  die of it. `noninteractive_group_sigint_ends_the_command_list` (bash_audit)
+  covered it intermittently; with a 300 ms pause injected after the spawn it
+  fails every time without this patch and passes with it.
 - `0072` treats NUL bytes in shell input as Bash does. The script, standard
   input and interactive line readers drop them. A script run by the shell is
   refused as binary (Bash's `check_binary_file`: a NUL on the first line, or
