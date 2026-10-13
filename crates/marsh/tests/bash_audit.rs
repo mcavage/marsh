@@ -2239,3 +2239,27 @@ unset GLOBIGNORE; echo *"#;
     assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
     assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
 }
+
+/// Diagnostics Bash words in a fixed form: command not found, `${v:?}`,
+/// `local` outside a function, invalid identifiers, `declare +a`, `export -f`,
+/// `read -u` of a closed descriptor, and `help` of unknown topics.
+#[test]
+fn common_diagnostics_are_worded_as_in_bash() {
+    let script = r#"nosuchcmd_x; echo $?; declare -n ref=missing; ( echo "${ref:?variable is required}" ); ( : "${u?}" ); ( : "${u:?}" ); ( : "${1:?}" )
+local x; declare -a da=(1); declare +a da; echo $?; declare "bad-name=1"; readonly "b-x=1"; export -f nosuchfn; export "e[0]=1"; echo $?
+help echo nosuch >/dev/null; echo $?; help nosuch; echo $?; read -t 0 -u 1000 x; echo "R:$?""#;
+    let bash = run_named("bash", script, false, Some("audit"));
+    let brush = run_named(
+        env!("CARGO_BIN_EXE_marsh-local"),
+        script,
+        false,
+        Some("audit"),
+    );
+    assert!(
+        bash.stderr.starts_with(b"audit: line 1: nosuchcmd_x: command not found\naudit: line 1: ref: variable is required\n"),
+        "Bash: {bash:?}"
+    );
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
+    assert_eq!(brush.status.code(), bash.status.code());
+}

@@ -1433,14 +1433,30 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
                     .await?;
                 let error_message = error_message.as_ref().map_or("", |v| v.as_str());
 
-                match (test_type, expanded_parameter.classify()) {
+                match (&test_type, expanded_parameter.classify()) {
                     (_, ParameterState::NonZeroLength)
                     | (
                         brush_parser::word::ParameterTestType::Unset,
                         ParameterState::DefinedEmptyString,
                     ) => Ok(expanded_parameter),
                     _ => {
-                        let result = self.basic_expand_to_str(error_message).await?;
+                        // Like Bash: `NAME: MESSAGE`, with a default message.
+                        let mut result = self.basic_expand_to_str(error_message).await?;
+                        if result.is_empty() {
+                            result = String::from(match test_type {
+                                brush_parser::word::ParameterTestType::Unset => "parameter not set",
+                                brush_parser::word::ParameterTestType::UnsetOrNull => {
+                                    "parameter null or not set"
+                                }
+                            });
+                        }
+                        let shown = parameter.to_string();
+                        let shown = shown
+                            .strip_prefix("${")
+                            .and_then(|name| name.strip_suffix('}'))
+                            .or_else(|| shown.strip_prefix('$'))
+                            .unwrap_or(&shown);
+                        let result = std::format!("{shown}: {result}");
                         let err: error::Error =
                             error::ErrorKind::CheckedExpansionError(result).into();
 

@@ -134,7 +134,11 @@ impl builtins::Command for DeclareCommand {
         };
 
         if matches!(verb, DeclareVerb::Local) && !context.shell.in_function() {
-            writeln!(context.stderr(), "can only be used in a function")?;
+            writeln!(
+                context.stderr(),
+                "{}local: can only be used in a function",
+                context.shell.diagnostic_prefix()
+            )?;
             return Ok(ExecutionResult::general_error());
         }
 
@@ -296,7 +300,26 @@ impl DeclareCommand {
         if !env::valid_variable_name(name.as_str()) {
             writeln!(
                 context.stderr(),
-                "{}: {name}: not a valid variable name",
+                "{}{}: `{declaration}': not a valid identifier",
+                context.shell.diagnostic_prefix(),
+                context.command_name
+            )?;
+            return Ok(false);
+        }
+
+        // Like Bash, `+a` and `+A` cannot turn an array back into a scalar.
+        if (self.make_indexed_array.to_bool() == Some(false)
+            || self.make_associative_array.to_bool() == Some(false))
+            && context
+                .shell
+                .env()
+                .get(&name)
+                .is_some_and(|(_, variable)| variable.value().is_array())
+        {
+            writeln!(
+                context.stderr(),
+                "{}{}: {name}: cannot destroy array variables in this way",
+                context.shell.diagnostic_prefix(),
                 context.command_name
             )?;
             return Ok(false);

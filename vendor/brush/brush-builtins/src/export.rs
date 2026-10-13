@@ -3,7 +3,7 @@ use itertools::Itertools;
 use std::io::Write;
 
 use brush_core::{
-    ExecutionExitCode, ExecutionResult, builtins,
+    ExecutionResult, builtins,
     env::{EnvironmentLookup, EnvironmentScope},
     parser::ast,
     variables,
@@ -78,7 +78,11 @@ impl ExportCommand {
                     None => (name, false),
                 };
                 if !brush_core::env::valid_variable_name(name) {
-                    return self.invalid_identifier(context, s);
+                    // Bash names a subscripted reference without its value.
+                    let element = name.split_once('[').is_some_and(|(array, rest)| {
+                        brush_core::env::valid_variable_name(array) && rest.ends_with(']')
+                    });
+                    return self.invalid_identifier(context, if element { name } else { s });
                 }
                 self.assign(
                     context,
@@ -99,8 +103,13 @@ impl ExportCommand {
                             func.export();
                         }
                     } else {
-                        writeln!(context.stderr(), "{s}: not a function")?;
-                        return Ok(ExecutionExitCode::InvalidUsage.into());
+                        writeln!(
+                            context.stderr(),
+                            "{}{}: {s}: not a function",
+                            context.shell.diagnostic_prefix(),
+                            context.command_name
+                        )?;
+                        return Ok(ExecutionResult::general_error());
                     }
                 } else if !brush_core::env::valid_variable_name(s) {
                     return self.invalid_identifier(context, s);

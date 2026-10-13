@@ -674,6 +674,15 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   match one of its `:`-separated patterns as a whole path, component by
   component (`*` does not cross `/`); it implies dotglob, and a glob it empties
   is unmatched. Covered by `chld_traps_and_globignore_match_bash`.
+- `0086` words common diagnostics as Bash does. `Error::bash_message` gives
+  Bash's fixed form for an error kind (`NAME: command not found`, a `${v:?}`
+  failure as `v: MESSAGE` with Bash's default messages), which both error
+  formatters print after the `NAME: line N: ` prefix instead of `error: ...`.
+  Builtins: `local` outside a function, invalid identifiers quoted whole
+  (a subscripted one without its value), `declare +a`/`+A` on an array
+  (refused), `export -f` of a missing function (status 1), `read -u` of a
+  closed descriptor (status 1), and `help` reporting only when no topic
+  matches. Covered by `common_diagnostics_are_worded_as_in_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

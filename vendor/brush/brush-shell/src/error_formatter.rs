@@ -7,8 +7,11 @@ impl brush_core::extensions::ErrorFormatter for Formatter {
     fn format_error(
         &self,
         err: &brush_core::error::Error,
-        _shell: &brush_core::Shell<impl brush_core::ShellExtensions>,
+        shell: &brush_core::Shell<impl brush_core::ShellExtensions>,
     ) -> String {
+        if let Some(message) = err.bash_message() {
+            return std::format!("{}{message}\n", shell.diagnostic_prefix());
+        }
         let prefix = if self.use_color {
             color_print::cstr!("<red>error:</red> ")
         } else {
