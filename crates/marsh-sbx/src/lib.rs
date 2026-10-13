@@ -2510,7 +2510,7 @@ impl StockSbx {
         {
             // A saved mount from a prior daemon generation: replace it exactly.
             let replaced = unmount_spec(&grant.source, &grant.target).and_then(|unmount| {
-                Self::require_success(
+                Self::require_unmounted(
                     "replace stale shell mount",
                     self.runner.run_bounded(
                         &self.invocation_in(
@@ -2954,7 +2954,7 @@ impl StockSbx {
                     deadline.saturating_duration_since(Instant::now()),
                 )
                 .map_err(SbxError::from)
-                .and_then(|output| Self::require_success("evict idle shell mount", output))
+                .and_then(|output| Self::require_unmounted("evict idle shell mount", output))
         });
         drop(operation);
         let mut state = reference
@@ -3057,7 +3057,7 @@ impl StockSbx {
                 source,
                 [OsStr::new("umount"), OsStr::new(vm), spec.as_os_str()],
             )
-            .and_then(|output| Self::require_success("evict idle grant", output));
+            .and_then(|output| Self::require_unmounted("evict idle grant", output));
         if let Err(error) = result {
             self.quarantined_workers
                 .lock()
@@ -3867,7 +3867,7 @@ impl StockSbx {
                 return Err(error);
             }
             let cleanup = unmount_spec(&grant.source, &vm_source).and_then(|spec| {
-                Self::require_success(
+                Self::require_unmounted(
                     "rollback shared grant",
                     self.run_source_control(
                         &grant.source,
@@ -3890,7 +3890,7 @@ impl StockSbx {
                 }
                 let retry_error = retried.expect_err("retry checked above");
                 let retry_cleanup = unmount_spec(&grant.source, &vm_source).and_then(|spec| {
-                    Self::require_success(
+                    Self::require_unmounted(
                         "rollback retried shared grant",
                         self.run_source_control(
                             &grant.source,
@@ -5674,6 +5674,18 @@ impl StockSbx {
             Err(command_failed(operation, output))
         }
     }
+
+    /// An `sbx umount` reached its goal if it unmounted the target, or if
+    /// stock reports that there was nothing to unmount: then the target is
+    /// not bound, which is what every caller needs. Any other failure leaves
+    /// the mount uncertain.
+    fn require_unmounted(operation: &'static str, output: CommandOutput) -> Result<(), SbxError> {
+        if output.succeeded() || nothing_to_unmount(&output) {
+            Ok(())
+        } else {
+            Err(command_failed(operation, output))
+        }
+    }
 }
 
 impl SbxError {
@@ -6691,6 +6703,13 @@ fn stale_shared_mount_error(error: &SbxError) -> bool {
     stderr.contains("already mounted")
         || stderr.contains("already exists")
         || stderr.contains("is mounted")
+}
+
+/// Stock v0.47.0's refusal to unmount a target that is not bound:
+/// `nothing to unmount: %q is not exposed in the sandbox`, or
+/// `... is not bound at %q in the sandbox`.
+fn nothing_to_unmount(output: &CommandOutput) -> bool {
+    String::from_utf8_lossy(&output.stderr).contains("nothing to unmount: ")
 }
 
 fn sandbox_missing(output: &CommandOutput) -> bool {

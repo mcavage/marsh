@@ -50,8 +50,15 @@ Needs a mutating command against a real VM, which is out of bounds here:
 - `mount-already-mounted.stderr`: what a stock that refuses to re-mount an
   existing target would print. v0.47.0 documents mounts as idempotent; the
   adapter still handles this wording (`stale_shared_mount_error`).
-- `umount-not-mounted.stderr`: `sbx umount --help` says unmounting a target
-  that is neither mounted nor saved fails; the wording is invented.
+- `umount-not-exposed.stderr`, `umount-not-bound.stderr`: `sbx umount --help`
+  says unmounting a target that is neither mounted nor saved fails. The two
+  messages are the format strings found in the v0.47.0 binary
+  (`strings $(readlink -f "$(command -v sbx)") | grep 'nothing to unmount'`):
+  `nothing to unmount: %q is not exposed in the sandbox` and
+  `nothing to unmount: %q is not bound at %q in the sandbox`. `HOST` and
+  `TARGET` stand for the quoted paths, and the `Error: ` prefix is cobra's
+  usual one; neither has been seen from a real run. The adapter relies only on
+  the `nothing to unmount` phrase.
 
 The missing-VM wording for verbs other than `inspect` (exec, cp, mount, rm,
 stop) is assumed to match `inspect-missing.stderr`; capturing it needs a

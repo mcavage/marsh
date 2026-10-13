@@ -964,7 +964,7 @@ impl StockModel {
         let [vm, spec] = parsed.positionals.as_slice() else {
             return failure("Error: accepts 2 arg(s)");
         };
-        let Some((_, target, _)) = Self::mount_spec(call, spec) else {
+        let Some((host, target, _)) = Self::mount_spec(call, spec) else {
             return failure("Error: invalid mount spec");
         };
         let Some(guest) = state.vms.get_mut(vm) else {
@@ -972,10 +972,15 @@ impl StockModel {
         };
         // "If CTR_TARGET is neither mounted nor saved, the command fails".
         if guest.mounts.remove(&target).is_some() {
-            success(Vec::new())
-        } else {
-            failure(corpus::UNVERIFIED_UMOUNT_NOT_MOUNTED)
+            return success(Vec::new());
         }
+        let quoted = |path: &Path| format!("{:?}", path.display().to_string());
+        let message = if guest.mounts.values().any(|(source, _)| *source == host) {
+            corpus::UNVERIFIED_UMOUNT_NOT_BOUND.replace("\"TARGET\"", &quoted(&target))
+        } else {
+            corpus::UNVERIFIED_UMOUNT_NOT_EXPOSED.to_owned()
+        };
+        failure(&message.replace("\"HOST\"", &quoted(&host)))
     }
 
     fn exec(state: &mut State, parsed: &Parsed) -> CommandOutput {
