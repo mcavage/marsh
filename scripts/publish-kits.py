@@ -37,7 +37,7 @@ _SHARED = importlib.util.module_from_spec(_SHARED_SPEC)
 _SHARED_SPEC.loader.exec_module(_SHARED)
 for _name in ("JSON_LIMIT", "FILE_LIMIT", "STAGE_LIMIT", "MAX_FILES", "parts",
               "directory", "regular_file", "read_file", "copy_regular",
-              "file_record", "tree_inventory", "json_bytes", "sha"):
+              "file_record", "tree_inventory", "json_bytes", "sha", "retained_walks"):
     globals()[_name] = getattr(_SHARED, _name)
 
 
@@ -137,17 +137,18 @@ def source_path(root, value):
     # Recover actual directory spelling by device/inode, not case-folding. On
     # case-sensitive volumes distinct names stay distinct; APFS aliases merge.
     current = root
-    for component in source.relative_to(root).parts:
-        with directory(current / component) as child:
-            identity = (os.fstat(child).st_dev, os.fstat(child).st_ino)
-        with directory(current) as parent:
-            names = [entry.name for entry in os.scandir(parent)
-                     if entry.is_dir(follow_symlinks=False)
-                     and (entry.stat(follow_symlinks=False).st_dev,
-                          entry.stat(follow_symlinks=False).st_ino) == identity]
-        if len(names) != 1:
-            raise ValueError("ambiguous Kit directory identity")
-        current /= names[0]
+    with retained_walks():
+        for component in source.relative_to(root).parts:
+            with directory(current / component) as child:
+                identity = (os.fstat(child).st_dev, os.fstat(child).st_ino)
+            with directory(current) as parent:
+                names = [entry.name for entry in os.scandir(parent)
+                         if entry.is_dir(follow_symlinks=False)
+                         and (entry.stat(follow_symlinks=False).st_dev,
+                              entry.stat(follow_symlinks=False).st_ino) == identity]
+            if len(names) != 1:
+                raise ValueError("ambiguous Kit directory identity")
+            current /= names[0]
     return current
 
 
@@ -273,12 +274,13 @@ COLLECTORS = frozenset("kits/" + name for name in (
 def admitted_inventory(source, budget=None):
     records = {}
     budget = budget if budget is not None else [STAGE_LIMIT]
-    for relative in git_files(source):
-        path = source / relative
-        # Do not resurrect tracked deletions; every admitted special file fails.
-        if not path.exists() and not path.is_symlink():
-            continue
-        records[relative] = file_record(path, budget=budget)
+    with retained_walks():
+        for relative in git_files(source):
+            path = source / relative
+            # Do not resurrect tracked deletions; every admitted special file fails.
+            if not path.exists() and not path.is_symlink():
+                continue
+            records[relative] = file_record(path, budget=budget)
     return records
 
 
@@ -352,8 +354,10 @@ def capture(root, selected, inputs, temporary):
     configs, canonical = canonical_inputs(root, set(selected.values()), configs)
     budget = [STAGE_LIMIT]
     source_records = {source: admitted_inventory(source, budget) for source in set(selected.values())}
-    explicit = {source: {name: file_record(Path(origin), budget=budget) for name, origin in config["files"].items()}
-                for source, config in configs.items()}
+    with retained_walks():
+        explicit = {source: {name: file_record(Path(origin), budget=budget)
+                             for name, origin in config["files"].items()}
+                    for source, config in configs.items()}
     plans = stage_all(set(selected.values()), configs, temporary)
     sources = {}
     for source, (context, descriptor, arguments) in plans.items():
@@ -369,8 +373,10 @@ def capture(root, selected, inputs, temporary):
             raise ValueError("staged bytes differ from admitted source inventory")
         if admitted_inventory(source) != source_records[source]:
             raise ValueError("Kit source changed during preparation/staging")
-        if any(file_record(Path(configs[source]["files"][name])) != record
-               for name, record in explicit[source].items()):
+        with retained_walks():
+            changed = any(file_record(Path(configs[source]["files"][name])) != record
+                          for name, record in explicit[source].items())
+        if changed:
             raise ValueError("explicit/canonical input changed during preparation/staging")
         sources[str(source.relative_to(root))] = {
             "source_tree": sha(json_bytes(source_records[source])),
@@ -571,12 +577,13 @@ def stage_all(selected, configs, temporary):
         context = temporary / f"source-{index}"
         context.mkdir(mode=0o700)
         paths = git_files(source)
-        for relative in paths:
-            path = source / relative
-            # Tracked deletions are not resurrected from the index.
-            if not path.exists() and not path.is_symlink():
-                continue
-            copy_regular(path, context / relative, budget)
+        with retained_walks():
+            for relative in paths:
+                path = source / relative
+                # Tracked deletions are not resurrected from the index.
+                if not path.exists() and not path.is_symlink():
+                    continue
+                copy_regular(path, context / relative, budget)
         descriptors = list(context.glob("*.yaml"))
         if len(descriptors) != 1:
             raise ValueError(f"expected one included Kit descriptor: {source}")
@@ -589,8 +596,9 @@ def stage_all(selected, configs, temporary):
         arguments = descriptor_arguments(document, config["args"])
         if len(paths) + len(config["files"]) > MAX_FILES:
             raise ValueError("combined Kit file-count limit exceeded")
-        for relative, origin in config["files"].items():
-            copy_regular(Path(origin), context / relative, budget)
+        with retained_walks():
+            for relative, origin in config["files"].items():
+                copy_regular(Path(origin), context / relative, budget)
         # COPY preserves directory permissions. Keep only the outer temporary
         # parent private; descendants must be traversable by image users.
         context.chmod(0o755)

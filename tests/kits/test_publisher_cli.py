@@ -718,6 +718,53 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
         self.assertEqual(result.returncode, 0, result)
         self.assertEqual(len(self.records()), 2)
 
+    def directory_opens(self, *extra):
+        """Run the publisher and count the directories it opens (Python's
+        `open` audit event, which `os.open` raises with its flags)."""
+        counter = self.root / 'directory-opens'
+        wrapper = self.root / 'count-directory-opens.py'
+        wrapper.write_text(
+            'import os, runpy, sys\n'
+            'opens = 0\n'
+            'def hook(event, args):\n'
+            '    global opens\n'
+            '    if event == "open" and isinstance(args[2], int) and args[2] & os.O_DIRECTORY:\n'
+            '        opens += 1\n'
+            'sys.addaudithook(hook)\n'
+            'counter, script = sys.argv[1:3]\n'
+            'sys.argv = sys.argv[2:]\n'
+            'try:\n'
+            '    runpy.run_path(script, run_name="__main__")\n'
+            'finally:\n'
+            '    with open(counter, "w") as stream:\n'
+            '        stream.write(str(opens))\n')
+        result = self.observed(subprocess.run(
+            [sys.executable, str(wrapper), str(counter), str(PUBLISHER), "--source-root", str(self.source),
+             "--commands", str(self.commands), "--build-inputs", str(self.inputs),
+             "--repository-prefix", "reg.example/test", "--output", str(self.output), *extra],
+            env=self.env, capture_output=True, text=True, timeout=PROCESS_TIMEOUT))
+        self.assertEqual(result.returncode, 0, result)
+        return int(counter.read_text())
+
+    def test_checkout_depth_is_walked_per_operation_not_per_file(self):
+        # Every input is read through no-follow, owner-checked directories from
+        # the filesystem root. Moving the checkout deeper adds opens per walk,
+        # which must not be one per input file per capture.
+        files = 1000
+        for index in range(files):
+            path = self.source / 'first' / 'tree' / f'{index % 10}' / f'{index}.txt'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(str(index))
+        levels = 20
+        shallow = self.directory_opens('--validate-only')
+        deep = self.root.joinpath(*['d'] * levels)
+        deep.parent.mkdir(parents=True)
+        self.source.rename(deep)
+        self.source = deep
+        per_level = (self.directory_opens('--validate-only') - shallow) / levels
+        self.assertEqual(len(self.records()), 4)
+        self.assertLess(per_level, files / 10,
+                        f'{per_level:.0f} more directory opens per checkout level for {files} input files')
 
 if __name__ == "__main__":
     unittest.main()
