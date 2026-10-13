@@ -33,7 +33,7 @@ set -u
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 case "${TLC_CACHE:-}" in ''|/*) ;; *) TLC_CACHE="$PWD/$TLC_CACHE" ;; esac
 cd "$(dirname "$0")"
-JAR="${TLA2TOOLS_JAR:-/private/tmp/marsh-tla2tools-1.8.0.jar}"
+JAR="${TLA2TOOLS_JAR:?set TLA2TOOLS_JAR to the pinned TLA+ tools jar (make test-model fetches it)}"
 export DOCKER_HOST="${DOCKER_HOST:-unix://$HOME/.docker/run/docker.sock}"
 IMAGE="${TLC_IMAGE:-eclipse-temurin:21-jre}"
 RUNNER="${TLC_RUNNER:-docker}"

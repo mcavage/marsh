@@ -46,7 +46,8 @@ TEST_BIN = $(abspath $(TARGET_DIR))/debug
 PUBLISHER_VENV ?= $(abspath $(TARGET_DIR))/publisher-venv
 MODEL_FLAGS ?= --quick
 MODEL_CACHE ?= $(abspath $(TARGET_DIR))/tlc-cache
-TLA2TOOLS_JAR ?= $(abspath $(TARGET_DIR))/tla2tools-1.8.0.jar
+TLA2TOOLS_RELEASE := tools-tla2tools-2026-10-06-94d0c50
+TLA2TOOLS_JAR ?= $(abspath $(TARGET_DIR))/$(TLA2TOOLS_RELEASE).jar
 TLA2TOOLS_SHA256 := 7beec0f04818732a62fa193731711a99aa4f11279499b2360a7d156c519ea78d
 # The callers of the built binaries, #[ignore]d without them: the MCP load
 # callers (MARSH_LOAD_TEST_BIN, a built marsh beside marsh-mcp and marshd) and
@@ -193,11 +194,14 @@ $(PUBLISHER_VENV)/.ready: scripts/requirements-publish.txt
 test-model: $(TLA2TOOLS_JAR)
 	TLA2TOOLS_JAR="$(TLA2TOOLS_JAR)" TLC_CACHE="$(MODEL_CACHE)" docs/model/check.sh $(MODEL_FLAGS)
 
-# The pinned TLA+ tools. v1.8.0 is TLA+'s rolling prerelease; the checksum pins
-# the build the model was last checked with: update both together.
+# The pinned TLA+ tools: the model needs TLC 2.20+ (v1.8.0), which upstream
+# publishes only as a rolling prerelease whose asset is replaced in place, so
+# the checked build is mirrored unmodified as its own release here. To move to
+# a newer build, re-check the model with it, mirror it the same way, and update
+# TLA2TOOLS_RELEASE and TLA2TOOLS_SHA256 together.
 $(TLA2TOOLS_JAR):
 	@mkdir -p "$(dir $@)"
-	curl -fsSL -o "$@.tmp" https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+	curl -fsSL -o "$@.tmp" https://github.com/mcavage/marsh/releases/download/$(TLA2TOOLS_RELEASE)/tla2tools.jar
 	@echo "$(TLA2TOOLS_SHA256)  $@.tmp" | { command -v sha256sum >/dev/null && sha256sum -c - || shasum -a 256 -c -; } >/dev/null
 	@mv "$@.tmp" "$@"
 

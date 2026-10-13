@@ -152,9 +152,10 @@ The default, CI's model job, and `make regress` run every config. `--huge` / `--
 that does not fit a CI job with its siblings from the rest. `TLC_CACHE=DIR` skips a config whose spec, config,
 jar and `check.sh` are byte-identical to one that already gave its expected verdict (`make test` uses
 `target/tlc-cache`); the release run does not set it. This needs Docker (or `TLC_RUNNER=java` with a local
-Java 17+) and the TLA+ tools jar at `/private/tmp/marsh-tla2tools-1.8.0.jar` (override with
-`TLA2TOOLS_JAR`). The script exits nonzero if a positive config fails or a negative control passes or fails
-for the wrong reason. The jar is not committed.
+Java 17+) and the pinned TLA+ tools jar, which `make test-model` downloads and checks (the build is
+mirrored as a release of this repository because upstream replaces its v1.8.0 asset in place; see the
+Makefile). Run directly, `check.sh` takes the jar from `TLA2TOOLS_JAR`. The script exits nonzero if a
+positive config fails or a negative control passes or fails for the wrong reason. The jar is not committed.
 
 | Spec action | Code location |
 |---|---|
