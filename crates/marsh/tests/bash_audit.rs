@@ -16,6 +16,11 @@ fn shell(program: &str) -> Command {
 }
 
 fn run(program: &str, script: &str, from_stdin: bool) -> Output {
+    run_named(program, script, from_stdin, None)
+}
+
+/// As [`run`]; with `-c`, `name` is `$0`, which prefixes Bash's diagnostics.
+fn run_named(program: &str, script: &str, from_stdin: bool, name: Option<&str>) -> Output {
     let directory = tempfile::tempdir().unwrap();
     let mut command = shell(program);
     command
@@ -39,7 +44,7 @@ fn run(program: &str, script: &str, from_stdin: bool) -> Output {
     if from_stdin {
         command.arg("-s").stdin(Stdio::piped());
     } else {
-        command.args(["-c", script]);
+        command.args(["-c", script]).args(name);
     }
     // A shell that misses a signal hangs; this fails the test by name and
     // kills the shell's group instead.
@@ -1602,4 +1607,82 @@ fn smallest_pattern_removal_can_remove_nothing() {
         0,
         b"aaaa aaaa aaaa aaaa . x/y /x\n",
     );
+}
+
+/// `disown` with job specs, PIDs and options, its diagnostics, and Bash's
+/// table of jobs collected by `wait`: still listed (so `disown %1` succeeds)
+/// until the next `jobs`, `wait` or process.
+#[test]
+fn disown_removes_jobs_as_bash_does() {
+    for (script, stdout) in [
+        ("disown; echo $?", b"1\n".as_slice()),
+        ("disown -z; echo $?", b"2\n"),
+        ("disown -a; disown -r; disown -ah; echo $?", b"0\n"),
+        ("disown %3 0 '' abc -- -1; echo $?", b"1\n"),
+        (
+            "sleep 1 & disown; echo $?; jobs; wait $!; echo $?",
+            b"0\n0\n",
+        ),
+        (
+            "sleep 1 & disown $!; jobs; sleep 1 & disown -h; set -- $(jobs -p); echo $#",
+            b"1\n",
+        ),
+        (
+            "sleep 1 & sleep 1 & disown %1 %1; echo $?; jobs",
+            b"1\n[2]+  Running                    sleep 1 &\n",
+        ),
+        (
+            "sleep 1 | cat & disown %cat; echo $?; disown %?LEE; echo $?",
+            b"1\n0\n",
+        ),
+        (
+            "sleep 1 | cat & sleep 1 & disown %?LEE; echo $?; disown %sleep; echo $?",
+            b"1\n1\n",
+        ),
+        (
+            "sleep 1 & sleep 1 & disown %sl; echo $?; disown -a; jobs",
+            b"1\n",
+        ),
+        (
+            "sleep 1 & echo \"$(disown; echo $?)\"; (disown; echo $?)",
+            b"0\n1\n",
+        ),
+        (
+            "true & wait $!; disown %1; echo $?; true & wait $!; jobs; disown %1; echo $?",
+            b"0\n1\n",
+        ),
+        (
+            "true & wait $!; disown -r; disown %1; echo $?; true & wait $!; /usr/bin/true; disown %1; echo $?",
+            b"0\n1\n",
+        ),
+        (
+            "sleep 1 & true & wait $!; disown -r; disown; echo $?; jobs",
+            b"1\n",
+        ),
+        (
+            "(exit 7) & wait $!; echo $?; wait $!; echo $?; disown %1; echo $?",
+            b"7\n7\n1\n",
+        ),
+        // `wait` keeps the `$!` job only if it had already finished, until `jobs` reports it.
+        (
+            "/usr/bin/true & /bin/sleep .3; wait; disown %1; echo $?; /bin/sleep .3 & wait; disown %1; echo $?; /usr/bin/true & /bin/sleep .3; wait; jobs",
+            b"0\n1\n[1]+  Done                       /usr/bin/true\n",
+        ),
+    ] {
+        let bash = run_named("bash", script, false, Some("audit"));
+        assert_eq!(bash.stdout, stdout, "Bash: {script}: {bash:?}");
+        let brush = run_named(
+            env!("CARGO_BIN_EXE_marsh-local"),
+            script,
+            false,
+            Some("audit"),
+        );
+        assert_eq!(
+            brush.status.code(),
+            bash.status.code(),
+            "{script}: {brush:?}"
+        );
+        assert_eq!(brush.stdout, bash.stdout, "{script}: {brush:?}");
+        assert_eq!(brush.stderr, bash.stderr, "{script}: {brush:?}");
+    }
 }

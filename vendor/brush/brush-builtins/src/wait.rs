@@ -115,7 +115,6 @@ impl WaitCommand {
         context: &mut brush_core::ExecutionContext<'_, SE>,
     ) -> Result<ExecutionResult, brush_core::Error> {
         let mut result = ExecutionResult::success();
-        let mut waited_for_pid = false;
         let mut last_waited_id = None;
 
         if !self.ids.is_empty() {
@@ -176,7 +175,6 @@ impl WaitCommand {
                         } else {
                             job.wait().await?
                         };
-                        waited_for_pid = true;
                         last_waited_id = Some(pid.to_string());
                         context.shell.jobs_mut().remember_reaped(pid, &result);
                     } else if let Some(completed) =
@@ -199,15 +197,14 @@ impl WaitCommand {
                     }
                 }
             }
-            if waited_for_pid {
-                context.shell.jobs_mut().sweep_waited_jobs();
-            }
+            context.shell.jobs_mut().finish_explicit_wait();
         } else {
             // Wait for all jobs.
+            let interactive = context.shell.options().interactive;
             let jobs = context
                 .shell
                 .jobs_mut()
-                .wait_all(self.wait_for_terminate)
+                .wait_all(self.wait_for_terminate, !interactive)
                 .await?;
 
             if context.shell.options().enable_job_control {

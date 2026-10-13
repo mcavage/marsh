@@ -12,6 +12,13 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
                 .await?;
         }
 
+        if self.options.interactive
+            && self.options.login_shell
+            && self.options.send_sighup_to_all_jobs_on_exit
+        {
+            self.jobs.hangup_all();
+        }
+
         Ok(())
     }
 

@@ -1842,6 +1842,9 @@
     "substring-pattern-C.utf8",
     "unquoted-external-argv"
    ],
+   "disown": [
+    "raw-text"
+   ],
    "external-redirects": [
     "raw-here"
    ],
@@ -2080,56 +2083,6 @@
     "core-byte-controls#0",
     "core-byte-controls#5",
     "nameref.yaml#100"
-   ]
-  }},
-  {"id": "DISOWN", "summary": "The disown builtin is not implemented", "cases": {
-   "disown": [
-    "after-double-disown",
-    "after-false-wait",
-    "after-jobs",
-    "after-wait",
-    "after-wait-all",
-    "after-wait-default",
-    "after-wait-disown-all",
-    "after-wait-disown-running",
-    "after-wait-foreground",
-    "after-wait-hup-repeat",
-    "after-wait-jobs-r",
-    "after-wait-pid",
-    "after-wait-prefix",
-    "after-wait-substring",
-    "after-wait-twice",
-    "all",
-    "all-empty",
-    "all-hup-empty",
-    "all-operand",
-    "bad-job",
-    "bad-pid",
-    "bad-text",
-    "command-substitution",
-    "current",
-    "disowned-wait-status",
-    "duplicate",
-    "empty",
-    "function",
-    "help",
-    "hup-empty",
-    "hup-retained",
-    "invalid-option",
-    "mixed-valid-invalid",
-    "negative",
-    "no-jobs",
-    "number-job",
-    "option-cluster",
-    "percent-job",
-    "pid",
-    "prefix-job",
-    "raw-text",
-    "running-empty",
-    "running-operand",
-    "subshell",
-    "substring-job",
-    "zero"
    ]
   }},
   {"id": "ECHO-XPG", "summary": "echo under xpg_echo and posix mode treats options and escapes differently", "cases": {

@@ -501,6 +501,17 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   queue, echoed, and read first. Covered by
   `interactive_shell_survives_a_terminal_that_never_reports_the_cursor`,
   which types its first line during the wait.
+- `0070` implements `disown` (`-a`, `-h`, `-r`, job specs and PIDs, Bash's
+  diagnostics with the `NAME: line N:` prefix) and `%name`/`%?name` job
+  specs. A job collected by `wait PID` or `wait %N` stays in the table, as
+  Bash's notified dead job does, until the next `jobs`, `wait`, or process;
+  `wait` without operands keeps the `$!` job if it had already finished
+  (until `jobs` reports it `Done`), as Bash's noninteractive shell does;
+  a disowned job's status is kept for `wait PID` and the shell still reaps
+  it. An interactive login shell with `huponexit` sends SIGHUP to its jobs
+  on exit, skipping those marked by `disown -h`. Covered by
+  `disown_removes_jobs_as_bash_does` (bash_audit) and
+  `huponexit_hangs_up_jobs_except_those_disowned_with_h` (smoke, PTY).
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

@@ -89,14 +89,16 @@ that ask the kernel.
 Patch `0069` keeps the lines typed while the shell waited for a cursor
 position report that never came (crossterm held them as parsed key events;
 the plain line reader that takes over read the terminal itself).
+Patch `0070` implements `disown`, `%name` job specs, Bash's retention of
+jobs collected by `wait` until the next cleanup, and `huponexit`.
 
 This directory contains only the runtime crate source, manifests, licenses,
 and build metadata needed by marsh. Upstream integration tests, snapshots,
 examples, benches, and development tooling are intentionally omitted. Each
 local delta is covered by focused tests in `crates/marsh/tests/smoke.rs` or,
 for `0010`, `0012`-`0016`, `0018`-`0032`, `0036`, `0038`, `0039`, `0042`,
-`0052`, `0053`, and `0055`-`0067`,
-`crates/marsh/tests/bash_audit.rs` (`0017`, `0036`, `0037`, `0040`, `0041`, `0043`, `0044`, `0054`, `0068`, and `0069` are in `smoke.rs`; `0033` and `0034` are in `split_join.rs` and `bash_audit.rs`, with
+`0052`, `0053`, `0055`-`0067`, and `0070`,
+`crates/marsh/tests/bash_audit.rs` (`0017`, `0036`, `0037`, `0040`, `0041`, `0043`, `0044`, `0054`, `0068`, and `0069` are in `smoke.rs`, and `0070` also is; `0033` and `0034` are in `split_join.rs` and `bash_audit.rs`, with
 parser cases in `brush-parser/src/parser/tests/composition.rs`). The earlier patch series was
 also checked against the full upstream compatibility suite
 before this source-only vendor snapshot was produced.

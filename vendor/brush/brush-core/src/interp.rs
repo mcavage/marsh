@@ -1663,6 +1663,13 @@ async fn wait_for_pipeline_processes_and_update_status(
 
     // Clear our the pipeline status so we can start filling it out.
     shell.last_pipeline_statuses_mut().clear();
+    // Bash forgets jobs an earlier `wait` collected once a foreground process runs.
+    if process_spawn_results
+        .iter()
+        .any(|spawned| matches!(spawned, ExecutionSpawnResult::StartedProcess(_)))
+    {
+        shell.jobs_mut().cleanup_dead_jobs();
+    }
 
     while let Some(child) = process_spawn_results.pop_front() {
         let wait_result = if !stopped_children.is_empty() {

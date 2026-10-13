@@ -1,9 +1,9 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 66 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 51 fix Bash
-compatibility: job control and job lines, signals and traps, `wait`, aliases,
+`vendor/brush/UPSTREAM_REVISION`) plus the 71 patches in
+[`docs/upstream/brush/`](../upstream/brush/README.md). 56 fix Bash
+compatibility: job control, job lines and `disown`, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
 formats, startup files, option order, field splitting, `read`, `[[ ]]`
 patterns, prompts, and input typed ahead at the prompt. The other 15 add marsh's registered
@@ -25,7 +25,7 @@ The focused executable corpus covers these regressions:
 | Name references | `local -n`/`declare -n` reads, scalar/array/associative assignments, `+=`, `read`, `printf -v`, `mapfile`, `unset`/`unset -n`, `declare -p` and `[[ -R ]]` |
 | Globbing | `globstar` (`**`, `**/`, `dir/**`, with `dotglob`), extglob `+( )`/`!( )` |
 | Common idioms | Arrays and slices, `printf %q`, `read -r -a`, `read -d ''`, `read -t` end of file versus timeout, `printf '%(fmt)T'`, `((count[$key]++))`, `mapfile`, `getopts`, `${x//a/b}`, `${x^^}`, `${x@Q}`, `${!prefix@}`, `BASH_REMATCH`, `pipefail` with `||`, here-strings, `<( )`, brace sequences, nested `( ( ) )` |
-| Job ownership | Real-PID `$!` for background lists, `jobs -p`/`-l`, inherited `jobs` metadata in pipelines and substitutions, cleared explicit/background subshell jobs, saved PID statuses and missing-child status 127 |
+| Job ownership | Real-PID `$!` for background lists, `jobs -p`/`-l`, inherited `jobs` metadata in pipelines and substitutions, cleared explicit/background subshell jobs, saved PID statuses and missing-child status 127; `disown` (`-a`, `-h`, `-r`, `%N`, `%name`, `%?name`, PIDs) with Bash's diagnostics, and jobs collected by `wait` kept listed until the next `jobs`, `wait` or process; `huponexit` hangs up jobs not marked by `disown -h` |
 | Interactive job lines (PTY) | The launch line is `[1] 467` (no `+`, no tab); completion notifications are `[1]+  Done<pad>CMD` and `[1]+  Exit 3<pad>CMD` with Bash's 27-column state field; `jobs` lists `[1]-  Running<pad>CMD &` with one `+` and one `-`; job numbers restart at one past the highest job still listed. Divergence: a background job killed by a signal is reported `Exit 143`, where Bash names the signal (`Terminated`) |
 | Descriptors and pipelines | `exec {fd}>file` allocation from 10 and `{fd}>&-` closure, ordered redirections, closed stdio, inherited high descriptors and later closure, mixed builtin/function/external stages, launch-time `pipefail`, canceled waits and polling |
 | Scripts | Non-executable script operands found through `PATH`, original script `$0`, ENOEXEC (no shebang) through Brush rather than `/bin/sh`, fresh exported environment/functions, positional arguments and `BASH_ENV`. In the product, the guest shell runs such files with a child guest `marsh` attached to the same session |
@@ -48,10 +48,10 @@ One explicit oracle-version divergence is classified: command-substitution
 marsh's exact `127`; the parent's subsequent wait must still return its child
 status. Candidate failures are not normalized away.
 
-The current corpus has 55 differential test functions (all enabled), a split
+The current corpus has 56 differential test functions (all enabled), a split
 `PIPESTATUS` check,
-and 54 smoke journeys (52 on Linux, where two macOS `script(1)` job-control
-journeys are compiled out; 53 on macOS, without one that reads `/proc`), run on macOS ARM64 with Rust
+and 55 smoke journeys (53 on Linux, where two macOS `script(1)` job-control
+journeys are compiled out; 54 on macOS, without one that reads `/proc`), run on macOS ARM64 with Rust
 1.95.0 and GNU Bash 5.3 and in a Linux arm64 `rust:1.95-bookworm` container
 with GNU Bash 5.3.0 built from source. A test function may contain several distinct
 scripts. These counts describe the selected
@@ -220,7 +220,6 @@ behavior that needs more than a small Brush patch.
 | EXTGLOB-GNU-OPTIMIZATION | GNU's matcher gives non-POSIX results for `*` followed by a nullable extglob (`[[ b == *@(\|a) ]]` fails, `${v#*@(\|a)}` removes the whole value); Brush matches by the pattern's language | `byte-matchers` `terminal-nullable-*` | GNU optimization artifacts; copying them is not ordinary behavior |
 | STARTUP-OPTIONS | Invocation options: `+x` short options other than `+o`/`+O`, `-a -B -E -h -T` and `-s` with `-c`, `-` and `+` terminators, invalid `-o`/`-O` names (Brush runs the command), bare `-o`/`-O` listings, and clap's error wording and statuses | `startup` | Brush's clap-based command line; agents use `-c`, `-l`, `-e`, `-o NAME` |
 | INTERACTIVE-WITHOUT-TERMINAL | `-i` without a terminal: Bash warns "cannot set terminal process group" and "no job control", keeps `m` out of `$-`, and echoes prompts and `exit` to stderr | `startup`, readline `exit-announcement-*` | Brush's minimal reader does not emulate Readline on a pipe |
-| DISOWN | `disown` is not implemented ("unimplemented built-in") | `disown` | Needs job-table and SIGHUP plumbing |
 | FUNSUB | Bash 5.3 `${ cmd; }` and `${\| cmd; }` are printed literally | `external-redirects` | New Bash 5.3 syntax |
 | REDIRECT-EXPANSION | An external command's redirection words are expanded by the shell, so `>"$((++i))"` and `>"${v:=x}"` change shell state and `{fd}>file` sets `fd`; Bash expands them in the forked child | `external-redirects` | Brush expands before spawning |
 | NAMED-FD-LIFETIME | `printf hi {fd}>out` closes `fd` after the builtin; Bash leaves it open | `external-redirects` | Redirection scopes |

@@ -109,7 +109,11 @@ impl JobManager {
     #[must_use]
     pub fn subshell_view(&self) -> Self {
         Self {
-            inherited: self.listed_jobs().map(Job::view).collect(),
+            inherited: self
+                .listed_jobs()
+                .filter(|job| !job.is_notified_dead())
+                .map(Job::view)
+                .collect(),
             ..Self::default()
         }
     }
@@ -137,6 +141,7 @@ impl JobManager {
         reason = "push() guarantees the vector length is >= 1"
     )]
     pub fn add_as_current(&mut self, mut job: Job) -> &Job {
+        self.cleanup_dead_jobs();
         for j in &mut self.jobs {
             j.annotation = match j.annotation {
                 JobAnnotation::Current => JobAnnotation::Previous,
@@ -226,15 +231,188 @@ impl JobManager {
                 let id = s.parse::<usize>().ok()?;
                 self.jobs.iter_mut().find(|j| j.id == id)
             }
-            _ => {
-                tracing::warn!(target: trace_categories::UNIMPLEMENTED, "unimplemented: job spec naming command: '{job_spec}'");
-                None
+            name => match find_by_name(&self.jobs, name) {
+                JobSpecMatch::Found(index) => self.jobs.get_mut(index),
+                JobSpecMatch::NoSuchJob | JobSpecMatch::Ambiguous => None,
+            },
+        }
+    }
+
+    /// Resolves a `disown` operand as Bash does: a number names a PID,
+    /// anything else (or nothing: the current job) a job spec. The parent's
+    /// jobs, as listed in a pipeline stage or command substitution, count.
+    pub fn find_for_disown(&self, operand: Option<&str>) -> JobSpecMatch<JobKey> {
+        let tables = [(false, &self.jobs), (true, &self.inherited)];
+        let found = |inherited, index| JobSpecMatch::Found(JobKey { inherited, index });
+        let Some(operand) = operand else {
+            return tables
+                .iter()
+                .find_map(|(inherited, jobs)| {
+                    jobs.iter()
+                        .position(Job::is_current)
+                        .map(|index| found(*inherited, index))
+                })
+                .unwrap_or(JobSpecMatch::NoSuchJob);
+        };
+        if let Some(pid) = parse_pid(operand) {
+            return tables
+                .iter()
+                .find_map(|(inherited, jobs)| {
+                    jobs.iter()
+                        .position(|job| job.has_pid(pid))
+                        .map(|index| found(*inherited, index))
+                })
+                .unwrap_or(JobSpecMatch::NoSuchJob);
+        }
+        let spec = operand.strip_prefix('%').unwrap_or(operand);
+        for (inherited, jobs) in tables {
+            let result = match spec {
+                "" if operand.is_empty() => JobSpecMatch::NoSuchJob,
+                "" | "%" | "+" => jobs
+                    .iter()
+                    .position(Job::is_current)
+                    .map_or(JobSpecMatch::NoSuchJob, JobSpecMatch::Found),
+                "-" => jobs
+                    .iter()
+                    .position(Job::is_prev)
+                    .map_or(JobSpecMatch::NoSuchJob, JobSpecMatch::Found),
+                s if s.bytes().all(|b| b.is_ascii_digit()) => s
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|id| jobs.iter().position(|j| j.id == id))
+                    .map_or(JobSpecMatch::NoSuchJob, JobSpecMatch::Found),
+                name => find_by_name(jobs, name),
+            };
+            match result {
+                JobSpecMatch::Found(index) => return found(inherited, index),
+                JobSpecMatch::Ambiguous => return JobSpecMatch::Ambiguous,
+                JobSpecMatch::NoSuchJob => {}
+            }
+        }
+        JobSpecMatch::NoSuchJob
+    }
+
+    /// Returns the job a [`JobKey`] names.
+    pub fn get(&self, key: JobKey) -> Option<&Job> {
+        if key.inherited {
+            self.inherited.get(key.index)
+        } else {
+            self.jobs.get(key.index)
+        }
+    }
+
+    /// Marks a job so a SIGHUP the shell sends its jobs skips it (`disown -h`).
+    pub fn set_nohup(&mut self, key: JobKey) {
+        let jobs = if key.inherited {
+            &mut self.inherited
+        } else {
+            &mut self.jobs
+        };
+        if let Some(job) = jobs.get_mut(key.index) {
+            job.nohup = true;
+        }
+    }
+
+    /// Removes a job from the table without signaling it (`disown`). As in
+    /// Bash, a later `wait PID` reports the status known at this point, and
+    /// the shell still reaps the process.
+    pub fn disown(&mut self, key: JobKey) {
+        if key.inherited {
+            if key.index < self.inherited.len() {
+                self.inherited.remove(key.index);
+            }
+            return;
+        }
+        if key.index >= self.jobs.len() {
+            return;
+        }
+        let job = self.jobs.remove(key.index);
+        if let Some(pid) = job.representative_pid() {
+            self.remember_reaped(pid, &job.known_status());
+        }
+        self.reannotate();
+        reap_in_background(job);
+    }
+
+    /// `disown -a` and `disown -r`: removes every job (or every running one),
+    /// remembering none of their statuses; `-a` also forgets saved statuses.
+    pub fn disown_all(&mut self, running_only: bool) {
+        let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.jobs)
+            .into_iter()
+            .partition(|job| !running_only || job.is_running());
+        self.jobs = kept;
+        if !running_only {
+            self.inherited.clear();
+            self.completed.clear();
+            self.reaped.clear();
+        } else {
+            self.inherited.retain(|job| !job.is_running());
+        }
+        // Bash leaves no current or previous job, even among those kept.
+        for job in &mut self.jobs {
+            job.annotation = JobAnnotation::None;
+        }
+        gone.into_iter().for_each(reap_in_background);
+    }
+
+    /// `disown -ah` and `disown -rh`: marks every job (or every running one)
+    /// so a SIGHUP the shell sends its jobs skips it.
+    pub fn set_nohup_all(&mut self, running_only: bool) {
+        for job in self.jobs.iter_mut().chain(&mut self.inherited) {
+            if !running_only || job.is_running() {
+                job.nohup = true;
             }
         }
     }
 
-    /// Waits for all managed jobs to complete.
-    pub async fn wait_all(&mut self, terminate_only: bool) -> Result<Vec<Job>, error::Error> {
+    /// Sends SIGHUP (and SIGCONT to a stopped job) to every job not marked
+    /// by `disown -h`, as Bash does when an interactive login shell with
+    /// `huponexit` exits.
+    pub fn hangup_all(&self) {
+        for job in self
+            .jobs
+            .iter()
+            .filter(|job| !job.nohup && !job.tasks.is_empty())
+        {
+            #[cfg(unix)]
+            {
+                let _ = job.kill(traps::TrapSignal::Signal(sys::signal::Signal::SIGHUP));
+                if matches!(job.state, JobState::Stopped) {
+                    let _ = job.kill(traps::TrapSignal::Signal(sys::signal::Signal::SIGCONT));
+                }
+            }
+        }
+    }
+
+    /// Removes the dead jobs an earlier `wait PID` or `wait %N` collected.
+    /// Bash keeps such a job (`disown %1` still finds it) until the next
+    /// `jobs`, `wait`, or foreground or background process.
+    pub fn cleanup_dead_jobs(&mut self) {
+        let before = self.jobs.len();
+        self.jobs.retain(|job| !job.is_notified_dead());
+        if self.jobs.len() != before {
+            self.reannotate();
+        }
+    }
+
+    /// Waits for all managed jobs to complete. With `keep_finished_last` (a
+    /// noninteractive shell), the `$!` job is kept, unreported, if it had
+    /// already finished when the wait began, as Bash keeps it.
+    pub async fn wait_all(
+        &mut self,
+        terminate_only: bool,
+        keep_finished_last: bool,
+    ) -> Result<Vec<Job>, error::Error> {
+        let finished_last = self
+            .last_background_pid
+            .filter(|_| keep_finished_last)
+            .and_then(|pid| {
+                let job = self
+                    .jobs
+                    .iter_mut()
+                    .find(|job| job.representative_pid() == Some(pid))?;
+                matches!(job.poll_done(), Ok(Some(_))).then_some(job.id)
+            });
         for job in &mut self.jobs {
             if terminate_only {
                 job.wait_for_termination().await?;
@@ -244,7 +422,26 @@ impl JobManager {
         }
 
         self.completed.clear();
-        Ok(self.sweep_completed_jobs())
+        let kept = finished_last.and_then(|id| {
+            let index = self.jobs.iter().position(|job| job.id == id)?;
+            Some(self.jobs.remove(index))
+        });
+        let swept = self.sweep_completed_jobs();
+        if let Some(job) = kept {
+            self.jobs.push(job);
+            self.jobs.sort_by_key(|job| job.id);
+        }
+        Ok(swept)
+    }
+
+    /// Removes finished jobs that `jobs` has just reported.
+    pub fn forget_reported(&mut self, ids: &[usize]) {
+        let before = self.jobs.len();
+        self.jobs
+            .retain(|job| !(job.tasks.is_empty() && ids.contains(&job.id)));
+        if self.jobs.len() != before {
+            self.reannotate();
+        }
     }
 
     /// Waits for the first eligible job to complete, preserving every other
@@ -364,8 +561,21 @@ impl JobManager {
         let _ = self.sweep_completed_jobs();
     }
 
+    /// Ends a `wait PID` or `wait %N`: removes the jobs an earlier wait
+    /// collected and keeps the ones this wait collected until the next
+    /// [`Self::cleanup_dead_jobs`].
+    pub fn finish_explicit_wait(&mut self) {
+        self.cleanup_dead_jobs();
+        for job in &mut self.jobs {
+            if job.tasks.is_empty() {
+                job.notified = true;
+            }
+        }
+    }
+
     /// Polls all managed jobs for completion.
     pub fn poll(&mut self) -> Result<Vec<JobResult>, error::Error> {
+        self.cleanup_dead_jobs();
         let mut results = Vec::with_capacity(self.jobs.len());
 
         let mut i = 0;
@@ -527,6 +737,13 @@ pub struct Job {
 
     /// The current operational state of the job.
     pub state: JobState,
+
+    /// Whether `disown -h` exempted the job from the shell's SIGHUP.
+    nohup: bool,
+
+    /// Whether an explicit `wait` collected the job, which stays listed
+    /// until the next cleanup (Bash's `J_NOTIFIED`).
+    notified: bool,
 }
 
 impl Display for Job {
@@ -580,6 +797,8 @@ impl Job {
             annotation: JobAnnotation::None,
             command_line,
             state,
+            nohup: false,
+            notified: false,
         }
     }
 
@@ -640,6 +859,8 @@ impl Job {
             id: self.id,
             command_line: self.command_line.clone(),
             state: self.state.clone(),
+            nohup: self.nohup,
+            notified: false,
         }
     }
 
@@ -664,6 +885,46 @@ impl Job {
     /// Returns whether the job is the previous job.
     pub const fn is_prev(&self) -> bool {
         matches!(self.annotation, JobAnnotation::Previous)
+    }
+
+    /// Returns whether `disown -h` exempted the job from the shell's SIGHUP.
+    pub const fn is_nohup(&self) -> bool {
+        self.nohup
+    }
+
+    const fn is_running(&self) -> bool {
+        matches!(self.state, JobState::Running)
+    }
+
+    fn is_notified_dead(&self) -> bool {
+        self.notified && self.tasks.is_empty()
+    }
+
+    /// Whether `pid` is one of the job's processes or its process group.
+    fn has_pid(&self, pid: sys::process::ProcessId) -> bool {
+        self.representative_pid == Some(pid)
+            || self.pgid == Some(pid)
+            || self.tasks.iter().any(|(_, task)| match task {
+                JobTask::External(process) => process.pid() == Some(pid),
+                JobTask::Internal(_) => false,
+            })
+    }
+
+    /// The status a `wait` would report now without waiting: the collected
+    /// status of a finished job, success for one still running (Bash records
+    /// the last process's status as it stands).
+    fn known_status(&self) -> ExecutionResult {
+        if self.tasks.is_empty() {
+            self.wait_result
+                .map_or_else(ExecutionResult::success, |(_, result)| result)
+        } else {
+            ExecutionResult::success()
+        }
+    }
+
+    /// The commands of the job's pipeline stages, for `%name` job specs.
+    fn stage_commands(&self) -> impl Iterator<Item = &str> {
+        self.command_line.split('|').map(str::trim_start)
     }
 
     // Polling consumes stages from the front; waits consume them from the back and may be
@@ -830,4 +1091,67 @@ impl Job {
                 .filter(|pid| *pid < SYNTHETIC_PID_BASE)
         })
     }
+}
+
+/// Identifies a job in a [`JobManager`]: one of its own, or one listed from
+/// the parent shell.
+#[derive(Clone, Copy)]
+pub struct JobKey {
+    inherited: bool,
+    index: usize,
+}
+
+/// The outcome of resolving a job specification.
+pub enum JobSpecMatch<T = usize> {
+    /// The spec names this job.
+    Found(T),
+    /// No job matches.
+    NoSuchJob,
+    /// A `%name` or `%?name` spec matches more than one job.
+    Ambiguous,
+}
+
+/// Bash's `%name` (a stage command starting with `name`) and `%?name` (a
+/// stage command containing `name`, ignoring case) job specs, newest first.
+/// As in Bash, a job whose match is not its first stage is ambiguous.
+fn find_by_name(jobs: &[Job], name: &str) -> JobSpecMatch {
+    let matches = |command: &str| {
+        if let Some(needle) = name.strip_prefix('?') {
+            command
+                .to_ascii_lowercase()
+                .contains(&needle.to_ascii_lowercase())
+        } else {
+            command.starts_with(name)
+        }
+    };
+    let mut found = None;
+    for (index, job) in jobs.iter().enumerate().rev() {
+        let Some(stage) = job.stage_commands().position(matches) else {
+            continue;
+        };
+        if found.is_some() || stage > 0 {
+            return JobSpecMatch::Ambiguous;
+        }
+        found = Some(index);
+    }
+    found.map_or(JobSpecMatch::NoSuchJob, JobSpecMatch::Found)
+}
+
+/// Bash's `legal_number` restricted to a PID: optional surrounding blanks and
+/// sign, decimal digits, and a value that fits a process ID.
+pub fn parse_pid(text: &str) -> Option<sys::process::ProcessId> {
+    let trimmed = text.trim_matches([' ', '\t', '\n']);
+    let digits = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    trimmed.parse().ok()
+}
+
+/// Reaps a job the shell no longer tracks, as Bash's SIGCHLD handler would.
+fn reap_in_background(mut job: Job) {
+    if job.tasks.is_empty() || tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    tokio::spawn(async move { while job.wait().await.is_ok() && !job.tasks.is_empty() {} });
 }

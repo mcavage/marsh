@@ -435,6 +435,21 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
     pub(crate) const fn last_exit_status_change_count(&self) -> usize {
         self.last_exit_status_change_count
     }
+
+    /// Bash's prefix for a builtin's diagnostics: `NAME: line N: ` in a
+    /// noninteractive shell, `NAME: ` in an interactive one.
+    pub fn diagnostic_prefix(&self) -> String {
+        let name = self.current_shell_name().unwrap_or_default();
+        if self.options.interactive {
+            return std::format!("{name}: ");
+        }
+        let line = self
+            .call_stack
+            .current_frame()
+            .and_then(|frame| frame.current_line())
+            .unwrap_or(1);
+        std::format!("{name}: line {line}: ")
+    }
 }
 
 /// Snapshot of the state the last command left behind: `$?`, `PIPESTATUS`, and `$_`.
