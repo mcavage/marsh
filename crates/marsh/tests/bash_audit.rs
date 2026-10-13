@@ -2444,3 +2444,42 @@ fn prompt_strings_decode_as_in_bash() {
         "the Bash oracle decodes octal into the expansion pass"
     );
 }
+
+/// `compgen -f` keeps the word's spelling (its directory part expanded only to
+/// find the names, never by a command substitution); `compgen -A command`
+/// lists aliases, not directories or disabled builtins.
+#[test]
+fn compgen_keeps_the_words_spelling() {
+    let directory = tempfile::tempdir().unwrap();
+    let home = directory.path().join("home");
+    std::fs::create_dir_all(home.join("sub dir")).unwrap();
+    std::fs::write(home.join("item1"), "").unwrap();
+    std::fs::write(home.join("sub dir/child"), "").unwrap();
+    let work = directory.path().join("work");
+    std::fs::create_dir_all(work.join("bin/zzdir")).unwrap();
+    write_executable(work.join("bin/zzcomplete_executable"), "#!/bin/sh\n");
+    std::os::unix::fs::symlink("zzdir", work.join("bin/zzcomplete_directory_link")).unwrap();
+    let script = r#"compgen -f -- '~/i'; compgen -f -- '$HOME/i'; compgen -f -- '"$HOME"/i'; compgen -f -- '~/sub dir/'
+compgen -f -- '${HOME}'; echo "s=$?"; compgen -f -- '$(touch BAD)/'; echo "s=$?"; test -e BAD || echo no-bad
+alias zzcomplete_alias=:; zzcomplete_function() { :; }; PATH=./bin; compgen -A command zzcomplete | /usr/bin/sort
+enable -n echo; compgen -A command echo; printf 's=%s\n' "$?""#;
+    let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+        let mut command = shell(program);
+        if program != "bash" {
+            command.arg("--no-config");
+        }
+        command
+            .args(["--noprofile", "--norc", "-c", script, "audit"])
+            .env("HOME", &home)
+            .current_dir(&work)
+            .output()
+            .unwrap()
+    });
+    let [bash, brush] = &outputs;
+    assert_eq!(
+        bash.stdout,
+        b"~/item1\n$HOME/item1\n\"$HOME\"/item1\n~/sub dir/child\ns=1\ns=1\nno-bad\nzzcomplete_alias\nzzcomplete_executable\nzzcomplete_function\ns=1\n",
+        "Bash: {bash:?}"
+    );
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+}

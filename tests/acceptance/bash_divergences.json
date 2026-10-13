@@ -52,24 +52,6 @@
     "point-unicode-not-raw-99@C.utf8"
    ]
   }},
-  {"id": "COMPGEN", "summary": "compgen -f does not expand ~ and $var in the word or quote results; compgen -A command lists differ", "cases": {
-   "completion": [
-    "braced-directory",
-    "command-names",
-    "disabled-command",
-    "escaped-directory",
-    "literal-directory-wins",
-    "literal-escaped-basename",
-    "no-backquote-substitution",
-    "no-command-substitution",
-    "parameter-directory",
-    "quoted-directory",
-    "spaced-directory",
-    "tilde-directory",
-    "tilde-directory-beats-literal",
-    "unexpanded-basename"
-   ]
-  }},
   {"id": "DIAGNOSTICS", "summary": "Bad array subscripts (read: silent, not `a: bad array subscript`; write: `array index out of range`) and syntax errors in sourced files (`unterminated single quote at L,C`, not `unexpected EOF while looking for matching`) use Brush's wording", "cases": {
    "nul-input": [
     "source-quote-consecutive@source-alias@raw",
