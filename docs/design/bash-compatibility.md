@@ -1,9 +1,9 @@
 # Bash compatibility qualification
 
 marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 71 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 56 fix Bash
-compatibility: job control, job lines and `disown`, signals and traps, `wait`, aliases,
+`vendor/brush/UPSTREAM_REVISION`) plus the 72 patches in
+[`docs/upstream/brush/`](../upstream/brush/README.md). 57 fix Bash
+compatibility: job control, job lines and `disown`, function substitutions, signals and traps, `wait`, aliases,
 namerefs, subshells, globstar, descriptor redirections, `printf` time
 formats, startup files, option order, field splitting, `read`, `[[ ]]`
 patterns, prompts, and input typed ahead at the prompt. The other 15 add marsh's registered
@@ -24,6 +24,7 @@ The focused executable corpus covers these regressions:
 | Process identity | `( )`, `&` lists, pipeline stages, coprocesses and process substitutions are forked processes: `$BASHPID` is the child (and `$!`/`$NAME_PID`), `$$` is unchanged, `$BASH_SUBSHELL` increments as in Bash, a single external command replaces the child, `exec` in a subshell keeps its PID, function pipeline stages die of `SIGPIPE`, and only an `EXIT` trap set inside the subshell runs there. `$( )` forks only when its text mentions `BASHPID` |
 | Name references | `local -n`/`declare -n` reads, scalar/array/associative assignments, `+=`, `read`, `printf -v`, `mapfile`, `unset`/`unset -n`, `declare -p` and `[[ -R ]]` |
 | Globbing | `globstar` (`**`, `**/`, `dir/**`, with `dotglob`), extglob `+( )`/`!( )` |
+| Function substitutions | Bash 5.3 `${ cmd; }` runs in the current shell (side effects persist, `local` and `return` work, positional parameters are shared, `exit` exits) and yields its output without trailing newlines; `${\| cmd; }` yields a local `REPLY`; the closing brace counts only in command position (`${ echo x}y; }`, `${ echo hi;}x`); nested substitutions, groups, here-documents, double quotes and here-document bodies; xtrace depth |
 | Common idioms | Arrays and slices, `printf %q`, `read -r -a`, `read -d ''`, `read -t` end of file versus timeout, `printf '%(fmt)T'`, `((count[$key]++))`, `mapfile`, `getopts`, `${x//a/b}`, `${x^^}`, `${x@Q}`, `${!prefix@}`, `BASH_REMATCH`, `pipefail` with `||`, here-strings, `<( )`, brace sequences, nested `( ( ) )` |
 | Job ownership | Real-PID `$!` for background lists, `jobs -p`/`-l`, inherited `jobs` metadata in pipelines and substitutions, cleared explicit/background subshell jobs, saved PID statuses and missing-child status 127; `disown` (`-a`, `-h`, `-r`, `%N`, `%name`, `%?name`, PIDs) with Bash's diagnostics, and jobs collected by `wait` kept listed until the next `jobs`, `wait` or process; `huponexit` hangs up jobs not marked by `disown -h` |
 | Interactive job lines (PTY) | The launch line is `[1] 467` (no `+`, no tab); completion notifications are `[1]+  Done<pad>CMD` and `[1]+  Exit 3<pad>CMD` with Bash's 27-column state field; `jobs` lists `[1]-  Running<pad>CMD &` with one `+` and one `-`; job numbers restart at one past the highest job still listed. Divergence: a background job killed by a signal is reported `Exit 143`, where Bash names the signal (`Terminated`) |
@@ -48,7 +49,7 @@ One explicit oracle-version divergence is classified: command-substitution
 marsh's exact `127`; the parent's subsequent wait must still return its child
 status. Candidate failures are not normalized away.
 
-The current corpus has 56 differential test functions (all enabled), a split
+The current corpus has 57 differential test functions (all enabled), a split
 `PIPESTATUS` check,
 and 55 smoke journeys (53 on Linux, where two macOS `script(1)` job-control
 journeys are compiled out; 54 on macOS, without one that reads `/proc`), run on macOS ARM64 with Rust
@@ -99,6 +100,8 @@ repaired (classified, not waived):
 - `${x~~}` case toggling, `select`, and an unquoted space inside an
   associative subscript assignment (`m[a b]=1`) are not supported.
 - `${!ref}` on a name reference does not yield the target name.
+- `break` or `continue` inside a function substitution ends the enclosing
+  command at once; Bash finishes that command first.
 - Syntax error wording: the line number matches Bash, but an unexpected end
   of file omits Bash's ``from `if' command on line 1`` and Bash's echo of the
   offending line; some errors Bash reports at a token (`echo (`) are reported
@@ -220,8 +223,8 @@ behavior that needs more than a small Brush patch.
 | EXTGLOB-GNU-OPTIMIZATION | GNU's matcher gives non-POSIX results for `*` followed by a nullable extglob (`[[ b == *@(\|a) ]]` fails, `${v#*@(\|a)}` removes the whole value); Brush matches by the pattern's language | `byte-matchers` `terminal-nullable-*` | GNU optimization artifacts; copying them is not ordinary behavior |
 | STARTUP-OPTIONS | Invocation options: `+x` short options other than `+o`/`+O`, `-a -B -E -h -T` and `-s` with `-c`, `-` and `+` terminators, invalid `-o`/`-O` names (Brush runs the command), bare `-o`/`-O` listings, and clap's error wording and statuses | `startup` | Brush's clap-based command line; agents use `-c`, `-l`, `-e`, `-o NAME` |
 | INTERACTIVE-WITHOUT-TERMINAL | `-i` without a terminal: Bash warns "cannot set terminal process group" and "no job control", keeps `m` out of `$-`, and echoes prompts and `exit` to stderr | `startup`, readline `exit-announcement-*` | Brush's minimal reader does not emulate Readline on a pipe |
-| FUNSUB | Bash 5.3 `${ cmd; }` and `${\| cmd; }` are printed literally | `external-redirects` | New Bash 5.3 syntax |
-| REDIRECT-EXPANSION | An external command's redirection words are expanded by the shell, so `>"$((++i))"` and `>"${v:=x}"` change shell state and `{fd}>file` sets `fd`; Bash expands them in the forked child | `external-redirects` | Brush expands before spawning |
+| REDIRECT-EXPANSION | An external command's redirection words (and here-document bodies) are expanded by the shell, so `>"$((++i))"`, `>"${v:=x}"` and `>"${ v=x; }"` change shell state, `exit` in a function substitution there exits the shell, and `{fd}>file` sets `fd`; Bash expands them in the forked child | `external-redirects` | Brush expands before spawning |
+| ASSIGNMENT-REDIRECT-ORDER | A simple command's redirections are expanded before its assignment prefixes, so `W=${ v=x; } cmd >"$v"` writes to the old `$v`; Bash expands the assignments first | `external-redirects` | Brush applies prefix assignments when it runs the command |
 | NAMED-FD-LIFETIME | `printf hi {fd}>out` closes `fd` after the builtin; Bash leaves it open | `external-redirects` | Redirection scopes |
 | POSIX-SPECIAL-ASSIGNMENT | `set -o posix; W=val :` does not keep `W` | `external-redirects` | Posix-mode special builtins |
 | COMPGEN | `compgen -f` expands `~`, `$HOME` and `\ ` in the word and prints absolute or unescaped names where Bash keeps the word's spelling; `'$(cmd)/'` completes in `/` (Bash: nothing); `compgen -A command` lists directory links and disabled builtins | `completion` | Completion generator differences |

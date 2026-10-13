@@ -276,6 +276,12 @@ impl<'a, SE: brush_core::ShellExtensions> Highlighter<'a, SE> {
                 self.highlight_program(command.as_str(), piece.start + 2 /* opening $( */);
                 self.set_next_missing_kind(HighlightKind::CommandSubstitution);
             }
+            brush_parser::word::WordPiece::FunctionSubstitution { command, reply } => {
+                self.set_next_missing_kind(HighlightKind::CommandSubstitution);
+                let open = if reply { 3 } else { 2 };
+                self.highlight_program(command.as_str(), piece.start + open);
+                self.set_next_missing_kind(HighlightKind::CommandSubstitution);
+            }
             brush_parser::word::WordPiece::ArithmeticExpression(_) => {
                 // TODO(highlighting): Consider individually highlighting pieces of the expression
                 // itself.

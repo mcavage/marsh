@@ -57,6 +57,14 @@ pub enum WordPiece {
     CommandSubstitution(String),
     /// A backquoted command substitution.
     BackquotedCommandSubstitution(String),
+    /// A Bash 5.3 function substitution: `${ command; }` (`reply` false), or
+    /// `${| command; }` (`reply` true), whose value is `REPLY`.
+    FunctionSubstitution {
+        /// The command text between the braces (without the `|`).
+        command: String,
+        /// Whether the value is `REPLY` rather than the command's output.
+        reply: bool,
+    },
     /// An escape sequence.
     EscapeSequence(String),
     /// An arithmetic expression.
@@ -879,12 +887,14 @@ peg::parser! {
             arithmetic_expansion() /
             legacy_arithmetic_expansion() /
             command_substitution() /
+            function_substitution() /
             parameter_expansion()
 
         rule double_quoted_word_piece() -> WordPiece =
             arithmetic_expansion() /
             legacy_arithmetic_expansion() /
             command_substitution() /
+            function_substitution() /
             parameter_expansion() /
             double_quoted_escape_sequence() /
             double_quoted_text()
@@ -969,6 +979,7 @@ peg::parser! {
             arithmetic_expansion() /
             legacy_arithmetic_expansion() /
             command_substitution() /
+            function_substitution() /
             parameter_expansion() /
             heredoc_escape_sequence() /
             heredoc_literal_text()
@@ -1176,6 +1187,24 @@ peg::parser! {
         pub(crate) rule command_substitution() -> WordPiece =
             "$(" c:command() ")" { WordPiece::CommandSubstitution(c.to_owned()) } /
             "`" c:backquoted_command() "`" { WordPiece::BackquotedCommandSubstitution(c) }
+
+        rule function_substitution() -> WordPiece =
+            non_posix_extensions_enabled() "${" body:function_substitution_body() {
+                match body.strip_prefix('|') {
+                    Some(command) => WordPiece::FunctionSubstitution { command: command.to_owned(), reply: true },
+                    None => WordPiece::FunctionSubstitution { command: body.to_owned(), reply: false },
+                }
+            }
+
+        // The text up to the closing brace, which the tokenizer locates; the
+        // brace itself is consumed but not returned.
+        rule function_substitution_body() -> &'input str = #{|input, pos| {
+            let rest = &input[pos..];
+            match crate::tokenizer::function_substitution_len(rest, &parser_options.tokenizer_options()) {
+                Some(len) => peg::RuleResult::Matched(pos + len, &rest[..len - 1]),
+                None => peg::RuleResult::Failed,
+            }
+        }}
 
         pub(crate) rule command() -> &'input str =
             $(command_piece()*)

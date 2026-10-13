@@ -546,6 +546,24 @@ pub fn uncached_tokenize_str(
     Ok(tokens)
 }
 
+/// Returns the byte length of a function substitution's body and closing brace, given the text
+/// just after its `${`; `None` if the text does not start one or it is not closed.
+pub(crate) fn function_substitution_len(text: &str, options: &TokenizerOptions) -> Option<usize> {
+    if !text.starts_with([' ', '\t', '\n', '|']) {
+        return None;
+    }
+    let mut reader = std::io::BufReader::new(text.as_bytes());
+    let mut tokenizer = Tokenizer::new(&mut reader, options);
+    let mut state = TokenParseState::new(&tokenizer.cross_state.cursor);
+    tokenizer.consume_function_substitution(&mut state).ok()?;
+    let chars = tokenizer.cross_state.cursor.index;
+    Some(
+        text.char_indices()
+            .nth(chars)
+            .map_or(text.len(), |(index, _)| index),
+    )
+}
+
 impl<'a, R: ?Sized + std::io::BufRead> Tokenizer<'a, R> {
     pub fn new(reader: &'a mut R, options: &TokenizerOptions) -> Self {
         Tokenizer {
@@ -687,6 +705,100 @@ impl<'a, R: ?Sized + std::io::BufRead> Tokenizer<'a, R> {
 
         state.append_char(self.next_char()?.unwrap());
         Ok(())
+    }
+
+    /// Consumes the body and closing brace of a function substitution, after its `${`. As in
+    /// Bash, the closing `}` is one in a position where a reserved word could be: at the start
+    /// of a command, after a group's `{ ...; }`. A `}` inside a word or among a command's
+    /// arguments is text.
+    fn consume_function_substitution(
+        &mut self,
+        state: &mut TokenParseState,
+    ) -> Result<(), TokenizerError> {
+        let mut pending_here_doc_tokens = vec![];
+        let mut drain_here_doc_tokens = false;
+        let mut groups = 0_usize;
+        let mut command_start = true;
+
+        loop {
+            let cur_token = if drain_here_doc_tokens && !pending_here_doc_tokens.is_empty() {
+                if pending_here_doc_tokens.len() == 1 {
+                    drain_here_doc_tokens = false;
+                }
+                pending_here_doc_tokens.remove(0)
+            } else {
+                let cur_token = self.next_token_until(Some('}'), true)?;
+                if matches!(
+                    cur_token.reason,
+                    TokenEndReason::HereDocumentBodyStart
+                        | TokenEndReason::HereDocumentBodyEnd
+                        | TokenEndReason::HereDocumentEndTag
+                ) {
+                    pending_here_doc_tokens.push(cur_token);
+                    continue;
+                }
+                cur_token
+            };
+
+            if matches!(cur_token.reason, TokenEndReason::UnescapedNewLine)
+                && !pending_here_doc_tokens.is_empty()
+            {
+                pending_here_doc_tokens.push(cur_token);
+                drain_here_doc_tokens = true;
+                continue;
+            }
+
+            let mut in_word = false;
+            if let Some(token) = &cur_token.token {
+                state.append_str(token.to_str());
+                match token {
+                    Token::Operator(operator, _) => {
+                        command_start = !matches!(operator.as_str(), ")" | ">" | "<" | ">>");
+                    }
+                    Token::Word(word, _) if word.trim_matches([' ', '\t']).is_empty() => {}
+                    Token::Word(word, _) => {
+                        let word = word.trim_matches([' ', '\t']);
+                        if command_start && word == "{" {
+                            groups += 1;
+                        }
+                        command_start = matches!(
+                            word,
+                            "{" | "then"
+                                | "do"
+                                | "else"
+                                | "elif"
+                                | "if"
+                                | "while"
+                                | "until"
+                                | "!"
+                                | "time"
+                        ) && command_start;
+                        in_word =
+                            matches!(cur_token.reason, TokenEndReason::SpecifiedTerminatingChar);
+                    }
+                }
+            }
+
+            match cur_token.reason {
+                TokenEndReason::HereDocumentBodyStart => state.append_char('\n'),
+                TokenEndReason::NonNewLineBlank => state.append_char(' '),
+                TokenEndReason::UnescapedNewLine => command_start = true,
+                TokenEndReason::SpecifiedTerminatingChar => {
+                    state.append_char(self.next_char()?.unwrap());
+                    if command_start && !in_word {
+                        if groups == 0 {
+                            return Ok(());
+                        }
+                        groups -= 1;
+                    }
+                    command_start = false;
+                }
+                TokenEndReason::EndOfInput => {
+                    return Err(TokenizerError::UnterminatedCommandSubstitution);
+                }
+                _ => (),
+            }
+        }
     }
 
     /// Returns the next token from the input stream, optionally stopping early when a specified
@@ -974,6 +1086,12 @@ impl<'a, R: ?Sized + std::io::BufRead> Tokenizer<'a, R> {
 
                             // Consume the '{' and add it to the token.
                             state.append_char(self.next_char()?.unwrap());
+
+                            // Bash 5.3 function substitution: `${ cmd; }`, `${| cmd; }`.
+                            if matches!(self.peek_char()?, Some(' ' | '\t' | '\n' | '|')) {
+                                self.consume_function_substitution(&mut state)?;
+                                continue;
+                            }
 
                             let mut pending_here_doc_tokens = vec![];
                             let mut drain_here_doc_tokens = false;

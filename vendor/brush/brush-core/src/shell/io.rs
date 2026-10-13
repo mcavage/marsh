@@ -46,7 +46,9 @@ impl<SE: extensions::ShellExtensions> crate::Shell<SE> {
         self.options.print_commands_and_arguments = tracing;
 
         // Add additional depth-based prefixes using the first character of PS4.
-        let additional_depth = self.call_stack.script_source_depth() + self.depth;
+        let additional_depth = self.call_stack.script_source_depth()
+            + self.call_stack.function_substitution_depth()
+            + self.depth;
         if let Some(c) = prefix.chars().next() {
             for _ in 0..additional_depth {
                 prefix.insert(0, c);
@@ -85,6 +87,9 @@ impl<SE: extensions::ShellExtensions> crate::Shell<SE> {
         err: &error::Error,
     ) -> Result<(), error::Error> {
         use crate::extensions::ErrorFormatter as _;
+        if matches!(err.kind(), error::ErrorKind::SubstitutionControlFlow(_)) {
+            return Ok(());
+        }
         let str = self.error_formatter.format_error(err, self);
         write!(file, "{str}")?;
 

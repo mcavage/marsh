@@ -4,6 +4,7 @@ use std::{
     borrow::Cow,
     ffi::OsStr,
     fmt::Display,
+    io::{Read as _, Seek as _},
     path::{Path, PathBuf},
     process::Stdio,
     sync::{Arc, OnceLock},
@@ -22,7 +23,8 @@ use crate::{
     openfiles::{self, OpenFile, OpenFiles},
     pathsearch, processes,
     results::ExecutionSpawnResult,
-    sys, trace_categories, traps, variables,
+    sys, trace_categories, traps,
+    variables::{self, ShellValue, ShellVariable},
 };
 
 type PreexecuteHook = Arc<dyn Fn(&str) + Send + Sync>;
@@ -1032,6 +1034,94 @@ pub(crate) async fn invoke_command_in_subshell_and_get_output(
     // shell to run the substitution.
 
     Ok(output_str)
+}
+
+/// Runs a Bash 5.3 function substitution in the current shell, as an unnamed
+/// function sharing the caller's positional parameters: `${ cmd; }` yields
+/// its output, `${| cmd; }` the value of a `REPLY` local to it. `return` ends
+/// only the substitution; `exit`, `break` and `continue` end the enclosing
+/// command, and the substitution's status becomes `$?`.
+pub(crate) async fn invoke_function_substitution(
+    shell: &mut Shell<impl extensions::ShellExtensions>,
+    params: &ExecutionParameters,
+    command: String,
+    reply: bool,
+) -> Result<String, error::Error> {
+    let mut params = params.clone();
+    // Bash captures the output in a temporary file, so background jobs the
+    // command starts cannot hold the substitution open.
+    let capture = if reply {
+        None
+    } else {
+        let file = unlinked_temp_file()?;
+        params.set_fd(OpenFiles::STDOUT_FD, file.try_clone()?.into());
+        Some(file)
+    };
+
+    shell.env_mut().push_scope(env::EnvironmentScope::Local);
+    if reply {
+        shell.env_mut().add(
+            "REPLY",
+            ShellVariable::new(ShellValue::Unset(variables::ShellValueUnsetType::Untyped)),
+            env::EnvironmentScope::Local,
+        )?;
+    }
+    shell.call_stack_mut().set_in_function_substitution(true);
+    let result = run_substitution_command(shell, params, command).await;
+    shell.call_stack_mut().set_in_function_substitution(false);
+    let value = if reply {
+        shell
+            .env()
+            .get_str("REPLY", shell)
+            .map(|value| value.into_owned())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    shell.env_mut().pop_scope(env::EnvironmentScope::Local)?;
+
+    let result = result?;
+    shell.set_last_exit_status(result.exit_code.into());
+    if !matches!(
+        result.next_control_flow,
+        ExecutionControlFlow::Normal | ExecutionControlFlow::ReturnFromFunctionOrScript
+    ) {
+        return Err(
+            error::ErrorKind::SubstitutionControlFlow(error::SubstitutionResult(result)).into(),
+        );
+    }
+
+    let Some(mut file) = capture else {
+        return Ok(value);
+    };
+    file.seek(std::io::SeekFrom::Start(0))?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// A new temporary file, already removed from its directory.
+fn unlinked_temp_file() -> Result<std::fs::File, error::Error> {
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    loop {
+        let path = std::env::temp_dir().join(std::format!(
+            "brush-funsub-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        match options.open(&path) {
+            Ok(file) => {
+                let _ = std::fs::remove_file(&path);
+                return Ok(file);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
 }
 
 async fn run_substitution_command(
