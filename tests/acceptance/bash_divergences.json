@@ -824,38 +824,10 @@
     "repeat-c3a9ff3e-stderr@C"
    ]
   }},
-  {"id": "PROMPT", "summary": "Prompt strings: quote removal and brace expansion are applied, \\nnn and \\001/\\002 handled differently, controls not made visible", "cases": {
+  {"id": "PROMPT", "summary": "Prompt strings: single quotes inside a ${v:-'w'} word are removed (Bash keeps them, as in a here-document)", "cases": {
    "prompt": [
-    "braces-tilde-glob-expand@C",
-    "braces-tilde-glob-expand@C.utf8",
-    "date-protected-variable-expand@C",
-    "date-protected-variable-expand@C.utf8",
-    "date-unknown-expand@C",
-    "date-unknown-expand@C.utf8",
-    "date-unknown-literal@C",
-    "date-unknown-literal@C.utf8",
-    "literal-control-expand@C",
-    "literal-control-expand@C.utf8",
-    "literal-control-literal@C",
-    "literal-control-literal@C.utf8",
-    "octal-control-expand@C",
-    "octal-control-expand@C.utf8",
-    "octal-control-literal@C",
-    "octal-control-literal@C.utf8",
-    "octal-exact-three-expand@C",
-    "octal-exact-three-expand@C.utf8",
-    "octal-exact-three-literal@C",
-    "octal-exact-three-literal@C.utf8",
-    "octal-nul-expand@C",
-    "octal-nul-expand@C.utf8",
-    "octal-nul-literal@C",
-    "octal-nul-literal@C.utf8",
     "parameter-single-quotes-expand@C",
-    "parameter-single-quotes-expand@C.utf8",
-    "quotes-expand@C",
-    "quotes-expand@C.utf8",
-    "quotes-variable-expand@C",
-    "quotes-variable-expand@C.utf8"
+    "parameter-single-quotes-expand@C.utf8"
    ]
   }},
   {"id": "READ", "summary": "read -t: when the timeout comes right after a backslash, Bash stores its internal CTLESC marker (\\x01) in the variable; Brush stores the backslash", "cases": {

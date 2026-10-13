@@ -738,6 +738,16 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   commands); with one it runs the trap and, if a line editor was reading,
   exits with the last status. A line the hangup cut short is dropped. Covered
   by `every_catchable_signal_can_be_trapped_or_ignored`.
+- `0093` decodes prompts as Bash's `decode_prompt_string`: `\\NNN` takes exactly
+  three octal digits (its byte, masked to eight bits; `\\000` shows nothing)
+  and, like `\\\\` and unknown escapes, passes on as written to the expansion
+  pass; every other escape's text is protected from that pass (`$`, a
+  backquote and `\\` escaped); `\\[`/`\\]` give markers only with line editing,
+  and only PS1/PS2 (and `BRUSH_PS_ALT`) drop them, so PS4 keeps raw `\\001`;
+  the expansion pass is here-document-like (`basic_expand_prompt_word`:
+  quotes, braces, `~` and globs are literal), with `\\"` resolved before it;
+  and `\\D{fmt}` is the C library's `strftime`. Covered by
+  `prompt_strings_decode_as_in_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
