@@ -1,4 +1,3 @@
-use crate::bytes::ToShellText as _;
 use brush_parser::ast::{self, CommandPrefixOrSuffixItem};
 use itertools::Itertools;
 use std::borrow::Cow;
@@ -2443,6 +2442,9 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
         let mut assignments = vec![];
         let mut args: Vec<CommandArg> = vec![];
         let mut command_takes_assignments = false;
+        // Bash expands a command's words, then its assignments, then its
+        // redirections.
+        let mut redirects = vec![];
 
         // Capture the status change count before expansion, so we can detect
         // if expansion (e.g., command substitution) set an exit status.
@@ -2450,16 +2452,7 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
 
         for item in prefix_iter.chain(cmd_name_items.iter()).chain(suffix_iter) {
             match item {
-                CommandPrefixOrSuffixItem::IoRedirect(redirect) => {
-                    if let Err(e) = setup_redirect(&mut context.shell, &mut params, redirect).await
-                    {
-                        if matches!(e.kind(), error::ErrorKind::SubstitutionControlFlow(_)) {
-                            return Err(e);
-                        }
-                        writeln!(params.stderr(&context.shell), "error: {e}")?;
-                        return Ok(ExecutionResult::general_error().into());
-                    }
-                }
+                CommandPrefixOrSuffixItem::IoRedirect(redirect) => redirects.push(redirect),
                 CommandPrefixOrSuffixItem::ProcessSubstitution(kind, subshell_command) => {
                     let (installed_fd_num, substitution_file) = setup_process_substitution(
                         &context.shell,
@@ -2530,6 +2523,47 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
                 }
             }
         }
+
+        let expanded_assignments;
+        let mut assignments = assignments;
+        if !redirects.is_empty() && !assignments.is_empty() {
+            expanded_assignments =
+                expand_assignments_first(&mut context.shell, &params, &assignments).await?;
+            assignments = expanded_assignments.iter().collect();
+        }
+
+        // Like Bash, a command that runs as its own process expands its
+        // redirections there: their side effects (`>"$((++i))"`, `{fd}>file`,
+        // `>"${ exit 3; }"`) do not reach the shell.
+        let in_child = runs_as_process(&context.shell, &args)
+            && redirects.iter().any(|redirect| redirect_expands(redirect));
+        let mut child_shell = in_child.then(|| (*context.shell).clone());
+        for redirect in redirects {
+            let shell = match child_shell.as_mut() {
+                Some(child) => child,
+                None => &mut *context.shell,
+            };
+            if let Err(e) = setup_redirect(shell, &mut params, redirect).await {
+                match e.kind() {
+                    error::ErrorKind::SubstitutionControlFlow(result) if in_child => {
+                        let status: u8 = result.0.exit_code.into();
+                        context.shell.set_last_exit_status(status);
+                        return Ok(ExecutionResult::new(status).into());
+                    }
+                    error::ErrorKind::SubstitutionControlFlow(_) => return Err(e),
+                    error::ErrorKind::RedirectionFailure(target, reason) => {
+                        writeln!(
+                            params.stderr(&context.shell),
+                            "{}{target}: {reason}",
+                            context.shell.diagnostic_prefix()
+                        )?;
+                    }
+                    _ => writeln!(params.stderr(&context.shell), "error: {e}")?,
+                }
+                return Ok(ExecutionResult::general_error().into());
+            }
+        }
+        drop(child_shell);
 
         // If we have a command, then execute it.
         if let Some(CommandArg::String(cmd_name)) = args.first() {
@@ -2677,6 +2711,131 @@ async fn expand_words(
         fields.extend(expansion::full_expand_and_split_word(shell, params, word).await?);
     }
     Ok(fields)
+}
+
+/// An I/O error's reason as the C library states it (`No such file or
+/// directory`), which Bash's diagnostics use.
+fn io_reason(err: &std::io::Error) -> String {
+    #[cfg(unix)]
+    if let Some(code) = err.raw_os_error() {
+        return nix::errno::Errno::from_raw(code).desc().to_owned();
+    }
+    err.to_string()
+}
+
+/// Expands assignment values ahead of the command's redirections, as Bash
+/// does; each value is kept as single-quoted text, so applying the assignment
+/// later does not expand it again. Each one is applied in a scope of its own
+/// while the next expands (`a=new b=$a cmd`), and that scope is then dropped:
+/// redirections do not see the command's variables.
+async fn expand_assignments_first(
+    shell: &mut Shell<impl extensions::ShellExtensions>,
+    params: &ExecutionParameters,
+    assignments: &[&ast::Assignment],
+) -> Result<Vec<ast::Assignment>, error::Error> {
+    let mut expanded = Vec::with_capacity(assignments.len());
+    shell.env_mut().push_scope(EnvironmentScope::Command);
+    let result = expand_each_assignment(shell, params, assignments, &mut expanded).await;
+    shell.env_mut().pop_scope(EnvironmentScope::Command)?;
+    result?;
+    Ok(expanded)
+}
+
+async fn expand_each_assignment(
+    shell: &mut Shell<impl extensions::ShellExtensions>,
+    params: &ExecutionParameters,
+    assignments: &[&ast::Assignment],
+    expanded: &mut Vec<ast::Assignment>,
+) -> Result<(), error::Error> {
+    let quote = |text: String| {
+        ast::Word::from(crate::escape::force_quote(
+            &text,
+            crate::escape::QuoteMode::SingleQuote,
+        ))
+    };
+    for assignment in assignments {
+        let value = match expand_assignment_value(shell, params, &assignment.value).await? {
+            ast::AssignmentValue::Scalar(word) => ast::AssignmentValue::Scalar(quote(word.value)),
+            ast::AssignmentValue::Array(elements) => ast::AssignmentValue::Array(
+                elements
+                    .into_iter()
+                    .map(|(key, value)| (key.map(|key| quote(key.value)), quote(value.value)))
+                    .collect(),
+            ),
+        };
+        let assignment = ast::Assignment {
+            name: assignment.name.clone(),
+            value,
+            append: assignment.append,
+            loc: assignment.loc.clone(),
+        };
+        // Traced once, when the command applies it.
+        let tracing =
+            std::mem::replace(&mut shell.options_mut().print_commands_and_arguments, false);
+        let applied = apply_assignment(
+            &assignment,
+            shell,
+            params,
+            true,
+            Some(EnvironmentScope::Command),
+            EnvironmentScope::Command,
+        )
+        .await;
+        shell.options_mut().print_commands_and_arguments = tracing;
+        applied?;
+        expanded.push(assignment);
+    }
+    Ok(())
+}
+
+/// Whether the command named by `args` runs as a separate process: not a
+/// function or builtin (a builtin backed by a process counts; `command NAME`
+/// is `NAME`).
+fn runs_as_process(shell: &Shell<impl extensions::ShellExtensions>, args: &[CommandArg]) -> bool {
+    let mut words = args.iter().filter_map(|arg| match arg {
+        CommandArg::String(word) => Some(word.as_str()),
+        CommandArg::Assignment(_) => None,
+    });
+    let mut name = words.next();
+    if name == Some("command") {
+        name = words.find(|word| *word != "-p");
+        if name.is_some_and(|word| word.starts_with('-')) {
+            return false;
+        }
+    }
+    let Some(name) = name else {
+        return false;
+    };
+    if name.contains('/') {
+        return true;
+    }
+    if shell.funcs().get(name).is_some() {
+        return false;
+    }
+    shell
+        .builtins()
+        .get(name)
+        .filter(|builtin| !builtin.disabled)
+        .is_none_or(|builtin| builtin.process_shim.is_some())
+}
+
+/// Whether setting up `redirect` may change shell state: its words expand
+/// something, or it names a descriptor variable.
+fn redirect_expands(redirect: &ast::IoRedirect) -> bool {
+    let expands = |text: &str| text.contains(['$', '`']);
+    match redirect {
+        ast::IoRedirect::NamedFd(..) => true,
+        ast::IoRedirect::HereDocument(_, doc) => doc.requires_expansion && expands(&doc.doc.value),
+        ast::IoRedirect::File(_, _, target) => match target {
+            ast::IoFileRedirectTarget::Filename(word)
+            | ast::IoFileRedirectTarget::Duplicate(word) => expands(&word.value),
+            ast::IoFileRedirectTarget::Fd(_)
+            | ast::IoFileRedirectTarget::ProcessSubstitution(..) => false,
+        },
+        ast::IoRedirect::HereString(_, word) | ast::IoRedirect::OutputAndError(word, _) => {
+            expands(&word.value)
+        }
+    }
 }
 
 async fn expand_assignment(
@@ -2985,8 +3144,9 @@ pub(crate) async fn setup_redirect(
                         return Err(error::ErrorKind::InvalidRedirection.into());
                     }
 
+                    let expanded_name = expanded_fields.remove(0);
                     let expanded_file_path: PathBuf =
-                        shell.absolute_path(Path::new(expanded_fields.remove(0).as_str()));
+                        shell.absolute_path(Path::new(expanded_name.as_str()));
 
                     let default_fd_if_unspecified = get_default_fd_for_redirect_kind(kind);
                     match kind {
@@ -3040,10 +3200,7 @@ pub(crate) async fn setup_redirect(
                     let opened_file = shell
                         .open_file(&options, &expanded_file_path, params)
                         .map_err(|err| {
-                            error::ErrorKind::RedirectionFailure(
-                                expanded_file_path.to_shell_text().to_string(),
-                                err.to_string(),
-                            )
+                            error::ErrorKind::RedirectionFailure(expanded_name, io_reason(&err))
                         })?;
 
                     params.open_files.set_fd(fd_num, opened_file);
@@ -3209,10 +3366,7 @@ fn setup_redirect_output_and_error_to(
     let stdout_file = shell
         .open_file(&file_options, &abs_file_path, params)
         .map_err(|err| {
-            error::ErrorKind::RedirectionFailure(
-                abs_file_path.to_shell_text().to_string(),
-                err.to_string(),
-            )
+            error::ErrorKind::RedirectionFailure(file_path.to_owned(), io_reason(&err))
         })?;
 
     let stderr_file = stdout_file.clone();

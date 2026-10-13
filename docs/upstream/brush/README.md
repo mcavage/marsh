@@ -568,6 +568,16 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   they read even when input is not a terminal; and `--input-backend reedline`
   without a terminal reads as the minimal backend (Reedline needs one). Covered
   by `interactive_shell_without_a_terminal_prompts_on_standard_error`.
+- `0076` expands a simple command's redirections after its words and
+  assignments, as Bash does: assignment values expand first, each applied in
+  a scope of its own while the next expands, then dropped so redirections do
+  not see them (the values are kept quoted, so the command does not expand
+  them again). For a command that runs as its own process (not a function or
+  builtin; `command NAME` is `NAME`), redirections whose words expand, and
+  `{fd}` ones, are set up in a copy of the shell, so their side effects stay
+  out of it, as in Bash's forked child; an `exit` there ends only the command.
+  A failed redirection reads `NAME: line N: WORD: No such file or directory`.
+  Covered by `redirections_expand_after_assignments_and_in_the_child_of_a_process`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

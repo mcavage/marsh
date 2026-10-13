@@ -1957,3 +1957,35 @@ fn interactive_shell_without_a_terminal_prompts_on_standard_error() {
     );
     assert_eq!(brush.status.code(), bash.status.code());
 }
+
+/// A command's words expand first, then its assignments (each seeing the one
+/// before), then its redirections, which do not see the command's variables.
+/// For a command that runs as its own process, the redirections expand as if
+/// in the child: their side effects (`$((++i))`, `${v:=x}`, `{fd}`, a function
+/// substitution's assignments or `exit`) do not reach the shell. A failed
+/// redirection is reported as Bash does.
+#[test]
+fn redirections_expand_after_assignments_and_in_the_child_of_a_process() {
+    let script = r#"i=0; /bin/echo a >"$((++i))"; unset v; /bin/echo b >"${v:=out}"; echo "i=$i v=${v-unset}"
+unset fd; /bin/echo c {fd}>f1; echo "fd=${fd-unset}"; printf d {fd}>f2; echo " fd=${fd-unset}"
+v=before; W=${ v=after; printf val; } /bin/echo e >"${ printf '%s' "$v"; }"; echo "v=$v"; cat after
+v=before; command /bin/echo f >"${ v=after; printf g; }"; echo "v=$v"; cat g
+a=old; a=new b=$a /usr/bin/printenv b >h; cat h; unset W; W=val /bin/echo i >"${W-none}"; cat none
+trap 'echo EXIT' EXIT; /bin/echo j >"${ exit 12; }"; echo "status=$?"
+cat <<E
+${ v=heredoc; printf k; }
+E
+echo "v=$v"; /bin/echo l >missing/m; echo "status=$?""#;
+    let expected = b"i=0 v=unset\nc\nfd=unset\nd fd=10\nv=after\ne\nv=before\nf\nnew\ni\nstatus=12\nk\nv=before\nstatus=1\nEXIT\n";
+    let bash = run_named("bash", script, false, Some("audit"));
+    assert_eq!(bash.stdout, expected, "Bash: {bash:?}");
+    let brush = run_named(
+        env!("CARGO_BIN_EXE_marsh-local"),
+        script,
+        false,
+        Some("audit"),
+    );
+    assert_eq!(brush.status.code(), bash.status.code(), "{brush:?}");
+    assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
+    assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
+}
