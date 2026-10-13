@@ -62,6 +62,14 @@ class JsonRpcPeer:
     def _read_stderr(self, stream) -> None:
         self.stderr = stream.read().decode("utf-8", "replace")
 
+    def exited(self, timeout: float = WAIT_TIMEOUT) -> tuple[int, str]:
+        """Wait for the process to exit; its status and complete stderr."""
+        status = self.process.wait(timeout=timeout)
+        self._stderr_reader.join(timeout)
+        if self._stderr_reader.is_alive():
+            raise AssertionError(f"stderr of exited process {self.process.pid} never closed")
+        return status, self.stderr
+
     def notify(self, method: str, params: dict | None = None) -> None:
         message = {"jsonrpc": "2.0", "method": method}
         if params is not None:

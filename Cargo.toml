@@ -29,3 +29,9 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+
+# marsh-mcp hashes its own executable and the pinned marsh, marshd and sbx
+# executables (hundreds of MB) to identify its resident broker. Unoptimized,
+# SHA-256 runs at about 30 MB/s; optimize just that crate in development builds.
+[profile.dev.package.sha2]
+opt-level = 3
