@@ -188,7 +188,7 @@ fn wait_n_can_collect_each_job_once_and_reports_empty_set() {
 
 fn matches_bash_in_a_fresh_directory(script: &str, expected: &[u8]) {
     common::require_bash_oracle();
-    let run = |mut command: Command| {
+    let run = |shell: &str, mut command: Command| {
         let directory = tempfile::tempdir().unwrap();
         let child = common::spawn_group(
             command
@@ -197,14 +197,16 @@ fn matches_bash_in_a_fresh_directory(script: &str, expected: &[u8]) {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped()),
         );
-        common::wait_for_exit(child, script, Duration::from_mins(1))
+        // Name the shell: a case that overstays its budget in one of them
+        // must say which.
+        common::wait_for_exit(child, &format!("{shell}: {script}"), Duration::from_mins(1))
     };
-    let bash = run(isolated_command("bash"));
+    let bash = run("Bash", isolated_command("bash"));
     assert!(bash.status.success(), "Bash: {bash:?}");
     assert_eq!(bash.stdout, expected, "Bash: {bash:?}");
     let mut brush = marsh();
     brush.arg("--no-config");
-    let brush = run(brush);
+    let brush = run("marsh", brush);
     assert_eq!(brush.status, bash.status, "{brush:?}");
     assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
 }
