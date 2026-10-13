@@ -195,3 +195,56 @@ generated successfully, and all 23 marked split/guide examples parsed without
 marker or replacement errors. Those VM-backed examples were not executed. An
 independent source-based review of the factual corrections led to narrower
 development-shell versus job authority language and Git-specific ignore rules.
+
+## Approved homepage follow-up: shell, filesystem, and speed
+
+After live review, the user identified that static recipes lost the experience
+of entering a shell and composing commands there. They approved restoring a
+short session animation, explaining filesystem branching under execution, and
+making speed visible.
+
+Keep the agreed platform identity. Show the Mac prompt, entry into marsh,
+`split { ... } | join --keep`, ordinary `agent && make test` branches, and a
+return to the prompt for inspection and explicit application. Do not restore the
+nested opening pipeline, automatic judge, or large job tree. The complete
+illustrated transcript remains visible during replay. Replay highlights commands
+and the corresponding project-copy/patch stages; it does not make readers wait
+for lines to appear. Provide a stop/replay control and a static reduced-motion
+and no-JavaScript view.
+
+The session remains illustrative: no fabricated model replies, test successes,
+split IDs, or elapsed-time claims. Its compressed playback is explicitly not a
+timing measurement. A captured substantive agent workflow remains follow-up work.
+
+Filesystem copy must explain that split snapshots current files once, including
+uncommitted edits and nonignored new files, then forks copies for the branches.
+Patches compare against that snapshot, not HEAD or the live original tree.
+macOS copy-on-write clones avoid full-file copying where supported; unsupported
+cloning falls back to ordinary copies. Do not claim instant atomic snapshots,
+that every file is copied, or that all branch shell commands are confined.
+
+Communicate speed through mechanisms: warm VM reuse instead of a VM boot per
+call, copy-on-write file clones, and concurrent branches. Keep first-use downloads
+separate from repeat use. Do not claim a numerical latency, throughput advantage,
+or faster model inference without measurements of the stated path and conditions.
+
+PR #79 reverted the previously approved docs/site files while adding benchmark
+work. The user authorized their exact restoration, shipped in PR #80. Preserve
+all benchmark files when making this follow-up; changes belong on a fresh branch
+based on current main, not an old filesystem snapshot.
+
+The follow-up browser checks cover five ordered replay phases, stop/replay,
+unchanged visible transcript text throughout playback, reduced motion, and
+no-JavaScript presentation. Desktop light/dark, 320/390px mobile, and tablet
+views have no page or code overflow; copying, theme switching, and keyboard skip
+navigation still work. Site/Markdown links and JavaScript syntax checks pass.
+Filesystem claims were reviewed against the implementation, including the
+unsupported-cloning fallback and the distinction between original repository
+branches and a fork's own Git metadata. No numeric speed benchmark or
+provider-billed demonstration was run for this homepage follow-up.
+
+Independent acceptance prompted two refinements: put the speed mechanisms in
+the hero and move execution/filesystem explanation ahead of deeper delegation;
+give the mobile filesystem view its own synchronized command fragment and
+replay/stop control. Real browser pointer clicks verified the mobile control and
+shared playback state. The revised candidate passed independent acceptance.
