@@ -135,10 +135,18 @@ class JsonRpcPeer:
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait()
-        try:
-            if self.process.stdout:
-                self.process.stdout.close()
-            if self.process.stderr:
-                self.process.stderr.close()
-        except OSError:
-            pass
+        # Close a pipe only once its reader has seen EOF. Closing it under a
+        # reader blocked in readline frees the descriptor number; the next
+        # peer's pipe can reuse it, and the stale reader then steals bytes
+        # from that peer. A reader still blocked (a descendant holds the pipe)
+        # keeps its descriptor open until the test process exits.
+        for reader, stream in (
+            (self._reader, self.process.stdout),
+            (self._stderr_reader, self.process.stderr),
+        ):
+            reader.join(5)
+            if stream and not reader.is_alive():
+                try:
+                    stream.close()
+                except OSError:
+                    pass
