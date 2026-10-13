@@ -934,20 +934,6 @@
     "special-prefix-hidden"
    ]
   }},
-  {"id": "PRINTF", "summary": "printf: %b keeps \\\" escapes and \\c stops all output in Bash; empty numeric arguments are errors in Bash", "cases": {
-   "byte-builtins": [
-    "printf-b-c-stop@C",
-    "printf-b-c-stop@C.utf8",
-    "printf-empty-vs-missing-number@C",
-    "printf-empty-vs-missing-number@C.utf8",
-    "printf-format-escaped-quote@C",
-    "printf-format-escaped-quote@C.utf8",
-    "printf-invalid-conversion@C",
-    "printf-invalid-conversion@C.utf8",
-    "printf-invalid-number@C",
-    "printf-invalid-number@C.utf8"
-   ]
-  }},
   {"id": "PROMPT", "summary": "Prompt strings: quote removal and brace expansion are applied, \\nnn and \\001/\\002 handled differently, controls not made visible", "cases": {
    "prompt": [
     "braces-tilde-glob-expand@C",
