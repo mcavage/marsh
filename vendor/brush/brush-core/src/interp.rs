@@ -3218,6 +3218,7 @@ pub(crate) async fn setup_redirect(
                 let mut fd: ShellFd = 10;
                 while params.open_files.contains_fd(fd)
                     || shell.persistent_open_files().contains_fd(fd)
+                    || crate::subshell::inherited_descriptor_open(fd)
                 {
                     fd += 1;
                 }

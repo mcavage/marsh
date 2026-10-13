@@ -2483,3 +2483,28 @@ enable -n echo; compgen -A command echo; printf 's=%s\n' "$?""#;
     );
     assert_eq!(brush.stdout, bash.stdout, "{brush:?}");
 }
+
+/// `{name}` redirections do not take a descriptor the shell inherited: with
+/// fd 10 open from its parent, both shells allocate 11 and leave 10 alone.
+#[test]
+fn named_descriptors_skip_inherited_ones() {
+    let directory = tempfile::tempdir().unwrap();
+    let outputs = ["bash", env!("CARGO_BIN_EXE_marsh-local")].map(|program| {
+        let output = shell("bash")
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                r#"exec 10>kept; if [ "$0" = bash ]; then set -- --noprofile --norc; else set -- --no-config --noprofile --norc; fi
+"$0" "$@" -c 'exec {x}>new; echo "x=$x"; sh -c "echo inherited >>/dev/fd/10"'; cat kept"#,
+                program,
+            ])
+            .current_dir(directory.path())
+            .output()
+            .unwrap();
+        assert!(output.stderr.is_empty(), "{program}: {output:?}");
+        output.stdout
+    });
+    assert_eq!(outputs[0], b"x=11\ninherited\n");
+    assert_eq!(outputs[1], outputs[0]);
+}
