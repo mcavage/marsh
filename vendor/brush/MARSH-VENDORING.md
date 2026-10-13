@@ -95,14 +95,15 @@ Patch `0071` implements Bash 5.3 function substitutions (`${ cmd; }`,
 `${| cmd; }`); `0071a` keeps a late runtime dispatch of a delivered TERM
 from running its trap again. Patch `0072` treats NUL bytes in shell input as Bash does.
 Patch `0073` keeps byte strings that are not UTF-8 losslessly
-(`brush_core::bytes`).
+(`brush_core::bytes`). Patch `0074` replaces `${v/pat/rep}` matches as
+Bash's `pat_subst` does.
 
 This directory contains only the runtime crate source, manifests, licenses,
 and build metadata needed by marsh. Upstream integration tests, snapshots,
 examples, benches, and development tooling are intentionally omitted. Each
 local delta is covered by focused tests in `crates/marsh/tests/smoke.rs` or,
 for `0010`, `0012`-`0016`, `0018`-`0032`, `0036`, `0038`, `0039`, `0042`,
-`0052`, `0053`, `0055`-`0067`, and `0070`-`0073`,
+`0052`, `0053`, `0055`-`0067`, and `0070`-`0074`,
 `crates/marsh/tests/bash_audit.rs` (`0017`, `0036`, `0037`, `0040`, `0041`, `0043`, `0044`, `0054`, `0068`, and `0069` are in `smoke.rs`, and `0070` also is; `0033` and `0034` are in `split_join.rs` and `bash_audit.rs`, with
 parser cases in `brush-parser/src/parser/tests/composition.rs`). The earlier patch series was
 also checked against the full upstream compatibility suite

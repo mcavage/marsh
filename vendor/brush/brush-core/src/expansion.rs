@@ -1755,20 +1755,21 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
 
                 // If no replacement was provided, then we replace with an empty string.
                 let replacement = replacement.unwrap_or(String::new());
-                let expanded_replacement = self.basic_expand_to_str(&replacement).await?;
+                let expanded_replacement = self.basic_expand(&replacement).await?;
+                let replacement = if self.shell.options().patsub_replacement
+                    && expanded_replacement.fields.len() == 1
+                {
+                    Replacement::with_matches(&expanded_replacement.fields[0])
+                } else {
+                    Replacement(vec![ReplacementPart::Text(
+                        self.fields_to_string(expanded_replacement),
+                    )])
+                };
 
-                let regex = expanded_pattern.to_regex(
-                    matches!(match_kind, brush_parser::word::SubstringMatchKind::Prefix),
-                    matches!(match_kind, brush_parser::word::SubstringMatchKind::Suffix),
-                )?;
+                let matcher = SubstitutionMatcher::new(&expanded_pattern, &match_kind)?;
 
                 transform_expansion(expanded_parameter, async |s| {
-                    Ok(Self::replace_substring(
-                        s.as_str(),
-                        &regex,
-                        expanded_replacement.as_str(),
-                        &match_kind,
-                    ))
+                    matcher.substitute(s.as_str(), &replacement)
                 })
                 .await
             }
@@ -2205,25 +2206,6 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
         }
     }
 
-    fn replace_substring(
-        s: &str,
-        regex: &fancy_regex::Regex,
-        replacement: &str,
-        match_kind: &SubstringMatchKind,
-    ) -> String {
-        match match_kind {
-            brush_parser::word::SubstringMatchKind::Prefix
-            | brush_parser::word::SubstringMatchKind::Suffix
-            | brush_parser::word::SubstringMatchKind::FirstOccurrence => {
-                regex.replace(s, replacement).into_owned()
-            }
-
-            brush_parser::word::SubstringMatchKind::Anywhere => {
-                regex.replace_all(s, replacement).into_owned()
-            }
-        }
-    }
-
     async fn apply_transform_to(
         &mut self,
         op: &ParameterTransformOp,
@@ -2480,5 +2462,177 @@ mod tests {
         assert_eq!(to_initial_capitals("ab bc cd"), String::from("Ab Bc Cd"));
         assert_eq!(to_initial_capitals(" a "), String::from(" A "));
         assert_eq!(to_initial_capitals(""), String::new());
+    }
+}
+
+/// Finds the matches of `${v/pattern/string}` (and `//`, `/#`, `/%`) as
+/// Bash's `pat_subst` does: each match is the leftmost one and, at that
+/// position, the longest; after an empty match one character is kept and
+/// the search goes on; no match is sought at the very end.
+struct SubstitutionMatcher {
+    kind: SubstringMatchKind,
+    empty: bool,
+    /// Bash tries only a pattern starting with `*` against empty text,
+    /// except at the end for `/%`.
+    matches_empty_text: bool,
+    /// The whole pattern, anchored at both ends.
+    full: fancy_regex::Regex,
+    /// For a pattern without extended globs, the regex whose leftmost
+    /// (greedy) match is Bash's match; extended globs (`!(a)`, `?(a)`) need
+    /// the exact leftmost-longest search instead.
+    search: Option<fancy_regex::Regex>,
+}
+
+impl SubstitutionMatcher {
+    fn new(pattern: &patterns::Pattern, kind: &SubstringMatchKind) -> Result<Self, error::Error> {
+        let search = (!pattern.has_extended_glob())
+            .then(|| {
+                pattern.to_regex(
+                    matches!(kind, SubstringMatchKind::Prefix),
+                    matches!(kind, SubstringMatchKind::Suffix),
+                )
+            })
+            .transpose()?;
+        Ok(Self {
+            kind: kind.clone(),
+            empty: pattern.is_empty(),
+            // Bash's end-anchored search tries empty text too.
+            matches_empty_text: pattern.starts_with_star()
+                || matches!(kind, SubstringMatchKind::Suffix),
+            full: pattern.to_regex(true, true)?,
+            search,
+        })
+    }
+
+    fn is_full_match(&self, text: &str) -> Result<bool, error::Error> {
+        Ok(self.full.is_match(text)?)
+    }
+
+    /// The first match at or after byte offset `from`, as `(start, end)`.
+    fn find(&self, s: &str, from: usize) -> Result<Option<(usize, usize)>, error::Error> {
+        if let Some(search) = &self.search {
+            if matches!(self.kind, SubstringMatchKind::Prefix) && from > 0 {
+                return Ok(None);
+            }
+            return Ok(search
+                .find_from_pos(s, from)?
+                .map(|m| (m.start(), m.end()))
+                .filter(|(start, _)| *start < s.len() || self.matches_empty_text));
+        }
+        let boundaries: Vec<usize> = s[from..]
+            .char_indices()
+            .map(|(index, _)| from + index)
+            .chain(std::iter::once(s.len()))
+            .collect();
+        let starts = match self.kind {
+            SubstringMatchKind::Prefix => &boundaries[..1],
+            _ => &boundaries[..],
+        };
+        for (index, start) in starts.iter().enumerate() {
+            if *start == s.len() && !self.matches_empty_text {
+                break;
+            }
+            if matches!(self.kind, SubstringMatchKind::Suffix) {
+                if self.is_full_match(&s[*start..])? {
+                    return Ok(Some((*start, s.len())));
+                }
+                continue;
+            }
+            for end in boundaries[index..].iter().rev() {
+                if self.is_full_match(&s[*start..*end])? {
+                    return Ok(Some((*start, *end)));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn substitute(&self, s: &str, replacement: &Replacement) -> Result<String, error::Error> {
+        if self.empty {
+            let replacement = replacement.render("");
+            return Ok(match self.kind {
+                SubstringMatchKind::Prefix => std::format!("{replacement}{s}"),
+                SubstringMatchKind::Suffix => std::format!("{s}{replacement}"),
+                _ => s.to_owned(),
+            });
+        }
+        if s.is_empty() {
+            return Ok(if self.matches_empty_text && self.is_full_match("")? {
+                replacement.render("")
+            } else {
+                String::new()
+            });
+        }
+        let global = matches!(self.kind, SubstringMatchKind::Anywhere);
+        let mut result = String::with_capacity(s.len());
+        let mut position = 0;
+        while position < s.len() {
+            let Some((start, end)) = self.find(s, position)? else {
+                break;
+            };
+            result.push_str(&s[position..start]);
+            result.push_str(&replacement.render(&s[start..end]));
+            position = end;
+            if !global {
+                break;
+            }
+            if start == end {
+                if let Some(c) = s[position..].chars().next() {
+                    result.push(c);
+                    position += c.len_utf8();
+                }
+            }
+        }
+        result.push_str(&s[position..]);
+        Ok(result)
+    }
+}
+
+/// The replacement of `${v/pattern/string}`. With `patsub_replacement`, each
+/// unquoted `&` stands for the matched text and `\&` is a literal `&`.
+struct Replacement(Vec<ReplacementPart>);
+
+enum ReplacementPart {
+    Text(String),
+    Match,
+}
+
+impl Replacement {
+    fn with_matches(field: &WordField) -> Self {
+        let mut parts = vec![];
+        let mut text = String::new();
+        for piece in &field.0 {
+            match piece {
+                ExpansionPiece::Unsplittable(s) => text.push_str(s),
+                ExpansionPiece::Splittable(s) | ExpansionPiece::Literal(s) => {
+                    let mut chars = s.chars().peekable();
+                    while let Some(c) = chars.next() {
+                        match c {
+                            '\\' if chars.peek() == Some(&'&') => {
+                                text.push('&');
+                                chars.next();
+                            }
+                            '&' => {
+                                parts.push(ReplacementPart::Text(std::mem::take(&mut text)));
+                                parts.push(ReplacementPart::Match);
+                            }
+                            c => text.push(c),
+                        }
+                    }
+                }
+            }
+        }
+        parts.push(ReplacementPart::Text(text));
+        Self(parts)
+    }
+
+    fn render(&self, matched: &str) -> String {
+        self.0
+            .iter()
+            .map(|part| match part {
+                ReplacementPart::Text(text) => text.as_str(),
+                ReplacementPart::Match => matched,
+            })
+            .collect()
     }
 }

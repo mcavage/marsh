@@ -1868,3 +1868,20 @@ printf '#!/bin/sh\necho ran\n' >"x$v"; chmod +x "x$v"; ./x*
     assert_eq!(brush.stderr, bash.stderr, "{brush:?}");
     assert_eq!(brush.status.code(), bash.status.code());
 }
+
+/// `${v/pattern/string}` replaces as Bash's `pat_subst`: the leftmost,
+/// longest match (extended globs such as `!(a)` included); after an empty
+/// match one character is kept; only a `*` pattern meets empty text (except
+/// at the end for `/%`); an empty pattern replaces nothing; with
+/// `patsub_replacement` an unquoted `&` is the match and `$0` is text.
+#[test]
+fn pattern_substitution_matches_like_bash() {
+    differential(
+        r#"shopt -s extglob; v=abba; r='&'
+echo "${v/!(a)/r} ${v//!(a)/r} ${v//?(a)/r} ${v//@(|a)/r} ${v///r} ${v/#/r} ${v/%/r} ${v//?/<&>}"
+echo "${v//b/\&} ${v//b/"&"} ${v//b/$r} ${v//b/"$r"} ${v//b/\$0} ${v/%?(x)/r}"
+e=; echo "[${e/*/r}][${e/@(|a)/r}][${e/%?(a)/r}]"; shopt -u patsub_replacement; echo "${v//b/&}""#,
+        0,
+        b"r r rrbrbr rrbrbr abba rabba abbar <a><b><b><a>\na&&a a&&a abba a&&a a$0$0a abbar\n[r][][r]\na&&a\n",
+    );
+}

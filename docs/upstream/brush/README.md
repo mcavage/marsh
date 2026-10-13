@@ -554,6 +554,13 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   text (`absolute_path`, PATH search, globs, command names). `${#v}` counts
   bytes. The `0055` raw-environment side table is gone. Covered by
   `non_utf8_bytes_survive_every_boundary`.
+- `0074` replaces `${v/pat/rep}` as Bash's `pat_subst`: matches are found
+  leftmost-longest (exactly, by trying each end, for extended globs; through
+  the regex for plain globs), one character is kept after an empty match,
+  only `*` patterns meet empty text (except at the end for `/%`), an empty
+  pattern changes nothing, and `patsub_replacement` makes an unquoted `&`
+  the match. The replacement is no longer a regex replacement string, so
+  `$0` is text. Covered by `pattern_substitution_matches_like_bash`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded
