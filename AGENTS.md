@@ -41,6 +41,7 @@ make dev                              # build everything; install ~/.marsh-dev
 make fixture-ref                      # once: published fixture ref -> target/fixture-ref
 make test                             # VM-free gate, the same targets CI runs (needs cargo-nextest)
 make dev && make check                # the loop: fast real smoke, warm scope in target/check
+make check-reset                      # before removing a worktree (make check-gc recovers if you forget)
 make verify                           # before pushing: check + high-signal suites, concurrent (tests/regress.py)
 make regress                          # every sbx-backed suite, then make test with the full model, before release
 make regress ONLY=smoke               # one suite, family, or scenario id (W01-...); REGRESS_JOBS=1 serializes

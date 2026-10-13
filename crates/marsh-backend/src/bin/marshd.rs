@@ -138,11 +138,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if env::var_os("MARSH_LOCAL_SHELL_AUTHORITY").is_some() {
         return Err("MARSH_LOCAL_SHELL_AUTHORITY was removed; pass a local shell image tag via the normal shell image setting".into());
     }
-    let stock_adapter = StockSbx::new(stock_sbx.clone(), runner)
+    let mut stock_adapter = StockSbx::new(stock_sbx.clone(), runner)
         .with_kit_image_cache(kit_image_cache)
         // Inside `marsh --dev` every stock call crosses the dev broker.
         .with_published_image_cache(env::var_os("MARSH_DEV_DEPTH").is_none())
         .with_vm_ownership(control_home.join("vm-ownership.json"))?;
+    // Test harnesses (`make check`) keep a copy of the map in a per-user scope
+    // registry outside the scope, so `make check-gc` can still retire its VMs
+    // after the scope directory is deleted.
+    if let Some(mirror) = env::var_os("MARSH_OWNERSHIP_MIRROR") {
+        stock_adapter = stock_adapter.with_vm_ownership_mirror(PathBuf::from(mirror))?;
+    }
     let shell_name = stock_adapter.vm_name(VmPurpose::Shell, "shell")?;
     let shell = ShellVmSpec {
         name: shell_name,

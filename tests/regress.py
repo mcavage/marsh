@@ -663,6 +663,10 @@ def main() -> int:
         parser.error("no suites selected")
     if sys.platform != "darwin":
         parser.error("the sbx-backed suites need the macOS host")
+    # Retire warm scopes of deleted checkouts first (tests/acceptance/scope_registry.py).
+    import scope_registry
+    for gc_report in scope_registry.collect(scope_registry.registry_root(), sbx_run=scope_registry.sbx_runner(plan.sbx)):
+        print("\n".join(scope_registry.describe(gc_report)), file=sys.stderr)
     # `make check` first (serial): its warm scope may restart the daemon and
     # VMs when the installed product changed, so it must settle before the
     # stock baseline is taken, and a broken product fails fast.
