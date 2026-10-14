@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Dry run (manual runs only)
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run != 'none'
         run: echo "RENOVATE_DRY_RUN=${{ inputs.dry_run }}" >> "$GITHUB_ENV"
