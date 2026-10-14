@@ -63,7 +63,9 @@ COPY --from=npm /usr/local/share/licenses/marsh-claude-acp /usr/local/share/lice
 COPY --chmod=0755 marsh-entrypoint.sh /usr/local/bin/marsh-claude
 LABEL com.docker.sandboxes.start-docker=true
 # v2's environment.variables, in the slot OCI already owns for static env.
-ENV IS_SANDBOX=1 PATH=/home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# The executable is a reviewed Kit input, not a per-container installation.
+ENV IS_SANDBOX=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATES=1 \
+    PATH=/home/agent/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 USER agent
 WORKDIR /home/agent/workspace
 # v2's sandbox.entrypoint.
