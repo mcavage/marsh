@@ -26,6 +26,9 @@ jobs:
     name: Linux arm64 (shell, guest crates, protocols)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -33,6 +36,10 @@ jobs:
           node-version: '22'
       - name: Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+      - name: Compiler cache (content-addressed, reusable across source changes)
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        with:
+          version: v0.18.0
       # Bash is the differential-test oracle, and the oracle is GNU Bash 5.3
       # (docs/design/bash-compatibility.md); Ubuntu 24.04 ships 5.2.
       - name: GNU Bash 5.3 (test oracle)
@@ -53,13 +60,17 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/nextest.tgz" https://get.nexte.st/0.9.148/linux-arm
           echo "81469eb963ef883fd590e60189e77d6aba3d91b418591d3391f50fe3e9480d2b  $RUNNER_TEMP/nextest.tgz" | sha256sum -c
           tar -xzf "$RUNNER_TEMP/nextest.tgz" -C "$HOME/.cargo/bin"
-      # Exact source key only: never restore build output across a source change.
+      # Cargo sources can cross source changes; target output cannot. sccache
+      # separately reuses compiler results by their actual compilation inputs.
       - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
+          key: cargo-registry-linux-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: target
           key: cargo-linux-${{ runner.arch }}-rust1.95-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**', 'tests/**') }}
       - name: Tool versions
         run: |
@@ -86,6 +97,9 @@ jobs:
     name: macOS arm64 (host build and tests)
     runs-on: macos-14
     timeout-minutes: 45
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -93,6 +107,10 @@ jobs:
           node-version: '22'
       - name: Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+      - name: Compiler cache (content-addressed, reusable across source changes)
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        with:
+          version: v0.18.0
       # The differential-test oracle is GNU Bash 5.3; the runner has only
       # /bin/bash 3.2.
       - name: GNU Bash 5.3 (test oracle)
@@ -137,6 +155,34 @@ jobs:
         run: make test-rust NEXTEST_PROFILE=ci
       - name: make test-harness (onboarding, MCP callers, publisher, tool self-tests)
         run: make test-harness
+
+  macos-release:
+    # Compilation needs neither test lane: keep this check off their critical
+    # path, but still require it before CI passes (including nightly admission).
+    name: macOS arm64 (release build and packaging checks)
+    runs-on: macos-14
+    timeout-minutes: 45
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Rust toolchain
+        run: rustup toolchain install 1.95.0 --profile minimal
+      - name: Compiler cache (content-addressed, reusable across source changes)
+        uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+        with:
+          version: v0.18.0
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-registry-macos-${{ hashFiles('Cargo.lock') }}
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: target/release
+          key: cargo-macos-release-${{ runner.arch }}-rust1.95-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**') }}
       - name: Release build, man page, and install script
         run: |
           cargo build --workspace --release --locked
