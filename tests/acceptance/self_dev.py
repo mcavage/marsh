@@ -151,14 +151,16 @@ def probes(kit: str, depth2: bool, shell_vm: str, depth3: bool = False) -> str:
         'echo "RECEIPTS=$(find "$MARSH_DEV_SCRATCH/control" -type f | wc -l)"',
         'sbx ls --json > "$MARSH_DEV_SCRATCH/tmp/ls.json"; echo "LS_EXIT=$?"',
         'echo "LS=$(tr -d "\\n" < "$MARSH_DEV_SCRATCH/tmp/ls.json")"',
-        "CHILD=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1]))[\"sandboxes\"]; "
+        "CHILD=$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); "
+        "r=r if isinstance(r,list) else r[\"sandboxes\"]; "
         "print(r[0][\"name\"] if r else \"none\")' \"$MARSH_DEV_SCRATCH/tmp/ls.json\")",
         'echo "CHILD=$CHILD"',
         # `sbx run` without --name: the broker names it `${prefix}r-<8>` and
         # mounts the current (natural project) directory.
         'sbx run -d shell >"$MARSH_DEV_SCRATCH/tmp/run.out" 2>&1; echo "RUN_D_EXIT=$?"; cut -c1-200 "$MARSH_DEV_SCRATCH/tmp/run.out"',
         "RUNVM=$(sbx ls --json | python3 -c 'import json,os,sys; p=os.environ[\"MARSH_VM_PREFIX\"]+\"r-\"; "
-        "print(next((r[\"name\"] for r in json.load(sys.stdin)[\"sandboxes\"] if r[\"name\"].startswith(p)), \"none\"))')",
+        "rows=json.load(sys.stdin); rows=rows if isinstance(rows,list) else rows[\"sandboxes\"]; "
+        "print(next((r[\"name\"] for r in rows if r[\"name\"].startswith(p)), \"none\"))')",
         'echo "RUNVM=$RUNVM"',
         'sbx exec "$RUNVM" sh -c "test -f $PWD/Cargo.toml"; echo "RUN_EXEC_EXIT=$?"',
     ]
