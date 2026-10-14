@@ -8,13 +8,13 @@
 # for Code Mode and fails that feature closed when it is missing.
 FROM dhi.io/node:24-debian13@sha256:f3575cf1e68ffe163703b691c465af833fd2d94cccc1e825d052c943018f2aa3 AS base
 
-FROM dhi.io/debian-base:trixie-dev@sha256:c6fc0de84b65bc20346cee5f071fd976ccf383431515db2a4d9721ca936feb9f AS packages
+FROM dhi.io/debian-base:trixie-dev@sha256:04a23b0daf5f06a4985703cce7942ea96be5448946f3e2ea2ef15ff9db0ae1e9 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
 RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
 
-FROM dhi.io/debian-base:trixie-dev@sha256:c6fc0de84b65bc20346cee5f071fd976ccf383431515db2a4d9721ca936feb9f AS build
+FROM dhi.io/debian-base:trixie-dev@sha256:04a23b0daf5f06a4985703cce7942ea96be5448946f3e2ea2ef15ff9db0ae1e9 AS build
 ARG CODEX_VERSION
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
@@ -45,7 +45,7 @@ RUN case "$TARGETARCH" in \
 # ACP mode (`codex --acp`, packaging/agents.json codex-session): the official
 # codex-acp adapter, pinned by package-lock.json, with the Codex build it
 # depends on kept inside its own node_modules (never on PATH).
-FROM dhi.io/node:24-debian13-dev@sha256:fe11b55fe5d9fca88aef74eac1c4a626646b89c1485ee7be7c30995afe33c67f AS npm
+FROM dhi.io/node:24-debian13-dev@sha256:81ee43ecd5e1741d4fbb1d66f9637e393c02b1ab0a056b10dbac400cbed2f2bc AS npm
 WORKDIR /opt/marsh/codex-acp
 COPY package.json package-lock.json ./
 COPY collect-notices.mjs ./
