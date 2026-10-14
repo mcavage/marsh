@@ -67,7 +67,7 @@
       },
       {
         "package": "curl",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
@@ -415,7 +415,7 @@
       },
       {
         "package": "libcurl4t64",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
@@ -1614,7 +1614,7 @@
       },
       {
         "package": "curl",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
@@ -2149,7 +2149,7 @@
       },
       {
         "package": "libcurl4t64",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
@@ -3574,7 +3574,7 @@
       },
       {
         "package": "curl",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
@@ -4109,7 +4109,7 @@
       },
       {
         "package": "libcurl4t64",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
@@ -5534,7 +5534,7 @@
       },
       {
         "package": "curl",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
@@ -6069,7 +6069,7 @@
       },
       {
         "package": "libcurl4t64",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
@@ -7408,7 +7408,7 @@
       },
       {
         "package": "curl",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
@@ -7756,7 +7756,7 @@
       },
       {
         "package": "libcurl4t64",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
@@ -8989,7 +8989,7 @@
       },
       {
         "package": "curl",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
@@ -9684,7 +9684,7 @@
       },
       {
         "package": "libcurl4t64",
-        "version": "8.14.1-2+deb13u5+dhi0",
+        "version": "8.14.1-2+deb13u7",
         "families": [
           "BSD",
           "GPL",
