@@ -3,7 +3,7 @@
   "adapters": {
     "codex-acp": {
       "root": "/opt/marsh/codex-acp",
-      "lock_sha256": "804b0ea9ef3c8b14a53fc15b5b41b0e6106b1bc8f1d3c5c6bf30f5078e33839d",
+      "lock_sha256": "92c05312ae7d60cd0504678a6da1b1caeddd67d94ee31649659b0c33a4d4ad71",
       "notice_root": "/usr/local/share/licenses/marsh-codex-acp",
       "selected_version": "0.160.1",
       "architectures": {
@@ -1635,7 +1635,7 @@
     },
     "claude-acp": {
       "root": "/opt/marsh/claude-acp",
-      "lock_sha256": "a69a85a7169fc7b525f56bc222a94bce52693e5e5d2bba43386bf5ca3d8c1eb9",
+      "lock_sha256": "9c4acff7d7d68d1611d1a4e2cdc46f17b8bf6e06bbf20534cc0bd6d9a509538e",
       "notice_root": "/usr/local/share/licenses/marsh-claude-acp",
       "selected_version": "0.3.296",
       "architectures": {
@@ -2293,7 +2293,7 @@
     },
     "pi": {
       "root": "/opt/marsh/pi-gateway",
-      "lock_sha256": "561b8f5434ef682e7801b7bba376653a65e6f4914064d5bc067f20f787e34414",
+      "lock_sha256": "5cbc6596e37a4fff9d95d1d3393d0ab206586952eb541f48084ed59439d5c8a3",
       "notice_root": "/usr/local/share/licenses/marsh-pi",
       "architectures": {
         "arm64": {

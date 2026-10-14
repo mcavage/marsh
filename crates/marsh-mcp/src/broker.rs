@@ -25,8 +25,8 @@ use std::{
     time::Duration,
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt, unix::AsyncFd},
-    net::UnixStream,
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{UnixListener, UnixStream},
     sync::{Notify, Semaphore},
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
@@ -380,7 +380,7 @@ pub async fn broker_run(options: BrokerOptions) -> Result<(), String> {
     })
     .and_then(|listener| {
         listener.set_nonblocking(true)?;
-        AsyncFd::new(listener)
+        UnixListener::from_std(listener)
     })
     .map_err(|error| format!("cannot bind resident MCP broker socket: {error}"))?;
     fs::set_permissions(&endpoint, fs::Permissions::from_mode(0o600))
@@ -444,19 +444,15 @@ pub async fn broker_run(options: BrokerOptions) -> Result<(), String> {
 /// Accept one connection inside the host descriptor fence. On macOS an
 /// accepted socket becomes close-on-exec only after `accept`; a host command
 /// a session spawned in between would hold the connection open for its life.
-async fn accept_fenced(
-    listener: &AsyncFd<std::os::unix::net::UnixListener>,
-) -> std::io::Result<UnixStream> {
-    loop {
-        let mut ready = listener.readable().await?;
-        if let Ok(accepted) =
-            ready.try_io(|listener| marsh_runtime::accept_unix(listener.get_ref()))
-        {
-            let stream = accepted?;
-            stream.set_nonblocking(true)?;
-            return UnixStream::from_std(stream);
-        }
-    }
+async fn accept_fenced(listener: &UnixListener) -> std::io::Result<UnixStream> {
+    // Fence only each nonblocking poll/accept, never the asynchronous wait.
+    // Tokio owns the descriptor registration, so no unsafe AsyncFd constructor
+    // is needed and accepted sockets still cannot leak into a concurrent spawn.
+    std::future::poll_fn(|cx| {
+        marsh_runtime::with_host_descriptor_creation_excluded(|| listener.poll_accept(cx))
+    })
+    .await
+    .map(|(stream, _)| stream)
 }
 
 /// Proxy one bounded stdio MCP transport to the authenticated broker.
