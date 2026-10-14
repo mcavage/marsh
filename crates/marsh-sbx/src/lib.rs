@@ -41,7 +41,9 @@ pub use stock_inventory::{StockInventory, StockInventoryVm};
 pub use vm_ownership::{DevGrantRecord, VmPurpose, valid_vm_prefix, vm_prefix};
 use vm_ownership::{VmClass, VmOwnership};
 mod capped_command;
+mod mcp_environment;
 pub use capped_command::{STOCK_COMMAND_CLEANUP_TIMEOUT, run_stock_command_capped};
+pub use mcp_environment::McpServer;
 
 pub const KIT_VM_BASIS: &str = "native-stock-sbx-kit";
 pub const WORKER_PATH: &str = "/usr/local/libexec/marsh-worker";
@@ -2112,6 +2114,17 @@ impl StockSbx {
         specs
             .entry(persistent.name.clone())
             .or_insert_with(|| persistent.clone());
+        // A restarted daemon may select a new personal environment. Cleanup
+        // still reaches every persisted owned shell generation. Only the name
+        // is used for UUID-checked removal; this never mounts or executes using
+        // a reconstructed spec.
+        for name in self.ownership.owned_shell_names() {
+            specs.entry(name.clone()).or_insert_with(|| {
+                let mut spec = persistent.clone();
+                spec.name = name;
+                spec
+            });
+        }
         specs.into_values().collect()
     }
 

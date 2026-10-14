@@ -112,6 +112,20 @@ and all mounts are released when the VM is retired. The pathname reopen inside
 `sbx mount` is an upstream limitation accepted under the trusted-host
 assumption.
 
+Optional `$MARSH_HOME/sbxenv.yaml` and `$MARSH_HOME/sbxenvs/COMMAND.yaml` files
+add native `mcp.servers` and `additionalWorkspaces` declarations. Shared and
+per-command lists concatenate; unsupported fields and duplicate/overlapping
+additions fail before stock work. Files are snapshotted at daemon startup;
+changing them requires finishing work, `marsh stop`, then a new launch.
+Additional sources use the same admission and cleanup as project/home mounts,
+are recorded in receipts, and propagate to nested jobs only through the parent's
+recorded view. Split Kit jobs and ephemeral-home sessions omit extra sources.
+MCP setup stays host-side through stock SBX: matching registrations are reused,
+different definitions are never overwritten, and missing registrations are
+added without interactive OAuth. Declared load failures block preparation.
+Credentials, full environment lifecycle, managed identities and primary mounts
+are not supplied by these additions. See `../guides/set-up-your-home.md`.
+
 ## Composition and results
 
 `fanout { ... } | collect` runs up to 16 branches concurrently in cloned shell

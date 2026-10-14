@@ -363,6 +363,16 @@ impl VmOwnership {
             .collect()
     }
 
+    /// Persisted shell generations, including older environment selectors.
+    pub(crate) fn owned_shell_names(&self) -> Vec<String> {
+        self.lock()
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.uuid.is_some() && entry.purpose == VmPurpose::Shell.label())
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     pub(crate) fn record(&self, name: &str, uuid: &str) -> Result<(), SbxError> {
         let mut state = self.lock();
         state.unclaimed_intents.remove(name);

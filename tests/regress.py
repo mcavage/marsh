@@ -195,6 +195,10 @@ class Plan:
 
         candidate("smoke.py", "smoke", 50, ("verify", "regress"), ["--kit", self.kit])
         candidate("run.py", "acceptance", 530, ("regress",), ["--kit", self.kit], avoid=("cpu-heavy",))
+        suites.append(Suite("sbxenvs", "sbxenvs",
+                            [python, str(ACCEPTANCE / "sbxenvs_uat.py"), "--prefix", str(self.prefix),
+                             "--kit", self.kit, *self.common()], 120, ("verify", "regress"),
+                            ("mcp-registry",), ("mcp-registry",)))
         ws = [s for s in list_scenarios("workspaces_uat.py")]
         prefixed("workspaces_uat.py", "workspaces", ws, self.args.workspace_shards, ("regress",))
         all_ps = list_scenarios("processes_uat.py")

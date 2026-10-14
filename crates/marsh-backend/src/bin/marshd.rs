@@ -92,6 +92,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut protected_guest_roots =
         vec![product_root, control_home.clone(), guest_artifacts.clone()];
     protected_guest_roots.push(install_prefix.to_path_buf());
+    protected_guest_roots.extend([home.join("sbxenv.yaml"), home.join("sbxenvs")]);
     let kit_image_cache = kit_image_cache_root(&real_home);
     // Superseded per-daemon cache (archives beside the lifecycle workspaces).
     let _ = fs::remove_dir_all(control_home.join("kit-lifecycle/.marsh-kit-image-cache"));
@@ -187,6 +188,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 guest_artifacts.join("agents.json").display(),
             )
         })?;
+    let backend = backend.with_sbxenvs()?;
+    let protected_guest_roots = backend.protected_guest_roots().to_vec();
     // All registry/configuration validation precedes even the stock version probe.
     stock.validate_supported_version().map_err(|_| {
         format!("stock SBX compatibility check failed for {}; requires stock SBX v0.47.0 or newer with local Kit v3 support; check `sbx version` and `sbx create --help`", stock_sbx.display())

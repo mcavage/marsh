@@ -229,6 +229,11 @@ See [Security](security.md).
 
 ## MCP servers inside Kit jobs
 
+For persistent third-party MCP connections, declare `mcp.servers` in the
+scope's optional `sbxenv.yaml` or `sbxenvs/NAME.yaml`. marsh registers/reuses
+them through stock SBX and loads them when preparing the Kit VM, including
+after worker reset. See [Set up your marsh home](guides/set-up-your-home.md).
+
 Docker Sandboxes can run an MCP gateway inside each Kit VM, and the packaged
 agent Kits connect to it. Every job in that Kit's VM then sees servers loaded
 by any of these:

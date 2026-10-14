@@ -109,6 +109,7 @@ with a `.git` directory. See [Split and join](docs/split.md) for details.
 - [Make independent changes in parallel](docs/guides/race-two-agents.md)
 - [Review a change with a panel](docs/guides/review-with-a-panel.md)
 - [Let an agent farm out work](docs/guides/farm-out-work.md)
+- [Set up your marsh home](docs/guides/set-up-your-home.md)
 - [Manual](docs/README.md) and `man marsh`
 
 ## Limits

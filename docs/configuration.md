@@ -16,6 +16,10 @@ each ending in `[built-in default]` or
 
 ## Scopes
 
+For skills, agent settings, per-Kit MCP connections and extra mounts, see
+[Set up your marsh home](guides/set-up-your-home.md). Optional scope-level
+`sbxenv.yaml` and `sbxenvs/NAME.yaml` files provide native SBX additions.
+
 A *scope* is one canonical `MARSH_HOME` path. It has its own daemon, VMs,
 guest home, and job records. The default scope is `~/.marsh`.
 Persistent-home shells in that scope share the shell VM; an
