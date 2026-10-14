@@ -11,15 +11,15 @@
   "binaries": [
     {
       "path": "/usr/bin/containerd",
-      "sha256": "6c5d4ffa174ef5320beb0dd6a077ece5d0feec4b69d50b7dcd12a7f68092dedf"
+      "sha256": "0560503316bfb9c2f94823046b7e5bdef3b22456508c82daac3ad056e788284a"
     },
     {
       "path": "/usr/bin/containerd-shim-runc-v2",
-      "sha256": "8950d1388a5cba13894b2b15d079aea354ae60252bbba90f17869ca35314548a"
+      "sha256": "bf028b208e6c514d448802c4e3d9fe6134aa93f4fbd7090d15a04f8e330be2f5"
     },
     {
       "path": "/usr/bin/ctr",
-      "sha256": "a7fba83c2af803d654d77f4b98b8d4c6f22ba08bc7811b26de16bb96f2b7d071"
+      "sha256": "df086010f79dbaba6e6189c5b61e461aac9871ae98dd5817b73c94f2376c244c"
     },
     {
       "path": "/usr/bin/docker",
@@ -35,7 +35,7 @@
     },
     {
       "path": "/usr/bin/runc",
-      "sha256": "1d51598ce776eca0efb0f8cc5d41811491031bca4ca7727b06ab754616beb00d"
+      "sha256": "607c96111a8b403142edd59238c9b60e12a384ca1de278eeb403e9fea702fe60"
     },
     {
       "path": "/usr/libexec/docker/cli-plugins/docker-buildx",
@@ -1313,7 +1313,7 @@
     },
     {
       "path": "github.com/godbus/dbus/v5",
-      "version": "v5.2.3",
+      "version": "v5.2.4",
       "binaries": [
         "/usr/bin/runc"
       ]
@@ -3213,7 +3213,7 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/api",
-      "version": "v0.0.0-20261005182115-fad411399dd8",
+      "version": "v0.0.0-20261012220534-4341edf3f941",
       "binaries": [
         "/usr/bin/containerd"
       ]
@@ -3229,7 +3229,7 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/rpc",
-      "version": "v0.0.0-20261005182115-fad411399dd8",
+      "version": "v0.0.0-20261012220534-4341edf3f941",
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",

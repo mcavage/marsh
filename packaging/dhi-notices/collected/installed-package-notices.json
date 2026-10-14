@@ -12,17 +12,17 @@
   "packages": [
     {
       "package": "containerd.io",
-      "version": "2.4.1-3",
+      "version": "2.4.2-0",
       "notices": [],
       "archive_notices": [],
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/containerd/containerd/f2551031d7276a770f65f98c9b52e57e7dad07e8/LICENSE",
+          "url": "https://raw.githubusercontent.com/containerd/containerd/b7a25261e029d68978bbf290df0a62fc819b3c51/LICENSE",
           "sha256": "4bbe3b885e8cd1907ab4cf9a41e862e74e24b5422297a4f2fe524e6a30ada2b4",
           "file": "texts/4bbe3b885e8cd1907ab4cf9a41e862e74e24b5422297a4f2fe524e6a30ada2b4.txt"
         },
         {
-          "url": "https://raw.githubusercontent.com/containerd/containerd/f2551031d7276a770f65f98c9b52e57e7dad07e8/NOTICE",
+          "url": "https://raw.githubusercontent.com/containerd/containerd/b7a25261e029d68978bbf290df0a62fc819b3c51/NOTICE",
           "sha256": "03f0b4bcaecfdb491ef5a7d320e2c2adf886c732d34e3fff87d52dbaec64d8c3",
           "file": "texts/03f0b4bcaecfdb491ef5a7d320e2c2adf886c732d34e3fff87d52dbaec64d8c3.txt"
         }
