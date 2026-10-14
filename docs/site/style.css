@@ -468,6 +468,8 @@ tr:last-child td { border-bottom: 0; }
   .top nav .hide-s { display: none; }
 }
 @media (max-width: 520px) {
+  .home .hero .install { height: auto; min-height: 2.9rem; padding-top: 0.4rem; padding-bottom: 0.4rem; }
+  .home .hero .install code { white-space: normal; }
   .home .top nav a[href="community.html"] { display: none; }
   .reasons { grid-template-columns: minmax(0, 1fr); }
   .reasons dt { padding-bottom: 0.4rem; }

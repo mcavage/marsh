@@ -11,7 +11,9 @@ you will need the project's Linux arm64 dependencies.
 
 ## Install and sign in
 
-On an **Apple Silicon Mac**, run these commands in your **Mac terminal**:
+You need an **Apple Silicon Mac** and **Docker Sandboxes** (`sbx`) **0.45.0 or
+newer**. In your **Mac terminal**, install both tools, sign in to Docker
+Sandboxes, and configure the provider used below:
 
 ```sh
 brew install docker/tap/sbx mcavage/tap/marsh
@@ -19,9 +21,8 @@ sbx login
 sbx secret set anthropic
 ```
 
-marsh needs Docker Sandboxes 0.45.0 or newer. The last command configures
-Anthropic for the Claude job below. [Install](install.md) has other
-installation methods.
+The last command configures Anthropic for the Claude job below.
+[Install](install.md) has other installation methods.
 
 In the same Mac terminal, change to your repository's root and run:
 
