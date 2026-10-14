@@ -10,6 +10,14 @@
 # that value instead of replacing it.
 set -eu
 
+export DISABLE_AUTOUPDATER=1 DISABLE_UPDATES=1
+case "${1:-}" in
+  update|upgrade)
+    echo 'claude kit: Claude Code is pinned by the Kit image; self-updates are disabled.' >&2
+    echo 'Upgrade marsh on the Mac, or register a rebuilt Claude Kit. See https://runmar.sh/docs/kits.html#updating-agent-versions' >&2
+    exit 125 ;;
+esac
+
 case "$(uname -m)" in
   aarch64|arm64) arch=arm64 ;;
   x86_64|amd64) arch=x64 ;;

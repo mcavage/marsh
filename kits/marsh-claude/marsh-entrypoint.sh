@@ -2,6 +2,16 @@
 set -eu
 umask 077
 
+# A fresh job must run the Kit's pinned executable, including in ACP mode.
+# Export here too so a caller's environment cannot accidentally enable updates.
+export DISABLE_AUTOUPDATER=1 DISABLE_UPDATES=1
+case "${1:-}" in
+  update|upgrade)
+    echo 'claude kit: Claude Code is pinned by the Kit image; self-updates are disabled.' >&2
+    echo 'Upgrade marsh on the Mac, or register a rebuilt Claude Kit. See https://runmar.sh/docs/kits.html#updating-agent-versions' >&2
+    exit 125 ;;
+esac
+
 selected=${MARSH_SELECTED_HOME:-${HOME:-/home/agent}}
 case "$selected" in
   /*) ;;
@@ -297,7 +307,7 @@ fi
 # only; nothing is written to the project or the selected home. Subcommands
 # take no prompt flags.
 case "${1:-}" in
-  mcp|plugin|plugins|setup-token|doctor|update|upgrade|install|migrate-installer|config|agents|auth|remote-control|help|completion) ;;
+  mcp|plugin|plugins|setup-token|doctor|install|migrate-installer|config|agents|auth|remote-control|help|completion) ;;
   *)
     if [ -r /run/marsh/context.md ]; then
       exec claude --dangerously-skip-permissions --settings '{"sandbox":{"enabled":false}}' \
