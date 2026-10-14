@@ -13,7 +13,7 @@ To share a Kit, a pipeline, or an AGENTS.md recipe instead of code, post it in
 
 You need an Apple Silicon Mac with Xcode Command Line Tools, Docker Desktop
 (with Buildx), `sbx` 0.45.0 or newer, Rust 1.95.0 (`rust-toolchain.toml` picks
-it), `cargo-nextest`, Python 3.10+, Node 22, GNU Bash 5.3 (the test oracle),
+it), `cargo-nextest`, Python 3.10+, Node 24.11+ (24.x), GNU Bash 5.3 (the test oracle),
 and `jq`.
 
 ```sh
@@ -140,7 +140,7 @@ suites use fixture Kits, not provider accounts.
 
 A Linux arm64 machine runs `make test-rust` and `make test-harness` without a
 Mac, Docker, `sbx`, or credentials; that is CI's Linux job. You need Rust
-1.95.0, `cargo-nextest`, Python 3.10+, Node 22, and GNU Bash 5.3 first on
+1.95.0, `cargo-nextest`, Python 3.10+, Node 24.11+ (24.x), and GNU Bash 5.3 first on
 `PATH` (`bash_audit` and the other differential tests compare marsh with the
 `bash` on `PATH`; include `bash --version` when you report results). On a small
 disk, set `CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_PROFILE_TEST_DEBUG=0`.
