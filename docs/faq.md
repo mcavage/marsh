@@ -50,7 +50,8 @@ It adds the shell, registered agent commands, project branching, parallel
 pipelines, and nested-job tracking. It can also publish pipelines as MCP
 tools and expose ACP sessions to clients.
 
-marsh requires Docker Sandboxes 0.45.0 or newer on an Apple Silicon Mac.
+You need an Apple Silicon Mac and Docker Sandboxes (`sbx`) 0.47.0 or newer,
+signed in. Check the installed version with `sbx version`.
 
 ## What it costs
 

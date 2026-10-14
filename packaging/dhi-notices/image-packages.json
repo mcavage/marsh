@@ -9909,6 +9909,16 @@
         ]
       },
       {
+        "package": "libgpm2",
+        "version": "1.20.7-11+dhi0",
+        "families": [
+          "GPL"
+        ],
+        "notices": [
+          "af426f7725c95262acf16f5840830bb085c7bb3c067ba556e9afe9a418e00724"
+        ]
+      },
+      {
         "package": "libgprofng0",
         "version": "2.44-3+dhi9",
         "families": [
@@ -10662,6 +10672,21 @@
         ]
       },
       {
+        "package": "libsodium23",
+        "version": "1.0.18-1+deb13u1+dhi2",
+        "families": [
+          "BSD",
+          "CC0-1.0",
+          "GPL",
+          "ISC",
+          "MIT",
+          "Public-Domain"
+        ],
+        "notices": [
+          "10d3576a7a0af8afb5601f358c06eb8c24b02192bb71ed4fb9a328a0979ec74b"
+        ]
+      },
+      {
         "package": "libsqlite3-0",
         "version": "3.46.1-7+deb13u2+dhi1",
         "families": [
@@ -10749,6 +10774,17 @@
         ]
       },
       {
+        "package": "libtree-sitter0.22",
+        "version": "0.22.6-6+b1",
+        "families": [
+          "MIT",
+          "Unicode"
+        ],
+        "notices": [
+          "cef156d12f31f01547a0a39b19dbb16c38ede23d6b5c23ebb563ebf81bb685dd"
+        ]
+      },
+      {
         "package": "libtsan2",
         "version": "14.2.0-19+dhi5",
         "families": [
@@ -10829,6 +10865,17 @@
         ],
         "notices": [
           "56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6"
+        ]
+      },
+      {
+        "package": "libxml2",
+        "version": "2.12.7+dfsg+really2.9.14-2.1+deb13u3+dhi3",
+        "families": [
+          "ISC",
+          "MIT"
+        ],
+        "notices": [
+          "ee746b96cfa5be73c3ea3e4cfb1285e9b315d4c9267f99b2ee9c5d911d9fe3f4"
         ]
       },
       {
@@ -11443,6 +11490,78 @@
         ],
         "notices": [
           "56b67e2eb8bac5a15d91e261d558d73f1f029113cced229753138194997366b6"
+        ]
+      },
+      {
+        "package": "vim",
+        "version": "2:9.1.1230-2+dhi3",
+        "families": [
+          "Apache-2.0",
+          "Artistic",
+          "BSD",
+          "GPL",
+          "LGPL",
+          "MIT",
+          "Public-Domain",
+          "Unknown:compaq",
+          "Unknown:edl-1",
+          "Unknown:opl-1+",
+          "Unknown:uc",
+          "Unknown:vim",
+          "Unknown:vim-regexp",
+          "Unknown:xpm",
+          "Unlicense"
+        ],
+        "notices": [
+          "bea5fda828b3754ee5e11ec4e30da9cb616f422a42ce797c7a8c87b5bf3eadf9"
+        ]
+      },
+      {
+        "package": "vim-common",
+        "version": "2:9.1.1230-2+dhi3",
+        "families": [
+          "Apache-2.0",
+          "Artistic",
+          "BSD",
+          "GPL",
+          "LGPL",
+          "MIT",
+          "Public-Domain",
+          "Unknown:compaq",
+          "Unknown:edl-1",
+          "Unknown:opl-1+",
+          "Unknown:uc",
+          "Unknown:vim",
+          "Unknown:vim-regexp",
+          "Unknown:xpm",
+          "Unlicense"
+        ],
+        "notices": [
+          "bea5fda828b3754ee5e11ec4e30da9cb616f422a42ce797c7a8c87b5bf3eadf9"
+        ]
+      },
+      {
+        "package": "vim-runtime",
+        "version": "2:9.1.1230-2+dhi3",
+        "families": [
+          "Apache-2.0",
+          "Artistic",
+          "BSD",
+          "GPL",
+          "LGPL",
+          "MIT",
+          "Public-Domain",
+          "Unknown:compaq",
+          "Unknown:edl-1",
+          "Unknown:opl-1+",
+          "Unknown:uc",
+          "Unknown:vim",
+          "Unknown:vim-regexp",
+          "Unknown:xpm",
+          "Unlicense"
+        ],
+        "notices": [
+          "bea5fda828b3754ee5e11ec4e30da9cb616f422a42ce797c7a8c87b5bf3eadf9"
         ]
       },
       {

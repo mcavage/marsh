@@ -1,11 +1,11 @@
 //! The stock CLI surface marsh depends on, driven by captured output of every
-//! supported version (`tests/data/sbx`).
+//! supported version and historical inventory formats (`tests/data/sbx`).
 use super::corpus::{self, StockVersion, VERSIONS};
 use super::*;
 
 #[test]
 fn every_supported_stock_version_passes_validation() {
-    for version in VERSIONS {
+    for version in [&corpus::V047, &corpus::V047_DEV] {
         StockModel::of(version)
             .adapter()
             .validate_supported_version()
@@ -14,8 +14,8 @@ fn every_supported_stock_version_passes_validation() {
 }
 
 static TOO_OLD: StockVersion = StockVersion {
-    name: "v0.44.9",
-    version_output: b"sbx version: v0.44.9 0000000000000000000000000000000000000000\n",
+    name: "v0.46.9",
+    version_output: b"sbx version: v0.46.9 0000000000000000000000000000000000000000\n",
     ..corpus::V047
 };
 
@@ -42,25 +42,26 @@ fn validation_rejects_an_old_release_and_a_create_without_local_kits() {
 }
 
 #[test]
-fn version_records_accept_stable_and_coherent_nightlies_from_045_only() {
+fn version_records_accept_stable_and_coherent_nightlies_from_047_only() {
     let commit = "1111111111111111111111111111111111111111";
     for (record, accepted) in [
-        (format!("sbx version: v0.45.0 {commit}"), true),
-        (format!("sbx version: v0.45.1-1-g1111111 {commit}"), true),
+        (format!("sbx version: v0.47.0 {commit}"), true),
+        (format!("sbx version: v0.47.1-1-g1111111 {commit}"), true),
         (format!("sbx version: v1.0.0 {commit}"), true),
         (
-            "sbx version: v0.45.0-239-g3fd12a12a 3fd12a12a0000000000000000000000000000000".into(),
+            "sbx version: v0.47.0-239-g3fd12a12a 3fd12a12a0000000000000000000000000000000".into(),
             true,
         ),
         (format!("sbx version v0.47.0 {commit}"), true),
+        (format!("sbx version: v0.46.0 {commit}"), false),
         (format!("sbx version: v0.44.9-999-g1111111 {commit}"), false),
         (format!("sbx version v0.44.9 {commit}"), false),
         // Abbreviated commit disagrees with the full commit.
-        (format!("sbx version: v0.45.1-1-g2222222 {commit}"), false),
+        (format!("sbx version: v0.47.1-1-g2222222 {commit}"), false),
         // Zero distance is not a nightly.
-        (format!("sbx version: v0.45.1-0-g1111111 {commit}"), false),
+        (format!("sbx version: v0.47.1-0-g1111111 {commit}"), false),
         (
-            "sbx version: v0.45.1 111111111111111111111111111111111111111".into(),
+            "sbx version: v0.47.1 111111111111111111111111111111111111111".into(),
             false,
         ),
         (format!("sbx versionv0.47.0 {commit}"), false),
@@ -75,7 +76,7 @@ fn version_records_accept_stable_and_coherent_nightlies_from_045_only() {
 }
 
 #[test]
-fn every_supported_inventory_document_decodes() {
+fn every_captured_inventory_document_decodes() {
     for version in VERSIONS {
         let inventory = StockInventory::decode(version.ls_json)
             .unwrap_or_else(|error| panic!("{}: {error}", version.name));
@@ -134,7 +135,7 @@ fn shell_template_download_hint_reads_every_template_listing() {
 /// Every stock call of a cold Kit, local Kit and shell is accepted by each
 /// version's captured flag set (the model rejects unknown flags).
 #[test]
-fn cold_preparation_runs_against_every_supported_stock_version() {
+fn cold_preparation_preserves_captured_stock_cli_format_coverage() {
     for version in VERSIONS {
         let model = StockModel::of(version);
         let adapter = model.adapter();

@@ -187,6 +187,7 @@ def main() -> None:
         repair_inputs = copy_inputs(ROOT / "packaging/image-repair", context / "image-repair", budget)
         notice_inputs = copy_inputs(ROOT / "packaging/dhi-notices/collected", context / "dhi-notices", budget)
         pi_inputs = copy_inputs(ROOT / "packaging/shell/pi", context / "pi", budget)
+        editor_inputs = copy_inputs(ROOT / "packaging/shell/editors", context / "editors", budget)
         staged_inputs = INPUTS.tree_inventory(context)
         metadata = temporary_root / "metadata.json"
         temporary_tag = "marsh-shell-build:" + uuid.uuid4().hex
@@ -205,7 +206,8 @@ def main() -> None:
                    "--metadata-file", str(metadata), str(context)]
         inputs = {"packaging/shell-image": base_hash, "packaging/shell/Dockerfile": recipe_hash,
                   "scripts/prepare-shell-image.py": script_hash, "packaging/image-repair": repair_inputs,
-                  "packaging/dhi-notices/collected": notice_inputs, "packaging/shell/pi": pi_inputs,
+                   "packaging/dhi-notices/collected": notice_inputs, "packaging/shell/pi": pi_inputs,
+                   "packaging/shell/editors": editor_inputs,
                   "support_scripts": support_hashes}
         phase = "build"
         try:
@@ -216,6 +218,7 @@ def main() -> None:
                     or input_tree(ROOT / "packaging/image-repair") != repair_inputs
                     or input_tree(ROOT / "packaging/dhi-notices/collected") != notice_inputs
                     or input_tree(ROOT / "packaging/shell/pi") != pi_inputs
+                    or input_tree(ROOT / "packaging/shell/editors") != editor_inputs
                     or support_hashes != {name: file_hash(ROOT / "scripts" / name) for name in support_hashes}):
                 raise ValueError("shell image inputs changed during build")
             if args.validate_only:

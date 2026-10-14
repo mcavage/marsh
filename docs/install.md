@@ -6,9 +6,8 @@ your first agent calls.
 
 ## Requirements
 
-You need an **Apple Silicon Mac** and Docker Sandboxes (`sbx`) **0.45.0 or
-newer**, signed in. Check the installed version with `sbx version`. marsh
-is tested with 0.46.0 and 0.47.0 and uses the stock CLI without modifying it.
+You need an **Apple Silicon Mac** and Docker Sandboxes (`sbx`) **0.47.0 or
+newer**, signed in. Check the installed version with `sbx version`.
 It does not run on Intel Macs or Linux hosts.
 
 Docker Desktop is not required for a release install. You need Desktop with

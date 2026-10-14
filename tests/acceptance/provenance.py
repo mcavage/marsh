@@ -107,6 +107,7 @@ def verify_shell_image_proof(source: Path, guest: Path, repository: str, insecur
     expected_inputs["packaging/image-repair"] = input_files(source / "packaging/image-repair")
     expected_inputs["packaging/dhi-notices/collected"] = input_files(source / "packaging/dhi-notices/collected")
     expected_inputs["packaging/shell/pi"] = input_files(source / "packaging/shell/pi")
+    expected_inputs["packaging/shell/editors"] = input_files(source / "packaging/shell/editors")
     expected_inputs["support_scripts"] = {name: file_digest(source / "scripts" / name)
                                           for name in ("build_inputs.py", "image_observations.py", "owned_process.py", "stock_sdk.py")}
     output = f"type=image,name={repository}:repaired,push=true" + (",registry.insecure=true" if insecure else "")

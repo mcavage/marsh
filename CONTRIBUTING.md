@@ -12,7 +12,7 @@ To share a Kit, a pipeline, or an AGENTS.md recipe instead of code, post it in
 ## Building on a Mac
 
 You need an Apple Silicon Mac with Xcode Command Line Tools, Docker Desktop
-(with Buildx), `sbx` 0.45.0 or newer, Rust 1.95.0 (`rust-toolchain.toml` picks
+(with Buildx), `sbx` 0.47.0 or newer, Rust 1.95.0 (`rust-toolchain.toml` picks
 it), `cargo-nextest`, Python 3.10+, Node 24.11+ (24.x), GNU Bash 5.3 (the test oracle),
 and `jq`.
 

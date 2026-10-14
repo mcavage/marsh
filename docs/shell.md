@@ -50,7 +50,8 @@ User
 
 System
 : Debian on arm64 from the marsh shell image, with git, make, gcc, Node.js,
-  and Rust.
+  and Rust. [Nightly builds](install.md#nightly-builds) also include Vim and
+  terminal Emacs.
 
 ### Shared VM
 
@@ -122,6 +123,11 @@ forms do not. See [Choosing your shell](shells.md).
 
 ## Startup files
 
+Edit `~/.bashrc` at the marsh prompt (or `~/.marsh/home/.bashrc` from your
+Mac in the default scope) to set aliases, environment variables, and your
+prompt. The [Quickstart](quickstart.md#make-it-your-shell) walks through setup.
+Your dotfiles survive VM removal. Packages you install in the VM do not.
+
 Brush reads these startup files, with `~` referring to the guest home:
 
 | Shell type | Files read |
@@ -131,6 +137,35 @@ Brush reads these startup files, with `~` referring to the guest home:
 | Noninteractive, non-login | The file named by `$BASH_ENV`, when set |
 
 The prompt defaults to Bash's `\s-\v\$ `.
+
+## Editor settings
+
+The shell VM in [nightly builds](install.md#nightly-builds) includes Vim and
+terminal Emacs. Their configuration files belong in the guest home, just
+like `.bashrc`.
+
+For Vim, edit `~/.vimrc`. For example:
+
+<!-- doc-test: shell -->
+```sh
+cat >> ~/.vimrc <<'EOF'
+set number
+set expandtab
+set shiftwidth=2
+EOF
+```
+
+For Emacs, edit `~/.emacs.d/init.el`. This enables column numbers:
+
+<!-- doc-test: shell -->
+```sh
+mkdir -p ~/.emacs.d
+printf '%s\n' '(column-number-mode 1)' >> ~/.emacs.d/init.el
+```
+
+Open files with `vim FILE` or `emacs -nw FILE`. From a Mac editor, the
+configuration files are `~/.marsh/home/.vimrc` and
+`~/.marsh/home/.emacs.d/init.el` in the default scope.
 
 ## Bash compatibility
 

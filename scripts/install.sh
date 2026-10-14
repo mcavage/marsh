@@ -22,8 +22,7 @@ PREFIX=${MARSH_PREFIX:-$HOME/.local}
 VERSION=${MARSH_VERSION:-}
 TARBALL=${MARSH_TARBALL:-}
 YES=0
-SBX_MIN=0.45.0
-SBX_TESTED=0.46.0
+SBX_MIN=0.47.0
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'marsh install: warning: %s\n' "$*" >&2; }
@@ -86,8 +85,6 @@ if sbx_path=$(command -v sbx 2>/dev/null); then
     warn "could not read the version of $sbx_path; marsh needs Docker Sandboxes (sbx) $SBX_MIN or newer."
   elif ! version_ge "$sbx_line" "$SBX_MIN"; then
     die "Docker Sandboxes (sbx) $sbx_line is too old; marsh needs $SBX_MIN or newer. Upgrade: brew upgrade docker/tap/sbx"
-  elif ! version_ge "$sbx_line" "$SBX_TESTED"; then
-    warn "sbx $sbx_line works but marsh is tested with $SBX_TESTED or newer."
   fi
 else
   sbx_note="Install Docker Sandboxes first:  brew install docker/tap/sbx"

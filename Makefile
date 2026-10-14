@@ -430,7 +430,7 @@ DEV_KIT ?= $(ACCEPTANCE_KIT)
 DEV_SUPPORT_SCRIPTS := $(addprefix scripts/,prepare-shell-image.py build_inputs.py image_observations.py owned_process.py stock_sdk.py)
 DEV_CANONICAL_INPUTS := $(shell find packaging/image-base packaging/image-repair packaging/dhi-notices/collected -type f 2>/dev/null)
 DEV_SHELL_IMAGE_INPUTS := packaging/shell-image packaging/shell/Dockerfile $(DEV_SUPPORT_SCRIPTS) $(DEV_CANONICAL_INPUTS) \
-	$(shell find packaging/shell/pi -type f 2>/dev/null)
+	$(shell find packaging/shell/pi packaging/shell/editors -type f 2>/dev/null)
 DEV_KIT_INPUTS := $(KIT_COMMANDS) scripts/stage-kits.py scripts/publish-kits.py scripts/npm-notices.mjs \
 	$(DEV_CANONICAL_INPUTS) $(wildcard $(shell git ls-files kits 2>/dev/null))
 
