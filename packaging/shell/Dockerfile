@@ -22,7 +22,7 @@ USER root
 # extras are not installed.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      docker-ce=5:29.8.2-1 docker-ce-cli=5:29.9.0-0 containerd.io=2.4.1-3 \
+      docker-ce=5:29.8.2-1 docker-ce-cli=5:29.9.0-0 containerd.io=2.4.2-0 \
       docker-buildx-plugin=0.38.0-1 \
       nodejs-24=24.21.0-1 npm=11.20.0-0 \
       python-3.14=3.14.8-0 python3-pip=26.2.1-2 \
