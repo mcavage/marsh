@@ -346,7 +346,7 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `W26-nested-repository`: H2: a nested repository (vendored or submodule checkout) splits; its .git is not copied.
 - `W27-sugar-interrupt`: Brush sugar: Ctrl-C cancels the daemon-side split; join and later stages never run.
 - `W28-quarantine-retire`: Owned quarantined or orphan-pinned Kit VMs are always retirable, with the cause printed.
-- `W29-doc-examples`: docs/split.md and docs/guides/*.md: every marked example runs as written (host bash
+- `W29-doc-examples`: Run marked public-documentation examples with declared fixture substitutions.
 - `W30-capture-ignored`: s8 capture: what a branch creates that the project's ignore rules exclude (`__pycache__/` from
 
 ### Processes (`processes_uat.py`, 37)

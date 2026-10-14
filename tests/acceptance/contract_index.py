@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate CONTRACT.md's scenario index from the suites' own scenario tables.
 
-`--write` rewrites the generated section; `--check` (the default) exits 1 when
+`--write` rewrites the generated section; running without options exits 1 when
 CONTRACT.md disagrees with the code. tests/acceptance/test_contract_index.py
 runs the check in CI.
 """
