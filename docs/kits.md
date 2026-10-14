@@ -1,24 +1,17 @@
 # Commands and Kits
 
-A Kit turns a container image into a shell command. Install one and type its
-name. Your project is mounted and output comes back to your terminal, but the
-program runs in a fresh container in a microVM, not on your Mac.
+A Kit packages a command's image, network policy, and credentials for Docker
+Sandboxes. marsh registers it under a shell name and runs each invocation in
+a fresh nonroot container. For example, in your [marsh shell](shell.md):
 
+<!-- doc-test: shell stdout="Linux aarch64" -->
 ```sh
-marsh kit install mytool --from registry.example.com/me/mytool-kit@sha256:DIGEST
-mytool --help
+shell -c 'uname -sm'
 ```
 
-The daemon checks the image through `sbx`, prepares a VM, and registers
-`mytool`. Open shells see it at once, and it is saved for the next start. The
-first `mytool` call prints `[starting mytool worker VM…]` if the VM is not
-already running.
-
-`claude`, `codex`, `pi`, and `shell` are registered the same way. A *registered
-command* is a shell name that runs in its own container. A *Kit* is what it
-runs: a Docker Sandboxes Kit (version 3), which is an image plus a small
-descriptor naming its network policy, credentials, and entrypoint. marsh maps
-names to Kits and defines no Kit format of its own.
+`shell` is a packaged command. To add your own, use
+`marsh kit install NAME --from REPOSITORY@sha256:DIGEST`, substituting its
+published reference. marsh uses the native Docker Sandboxes Kit v3 format.
 
 ## The default commands
 
@@ -32,8 +25,8 @@ names to Kits and defines no Kit format of its own.
 Releases pin the images by digest (`docker.io/mcavage/marsh-*@sha256:...`).
 The list is in the installed `libexec/marsh/commands.json`.
 
-The first call to a Kit boots its VM and prints `[starting NAME worker VM…]`.
-To boot VMs before the prompt, start marsh with `marsh --load KIT,...` or
+A foreground call that boots a Kit VM prints `[starting NAME worker VM…]`.
+To prepare VMs before the prompt, start marsh with `marsh --load KIT,...` or
 `marsh --load all`.
 
 ### Signing in
@@ -42,15 +35,15 @@ marsh has no login of its own. Docker Sandboxes (`sbx`) holds the credentials
 on your Mac. Run `sbx login` once, then give `sbx` a credential for each
 provider:
 
-```sh
-sbx secret set anthropic     # claude, and pi
-sbx secret set openai        # codex
-```
+| Host command | Used by |
+|---|---|
+| `sbx secret set anthropic` | `claude` and `pi` |
+| `sbx secret set openai` | `codex` |
 
 `sbx secret import` takes keys from your environment variables instead. The
 Claude and Codex Kits also accept an OAuth login that `sbx` holds. The `sbx`
 proxy adds the credential to the agent's requests, and the container sees a
-placeholder, never the key.
+placeholder.
 
 If nothing is bound, an agent can still sign in from inside its container
 (`codex login`, or Claude's `/login`). That login is stored in the guest home
@@ -61,14 +54,15 @@ The Pi Kit declares an Anthropic API key only. `shell` has no credentials.
 
 ## How a call runs
 
-Running `codex exec 'hello'` does the following:
+When you invoke a registered command:
 
 1. The shell asks the marsh daemon on your Mac to start a job.
-2. The daemon finds a warm VM for the `codex` Kit, or creates one.
+2. The daemon finds a warm VM for the command's Kit, or creates one.
 3. Inside that VM, a fresh container starts from the Kit image. It runs as a
    nonroot user with your UID.
-4. Your project is mounted at its Mac path. Your guest home is mounted as
-   `$HOME`.
+4. Your project is mounted read/write at its Mac path. In a split, the job
+   instead mounts its fork at the fork's own host path. Your guest home is
+   mounted read/write as `$HOME` in both cases.
 5. stdin, stdout, stderr, signals, and the exit status pass through as for a
    local program. A child job started by another job gets no terminal
    ([Agents running agents](agents.md#limits-and-messages)).
@@ -81,18 +75,19 @@ Up to 8 jobs run at once per daemon.
 VM names are random (`marsh-k-xxxxxxxx`) and recorded before creation. marsh
 only stops, removes, or runs commands in VMs on that record.
 
-The container can read and write your project, and an agent can delete files
-there. The guest home is shared by every job in the scope. The packaged agent
-Kits turn off each agent's own sandbox and permission prompts, because the
-container is the sandbox ([Agents running agents](agents.md)). To keep agents
-off your files, use [`split`](split.md).
+An agent can edit or delete the project files its container mounts. The
+packaged agent Kits disable their agents' own sandboxes and permission
+prompts ([details](agents.md#agent-sandboxes-and-permission-prompts)). Use
+[`split`](split.md) to give an agent a private project copy. The guest home
+remains shared even in a split.
 
 ### Network and credentials
 
 Credentials go through the Docker Sandboxes proxy; see
-[Signing in](#signing-in). Each Kit VM has the network policy its Kit declares. The `codex` Kit, for
-example, allows OpenAI hosts, GitHub, npm, and the Ubuntu package mirrors, and
-nothing else. The list is in the Kit's descriptor
+[Signing in](#signing-in). Each Kit VM has the network policy its Kit declares.
+The `codex` Kit, for example, allows the listed OpenAI endpoints, GitHub
+download hosts, npm, and package repositories. The exact hosts and ports are
+in the Kit's descriptor
 (`kits/marsh-codex/codex.yaml`).
 
 ### Limits per job
@@ -115,10 +110,11 @@ agent as a child job. See [Agents running agents](agents.md).
 
 ## Adding a command
 
-`marsh kit install NAME --from REPOSITORY@sha256:DIGEST` registers a published
-Kit in the running daemon, as shown at the top of this page. The reference
-must be pinned by digest. A name that already exists, including a packaged
-one, is refused. To replace a name, edit `commands.json` below.
+`marsh kit install NAME --from REPOSITORY@sha256:DIGEST` validates and registers
+a published Kit through `sbx`. Open shells see the name immediately, and the
+mapping persists for later launches. The reference must be pinned by digest.
+An existing name, including a packaged one, is refused. To replace a name,
+edit `commands.json` below.
 
 ### Changing or replacing a command
 
@@ -137,12 +133,9 @@ Each value is one of:
 - an image reference pinned by digest (tags are refused);
 - the absolute path of a Kit source directory.
 
-After changing a mapping, reset the old Kit VM so the next call uses the new
-Kit:
-
-```sh
-marsh workers reset mytool
-```
+Manual edits take effect when the daemon starts: finish active work, exit
+open shells, run `marsh stop`, then launch marsh again. A worker reset alone
+does not reload `commands.json`.
 
 A malformed `commands.json` stops the daemon from starting, and the error
 names the file.
@@ -152,8 +145,8 @@ names the file.
 - Names are 1 to 128 letters, digits, `_`, or `-`, and do not start with `-`.
 - These names are reserved: `marsh`, `fanout`, `collect`, `acp`, `mcp`, `ps`,
   `top`.
-- A source directory must be outside your project and your guest home. Code
-  in the shell then cannot rewrite the Kit.
+- A source directory must be outside your project and guest home, so the
+  normal project and home mounts do not expose it to guest code.
 - Running a Kit from source needs Docker Desktop with Buildx on the Mac.
 - Docker Sandboxes must allow the image's registry in its Kit sources policy.
 
@@ -173,7 +166,7 @@ capabilities:
 ```
 
 The image's `ENTRYPOINT` receives the command's arguments. It runs as a
-nonroot user, in the caller's directory, with this environment:
+nonroot user in the caller's directory, with these mounts and variables:
 
 - `HOME` set to the mounted guest home. The same path is in
   `MARSH_SELECTED_HOME`.
@@ -199,13 +192,12 @@ To share a Kit, post it in
 
 ## Removing VMs
 
-```sh
-marsh workers reset codex       # one Kit's idle VM
-marsh workers reset all         # every idle Kit VM
-```
+| Command | Removes |
+|---|---|
+| `marsh workers reset codex` | The idle Codex Kit VM |
+| `marsh workers reset all` | All idle Kit VMs |
 
-The next call creates a new VM. Use this after changing a mapping, or to clear
-a quarantined VM
+The next call creates a new VM. Use this to clear a quarantined VM
 ([Troubleshooting](troubleshooting.md#cleanup-uncertain-and-quarantine)).
 
 Next: [Troubleshooting](troubleshooting.md), [Configuration](configuration.md).

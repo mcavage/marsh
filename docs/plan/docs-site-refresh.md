@@ -1,250 +1,87 @@
-# Site and documentation refresh
+# Site and documentation editorial brief
 
-## Status
+The user approved a complete documentation rewrite after reviewing the homepage
+on October 13, 2026. This includes checking every page and its examples, then
+publishing the result. It does not authorize product changes or edits to the
+separate benchmark and CI work. Leave `profiles.md` alone.
 
-October 13, 2026. Homepage direction agreed with the user, followed by approval
-to proceed. A local homepage candidate is implemented in `docs/site/`, including
-its metadata, social card, styles, and static copyable examples. The user
-approved publishing this first pass for live review because the site has not
-been shared. PR #77 is merged, Pages deployment succeeded, and the new homepage
-was verified at `https://runmar.sh`. A follow-up
-branch contains factual documentation repairs. This document is not authorization
-for an autonomous site-wide rewrite.
+## Product story
 
-Read [the audit handoff](docs-audit-handoff.md) for existing defects and evidence.
-Leave the unrelated `profiles.md` work alone.
+Keep **A shell for composing agents.** marsh is a platform, not a racing tool or
+an application for one outcome. Show agents used as commands at a shell prompt,
+including from inside another agent's job.
 
-## Agreed homepage direction
+Filesystem branching belongs in that explanation. A split starts with the
+current project files, gives branches private copies, and returns patches for
+the caller to apply. Warm VMs, copy-on-write cloning where supported, and
+concurrent branches explain the speed. Do not invent latency figures or imply
+that marsh speeds up model inference.
 
-Present marsh as a platform for composing agents, with concrete execution
-guarantees. Do not position it as a single-outcome product, a bug-fixing race
-tool, or an experimentation playground.
+The homepage session is an example, labeled in the terminal bar. It has no
+invented agent answers, successful test output, measured duration, or realistic
+but fabricated split ID. Keep the shell replay and file diagram together on
+mobile. The full transcript must remain readable during playback, with Stop,
+Replay, reduced-motion, and no-JavaScript support.
 
-The headline establishes what marsh is. The demonstration reveals what ordinary
-shell scripts leave the developer managing.
+## Writing
 
-The story has three parts:
+Write for developers who know how to use a shell. Explain what marsh adds and
+what they need to do next. Do not explain `&&` repeatedly or turn every page
+into another product pitch.
 
-- Agents are composable processes, including from inside other agents.
-- Parallel work can use separate project copies for concurrent edits, with
-  inspectable patches and explicit application.
-- Execution environments, nested job lifetimes, cancellation, and cleanup have
-  defined behavior.
+Read each sentence aloud. Rewrite anything that sounds like a checklist pasted
+into prose: clipped noun slogans, repeated contrasts, ceremonial introductions,
+or caveats that belong on a different page. A banned-word scan is not an
+editorial review. Technical reference still needs exact flags, limits, defaults,
+and failure behavior.
 
-Avoid an unqualified promise of safety. Direct agent calls can change or delete
-project files. Private agent mounts and trusted shell branches have different
-boundaries. Passing tests does not prove a patch is safe. Scope credential
-claims to proxy-managed credentials rather than saved guest login files.
+Use the Pix writing-voice, anti-slop, DevRel, DX, and verification guidance.
+Gemini 4 Argon provides the adversarial editorial review. Its suggestions need
+the same scrutiny as the draft: an invented example ID is still invented, and
+removing a necessary qualification can make a shorter sentence false.
 
-## Proposed homepage structure
+The requested review lenses are editorial questions, not attributed opinions:
 
-1. Hero: identity, concrete difference, one primary getting-started action.
-2. Compact substantive demonstration: ordinary commands and tests, parallel
-   edits on separate copies, returned patches, no automatic merging.
-3. Deeper capability: the same registered commands work inside an agent's shell
-   tool, with nested calls tracked and cancelled as one process tree.
-4. Why not scripts and worktrees: explain the execution and lifecycle work marsh
-   manages, without claiming those tools cannot compose agents.
-5. Execution boundaries and practical requirements, followed by one onboarding
-   destination.
+- Patrick Collison: what does this sentence tell the reader that they need?
+- Tobi Lütke: are we making the work harder by explaining the machinery?
+- Solomon Hykes: can a reader see useful combinations of a few shell primitives?
+- Mitchell Hashimoto: can they predict execution location and file access?
+- Simon Willison: can they reproduce the example and inspect its evidence?
 
-Keep GitHub available, but do not make starring compete with getting started.
-Keep the Apple Silicon requirement beside the first action. Explain Linux
-compatibility, credentials, cold starts, model-account costs, and early/unsigned
-status without requiring a reader to discover consequential limits elsewhere.
+## Documentation and examples
 
-Move the nested opening pipeline, automatic judge, long patch-selection script,
-numeric admission limits, MCP/ACP walkthroughs, shell-selection examples, and
-daemon ownership diagram out of first contact. Their removal from the homepage
-does not imply removing the underlying documentation or product features.
+The first run uses one provider, configured before the first agent request. It
+works with the reader's existing repository rather than an imaginary failing
+test. Separate Mac-terminal commands from guest-shell commands, and leave the
+shell before stopping VMs.
 
-## Working hero, not final copy
+The guides cover independent changes, review, and bounded delegation. The old
+judge URL remains useful for optional downstream review; no model becomes an
+approval authority. Preserve existing URLs and repair any changed links.
 
-> **A shell for composing agents.**
->
-> Run Claude, Codex, and Pi as commands, each in a fresh Linux container. Compose
-> them with pipes and scripts, run concurrent edits on separate copies, and
-> manage agents started by agents in one process tree.
+Treat examples according to what they are. Execute marked command blocks in
+isolated scopes. For model-backed recipes, declared fixture substitutions check
+the shell composition and patch handling, not the model's judgment. Test ACP and
+MCP through their real callers with deterministic agents. Exercise installation
+in a disposable prefix rather than overwriting the user's install.
 
-## Review lenses
+Keep a verification inventory that distinguishes executed examples, adaptable
+project recipes, output excerpts, configuration samples, and host-mutating
+instructions. Do not call an unexecuted transcript a passing test. Record the
+shipping binary and fixture identities used in the runs.
 
-Use these as editorial questions, not attributed opinions or fabricated quotes:
+Design documents must distinguish shipped behavior from historical proposals.
+Preserve formal invariants and source mappings; changing prose is not evidence
+that the Rust implementation satisfies the model.
 
-- Patrick Collison: does each sentence earn the reader's attention, and does the
-  evidence establish what marsh adds to existing agent CLIs and scripts?
-- Tobi Lütke: is using the platform simpler than explaining its machinery?
-- Solomon Hykes: do a few understandable primitives compose naturally, including
-  into uses the page does not enumerate?
-- Mitchell Hashimoto: can the reader predict execution location, file access,
-  and lifecycle behavior?
-- Simon Willison: can the demonstration be reproduced, and are observed results
-  distinguished from guarantees and unverified claims?
+## Publication history
 
-Apply Pix's impatient-developer, DX, DevRel, design, and editorial guidance.
-Do not mistake a banned-word scan for a substantive editorial review.
+PRs #77 and #78 introduced the first homepage and factual repairs. The later
+benchmark merge, #79, reverted those files; #80 restored them without removing
+benchmark work. PR #81 restored the short replay and explained file branching
+and speed. The user then rejected the remaining generated voice and authorized
+this full editorial pass.
 
-## Next decisions and sequence
-
-First develop the hero and demonstration together. The actual task, repository,
-prerequisites, and captured results remain undecided. The candidate uses an
-explicitly illustrative events API/CLI recipe, not a recorded or verified agent
-run. Do not invent a successful transcript, speed claim, or productivity claim. The demonstration
-must be useful enough to justify its parallel work and concise enough not to
-require learning every marsh feature first.
-
-Review the full first-run path before shipping a homepage that sends readers to
-it. Then proceed in the user's requested order: guides and manual, then the rest
-of the public documentation and site. Those phases have no approved rewrite
-plan yet. Resolve factual contradictions against current behavior rather than
-repeating historical design claims.
-
-## Candidate review and validation
-
-Pix-guided independent editorial and visual reviews led to these revisions:
-shared-file composition and custom commands are visible without additional
-feature panels; stdout and exit status explain the delegation interface;
-section headings share one scale; mobile examples precede explanation; short
-code lines remain intact; safety qualifications use plain language.
-
-The animated transcript and its replay code were removed. The social card now
-matches the headline. Existing shared documentation styles and community
-content were otherwise left in place.
-
-Checks performed:
-
-- `make site-check` with output under the approved OpenCode temporary directory:
-  38 pages built, no broken generated-site or repository Markdown links.
-- `node --check docs/site/site.js` and `git diff --check`.
-- Isolated headless Chrome: desktop light/dark, 390px mobile light/dark, 320px
-  mobile, and tablet views; no page or code overflow and no script exceptions.
-- Browser interactions: code copying preserves command bytes, theme toggle,
-  keyboard skip link, and visible examples with JavaScript disabled.
-
-Screenshots and the browser report are under the approved temporary directory
-in `marsh-homepage-review/`. They are review artifacts, not product evidence.
-No provider-billed agent calls, VM-backed acceptance runs, or complete fresh
-installation journey were performed. The existing quickstart's audit findings
-remain unresolved and are the next documentation phase. Publishing this first
-pass does not establish that onboarding or the illustrative agent recipe has
-been verified end to end.
-
-## Guides and manual: proposed next phase
-
-Status: under discussion, not an approved broad rewrite. Independent Pix-guided
-reviews recommend three task guides rather than the current race, judge, panel,
-and large farm-out-script sequence:
-
-- **Develop independent changes in parallel.** Separate responsibilities,
-  separate project copies, inspect both patches, apply deliberately, and test
-  the combined working tree. Passing branches are not proof that the integrated
-  result works. Competing implementations are an optional variation.
-- **Review a change from different concerns.** One exact diff target throughout;
-  focused questions; checks where appropriate; findings verified against code.
-  Distinguish prompts requesting no edits from private-copy mount enforcement.
-- **Delegate a bounded subtask from an agent.** Start with one child and ordinary
-  process I/O, then private-copy delegation for edits. Explain enforced spawn
-  restrictions and tree cancellation without requiring an orchestration script
-  or a large project instructions block.
-
-Retiring the standalone judge guide is proposed, not decided. If approved,
-preserve its URL with a moved-page stub and move its useful pipeline mechanics
-into review/delegation documentation. Existing guide URLs need not break when
-their titles and examples change.
-
-The manual entry page should be navigation, not another pitch or race
-transcript. Separate the first-session tutorial, task guides, command reference,
-and explanations of execution/files/lifetimes. Do not force reference and
-explanation pages into tutorial-shaped numbered steps.
-
-### First-run constraints
-
-Use one provider, configured before the first agent call. Distinguish Mac and
-guest commands, establish the Linux execution location, show a real successful
-agent request and inspect its result/receipt, then exit before stopping VMs.
-Do not change syntax or start a second split merely to apply the first result.
-State cold-start and model-account costs without promising a one-minute install.
-
-A deterministic shell transformation can check platform mechanics, but is not a
-convincing flagship developer workflow. Do not replace the rejected toy fix with
-an equally trivial checklist demo, or use fixture results as evidence of model
-quality. Authentication smoke checks and substantive composition examples have
-different jobs and should be labeled accordingly.
-
-Still to decide: whether the first substantive walkthrough uses a pinned real
-reference repository or a reader's existing Linux-compatible project. A pinned
-repository improves reproducibility but must contain useful work and an actual
-verified journey; an adaptable recipe must state its prerequisites and cannot
-promise the reader's dependencies or tests work. Neither decision authorizes
-provider-billed runs automatically.
-
-### Immediate corrections
-
-A separate follow-up branch repairs factual defects without choosing the new
-guide examples: keep results before applying printed patches; leave the shell
-before stopping; identify Brush correctly; qualify credential and host-authority
-claims; document split input exclusions; distinguish marked examples from
-unexecuted illustrative transcripts. These are documentation changes, not
-changes to execution guarantees or a security audit.
-
-The follow-up also keeps quickstart results for explicit application from the
-original split instead of silently launching a second split. Its broader
-two-provider, hypothetical-project narrative still needs replacement.
-
-Follow-up validation: site and repository Markdown link checks passed, man pages
-generated successfully, and all 23 marked split/guide examples parsed without
-marker or replacement errors. Those VM-backed examples were not executed. An
-independent source-based review of the factual corrections led to narrower
-development-shell versus job authority language and Git-specific ignore rules.
-
-## Approved homepage follow-up: shell, filesystem, and speed
-
-After live review, the user identified that static recipes lost the experience
-of entering a shell and composing commands there. They approved restoring a
-short session animation, explaining filesystem branching under execution, and
-making speed visible.
-
-Keep the agreed platform identity. Show the Mac prompt, entry into marsh,
-`split { ... } | join --keep`, ordinary `agent && make test` branches, and a
-return to the prompt for inspection and explicit application. Do not restore the
-nested opening pipeline, automatic judge, or large job tree. The complete
-illustrated transcript remains visible during replay. Replay highlights commands
-and the corresponding project-copy/patch stages; it does not make readers wait
-for lines to appear. Provide a stop/replay control and a static reduced-motion
-and no-JavaScript view.
-
-The session remains illustrative: no fabricated model replies, test successes,
-split IDs, or elapsed-time claims. Its compressed playback is explicitly not a
-timing measurement. A captured substantive agent workflow remains follow-up work.
-
-Filesystem copy must explain that split snapshots current files once, including
-uncommitted edits and nonignored new files, then forks copies for the branches.
-Patches compare against that snapshot, not HEAD or the live original tree.
-macOS copy-on-write clones avoid full-file copying where supported; unsupported
-cloning falls back to ordinary copies. Do not claim instant atomic snapshots,
-that every file is copied, or that all branch shell commands are confined.
-
-Communicate speed through mechanisms: warm VM reuse instead of a VM boot per
-call, copy-on-write file clones, and concurrent branches. Keep first-use downloads
-separate from repeat use. Do not claim a numerical latency, throughput advantage,
-or faster model inference without measurements of the stated path and conditions.
-
-PR #79 reverted the previously approved docs/site files while adding benchmark
-work. The user authorized their exact restoration, shipped in PR #80. Preserve
-all benchmark files when making this follow-up; changes belong on a fresh branch
-based on current main, not an old filesystem snapshot.
-
-The follow-up browser checks cover five ordered replay phases, stop/replay,
-unchanged visible transcript text throughout playback, reduced motion, and
-no-JavaScript presentation. Desktop light/dark, 320/390px mobile, and tablet
-views have no page or code overflow; copying, theme switching, and keyboard skip
-navigation still work. Site/Markdown links and JavaScript syntax checks pass.
-Filesystem claims were reviewed against the implementation, including the
-unsupported-cloning fallback and the distinction between original repository
-branches and a fork's own Git metadata. No numeric speed benchmark or
-provider-billed demonstration was run for this homepage follow-up.
-
-Independent acceptance prompted two refinements: put the speed mechanisms in
-the hero and move execution/filesystem explanation ahead of deeper delegation;
-give the mobile filesystem view its own synchronized command fragment and
-replay/stop control. Real browser pointer clicks verified the mobile control and
-shared playback state. The revised candidate passed independent acceptance.
+Work from an isolated worktree based on current main. Verify the PR's changed
+files before merging. After Pages finishes, inspect the public HTML and assets;
+a successful deployment alone does not establish that the right page shipped.

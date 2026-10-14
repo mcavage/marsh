@@ -1,107 +1,86 @@
 # Install
 
-marsh is a Bash-compatible Linux shell for composing agents on Apple Silicon
-Macs. Registered agent commands run in fresh containers inside Docker Sandbox
-VMs. The default shell is Brush, not Bash.
+Install marsh and Docker Sandboxes on your Mac, then open your project in a
+Linux shell. The [Quickstart](quickstart.md) covers provider credentials and
+your first agent calls.
+
+## Requirements
+
+You need an **Apple Silicon Mac** and Docker Sandboxes (`sbx`) **0.45.0 or
+newer**, signed in. Check the installed version with `sbx version`. marsh
+is tested with 0.46.0 and 0.47.0 and uses the stock CLI without modifying it.
+It does not run on Intel Macs or Linux hosts.
+
+Docker Desktop is not required for a release install. You need Desktop with
+Buildx only when building marsh from source or running a Kit from a local
+source directory. Release binaries are unsigned and not notarized.
+
+## Install marsh
+
+### Homebrew
+
+In your **Mac terminal**:
 
 ```sh
 brew install docker/tap/sbx mcavage/tap/marsh
 sbx login
 ```
 
-Then, from any project directory:
+This installs `sbx` as a cask and marsh as a formula. The marsh formula
+cannot depend on that cask, so the command names both. If you install only
+marsh, it will tell you to install `sbx` before starting.
 
-```console
-$ cd ~/src/some-project
-$ marsh --version                     # marsh VERSION
-$ marsh -c 'pwd; uname -sm'
-/Users/you/src/some-project
-Linux aarch64
-```
-
-The command ran in a Linux VM at your project's Mac path. The first run
-creates the shell VM, so it is slower. Later runs reuse it.
-
-## Requirements
-
-- A Mac with Apple Silicon. marsh does not run on Intel Macs or Linux hosts.
-- Docker Sandboxes (`sbx`) 0.45.0 or newer, signed in. Check with
-  `sbx version`. marsh is tested with 0.46.0 and 0.47.0. marsh uses `sbx` as installed and
-  never changes it. Error messages for a missing or old `sbx` are in
-[Troubleshooting](troubleshooting.md#missing-or-old-sbx).
-
-The release binaries are not signed or notarized.
-
-Docker Desktop is not needed to run a release. The shell and every Kit run in
-VMs that `sbx` creates. Docker Desktop with Buildx is needed only to build
-marsh from source or to run a Kit from a local source directory.
-
-## Install marsh
-
-### Homebrew
-
-The commands at the top of this page are the Homebrew install. Run
-`sbx login` once. The marsh formula installs:
-
-- `marsh`, `msh`, `marshd`, and `marsh-mcp` on your `PATH`
-- the Linux binaries for the VMs, under the formula's `libexec`
-- the `marsh(1)` and `msh(1)` man pages
-
-The formula does not install `sbx`, which ships only as the `docker/tap/sbx`
-cask, and a formula cannot depend on a cask. If `sbx` is missing, the
-formula's caveats and marsh print:
-
-```
-marsh needs Docker Sandboxes: brew install docker/tap/sbx; then `sbx login`
-```
+The formula puts `marsh`, `msh`, `marshd`, and `marsh-mcp` on your `PATH`,
+installs guest binaries under its `libexec`, and includes the `marsh(1)` and
+`msh(1)` man pages.
 
 ### curl
 
-To install without Homebrew, first install and sign in to `sbx`:
+To install marsh with the release script, first install and sign in to
+Docker Sandboxes. These commands still use Homebrew for `sbx`:
 
 ```sh
-brew install docker/tap/sbx && sbx login
+brew install docker/tap/sbx
+sbx login
 curl -fsSL https://runmar.sh/install | sh
 ```
 
-The script checks that this is an Apple Silicon Mac and that `sbx` is new
-enough, downloads the latest release from GitHub, verifies its SHA-256
-checksum, and installs into `~/.local`. It needs `curl`, `tar`, and `shasum`.
-If `sbx` is missing it warns and installs anyway, but marsh will not start
-without `sbx`.
+The script installs into `~/.local`. It checks the host architecture and
+`sbx` version, downloads the latest GitHub release, and verifies its SHA-256
+checksum. It requires `curl`, `tar`, and `shasum`. If `sbx` is absent, the
+script warns but installs marsh; you must install `sbx` before marsh can run.
 
-The checksum comes from the same release as the download. It detects a
-corrupt file, not a malicious release.
+The checksum catches corrupt downloads, not a compromised release.
 
-Installed files:
+The install contains:
 
-```
+```text
 ~/.local/bin/marsh, msh, marshd, marsh-mcp
-~/.local/libexec/marsh/        Linux binaries for the VMs, command registry, shell image reference
+~/.local/libexec/marsh/        guest binaries, command registry, shell image reference
 ~/.local/share/man/man1/marsh.1, msh.1
 ~/.local/share/licenses/marsh/
 ```
 
-The script edits no shell profile. If `~/.local/bin` is not on your `PATH`,
-it prints a line to add it, for example:
+The script does not edit your shell profile. If `~/.local/bin` is not on
+your `PATH`, add it to the profile for your Mac shell. For zsh:
 
 ```sh
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+exec zsh
 ```
 
-Options go after `sh -s --`. `MARSH_PREFIX` and `MARSH_VERSION` set the same
-values as `--prefix` and `--version`.
+To use another install prefix:
 
 ```sh
-curl -fsSL https://runmar.sh/install | sh -s -- --prefix /usr/local   # asks before sudo
-curl -fsSL https://runmar.sh/install | sh -s -- --version 0.1.0
+curl -fsSL https://runmar.sh/install | sh -s -- --prefix /usr/local
 ```
 
-`--prefix` must be an absolute path. If the prefix is not writable, the script
-asks before using `sudo`. With no terminal to ask on, it exits unless you pass
-`--yes`.
+`--prefix` must be absolute. If the directory is not writable, the script
+asks before using `sudo`. Without a terminal it exits unless you pass
+`--yes`. Use `--version VERSION` to pin a release. `MARSH_PREFIX` and
+`MARSH_VERSION` set the same values as those flags.
 
-To read the script before running it:
+If you want to read the installer first:
 
 ```sh
 curl -fsSL https://runmar.sh/install -o install.sh
@@ -111,116 +90,153 @@ sh install.sh
 
 ### Release tarball
 
-1. Download `marsh-VERSION-darwin-arm64.tar.gz` and its `.sha256` from
-   [GitHub Releases](https://github.com/mcavage/marsh/releases).
-2. Check it with `shasum -a 256 -c`.
-3. Copy `bin/`, `libexec/` and `share/` into a prefix.
+Download `marsh-VERSION-darwin-arm64.tar.gz` and its `.sha256` file from
+[GitHub Releases](https://github.com/mcavage/marsh/releases). Substitute your
+chosen version and run
+`shasum -a 256 -c marsh-VERSION-darwin-arm64.tar.gz.sha256` in the download
+directory. Extract the archive and copy its `bin/`, `libexec/`, and `share/`
+directories into your chosen prefix.
 
-Keep `bin/` and `libexec/marsh/` under the same prefix. `marsh` looks for its
-VM binaries in `../libexec/marsh`.
+Keep `bin/` and `libexec/marsh/` under the same prefix. The host executable
+looks for guest binaries in `../libexec/marsh`.
+
+## Check the install
+
+In your **Mac terminal**, change to an existing project directory, then run:
+
+```sh
+marsh --version
+marsh -c 'pwd; uname -sm'
+```
+
+The first command prints the installed version. The second starts a
+noninteractive guest shell and prints your project's absolute Mac path,
+followed by `Linux aarch64`. It returns you to the Mac terminal when done.
+The first launch can take a few minutes while Docker Sandboxes prepares the
+shell VM. Later launches reuse that VM.
+
+Agent calls need a provider credential as well as `sbx login`. Follow the
+[Quickstart](quickstart.md) before making your first call.
 
 ## Nightly builds
 
-Every commit on `main` that passes CI is published as a nightly build, a few
-hours behind `main` at most. Nightlies can break things and make no
-compatibility promise. Releases are what most people should run.
+CI publishes passing commits on `main` as nightly builds. Use a release
+unless you need a change that has not been released yet; nightlies can break
+compatibility. The nightly and stable Homebrew packages conflict. Uninstall
+your stable formula before switching:
 
 ```sh
-brew install mcavage/tap/marsh-nightly    # replaces a stable install: they conflict
+brew uninstall marsh
+brew install mcavage/tap/marsh-nightly
+```
+
+To update a nightly:
+
+```sh
 brew upgrade mcavage/tap/marsh-nightly
 ```
 
-`marsh --version` shows a nightly as `X.Y.Z-nightly.TIME.gSHA`; the number is
-the next release after the latest one. Nightlies are GitHub prereleases on the
-[releases page](https://github.com/mcavage/marsh/releases) (the newest 10 are
-kept). The curl installer takes one with `--version`. A nightly and a stable
-install share `~/.marsh`, so go back with `brew uninstall marsh-nightly &&
-brew install mcavage/tap/marsh`.
+`marsh --version` identifies it as `X.Y.Z-nightly.TIME.gSHA`, using the next
+release number. The newest ten nightlies are kept as GitHub prereleases on
+the [releases page](https://github.com/mcavage/marsh/releases). The curl
+installer also accepts their full version with `--version`.
+
+Stable and nightly installs share `~/.marsh`. To switch back:
+
+```sh
+brew uninstall marsh-nightly
+brew install mcavage/tap/marsh
+```
 
 ## Upgrade
 
-With Homebrew:
+For Homebrew:
 
 ```sh
 brew upgrade mcavage/tap/marsh
 ```
 
-With the curl installer, run it again. With a tarball, repeat the tarball
-steps.
+For a script install, run the installer again. For a tarball install,
+repeat the extraction and copy steps with the new release.
 
-A running marsh daemon keeps the old binaries until it stops. When no jobs
-are running, run `marsh stop`. The next `marsh` starts the new version.
-`marsh stop` refuses while shells or jobs are open
-([troubleshooting](troubleshooting.md#removing-vms)).
+An existing daemon keeps using the old binaries. Finish its jobs and run
+`exit` in every marsh shell, then run `marsh stop` from your **Mac terminal**.
+The next launch uses the new version. Stop refuses while shells or jobs are
+active; see [Removing VMs](troubleshooting.md#removing-vms).
 
-After you upgrade `sbx`, marsh restarts its idle daemon by itself. Rerun the
-`marsh mcp install CLIENT` command in each project where you ran it, because
-the registration records the `sbx` path.
+After an `sbx` upgrade, marsh restarts its idle daemon automatically. In
+projects where you registered an MCP client, rerun `marsh mcp install CLIENT`
+with that client's name because the registration stores the `sbx` path.
 
 ## Uninstall
 
+Finish jobs and leave every marsh shell with `exit`. In your **Mac
+terminal**, remove marsh's VMs and stop its daemon:
+
 ```sh
-marsh stop            # removes the VMs marsh created and stops its daemon
+marsh stop
 ```
 
-With Homebrew:
+For Homebrew:
 
 ```sh
 brew uninstall marsh
 ```
 
-Otherwise:
+For a default `~/.local` script or tarball install, remove its installed
+files. Adjust these paths if you used another prefix:
 
 ```sh
 rm -f ~/.local/bin/{marsh,msh,marshd,marsh-mcp} ~/.local/share/man/man1/{marsh,msh}.1
 rm -rf ~/.local/libexec/marsh ~/.local/share/licenses/marsh
 ```
 
-Uninstalling does not remove your data. To remove it as well:
+These commands leave user data in place. Remove any of the following only
+if you no longer need its contents:
 
 | Path | Contents |
 | --- | --- |
-| `~/.marsh` | guest home, including agent logins and history |
-| `~/Library/Application Support/marsh` | host control directory |
-| `~/Library/Application Support/marsh-mcp-scopes` | generated MCP server scopes |
-| `~/Library/Caches/marsh` | Kit image cache |
+| `~/.marsh` | Guest home, including saved agent logins and history |
+| `~/Library/Application Support/marsh` | Host control data and job records |
+| `~/Library/Application Support/marsh-mcp-scopes` | Generated MCP server scopes |
+| `~/Library/Caches/marsh` | Cached Kit images |
 
 ## Docker Sandboxes policy
 
-Release Kits and the shell image are published on Docker Hub as
-`docker.io/mcavage/marsh-*` (tags `:X.Y.Z` and `:latest`; nightlies use
-`:nightly`). If your Docker Sandboxes policy restricts Kit
-sources, allow `docker.io/mcavage`.
+The release shell image and Kits are published as
+`docker.io/mcavage/marsh-*`, with version tags and `:latest`; nightlies use
+`:nightly`. If your Docker Sandboxes policy restricts Kit sources, allow
+`docker.io/mcavage`.
 
 ## From source
 
-You need Docker Desktop with Buildx, Rust 1.95, Python 3.10+, `jq`, and `sbx`
-(see Requirements). See [CONTRIBUTING.md](../CONTRIBUTING.md) for details.
+You need Docker Desktop with Buildx, Rust 1.95, Python 3.10 or newer, `jq`,
+and the `sbx` version listed under [Requirements](#requirements). See
+[CONTRIBUTING.md](../CONTRIBUTING.md) for the development loop.
 
 ```sh
-git clone https://github.com/mcavage/marsh && cd marsh
-make install            # builds and installs into ~/.local
+git clone https://github.com/mcavage/marsh
+cd marsh
+make install
 ```
 
-To build an installable tarball from your local build and install it like a
-release tarball:
+`make install` builds and installs into `~/.local`. To package a local
+build as a tarball instead:
 
 ```sh
-make dist-local         # -> target/dist/marsh-VERSION-local-darwin-arm64.tar.gz
-mkdir -p ~/.local
-tar -xzf target/dist/marsh-*-local-darwin-arm64.tar.gz -C /tmp
-cp -R /tmp/marsh-*-local-darwin-arm64/{bin,libexec,share} ~/.local/
-~/.local/bin/marsh --version    # marsh VERSION (local build: REV DATE; not a release)
+make dist-local
 ```
 
-A local tarball is marked: its name has `-local`, it contains
-`LOCAL-BUILD.txt`, and `marsh --version` says `local build`. It differs from a
-release in two ways:
+The archive is
+`target/dist/marsh-VERSION-local-darwin-arm64.tar.gz`. Extract that one
+archive into an empty directory and copy its `bin/`, `libexec/`, and `share/`
+into your prefix, as for a release tarball.
 
-- Its Kits are unpinned source directories, built on first use.
-- Its shell image is a local image in this Mac's `sbx` image store.
+A local archive includes `LOCAL-BUILD.txt`, and `marsh --version` identifies
+it as a local build. Its Kits are unpinned source directories, built on first
+use, and its shell image lives in that Mac's `sbx` image store. Install it
+only on the Mac that built it. The release target, `make dist`, refuses
+unpinned Kits and directs you to `make dist-local`.
 
-Install a local tarball only on the Mac that built it. `make dist`, the
-release packaging, refuses unpinned Kits and points you to `make dist-local`.
-
-Next: [Quickstart](quickstart.md) runs an agent and a `split`.
+Next, follow the [Quickstart](quickstart.md), or consult
+[Troubleshooting](troubleshooting.md) if the install does not start.

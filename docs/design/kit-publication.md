@@ -28,11 +28,11 @@ private repositories before publication when the payload must stay private.
 Preparation/publishing output directories must be **owner-private (0700)** and
 outside every selected Kit source. New directories are created at 0700. For an
 existing `target/kit-release`, review its contents and set its mode to 0700 first.
-Files are written at 0600; a public or writable output directory is not silently
-chmodded. `make kits` / `--validate-only` perform full native cache-only builds,
-not pushes. They are **not pure or read-only validation**: Dockerfile build
-instructions may execute, public/base images may be pulled and builder cache may
-change. Every selected cache-only build must succeed before any push starts.
+Files are written at 0600, and an existing output directory with unsafe
+permissions is rejected. `make kits` and `--validate-only` run full native
+cache-only builds without pushing. Those builds can execute Dockerfile
+instructions, pull images, and write builder cache. Every selected build must
+succeed before any push starts.
 
 ## One canonical input set
 
@@ -70,8 +70,7 @@ not symlink aliases. The receipt must be outside source and both host/Linux
 exports, in its private host directory. Strong prepared documents and publication
 registries must also stay outside that observed source and its exports; neither
 output may overwrite a consumed source/proof input (including an inode alias).
-The shared
-`image_observations.verified_shell_image` revalidates the observed build receipt,
+The shared `image_observations.verified_shell_image` revalidates the observed build receipt,
 exact source, host/Linux artifacts, licenses, producer image proof and original
 export path. Copied/relabeled image files, stale artifacts with unchanged receipt
 bytes, and helper-only JSON are rejected. Candidate/compiler/tool observations
@@ -112,10 +111,9 @@ configuration fails **before any Docker invocation**. Rechecks after all native
 cache-only builds prevent a changed source from starting a push.
 Private context changes are also refused. Strong shell proof verification is
 repeated before Docker, after cache-only builds, before each push, and after
-publication; unchanged receipt bytes cannot hide changed candidate/artifact bytes.
-After publication, all inputs and contexts are checked again; a failure then
-explicitly says **publication may
-have occurred**, never that there were zero remote effects.
+publication, checking candidate and artifact bytes as well as the receipt.
+If a check fails after a push, the diagnostic says **publication may have
+occurred**. Inspect the destination before retrying.
 
 Successful publication writes a durable content-addressed receipt named
 `<registry>.publication-<sha256>.json` before atomically replacing the ordinary
@@ -123,16 +121,17 @@ Successful publication writes a durable content-addressed receipt named
 file bytes, source/script bindings, effective arguments and staged hashes to each
 reported immutable digest and the exact registry hash. Existing receipts are not
 overwritten. Consumers can verify the receipt filename and `registry_sha256`.
-A failure before registry commit preserves the previous registry and receipts;
-a crash can leave an unreferenced new receipt. These two local files are not
-claimed to be a filesystem-wide transaction. Remote pushes are not transactional:
-partial runs can leave images and move the mutable tag (`:release`, or `--tag`;
-nightlies use `:nightly`). Consumers pin by digest, so a moved tag changes nothing they run.
+A failure before registry commit preserves the previous registry and receipts,
+but a crash can leave an unreferenced new receipt: the receipt and registry are
+separate local commits. Remote pushes can also partially succeed, leaving images
+and moving the mutable tag (`:release`, or `--tag`; nightlies use `:nightly`).
+Consumers pin by digest, so a moved tag does not change their selected image.
 
-This is byte provenance, **not a signature, attestation of trustworthy source,
-legal completeness proof, or runtime/image qualification**. Do not modify source
-concurrently with preparation/publication. Before/after checks detect observed
-changes; they are not an atomic snapshot of a hostile same-user editor.
+The receipt binds source and staged bytes to reported digests. It does not
+sign them, establish source trust or legal completeness, or qualify the image
+at runtime. Do not edit sources during preparation or publication: before/after
+checks can detect changes, but cannot take an atomic snapshot against a hostile
+same-user editor.
 
 ## Explicit authoring inputs and native argument rules
 
@@ -178,7 +177,7 @@ traverse, overwrite source files, or add Docker ignore controls.
 Only descriptor argument names are accepted, not raw Docker `buildArg` names.
 Missing values use declared defaults, otherwise they are required. Strings,
 argument counts, patterns and YAML nesting are bounded; aliases and duplicate
-keys are refused. **Python regex matching is not used.** All selected private
+keys are refused. All selected private
 contexts undergo full native `--output type=cacheonly` builds before any push.
 Go's native regex parser is the pattern authority, including `\z`, POSIX classes
 and rejection of backreferences. It checks the effective value: a default that
@@ -232,7 +231,7 @@ and nonsecret inputs before granting the builder authority.
 python3 -W error tests/kits/test_publisher_cli.py -v
 ```
 
-The suite calls the real CLIs on copied default-seven and fixture source, with a
+The suite calls the real CLIs on copied default Kit and fixture sources, with a
 recording Docker executable. It independently hashes canonical/staged bytes and
 checks stale additions/deletions/modifications, single-link/owner/no-follow/size
 refusals, namespace reservation, long paths, output boundaries, source changes
@@ -240,7 +239,9 @@ during builds, publication receipt binding and preservation. It also checks
 cache-only-before-push call order, **not native regex semantics**; the recorder
 explicitly refuses frontend subrequest flags. The APFS alias case is skipped on
 case-sensitive test volumes.
-Actual registry/nonroot image readability and stock-SBX remain separate host gates.
+The recording executable cannot establish native frontend compatibility, registry
+readability, nonroot image behavior, or stock-SBX execution. Those require the
+actual host gates below and the product acceptance run.
 
 ## Opt-in actual frontend regression
 
@@ -265,9 +266,8 @@ The same cases also call the real publisher's cache-only route; its retained
 4,096-byte input bound refuses the oversized nested case before Docker. The
 20,001-byte direct-native case separately proves native finite mismatch behavior.
 
-Each live command has a 120-second default deadline (bounded override to 600).
-Negative cases require native pattern diagnostics; a generic setup/unsupported
-frontend error is not a passing refusal. No push, image load, workload/agent
-execution or SBX command exists in this harness. Public image resolves and
-builder-cache writes are possible; do not describe this as zero build effects.
-A fresh host run is still required for the exact current publisher.
+Each live command has a 120-second default deadline, with an override up to 600.
+Negative cases must return native pattern diagnostics; setup failures or an
+unsupported frontend fail the test. The harness can resolve public images and
+write builder cache, but has no push, image-load, workload, agent, or SBX step.
+Qualification still requires a host run against the exact publisher candidate.

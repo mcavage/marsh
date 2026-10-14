@@ -31,6 +31,21 @@ MARKER = re.compile(r"^<!-- doc-test: (host|shell)(.*?) -->$")
 ATTR = re.compile(r'\s+(\w+)=("(?:[^"\\]|\\.)*"|\[[^\]]*\]|\S+)')
 
 
+def documents(root: pathlib.Path | None = None) -> list[pathlib.Path]:
+    """Public documentation whose marked examples W29 executes.
+
+    The agent-job examples have their own P31 caller. Historical design and
+    upstream patch records are not instructions to execute against a release.
+    """
+    root = root or DOC.parent.parent
+    paths = [root / "README.md", *(root / "docs").glob("*.md"),
+             *(root / "docs" / "guides").glob("*.md"),
+             root / "docs" / "man" / "marsh.1.md",
+             root / "docs" / "site" / "llms-intro.md"]
+    return sorted({path for path in paths
+                   if path.is_file() and path != root / "docs" / "agents.md"})
+
+
 @dataclass
 class Example:
     line: int

@@ -1,9 +1,10 @@
 # Fanout and collect
 
-`fanout` runs commands side by side on your project files. `collect` prints
-their output in the order you wrote them, labelled. Total time is about that
-of the slowest branch, not the sum.
+`fanout` runs commands concurrently on the same project files. `collect`
+waits for them and prints labelled output in declaration order. From an
+[installed marsh shell](shell.md), you can run a review alongside tests:
 
+<!-- doc-test: shell replace=["fanout {\n  races: codex exec \"find data races in net/\"\n  leaks: claude -p \"find goroutine leaks in net/\"\n  tests: make test\n} | collect", "fanout {\n  races: fixture identity\n  leaks: fixture identity\n  tests: printf 'tests finished\\n'\n} | collect"] stdout="== tests (complete) ==\ntests finished" -->
 ```sh
 fanout {
   races: codex exec "find data races in net/"
@@ -12,35 +13,17 @@ fanout {
 } | collect
 ```
 
-```text
-== races (complete) ==
-net/dial.go:88 reads d.timeout without holding d.mu.
-
-== leaks (complete) ==
-None found: every goroutine in net/ exits on ctx.Done().
-
-== tests (failed: 2) ==
-
-== tests stderr ==
---- FAIL: TestDialTimeout (0.31s)
-```
-
 Ctrl-C stops every branch, along with every process the branch started. The
 exit status of `fanout | collect` is the first nonzero branch status in the
-order written, here 2.
-
-Each agent branch is a job in its own container and authenticates as it does
-when you run it directly, through Docker Sandboxes ([Kits](kits.md#signing-in)).
+order written.
 
 ## When to use split instead
 
-`fanout` makes no private copies. Branches share your project, so their writes
-are real and can race: two branches that write the same file overwrite each
-other. An agent branch can also delete project files.
-
-Use `fanout` for reads and checks: tests, lint, reviews. Use
-[`split`](split.md) when branches write files, or when you want a patch to
-review before anything changes.
+Use `fanout` when commands can safely share their files. Branches write to
+your live project, so they can overwrite each other's changes. Tests and
+linters may share caches or build output, and a review prompt does not
+prevent an agent from editing or deleting files. Use [`split`](split.md)
+when you need private project copies and patches to inspect.
 
 ## Output and status
 
@@ -58,6 +41,10 @@ stdout, so a header always precedes its stderr.
 On a terminal, `fanout` prints the same output itself, so `| collect` is
 optional there.
 
+The pipeline carries a structured result between `fanout` and `collect`;
+ordinary commands belong after `collect`. Normal `pipefail` rules apply to
+later pipeline stages.
+
 ## In the marsh shell
 
 `label: commands` names a branch, as in `split { }`. Inside the braces, a new
@@ -68,24 +55,39 @@ branch starts after any of these:
 - a comma
 - a `;` followed by `LABEL:`
 
-Anything else inside a branch is ordinary Bash, including other `;`, `&&`,
+Anything else inside a branch is ordinary shell syntax, including other `;`, `&&`,
 and groups.
 
 ## From any shell
 
 Use these forms in scripts, in a non-marsh shell, or from inside a job.
 
+<!-- doc-test: host stdout="== count (complete) ==\n2" -->
+<!-- doc-test: shell stdout="== count (complete) ==\n2" -->
 ```sh
-marsh fanout -n -b test='make test' -b lint='make lint' | marsh collect
-marsh fanout -n ::: a codex exec 'review src/a.rs' ::: b pi -p 'review src/b.rs' | marsh collect
+marsh fanout -n -b count='wc -l < notes.txt' \
+                -b contents='cat notes.txt' | marsh collect
+```
+
+This example assumes `notes.txt` contains two lines. An argv branch avoids
+shell parsing:
+
+<!-- doc-test: shell replace=["codex exec 'review notes.txt'", "fixture identity"] stdout="== review (complete) ==" -->
+```sh
+marsh fanout -n ::: review codex exec 'review notes.txt' ::: count wc -l notes.txt | marsh collect
 ```
 
 Branch forms:
 
-- `-b LABEL=STRING` runs STRING with the marsh shell in the shell VM. A job
-  cannot use `-b`.
+- `-b LABEL=STRING` runs STRING in a fresh Brush shell in the shell VM. A job
+  cannot use `-b`. These shell commands have your shell VM user's access to
+  mounted files; the branch does not confine them.
 - `::: LABEL CMD ARG...` runs one command. The next `:::` ends the branch.
-  A registered name starts a job.
+  A registered name starts a job; other commands run in the caller's
+  environment. An argument cannot be the literal `:::`.
+
+CLI labels are unique ignoring case, up to 64 characters, and begin with a
+letter or `_`. Following characters may be letters, digits, `_`, `-`, or `.`.
 
 Where it runs:
 
@@ -101,14 +103,8 @@ Input:
 
 ## Jobs in `marsh jobs --tree`
 
-Each branch runs with `FANOUT_BRANCH=ID/LABEL` exported. The jobs a branch
-starts appear under one `fanout (LABEL, ...)` node, as a split's jobs do. The
-node for the example above:
-
-```text
-ID        STARTED   STATE      EXIT      RUN  COMMAND
-3e0c1a7b  1m ago    finished      0    1m02s  fanout (races, leaks)
-```
+Each branch runs with `FANOUT_BRANCH=ID/LABEL` exported. The jobs it starts
+appear under a `fanout (LABEL, ...)` node in `marsh jobs --tree`.
 
 Two nesting cases:
 
@@ -125,11 +121,13 @@ Two nesting cases:
 | Input | 64 MiB |
 | Output, all branches together | 16 MiB |
 
-Crossing a limit cancels every branch, with every process it started, and
-prints nothing. More than 16 branches fails with `fanout: at most 16 branches`.
+Oversized input is refused before branches start. Exceeding the output budget
+cancels and reaps every branch and its process group, with no collected
+output. Errors still appear on stderr. More than 16 branches fails with
+`fanout: at most 16 branches`.
 
 The daemon runs only 8 jobs at once, across all callers. If more than 8
-branches call registered commands, the extra branches are refused with
+jobs would be live at once, extra calls are refused with
 `capacity: 8 jobs` ([Troubleshooting](troubleshooting.md#a-job-was-refused)).
 
 Next: [Split and join](split.md), [Agents running agents](agents.md).

@@ -1,228 +1,230 @@
 # FAQ
 
-marsh is a Bash-compatible Linux shell for composing agents. Brush is the
-default shell; registered agent commands run in fresh containers inside Docker
-Sandbox VMs. Here is one way to use it:
-
-```console
-marsh-0.5$ marsh split -n ::: a claude -p 'fix the flaky test' \
-                          ::: b codex exec 'fix the flaky test' | marsh join --keep
-
-== a (exited 0, kit:claude) ==
-The test raced on a shared port; it now asks the kernel for a free one.
--- a: 1 file (M test/net_test.go); diff …/out/a/diff.patch --
-...
-== b (exited 0, kit:codex) ==
-Added a retry around the dial and a longer timeout.
--- b: 2 files (M net/dial.go, M test/net_test.go); diff …/out/b/diff.patch --
-...
-marsh: join: kept /Users/you/src/my-project/.marsh/split/8d5c8fdd1563 (join --keep); inspect, then: marsh splits rm 8d5c8fdd1563
-marsh-0.5$ git apply .marsh/split/8d5c8fdd1563/out/a/diff.patch
-```
-
-Each agent worked on its own fork, a private copy of the project. (`...`
-marks omitted output.) Your files changed only
-when you ran `git apply`. Ctrl-C during the split would have stopped both
-agents and anything they started.
+For a first session, follow the [Quickstart](quickstart.md).
 
 ## Why not something else
 
 ### Why not run agents in Docker myself?
 
-You can. A container with the project mounted read/write can also delete the
-project. marsh provides:
+You can build that setup yourself. marsh handles a fresh nonroot container
+for each registered command, reuses its Kit's VM, and checks container
+deletion when the call ends. It also provides project copies and patches
+with `split`, tracks nested agent calls in one tree, and cancels that tree
+together.
 
-- A fresh nonroot container per call, inside a VM per Kit. The VM has its own
-  Docker Engine and no Mac Docker socket.
-- Placeholder credentials in the container. The real keys stay with the
-  Docker Sandboxes proxy.
-- A private copy of the project per `split` branch, and a patch back.
-- Limits per job (CPU, memory, processes, output, wall time), one job tree
-  across nested agents, and a check that each container was removed.
-
-A mounted project is still writable, in marsh or in Docker. See
+Docker Sandboxes manages the VMs, network policies, and provider credential
+proxy. No job receives a Docker socket or an SBX control socket. The mounted
+project remains writable: outside a split, an agent can delete it. See
 [What can go wrong](#what-can-go-wrong).
 
 ### Why not git worktrees?
 
-A worktree is a second checkout. It does not limit what a process running in
-it can do on your Mac.
+Worktrees give you separate checkouts. A process in one still has your Mac
+user's authority unless you arrange confinement yourself.
 
-A `split` branch that runs a registered command (`::: LABEL CMD ...`) mounts
-only its fork, so it cannot write your real files or `.git`. The directory does
-not have to be a Git repository. A fork is a copy-on-write clone: it shares
-storage with the original until a branch writes.
+A registered agent in a marsh split mounts only its fork of the project,
+plus the shared guest home and read-only Git metadata. The fork includes
+uncommitted work, and copy-on-write cloning shares unchanged file data where
+the filesystem supports it. `join` returns patches without merging them.
+You inspect and apply the changes you want.
 
-`split` returns each branch's result as a `git apply` patch. It does not
-merge, and it does not pick between branches.
+Split also works in a plain directory. For Git projects, it omits ignored
+files and refuses roots with a `.git` file, including linked worktrees and
+submodule checkouts. Use a checkout with a `.git` directory.
 
 ### Why not tmux?
 
-tmux gives you several terminals. You start each agent, watch each one, and
-collect results yourself.
+tmux is useful when you want separate interactive terminals. It does not
+capture a pane's project changes or track agent calls across containers.
 
-`split { ... } | join` starts the branches, waits for all of them, and prints
-each one's output, exit status, and diff. `marsh jobs --tree` shows which job
-started which. Ctrl-C stops the whole tree. tmux does not start branches or
-capture what a pane changed.
+In marsh, `split { ... } | join` starts branches on project copies and
+prints each branch's output, exit status, and diff. `marsh jobs --tree`
+shows nested jobs, and Ctrl-C stops the foreground tree. You can still use
+tmux to organize your terminals.
 
 ### How is it different from plain `sbx`?
 
-marsh calls the public `sbx` command line and ships no modified copy. `sbx`
-creates the VMs, enforces each VM's network policy, and holds your credentials
-behind a proxy. marsh adds:
+`sbx` creates VMs, applies their network policies, and manages proxy-held
+credentials. marsh uses its public CLI without shipping a modified copy.
+It adds the shell, registered agent commands, project branching, parallel
+pipelines, and nested-job tracking. It can also publish pipelines as MCP
+tools and expose ACP sessions to clients.
 
-- a Bash-compatible shell that opens your project in a VM at the same path
-- registered commands: a name such as `codex` that runs a Docker Sandboxes
-  Kit in a fresh container ([Commands and Kits](kits.md))
-- `split`, `fanout`, `join`, and `collect`
-- nested jobs under one tree, with limits, and `marsh results`
-- MCP and ACP publication of pipelines and sessions
-
-marsh needs Docker Sandboxes 0.45.0 or newer.
+marsh requires Docker Sandboxes 0.45.0 or newer on an Apple Silicon Mac.
 
 ## What it costs
 
-Money
-: marsh is Apache-2.0. Agents bill through your own provider accounts, and a
-  split with N agent branches runs N agent sessions. The job limits do not
-  cap API spend.
+### Who pays for the agents?
 
-Time
-: The first command boots the shell VM. The first call to each Kit boots that
-  Kit's VM, and marsh prints `[starting NAME worker VM…]`. Later calls reuse
-  warm VMs. `marsh --load all` boots every Kit VM before your first prompt.
-  `marsh join --timing` prints marsh's own overhead for a split.
-  A Kit image that is not yet cached is downloaded on first use (about
-  600 MB, a few minutes); marsh prints a notice before it starts.
+You use your own provider accounts. Each branch or child starts a separate
+agent run, which may make many model requests. marsh is Apache-2.0 software;
+its job limits do not impose a spending cap.
 
-CPU and memory
-: Each job gets 4 CPUs and 8 GiB by default. At most 8 jobs run at once. These
-  docs give no figure for the VMs themselves.
+### Why does the first call take longer?
 
-Disk
-: A split puts its forks in `PROJECT/.marsh/split/ID/`, which Git ignores.
-  `join` removes them. It keeps them if the `join` command failed, if you pass
-  `--keep`, if a branch could not be confirmed stopped, or if nothing joined
-  for 60 seconds. Remove a kept split with `marsh splits rm ID`. Packages you install in a VM are lost when the VM
-  is removed.
+The first shell launch starts its VM. First use of a Kit starts another VM
+and may download an image of about 600 MB, which can take a few minutes.
+Later calls reuse warm VMs. `marsh --load all` prepares Kit VMs before the
+prompt, and `marsh join --timing` reports split overhead.
 
-Limits: [Commands and Kits](kits.md#limits-per-job) and
-[Configuration](configuration.md#job-limits).
+### How much CPU and memory does a job get?
+
+Each job defaults to four CPUs and 8 GiB of memory, with at most eight
+concurrent jobs per daemon. The VMs also need resources beyond those job
+limits. See [Job limits](configuration.md#job-limits).
+
+### Where do split copies go, and when are they removed?
+
+Copies and results live under `PROJECT/.marsh/split/ID/`. A successful join
+normally removes them; `--keep`, a failed join, uncertain cleanup, or a split
+left unjoined for 60 seconds preserves them. Inspect them with `marsh splits` and remove a
+finished one with `marsh splits rm ID`. VM removal discards packages you
+installed inside that VM, but not the saved guest home.
 
 ## What can go wrong
 
-An agent can delete your project files.
-: Every job can read and write the project. Agents started inside a `split`
-  branch see only their fork. Outside `split`, nothing protects the project.
-  Keep your work in Git.
+### Can an agent delete my files?
 
-Shell code in a split branch is not confined.
-: A branch from `-b` or `split { }` runs your own code in the shell VM and can
-  write anything you can write there. Only its fork's changes are captured.
-  Agents it starts, like `claude`, run in containers that mount only the fork.
+Yes. A direct call has read-write access to the original project. A split
+agent has that access to its fork instead. Keep recoverable copies of your
+work and inspect patches before applying them.
 
-Every job can read the guest home.
-: Agents keep logins and history there, so an agent in one Kit can read
-  another agent's settings. For work that must stay apart, use a separate
-  `MARSH_HOME`.
+### Are my tests confined to a split copy?
 
-The agents' own sandboxes are off.
-: The packaged Kits run Claude Code with `--dangerously-skip-permissions` and
-  Codex with `--dangerously-bypass-approvals-and-sandbox`. Pi has none. The
-  container and VM are the only sandbox.
+No. Your own shell code runs unconfined in the shell VM. A branch created
+with `-b` or `split { }` starts in a fork but can write elsewhere in that VM,
+including other mounted project paths. Registered agents it starts get the
+fork-only project mount. That does not confine a test command you run after
+the agent.
 
-Containers in one Kit VM share a kernel.
-: The VM separates Kits from each other. The container does not.
+### Can one job read another agent's saved login?
 
-marsh can fail to confirm that a container was removed.
-: It does not re-run the job. It marks it `cleanup_uncertain` and quarantines
-  that Kit VM until you run `marsh workers reset KIT`.
+Yes. Jobs share a guest home containing settings, history, and saved logins.
+One job can read files another agent saved there. Use a separate
+`MARSH_HOME` for work that must stay apart; a project fork is not a private
+home.
 
-A job can be refused.
-: At a limit (for example 8 jobs at once), the job starts nothing, prints a
-  reason, and exits 125. [Troubleshooting](troubleshooting.md#a-job-was-refused)
-  lists every limit.
+### Will agents ask before running tools?
 
-The project is young.
-: There has been no independent security review, and the binaries are not
-  signed or notarized.
+The packaged agents do not. Claude Code runs with
+`--dangerously-skip-permissions`; Codex uses
+`--dangerously-bypass-approvals-and-sandbox`. Their own internal sandboxes
+are disabled, and Pi has no OS-level sandbox. The job container and VM
+provide the isolation. Containers within one Kit VM share a kernel.
 
-[Security model](security.md) has the rest.
-[Troubleshooting](troubleshooting.md) lists error messages and fixes.
+### What if marsh loses contact with a running job?
+
+If marsh cannot confirm that a container ended and was removed, it records
+`cleanup_uncertain` and quarantines the Kit VM. It does not replay the job.
+Use `marsh workers reset KIT` to retire the VM before using that Kit again.
+
+### Why was a job refused?
+
+A launch would have exceeded a limit or used a command outside its allowed
+spawn set. At a limit, marsh starts nothing, prints the reason, and exits
+125. A command outside the spawn set exits 126.
+See [A job was refused](troubleshooting.md#a-job-was-refused).
+
+### Has marsh had a security review?
+
+Not yet. Release binaries are also unsigned and not notarized. The
+[security model](security.md) describes the boundaries in detail;
+[Troubleshooting](troubleshooting.md) covers
+failure recovery.
 
 ## Agents and logins
 
 ### Which agents work?
 
-`claude` (Claude Code), `codex` (OpenAI Codex CLI), and `pi` (the Pi coding
-agent) are registered. `shell` runs a plain `/bin/sh` with no credentials.
-Any other tool works if you package it as a Docker Sandboxes Kit and register
-it with `marsh kit install` or `commands.json`. See
-[Commands and Kits](kits.md).
+The packaged commands are `claude` (Claude Code), `codex` (OpenAI Codex
+CLI), `pi` (the Pi coding agent), and `shell` (plain `/bin/sh`, without
+provider credentials). They are Linux CLI versions supplied by marsh's
+Kits, not the installations on your Mac.
+
+You can package another tool as a Docker Sandboxes Kit and register it with
+`marsh kit install` or `commands.json`. See [Commands and Kits](kits.md).
 
 ### How do agents authenticate?
 
-marsh has no login. Run `sbx login` once, then give Docker Sandboxes a
-credential with `sbx secret set anthropic` or `sbx secret set openai`. Its proxy
-adds the credential to the agent's requests, and containers see placeholders.
-See [Signing in](kits.md#signing-in).
+Run `sbx login` on your Mac, then configure the provider before calling an
+agent: `sbx secret set anthropic` for Claude, or `sbx secret set openai` for
+Codex. Pi can use Anthropic models with the Anthropic credential. Docker
+Sandboxes also supports OAuth bindings for the agent Kits; see
+[Signing in](kits.md#signing-in).
+
+For proxy-managed credentials, the real provider key stays on the Mac and
+containers receive placeholders. Saved guest login files are ordinary files
+in the shared guest home and can be read by other jobs. A child uses its own
+Kit's credential and network policy, not its parent's.
 
 ### Can Mac clients use what I build in marsh?
 
-Mac Codex can load published pipelines and ACP sessions with
-`marsh mcp install-published` and `marsh acp install-published`. Those
-commands support only `codex`. `marsh mcp install` also registers Claude Code
-and Docker Sandboxes' gateway. See [MCP](mcp.md) and [ACP](acp.md).
+Mac Codex can load published pipelines with `marsh mcp install-published`
+and ACP sessions with `marsh acp install-published`. Those two commands
+support only `codex`. `marsh mcp install` also supports Claude Code and the
+Docker Sandboxes gateway. See [MCP](mcp.md) and [ACP](acp.md).
 
 ### Does marsh record my sessions?
 
-It records what ran, the exit status, cleanup, and timing (`marsh results`).
-It does not record prompts, terminal content, or output. Arguments and paths
-do appear in `marsh results` and `marsh jobs`, so keep secrets out of them.
+`marsh results` records job status, cleanup, and timing, not a terminal
+transcript. It does not retain stdin, stdout, or stderr. Command arguments
+and paths do appear in job records, so a prompt passed as an argument can
+appear there too. Keep secrets out of arguments. Split results separately
+retain branch output and patches while the split exists.
 
 ## The shell
 
 ### Is it Bash?
 
-No. It is [Brush](https://github.com/reubeno/brush), a Bash-compatible shell
-written in Rust, plus 49 patches in
-[`docs/upstream/brush/`](upstream/brush/README.md), most of them Bash
-compatibility fixes. marsh never calls Bash to do its work. Known differences
-are listed in [The shell](shell.md#bash-compatibility).
+No. The default shell is [Brush](https://github.com/reubeno/brush), a
+Bash-compatible shell written in Rust, with marsh's
+[patch queue](upstream/brush/README.md). marsh does not use Bash to implement
+its default shell. Known gaps are in
+[Bash compatibility](shell.md#bash-compatibility).
+
+You can select the guest's own Bash or zsh with `marsh --shell bash` or
+`marsh --shell zsh`. Registered agent commands still work. For split and
+fanout, use their CLI forms rather than Brush's block syntax. See
+[Using bash or zsh instead](shells.md).
 
 ### How do `split` and `fanout` differ?
 
-`split` gives every branch a private copy of the project and returns patches.
-`fanout` runs branches at once on your real files, so branches can conflict.
+`split` gives each branch a project copy and returns a patch. Use it for
+independent edits, alternative implementations, or reviewers whose
+unexpected writes should stay off the original project.
 
-Use `split` for competing attempts and `fanout` for independent tasks such as
-tests and lint. See [Split and join](split.md) and
-[Fanout and collect](fanout.md).
+`fanout` runs branches on shared files. It suits checks that can safely
+share a working directory, but parallel writers can collide. A request not
+to edit does not make an agent read-only. See [Split and join](split.md)
+and [Fanout and collect](fanout.md).
 
 ### Does it run on Linux or Intel Macs?
 
-No. It needs an Apple Silicon Mac and Docker Sandboxes. Contributors can build
-the shell and run its tests on Linux arm64.
+No. The host product requires Apple Silicon and Docker Sandboxes. Its
+guest commands run on Linux arm64. Contributors can build the shell and run
+its tests on Linux arm64, which is different from running the Mac product
+there.
 
 ### Do I need Docker Desktop?
 
-Not to run a release. Building marsh from source, or running a Kit from a
-source directory, needs Docker Desktop with Buildx.
+Not for a release install. Building marsh from source or running a Kit from
+a source directory requires Docker Desktop with Buildx.
 
 ### How do I remove everything?
 
-Run `marsh stop`, then follow [Install](install.md#uninstall). `marsh stop`
-refuses while shells or jobs are open.
+Finish jobs, run `exit` in every marsh shell, then run `marsh stop` in your
+Mac terminal. Stop refuses while shells or jobs remain active. Follow
+[Uninstall](install.md#uninstall) to remove the program and, if wanted,
+its saved data.
 
 ### Why "marsh"?
 
-From *marshal*. `msh` is the short name.
+From *marshal*. `msh` is the short command name.
 
 ### How do I develop marsh?
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md). You can also develop marsh from
-inside marsh with `marsh --dev`
-([design/self-development.md](design/self-development.md)).
+[CONTRIBUTING.md](../CONTRIBUTING.md) describes the build and test loop.
+You can also work from inside marsh with `marsh --dev`; see
+[Self-development](design/self-development.md).
 
-Next: [Quickstart](quickstart.md).
+Next: [Quickstart](quickstart.md) or [Guides](guides/README.md).

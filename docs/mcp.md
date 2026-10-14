@@ -1,8 +1,9 @@
 # MCP
 
-`mcp publish` turns a shell pipeline into a tool that other agents can call.
-In the marsh shell:
+`mcp publish` gives other agents a tool that runs a pipeline you choose.
+For a project with a `make lint` target, run this in the marsh shell:
 
+<!-- doc-test: shell stdout="Published MCP tool: lint" -->
 ```sh
 mcp publish lint --description 'Run the linter' -- 'make lint 2>&1'
 ```
@@ -14,12 +15,10 @@ Available to agent Kits: every Kit VM created from now on loads it before its fi
 Kit VMs already running are not changed. Load one now with: mcp load lint --kit KIT, or recreate it with: marsh workers reset KIT
 ```
 
-`Server:` is the registration name for this project. Start a new agent
-session in a Kit VM that has loaded `lint`, and ask it to run the linter. The
-agent calls the tool, marsh runs `make lint 2>&1` in your
-project's shell VM, and the agent gets back the output and exit status. The
-agent authenticates as for any Kit job, through Docker Sandboxes
-([Kits](kits.md#signing-in)).
+`Server:` gives this project's registration name. When an agent calls `lint`,
+marsh runs `make lint 2>&1` in the project's shell VM and returns the output
+and exit status. Newly created agent Kit VMs load the tool before their first
+job; start a new agent session there to use it.
 
 To load it into a running Kit VM now:
 
@@ -28,15 +27,16 @@ mcp load lint --kit pi
 ```
 
 You can also publish a running [ACP session](acp.md) as a tool, or register
-marsh itself as a server so an agent on the Mac can drive it. Both are below.
+marsh itself as a server so an agent on the Mac can drive the project.
 
 ## Publish a pipeline
 
 `mcp publish` runs inside the marsh shell. The pipeline text is fixed by the
 publisher. A caller may pass an `input` string, which becomes the pipeline's
-stdin, and gets back the output and exit status. The pipeline runs in this
-project's shell VM with the shell's privileges. The `input` is bounded;
-the exact limit is not documented here.
+stdin, and receives the output and exit status. The pipeline runs through
+Brush in this project's shell VM, with the shell's privileges. Published
+pipelines accept up to 64 KiB of input, time out after two minutes, and
+capture up to 256 KiB each of stdout and stderr.
 
 Tool names are 1 to 64 ASCII letters, digits, `_`, `-`, or `.`. A name cannot
 start with `-` or consist only of dots.
@@ -48,16 +48,18 @@ start with `-` or consist only of dots.
 | `mcp load NAME --kit KIT \| --sandbox SANDBOX` | Load an existing publication somewhere else, now |
 | `mcp unpublish NAME` | Revoke it; later calls are refused |
 
-The targets:
+Choose a target to load the tool immediately:
 
 - `--kit KIT` loads into that Kit's VM. Every later job of that Kit can use
   the tool.
-- `--sandbox SANDBOX` loads into any running Docker sandbox of yours.
+- `--sandbox SANDBOX` loads into a running Docker sandbox owned by your Mac
+  account.
 
-After loading, start a new agent session. A running session does not see
-tools added later.
+After loading, start a new agent session. An existing session may keep its
+previous tool list.
 
-From a host terminal in the same project you can also load or unpublish:
+From a Mac terminal in the same project and with the same `MARSH_HOME`, you
+can also load or unpublish:
 
 ```sh
 marsh mcp load NAME --sandbox SANDBOX
@@ -97,14 +99,23 @@ Not loaded automatically:
   that tool. The reason is in the daemon log, and `mcp load NAME --kit KIT`
   retries.
 
+Revocation refuses later calls; a client may still display the stale tool.
+Publishing the same name again replaces its grant. Existing clients must
+reload it before they can call the replacement.
+
 ## Use a pipeline from Codex on the Mac
 
-Codex on the Mac can call a published pipeline. Publish it in the marsh shell,
-then register it from a host terminal in the same project:
+Codex on the Mac can call a published pipeline. First publish it in the marsh
+shell:
 
 ```sh
-mcp publish lint --description 'Run the linter' -- 'make lint 2>&1'   # in the marsh shell
-marsh mcp install-published codex lint                               # on the Mac
+mcp publish lint --description 'Run the linter' -- 'make lint 2>&1'
+```
+
+Then, from a Mac terminal in the same project and with the same `MARSH_HOME`:
+
+```sh
+marsh mcp install-published codex lint
 codex exec 'run lint and fix what it finds'
 ```
 
@@ -147,8 +158,8 @@ marsh mcp install claude     # Claude Code on the Mac
 marsh mcp install sbx        # Docker Sandboxes' MCP gateway
 ```
 
-Each registers a server named `marsh-dev-HASH` for this directory.
-Codex and Claude Code start it when they need it.
+Each registers a server named `marsh-dev-HASH` for this directory, using a
+separate MCP scope root. Codex and Claude Code start it when they need it.
 
 For `sbx`, marsh starts a small broker on the Mac and registers it with the
 Docker Sandboxes MCP gateway. Load it into a sandbox:
@@ -165,7 +176,7 @@ sbx mcp load marsh-dev-HASH --sandbox NAME
 
 ### Tools
 
-The server offers tools to:
+The server has tools to:
 
 - run a command in this project's marsh shell (`shell_run`) and read its
   output (`operation_get`, `operation_output`, `operation_cancel`);
@@ -177,20 +188,24 @@ The server offers tools to:
 
 [design/mcp.md](design/mcp.md) lists every tool and its limits.
 
-Every command runs in the shell VM, not on the Mac. The server never hands out
-`sbx`, Docker, or daemon credentials.
+Shell commands run in the shell VM. VM lifecycle operations run through marsh
+on the Mac; clients get no generic host-command tool or control socket. An
+optional `--allow-full-sbx-control` flag enables the `qualify` tool to run
+fixed repository test gates on the Mac. Enable that only for a trusted
+checkout: those gates execute its Makefile.
 
 ### Other MCP clients
 
 Other clients can launch the server directly over stdio:
 
 ```sh
-marsh-mcp serve --workspace "$PWD" --marsh "$(command -v marsh)" --sbx "$(realpath "$(command -v sbx)")"
+marsh mcp serve --workspace "$PWD" --marsh "$(command -v marsh)" --sbx "$(realpath "$(command -v sbx)")"
 ```
 
-The server uses the same scope as the `marsh` command (`MARSH_HOME`, else
-`~/.marsh`), so it shares your shell VM and Kit VMs. `marsh` and `sbx` must be
-installed outside the project.
+This direct `serve` command uses the CLI's scope (`MARSH_HOME`, else
+`~/.marsh`) and shares its shell and Kit VMs. It does not allow `scope_start`.
+Pass `--scope-root ABSOLUTE_PATH` to enable separate managed scopes, as the
+`install` commands do. `marsh` and `sbx` must be installed outside the project.
 
 ## What a caller can do
 
@@ -199,9 +214,16 @@ installed outside the project.
 - Scopes share the same project files, so two scopes can race on one file.
 - A caller of a published pipeline cannot change the pipeline text. It can
   choose the `input`, so a pipeline that executes its stdin gives the caller
-  that power.
+  that power. Project scripts the pipeline calls can also change after
+  publication.
 - Anyone who can reach a registered tool can call it with this project's
   privileges. Give a tool only to agents you would let run that pipeline.
+
+Publishing registers a tool with the host broker; calling it runs the pipeline
+with the publishing shell's privileges. Loading a tool into a Kit VM makes
+that operation available to jobs there, without giving them a general
+host-command channel. Other MCP servers you load may offer different access;
+check their tools before sharing them with a job.
 
 See [Security](security.md).
 

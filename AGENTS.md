@@ -15,13 +15,15 @@ In scope:
   a warm per-Kit VM, from the shell or from inside any job (nested processes,
   one lineage tree and one admission; `docs/design/processes.md`);
 - `fanout { ... } | collect` composition and structural `marsh results`;
+- daemon-owned filesystem snapshots and private split forks, with patch results
+  (`docs/design/workspaces.md`);
 - ACP agent sessions and MCP publication/load;
-- `marsh --dev`: a lean dev broker so marsh can be developed from inside an
-  marsh session (`docs/design/self-development.md`).
+- `marsh --dev`: a scoped host broker for developing marsh from a marsh
+  session (`docs/design/self-development.md`).
 
 Out of scope: Cloud execution, a Brush fork, cross-daemon source ledgers,
-build-receipt authority binding, general M:N scheduling, private split
-workspaces, workload restart recovery, and multi-device history. Third-party
+build-receipt authority binding, general M:N scheduling, workload restart
+recovery, and multi-device history. Third-party
 agent Kits live outside this repository (`docs/plan/custom-agent-kit.md`). The
 flight recorder was removed; `marsh results` (structural receipts) is the job record.
 
@@ -62,6 +64,9 @@ Add focused tests for the crate you changed. Avoid whole-workspace test churn.
 
 ## Rules
 
+- Documentation edits must preserve current positioning and distinguish shipped
+  behavior from historical plans. Do not invent benchmarks or transcripts, or
+  make broad rewrites without user approval.
 - Preserve ordinary Bash behavior through Brush. Classify and test every
   divergence. Keep Brush changes as small patches in `docs/upstream/brush/`.
 - Host `sbx` is trusted. Use only its public CLI; never ship a patched SBX.

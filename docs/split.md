@@ -1,57 +1,36 @@
 # Split and join
 
-`split` runs commands in parallel, each on its own private copy of your
-project (a *fork*). `join` prints what each one said and a patch of what it
-changed. Registered agents edit their copies, not your working tree; applying
-their patches is explicit. Your own shell commands have broader access
-([below](#shell-branches-and--branches)).
+`split` runs parallel commands on private copies of your project, called
+*forks*. `join` shows their output and patches. It never applies a patch.
 
-Two agents try to fix the same failing test:
+From a marsh shell, ask two agents to work independently:
 
-```console
-marsh-0.5$ split {
->   a: claude -p "fix TestDialTimeout"
->   b: pi -p "fix TestDialTimeout"
-> } | join --keep
-# split 8d5c8fdd1563: 2 branches; manifest …/out/manifest.json
-
-== a (exited 0, shell-vm) ==
-The test raced on a fixed port; it now asks the kernel for a free one.
--- a: 1 file (M net/dial_test.go); diff …/out/a/diff.patch --
-diff --git a/net/dial_test.go b/net/dial_test.go
-…
-== b (exited 0, shell-vm) ==
-Added a retry around Dial and a longer timeout.
--- b: 2 files (M net/dial.go, M net/dial_test.go); diff …/out/b/diff.patch --
-diff --git a/net/dial.go b/net/dial.go
-…
-marsh-0.5$ git apply .marsh/split/8d5c8fdd1563/out/a/diff.patch
-marsh-0.5$ marsh splits rm 8d5c8fdd1563
+<!-- doc-test: shell replace=["split {\n  a: claude -p 'append gamma to notes.txt'\n  b: pi -p 'append gamma to notes.txt'\n} | join --keep", "split {\n  a: fixture project-write notes.txt fixed\n  b: fixture project-write notes.txt corrected\n} | join --keep"] stdout="-- a: 1 file (M notes.txt)" -->
+```sh
+split {
+  a: claude -p 'append gamma to notes.txt'
+  b: pi -p 'append gamma to notes.txt'
+} | join --keep
 ```
 
-Both agents ran at once, each on its own fork. You read both answers and
-applied the patch you wanted. Ctrl-C during the split stops every branch and
-everything it started. `--keep` retains the patches for inspection and
-application; a successful bare `join` removes them. `…` marks trimmed output.
+`--keep` leaves the results under `.marsh/split/ID/out/`. Review a branch's
+`diff.patch`, apply it with `git apply`, then remove the split with
+`marsh splits rm ID`. Keep results whenever you want to read or apply them
+after the pipeline ends.
 
-`split` does not review patches. In the example, `claude` and `pi` are
-registered commands, so each runs in a container that mounts only its fork.
-The branch's own shell code is different: plain commands run as you in the shell
-VM and can write anywhere you can, including your real project directory
-([below](#shell-branches-and--branches)).
+Registered agents mount their own fork of the project. A branch's shell
+commands, including tests, run with your shell VM privileges and can reach
+your real project ([branch types](#shell-branches-and--branches)).
 
-For proxy-managed credentials, a container sees placeholder values rather than
-your provider keys. Agent logins saved inside the guest home are ordinary files
-([Kits](kits.md), [security model](security.md#what-is-not-isolated)).
-
-The marked examples below use a file `notes.txt` in a Git repository, unless a
-marker specifies a plain directory. The test suite runs those marked examples,
-not the illustrative agent transcript above.
+The shell examples below assume `notes.txt` contains `alpha` and `beta` on
+separate lines. Use a scratch project to try them. Agent examples also need
+[provider credentials](kits.md#signing-in).
 
 ## What split touches
 
-- It writes no files in your project and nothing in your `.git`, except the
-  `.marsh/split/ID` directory that holds the results.
+- marsh creates `.marsh/split/ID/` for the snapshot, forks, and results. In a
+  Git project, it also creates `.marsh/.gitignore` if absent. It leaves the
+  original repository's index, objects, and refs untouched.
 - Branches run in the shell VM or in a Kit's VM, not on the Mac.
 - In Git repositories, ignored files are not copied into forks. A split's root
   cannot be a linked Git worktree or a submodule checkout with a `.git` file;
@@ -59,8 +38,18 @@ not the illustrative agent transcript above.
 - `marsh split` works from the marsh shell and from plain bash on the Mac.
   `split { }` works only in the marsh shell. Inside a job, only `:::`
   branches work.
-- `join` shows at most 128 KiB of diff and the last 4 KiB of a failed branch's
-  stderr. `diff.patch` and `stderr` in `out/` hold the full text.
+- `join` limits previews to 128 KiB of stdout per branch, 128 KiB of diff
+  across branches, and the last 4 KiB of a failed branch's stderr. The whole
+  rendering is capped at 192 KiB. Files in `out/` hold the full captured bytes.
+
+The snapshot comes from your current files, including uncommitted edits and
+nonignored untracked files. It is not a checkout of `HEAD`. marsh uses
+copy-on-write filesystem clones, falling back to copies only when cloning
+returns `Unsupported`; other clone errors fail the split. Forks live and mount
+at their own host paths, such as `PROJECT/.marsh/split/ID/a`. In a shell
+branch, an absolute path to the original project still reaches your live
+files. A registered Kit command mounts the fork, not the original project
+root.
 
 ## Applying a result
 
@@ -77,24 +66,34 @@ grep -q gamma notes.txt
 
 ### Merging when your tree has moved
 
-`git apply --3way` merges when your tree has changed since the split, and it
-stages the result. Commit or stage your own edits first.
+If your tree has changed since the split, `git apply --3way` can attempt a
+three-way merge. It stages the result and can leave conflicts. Commit or stage
+your own edits first.
 
 Two details matter:
 
 - `SPLIT_OBJECTS` holds file versions Git may not have. Pass it as
   `GIT_ALTERNATE_OBJECT_DIRECTORIES`.
-- Git compares the index with your files by stat data, and the shell VM and
-  macOS report different stat data for the same files. If the other side wrote
-  the files last, run `git update-index -q --refresh` first.
+- Your index must match your working files. If Git reports a stale index after
+  changes from the other side of the mount, run `git update-index -q --refresh`.
 
-<!-- doc-test: host prep=other control="git update-index -q --refresh" -->
-<!-- doc-test: shell prep=other control="git update-index -q --refresh" -->
+The example keeps an uncommitted line from the starting snapshot and merges
+two later edits to different lines. The objects from the split are needed
+because that starting version was never committed to the original repository.
+
+<!-- doc-test: host control="export GIT_ALTERNATE_OBJECT_DIRECTORIES=\"$SPLIT_OBJECTS\"" -->
+<!-- doc-test: shell control="export GIT_ALTERNATE_OBJECT_DIRECTORIES=\"$SPLIT_OBJECTS\"" -->
 ```sh
-split_id=$(marsh split -n -b fix='printf "alpha\nbeta\ngamma\n" > notes.txt')
-marsh join -- sh -c 'cat >/dev/null; git update-index -q --refresh
-  GIT_ALTERNATE_OBJECT_DIRECTORIES="$SPLIT_OBJECTS" git apply --3way "$SPLIT_DIR/fix/diff.patch"' <<<"$split_id"
-git diff --cached --name-only | grep -qx notes.txt
+set -e
+printf 'alpha\nbeta\nmiddle\nuncommitted\n' > notes.txt
+handle=$(marsh split -n -b fix='sed s/alpha/ALPHA/ notes.txt > next; mv next notes.txt')
+printf 'alpha\nbeta\nmiddle\nlocal\n' > notes.txt
+git add notes.txt
+marsh join -- sh -c 'cat >/dev/null
+  export GIT_ALTERNATE_OBJECT_DIRECTORIES="$SPLIT_OBJECTS"
+  git apply --3way "$SPLIT_DIR/fix/diff.patch"' <<<"$handle"
+grep -qx ALPHA notes.txt
+grep -qx local notes.txt
 ```
 
 ## Inside marsh (Brush form)
@@ -110,11 +109,14 @@ split {
 Each `label: command` line is one branch. Without a label, a branch is named
 after its command.
 
-- Labels must be unique, ignoring case.
+- Labels start with a letter or `_`, followed by letters, digits, `_`, or `-`,
+  up to 64 characters. They must be unique, ignoring case; `out`, `base`, and
+  `owner` are reserved.
 - A split has at most 16 branches.
 - Commands after `join` read its output on stdin and run in your real
   project directory (in the marsh shell, the shell VM's view of it). They see
-  `SPLIT_ID`, `SPLIT_DIR`, `SPLIT_MANIFEST`, and `SPLIT_OBJECTS`.
+  `SPLIT_ID`, `SPLIT_DIR`, and `SPLIT_MANIFEST`, plus `SPLIT_OBJECTS` for Git
+  projects. These variables are scoped to the downstream stages.
 - Every branch in `split { }` is a shell branch
   ([see below](#shell-branches-and--branches)). For `:::` branches, use the CLI
   form.
@@ -126,7 +128,7 @@ A new branch starts after `{`, after a newline, or after `,`.
 After `;`, a new branch starts only if the next word is a label. A label
 matches `[A-Za-z_][A-Za-z0-9_-]*:`.
 
-Everything else is ordinary Bash inside the current branch. That includes
+Everything else is ordinary shell syntax inside the current branch. That includes
 other `;`, `&&`, `||`, `{ ...; }`, `( ... )`, and `case ... ;;`.
 
 | Input | Result |
@@ -148,8 +150,10 @@ split { upper: tr a-z A-Z < notes.txt > n; mv n notes.txt; count: { wc -l; echo 
 
 For each branch, `join` prints a header with the status and where it ran
 (`shell-vm`, or `kit:NAME` for a `:::` branch), then its stdout, its stderr if
-it failed, and its diff. A branch that changed nothing prints
-`-- LABEL: no changes --`. A diff cut at the limit ends with
+it failed, and its diff. `-- LABEL: no changes --` means capture found no net
+changes relative to the snapshot. It does not describe new files excluded by
+ignore rules, shared-home writes, or edits the branch later reverted. A diff
+cut at the limit ends with
 `(diff truncated; full diff: PATH)`.
 
 A binary change appears as
@@ -188,33 +192,42 @@ Input to the branches:
 - With `-n`, or when stdin is a terminal, branches get empty input.
 
 With `-- CMD`, `marsh join` runs CMD with its output on stdin and the
-`SPLIT_*` variables set. The split is removed when CMD exits 0 and kept
-otherwise.
+`SPLIT_*` variables set. It removes the split when CMD exits 0, unless
+`--keep` was set or cleanup is uncertain. A nonzero CMD status keeps it.
+
+| Option | Effect |
+|---|---|
+| `marsh split -n` | Give branches empty stdin |
+| `marsh join --json` | Emit the manifest instead of the text rendering |
+| `marsh join --keep` | Retain forks and results after joining |
+| `marsh join --timing` | Print phase timings on stderr |
+| `marsh join -- CMD ARG...` | Run a command with the rendering on stdin and `SPLIT_*` set |
 
 ## Shell branches and `:::` branches
 
-There are two kinds of branch.
+A *shell branch*, written as `-b LABEL=STRING` or inside `split { }`, runs
+your code in a fresh Brush shell in the shell VM. It starts in its fork,
+even when your interactive shell is Bash or zsh.
 
-A *shell branch* is your own code:
+Its ordinary commands (`make`, `sed`, a script) are not confined: they can
+write anywhere your shell user can, including your live project. Capture
+records only changes in the fork. Use shell branches for tests and scripts
+you trust. Registered commands they start still run in Kit containers that
+mount the fork.
 
-- It is `-b LABEL=STRING`, or any branch in `split { }`.
-- It runs in the shell VM as you and starts in its fork.
-- Its own commands (`make`, `sed`, a script) are not confined. They can write
-  anywhere you can, including your real project directory. Only the fork's
-  changes are captured.
-- A registered command it starts (`claude`, `codex`, `pi`) runs in a Kit
-  container whose working directory is the fork, so that container mounts only
-  the fork.
-- Use it for `make test`, linters, scripts you trust, and agent calls.
+An *argv branch*, written as `::: LABEL CMD ARG...`, runs one registered
+command in a fresh container. Its project mount is the fork, along with the
+Git metadata the fork needs:
 
-An *argv branch* is one registered command in a fresh container:
+- The index, objects, and refs are writable, with `HEAD` naming a private
+  `marsh-split` branch. The command can stage and commit without changing
+  your original repository.
+- The original object store and the fork's fixed configuration files are
+  read-only mounts.
 
-- It is `::: LABEL CMD ARG...`.
-- Of the project, it mounts only its fork and the fork's Git metadata.
-- Like every Kit job, it also mounts your marsh home read/write. Agents keep
-  logins and session state there (`~/.claude`, `~/.codex`). All jobs can read
-  that home.
-- Use it for agents. Within the project, they can write only their fork.
+Every Kit job also mounts the shared guest home read/write. Login files and
+session state saved there, such as `~/.claude` and `~/.codex`, remain visible
+to other jobs in that home.
 
 <!-- doc-test: host replace=["codex exec 'fix the typo in notes.txt'", "fixture project-write notes.txt fixed"] stdout="-- review: 1 file (M notes.txt)" -->
 ```sh
@@ -236,8 +249,9 @@ $SPLIT_DIR = <project>/.marsh/split/<id>/out
   <label>/diff.patch       a git-apply patch (absent when nothing changed)
 ```
 
-In a Git repository, `.marsh/` has its own `.gitignore`, so `git status` does
-not show it.
+In a Git repository, marsh creates `.marsh/.gitignore` containing `*` when
+that file is absent, so Git ignores new split state. An existing ignore file
+is left unchanged.
 
 ### What is captured
 
@@ -246,8 +260,15 @@ captured, as with `git status`. The rules are `.gitignore`,
 `.git/info/exclude`, and `core.excludesFile`. `__pycache__/` from running
 Python is an example.
 
-A file that existed when the split started is always captured, even if a rule
-matches it.
+A file included in the snapshot is always compared, even if a branch adds an
+ignore rule that matches it. Ignore filtering applies only to Git projects;
+a plain directory's `.gitignore` does not exclude files.
+
+Capture allows 32 MiB per changed file and 256 MiB of changed bytes per branch,
+with a five-second deadline per text diff. Exceeding a capture limit rejects
+that branch's result. `.marsh`, nested `.git` entries, and special files are
+excluded from the initial snapshot; creating a nested `.git` in a fork causes
+capture to reject it.
 
 ## Directories that are not Git repositories
 
@@ -263,14 +284,17 @@ grep -q gamma notes.txt && test ! -e .git && test ! -e .marsh/.gitignore
 
 ## Failures, pipefail, Ctrl-C
 
-`join -- CMD` runs CMD even when branches failed. Their statuses are in join's
-output.
+`marsh split` returns the first nonzero branch status in declaration order.
+Bare `marsh join` returns that status too, keeping failed results. With
+`marsh join -- CMD`, CMD runs even if branches failed, and its status becomes
+join's status. A successful CMD removes the results unless `--keep` was set
+or cleanup is uncertain.
 
-The exit status of the pipeline depends on the form:
-
-- In the `split { }` form, the last stage's status decides.
-- With `pipefail`, the pipeline returns CMD's status if it is nonzero,
-  otherwise the split's.
+In Brush's `split { } | join | CMD` form, `PIPESTATUS` records the split stage,
+join stage, and downstream stages. The last stage determines the pipeline's
+status unless `pipefail` is set. Retention still follows the last stage's
+status, even with `pipefail`: a successful CMD can remove a failed branch's
+results. Use `join --keep` if you need them afterward.
 
 If CMD fails, marsh keeps the split and says why:
 
@@ -314,32 +338,24 @@ Other commands:
 A split waiting for `join` that no process has held open for 60 seconds is kept. Its
 creator can still join it.
 
-Example of `--timing` output:
-
-```text
-split 8d5c8fdd1563 timing: snapshot 0ms; forks 2ms; run 727ms; capture fix 0ms, review 0ms; consumer 278ms
-```
+`--timing` reports these phases:
 
 - `run`: the slowest branch, including Kit VM boots.
 - `consumer`: the commands after `join`.
 - `snapshot`, `forks`, `capture`: marsh's own overhead.
 
+Splits allow 16 branches, 64 MiB of input, and 16 MiB of combined branch
+output. They have a one-hour deadline and can nest three splits deep. Nested
+splits snapshot the calling branch's fork and accept only argv branches.
+Branches share an eight-slot session pool, while registered commands also
+count against the daemon's [job limits](agents.md#limits-and-messages).
+Only the creator may join a split, including one retained after lease expiry.
+
 ## Seeing a split in `marsh jobs --tree`
 
-In your session, `marsh jobs --tree` draws each split you ran, with its
-branches and every job they started. It does this even after `join` removed
-the split. A job started after `join` says which split it read:
-
-```text
-ID               STARTED   STATE      EXIT      RUN  COMMAND
-524499e5         0s ago    finished      0     0.2s  claude -p "apply the good ones…"  (consumes split 8d5c8fdd)
-8d5c8fdd         1m ago    joined        0    1m01s  split (fix, review)
-8d5c8fdd/fix     1m ago    finished      0    1m01s  ├─ fix: claude -p "find and fix one small bug…"
-9f47f6af         1m ago    finished      0    58.2s  │  └─ claude -p "find and fix one small bug…"
-b982a277         1m ago    finished      0    20.1s  │     └─ codex exec "…"
-8d5c8fdd/review  1m ago    finished      0    48.4s  └─ review: codex exec "suggest one small improvement…"
-149f157c         1m ago    finished      0    47.9s     └─ codex exec "suggest one small improvement…"
-```
+In your session, `marsh jobs --tree` draws each split with its branches and
+the jobs they started, even after `join` removed the files. A job started in
+a downstream stage says `(consumes split ID)`.
 
 A shell branch's row (`SPLIT/label`) times the whole branch. The job rows under it time
 each Kit job from its start. The gap between them is shell startup plus any

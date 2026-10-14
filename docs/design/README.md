@@ -1,7 +1,9 @@
 # Design documents
 
-These describe how marsh works and what it promises. They are for
-contributors and reviewers; to use marsh, read the [manual](../README.md).
+These documents explain the implementation and its contracts for contributors
+and reviewers. Revision histories retain earlier proposals; headings and status
+notes distinguish those from current behavior. To use marsh, read the
+[manual](../README.md).
 
 Read in order:
 

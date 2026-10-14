@@ -1,7 +1,7 @@
 # Command registry
 
-Native Kit v3 deliberately does not define the shell word a user types. marsh
-adds only that mapping:
+The registry maps the command a user types to a native Kit v3 source or immutable
+reference. The Kit itself owns the workload configuration:
 
 ```json
 {
@@ -24,8 +24,7 @@ published image. Stock SBX must allow the registry in `kit.allowedSources`.
 
 The loader and live `kit install` use the same declaration rules in
 `marsh-contracts::command_registry`. These rules are declared in
-`crates/marsh-contracts/src/command_registry_rules.json` and embedded by Rust;
-this is a small validation rule set, not another Kit manifest. A registry
+`crates/marsh-contracts/src/command_registry_rules.json` and embedded by Rust. A registry
 has at most 251 commands, and each registry file is at most 1 MiB. Names are 1–128 ASCII bytes,
 containing letters, digits, `_` or `-`, and cannot start with `-`. Reserved names
 are `marsh`, `fanout`, `collect`, `acp`, `mcp`, `ps`, and `top`.
@@ -58,8 +57,7 @@ entrypoint, command, static environment, user, workdir, capabilities, network
 policy, and services. marsh supplies only invocation arguments plus the
 host/session bindings required by its product contract: nonroot Mac UID/GID,
 natural working directory and home path, selected home backing, terminal
-mode, and exact project/home grants. It does not define another image, argv,
-policy, resource, capability, mixin, or service schema.
+mode, and exact project/home grants.
 
 Directories under `kits/` are native v3 source for stock Docker tooling. The
 local-source runtime path currently cannot prove that its independent Buildx
@@ -113,7 +111,7 @@ not authorized for this host lifecycle operation.
 
 ## ACP adapter configuration
 
-`agents.json` has deliberately different overlay semantics: a host-control file
+`agents.json` has different overlay semantics: a host-control file
 **replaces** the complete packaged adapter set. An explicit `[]` disables all
 ACP adapters; omitting the file selects packaged defaults. A nonempty replacement
 must list every adapter the user wants to keep. No implicit merge resurrects a

@@ -1,15 +1,13 @@
 # Bash compatibility qualification
 
-marsh's shell is a patched Brush: upstream revision `1389a8e` (full hash in
-`vendor/brush/UPSTREAM_REVISION`) plus the 98 patches in
-[`docs/upstream/brush/`](../upstream/brush/README.md). 82 fix Bash
-compatibility: `compgen` words, prompt decoding, signal traps and SIGHUP, invocation option order, name references to array elements, small builtin details (`set`, `$!`, empty `PATH` entries, `local -`, `@K`), DEBUG and ERR traps, `set -v`, common diagnostics, `CHLD` traps, GLOBIGNORE, `[[ =~ ]]` as POSIX extended regular expressions, negative subscripts, `{fd}` lifetime, posix special-builtin assignments, noninteractive `history`, `read` splitting and assignment, `printf` conversions and errors, `unset` of readonly names, `xpg_echo`, `mapfile -C`, `getopts` and `OPTIND`, redirection expansion order, job control, job lines and `disown`, function substitutions, NUL bytes in input, byte strings that are not UTF-8, pattern substitution, interactive shells without a terminal, signals and traps, `wait`, aliases,
-namerefs, subshells, globstar, descriptor redirections, `printf` time
-formats, startup files, option order, field splitting, `read`, `[[ ]]`
-patterns, prompts, and input typed ahead at the prompt. The other 16 add marsh's registered
-commands, `split`/`join`, `fanout`/`collect`, and a test hook.
+The default shell is vendored Brush plus marsh's patch queue. The
+[upstream record](../upstream/brush/README.md) identifies the exact revision,
+patch inventory, and purpose of each delta. This page describes the executable
+comparisons and remaining differences.
 
-Bash is the test oracle. It is never a fallback and never the implementation.
+Bash is the test oracle, never Brush's fallback or implementation. A user-selected
+`--shell bash` frontend and an image's own Bash inside a Kit job are separate
+from this qualification.
 The goal is ordinary Bash behavior, not complete GNU Bash conformance.
 
 ## Repaired and exercised behavior
@@ -62,26 +60,24 @@ One explicit oracle-version divergence is classified: command-substitution
 `wait` on a parent PID can print internal status `-1` on GNU Bash 5.2, while
 5.3 and marsh print `127`. The test records that oracle variant and requires
 marsh's exact `127`; the parent's subsequent wait must still return its child
-status. Candidate failures are not normalized away.
+status.
 
-The current corpus has 80 differential test functions (all enabled), a split
-`PIPESTATUS` check,
-and 55 smoke journeys (53 on Linux, where two macOS `script(1)` job-control
-journeys are compiled out; 54 on macOS, without one that reads `/proc`), run on macOS ARM64 with Rust
-1.95.0 and GNU Bash 5.3 and in a Linux arm64 `rust:1.95-bookworm` container
-with GNU Bash 5.3.0 built from source. A test function may contain several distinct
-scripts. These counts describe the selected
-corpus, not a GNU Bash test-suite pass. The canceled-wait fixture uses explicit
+The Rust corpus is defined by `crates/marsh/tests/bash_audit.rs`, `smoke.rs`,
+and `split_join.rs`. Platform-specific journeys use macOS `script(1)` or Linux
+`/proc`; no one host runs all of them. Recorded runs used Rust 1.95.0 and GNU
+Bash 5.3 on macOS ARM64, and a Linux arm64 `rust:1.95-bookworm` container with
+GNU Bash 5.3.0 built from source. A test function may contain multiple scripts;
+test counts do not establish GNU Bash conformance. The canceled-wait fixture uses explicit
 completion barriers so its expected ordering does not depend on process
 startup speed.
 
-A separate 17-case audit compared the exact pinned upstream runtime, GNU
-Bash and shipping `marsh-local`: fourteen targeted differences were inherited
-Brush gaps, one was an marsh `collect` collision, and ENOEXEC requires Brush
-interpreter identity. A plain control agreed across all three. The pristine
-build preserved upstream runtime source/default features but used isolated
-manifests without development dependencies and an available compatible lock.
-It does not qualify the full upstream TCK.
+A historical 17-case audit compared the pinned upstream runtime, GNU Bash, and
+`marsh-local`. Fourteen differences came from Brush, one from marsh's `collect`
+collision, and one from ENOEXEC's need to retain Brush interpreter identity;
+the plain control agreed across all three. The upstream build kept its runtime
+source and default features, using isolated manifests without development
+dependencies and an available compatible lock. This was a targeted comparison,
+not a full upstream TCK run.
 
 ## Known gaps
 
@@ -98,7 +94,7 @@ No differential test is currently `#[ignore]`d. Real-process subshells (patch
   Linux arm64 container, not by the macOS host run alone.
 
 Other differences found by the common-idiom differential sample and not yet
-repaired (classified, not waived):
+repaired:
 
 - `printf '%(fmt)T'` uses the process `TZ`, not a `TZ` set only inside the
   shell.
@@ -139,15 +135,16 @@ Classified divergences by design:
   the Reedline editor sends before each prompt: the first such timeout (2 s)
   at the session's first prompt, or two in a row later, switch the session to
   plain cooked-mode line reading with a one-line warning, instead of ending
-  the shell. Bash's Readline never sends the query. Keys typed before the
-  timeout are consumed by the query and lost.
+  the shell. Bash's Readline never sends the query. Patch `0069` preserves keys
+  typed during the unanswered query for the fallback reader.
 
 ## Qualification boundaries
 
-- `[[ value =~ regex ]]` uses upstream Brush's matcher. The former native
-  helper with explicit resource limits was removed with the Brush fork (see
-  `upstream/brush/README.md`); expensive expressions are not bounded by marsh.
-- Product composition syntax (`fanout`/`collect`, `split`/`join`) is an marsh extension. Its
+- On Unix, `[[ value =~ regex ]]` uses the C library's POSIX ERE matcher
+  (patch `0084`), without marsh-specific resource limits. The former native
+  regex helper was removed with the Brush fork. Other platforms retain
+  upstream's matcher.
+- Product composition syntax (`fanout`/`collect`, `split`/`join`) is a marsh extension. Its
   parser coexistence is checked by the focused journeys above; arbitrary Bash
   grammar with extensions enabled is not exhaustively qualified.
 - This is a focused real-caller corpus, not the complete upstream Brush TCK or
@@ -176,15 +173,14 @@ External environment arrays have no ordered-export contract. In the concrete
 order while Rust's command builder sorts the normal environment. Qualification
 retains that raw stdout difference and separately requires exact unique names,
 raw byte values, prefix precedence, status, stderr and filesystem effects.
-No output normalization turns this caller into a byte-exact pass.
 
-GNU's `read -t 0` readiness probe uses a fixed `fd_set`. At descriptor1024 and
+GNU's `read -t 0` readiness probe uses a fixed `fd_set`. At descriptor 1024 and
 above its observed result varies by platform; on Linux an out-of-range FD_SET
 can access beyond that stack object. Brush uses a dynamically sized Darwin
 select fallback and poll elsewhere, and does not copy undefined stack access or
-add an artificial1024 descriptor limit. Real reads and low/high OS-descriptor
-readiness are measured separately. This does not excuse ordinary closed-pipe,
-EOF, timeout or invalid-descriptor differences.
+add an artificial 1024 descriptor limit. Real reads and low/high OS-descriptor
+readiness are measured separately from closed-pipe, EOF, timeout, and
+invalid-descriptor behavior.
 
 GNU Bash 5.3.20 has an uninitialized-prefix divergence when a HUP trap's syntax
 error resets the input buffer during a partial, unedited interactive pipe read.
@@ -193,9 +189,8 @@ The reproducible `singlequote-backslash`, `continued-singlequote`, and
 on Linux. The official 5.3 sources plus patches 1–20 explain the retained outer
 read index followed by allocation of an uninitialized prefix; the strict
 comparison failures were retained as local evidence. Brush uses deterministic cleared-input
-resumption, matching the stable Mac GNU controls, and does not reproduce
-allocator contents. This classification does not waive the remaining ordinary
-input/history differences or turn these Linux rows into byte-exact passes.
+resumption, matching the stable Mac GNU controls rather than reproducing
+allocator contents. The Linux comparison failures remain recorded.
 
 ## Differential suites
 

@@ -1,9 +1,11 @@
-# Develop marsh from marsh (lean dev broker)
+# Develop marsh from marsh
 
-Status: built (E2E 1 below, the `self-dev` regress suite, passes).
+Status: implemented. `self-dev` is the end-to-end regress suite; its checks are
+described below. Run it against the candidate being qualified.
 
-Goal: in an marsh session at the checkout's Mac path, edit marsh, build a Linux candidate,
-and run it, with every stock VM the candidate needs going through a host-daemon broker.
+In a dev session at the checkout's Mac path, you can edit marsh, build a Linux
+candidate, and run it. The candidate's stock-SBX calls pass through a host-daemon
+broker restricted to the dev shell's grant.
 
 ```sh
 make dev                                       # Mac: build everything, install ~/.marsh-dev
@@ -18,26 +20,34 @@ To work on marsh with Pi, after `make dev`, from the Mac checkout:
 ~/.marsh-dev/bin/marsh --dev -c pi-dev
 ```
 
-`make dev` builds, in parallel and incrementally, the host binaries, the linux/arm64 guest,
-the shell template (one image for every shell VM, dev tooling included), and the packaged source Kits
-(`scripts/stage-kits.py`: each Kit's Git files plus the canonical `image-base/`,
-`dhi-notices/` and `collect-notices.mjs` inputs that `publish-kits.py` adds, so stock SBX
-builds them as is). It then installs to `DEV_PREFIX` (default `~/.marsh-dev`: `bin/` and
-`libexec/marsh/`) and runs `marshd --prebuild-kit-images DEV_PREFIX/libexec/marsh`: the
-daemon's own Buildx path builds each packaged Kit's job image into the per-user Kit image
-cache (`~/Library/Caches/marsh/kit-images`, `MARSH_KIT_IMAGE_CACHE` overrides; owner-only,
-never guest-mounted), keyed by source fingerprint and skipped when unchanged
-(`DEV_KIT_IMAGES=0` opts out). Every daemon of the account then loads the archive into a cold
-Kit VM instead of building, still checking it against stock SBX's outer image digest and the
-loaded image ID (a mismatch evicts the entry). Entries are written by atomic rename; the 24
-most recently used are kept, none unused for 14 days. Published (OCI digest) Kit images share
-the cache keyed by their digest: after a cold VM pulls one, the daemon saves it in the
-background (`docker image save` under a `marsh-<digest>` tag in the same repository, so it
-loads named), and the next cold VM loads the archive instead of pulling, accepting it only
-when the pinned `repository@sha256:` reference then resolves to that digest in the VM's
-content-addressed image store (otherwise the entry is evicted and the image pulled). Stock SBX's own Kit builder cache is
-not warmed: its only public entry is a real `sbx create`. The install must be outside the checkout (the daemon refuses guest
-mounts that overlap its own artifacts); `make dev` refuses a `DEV_PREFIX` inside it.
+`make dev` incrementally builds the host binaries, Linux arm64 guest, shell
+template with dev tools, and packaged source Kits in parallel. The Kit staging
+script (`scripts/stage-kits.py`) combines each Kit's Git files with the
+canonical `image-base/`, `dhi-notices/`, and `collect-notices.mjs` inputs used by
+the publisher, so stock SBX can build the staged sources. Installation writes
+`bin/` and `libexec/marsh/` under `DEV_PREFIX` (default `~/.marsh-dev`).
+
+The install then runs `marshd --prebuild-kit-images DEV_PREFIX/libexec/marsh`.
+The daemon's Buildx path builds each packaged Kit's job image into the
+owner-only cache at `~/Library/Caches/marsh/kit-images`
+(`MARSH_KIT_IMAGE_CACHE` overrides), which is never guest-mounted. Builds are
+keyed by source fingerprint and skipped when unchanged; `DEV_KIT_IMAGES=0`
+opts out. Any daemon for the account can load a cached archive into a cold Kit
+VM, checking it against stock SBX's outer image digest and the loaded image ID.
+A mismatch evicts the entry. Cache writes use atomic rename, and retention
+keeps the 24 most recently used entries, with none unused for 14 days.
+
+Published OCI-digest Kit images share the cache, keyed by digest. After a cold
+VM pulls one, the daemon saves it in the background with `docker image save`,
+under a `marsh-<digest>` tag in the same repository so it loads with a name.
+The next cold VM loads the archive instead of pulling, accepting it only when
+the pinned `repository@sha256:` reference resolves to that digest in the VM's
+content-addressed image store. A mismatch evicts the entry and pulls the image.
+
+Stock SBX's own Kit builder cache is not warmed because its only public entry
+is a real `sbx create`. The install must be outside the checkout: the daemon
+refuses guest mounts that overlap its artifacts, and `make dev` rejects a
+`DEV_PREFIX` inside the checkout.
 
 `libexec/marsh/dev-enabled` (an empty marker `make dev` writes) is what turns `--dev` on: a
 daemon whose install carries it admits dev grants. `make install` ships no such file, so a
@@ -57,7 +67,8 @@ the same tools. Its VM-local cargo target survives sessions. Kit jobs (ACP
 agents included) still get no daemon socket or relay. Grants exist only on a dev install's
 daemon or one started with `MARSH_ENABLE_DEV_SCOPES=1`; `--dev` is not tied to a particular
 home. The trust domain
-is the shell VM.
+is the shell VM. A process in that VM can exercise the grant; a registered Kit
+job has only its job capability socket and cannot use the dev relay.
 
 ## Reaching the host: the existing relay + an `sbx` shim
 
@@ -100,7 +111,7 @@ cleanup_uncertain, names: name -> uuid | null(intent)}`.
 |---|---|---|
 | `version`, `--help`, `create --help` | pass-through | |
 | `ls [--json]` | rows filtered to this grant | other rows |
-| `create` | name rule; `--quiet --pull --skills off\|readonly --cpus -m --memory --deny-network`, `-e K=V`; `--template` = the host shell template (tag or tag@digest; a local template reaches stock as its tag, and the created VM's image digest must match or the VM is removed and the call fails — after a `run` session, the grant is revoked); agent `shell`, `oci://…@sha256:…`, or a Kit dir under roots; workspaces under roots | `--env-file`, bare `-e K`, `--kit`, `-p`, `--clone`, `--cloud`, `--skills readwrite`, built-in agents (use `run`), other options, over `max_vms` |
+| `create` | name rule; `--quiet --pull --skills off\|readonly --cpus -m --memory --deny-network`, `-e K=V`; `--template` = the host shell template (tag or tag@digest; a local template reaches stock as its tag, and the created VM's image digest must match or the VM is removed and the call fails; after a `run` session, the grant is revoked); agent `shell`, `oci://…@sha256:…`, or a Kit dir under roots; workspaces under roots | `--env-file`, bare `-e K`, `--kit`, `-p`, `--clone`, `--cloud`, `--skills readwrite`, built-in agents (use `run`), other options, over `max_vms` |
 | `exec` | `-i -t -u -w --detach-keys`, `-e K=V` | `--env-file`, bare `-e K`, `--privileged`, other options |
 | `mount`, `umount` | `HOST[:CTR[:ro\|rw]]`, HOST (relative to `cwd`) under roots | anything else |
 | `cp` | host → own VM, SRC under roots | VM → host, `-L` |
@@ -138,7 +149,7 @@ Streams nest one hop per level; mind the relay's 16-connection cap.
   `MARSH_CONTROL_HOME=S/control`, `TMPDIR=S/tmp`, `MARSH_SBX=S/tmp/bin/sbx`, relay variables
   unset. `DEV_INNER_FLAGS=--dev` opens a depth-2 dev child. `make dev-inner-stop` stops it.
 
-## E2E 1
+## End-to-end checks
 
 `python3 tests/acceptance/self_dev.py --sbx $(command -v sbx) --kit <fixture-ref>
 [--prefix ~/.marsh-dev] [--depth2|--depth3] [--relay-kill|--only-relay-kill]`: runs the `make dev` install with a dedicated
@@ -163,8 +174,8 @@ until `marsh reset`, after which a new `--dev` session works.
 
 ## Pi in the dev shell
 
-The shell image installs the Pi coding agent 1.0.0 (`@earendil-works/pi-coding-agent`,
-`packaging/shell/pi`, npm-locked; regenerate the lock with
+The shell image installs the Pi coding agent from the exact npm lock in
+`packaging/shell/pi` (`@earendil-works/pi-coding-agent`; regenerate the lock with
 `npm install --package-lock-only --min-release-age=0` if a local npm enforces a minimum
 release age, and keep `resolved` URLs on registry.npmjs.org) and a `pi-dev` launcher.
 Pi runs in the dev shell VM, so its bash tool runs there too, with the session's `PATH` (the

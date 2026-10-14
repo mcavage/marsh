@@ -1,164 +1,133 @@
 # marsh
 
-**Code mode for agents.** marsh is a Bash-compatible shell for Apple Silicon
-Macs in which `claude`, `codex`, and `pi` are commands. Each call runs in a
-fresh container inside a Docker Sandbox microVM, with your project at the same
-path as on your Mac. You combine agents with pipes, `&&`, scripts, and two
-additions, `split` and `fanout`. An agent running in marsh can do the same from
-its own shell tool: it writes a few lines of shell to hand work to other
-agents, with no orchestration framework.
+**A shell for composing agents.** marsh opens a Bash-compatible Linux shell
+on your Apple Silicon Mac. `claude`, `codex`, and `pi` work as commands, so
+you can put agents in a pipeline, call them from a script, or give each one
+a separate copy of your project with `split`.
 
-Two agents fix the same bug, each on a private copy of the project, and each
-copy runs the tests:
+For a project with a CLI and a paginated API, you might divide the work
+like this. Adapt the prompts to your code, after configuring Claude as
+shown under [Install](#install):
 
-```console
-$ cd ~/src/slug
-$ marsh
-marsh-0.5$ split {
->   claude: claude -p "make test fails. Fix slug.py without editing the tests. Reply in one line." && make test
->   codex:  codex exec "make test fails. Fix slug.py without editing the tests. Reply in one line." && make test
-> } | join --keep
-# split 3c8145fd9046: 2 branches; manifest …/out/manifest.json
-
-== claude (exited 0, shell-vm) ==
-Fixed `slug.py:6` to collapse runs of non-alphanumerics into one hyphen and strip leading/trailing hyphens — all 3 tests pass (no children spawned; the edit was a one-liner).
-python3 -m unittest -q
--- claude: 1 file (M slug.py); diff …/out/claude/diff.patch --
-…
-== codex (exited 0, shell-vm) ==
-Fixed `slug.py` to collapse separators and trim hyphens; all 3 tests pass, tests unchanged, no child agents used.
-python3 -m unittest -q
--- codex: 1 file (M slug.py); diff …/out/codex/diff.patch --
-…
-split: kept …/.marsh/split/3c8145fd9046 (join --keep); inspect, then: marsh splits rm 3c8145fd9046
-marsh-0.5$ git apply .marsh/split/3c8145fd9046/out/codex/diff.patch
+<!-- doc-test: shell replace=["split {\n  cli: claude -p 'Add JSON output to the existing list command. Preserve text output by default. Change only CLI code and tests.'\n  api: claude -p 'Test the existing API pagination contract for the final page and invalid cursors. Change only API code and tests.'\n} | join --keep", "split {\n  cli: fixture project-write notes.txt gamma\n  api: fixture project-write pagination.txt cursor\n} | join --keep"] stdout="== api (exited 0, shell-vm) ==" -->
+```sh
+split {
+  cli: claude -p 'Add JSON output to the existing list command. Preserve text output by default. Change only CLI code and tests.'
+  api: claude -p 'Test the existing API pagination contract for the final page and invalid cursors. Change only API code and tests.'
+} | join --keep
 ```
 
-Each agent edited its own copy. `git apply` copied the chosen patch into your
-working tree. The `make test` in each branch is your own command and runs in the
-shell VM, unconfined. `…` marks trimmed output; the run took 12 seconds with
-warm VMs.
+Both branches start from the same project snapshot and run in parallel.
+`join` shows their output and patches; you decide what to apply. The
+[parallel guide](docs/guides/race-two-agents.md) adds per-branch tests and
+checks the combined change. For a first session, the
+[Quickstart](docs/quickstart.md) runs one inspection job on your repository.
 
-## What it does
+## Work in the shell
 
-- **Agents are commands.** `git diff | codex exec 'review this diff' > review.txt`
-  works, and so does a Makefile target that calls `claude -p`. Each call is a
-  new nonroot container in that agent's warm VM, deleted when the call exits.
-- **`split { ... } | join`** runs branches at once, each on a private copy of
-  your working tree. `join` prints each branch's exit status, output, and a
-  patch for `git apply`.
-- **`fanout { ... } | collect`** runs branches at once on your real files,
-  with no copies. Use it for commands that can share a working directory. A
-  "do not edit files" prompt is a request, not a guard.
-- **Agents can run agents.** Inside a job, the same commands are on `PATH`. A
-  call becomes a child job in one tree, under fixed limits, and one Ctrl-C
-  stops the tree. See [Let an agent farm out work](docs/guides/farm-out-work.md).
-- **A record of what ran.** `marsh jobs --tree` shows who started what.
-  `marsh results` shows each job's exit status, wall time, and whether its
-  container was confirmed deleted.
-- **MCP and ACP.** `mcp publish` makes a shell pipeline an MCP tool for agents.
-  `acp publish` does the same for a running agent session.
+Your project appears at the same absolute path as on your Mac. Ordinary shell
+tools run in a Linux VM. Each registered agent call gets a fresh nonroot
+container in its Kit's VM, which stays warm between calls. Split uses
+copy-on-write cloning where the filesystem supports it, so unchanged files
+can share disk space.
 
-The shell is [Brush](https://github.com/reubeno/brush), which runs Bash
-syntax with [known gaps](docs/shell.md#bash-compatibility). `marsh --shell zsh`
-or `--shell bash` runs those shells instead and keeps everything above except
-the `split { }` and `fanout { }` block syntax. `msh` is the same program.
+`split { ... } | join` is for work that needs separate project copies.
+`fanout { ... } | collect` runs commands together on the same files, such as
+checks that do not interfere with one another. Pipes, redirection, `&&`, and
+scripts work as they do in a shell.
 
-## Why not worktrees and a script?
+An agent can use the same commands from its own shell tool. Its calls become
+child jobs, each in a separate container, under one job tree. Ctrl-C stops
+the whole foreground tree. `marsh jobs --tree` shows the relationships;
+`marsh results` records exit status, timing, and whether marsh confirmed
+container deletion.
 
-You can get part of this with `git worktree` and `&`. marsh adds:
+You can also publish a pipeline as an MCP tool or expose a running ACP agent
+session to a client. See [MCP](docs/mcp.md) and [ACP](docs/acp.md).
 
-- Each agent call runs in its own container in a microVM that mounts the
-  project (in a split, only that branch's copy), not your Mac home.
-- Credentials are added by the Docker Sandboxes proxy. Containers see
-  placeholders, not your keys.
-- Split copies include uncommitted changes. You get a patch per branch, and
-  no branches or worktrees are left in your repo.
-- Agents an agent starts are tracked in one tree, held to fixed limits, and
-  stopped together by one Ctrl-C.
-- Each job leaves a record that says whether its container was confirmed
-  deleted.
-
-## What changes for your agents
-
-- They are the Linux CLI versions pinned in marsh's Kits, not the ones on
-  your Mac.
-- They do not see your Mac's `~/.claude` or `~/.codex`. Their settings,
-  logins, and history live in marsh's guest home, `~/.marsh/home`. Project
-  files such as `CLAUDE.md` and `AGENTS.md` are visible as usual.
-- They authenticate with keys you store with `sbx secret set`, or an OAuth
-  login that `sbx` holds.
-- They run with their permission prompts and their own sandboxes turned off.
-  The container is the sandbox. An agent you call directly can edit or delete
-  project files; run it in a `split` to get a patch instead.
-
-The [security model](docs/security.md) lists what each job can reach.
+The default shell is [Brush](https://github.com/reubeno/brush), with
+[Bash compatibility gaps](docs/shell.md#bash-compatibility). It is not Bash.
+If you prefer, `marsh --shell zsh` or `marsh --shell bash` selects the VM's
+own shell. Registered commands still work; use the `marsh split` and
+`marsh fanout` CLI forms instead of Brush's block syntax. `msh` is the short
+command name for `marsh`.
 
 ## Install
 
-You need an Apple Silicon Mac and [Docker Sandboxes](https://docs.docker.com/ai/sandboxes/)
-(`sbx`) 0.45.0 or newer, signed in.
+You need an Apple Silicon Mac and Docker Sandboxes (`sbx`) 0.45.0 or newer.
+From your **Mac terminal**, install both programs, sign in to Docker
+Sandboxes, and configure one provider:
 
 ```sh
 brew install docker/tap/sbx mcavage/tap/marsh
 sbx login
-sbx secret set anthropic     # for claude and pi
-sbx secret set openai        # for codex
+sbx secret set anthropic
 ```
 
-Without Homebrew for marsh itself, install `sbx` as above, then run
-`curl -fsSL https://runmar.sh/install | sh`. It installs into `~/.local`.
-[Install](docs/install.md) covers upgrades, removal, the nightly channel, and
-building from source.
+That provider is enough for the Claude examples above and in the Quickstart.
+Codex uses `sbx secret set openai`. Calls bill through your provider account.
+
+To install marsh without Homebrew, install `sbx` first, then run
+`curl -fsSL https://runmar.sh/install | sh`. The installer uses `~/.local`.
+[Install](docs/install.md) covers other methods, upgrades, and removal.
 
 ## First run
 
-```sh
-cd ~/src/your-project
-marsh                                   # a Linux shell at the same path
-claude -p 'what does this repo do?'     # an agent, in a fresh container
-marsh jobs --tree                       # what ran
-exit                                    # return to your Mac terminal
-marsh stop                              # remove marsh's VMs from the Mac
-```
+From your Mac terminal, enter an existing project and run `marsh`. At the
+marsh prompt, you are in Linux at the same project path. A first shell or
+agent launch can take a few minutes while Docker Sandboxes downloads images
+and starts VMs. Later calls reuse the warm VMs.
 
-The first call to each agent boots its VM and downloads its image, about
-600 MB, which takes a few minutes. Later calls start in seconds.
+Follow the [Quickstart](docs/quickstart.md) to run an agent on a project copy,
+find your repository's test command, and check where it is defined.
 
-`marsh stop` refuses while any marsh shells or jobs are active. It preserves
-your project and guest home.
+When finished, run `exit` to leave marsh, then `marsh stop` from your Mac
+terminal. Stop refuses while any marsh shells or jobs remain active. It
+removes marsh's VMs without deleting your project or saved guest home.
 
-Then follow a guide:
+## Know what can change
 
-- [Race two agents on one bug](docs/guides/race-two-agents.md)
-- [Let a judge pick the winner](docs/guides/add-a-judge.md)
+An agent called directly can edit or delete your project. In a split, its
+container mounts only that branch's project copy, along with the shared
+guest home and read-only Git metadata. Your own shell code, including tests
+in a split branch, runs unconfined in the shell VM.
+
+The guest home is backed by `~/.marsh/home` on your Mac, not your whole Mac
+home. Jobs share its settings, history, and saved logins. Docker Sandboxes
+keeps proxy-managed provider keys out of containers; that does not protect
+login files saved in the guest home from other jobs. The packaged agents'
+permission prompts and internal sandboxes are disabled. Read the
+[security model](docs/security.md) before using sensitive projects.
+
+Split copies include uncommitted work but omit Git-ignored files. A linked
+worktree or submodule root with a `.git` file is refused; use a checkout
+with a `.git` directory. See [Split and join](docs/split.md) for details.
+
+## Keep going
+
+- [Make independent changes in parallel](docs/guides/race-two-agents.md)
 - [Review a change with a panel](docs/guides/review-with-a-panel.md)
 - [Let an agent farm out work](docs/guides/farm-out-work.md)
+- [Manual](docs/README.md) and `man marsh`
 
 ## Limits
 
-- Apple Silicon Macs only. marsh needs `sbx` and does not run on Intel Macs
-  or Linux.
-- Commands run on Linux arm64. A build or test that needs macOS (Xcode, macOS
-  frameworks) does not run in marsh.
-- At most 8 jobs run at once per daemon. A job tree is at most 4 deep, with 4
-  live children per job and 64 jobs in total.
-- Every agent call is a full model run on your account. marsh has no
-  benchmarks. It does not make an agent better; it runs several and shows you
-  what each did.
-- marsh is early. Binaries are not signed. Expect changes.
+marsh runs on Apple Silicon Macs, with Linux arm64 guest tools. Builds that
+require Xcode or macOS frameworks cannot run in the guest. At most eight
+jobs run at once per daemon; a job tree has at most four levels, four live
+children per job, and 64 jobs in total.
+
+marsh is early, and its release binaries are unsigned.
 
 ## Documentation
 
-- [Manual](docs/README.md) and `man marsh`
-- [Security model](docs/security.md): what each job can reach
-- [Design documents](docs/design/README.md)
-- Site: [runmar.sh](https://runmar.sh). For agents:
-  [runmar.sh/llms.txt](https://runmar.sh/llms.txt)
+The site is [runmar.sh](https://runmar.sh); agent-readable documentation starts
+at [runmar.sh/llms.txt](https://runmar.sh/llms.txt). For implementation details,
+see the [design documents](docs/design/README.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports:
+Contributions: [CONTRIBUTING.md](CONTRIBUTING.md). Security reports:
 [SECURITY.md](SECURITY.md). Conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## License

@@ -1,183 +1,148 @@
-marsh runs only on Apple Silicon Macs (`uname -m` prints `arm64`). It needs
-Docker Sandboxes (`sbx`) 0.45.0 or newer, signed in; `sbx version` shows the
-version. `sbx` ships only as a Homebrew cask, so Homebrew is required. marsh
-does not run on Intel Macs, Linux, or Windows. Docker Desktop is not needed.
-`msh` is the same program as `marsh`.
+marsh is a shell for composing agents on Apple Silicon Macs. It opens a Linux
+shell at the project's Mac path. Registered commands such as `claude`, `codex`,
+and `pi` each run in a fresh nonroot container inside a warm VM for that Kit.
+`msh` is the same program.
 
 ## Install
+
+You need an Apple Silicon Mac (`uname -m` prints `arm64`), Homebrew, and Docker
+Sandboxes (`sbx`) signed in. See https://runmar.sh/docs/install.md for the
+supported `sbx` version and other installation methods. Docker Desktop is not
+required to run marsh. Intel Macs, Linux, and Windows are not supported hosts.
 
 ```sh
 brew install docker/tap/sbx mcavage/tap/marsh
 sbx login                    # interactive sign-in
-sbx secret set anthropic     # interactive: prompts for a key; used by claude and pi
-sbx secret set openai        # interactive: prompts for a key; used by codex
+sbx secret set anthropic     # interactive key entry; claude and pi
+sbx secret set openai        # interactive key entry; codex
 marsh --version
 ```
 
-The three `sbx` steps need the user. If you are an agent installing marsh,
-run the `brew` line, then ask the user to run the `sbx` lines; do not invent
-credentials or export API keys as environment variables. `sbx secret ls`
-shows which credentials are stored. marsh has no login of its own. To check
-that a credential works: `marsh -c 'claude -p "reply with OK" </dev/null'`
-(the first call to each agent takes minutes; see below).
-
-To install marsh without its Homebrew formula: `brew install docker/tap/sbx`,
-the `sbx` lines above, then `curl -fsSL https://runmar.sh/install | sh`. It
-installs into `~/.local/bin`; if that is not on `PATH`, run
-`export PATH="$HOME/.local/bin:$PATH"`.
+An agent can run the `brew` command, but must ask the user to complete the
+interactive `sbx` steps. Do not invent credentials or export API keys into the
+shell. `sbx secret ls` lists stored credentials; marsh has no login of its own.
+Provider keys managed by the `sbx` proxy stay outside jobs. An agent's own
+login flow can save credentials in the shared guest home, where other jobs
+can read them.
 
 ## Run
 
-Run marsh from a project directory (a Git repository or a plain directory).
-`marsh` opens an interactive Linux shell in a VM, at the same path as on the
-Mac, with the project mounted read/write. `marsh -c 'CMD'` runs one command
-and exits, like `bash -c`; use it when you cannot drive an interactive
-terminal. The shell is Brush, which runs Bash syntax; the differences are
-listed at https://runmar.sh/docs/shell.md#bash-compatibility.
+Use `marsh` for an interactive shell or `marsh -c 'COMMAND'` when your tool
+cannot drive a terminal. The default shell is Brush, with Bash-compatible
+syntax and the gaps listed at
+https://runmar.sh/docs/shell.md#bash-compatibility. `--shell bash` and
+`--shell zsh` select those shells inside the VM instead.
 
 ```sh
 cd ~/src/project
-marsh -c 'pwd; uname -sm'                          # /Users/you/src/project, Linux aarch64
+marsh -c 'pwd; uname -sm'
 marsh -c 'claude -p "summarize README.md" </dev/null'
 ```
 
-There are two kinds of place where commands run:
+`pwd` prints the same project path as on the Mac; `uname -sm` reports Linux
+aarch64. Plain commands such as `git` and `make test` run in the shell VM.
+Registered commands run in Kit containers, so packages installed in the shell
+VM are not available to them. The first call to a Kit may need to download
+its image and boot its VM. `marsh --load claude,codex` prepares those VMs
+before opening the shell.
 
-- The shell VM: Debian arm64 with git, make, gcc, Python 3, Node.js, Rust,
-  and passwordless `sudo apt-get`. Plain commands (`make test`, `git`) run
-  here. Packages you install here stay until the VM is removed.
-- Kit containers: `claude`, `codex`, `pi`, and `shell` (plain `/bin/sh`, no
-  credentials) are registered commands: names that marsh runs in containers. Each call runs in a new nonroot
-  container in that Kit's microVM, with the project at its usual path, and
-  the container is deleted when the call exits. Packages installed in the
-  shell VM are not in these containers. The claude, codex, and pi Kits
-  include git, make, gcc, Python 3, Node.js 24, and ripgrep (no Go, no Java,
-  no package manager).
-
-The first call to each registered command boots its VM and may download about
-600 MB; expect a few minutes and the notice `[starting NAME worker VM…]`.
-`marsh --load claude,codex` boots VMs ahead of time. Agents run with their own
-permission prompts and sandboxes turned off; the container is the sandbox. An
-agent called directly can edit or delete project files. Agents in marsh do not
-see the Mac's `~/.claude` or `~/.codex`; their settings live in marsh's guest
-home (`~/.marsh/home`). Project files such as `AGENTS.md` are visible.
+Agents called directly can change or delete project files. The packaged Kits
+turn off the agents' own sandboxes and permission prompts. They do not see the
+Mac's `~/.claude` or `~/.codex`; settings, history, and saved logins use marsh's
+guest home (`$MARSH_HOME/home`, normally `~/.marsh/home`). Project instructions
+such as `AGENTS.md` remain visible.
 
 ## Parallel work
 
-A complete race, run from the Mac, that keeps the results so you can apply
-one. First run the test command once (`marsh -c 'make test'`): if it cannot
-run in the shell VM, every branch fails after paying for its agent run.
+`split` gives each branch a private project copy, including uncommitted
+changes but excluding ignored files. Use `join --keep` to retain the patches
+for review. For a project with a working `make test` target:
 
 ```sh
-cd ~/src/project
 marsh -c 'split {
-  a: claude -p "make test fails. Fix the code, not the tests." && make test
-  b: codex exec "make test fails. Fix the code, not the tests." && make test
+  a: claude -p "Fix the failing test without changing the tests." && make test
+  b: codex exec "Fix the failing test without changing the tests." && make test
 } | join --keep'
 ```
 
-Read the output. The first line is `# split ID: 2 branches; ...`. Each branch
-has a header such as `== a (exited 0, shell-vm) ==`; `exited 0` means the
-agent finished and `make test` passed on that copy. A branch that passed is a
-candidate. If both passed, prefer the smaller patch that does not touch test
-files, or ask the user. If neither passed, apply nothing. Then, with ID and
-the chosen label filled in:
+Run `marsh -c 'make test'` once before starting agents to check that the test
+command works in Linux. A branch's `exited 0` means its command list succeeded;
+it does not establish that the patch is correct. Inspect the diff and test
+output before choosing a branch. With the reported split ID and chosen label:
 
 ```sh
-git apply --check .marsh/split/ID/out/a/diff.patch   # does it apply to the tree now?
+git apply --check .marsh/split/ID/out/a/diff.patch
 git apply .marsh/split/ID/out/a/diff.patch
-marsh -c 'make test'                                  # rerun on the real tree, in the VM
+marsh -c 'make test'
 marsh splits rm ID
 ```
 
-`git apply` works from the Mac or inside marsh. Run the tests with
-`marsh -c`, since the branches ran them in the Linux VM.
+Registered commands in a split mount only their fork. Your own shell code,
+including each `make test` above, starts in the fork but is not confined there.
+It can write elsewhere in the shell VM. All branches still share the guest
+home. Without `--keep`, a successful `join` removes the split and patches; a
+failed branch keeps them. See https://runmar.sh/docs/split.md.
 
-`split { }` and `fanout { }` are marsh shell syntax: they work at the marsh
-prompt and in `marsh -c`. Each line in the braces is `LABEL: commands`, and
-the commands are ordinary Bash run on that branch's private copy of the
-working tree (uncommitted changes included). Without `--keep`, `join` deletes
-the copies and patches after a run in which every branch succeeded. When any
-branch fails, `join` exits nonzero and keeps them.
+`fanout` shares files instead of copying them. Use it only when the commands
+can safely run together. This example prints both results in
+declaration order:
 
+<!-- doc-test: host stdout="== second (complete) ==\ntwo" -->
 ```sh
-fanout { lint: make lint; test: make test } | collect   # same files, no copies
+marsh -c 'fanout { first: printf "one\n"; second: printf "two\n" } | collect'
 ```
 
-The CLI form works from any shell, from bash or zsh on the Mac, and from
-inside a marsh job:
+The brace forms require Brush. From another shell, use the CLI forms:
 
 ```sh
-marsh split -n ::: a claude -p "fix it" ::: b codex exec "fix it" | marsh join --keep
-# Apply branch a only if it exited 0 and its patch applies, then rerun the tests:
-marsh split -n ::: a claude -p "fix it" ::: b codex exec "fix it" |
-  marsh join -- sh -c 'cat; grep -qx "exited 0" "$SPLIT_DIR/a/status" &&
-    git apply "$SPLIT_DIR/a/diff.patch" && make test'
-marsh fanout -n ::: lint make lint ::: test make test | marsh collect
+marsh split -n ::: a claude -p 'fix the bug' ::: b codex exec 'fix the bug' | marsh join --keep
+marsh fanout -n ::: tests make test ::: lint make lint | marsh collect
 ```
 
-- `::: LABEL CMD ARG...` is one branch that runs one command; the next `:::`
-  ends it. `-b LABEL='shell string'` is a shell branch, allowed only from the
-  user's shell, never from inside a job.
-- `-n` gives branches empty stdin. Use it unless you mean to pipe input.
-- `marsh join -- CMD` runs CMD with join's output on stdin and `$SPLIT_ID`
-  and `$SPLIT_DIR` set. The patch for branch LABEL is
-  `$SPLIT_DIR/LABEL/diff.patch` (absent if the branch changed nothing), its
-  changed paths are in `$SPLIT_DIR/LABEL/files`, and its status (`exited 0`,
-  ...) is in `$SPLIT_DIR/LABEL/status`. CMD runs even if branches failed. The
-  split is deleted when CMD exits 0 and kept otherwise. A `:::` branch that
-  runs only an agent exits 0 when the agent does, whatever it changed; check
-  the patch and run the tests yourself.
-- `marsh join -- CMD` exits with CMD's status. Without `-- CMD`, `join`
-  exits with the first nonzero branch status, and a nonzero status keeps the
-  split. `collect` exits with the first nonzero branch status. `marsh splits`
-  lists kept splits; `marsh splits rm ID` removes one.
-- At most 16 branches per split or fanout.
-- A split's branches change only their copies; your files change when you
-  apply a patch. A fanout branch, or an agent called directly, writes the real
-  files.
+For `split`, `::: LABEL CMD ARG...` runs one registered command in its fork.
+A `fanout` argv branch can run an ordinary command too. `-b LABEL='commands'`
+runs a shell branch, but is allowed only from the user's shell, never from a
+job. `-n` supplies empty stdin. Both forms allow at most 16 branches.
 
 ## Inside a marsh job
 
-When an agent runs in marsh, `$MARSH_JOB` is set and `claude`, `codex`, `pi`,
-`shell`, and `marsh` are on PATH (`/run/marsh/bin`). Calling one starts a
-child job with the same project files. In a job:
+`$MARSH_JOB` identifies a Kit job. Registered commands and the in-job `marsh`
+are on `PATH` under `/run/marsh/bin`. Calling a registered command starts a
+managed child job with the parent's project files, under the child Kit's
+network policy and credentials.
 
-- Give a direct child `</dev/null`. marsh refuses a child whose stdin or
-  stdout is a terminal. Agent shell tools usually capture stdout; if yours
-  gives commands a terminal, send stdout to a file or a pipe (with `| cat`,
-  set `-o pipefail` to keep the child's exit status).
-- Use only `:::` branches with `marsh split` and `marsh fanout`.
-- The in-job `marsh` has `run`, `split`, `join`, `fanout`, `collect`, `jobs`,
-  and `context`; not `results`, `status`, or `stop`. `marsh context` prints
-  this job's instructions. `marsh run --no-spawn NAME ARG...` starts a child
-  that cannot start anything itself.
-- These calls take minutes. Give your shell tool a timeout of 10 minutes or
-  more; if the calling command is killed, marsh cancels its children.
+- Children get no terminal. Supply `</dev/null`; if your tool gives stdout a
+  terminal, redirect it to a file or pipe. With `| cat`, enable `pipefail` to
+  preserve a child's failure status.
+- Inside a job, `marsh` supports `run`, `split`, `join`, `fanout`, `collect`,
+  `jobs`, and `context`, not host controls such as `status` or `stop`. Split
+  and fanout accept only `:::` branches here. `marsh context` prints the
+  current job's instructions and limits.
+- `marsh run --no-spawn NAME ARG...` starts a child that cannot launch more
+  jobs. `MARSH_SPAWN=codex,pi` or `none` narrows permitted child commands;
+  nothing in a job can widen its inherited permission.
+- Allow time for image downloads and model calls. Killing a parent cancels
+  its children. Ctrl-C cancels the foreground tree with INT, then KILL after
+  10 seconds if needed.
 
-Limits: 8 jobs at once per daemon; depth 4; 4 live children per job (split
-and fanout branches count); 64 jobs per tree; 4 distinct Kit VMs per tree;
-the same Kit at most twice in a row (claude → claude → claude is refused).
-A refused launch starts nothing, prints the reason on stderr, and exits 125
-(126 for a name outside `MARSH_SPAWN`). `capacity` and `fan-out limit` clear
-when running jobs finish. For the others, start fewer jobs, nest fewer
-levels, or use fewer distinct agents.
-`export MARSH_SPAWN=codex` (or `none`) in the user's shell limits what jobs
-may start.
+Defaults are 8 concurrent jobs per daemon, depth 4, 4 live children per job,
+64 jobs per tree, and 4 distinct Kit VMs per tree. The same Kit may appear at
+most twice consecutively in a lineage. Refusals exit 125, or 126 for a name
+outside the spawn set. See https://runmar.sh/docs/agents.md for exact messages.
 
 ## Inspect and clean up
 
 ```sh
-marsh jobs --tree         # jobs and their children
-marsh results             # exit status, wall time, cleanup per job
-marsh status              # daemon, VMs, limits
-marsh stop                # remove marsh's VMs and stop its daemon; keeps project and home
-marsh workers reset KIT   # retire one Kit's VM, e.g. after "cleanup uncertain"
+marsh jobs --tree         # running and recent jobs, with children
+marsh results             # exit status, wall time, cleanup
+marsh status              # daemon, VMs, effective limits
+marsh workers reset KIT   # retire an idle or quarantined Kit VM
+marsh stop                # remove owned VMs and stop the daemon
 ```
 
-Ctrl-C cancels the whole job tree (INT, then KILL after 10 s) and exits 130.
-
-Common errors: `marsh needs Docker Sandboxes` (install `sbx`); an agent
-exits nonzero with an authentication error (the user runs `sbx secret set
-...`); `capacity: 8 jobs` (wait and retry); `interactive child jobs are not
-supported yet` (add `</dev/null`, and make stdout a file or pipe).
+`stop` refuses while shells or jobs are active and keeps the project, guest
+home, and results. Results contain command arguments and paths, so do not put
+secrets in them; they do not capture command output. For authentication errors,
+ask the user to check the relevant `sbx` credential. For `capacity` or
+`fan-out limit`, wait for jobs to finish before retrying. Other admission
+limits require a smaller or less deeply nested plan.

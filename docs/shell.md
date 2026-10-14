@@ -1,37 +1,30 @@
 # The shell
 
-`marsh` (or `msh`, the same program) opens a Bash-compatible shell in a Linux
-VM, with your project mounted at the path it has on your Mac:
+`marsh` opens a Linux shell with your project at its Mac path. `msh` is a
+symlink to the same program. After [installing marsh](install.md), run this
+from your project directory:
 
+<!-- doc-test: host stdout="Linux aarch64" -->
 ```sh
-cd ~/src/app
 marsh -c 'pwd; uname -sm'
 ```
 
-```text
-/Users/you/src/app
-Linux aarch64
-```
+The first line is your current Mac directory; the second is `Linux aarch64`.
 
-The VM is a Docker Sandboxes (`sbx`) microVM. Run a command, a script, or an
-interactive session:
+The shell runs in a Docker Sandboxes (`sbx`) microVM:
 
-```sh
-marsh                          # interactive shell
-marsh -c 'make test'           # one command, like bash -c
-marsh ./script.sh arg          # run a script
-```
+| Invocation | Runs |
+|---|---|
+| `marsh` | An interactive shell |
+| `marsh -c 'make test'` | One command string |
+| `marsh ./script.sh arg` | A script with arguments |
 
-Agents are ordinary commands in that shell. Each runs in its own container
-and works in a pipe:
+Registered agents work in pipelines and run in fresh containers:
 
+<!-- doc-test: shell replace=["claude -p 'list the TODOs in this repo'", "fixture pipeline '|' printf 'TODO: review\\n'"] stdout="TODO: review" -->
 ```sh
 claude -p 'list the TODOs in this repo' | sort | head
 ```
-
-For parallel agents on private copies of your files, see
-[Split and join](split.md) and [Fanout](fanout.md). How agents sign in is in
-[Commands and Kits](kits.md).
 
 ## Where you are
 
@@ -48,10 +41,12 @@ Home
   [Configuration](configuration.md)).
 
 User
-: Your Mac user name and UID. You have passwordless `sudo` and a private
-  Docker Engine (`docker run` works) inside the VM. Neither sudo nor Docker
-  reaches the Mac. Packages installed with `sudo apt-get` last as long as the
-  VM.
+: Your Mac user name and UID. The shell user has passwordless `sudo` and a
+  private Docker Engine (`docker run` works) inside the VM. Packages installed
+  with `sudo apt-get` last as long as the VM. Kit jobs start as nonroot users
+  in separate containers with no Docker or SBX sockets. See the
+  [security model](security.md) for the shell VM's authority and explicit
+  host grants.
 
 System
 : Debian on arm64 from the marsh shell image, with git, make, gcc, Node.js,
@@ -59,8 +54,8 @@ System
 
 ### Shared VM
 
-All shells in one scope share one warm shell VM and one daemon. A second
-project opened in the same scope uses the same VM and can see the first
+Persistent-home shells in one scope share one warm shell VM and one daemon.
+A second project opened in the same scope can see the first
 project's files. To keep work apart, use a separate `MARSH_HOME`.
 
 ### Ephemeral home
@@ -70,12 +65,13 @@ That shell gets its own VM.
 
 ## Command-line arguments
 
-marsh passes options it does not recognize to the shell, so the usual Bash
-options work:
+marsh passes options it does not recognize to the selected shell. For example,
+`marsh -x script.sh` enables tracing. In Brush, `pipefail` makes this command
+exit 1:
 
+<!-- doc-test: host status=1 -->
 ```sh
 marsh -o pipefail -c 'false | true'
-marsh -x script
 ```
 
 After `-c` or `--`, marsh passes every argument to the shell unchanged.
@@ -115,12 +111,9 @@ explicit path bypasses both. See [Commands and Kits](kits.md).
 The shell is [Brush](https://github.com/reubeno/brush), a Bash-compatible
 shell written in Rust. marsh never runs Bash to implement itself.
 
-marsh uses upstream revision `1389a8e` plus 49 patches in
-[`docs/upstream/brush/`](upstream/brush/README.md):
-
-- 34 patches fix Bash compatibility: job control, signals and traps, `wait`,
-  aliases, namerefs, subshells, globstar, redirections, and startup files.
-- 15 patches add registered commands, `split`/`join`, and `fanout`/`collect`.
+The [upstream record](upstream/brush/README.md) tracks the vendored revision
+and marsh's patch queue, including compatibility fixes and the composition
+syntax.
 
 To use the VM's GNU Bash or zsh instead, run `marsh --shell bash`, set
 `MARSH_SHELL=zsh`, or set a default with `marsh config shell zsh`. Registered
@@ -129,27 +122,27 @@ forms do not. See [Choosing your shell](shells.md).
 
 ## Startup files
 
-marsh reads these files from the guest home:
+Brush reads these startup files, with `~` referring to the guest home:
 
 | Shell type | Files read |
 |---|---|
-| Interactive | `/etc/bash.bashrc`, `~/.bashrc`, `~/.brushrc` |
-| Login | `~/.bash_profile` or `~/.profile` |
-| Noninteractive | `$BASH_ENV` |
+| Interactive, non-login | `/etc/bash.bashrc`, `~/.bashrc`, `~/.brushrc` |
+| Login | `/etc/profile`, then the first readable file among `~/.bash_profile`, `~/.bash_login`, `~/.profile` |
+| Noninteractive, non-login | The file named by `$BASH_ENV`, when set |
 
 The prompt defaults to Bash's `\s-\v\$ `.
 
 ## Bash compatibility
 
-Ordinary scripts and interactive use behave as in Bash except for the
-differences below. Each is recorded and tested:
+Brush supports ordinary Bash scripts and interactive use, with known gaps.
+These differences have regression tests:
 
 - A `RETURN` trap does not fire.
 - `select` and `${x~~}` are not supported.
 - `(( m["a b"]=1 ))` and `m[a b]=1` do not parse.
 - A trapped signal runs its trap after the current pipeline, not in the
   middle of a builtin. A blocking `read` from a terminal is not interrupted.
-- `set -u` on an unset variable exits with status 1 (Bash 5.3: 127).
+- `set -u` on an unset variable exits with status 1.
 - Error messages use Brush's wording and add a `(col N)` suffix.
 - `printf '%(fmt)T'` uses the process `TZ`, not one set only in the shell.
 - A background job killed by a signal is reported as `Exit 143`. Bash prints

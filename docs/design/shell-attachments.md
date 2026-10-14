@@ -1,7 +1,7 @@
 # Shell attachment, interruption, and cleanup
 
-These are the implementation's shell transport boundaries. Linux socket/process
-checks support them; release qualification still requires the matching Mac and
+This document specifies shell transport, interruption, and cleanup behavior.
+Linux socket/process checks cover part of it; release qualification requires the matching Mac and
 Linux artifacts on supported stock SBX. See the
 [local product contract](../plan/local-product-contract.md).
 
@@ -20,9 +20,9 @@ Linux artifacts on supported stock SBX. See the
 - Complete, verified executions preserve their actual status, including ordinary
   `exit 1`. Shell daemon/transport failure, incomplete delivery, unknown exit,
   quarantine, and unverified cleanup return **125**. CLI usage errors remain **2**.
-  This is shell-delivery error classification, not a blanket change to every
-  marsh command's errors. Ordinary pipeline last-stage and `pipefail` rules still
-  apply to the surrounding shell.
+  These codes classify shell delivery; other marsh commands keep their own
+  error codes. The surrounding shell applies its ordinary last-stage and
+  `pipefail` rules.
 
 Input credits bound pending stdin; output is streamed in bounded chunks, not
 accumulated into a full-output buffer. The control reader does not wait for output
@@ -37,12 +37,12 @@ before its acceptance frame. A duplicate open or public detach cannot retire an
 active generation. If the acceptance write fails before backend admission, only
 that request's registration is released. Once backend work is admitted, an
 unfinished owner retains cleanup uncertainty rather than claiming guest absence.
-Only the matching owner's completion can settle the generation. This is not
-restart recovery or an authorization grant to another session.
+Only the matching owner's completion can settle the generation; a different
+session cannot take it over.
 
 An actual worker exit remains a separate receipt fact: incomplete required output
-or uncertain cleanup reports public125 even when the actual worker exited7.
-Complete, verified exit7 remains7. A frame and its public receipt must agree on
+or uncertain cleanup reports public status 125 even when the worker exited 7.
+A complete, verified exit 7 remains 7. A frame and its public receipt must agree on
 that public code; actual execution is not overwritten with a guessed failure.
 
 ## Ctrl-C during preparation
@@ -56,9 +56,9 @@ because one controller cancels. The CLI waits for an independent cleanup-state
 observation before returning the interruption status (130 for Ctrl-C).
 
 An already-running stock operation may need to finish or reach its own bound
-before rollback completes. Cancellation is not transactional undo of filesystem
-changes made by user code whose start was already in flight. If rollback cannot
-be confirmed, the result is 125 and recovery is required. After readiness,
+before rollback completes. Cancellation cannot undo files changed by user code
+that already started. If rollback cannot be confirmed, the result is 125 and
+recovery is required. After readiness,
 Ctrl-C has ordinary attached-shell signal semantics.
 
 The attachment control protocol accepts INT, TERM, KILL and HUP and their named
@@ -111,8 +111,6 @@ See [troubleshooting](../troubleshooting.md#removing-vms) and the
 
 ## Measuring open and teardown
 
-Measure shell open and teardown from the outside: wall time of `marsh -c true`
-cold and warm (`tests/perf/warm.py`). Do not infer stock performance from a
-Linux socket fixture or remove serial checks merely to lower these numbers.
-Compare exact-candidate cold and warm runs on the supported host before making
-a latency claim.
+Measure shell open and teardown from the outside with cold and warm wall times
+for `marsh -c true` (`tests/perf/warm.py`). Latency claims require those runs
+on the supported host against the exact candidate, with its serial checks intact.

@@ -1,8 +1,8 @@
 # Results and shell history
 
-`marsh results` (also `marsh jobs`) shows durable structural receipts for registered-command
-invocations. It is intentionally separate from Brush's `history` builtin:
-`history` continues to show the user's ordinary shell command history.
+`marsh results` and `marsh jobs` read durable receipts for registered-command
+invocations, with different list views. Brush's `history` builtin continues to
+show ordinary shell command history.
 
 ```console
 marsh results
@@ -26,9 +26,11 @@ for automation.
 
 The same-user daemon stores only structural receipt fields: command registry
 name, opaque execution identities, public mount targets, state, exit cause,
-cleanup result, and timings. It never stores prompt bytes or captured stdout or
-stderr in this journal. This is execution metadata, not transcript history or
-an assertion that path and command metadata are secret-free. JSON receipts expose
+cleanup result, timings, and bounded arguments for display. It stores the first
+16 arguments, each truncated to 200 characters with lossy UTF-8 decoding
+(`DaemonStore::set_job_args`). A prompt passed as an argument can be retained.
+The journal captures no stdin, stdout, or stderr. Treat paths and arguments as
+potentially sensitive metadata. JSON receipts expose
 `execution` as a typed worker outcome, independently of the public `exit`
 code/cause. Legacy receipts without that field report
 `unknown`; do not reconstruct it by parsing diagnostic prose.
@@ -38,23 +40,25 @@ The versioned checksum journal lives under the host-only control directory at
 When `MARSH_CONTROL_HOME` is set, the journal uses
 `$MARSH_CONTROL_HOME/<selected-home-hash>/state/results.journal`.
 `selected-home-hash` means SHA256 of canonical **`MARSH_HOME`**, not its `home/`
-child. `marsh status` and `marsh status --json` report the absolute `control_home`
-so callers do not need to reconstruct that path. The control and state
-directories are mode `0700`, and the journal is mode `0600`. A journal in the guest-writable
-`$MARSH_HOME/state` is never loaded or imported. Terminal transitions are synchronized before they are
-reported complete. Replay truncates only an incomplete final frame; a checksum
-or structural failure anywhere, including the last complete frame, fails
-daemon startup. An owner-only lock in the same state directory prevents another
-daemon from replaying or writing that selected home's journal, even if its
-`TMPDIR` differs. Drain resident daemons from builds that predate this lock
-before upgrading, since those processes do not hold it. Retention is bounded to the
-newest 1,000 terminal receipts, while currently active receipts are retained.
-Jobs left queued or running by a daemon exit are reported as `unknown` with a
-`daemon_restarted` cause after replay. The daemon does not claim to resume the
-old container. Quarantine blocks worker reuse in the current daemon generation.
-The receipt remains durable evidence, but restarting the daemon does not restore
-quarantine from historical receipts. Independently verify removal of the affected
-VM before recreating work; do not delete the journal to recover.
+child. Both status forms report the absolute `control_home` path. The control
+and state directories are mode `0700`, and the journal is mode `0600`;
+the daemon never imports a journal from guest-writable `$MARSH_HOME/state`.
+
+Terminal transitions are synchronized before completion is reported. During
+replay, the daemon truncates an incomplete final frame, but any checksum or
+structural failure in a complete frame prevents startup. An owner-only lock
+in the state directory excludes another journal writer for the selected home,
+even with a different `TMPDIR`. Stop daemons from builds predating that lock
+before upgrading, since they do not hold it.
+
+Retention keeps the newest 1,000 terminal receipts and all active receipts.
+After a daemon exit, replay marks queued or running jobs `unknown` with cause
+`daemon_restarted`; it never resumes the old containers. Quarantine blocks
+worker reuse within a daemon generation, but the adapter's in-memory
+quarantine set does not survive restart.
+Process admission separately retains uncertain jobs' held slots from receipts
+until a successful `marsh workers reset KIT` is recorded. Use that reset to
+retire the affected owned VM; do not delete the journal to recover.
 
 ## Scope configuration and job limits
 
