@@ -1635,9 +1635,9 @@
     },
     "claude-acp": {
       "root": "/opt/marsh/claude-acp",
-      "lock_sha256": "0975141cc5315960c1c17355a936aadef9797f18a257792abade5745ffbe9b43",
+      "lock_sha256": "a69a85a7169fc7b525f56bc222a94bce52693e5e5d2bba43386bf5ca3d8c1eb9",
       "notice_root": "/usr/local/share/licenses/marsh-claude-acp",
-      "selected_version": "0.3.293",
+      "selected_version": "0.3.296",
       "architectures": {
         "arm64": {
           "packages": [
@@ -1645,12 +1645,12 @@
               "alias": "@anthropic-ai/claude-agent-sdk",
               "root": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk",
               "package": "@anthropic-ai/claude-agent-sdk",
-              "version": "0.3.293",
+              "version": "0.3.296",
               "acquisition": {
-                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.293.tgz",
-                "sha256": "395bfbda4294c6334fa18be3706a46ff31851b4f4a6f74ba11ac96c9d97ced9f",
-                "size": 1590960,
-                "integrity": "sha512-DVfn46SmpfB7xaKuUHsAC+qwY27hOLHNbvF7FoNOAXLZPRTeCr68SjhBjlFOtk+jz5Nf7pfUwnIUDFcdVih6Dg==",
+                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.296.tgz",
+                "sha256": "e966be99b6f047d56165e2ec03822f17a49beebd48ac8efb91dab1e48bcf69a7",
+                "size": 1599938,
+                "integrity": "sha512-Y+cZ2BT8X94mQ9GJOVyIqhjC/nWGvwozUVLjdkzX7aSt+zuo5tgk7Hdv9V7tEUQ9fKnEuiL6moYNWDeHqCD4Lw==",
                 "signature_verified": false
               },
               "payload_entries": [
@@ -1694,8 +1694,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/bridge.d.ts",
                   "type": "file",
-                  "sha256": "ccb7b26ff6e89cc11dc5748ec71ce9b5363e5a39fc1a2eec2d8a53cabe17f5bf",
-                  "size": 17734,
+                  "sha256": "a6112e647f7f67ede320026e4085ff352f610a8ea5544c11f7205278e8dee6de",
+                  "size": 18097,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -1704,8 +1704,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/bridge.mjs",
                   "type": "file",
-                  "sha256": "60336b522b1fa039ccd42f0ab9df1c487c709033e80cf83fe1e17e9579af1d63",
-                  "size": 1336965,
+                  "sha256": "0ad63e39ec76389ee08129ff0654926daa71b2890d9ca2bd9b717607e1aed8f7",
+                  "size": 1350239,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -1724,32 +1724,32 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/browser-sdk.js",
                   "type": "file",
-                  "sha256": "4676c6ce5f8772b8bb8f178da2425226d45ddc4077049216f80a8c013fd87387",
-                  "size": 1411823,
+                  "sha256": "7f5d8dc0108929f15215b17e8bb4fbdb944d0ec4303e76c562643206988d0536",
+                  "size": 1413526,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
                   "npm_member": "package/browser-sdk.js"
                 },
                 {
-                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core-ae32wa3s.mjs",
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core-2haqfy07.mjs",
                   "type": "file",
-                  "sha256": "f2e7750556e3a719bd6ed14987668e9c64e675541d3b9aa3a8eb34142632fc26",
-                  "size": 472698,
+                  "sha256": "82f32d2a8f34994ff1bb9ba9d6224c79e4de8df95c6a349e4d1096f88b79277d",
+                  "size": 180195,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
-                  "npm_member": "package/core-ae32wa3s.mjs"
+                  "npm_member": "package/core-2haqfy07.mjs"
                 },
                 {
-                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core-d0szsqzn.mjs",
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core-a92dt75k.mjs",
                   "type": "file",
-                  "sha256": "5f3b67bc1fe625ba2a81dbee172153726bda7f75595eb6d3efef0bd2fb8e41da",
-                  "size": 178346,
+                  "sha256": "d9ca1060349bf00b3d590cb2ba7e24a41a24b8380217b1eedeac326fcabcc962",
+                  "size": 474960,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
-                  "npm_member": "package/core-d0szsqzn.mjs"
+                  "npm_member": "package/core-a92dt75k.mjs"
                 },
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core.d.ts",
@@ -1764,8 +1764,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core.mjs",
                   "type": "file",
-                  "sha256": "e0e0cb54b1dde93e0cf0397bd1aac282ab8faf4125031a9a6de4e71de596251b",
-                  "size": 124422,
+                  "sha256": "b51805800c20e586355a72372454fc15aec6c0559a8dfceb50afbb9e9c438629",
+                  "size": 125534,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -1794,8 +1794,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/manifest.json",
                   "type": "file",
-                  "sha256": "ce867df78920b885ffcd8ddeb5b12f867bbb34f8a7dd85d42740d48b4c6ef351",
-                  "size": 2076,
+                  "sha256": "e50e872d91f3b7da2fb3d8d38505d709e0a90f48da1951dd51176930c8da8270",
+                  "size": 1931,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -1804,8 +1804,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/manifest.zst.json",
                   "type": "file",
-                  "sha256": "464d122108c12d6200bf3c2316da659fc3510630a7739704ed9382efdf84723f",
-                  "size": 2380,
+                  "sha256": "e1d8af9d6a6b18a4a6ca3061c72647db0adbd16e79a1b57b33d0721e48202ab9",
+                  "size": 2235,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -1814,7 +1814,7 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/package.json",
                   "type": "file",
-                  "sha256": "6b4847168d3f1b585e4f732f47e3a986680bac8da7f3f55c7c4d36bfa4e89f21",
+                  "sha256": "a2f4bd57129cb99253877099ab6deed575b3bdd37aa0e09aa6469a63bc81690f",
                   "size": 2546,
                   "mode": 420,
                   "uid": 0,
@@ -1824,8 +1824,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts",
                   "type": "file",
-                  "sha256": "d850d83ecd9e5f92be6e1d98b54b228e68ce0cc32767391f6e20573a4870e024",
-                  "size": 170993,
+                  "sha256": "63e378f4585427786c6cd0e876f094c8ade8d284d86554ef44f83a5cdf396cfb",
+                  "size": 171449,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -1834,8 +1834,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts",
                   "type": "file",
-                  "sha256": "bbfe75f8b5d29109d282d8b12d990f006744be11b53f86ce1b71c67824716254",
-                  "size": 535462,
+                  "sha256": "fc2866dfe2c01468edb19b1d94f26156bfacecdf1e7f1452b276ed2f8cc0b08f",
+                  "size": 538514,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -1844,8 +1844,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs",
                   "type": "file",
-                  "sha256": "a980b792353c301eea60d7896704cff21440de7c4aeefc3fe481be079504e203",
-                  "size": 1233964,
+                  "sha256": "5cf6f15237f9c84e6e5b724a10180478732457168921d7aa3e02632037cce299",
+                  "size": 1239190,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -1856,15 +1856,15 @@
                 {
                   "file": "texts/8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a.txt",
                   "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
-                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.293.tgz",
-                  "package_integrity": "sha512-DVfn46SmpfB7xaKuUHsAC+qwY27hOLHNbvF7FoNOAXLZPRTeCr68SjhBjlFOtk+jz5Nf7pfUwnIUDFcdVih6Dg==",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.296.tgz",
+                  "package_integrity": "sha512-Y+cZ2BT8X94mQ9GJOVyIqhjC/nWGvwozUVLjdkzX7aSt+zuo5tgk7Hdv9V7tEUQ9fKnEuiL6moYNWDeHqCD4Lw==",
                   "member": "package/LICENSE.md"
                 },
                 {
                   "file": "texts/786e57ced73510c752e2e15901d290c7c22786e4791d8a2e2d96991a9a97c192.txt",
                   "sha256": "786e57ced73510c752e2e15901d290c7c22786e4791d8a2e2d96991a9a97c192",
-                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.293.tgz",
-                  "package_integrity": "sha512-DVfn46SmpfB7xaKuUHsAC+qwY27hOLHNbvF7FoNOAXLZPRTeCr68SjhBjlFOtk+jz5Nf7pfUwnIUDFcdVih6Dg==",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.296.tgz",
+                  "package_integrity": "sha512-Y+cZ2BT8X94mQ9GJOVyIqhjC/nWGvwozUVLjdkzX7aSt+zuo5tgk7Hdv9V7tEUQ9fKnEuiL6moYNWDeHqCD4Lw==",
                   "member": "package/README.md"
                 }
               ]
@@ -1873,12 +1873,12 @@
               "alias": "@anthropic-ai/claude-agent-sdk-linux-arm64",
               "root": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64",
               "package": "@anthropic-ai/claude-agent-sdk-linux-arm64",
-              "version": "0.3.293",
+              "version": "0.3.296",
               "acquisition": {
-                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.293.tgz",
-                "sha256": "7a896de19be15b52b0b0ede2befe58c11ff2321064c3333ccac3f84eadafc36c",
-                "size": 113342424,
-                "integrity": "sha512-B3M5gw6pPH/ckMtrLtGg4ZY1adLVnPoXkEV+Ruu0j/gdFzwuLWR64Spa0RCsbo7BXVN6w5NTqkuZk+HBfsPUZA==",
+                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.296.tgz",
+                "sha256": "2f8aa5b74ed96864a080b4e292e90cd350d42ccc042c4bd02477ac8856c9a415",
+                "size": 115122328,
+                "integrity": "sha512-+tC1KlUlp/3BQS+EfG8RBrmru4xKwF6hNEm15gNct8k9tNVRLYOftbkNCGJPTKkoBoq0sQ+Omojzwr/W2Dg60A==",
                 "signature_verified": false
               },
               "payload_entries": [
@@ -1912,8 +1912,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/claude",
                   "type": "file",
-                  "sha256": "a43629e888f0a7d96c5e8de62abf44852433a7ff2481574688db3e5b6399491f",
-                  "size": 252108792,
+                  "sha256": "f1f6e96e0d8342b9dbf41d7e88255397a6a52ce3d8736ad6a4c6b59c9b62fefa",
+                  "size": 256434168,
                   "mode": 493,
                   "uid": 0,
                   "gid": 0,
@@ -1922,7 +1922,7 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/package.json",
                   "type": "file",
-                  "sha256": "0e0c9b340989fb3be659db334d9c6301bfa00825a2e2695e47932cb251d0c8dc",
+                  "sha256": "2493f3f808e487c1ff73b6c6b7aec5c49e6062166b613d0ab36817252f3cb7aa",
                   "size": 288,
                   "mode": 420,
                   "uid": 0,
@@ -1934,15 +1934,15 @@
                 {
                   "file": "texts/8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a.txt",
                   "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
-                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.293.tgz",
-                  "package_integrity": "sha512-B3M5gw6pPH/ckMtrLtGg4ZY1adLVnPoXkEV+Ruu0j/gdFzwuLWR64Spa0RCsbo7BXVN6w5NTqkuZk+HBfsPUZA==",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.296.tgz",
+                  "package_integrity": "sha512-+tC1KlUlp/3BQS+EfG8RBrmru4xKwF6hNEm15gNct8k9tNVRLYOftbkNCGJPTKkoBoq0sQ+Omojzwr/W2Dg60A==",
                   "member": "package/LICENSE.md"
                 },
                 {
                   "file": "texts/52ff43c0a87bc38e1108533895cc91d5b9645e35ebc90e8cc3933515cfcb043d.txt",
                   "sha256": "52ff43c0a87bc38e1108533895cc91d5b9645e35ebc90e8cc3933515cfcb043d",
-                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.293.tgz",
-                  "package_integrity": "sha512-B3M5gw6pPH/ckMtrLtGg4ZY1adLVnPoXkEV+Ruu0j/gdFzwuLWR64Spa0RCsbo7BXVN6w5NTqkuZk+HBfsPUZA==",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-arm64/-/claude-agent-sdk-linux-arm64-0.3.296.tgz",
+                  "package_integrity": "sha512-+tC1KlUlp/3BQS+EfG8RBrmru4xKwF6hNEm15gNct8k9tNVRLYOftbkNCGJPTKkoBoq0sQ+Omojzwr/W2Dg60A==",
                   "member": "package/README.md"
                 }
               ]
@@ -1970,12 +1970,12 @@
               "alias": "@anthropic-ai/claude-agent-sdk",
               "root": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk",
               "package": "@anthropic-ai/claude-agent-sdk",
-              "version": "0.3.293",
+              "version": "0.3.296",
               "acquisition": {
-                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.293.tgz",
-                "sha256": "395bfbda4294c6334fa18be3706a46ff31851b4f4a6f74ba11ac96c9d97ced9f",
-                "size": 1590960,
-                "integrity": "sha512-DVfn46SmpfB7xaKuUHsAC+qwY27hOLHNbvF7FoNOAXLZPRTeCr68SjhBjlFOtk+jz5Nf7pfUwnIUDFcdVih6Dg==",
+                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.296.tgz",
+                "sha256": "e966be99b6f047d56165e2ec03822f17a49beebd48ac8efb91dab1e48bcf69a7",
+                "size": 1599938,
+                "integrity": "sha512-Y+cZ2BT8X94mQ9GJOVyIqhjC/nWGvwozUVLjdkzX7aSt+zuo5tgk7Hdv9V7tEUQ9fKnEuiL6moYNWDeHqCD4Lw==",
                 "signature_verified": false
               },
               "payload_entries": [
@@ -2019,8 +2019,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/bridge.d.ts",
                   "type": "file",
-                  "sha256": "ccb7b26ff6e89cc11dc5748ec71ce9b5363e5a39fc1a2eec2d8a53cabe17f5bf",
-                  "size": 17734,
+                  "sha256": "a6112e647f7f67ede320026e4085ff352f610a8ea5544c11f7205278e8dee6de",
+                  "size": 18097,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -2029,8 +2029,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/bridge.mjs",
                   "type": "file",
-                  "sha256": "60336b522b1fa039ccd42f0ab9df1c487c709033e80cf83fe1e17e9579af1d63",
-                  "size": 1336965,
+                  "sha256": "0ad63e39ec76389ee08129ff0654926daa71b2890d9ca2bd9b717607e1aed8f7",
+                  "size": 1350239,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -2049,32 +2049,32 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/browser-sdk.js",
                   "type": "file",
-                  "sha256": "4676c6ce5f8772b8bb8f178da2425226d45ddc4077049216f80a8c013fd87387",
-                  "size": 1411823,
+                  "sha256": "7f5d8dc0108929f15215b17e8bb4fbdb944d0ec4303e76c562643206988d0536",
+                  "size": 1413526,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
                   "npm_member": "package/browser-sdk.js"
                 },
                 {
-                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core-ae32wa3s.mjs",
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core-2haqfy07.mjs",
                   "type": "file",
-                  "sha256": "f2e7750556e3a719bd6ed14987668e9c64e675541d3b9aa3a8eb34142632fc26",
-                  "size": 472698,
+                  "sha256": "82f32d2a8f34994ff1bb9ba9d6224c79e4de8df95c6a349e4d1096f88b79277d",
+                  "size": 180195,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
-                  "npm_member": "package/core-ae32wa3s.mjs"
+                  "npm_member": "package/core-2haqfy07.mjs"
                 },
                 {
-                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core-d0szsqzn.mjs",
+                  "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core-a92dt75k.mjs",
                   "type": "file",
-                  "sha256": "5f3b67bc1fe625ba2a81dbee172153726bda7f75595eb6d3efef0bd2fb8e41da",
-                  "size": 178346,
+                  "sha256": "d9ca1060349bf00b3d590cb2ba7e24a41a24b8380217b1eedeac326fcabcc962",
+                  "size": 474960,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
-                  "npm_member": "package/core-d0szsqzn.mjs"
+                  "npm_member": "package/core-a92dt75k.mjs"
                 },
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core.d.ts",
@@ -2089,8 +2089,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/core.mjs",
                   "type": "file",
-                  "sha256": "e0e0cb54b1dde93e0cf0397bd1aac282ab8faf4125031a9a6de4e71de596251b",
-                  "size": 124422,
+                  "sha256": "b51805800c20e586355a72372454fc15aec6c0559a8dfceb50afbb9e9c438629",
+                  "size": 125534,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -2119,8 +2119,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/manifest.json",
                   "type": "file",
-                  "sha256": "ce867df78920b885ffcd8ddeb5b12f867bbb34f8a7dd85d42740d48b4c6ef351",
-                  "size": 2076,
+                  "sha256": "e50e872d91f3b7da2fb3d8d38505d709e0a90f48da1951dd51176930c8da8270",
+                  "size": 1931,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -2129,8 +2129,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/manifest.zst.json",
                   "type": "file",
-                  "sha256": "464d122108c12d6200bf3c2316da659fc3510630a7739704ed9382efdf84723f",
-                  "size": 2380,
+                  "sha256": "e1d8af9d6a6b18a4a6ca3061c72647db0adbd16e79a1b57b33d0721e48202ab9",
+                  "size": 2235,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -2139,7 +2139,7 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/package.json",
                   "type": "file",
-                  "sha256": "6b4847168d3f1b585e4f732f47e3a986680bac8da7f3f55c7c4d36bfa4e89f21",
+                  "sha256": "a2f4bd57129cb99253877099ab6deed575b3bdd37aa0e09aa6469a63bc81690f",
                   "size": 2546,
                   "mode": 420,
                   "uid": 0,
@@ -2149,8 +2149,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts",
                   "type": "file",
-                  "sha256": "d850d83ecd9e5f92be6e1d98b54b228e68ce0cc32767391f6e20573a4870e024",
-                  "size": 170993,
+                  "sha256": "63e378f4585427786c6cd0e876f094c8ade8d284d86554ef44f83a5cdf396cfb",
+                  "size": 171449,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -2159,8 +2159,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts",
                   "type": "file",
-                  "sha256": "bbfe75f8b5d29109d282d8b12d990f006744be11b53f86ce1b71c67824716254",
-                  "size": 535462,
+                  "sha256": "fc2866dfe2c01468edb19b1d94f26156bfacecdf1e7f1452b276ed2f8cc0b08f",
+                  "size": 538514,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -2169,8 +2169,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs",
                   "type": "file",
-                  "sha256": "a980b792353c301eea60d7896704cff21440de7c4aeefc3fe481be079504e203",
-                  "size": 1233964,
+                  "sha256": "5cf6f15237f9c84e6e5b724a10180478732457168921d7aa3e02632037cce299",
+                  "size": 1239190,
                   "mode": 420,
                   "uid": 0,
                   "gid": 0,
@@ -2181,15 +2181,15 @@
                 {
                   "file": "texts/8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a.txt",
                   "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
-                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.293.tgz",
-                  "package_integrity": "sha512-DVfn46SmpfB7xaKuUHsAC+qwY27hOLHNbvF7FoNOAXLZPRTeCr68SjhBjlFOtk+jz5Nf7pfUwnIUDFcdVih6Dg==",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.296.tgz",
+                  "package_integrity": "sha512-Y+cZ2BT8X94mQ9GJOVyIqhjC/nWGvwozUVLjdkzX7aSt+zuo5tgk7Hdv9V7tEUQ9fKnEuiL6moYNWDeHqCD4Lw==",
                   "member": "package/LICENSE.md"
                 },
                 {
                   "file": "texts/786e57ced73510c752e2e15901d290c7c22786e4791d8a2e2d96991a9a97c192.txt",
                   "sha256": "786e57ced73510c752e2e15901d290c7c22786e4791d8a2e2d96991a9a97c192",
-                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.293.tgz",
-                  "package_integrity": "sha512-DVfn46SmpfB7xaKuUHsAC+qwY27hOLHNbvF7FoNOAXLZPRTeCr68SjhBjlFOtk+jz5Nf7pfUwnIUDFcdVih6Dg==",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.296.tgz",
+                  "package_integrity": "sha512-Y+cZ2BT8X94mQ9GJOVyIqhjC/nWGvwozUVLjdkzX7aSt+zuo5tgk7Hdv9V7tEUQ9fKnEuiL6moYNWDeHqCD4Lw==",
                   "member": "package/README.md"
                 }
               ]
@@ -2198,12 +2198,12 @@
               "alias": "@anthropic-ai/claude-agent-sdk-linux-x64",
               "root": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64",
               "package": "@anthropic-ai/claude-agent-sdk-linux-x64",
-              "version": "0.3.293",
+              "version": "0.3.296",
               "acquisition": {
-                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.293.tgz",
-                "sha256": "bdcb3a8e653e96aace67adb5ce6a50d20753c62093ec45396882fdb327535a76",
-                "size": 113084301,
-                "integrity": "sha512-MtqXROSQiuqOCNXfC4k3/3DVfgTNLEdaT5jp/omaZeiPtnRtfCz2KTtBTVG4IwbEDFaKsqfzPsPFzN7X6avwkg==",
+                "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.296.tgz",
+                "sha256": "1cd95b11b175fa8b4fa012ab20302612811141c4e351ac153c17ae7108901f60",
+                "size": 114864547,
+                "integrity": "sha512-TStCnbg2iBtWJBQeMdO7Xwpx5IYWICmdcf7J9eXhIi4JbahWD+VLRaH5sxB+LLZjdBXekp8piKv6Ne2+arag0w==",
                 "signature_verified": false
               },
               "payload_entries": [
@@ -2237,8 +2237,8 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude",
                   "type": "file",
-                  "sha256": "8968405e26db478af44eabc4635ab5ca557057b702a54460a59c13e1b253e978",
-                  "size": 252755128,
+                  "sha256": "24972e3bc859fab2b46ed4c1e51f7d6130f06d3bd550811a114640de3370d0de",
+                  "size": 257068216,
                   "mode": 493,
                   "uid": 0,
                   "gid": 0,
@@ -2247,7 +2247,7 @@
                 {
                   "path": "/opt/marsh/claude-acp/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/package.json",
                   "type": "file",
-                  "sha256": "afde7e87bdbac42cacd914b0ab50d3bfcc3852d9a885832ed65b5d6d07d2a1a7",
+                  "sha256": "5e8cb95bb83978c4f7bc4718088dd177e8caef48840e0bfec29b92bd4abd1d31",
                   "size": 282,
                   "mode": 420,
                   "uid": 0,
@@ -2259,15 +2259,15 @@
                 {
                   "file": "texts/8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a.txt",
                   "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a",
-                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.293.tgz",
-                  "package_integrity": "sha512-MtqXROSQiuqOCNXfC4k3/3DVfgTNLEdaT5jp/omaZeiPtnRtfCz2KTtBTVG4IwbEDFaKsqfzPsPFzN7X6avwkg==",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.296.tgz",
+                  "package_integrity": "sha512-TStCnbg2iBtWJBQeMdO7Xwpx5IYWICmdcf7J9eXhIi4JbahWD+VLRaH5sxB+LLZjdBXekp8piKv6Ne2+arag0w==",
                   "member": "package/LICENSE.md"
                 },
                 {
                   "file": "texts/310346d4c8006eef72f488dcc348bd2803a83a93111de5211954c8cae1f9d0fe.txt",
                   "sha256": "310346d4c8006eef72f488dcc348bd2803a83a93111de5211954c8cae1f9d0fe",
-                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.293.tgz",
-                  "package_integrity": "sha512-MtqXROSQiuqOCNXfC4k3/3DVfgTNLEdaT5jp/omaZeiPtnRtfCz2KTtBTVG4IwbEDFaKsqfzPsPFzN7X6avwkg==",
+                  "url": "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.296.tgz",
+                  "package_integrity": "sha512-TStCnbg2iBtWJBQeMdO7Xwpx5IYWICmdcf7J9eXhIi4JbahWD+VLRaH5sxB+LLZjdBXekp8piKv6Ne2+arag0w==",
                   "member": "package/README.md"
                 }
               ]
@@ -2293,7 +2293,7 @@
     },
     "pi": {
       "root": "/opt/marsh/pi-gateway",
-      "lock_sha256": "7b4cd87bed56f7df7f189bbd5630cdd96c089fa74473adb4b6e2a0ab00a82d8f",
+      "lock_sha256": "561b8f5434ef682e7801b7bba376653a65e6f4914064d5bc067f20f787e34414",
       "notice_root": "/usr/local/share/licenses/marsh-pi",
       "architectures": {
         "arm64": {

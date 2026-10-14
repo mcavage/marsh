@@ -16,6 +16,7 @@ make_fake() {
     printf 'arg=%s\n' "$argument"
   done
 } >"$MARSH_TEST_CAPTURE/invocation"
+printf '%s\n' "${DISABLE_AUTOUPDATER:-unset}" "${DISABLE_UPDATES:-unset}" >"$MARSH_TEST_CAPTURE/update-policy"
 if [ ! -t 0 ]; then
   cat >"$MARSH_TEST_CAPTURE/stdin"
 fi
@@ -104,6 +105,53 @@ arg=--dangerously-skip-permissions
 arg=--settings
 arg={"sandbox":{"enabled":false}}'
 test "$(cat "$root/claude-pipe/stdin")" = 'prompt over stdin'
+printf '1\n1\n' >"$root/expected-update-policy"
+cmp "$root/expected-update-policy" "$root/claude-pipe/update-policy"
+
+# Refuse updater aliases before invoking Claude/Node or touching the selected
+# home, even when a caller tries to turn the policy off. Preserve user files.
+for subcommand in update upgrade; do
+  capture="$root/claude-$subcommand"
+  home="$root/claude-$subcommand-home"
+  mkdir -p "$capture" "$home/.claude"
+  printf 'user settings\n' >"$home/.claude/settings.json"
+  cp "$home/.claude/settings.json" "$root/settings-before"
+  if PATH="$bin:$PATH" MARSH_TEST_CAPTURE="$capture" MARSH_SELECTED_HOME="$home" \
+      DISABLE_AUTOUPDATER=0 DISABLE_UPDATES=0 \
+      sh kits/marsh-claude/marsh-entrypoint.sh "$subcommand" \
+      >"$capture/out" 2>"$capture/err"; then
+    echo 'Claude self-update was not refused' >&2
+    exit 1
+  else
+    test "$?" -eq 125
+  fi
+  test ! -e "$capture/invocation"
+  test ! -s "$capture/out"
+  grep -Fq 'Claude Code is pinned by the Kit image' "$capture/err"
+  grep -Fq 'Upgrade marsh on the Mac' "$capture/err"
+  cmp "$root/settings-before" "$home/.claude/settings.json"
+  test ! -e "$home/.claude.json"
+  test "$(find "$home" -type f | wc -l | tr -d ' ')" = 1
+done
+
+# Environment defaults also hold on ordinary launches, not just refused calls.
+DISABLE_AUTOUPDATER=0 DISABLE_UPDATES=0 run_adapter claude "$root/claude-update-env" --version </dev/null
+cmp "$root/expected-update-policy" "$root/claude-update-env/update-policy"
+
+# The outer ACP entrypoint must set the policy before it launches the adapter,
+# without creating CLI configuration in the selected home.
+mkdir -p "$root/acp-node" "$root/claude-acp-mode"
+cp "$bin/claude" "$root/acp-node/node"
+PATH="$root/acp-node:$PATH" MARSH_TEST_CAPTURE="$root/claude-acp-mode" \
+  MARSH_SELECTED_HOME="$root/claude-acp-mode-home" \
+  DISABLE_AUTOUPDATER=0 DISABLE_UPDATES=0 \
+  sh kits/marsh-claude/marsh-entrypoint.sh --acp --fixture </dev/null
+cmp "$root/expected-update-policy" "$root/claude-acp-mode/update-policy"
+assert_invocation "$root/claude-acp-mode" 'tty=no
+arg=/opt/marsh/claude-acp/mcp-gateway-proxy.mjs
+arg=/opt/marsh/claude-acp/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js
+arg=--fixture'
+test ! -e "$root/claude-acp-mode-home"
 
 printf 'prompt over stdin' | run_adapter pi "$root/pi-pipe"
 assert_invocation "$root/pi-pipe" 'tty=no
@@ -194,6 +242,7 @@ run_claude_cli() {
     sh kits/marsh-claude/claude-cli.sh "$@" </dev/null
 }
 run_claude_cli "$root/acp-plain" --output-format stream-json --verbose
+cmp "$root/expected-update-policy" "$root/acp-plain/update-policy"
 assert_invocation "$root/acp-plain" 'tty=no
 arg=--output-format
 arg=stream-json
@@ -218,6 +267,22 @@ assert_invocation "$root/acp-subcommand" 'tty=no
 arg=auth
 arg=status
 arg=--json'
+cmp "$root/expected-update-policy" "$root/acp-subcommand/update-policy"
+
+DISABLE_AUTOUPDATER=0 DISABLE_UPDATES=0 run_claude_cli "$root/acp-update-env" --version
+cmp "$root/expected-update-policy" "$root/acp-update-env/update-policy"
+for subcommand in update upgrade; do
+  capture="$root/acp-$subcommand"
+  if run_claude_cli "$capture" "$subcommand" >"$root/acp-update.out" 2>"$root/acp-update.err"; then
+    echo 'ACP Claude self-update was not refused' >&2
+    exit 1
+  else
+    test "$?" -eq 125
+  fi
+  test ! -e "$capture/invocation"
+  test ! -s "$root/acp-update.out"
+  grep -Fq 'Claude Code is pinned by the Kit image' "$root/acp-update.err"
+done
 
 # Every agent Kit selects ACP mode only from a leading --acp, which
 # packaging/agents.json appends; the CLI path never sees it.

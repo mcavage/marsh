@@ -29,6 +29,47 @@ A foreground call that boots a Kit VM prints `[starting NAME worker VM…]`.
 To prepare VMs before the prompt, start marsh with `marsh --load KIT,...` or
 `marsh --load all`.
 
+### Updating agent versions
+
+The Kit image chooses the agent's executable version. A new container, a VM
+reset, or `marsh stop` followed by `marsh` still uses the same pinned image;
+none of those fetches a newer Claude, Codex, or Pi release automatically.
+
+For the packaged commands, upgrade marsh **on your Mac** to get the Kit images
+selected by a newer marsh release:
+
+```sh
+brew update && brew upgrade mcavage/tap/marsh
+```
+
+A marsh release need not bump every agent. Inside marsh, `claude --version`,
+`codex --version`, or `pi --version` shows the executable actually selected.
+A provider's “Updated to latest” or changelog notice is not evidence that
+marsh selected a newer Kit. The CLI version is also separate from the model:
+a model label such as Sonnet can change without replacing Claude Code.
+
+If an upgrade leaves an old daemon or reports an incompatible existing VM,
+close active sessions and run `marsh stop` before reopening marsh. This retires
+marsh's VMs and discards VM-only packages and files, but preserves the mounted
+project and persistent guest home. See
+[upgrade troubleshooting](troubleshooting.md#stale-daemon-after-an-upgrade).
+
+The packaged Claude Kit disables automatic and manual Claude Code self-updates
+for both CLI and ACP sessions. `claude update` and `claude upgrade` exit 125
+with a Kit-specific explanation, without running the updater or changing the
+guest home. Agent configuration, sessions, and plugins are separate from the
+executable version; this policy does not block manual plugin management.
+
+Other agent installers also cannot change a pinned image. Changes made only in
+a job's container disappear when the job exits; files written into the shared
+guest home persist, but do not by themselves replace the Kit's executable.
+
+To use a newer agent independently of a marsh release, build and publish a Kit
+with the desired version, checksums, and notices, then register it under a new
+command name or [override the packaged command](#changing-or-replacing-a-command).
+For this repository's packaged Kits, see the
+[pin refresh procedure](design/supply-chain.md#keeping-pins-current).
+
 ### Signing in
 
 marsh has no login of its own. Docker Sandboxes (`sbx`) holds the credentials

@@ -101,13 +101,13 @@ impl BrokerOptions {
             .join("marshd");
         hash_path(&marshd, &mut digest)?;
         digest.update([u8::from(self.allow_full_sbx_control)]);
-        Ok(format!("{:x}", digest.finalize()))
+        Ok(marsh_contracts::process::hex(&digest.finalize()))
     }
 
     fn endpoint(&self) -> PathBuf {
         let mut digest = Sha256::new();
         digest.update(self.scope_root.as_os_str().as_encoded_bytes());
-        let key = format!("{:x}", digest.finalize());
+        let key = marsh_contracts::process::hex(&digest.finalize());
         PathBuf::from("/tmp")
             .join(format!(
                 "marsh-mcp-{}-{}",
@@ -898,10 +898,10 @@ fn build_id() -> Result<String, String> {
     let mut digest = Sha256::new();
     hash_path(&current, &mut digest)?;
     let build = format!(
-        "{}:{}:{:x}",
+        "{}:{}:{}",
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION"),
-        digest.finalize()
+        marsh_contracts::process::hex(&digest.finalize())
     );
     Ok(BUILD.get_or_init(|| build).clone())
 }
