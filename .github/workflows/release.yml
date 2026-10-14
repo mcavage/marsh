@@ -68,7 +68,7 @@ jobs:
       image_tag: ${{ steps.v.outputs.image_tag }}
       extra_tags: ${{ steps.v.outputs.extra_tags }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
@@ -110,12 +110,12 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.version.outputs.sha }}
       - name: Stamp the version
         run: python3 scripts/stamp-version.py "${{ needs.version.outputs.version }}"
-      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Build Linux arm64 guest binaries
         run: |
           docker buildx build --platform linux/arm64 \
@@ -123,7 +123,7 @@ jobs:
             --target export --output type=local,dest=out/guest \
             -f packaging/linux-arm64/Dockerfile .
           ls -l out/guest
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: guest
           path: out/guest
@@ -142,10 +142,10 @@ jobs:
       IMAGE_TAG: ${{ needs.version.outputs.image_tag }}
       EXTRA_TAGS: ${{ needs.version.outputs.extra_tags }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.version.outputs.sha }}
-      - uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Log in to Docker Hub and Docker Hardened Images
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -196,7 +196,7 @@ jobs:
             cat "$RUNNER_TEMP/out/fixture-ref.txt"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: images
           path: |
@@ -214,18 +214,18 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       FORMULA_CHANNEL: ${{ needs.version.outputs.channel }}
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.version.outputs.sha }}
       - name: Stamp the version
         run: python3 scripts/stamp-version.py "$VERSION"
       - name: Rust toolchain
         run: rustup toolchain install 1.95.0 --profile minimal
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: guest
           path: target/libexec/marsh
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: images
           path: target/images
@@ -247,7 +247,7 @@ jobs:
           # agents.json and shell-image (offline: no sbx, VM or network).
           "$RUNNER_TEMP/prefix/bin/marshd" --check-config
           MANPATH="$RUNNER_TEMP/prefix/share/man" man -w marsh
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist
           path: target/dist
@@ -268,14 +268,14 @@ jobs:
       SHA: ${{ needs.version.outputs.sha }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dist
           path: dist
       - name: Check the checksum
         working-directory: dist
         run: sha256sum -c "marsh-$VERSION-darwin-arm64.tar.gz.sha256"
-      - uses: actions/attest-build-provenance@db473fddc028af60658334401dc6fa3ffd8669fd # v2.3.0
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/marsh-${{ env.VERSION }}-darwin-arm64.tar.gz
       # A token-created tag does not start another workflow run, so a nightly's
@@ -312,7 +312,7 @@ jobs:
       FORMULA: ${{ needs.version.outputs.formula }}
       TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: dist
           path: dist
