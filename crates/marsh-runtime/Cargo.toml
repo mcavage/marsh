@@ -17,7 +17,7 @@ test-support = []
 marsh-contracts = { path = "../marsh-contracts" }
 thiserror = "2.0"
 serde_json = "1.0"
-signal-hook = { version = "0.3.18", default-features = false }
+signal-hook = { version = "0.4.0", default-features = false }
 nix = { version = "0.31", features = ["poll", "process", "signal", "term"] }
 rustix = { version = "1.1", features = ["termios", "fs", "process", "net", "pty"] }
 

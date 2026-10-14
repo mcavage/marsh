@@ -148,10 +148,8 @@ impl DevBroker {
             )));
         }
         let project = project.canonicalize()?;
-        let key = format!(
-            "{:x}",
-            Sha256::digest(project.as_os_str().as_encoded_bytes())
-        );
+        let key =
+            marsh_contracts::process::hex(&Sha256::digest(project.as_os_str().as_encoded_bytes()));
         let scratch = self.cache_root.join(&key[..16]);
         if self
             .stock

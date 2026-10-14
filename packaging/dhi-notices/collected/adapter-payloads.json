@@ -2293,7 +2293,7 @@
     },
     "pi": {
       "root": "/opt/marsh/pi-gateway",
-      "lock_sha256": "299ffb1d31f41f10db1250828d17593f3f6169f666a1b271507d948a37943c3f",
+      "lock_sha256": "5cbc6596e37a4fff9d95d1d3393d0ab206586952eb541f48084ed59439d5c8a3",
       "notice_root": "/usr/local/share/licenses/marsh-pi",
       "architectures": {
         "arm64": {

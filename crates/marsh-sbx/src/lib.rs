@@ -5878,7 +5878,7 @@ fn shared_grant_path(source: &Path, identity: &HostIdentity) -> PathBuf {
     digest.update(identity.gid.to_be_bytes());
     PathBuf::from(GRANT_ROOT)
         .join("shared")
-        .join(format!("{:x}", digest.finalize()))
+        .join(marsh_contracts::process::hex(&digest.finalize()))
 }
 
 fn verify_pinned_grant_handles(
@@ -5953,7 +5953,10 @@ fn artifact_identity(path: &Path) -> Result<String, SbxError> {
         }
         digest.update(&buffer[..read]);
     }
-    Ok(format!("sha256:{:x}", digest.finalize()))
+    Ok(format!(
+        "sha256:{}",
+        marsh_contracts::process::hex(&digest.finalize())
+    ))
 }
 
 fn validate_name(value: &str) -> Result<(), SbxError> {
@@ -6485,7 +6488,10 @@ fn local_source_fingerprint(source: &Path) -> Result<String, SbxError> {
 
     let mut digest = Sha256::new();
     hash_tree(source, source, &mut digest)?;
-    Ok(format!("sha256:{:x}", digest.finalize()))
+    Ok(format!(
+        "sha256:{}",
+        marsh_contracts::process::hex(&digest.finalize())
+    ))
 }
 
 fn sweep_stale_local_scratch(directory: &Path, now: SystemTime) -> Result<(), SbxError> {
@@ -6573,7 +6579,10 @@ pub fn selected_home_identity(path: &Path) -> Result<String, SbxError> {
     digest.update(identity.inode.to_be_bytes());
     digest.update(identity.uid.to_be_bytes());
     digest.update(identity.gid.to_be_bytes());
-    Ok(format!("sha256:{:x}", digest.finalize()))
+    Ok(format!(
+        "sha256:{}",
+        marsh_contracts::process::hex(&digest.finalize())
+    ))
 }
 
 fn mount_spec(host: &Path, target: &Path, mode: &str) -> Result<OsString, SbxError> {

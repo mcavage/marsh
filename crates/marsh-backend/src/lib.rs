@@ -2933,7 +2933,7 @@ fn unix_millis(time: SystemTime) -> u64 {
 }
 
 fn identity_digest(identity: &str) -> String {
-    format!("{:x}", Sha256::digest(identity.as_bytes()))
+    marsh_contracts::process::hex(&Sha256::digest(identity.as_bytes()))
 }
 
 fn millis(duration: std::time::Duration) -> u64 {
