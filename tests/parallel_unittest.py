@@ -5,7 +5,8 @@
 
 The slow Python suites (publisher and publication callers) are hundreds of
 independent tests, each with its own temporary directory, run serially by
-`unittest discover`. This enumerates every test in the given files, runs each
+`unittest discover`. This enumerates each file in its own process (so suites
+can import different modules with the same name, such as run.py), runs each
 as `python -m unittest module.Class.test` with the file's directory on
 PYTHONPATH (exactly how `discover -s DIR -p FILE` imports it), and prints
 nothing for a pass. `--first PATTERN` starts the tests whose id contains PATTERN
@@ -15,6 +16,7 @@ unloadable test cannot pass silently.
 """
 import argparse
 import concurrent.futures
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -54,13 +56,26 @@ def main():
     parser.add_argument('--first', action='append', default=[], metavar='PATTERN',
                         help='schedule tests whose id contains PATTERN first (repeatable)')
     parser.add_argument('--slowest', type=int, default=3, help='list the N slowest tests (default 3)')
+    parser.add_argument('--list', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('files', nargs='+', type=Path)
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error('--jobs must be positive')
+    if args.list:
+        if len(args.files) != 1:
+            parser.error('--list requires exactly one file')
+        print(json.dumps(enumerate_tests(args.files[0].resolve())))
+        return 0
 
     jobs = []
+    warning_flags = ['-W', args.warnings] if args.warnings else []
     for path in args.files:
         path = path.resolve()
-        for test_id in enumerate_tests(path):
+        command = [sys.executable, *warning_flags, str(Path(__file__).resolve()), '--list', str(path)]
+        listed = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if listed.returncode != 0:
+            raise SystemExit(f'{path}: cannot enumerate tests\n{listed.stdout}{listed.stderr}')
+        for test_id in json.loads(listed.stdout):
             jobs.append((path, test_id))
 
     def rank(job):
@@ -70,7 +85,7 @@ def main():
 
     def run(job):
         path, test_id = job
-        command = [sys.executable] + (['-W', args.warnings] if args.warnings else []) + ['-m', 'unittest', test_id]
+        command = [sys.executable, *warning_flags, '-m', 'unittest', test_id]
         env = {**os.environ, 'PYTHONPATH': os.pathsep.join(filter(None, [str(path.parent), os.environ.get('PYTHONPATH')]))}
         started = time.monotonic()
         done = subprocess.run(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)

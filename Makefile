@@ -45,6 +45,8 @@ GITHUB_REPOSITORY ?= mcavage/marsh
 NEXTEST_PROFILE ?= default
 TEST_BIN = $(abspath $(TARGET_DIR))/debug
 PUBLISHER_VENV ?= $(abspath $(TARGET_DIR))/publisher-venv
+# Each isolated Python test gets a process; set to 1 to diagnose serially.
+HARNESS_JOBS ?= 3
 MODEL_FLAGS ?= --quick
 MODEL_CACHE ?= $(abspath $(TARGET_DIR))/tlc-cache
 TLA2TOOLS_RELEASE := tools-tla2tools-2026-10-06-94d0c50
@@ -176,17 +178,16 @@ test-harness:
 	$(PYTHON) tests/acceptance/onboarding.py --marsh "$(TEST_BIN)/marsh" --shell "$(TEST_BIN)/marsh-local" \
 		--evidence "$(abspath $(TARGET_DIR))/onboarding.json"
 	MARSH_BINARY="$(TEST_BIN)/marsh" MARSH_MCP_BIN="$(TEST_BIN)/marsh-mcp" \
-		$(PYTHON) tests/parallel_unittest.py -j 3 -W error $(addprefix tests/mcp/,$(MCP_TEST_FILES))
-	$(PYTHON) -W error -m unittest discover -s tests/acceptance -p 'test_*.py'
-	$(PYTHON) -W error -m unittest discover -s tests/release -p 'test_*.py'
+		$(PYTHON) tests/parallel_unittest.py -j $(HARNESS_JOBS) -W error $(addprefix tests/mcp/,$(MCP_TEST_FILES))
+	$(PYTHON) tests/parallel_unittest.py -j $(HARNESS_JOBS) -W error \
+		tests/acceptance/test_*.py tests/release/test_*.py \
+		evals/benchmark/test_*.py evals/reach/test_*.py tests/test_parallel_unittest.py
 	$(PYTHON) -m unittest discover -s tests/perf -p 'test_*.py'
-	$(PYTHON) -W error -m unittest discover -s evals/benchmark -p 'test_*.py'
-	$(PYTHON) -W error -m unittest discover -s evals/reach -p 'test_*.py'
 	sh tests/kits/selected-home.sh
 	sh tests/kits/cli-adapters.sh
 	sh tests/kits/shell-adapter.sh
 	$(MAKE) --no-print-directory "$(PUBLISHER_VENV)/.ready"
-	"$(PUBLISHER_VENV)/bin/python" tests/parallel_unittest.py -j 3 -W error tests/kits/test_publisher_cli.py
+	"$(PUBLISHER_VENV)/bin/python" tests/parallel_unittest.py -j $(HARNESS_JOBS) -W error tests/kits/test_publisher_cli.py
 
 # The publisher's one dependency, hash-pinned.
 $(PUBLISHER_VENV)/.ready: scripts/requirements-publish.txt
