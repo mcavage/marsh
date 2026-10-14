@@ -9,7 +9,7 @@ and development shells have the explicit grants described below.
 | Can a job ... | Answer | What enforces it |
 |---|---|---|
 | Run a command directly on your Mac | Not through ordinary job execution | The VM boundary; jobs receive no host-command relay or Docker, containerd, or `sbx` control socket |
-| Read your real home directory | No | Only the project and the guest home are mounted |
+| Read your real home directory | Not implicitly | Only the project, guest home, and explicitly configured extra directories are mounted |
 | Read proxy-managed provider keys | No | The `sbx` proxy holds them; the job sees placeholders |
 | Change or delete project files | Yes | The project is mounted read/write |
 | Read other jobs' logins and history | Yes, when they use the same guest home | The persistent guest home is shared within a scope |
@@ -42,8 +42,8 @@ Your own shell commands in a branch are not confined to that copy
 
 ### Mac
 
-The guest does not mount your real home as its home directory. It shares two
-directories with the Mac:
+The guest does not mount your real home as its home directory. By default,
+it shares two directories with the Mac:
 
 - the project you started in, read/write, at its Mac path
 - the guest home (`$MARSH_HOME/home`, normally `~/.marsh/home`)
@@ -53,6 +53,15 @@ session. It does not make the project read-only.
 
 MCP integrations and `--dev` can add access beyond these mounts, as described
 [below](#what-is-not-isolated).
+
+Native `sbxenv.yaml`/`sbxenvs/NAME.yaml` additions can explicitly grant other
+directories and MCP sources ([home setup](guides/set-up-your-home.md)). Extras
+use normal source admission, appear in receipts, propagate only through a
+parent's recorded view, and are omitted from split Kit jobs. Environment files
+and local MCP executable paths are protected host inputs. Local MCP servers
+execute on the Mac with your privileges; their code and dependencies must be
+trusted and kept outside writable guest mounts. Connections are per Kit VM,
+not per project, and do not imply permission to send messages or mutate data.
 
 The host control directory, the install, and Kit sources are never mounted.
 marsh refuses to start in a directory that contains them.

@@ -9,6 +9,12 @@ implementation types.
 
 ## Runs
 
+`tests/acceptance/sbxenvs_uat.py` exercises home-level native environment
+additions: shared/per-Kit mounts, RO/RW bytes and receipts, child inheritance
+without Kit widening, split omission, credential-free MCP echo through a real
+job, restoration after worker reset, startup snapshots, and unsafe-config
+refusals without VM changes. It is included in `make verify`/`make regress`.
+
 There are three ways to run the gate (`run.py` is the full gate; `smoke.py`
 is its fast subset, sharing the same scope harness, `harness.py`):
 

@@ -11,6 +11,8 @@ your project:
   you can check in the source.
 - [Review split results in a pipeline](add-a-judge.md): optional comments
   from a downstream agent before you apply patches.
+- [Set up your marsh home](set-up-your-home.md): personal skills, dotfiles,
+  shared and per-Kit MCP connections and mounted directories.
 
 `split { ... } | join` creates project copies. `fanout { ... } | collect`
 runs on shared files. In another shell, or inside an agent job, use the CLI

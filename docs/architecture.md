@@ -123,6 +123,17 @@ module to the responsible crate before adding a crate or service.
 
 ## Trust boundaries
 
+Optional scope `sbxenv.yaml` and `sbxenvs/COMMAND.yaml` additions are parsed and
+snapshotted before stock effects (`marsh-backend/src/sbxenv.rs`). Only native
+MCP declarations and additional workspaces are admitted. Environment content
+participates in the VM ownership selector; aliases cannot diverge. Added sources
+use the existing `AdmittedHostGrant`/mount ledger, appear in receipts, are
+inherited only from a parent's recorded view, and are omitted from split Kit
+jobs. MCP registrations are inspected/reused or added without OAuth prompts,
+never overwritten, then loaded before preparation completes
+(`marsh-sbx/src/mcp_environment.rs`). Configuration and local executable paths
+are protected host inputs, not guest-home content.
+
 - **Host `sbx`** is trusted and used only through its public CLI.
 - **Daemon** is same-user, owner-only, and scoped to one canonical
   `MARSH_HOME`. Its control directory is outside every guest mount.

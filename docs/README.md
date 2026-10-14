@@ -20,6 +20,8 @@ containers, and lets you combine their work with shell syntax.
   one bounded child job from its shell tool.
 - [Review split results in a pipeline](guides/add-a-judge.md): send results
   to another agent for an optional second opinion.
+- [Set up your marsh home](guides/set-up-your-home.md): skills, dotfiles,
+  shared and per-Kit MCP servers and extra mounts.
 
 ## Using marsh
 

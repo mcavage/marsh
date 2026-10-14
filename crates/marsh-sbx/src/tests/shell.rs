@@ -55,6 +55,28 @@ fn warm_shell_reuses_validated_initialization_without_stock_calls() {
 }
 
 #[test]
+fn restarted_daemon_recovers_old_owned_shell_environment_generations() {
+    let model = StockModel::new();
+    let root = tempfile::tempdir().unwrap();
+    let map = root.path().join("ownership.json");
+    let first = model.adapter().with_vm_ownership(map.clone()).unwrap();
+    let mut shell = ShellFixture::new();
+    shell.spec.name = first.vm_name(VmPurpose::Shell, "shell:sbxenv:old").unwrap();
+    let old = first.ensure_shell_vm(&shell.spec).unwrap();
+    drop(first);
+    let restarted = model.adapter().with_vm_ownership(map).unwrap();
+    shell.spec.name = restarted
+        .vm_name(VmPurpose::Shell, "shell:sbxenv:new")
+        .unwrap();
+    let recovered = restarted.shell_recovery_specs(&shell.spec);
+    assert!(recovered.iter().any(|spec| spec.name == old.name));
+    for spec in recovered {
+        restarted.reset_shell_vm(&spec).unwrap();
+    }
+    assert!(model.vm(&old.name).is_none());
+}
+
+#[test]
 fn shell_vm_is_not_ready_until_its_supervisor_acknowledges_the_generation() {
     let model = StockModel::new();
     model.answer_next_supervisor_with_wrong_generation();

@@ -1576,6 +1576,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2",
  "signal-hook 0.4.5",
  "tempfile",

@@ -31,6 +31,8 @@ url = os.environ["MCP_GATEWAY_URL"]
 name, encoded_input, list_only = sys.argv[1:]
 input_text = base64.b64decode(encoded_input[1:]).decode("utf-8")
 headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream", "MCP-Protocol-Version": "2025-06-18"}
+if os.environ.get("MCP_SENTINEL_TOKEN_NAME"):
+    headers["Authorization"] = "Bearer " + os.environ["MCP_SENTINEL_TOKEN_NAME"]
 def post(message):
     req = urllib.request.Request(url, data=json.dumps(message).encode(), method="POST", headers=headers)
     with urllib.request.urlopen(req, timeout=25) as response:

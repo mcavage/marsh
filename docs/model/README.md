@@ -1,9 +1,21 @@
 # Cross-component model
 
-Five TLA+ modules specify cross-component state. TLC checks their bounded state
+Six TLA+ modules specify cross-component state. TLC checks their bounded state
 spaces; a pass does not prove that the Rust code refines these specifications.
 The code-location table below records the implementation mapping and known gaps.
 
+- `Sbxenv.tla`: snapshotted native MCP/extra-mount additions, required MCP load
+  before VM readiness, registration reuse without overwrite, inherited extra
+  mounts without child-Kit widening, and extra-mount omission from split jobs.
+  Its four negative controls are `childKitMount` (ExtraAttenuation),
+  `splitExtraMount` (SplitOmitsExtras), `skipMcpLoad` (McpBeforeReady), and
+  `overwriteRegistration` (NoRegistrationOverwrite). Configuration/file/path
+  parsing, alias equivalence and content-sensitive VM selectors are static code
+  checks, not modeled. It abstracts one declared server per Kit; source identity,
+  retained mounts and cleanup remain in Worker/Ownership, and fork paths in Workspace.
+  Registration inspection/addition are abstracted as one step: concurrent changes
+  by other host-global SBX clients are trusted-host behavior, not an atomic
+  compare-and-set promise of marsh's separate public CLI calls.
 - `Ownership.tla`: one daemon per selected home, stock SBX as a name -> VM table that
   other actors change at any time, the persisted ownership map, persisted create intent
   (intent-then-adopt create), daemon restart, the cached inventory, explicit operator
@@ -160,9 +172,11 @@ positive config fails or a negative control passes or fails for the wrong reason
 
 | Spec action | Code location |
 |---|---|
+| Sbxenv: Create / Register / Load / Ready / Remove | `marsh-backend/src/sbxenv.rs` `with_sbxenvs` (snapshot), `lib.rs` `kit_spec` (environment selector), `prepare_one_authorized` (required setup before ready cache), `configure_kit_mcp`; `marsh-sbx/src/mcp_environment.rs` `ensure_mcp_server` (inspect/reuse or add, no overwrite), `load_mcp_server` / `load_shell_mcp_server` (owned UUID); worker reset and scope teardown |
+| Sbxenv: Launch (ExtraAttenuation, SplitOmitsExtras) | `marsh-backend` `execute` selects a root's environment, an ordinary child's inherited receipt view, or no extras for a split; `sbxenv.rs` `additional_grants` applies existing descriptor/overlap admission; `inherited_environment` maps only parent-recorded additions. Rust callers: `sbxenv::tests`, `marsh-sbx/tests/mcp_environment.rs`; real caller: `tests/acceptance/sbxenvs_uat.py` |
 | Inventory, Use, StartVM, Remove | marsh-sbx `lib.rs` `StockSbx::stock_view` (cached `sbx ls --json`, refreshed on demand; `stock_inventory.rs` decodes it) and `classify_vm` -> `vm_ownership.rs` `classify` (owned only with its recorded UUID present, else foreign or absent); `ensure_kit_vm_authorized` / `ensure_shell_vm_inner` (StartVM); `remove_owned_vm` (fresh classification, `sbx rm`, then proves the recorded UUID is gone) |
 | CreateBegin / CreateDo / Record / Restart | marsh-sbx `vm_ownership.rs` (`assign`, `store_view` adopt/drop) |
-| Remove (incl. operator Retire) | marsh-sbx `retire_kit_vm_before` via `marsh workers reset KIT` (a quarantined VM's references, and pins of shells no longer attached, end with the VM) and via `marsh stop`/`reset` `teardown_scope` (lifecycle admission proves no attached shell or running job, so every retained reference ends with the VM) |
+| Remove (incl. operator Retire) | marsh-sbx `retire_kit_vm_before` via `marsh workers reset KIT` (a quarantined VM's references, and pins of shells no longer attached, end with the VM) and via `marsh stop`/`reset` `teardown_scope` (lifecycle admission proves no attached shell or running job, so every retained reference ends with the VM); `shell_recovery_specs` includes persisted `owned_shell_names` across personal-environment generations, used only for UUID-checked removal |
 | ChildCreateBegin/Do/Record, ChildOp, ChildRemove | marsh-daemon `dev_broker.rs` (`serve`, `serve_admitted` incl. `Action::Run`: a fresh `run` is a ChildCreate, a reattach a ChildOp; `check_owned`) + `dev_broker/policy.rs`; grant section in marsh-sbx `vm_ownership.rs` (`update_dev_grants`, adoption in `store_view`) |
 | RevokeChild, Restart (revoke all), HostAdoptChild, HostCleanChild | marsh-daemon `dev_broker.rs` (`revoke_session` at session end in marsh-backend `open_shell`, `revoke_all` at `marsh stop`/`marsh reset` and in `marshd` startup, `remove_children`) |
 | Admit / Run / Exit / Cleanup / Cancel | marsh-sbx `StockSbx::launch_worker` (refuses a quarantined VM or a stale worker generation; one `AttemptRoute` per attempt on the VM's retained worker transport); marsh-worker `control.rs` (per-attempt start, exit and cleanup frames) and `transport.rs` (`cancellation`). Not implemented as modeled: a per-VM `CAP`; concurrency is bounded by the daemon's session pool (`marsh-daemon/src/process.rs` `admit`) |
