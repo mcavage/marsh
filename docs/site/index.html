@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>marsh: a shell for composing agents</title>
-<meta name="description" content="A Linux shell for Apple Silicon Macs where Claude, Codex, and Pi run in containers. Use split and join to work on separate copies of your project.">
+<meta name="description" content="A Bash-compatible shell with sandboxed agent commands and filesystem branching. Compose your agents with pipes, parallel branches, and joins.">
 <link rel="canonical" href="{{canonical}}">
 <link rel="alternate" type="text/plain" href="llms.txt" title="llms.txt">
 <meta name="theme-color" content="#0a0c0b">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="marsh">
 <meta property="og:title" content="marsh: a shell for composing agents">
-<meta property="og:description" content="A Linux shell for Apple Silicon Macs where Claude, Codex, and Pi run in containers. Use split and join to work on separate copies of your project.">
+<meta property="og:description" content="A Bash-compatible shell with sandboxed agent commands and filesystem branching. Compose your agents with pipes, parallel branches, and joins.">
 <meta property="og:url" content="{{canonical}}">
 <meta property="og:image" content="{{base}}/og.png">
 <meta property="og:image:width" content="1200">
@@ -19,7 +19,7 @@
 <meta property="og:image:alt" content="marsh: a shell for composing agents">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="marsh: a shell for composing agents">
-<meta name="twitter:description" content="A Linux shell for Apple Silicon Macs where Claude, Codex, and Pi run in containers. Use split and join to work on separate copies of your project.">
+<meta name="twitter:description" content="A Bash-compatible shell with sandboxed agent commands and filesystem branching. Compose your agents with pipes, parallel branches, and joins.">
 <meta name="twitter:image" content="{{base}}/og.png">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -50,15 +50,18 @@
     <div class="wrap">
       <h1>A shell for <span class="hl">composing agents.</span></h1>
       <p class="sub">
-        marsh gives you a Linux shell in your project. Claude, Codex, and Pi run
-        in their own containers and work with pipes, scripts, and Makefiles.
+        marsh adds sandboxed agent commands and filesystem branching to a
+        Bash-compatible shell. Use the included agents or
+        <a href="docs/kits.html#adding-a-command">register your own</a>, then
+        connect their work with pipes and parallel branches.
       </p>
-      <p class="speed-note">Repeat calls start quickly because marsh keeps the agent VMs running.</p>
       <div class="cta">
-        <a class="btn primary" href="docs/quickstart.html">Get started</a>
-        <a href="docs/index.html">Read the manual</a>
+        <div class="install" data-copy="brew install docker/tap/sbx mcavage/tap/marsh">
+          <code><span class="ps" aria-hidden="true">$ </span>brew install docker/tap/sbx mcavage/tap/marsh</code>
+          <button class="copy" type="button" aria-label="Copy Homebrew install command">Copy</button>
+        </div>
+        <a href="docs/quickstart.html">First run →</a>
       </div>
-      <p class="caption">Apple Silicon Macs · Linux arm64 · Docker Sandboxes</p>
     </div>
   </section>
 
@@ -130,51 +133,42 @@
         </div>
       </figure>
       <p class="demo-followup">
-        For parallel commands that can share your working tree, such as tests
-        and linters, use
-        <a href="docs/fanout.html"><code>fanout { … } | collect</code></a>.
-        <a class="more" href="docs/split.html">Split and join →</a>
+        <a href="docs/fanout.html">Fan work out in parallel</a>,
+        <a href="docs/split.html">give editing branches their own files</a>,
+        and pipe the results into the next stage.
       </p>
     </div>
   </section>
 
   <section class="section" aria-labelledby="rationale-h">
     <div class="wrap rationale">
-      <h2 id="rationale-h">Why it starts quickly</h2>
-      <dl class="reasons">
-        <dt>Agent VMs</dt>
-        <dd>
-          The first call to each agent prepares its VM and image, which can take
-          a few minutes. Later calls reuse the running VM and start a new
-          container for each job. You can
-          <a href="docs/kits.html#adding-a-command">register other tools</a>
-          to run the same way.
-        </dd>
-
-        <dt>File branches</dt>
-        <dd>
-          <code>split</code> snapshots the files you have now, including
-          uncommitted work. It uses macOS copy-on-write clones where supported,
-          so branching doesn't copy unchanged file data up front. Each patch
-          is a diff against that starting snapshot, and marsh leaves your
-          repository's branches and <code>.git</code> directory alone.
-        </dd>
-      </dl>
+      <h2 id="rationale-h">A sandbox for every agent call</h2>
+      <p>
+        Each call runs in a fresh nonroot container inside a Docker Sandbox VM.
+        marsh keeps a warm VM per <a href="docs/kits.html">agent Kit</a>, so
+        repeated and concurrent calls share its boot and memory costs.
+      </p>
+      <p>
+        macOS copy-on-write clones let project branches share unchanged file
+        data on supported filesystems. If cloning is unsupported, marsh makes
+        a regular copy.
+      </p>
     </div>
   </section>
 
   <section class="section" aria-labelledby="delegation-h">
     <div class="wrap delegation demo-layout">
       <div class="demo-copy">
-        <h2 id="delegation-h">Agents can run agents</h2>
+        <h2 id="delegation-h">Your agents get filesystem branching</h2>
         <p>
-          Claude can pipe its diff to Codex from its own shell tool. Codex runs
-          as a child job and sends its answer back on stdout.
+          Inside a job, registered commands, <code>marsh split</code>, and
+          <code>marsh fanout</code> are on <code>PATH</code>. An agent can use its
+          existing shell tool to start sandboxed children and work on private
+          copies of its project.
         </p>
         <p>
-          Cancel Claude and its child jobs stop too. <code>marsh jobs --tree</code>
-          shows the calls, with
-          <a href="docs/agents.html#limits-and-messages">limits on nesting and concurrent jobs</a>.
+          The agent reads the results and patches on stdout. It needs no new
+          delegation API or changes to its own code.
         </p>
         <a class="more" href="docs/agents.html">Agents running agents →</a>
       </div>
@@ -183,26 +177,42 @@
           <i></i><i></i><i></i>
           <span class="title">Inside an agent’s shell tool</span>
         </div>
-<pre class="term example" tabindex="0" aria-label="Example command run by an agent's shell tool"><code>git diff |
-  <span class="k">codex</span> exec <span class="s">'Review this diff.'</span></code></pre>
+<pre class="term example" tabindex="0" aria-label="An agent branching work through its existing shell tool"><code>marsh split -n \
+  ::: api <span class="k">claude</span> -p \
+    <span class="s">'Add cursor pagination.'</span> \
+  ::: cli <span class="k">codex</span> exec \
+    <span class="s">'Add --json output.'</span> \
+  | marsh join --keep</code></pre>
       </div>
     </div>
   </section>
 
   <section class="section" aria-labelledby="boundaries-h">
     <div class="wrap boundaries">
-      <h2 id="boundaries-h">What agents can change</h2>
+      <h2 id="boundaries-h">See and control what runs</h2>
       <p>
-        The supplied agents run without permission prompts. A direct call can
-        edit or delete your project; a split agent gets its branch's copy.
-        Shell commands such as <code>make test</code> still run in the shared
-        shell VM and can write outside the branch's copy.
+        Jobs run as nonroot users inside containers and sandbox VMs, without
+        your Mac home or Docker/SBX control sockets. Kit policies filter network
+        access, and you can restrict which commands an agent may start and set
+        resource limits.
       </p>
       <p>
-        Jobs share a guest home for agent settings and history. It is separate
-        from your Mac home, but any job can read saved logins there. Docker
-        Sandboxes supplies proxy-managed API keys without exposing their values
-        to the jobs.
+        Provider keys stored with Docker Sandboxes are added by its proxy, so
+        jobs don't receive the key values. Logins saved in the shared guest
+        home remain readable by other jobs that use it.
+      </p>
+      <p>
+        <code>marsh jobs --tree</code> shows who started each call, and
+        <code>marsh results</code> records its exit status and container cleanup.
+        Ctrl-C cancels the foreground tree, including jobs the agents started
+        themselves.
+      </p>
+      <p>
+        The included agents run with permission prompts disabled, so a direct
+        call can edit your working tree immediately. Use <code>split</code> to
+        give registered agent calls private project copies. Ordinary commands
+        in a shell branch, such as <code>make test</code>, can still write outside
+        that copy within your session's Linux VM.
       </p>
       <a class="more" href="docs/security.html">Security model →</a>
     </div>
@@ -212,7 +222,7 @@
     <div class="wrap">
       <h2 id="final-h">Open a shell in your project</h2>
       <div class="cta">
-        <a class="btn primary" href="docs/quickstart.html">Get started</a>
+        <a class="btn primary" href="docs/quickstart.html">First run →</a>
       </div>
       <p class="caption">
         You'll need an Apple Silicon Mac and Docker Sandboxes 0.45 or later.
