@@ -706,7 +706,7 @@
       },
       {
         "package": "liblzma5",
-        "version": "5.8.1-1+dhi1",
+        "version": "5.8.1-1+deb13u2+dhi0",
         "families": [
           "0BSD",
           "GPL",
@@ -2548,7 +2548,7 @@
       },
       {
         "package": "liblzma5",
-        "version": "5.8.1-1+dhi1",
+        "version": "5.8.1-1+deb13u2+dhi0",
         "families": [
           "0BSD",
           "GPL",
@@ -4508,7 +4508,7 @@
       },
       {
         "package": "liblzma5",
-        "version": "5.8.1-1+dhi1",
+        "version": "5.8.1-1+deb13u2+dhi0",
         "families": [
           "0BSD",
           "GPL",
@@ -6468,7 +6468,7 @@
       },
       {
         "package": "liblzma5",
-        "version": "5.8.1-1+dhi1",
+        "version": "5.8.1-1+deb13u2+dhi0",
         "families": [
           "0BSD",
           "GPL",
@@ -8047,7 +8047,7 @@
       },
       {
         "package": "liblzma5",
-        "version": "5.8.1-1+dhi1",
+        "version": "5.8.1-1+deb13u2+dhi0",
         "families": [
           "0BSD",
           "GPL",
@@ -9390,7 +9390,7 @@
       },
       {
         "package": "libaudit-common",
-        "version": "1:4.0.2-2+dhi1",
+        "version": "1:4.0.2-2+deb13u1+dhi0",
         "families": [
           "GPL",
           "LGPL"
@@ -9401,7 +9401,7 @@
       },
       {
         "package": "libaudit1",
-        "version": "1:4.0.2-2+dhi1",
+        "version": "1:4.0.2-2+deb13u1+dhi0",
         "families": [
           "GPL",
           "LGPL"
@@ -9820,7 +9820,7 @@
       },
       {
         "package": "libgcrypt20",
-        "version": "1.11.0-7+dhi2",
+        "version": "1.11.0-7+deb13u1+dhi1",
         "families": [
           "BSD",
           "GPL",
@@ -10172,7 +10172,7 @@
       },
       {
         "package": "liblzma5",
-        "version": "5.8.1-1+dhi1",
+        "version": "5.8.1-1+deb13u2+dhi0",
         "families": [
           "0BSD",
           "GPL",

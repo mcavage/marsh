@@ -662,7 +662,7 @@ impl StockModel {
 
     fn next_uuid(state: &mut State) -> String {
         state.next_id += 1;
-        let digest = format!("{:x}", Sha256::digest(state.next_id.to_be_bytes()));
+        let digest = marsh_contracts::process::hex(&Sha256::digest(state.next_id.to_be_bytes()));
         format!(
             "{}-{}-4{}-8{}-{}",
             &digest[..8],

@@ -36,10 +36,9 @@ async fn cli_load_keeps_original_mcp_caller_valid_until_unpublish() {
     let cli = std::env::var_os("MARSH_LOAD_TEST_BIN").expect("MARSH_LOAD_TEST_BIN required");
     for name in ["marsh", "marsh-mcp", "marshd"] {
         let path = Path::new(&cli).with_file_name(name);
-        let digest = format!(
-            "{:x}",
-            Sha256::digest(fs::read(&path).expect("all three host binaries required"))
-        );
+        let digest = marsh_contracts::process::hex(&Sha256::digest(
+            fs::read(&path).expect("all three host binaries required"),
+        ));
         eprintln!("MCP caller binary {} sha256={digest}", path.display());
         if let Some(evidence) = std::env::var_os("MARSH_MCP_TEST_EVIDENCE") {
             fs::create_dir_all(&evidence).unwrap();
