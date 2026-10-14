@@ -11,7 +11,7 @@ you will need the project's Linux arm64 dependencies.
 
 ## Install and sign in
 
-You need an **Apple Silicon Mac** and **Docker Sandboxes** (`sbx`) **0.45.0 or
+You need an **Apple Silicon Mac** and **Docker Sandboxes** (`sbx`) **0.47.0 or
 newer**. In your **Mac terminal**, install both tools, sign in to Docker
 Sandboxes, and configure the provider used below:
 
@@ -34,6 +34,40 @@ You are now in Linux at the same project path. The first shell launch may
 download its VM template. First use of Claude also starts its Kit VM and
 may download an image of about 600 MB. Allow a few minutes for these cold
 starts; later launches reuse warm VMs.
+
+## Make it your shell
+
+marsh keeps its own home directory, backed by `~/.marsh/home` on your Mac
+in the default scope. Your Mac's dotfiles stay untouched.
+
+Vim and terminal Emacs are included in
+[nightly builds](install.md#nightly-builds). At the **marsh prompt**, open
+`~/.bashrc` with `vim ~/.bashrc` or `emacs -nw ~/.bashrc`. You can also
+open `~/.marsh/home/.bashrc` in your Mac editor.
+
+For example, add an alias and set your prompt:
+
+<!-- doc-test: shell stdout="ll=" -->
+```sh
+cat >> ~/.bashrc <<'EOF'
+alias ll='ls -lah'
+PS1='\w \$ '
+EOF
+source ~/.bashrc
+alias ll
+```
+
+Brush reads `~/.bashrc` when you open an interactive shell. Your editor
+settings live in the same guest home: `~/.vimrc` for Vim, or
+`~/.emacs.d/init.el` for Emacs. See [Editor settings](shell.md#editor-settings)
+for examples.
+
+Your dotfiles survive VM removal. Jobs using this guest home can read them
+too, along with any saved logins. Keep credentials out of
+the files you copy from your Mac.
+
+For other startup files or zsh configuration, see
+[The shell](shell.md#startup-files) and [Choosing your shell](shells.md).
 
 ## Split a task
 

@@ -12,6 +12,10 @@ An unlisted version fails before downloading it. Codex archive members are read
 to stdout into fixed output files, without extracting archive paths into the
 builder filesystem.
 
+The shell image installs Vim with apt and builds terminal Emacs from
+checksum-pinned source in `packaging/shell/Dockerfile`. Emacs is built
+without native compilation to avoid replacing the DHI GCC libraries.
+
 The current checksum sources are:
 
 - [Claude Code 2.1.296 manifest](https://downloads.claude.ai/claude-code-releases/2.1.296/manifest.json).
@@ -89,7 +93,8 @@ itself.
 Not covered by Renovate, because each needs a coordinated change: the Rust
 toolchain (`rust-toolchain.toml`, the workflows, the builder image tag), the
 pinned downloads in `ci.yml` (nextest, TLA+ tools, the Bash 5.3 source), the Node
-and Java versions in CI, and the vendored Brush revision. Other Debian packages
+and Java versions in CI, the vendored Brush revision, and the Emacs source
+pin in the shell Dockerfile. Other Debian packages
 are not pinned; each carries its own copyright file, and the license delta shows
 when one moved. Vendored files (`vendor/`) are never touched.
 

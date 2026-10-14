@@ -1,0 +1,72 @@
+--- a/lisp/net/tramp.el
++++ b/lisp/net/tramp.el
+@@ -975,3 +975,3 @@
+ (defconst tramp-user-regexp
+-  (rx (| (+ (not (any "/\\^$?*:;|[]{}()<>`'\"" blank)))
++  (rx (| (+ (not (any "/\\^$!#&?*:;,|[]{}()<>`'\"" blank control)))
+          ;; Environment variable.
+@@ -1737,2 +1737,7 @@
+ 
++(defvar tramp-allow-double-percent (not (eq system-type 'windows-nt))
++  "Whether a pattern \"%NAME%\" can be used in user or host names.
++It is not recommended to change this variable globally.  Instead, it
++should be set connection-local.")
++
+ ;;;###tramp-autoload
+@@ -1803,3 +1808,36 @@
+ 	    (tramp-user-error
+-	     v "Method `%s' is not supported for multi-hops" method)))))))
++	     v "Method `%s' is not supported for multi-hops" method))
++	  (let (connection-local-variables-alist)
++	    (hack-connection-local-variables
++	     `(:application tramp
++               :protocol ,(tramp-file-name-method v)
++               :user ,(tramp-file-name-user-domain v)
++               :machine ,(tramp-file-name-host-port v)))
++	    (let ((allow-double-percent
++		   (alist-get
++		    'tramp-allow-double-percent
++		    connection-local-variables-alist
++		    tramp-allow-double-percent)))
++	      ;; User name could be invalid after expansion of
++	      ;; environment variables, or contain a literal
++	      ;; environment variable.
++	      (unless (tramp-string-empty-or-nil-p user)
++		(when (or (not (string-match-p tramp-user-regexp user))
++			  (string-match-p
++			   (rx "$") (tramp-file-name-user-domain v))
++			  (and (not allow-double-percent)
++			       (string-match-p
++				(rx "%" (* nonl) "%")
++				(tramp-file-name-user-domain v))))
++		  (tramp-user-error
++		   v "Not a valid user name: \"%s\""
++		   (tramp-file-name-user-domain v))))
++	      ;; Host name could contain a literal environment variable.
++	      (unless (tramp-string-empty-or-nil-p host)
++		(when (or (not (string-match-p tramp-host-regexp host))
++			  (string-match-p (rx "$") host)
++			  (and (not allow-double-percent)
++			       (string-match-p (rx "%" (* nonl) "%") host)))
++		  (tramp-user-error
++		   v "Not a valid host name: \"%s\"" host))))))))))
+ 
+--- a/lisp/net/tramp-archive.el
++++ b/lisp/net/tramp-archive.el
+@@ -736,2 +736,16 @@
+ 
++;;; Default connection-local variables for Tramp.
++(defconst tramp-archive-connection-local-default-variables
++  '((tramp-allow-double-percent . t))
++  "Default connection-local variables for file archives.")
++
++(connection-local-set-profile-variables
++ 'tramp-archive-connection-local-default-profile
++ tramp-archive-connection-local-default-variables)
++
++(connection-local-set-profiles
++ `(:application tramp :protocol ,tramp-archive-method)
++ 'tramp-archive-connection-local-default-profile)
++
++
+ (add-hook 'tramp-unload-hook

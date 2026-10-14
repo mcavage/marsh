@@ -54,7 +54,8 @@ command name for `marsh`.
 
 ## Install
 
-You need an Apple Silicon Mac and Docker Sandboxes (`sbx`) 0.45.0 or newer.
+You need an Apple Silicon Mac and Docker Sandboxes (`sbx`) 0.47.0 or newer,
+signed in. Check the installed version with `sbx version`.
 From your **Mac terminal**, install both programs, sign in to Docker
 Sandboxes, and configure one provider:
 

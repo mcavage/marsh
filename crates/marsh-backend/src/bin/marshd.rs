@@ -189,7 +189,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })?;
     // All registry/configuration validation precedes even the stock version probe.
     stock.validate_supported_version().map_err(|_| {
-        format!("stock SBX compatibility check failed for {}; requires stock SBX v0.45.0 or newer with local Kit v3 support; check `sbx version` and `sbx create --help`", stock_sbx.display())
+        format!("stock SBX compatibility check failed for {}; requires stock SBX v0.47.0 or newer with local Kit v3 support; check `sbx version` and `sbx create --help`", stock_sbx.display())
     })?;
     // Grants never outlive a daemon: revoke and clean every persisted grant
     // (and retry uncertain ones) before serving.

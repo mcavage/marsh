@@ -42,7 +42,7 @@ To boot them up front, use `marsh --load all` or `marsh --load claude,codex`.
 |---|---|
 | `stock sbx not found on PATH`, followed by `marsh needs Docker Sandboxes: ...` | The marsh formula does not install `sbx`. Run `brew install docker/tap/sbx`, then `sbx login`. To use an `sbx` elsewhere, set `MARSH_SBX` to its path. |
 | `stock sbx not found at PATH (MARSH_SBX)` | `MARSH_SBX` names a file that does not exist or is not a regular executable. Fix the path, or unset `MARSH_SBX` to use `sbx` on `PATH`. |
-| `stock SBX v0.45.0 or newer ... required` | Run `brew upgrade docker/tap/sbx`. |
+| `stock SBX v0.47.0 or newer ... required` | Check `sbx version`, then run `brew upgrade docker/tap/sbx`. |
 
 ### Login and policy errors from `sbx`
 

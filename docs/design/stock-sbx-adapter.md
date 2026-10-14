@@ -8,10 +8,12 @@ run a registered command directly in a VM. Host `sbx` is trusted.
 
 ## Version and installation
 
-Startup requires stock SBX v0.45.0 or newer (stable or coherent nightly),
+Startup requires stock SBX v0.47.0 or newer (stable or coherent nightly),
 checks the exact reported version and commit, and probes the local Kit v3
-create surface before creating product state. The recorded smoke baseline is
-v0.46.0; it is not qualification of every later version. The version check does not prove that a build has the EROFS
+create surface before creating product state. The historical smoke baseline
+was v0.46.0, below the current supported floor. Older inventory fixtures remain
+as parser and model coverage, not supported releases. The version check does
+not qualify every later version or prove that a build has the EROFS
 writable-layer discard fix; acceptance checks container cleanup directly.
 
 Homebrew owns installation of `sbx`. marsh resolves `MARSH_SBX`, otherwise

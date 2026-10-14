@@ -131,6 +131,8 @@ class ImageCallerTests(unittest.TestCase):
             (directory / "Dockerfile").write_text("FROM controlled@sha256:" + "a" * 64 + "\n")
         (self.source / "packaging/shell/pi").mkdir()
         (self.source / "packaging/shell/pi/package.json").write_text("{}\n")
+        (self.source / "packaging/shell/editors").mkdir()
+        (self.source / "packaging/shell/editors/input").write_text("controlled editor input\n")
         (self.source / "packaging/shell-image").write_text("example/base@sha256:" + "b" * 64 + "\n")
         for name in ("image-repair", "dhi-notices/collected"):
             directory = self.source / "packaging" / name

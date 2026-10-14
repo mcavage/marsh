@@ -68,6 +68,7 @@ pub(super) const V047_DEV: StockVersion = StockVersion {
     shape: InventoryShape::BareArray,
 };
 
+// Includes historical formats for parser/model coverage, not startup eligibility.
 pub(super) const VERSIONS: [&StockVersion; 3] = [&V046, &V047, &V047_DEV];
 
 /// Captured from v0.47.0: `sbx inspect --json marsh-nonexistent-zz9`, exit 1.

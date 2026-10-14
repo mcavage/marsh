@@ -78,7 +78,7 @@ const SHELL_SETUP_SCRIPT: &str = concat!(
     "printf '%s\\n' \"$MARSH_WORKER_MARKER\" > /var/lib/marsh/worker.json",
 );
 pub const GRANT_ROOT: &str = "/run/marsh/grants";
-const MINIMUM_SBX_VERSION: (u64, u64, u64) = (0, 45, 0);
+const MINIMUM_SBX_VERSION: (u64, u64, u64) = (0, 47, 0);
 const SBX_COMPATIBILITY_TIMEOUT: Duration = Duration::from_secs(10);
 const KEEPALIVE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const LOCAL_SCRATCH_STALE_AFTER: Duration = Duration::from_hours(1);
@@ -1398,7 +1398,7 @@ impl StockSbx {
 
     /// Verify the observable stock-SBX contract required by this adapter.
     ///
-    /// Accept stock SBX 0.45.0 and newer, including coherent nightly builds.
+    /// Accept stock SBX 0.47.0 and newer, including coherent nightly builds.
     /// A help probe also checks the local Kit v3 create surface marsh calls.
     ///
     /// # Errors
@@ -1415,7 +1415,7 @@ impl StockSbx {
         if !supported_sbx_version(&rendered_version) {
             return Err(SbxError::UnsupportedVersion {
                 found: rendered_version.trim().to_owned(),
-                required: "stock SBX v0.45.0 or newer (stable or coherent nightly) with local Kit v3 support",
+                required: "stock SBX v0.47.0 or newer (stable or coherent nightly) with local Kit v3 support",
             });
         }
 
