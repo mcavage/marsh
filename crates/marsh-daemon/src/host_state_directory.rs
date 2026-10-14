@@ -60,10 +60,9 @@ pub fn verify_host_state_directory(
 #[must_use]
 pub fn scope_control_leaf(canonical_selected_home: &Path) -> String {
     use sha2::{Digest as _, Sha256};
-    format!(
-        "{:x}",
-        Sha256::digest(canonical_selected_home.as_os_str().as_encoded_bytes())
-    )
+    marsh_contracts::process::hex(&Sha256::digest(
+        canonical_selected_home.as_os_str().as_encoded_bytes(),
+    ))
 }
 
 /// Default host product root (`~/Library/Application Support/marsh` on macOS).

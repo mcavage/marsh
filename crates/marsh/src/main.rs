@@ -2924,10 +2924,7 @@ fn metadata_is_executable(_metadata: &std::fs::Metadata) -> bool {
 }
 
 fn workspace_key(workspace: &Path) -> String {
-    format!(
-        "{:x}",
-        Sha256::digest(workspace.as_os_str().as_encoded_bytes())
-    )
+    marsh_contracts::process::hex(&Sha256::digest(workspace.as_os_str().as_encoded_bytes()))
 }
 
 fn client_scope_root(client: McpClient, workspace: &Path) -> Result<PathBuf, RunError> {
@@ -3365,10 +3362,9 @@ mod tests {
         let workspace = tempfile::tempdir().unwrap();
         let workspace_path = workspace.path().canonicalize().unwrap();
         let expected_sbx = stock_bin.join("sbx").canonicalize().unwrap();
-        let key = format!(
-            "{:x}",
-            Sha256::digest(workspace_path.as_os_str().as_encoded_bytes())
-        );
+        let key = marsh_contracts::process::hex(&Sha256::digest(
+            workspace_path.as_os_str().as_encoded_bytes(),
+        ));
         for client in [McpClient::Codex, McpClient::Claude, McpClient::Sbx] {
             let registration =
                 mcp_registration_with(client, &bin.join("marsh"), &workspace_path, || {

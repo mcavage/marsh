@@ -630,10 +630,8 @@ pub fn generated_scope_root_for_workspace(workspace: &Path) -> Result<PathBuf, S
     if !host_home.is_absolute() {
         return Err("HOME must be absolute to select the default MCP home".into());
     }
-    let key = format!(
-        "{:x}",
-        Sha256::digest(workspace.as_os_str().as_encoded_bytes())
-    );
+    let key =
+        marsh_contracts::process::hex(&Sha256::digest(workspace.as_os_str().as_encoded_bytes()));
     let base = if cfg!(target_os = "macos") {
         mcp_scope_base(&host_home)
     } else if let Some(xdg) = env::var_os("XDG_DATA_HOME").map(PathBuf::from) {
@@ -2946,7 +2944,7 @@ fn command_failure(name: &str, output: &CapturedOutput) -> String {
 fn encoded_stream(bytes: &[u8]) -> Value {
     json!({
         "byte_length": bytes.len(),
-        "sha256": format!("{:x}", Sha256::digest(bytes)),
+        "sha256": marsh_contracts::process::hex(&Sha256::digest(bytes)),
         "base64": BASE64.encode(bytes)
     })
 }
