@@ -255,12 +255,28 @@
       "url": "https://raw.githubusercontent.com/modelcontextprotocol/rust-sdk/fd7811fdaa9fefa1c8034534b4d7a31c97204f89/LICENSE"
     }
   ],
+  "rmcp-macros@3.5.1": [
+    {
+      "commit": "79437f291b2c44053d00dcd5db969fd0cca7c887",
+      "file": "rmcp-macros-3.4.0-LICENSE",
+      "sha256": "0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a",
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/rust-sdk/79437f291b2c44053d00dcd5db969fd0cca7c887/LICENSE"
+    }
+  ],
   "rmcp@3.4.0": [
     {
       "commit": "fd7811fdaa9fefa1c8034534b4d7a31c97204f89",
       "file": "rmcp-3.4.0-LICENSE",
       "sha256": "0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a",
       "url": "https://raw.githubusercontent.com/modelcontextprotocol/rust-sdk/fd7811fdaa9fefa1c8034534b4d7a31c97204f89/LICENSE"
+    }
+  ],
+  "rmcp@3.5.1": [
+    {
+      "commit": "79437f291b2c44053d00dcd5db969fd0cca7c887",
+      "file": "rmcp-3.4.0-LICENSE",
+      "sha256": "0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a",
+      "url": "https://raw.githubusercontent.com/modelcontextprotocol/rust-sdk/79437f291b2c44053d00dcd5db969fd0cca7c887/LICENSE"
     }
   ],
   "utf8-chars@3.0.7": [
