@@ -27,6 +27,7 @@ tokio = { version = "1.48", features = ["io-std", "macros", "net", "process", "r
 tokio-util = { version = "0.7", features = ["codec"] }
 uuid = { version = "1.18", features = ["v4"] }
 marsh-daemon = { path = "../marsh-daemon" }
+marsh-contracts = { path = "../marsh-contracts" }
 marsh-runtime = { path = "../marsh-runtime" }
 
 [dev-dependencies]

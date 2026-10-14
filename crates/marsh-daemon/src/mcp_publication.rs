@@ -91,7 +91,7 @@ impl PublicationScope {
         digest.update(home_backing.as_os_str().as_encoded_bytes());
         Self {
             kind,
-            key: format!("{:x}", digest.finalize()),
+            key: marsh_contracts::process::hex(&digest.finalize()),
         }
     }
     #[must_use]

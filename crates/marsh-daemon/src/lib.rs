@@ -3054,7 +3054,7 @@ fn project_scope(path: &Path, (device, inode): (u64, u64)) -> String {
     hash.update(path);
     hash.update(device.to_le_bytes());
     hash.update(inode.to_le_bytes());
-    format!("{:x}", hash.finalize())
+    marsh_contracts::process::hex(&hash.finalize())
 }
 
 fn session_project_scope(state: &State, session_id: &str) -> Option<String> {
