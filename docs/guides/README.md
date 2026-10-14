@@ -1,24 +1,21 @@
 # Guides
 
-Each guide does one job from start to finish: the commands, what comes back,
-what it costs, and what goes wrong. The output shown comes from real runs.
-Every marked example also runs in marsh's test suite, with a stand-in command
-where the guide calls a model.
+After the [Quickstart](../quickstart.md), use these recipes for work in
+your project:
 
-| Guide | Use it when |
-|---|---|
-| [Race two agents on one bug](race-two-agents.md) | A test fails and a second attempt is worth a second model run |
-| [Let a judge pick the winner](add-a-judge.md) | Both attempts pass and you want a reasoned choice |
-| [Review a change with a panel](review-with-a-panel.md) | A risky change needs several reviewers and your checks, at once |
-| [Let an agent farm out work](farm-out-work.md) | You want an agent to run races, reviews, and subtasks itself |
+- [Make independent changes in parallel](race-two-agents.md): separate CLI
+  and API changes, with tests in each branch and on the combined tree.
+- [Review a change with a panel](review-with-a-panel.md): two review
+  questions about one diff.
+- [Let an agent farm out work](farm-out-work.md): one child job and evidence
+  you can check in the source.
+- [Review split results in a pipeline](add-a-judge.md): optional comments
+  from a downstream agent before you apply patches.
 
-They use four commands:
-
-- `split { ... } | join` runs each branch on a private copy of your project and
-  prints each branch's output and patch. See [Split and join](../split.md).
-- `fanout { ... } | collect` runs branches side by side on your real files.
-  See [Fanout and collect](../fanout.md).
-
-From inside an agent, or from bash or zsh, the same commands are
-`marsh split ::: LABEL CMD ARG... | marsh join` and
+`split { ... } | join` creates project copies. `fanout { ... } | collect`
+runs on shared files. In another shell, or inside an agent job, use the CLI
+forms: `marsh split ::: LABEL CMD ARG... | marsh join` and
 `marsh fanout ::: LABEL CMD ARG... | marsh collect`.
+
+For the full behavior and options, see [Split and join](../split.md),
+[Fanout and collect](../fanout.md), and [Agents running agents](../agents.md).

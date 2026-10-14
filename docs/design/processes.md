@@ -1,19 +1,15 @@
-# Processes: one shell, one protocol, one lineage tree (design)
+# Processes: nested jobs and authority
 
-Status: built (revision 5). Revision 3 adopted every fix and cut from the
-adversarial review of revision 2 (section 12); revision 4 records the GM
-resolutions of the acceptance author's spec gaps (section 13) and what the
-implementation defers (section 14); revision 5 (section 15) removes the job
-shell: Kit jobs keep the image's own `bash` and `sh` (operator decision), and
-adds the `marsh fanout | marsh collect` CLI and per-job agent context. Model: `model/Process.tla`. Builds on
-`workspaces.md` (split, capability socket). Acceptance:
-`processes-acceptance.md`.
+Status: implemented (revision 5). Any process in a Kit job can call registered
+commands, `marsh run`, or `marsh split`. Each call or split argv branch starts
+a fresh job, subject to admission. The daemon records its parent and cancels
+the tree together. Kit jobs keep their image's own shells.
 
-Goal: any process in any Kit, at any depth, can run a registered command,
-`marsh run`, or `marsh split`. Each such command, and each split argv branch,
-becomes a fresh marsh job. The daemon places it, records it under its
-parent, charges it to one budget, and cancels it with its ancestors.
-Nothing is per agent: Kit images and entrypoints are unchanged.
+The model is `docs/model/Process.tla`. This builds on
+[workspaces](workspaces.md); [acceptance scenarios](processes-acceptance.md)
+define the external checks. Sections 11–12 retain the historical migration
+and review record. Section 13 records resolved contract details, section 14
+lists implementation limits, and section 15 explains the revision 5 changes.
 
 ## 1. Principle: one protocol, many authorities
 
@@ -23,8 +19,7 @@ is the image's own (section 15). Every client (the session shell, the `marsh`
 CLI, and the per-name links) speaks one request protocol
 (`Envelope<PublicRequest>`) over one local socket.
 
-**Many authorities.** The authority is the only thing that differs, and the
-daemon binds it to the socket:
+The daemon binds authority to the caller's socket:
 
 | Caller | Socket | Authority | Parent of what it starts |
 |---|---|---|---|
@@ -40,18 +35,15 @@ daemon binds it to the socket:
   `/run/marsh/bin`, the session command dir in the shell VM. So they work
   from real bash, dash, busybox, zsh, `env`, Node, Python, or a direct
   `execvp`.
-- **Brush sugar works only in the session shell.** That is `fanout { } |
-  collect`, `split { } | join`, and in-process dispatch. Every sugar form has
-  a CLI form with the same semantics (`marsh fanout ... | marsh collect`,
-  `marsh split ... | marsh join`), so a job, or a plain bash or zsh front end,
-  keeps every capability and loses only the syntax.
+- **Brush sugar works only in the Brush session shell.** That is `fanout { } |
+  collect`, `split { } | join`, and in-process dispatch. The CLI forms
+  (`marsh fanout ... | marsh collect`, `marsh split ... | marsh join`) work
+  from bash and zsh too. Inside a Kit job, they accept argv branches only;
+  a job cannot start a session-shell branch with wider authority.
 
-**What collapses:**
-
-- `marsh-local` becomes a mode of the one static binary.
-- The split-only capability allowlist becomes one authority table
-  (section 3).
-- The split pool becomes process admission (section 6).
+The job capability covers both process and split requests (section 3).
+`marsh-local` remains the static job artifact. Kit jobs use process admission;
+split execution also retains its branch pool (`workspaces.md`, section 4).
 
 ## 2. Process model
 
@@ -72,8 +64,7 @@ session ─ job ─ job ...            (registered name or marsh run: own contai
 - **Capability.** Each job has one: a daemon record `{job, rights,
   generation, live|revoked}`, never a bearer secret. It is delivered
   through the worker's per-attempt socket (`marsh-worker/src/capability.rs`,
-  backend `CapabilityBridges`). Today only split branches get that socket
-  (`split_capability` in `marsh-backend/src/lib.rs`).
+  backend `CapabilityBridges`). Every Kit job receives that socket.
 
 ## 3. Requests by authority
 
@@ -81,9 +72,9 @@ session ─ job ─ job ...            (registered name or marsh run: own contai
 |---|---|---|
 | `ProcessRun {argv, cwd, env, spawn}` + stdin → `job`, then `Execute` frames | yes | yes; `spawn` may only narrow; a dropped stream cancels the child |
 | `SplitCreate` / `SplitJoin` | yes | yes; the creator is the job and the snapshot is the job's view |
-| `ProcessShow` | the session's forest | the job's own subtree |
+| `ProcessShow`, `Jobs`, `ShowJob` | session-authorized job inspection | the job's own subtree |
 | `SplitCancel`, `jobs cancel`, `splits rm` | yes, within its tree | no (drop the stream instead) |
-| everything else (MCP, ACP, dev broker, lifecycle) | as today | refused |
+| everything else (MCP, ACP, dev broker, lifecycle) | request-specific session grants; dev broker only for `--dev` | refused |
 
 **`ProcessRun`** is admission (section 6), then an internal `Execute`
 through the daemon's own endpoint (as split argv branches do in `split.rs`),
@@ -94,25 +85,20 @@ then frame relay.
   inserts the child record, and only then submits. A cancel that takes the
   lock first sees no child. A cancel that takes it later finds the record
   and cancels the child (`Spawn` is atomic in the model).
-- **stdin.** stdin is credit-windowed: the daemon grants 256 KiB and
-  replenishes it as the child's worker consumes. The client stops reading
-  its stdin at zero credit, so the agent's pipe sees backpressure and
-  nothing is buffered without bound. stdout and stderr keep today's
-  per-attempt credits.
+- **stdin.** The implementation uses a bounded per-connection queue. The
+  proposed 256 KiB replenished stdin-credit window remains deferred
+  (section 14). stdout and stderr use per-attempt credits.
 
-**Capability socket fixes** (in `capability.rs`):
-
-- Admit at least `MaxFan + 4` (8) connections per attempt, up from 4.
-- Answer an excess connection with a refusal frame (`marsh: too many
-  concurrent daemon requests in this job`). Today it is silently dropped.
-- Replace the 50 ms polled accept with a blocking accept.
+**Capability socket** (`capability.rs`): blocking accept, at most
+`MaxFan + 4` (8) open connections per attempt. An excess connection receives
+`marsh: too many concurrent daemon requests in this job` and closes.
 
 ## 4. The links and the in-job `marsh`
 
-**Artifact.** Build `marsh` as a static musl binary, like `marsh-worker`
-already is. The guest `marsh` is glibc-dynamic today. Copy it to each Kit
-VM's local disk alongside the worker binaries, and bind it read-only at
-`/run/marsh/marsh`. A runtime test checks that the bind is read-only.
+**Artifact.** The static musl `marsh-local` binary is installed on each Kit
+VM's local disk alongside the worker binaries and bound read-only at
+`/run/marsh/marsh`. The session-shell `marsh` remains a glibc build. Runtime
+tests check that the job artifact's bind is read-only.
 
 **Per attempt**, inside the existing capability dir `/run/marsh/`, which is
 root-owned and read-only to the job:
@@ -137,8 +123,8 @@ root-owned and read-only to the job:
   worker reads only the image config (`Env`); there is no probe container.
 - `MARSH_JOB` and `MARSH_ENTRY=1`. `SHELL` is left as the image sets it.
 
-**Nothing in the image is shadowed.** `bash`, `sh`, `/usr/bin/*`, dpkg, and
-the entrypoint stay the image's own. There is no `bash` or `sh` link.
+The image's shells, system tools, and entrypoint are unchanged. Only registered
+names and `marsh` get links; there is no `bash` or `sh` link.
 
 **What each caller gets:**
 
@@ -237,12 +223,13 @@ this way. To prevent that, narrow the spawn set.
 
 A child's set is its parent's set or a subset of it. Nothing can widen it,
 from the cap socket or from the session (`SpawnSetAttenuates`, control
-`spawnWiden`). Raw secrets never cross the socket: frames carry argv, env,
-and bytes.
+`spawnWiden`). marsh does not send proxy-held credentials over this socket.
+Frames carry caller-supplied argv, filtered environment, and stream bytes;
+callers can still put sensitive data in those fields.
 
 **Environment for children.** A child receives the variables its parent
 received from *its* parent (or, for a root job, the user's exported shell
-variables), plus those the parent set or changed. So a variable the user
+  variables), plus those the parent set or changed. A variable the user
 exports reaches the whole tree, and a child re-exporting a received name
 with the same value still passes it on. Image `ENV` is never forwarded
 unless the job changed it, and the split filter (`workspaces.md` s17) drops
@@ -263,8 +250,9 @@ credential-shaped names daemon-side.
 
 The child gets its own image's environment.
 
-**Budgets.** One admission covers top-level jobs, Run children, and split
-branches. It fails fast and never queues, because a parent waiting on a
+**Budgets.** Process admission covers top-level Kit jobs, Run children, and
+split argv jobs. Split execution also has a separate branch pool
+(`workspaces.md`, section 4). Admission fails fast and never queues, because a parent waiting on a
 queued child would deadlock the pool.
 
 | Limit | Value | Refusal (exit 125 / `failed: …`) |
@@ -298,9 +286,10 @@ refused by the spawn set), and is counted in `marsh status`
   A top-level job's child sees the project and the selected home. A branch
   job's child sees, of the project, only the fork and its Git metadata
   (`split_confinement.rs`), plus the selected home read-write as every Kit
-  job does (agents keep credentials and session state there).
+  job does (agents keep settings and session state there).
 - **cwd.** The child's cwd must lie inside those mounts.
-- **Narrowing.** Only splits narrow a view, and nothing widens one.
+- **Narrowing.** Splits narrow the project view; the late `.marsh` read-only
+  bind also reduces writes. Nothing widens a child's view.
 - **Splits.** A split created by a job snapshots the job's view root.
   Capture waits for the creating branch's whole subtree (`workspaces.md` s17).
 - **No new writable paths.** The artifact and `/run/marsh` are read-only
@@ -331,14 +320,15 @@ refused by the spawn set), and is counted in `marsh status`
   of that Kit, persisted in `process-resets.json`), so they survive a
   daemon restart and are released only after a reset succeeds.
 - **Daemon restart.** All capabilities are revoked. Unfinished jobs become
-  uncertain and their VMs are quarantined. Nothing is resubmitted
-  (`RevokedAtRestart`, `RestartUncertain`, `NoReplay`). The root client
+  uncertain and retain held admission slots until verified reset. Nothing is
+  resubmitted (`RevokedAtRestart`, `RestartUncertain`, `NoReplay`). The adapter's
+  in-memory VM quarantine is not restored from receipts (`results.md`). The root client
   attached to an in-flight tree exits 125 with `job uncertain`; its
   children are listed uncertain.
 - **Restart under `--dev`.** `make dev` reinstalls and restarts `marshd`.
-  Every Kit VM with a running job, nested ones included, is then
-  quarantined until `marsh workers reset KIT`. Stop agent trees before
-  reinstalling. The dev broker's grants are revoked at restart as today
+  Jobs that were running, nested ones included, become uncertain and hold
+  their slots until `marsh workers reset KIT`. Stop agent trees before
+  reinstalling. The dev broker's grants are revoked at restart
   (`self-development.md`).
 
 ## 9. Lineage and awareness
@@ -436,7 +426,11 @@ Not modeled:
 - `Workspace.tla`'s fork and capture, which compose through the shared
   cascade and the pool.
 
-## 11. Size and migration
+## 11. Historical size estimate and migration
+
+This section preserves the original implementation plan. In the built system,
+`marsh-local` remains the static job artifact and the split branch pool remains
+separate from process admission. The size figures are historical estimates.
 
 **Size** (non-test Rust): about 2.3k added and 0.3k removed.
 
@@ -480,7 +474,11 @@ Not modeled:
 - Exported variables reach the whole tree; image `ENV` and secrets never do.
 - The artifact bind is read-only.
 
-## 12. Review disposition (revision 2 → 3)
+## 12. Historical review disposition (revision 2 → 3)
+
+The table records revision 3, before revision 5 removed the job-shell wrapper.
+References to PATH `bash`, `SHELL`, and the job-shell gate here are historical;
+current shell behavior is specified in sections 4 and 15.
 
 | Finding | Resolution |
 |---|---|
@@ -499,7 +497,7 @@ Not modeled:
 | Lows | Restart under `--dev` (section 8); `claude update` (section 5); size trimmed |
 | Q1–Q5 | Q1 superseded by the operator decision (H2); Q2 refuse TTY children; Q3 `marsh context`, print only; Q4 image-provided names stay local; Q5 relative gate |
 
-**Open.** None.
+The review's questions were resolved in sections 13–15.
 
 ## 13. GM resolutions (revision 4)
 
@@ -582,11 +580,13 @@ Not modeled:
    - `marsh status --json`: `"processes": {"running": N, "refused": N,
      "held": N}`.
    - `/run/marsh/job.json`: `{"version": 1, "job", "name", "spawn":
-     [...], "registered": [...], "socket": "/run/marsh/cap.sock" | null,
+      [...], "registered": [...], "socket": "/run/marsh/cap.sock",
      "path": "<starting PATH>", "limits": {"pool", "depth", "same_kit",
      "fan_out", "total"}, "env": {"NAME": "<HMAC-SHA256 hex of NAME=VALUE
      under the daemon's key>" | "" (set by Docker, never forwarded)},
-     "forwarded": ["NAME", ...] (received from the parent)}`.
+      "forwarded": ["NAME", ...] (received from the parent)}`.
+      Every Kit job retains the socket and links, including with `--no-spawn`;
+      an empty spawn set narrows admission rather than removing the channel.
 9. **Restart.** The root client attached to an in-flight tree exits 125
    with `job uncertain`; children are listed uncertain.
 10. **Connection cap** counts open connections including idle ones; an
@@ -596,15 +596,10 @@ Not modeled:
 
 ## 14. Implementation notes and deferrals
 
-- The static artifact is the musl build of `marsh-local`
-  (`marsh-local-linux-arm64`), installed with the worker to
-  `/usr/local/libexec/marsh-local` on the Kit VM's disk and bound at
-  `/run/marsh/marsh`. The host and shell-VM `marsh` stay glibc builds.
-- `ProcessRun` runs the child through this daemon's own `Execute`
-  (`process::serve_run`); admission is `process::admit` under the store
-  lock, once before VM work and again in `begin_job_process`.
-- `--no-spawn` / an empty spawn set keeps `cap.sock` and the links; the
-  daemon refuses every spawn (resolution 5).
+- The worker installs `marsh-local-linux-arm64` at
+  `/usr/local/libexec/marsh-local` on the Kit VM's disk.
+- Process admission is checked before VM preparation and again under the
+  store lock in `begin_job_process`, before submission.
 - The artifact is mandatory: the worker install and identity and the job's
   container setup fail without it; a failed `/run/marsh` setup fails the
   attempt (`SetupFailed`), never runs it without one.

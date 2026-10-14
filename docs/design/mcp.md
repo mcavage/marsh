@@ -1,18 +1,15 @@
 # Host MCP server
 
-`marsh-mcp` is a local, stdio [Model Context Protocol][mcp] server for driving
-one marsh development workspace from a host-side client. It gives a
-coding agent a useful, inspectable way to run the project shell, manage the
-marsh workers that belong to that workspace, and inspect structural receipts.
-Full SBX control is a separately enabled operator capability.
+`marsh-mcp` is a local stdio [Model Context Protocol][mcp] server. A client can
+run the project shell, manage that workspace's marsh workers, and inspect
+receipts. The server fixes one canonical workspace at startup and manages a
+bounded set of owner-only development scopes. Each scope has its own
+`MARSH_HOME`, daemon, shell VM, Kit VM pool, and results.
 
-It is a product-control adapter, not a general macOS, Docker, or `sbx` remote
-shell. The server owns exactly one canonical workspace and a bounded set of
-independent, owner-only development scopes. Each scope has its own
-`MARSH_HOME`, daemon, project-shell VM, Kit VM pool, and structural results.
-It never offers raw SBX/Docker
-commands, daemon tokens, a host shell, caller-selected environment variables,
-caller-selected filesystem paths, or VM/container identifiers.
+Tools accept commands for the guest shell, not arbitrary host commands, paths,
+environment variables, or VM/container identifiers. The separately enabled
+`qualify` tool can run repository recipes as the Mac user; its authority is
+described under [full-SBX-control opt-in](#deliberate-full-sbx-control-opt-in).
 
 [mcp]: https://modelcontextprotocol.io/
 
@@ -48,7 +45,7 @@ flowchart TB
 
 The MCP service runs on the Mac. Direct clients start a stdio process; stock
 SBX starts a stdio proxy to the resident per-workspace broker. Both use marsh's
-authenticated same-user control path, but limits that authority to its fixed
+authenticated same-user control path, with authority limited to the fixed
 workspace and server-created scopes. `shell_run` sends a command to the default
 scope's project shell VM; `scope_run` targets one opaque scope ID. Neither runs
 a host command. A registered command inside that project-shell command follows
@@ -59,7 +56,7 @@ observe and race on the same project files, just as two local editors can. Use
 separate Git worktrees or application-level coordination when agents must make
 independent writes; scope isolation does not serialize workspace I/O.
 
-This first delivery is **host stdio only**. A Kit job container must not receive
+The server exposes **host stdio only**. A Kit job container must not receive
 the host daemon credential, the MCP server's inherited authority, or a raw
 network endpoint to it. Direct access to this host-control server from a Kit or project-shell VM is
 unsupported. A native Kit's agent may connect to the **stock SBX MCP gateway**
@@ -122,9 +119,8 @@ The previous experimental `$HOME/.marsh/mcp/<workspace-hash>`,
 `$HOME/Library/Application Support/marsh/.dev-mcp/` locations are not part of
 this namespace. The server does not read, migrate, or delete that state; an
 operator may inspect and remove it separately after confirming it is unused.
-The scope root is host-side control state only. It is not a location or
-protocol for future MCP capabilities exposed to project-shell or Kit
-containers.
+The scope root holds the host-managed registry and scope homes. The registry
+stays host-side; each scope's guest home backing is mounted by marsh.
 
 The `--marsh` and `--sbx` executables are trust anchors, not convenience paths.
 Both must be installed outside the mutable workspace and managed scope root. The
@@ -231,8 +227,7 @@ equivalently launch the same command and argument list over stdio.
 
 Full SBX control is **disabled by default**. `qualify` remains visible in the
 static MCP tool list, but every call returns a clear disabled failure until the
-server is started with `--allow-full-sbx-control`. This is intentional. A source,
-smoke, full, or performance gate runs
+server is started with `--allow-full-sbx-control`. A source, smoke, full, or performance gate runs
 repository recipes on the Mac; a mutable `Makefile`, build script, test helper,
 or dependency build step can execute code as the host user. An MCP sandbox does
 not contain that host execution.
@@ -253,21 +248,21 @@ sbx mcp add marsh-dev-qualify \
 sbx mcp load marsh-dev-qualify --sandbox TRUSTED_SANDBOX_NAME
 ```
 
-## First-delivery tool surface
+## Tool surface
 
 All tools return structured JSON with bounded byte-faithful output encoded as
 base64 where command streams are present. Server errors are typed and fail
 closed. Stdio frames are capped at 1 MiB, output is
 bounded, and one global subprocess cap applies across all operations; capacity
 exhaustion is a typed response, never an unbounded host process queue. Tool
-names and fields below are the public contract; omitted fields are rejected
-rather than interpreted as defaults.
+names and fields below are the public contract. Missing required fields are
+rejected; only fields marked optional may be omitted.
 
 | Tool | Input | Result | Boundary |
 | --- | --- | --- | --- |
 | `doctor` | none | fixed workspace, home, executable, and static limits | No credentials or daemon relay authority. |
 | `status` | none | versioned marsh status for this scope | Read-only product state only. |
-| `results_list` | none | newest-first durable receipts | No stdin, stdout, stderr, or prompt retention. |
+| `results_list` | none | newest-first durable receipts | No captured stdin, stdout, or stderr; bounded display arguments may contain prompt text. |
 | `result_get` | exact receipt cursor or job selector | one durable structural receipt | Selector resolves only through this scope. |
 | `shell_run` | `command`, optional bounded timeout | opaque operation ID | Runs only through the fixed project's marsh shell VM. It never invokes a host shell. |
 | `scope_start` | empty object | opaque scope ID and boot operation ID | Creates an owner-only home beneath the fixed development root; callers provide no path, label, environment, or runtime identity. |
@@ -334,7 +329,7 @@ runs the typed whole-scope reset, then performs a final pinned boot validation.
 Each step must succeed in order; identity-invalid homes and foreign or
 unverifiable exact VMs still fail closed.
 
-`shell_run` deliberately accepts a shell command string because development
+`shell_run` accepts a shell command string because development
 requires shell syntax such as pipelines, redirections, `make`, and `cargo`.
 The string is carried as data over the daemon's typed request and interpreted
 inside the project shell by marsh/Brush. It is never concatenated into or
@@ -343,7 +338,7 @@ workspace. The tool cannot set a working directory, executable path, host
 environment, mount, Kit source, resource ceiling, or VM identity.
 
 When the server was started with `--allow-full-sbx-control`, `qualify`
-accepts a fixed profile — `source`, `smoke`, `full`, or `perf` — and returns an
+accepts a fixed profile (`source`, `smoke`, `full`, or `perf`) and returns an
 opaque operation ID. Without that flag it returns the clear disabled failure.
 This is the only tool that runs a
 non-marsh host program, through a repository-owned allowlisted recipe.
@@ -384,13 +379,12 @@ server:
 Operation state and bounded captured output are in broker/process memory and
 are accessible only to the client session that created them. Durable product
 receipts remain available through `results_*`.
-Persistent MCP audit/evaluation records are deliberately future work; this
-delivery does not imply a durable host transcript. Cancellation is
-conservative: this delivery always reports `cancellation_uncertain` after a
+Persistent MCP audit/evaluation records are not implemented. Cancellation
+always reports `cancellation_uncertain` after a
 cancellation request, even when its local process-group cleanup completed,
 because that alone does not prove the submitted sandbox work stopped.
 
-`operation_output` deliberately returns the command's bounded stdout and
+`operation_output` returns the command's bounded stdout and
 stderr to the MCP client. Although marsh does not forward provider credentials,
 a command can print sensitive project content; treat that output as data the
 connected client is authorized to read and do not use it as a secret store.
@@ -413,6 +407,7 @@ Host terminals can still load or revoke an **existing** publication in the same
 project and selected home. The authenticated shell session sends a typed request
 to the host daemon; Kit jobs have no publication token. The host owns the registration
 and declaration, and pins the attached project's path and file identity.
+
 With neither `--kit` nor `--sandbox` the publication is a *default*: after the
 publish commits, the daemon records the stock server name, declaration path,
 and generation in its control directory (`mcp-defaults.json`,
@@ -429,12 +424,15 @@ republish elsewhere) is skipped and pruned. A targeted republish and
 load leaves the VM usable without that tool and is logged; it is not a
 preparation failure. `mcp load NAME --kit KIT` is the explicit way to load a
 running Kit VM.
+
 `--kit codex` (or another registered Kit command) prepares its worker and loads
-the tool into the exact Kit VM selected by preparation, including when the worker is already warm and older Kit generations are still running. Later
+the tool into the exact Kit VM selected by preparation, including when the
+worker is already warm and older Kit generations are still running. Later
 jobs sharing that Kit VM in the selected-home scope can use the loaded tool,
 including jobs from another project in that scope. Start a
-new agent session after loading so it discovers the tool. `--sandbox`
-explicitly grants the attached shell authority to load the tool
+new agent session after loading so it discovers the tool.
+
+`--sandbox` explicitly grants the attached shell authority to load the tool
 into any named running same-user stock SBX sandbox, including an unrelated agent
 sandbox. Code running in the attached shell can exercise that grant; choose the
 shell and target sandbox accordingly. Without `--sandbox`, load the reported
@@ -448,30 +446,33 @@ leading `-` or a dot-only name. For example, `team.review` is a publication name
 A `--kit` target is different: it must be a registered Kit command name under
 the command registry's rules, not an image reference or a dotted tool name.
 
-Loading preserves the declaration bytes, generation, and original publisher's
-recording policy. It creates no new publication grant and does not invalidate
-already-loaded clients. A missing, revoked, stale, cross-protocol, or modified
+Loading preserves the declaration bytes and generation. It creates no new
+publication grant and does not invalidate already-loaded clients. A missing,
+revoked, stale, cross-protocol, or modified
 registration is rejected rather than repaired. For `--kit`, validation happens
 before Kit preparation; `publish --kit` also validates its declaration and
-registration before preparing. ACP and MCP transactions share one project/home admission lock. The daemon
-acquires the real cross-process lock before grant admission and retains it through
+registration before preparing.
+
+ACP and MCP transactions share one project/home admission lock. The daemon
+acquires the cross-process lock before grant admission and retains it through
 preparation, stock load, rollback and result checks. A competing publication is
-rejected as busy before changing its grant or recording policy. Kit
+rejected as busy before changing its grant. Kit
 preparation runs directly in the authenticated daemon and reports real cold-boot
 progress; it does not reconnect with a master token or use the five-minute host-idle
 budget. The daemon owns each bounded stock command, even if the host CLI exits.
 Preflight/commit and rollback have separate command allowances; a slow rollback
 cannot be cut short merely because preparation or prior stock calls used time.
 Unconfirmed mutating delivery or carrier cleanup fences the scope for host
-inspection rather than allowing a following unpublish to race unfinished work. Loading does not change network policy or move the
+inspection rather than allowing a following unpublish to race unfinished work.
+Loading does not change network policy or move the
 pipeline into the consuming sandbox's workspace.
 
-Publication control replies distinguish `committed`, `rejected_before_effect`,
-and `uncertain`. Rejection means no publication or worker preparation was admitted; an uncertain result requires inspecting the state
-before retrying. Lost replies and failures after effects are not argument errors
-or evidence of cancellation. The private host transaction returns framed JSON,
-not an exit-code guess or a line parsed from stdout. Invalid targets are checked
-before host-scope effects.
+Publication control returns a framed JSON result: `committed`,
+`rejected_before_effect`, or `uncertain`. Rejection means the daemon admitted
+neither publication nor worker preparation; target validation happens before
+host-scope effects. If a reply is lost or an operation fails after effects may
+have occurred, inspect the publication and worker state before retrying. The
+CLI reports uncertainty rather than assuming the work was cancelled.
 
 Unpublishing an existing MCP publication marks revocation pending before waiting
 for a slow load's lock. The load rechecks that marker after preparation and will
@@ -521,8 +522,8 @@ use `mcp load NAME --sandbox SANDBOX` in the attached shell, or
 and selected home. These forms check the declaration and exact registration
 before loading; a raw `sbx mcp load` does not perform those checks.
 An agent in a Kit VM may instead find the registered server in the stock MCP
-Gateway catalog and add it to that VM; the user's live Claude Kit exercise
-followed this path. It does not require a `claude --mcp` flag. The loaded server
+Gateway catalog and add it to that VM. It does not require a `claude --mcp`
+flag. The loaded server
 set belongs to the Kit VM, so subsequent jobs there may see it. Publication
 alone does not force every agent client to load or discover the tool.
 
@@ -611,8 +612,8 @@ already loaded servers return an empty list and reject calls.
 
 ## Qualification status
 
-This document defines the intended first delivery; it is not evidence that the
-MCP server has passed UAT. The required black-box protocol, security, and
+This document describes the implementation and required contracts. Qualification
+applies to an exact candidate, not to this prose. The required black-box protocol, security, and
 end-to-end cases are in [`tests/mcp/CONTRACT.md`](../../tests/mcp/CONTRACT.md).
 The normal local product release gate remains
 [`tests/acceptance/CONTRACT.md`](../../tests/acceptance/CONTRACT.md).

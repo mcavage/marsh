@@ -946,10 +946,10 @@ class Workspaces(ScenarioSuite):
         return vm
 
     def doc_examples(self) -> None:
-        """docs/split.md and docs/guides/*.md: every marked example runs as written (host bash
-        and/or the shell); guides replace their model calls with fixture commands."""
+        """Execute marked public-documentation examples, replacing model calls
+        only where the page declares a fixture substitution. P31 covers agents.md."""
         failures = []
-        docs = [doc_examples.DOC, *sorted((doc_examples.DOC.parent / "guides").glob("*.md"))]
+        docs = doc_examples.documents()
         found = [example for doc in docs for example in doc_examples.examples(doc)]
         require(any(example.doc == "race-two-agents.md" for example in found), "no guide examples found")
         for number, example in enumerate(found):

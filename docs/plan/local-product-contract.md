@@ -1,15 +1,16 @@
 # Local product contract
 
-This is the user-visible contract for the lean local product. Read it with
-`../architecture.md` (implementation) and `../model/README.md` (cross-component
-state). `context.md` is historical and is not a requirement.
+This defines current user-visible behavior. Read it with the
+[architecture](../architecture.md) and [cross-component model](../model/README.md).
+Earlier planning notes are historical, not requirements. The per-job
+`/run/marsh/context.md` described below is part of the current product.
 
 ## Shell
 
 On an Apple Silicon Mac with stock Docker Sandboxes, `marsh` opens a Debian
 ARM64 Brush shell at the launch directory's exact absolute path. Brush owns
 shell syntax, expansion, pipelines, redirection, background jobs, `jobs`,
-`wait`, signals, and exit status. marsh never delegates evaluation to Bash.
+`wait`, signals, and exit status. Brush never delegates evaluation to Bash.
 `msh` is installed beside `marsh` as a symlink and behaves identically.
 A user may instead choose the shell VM's own `bash` or `zsh` (`--shell`,
 `MARSH_SHELL`, or `marsh config shell`; `../shells.md`). That shell then owns
@@ -23,7 +24,8 @@ shell uses its own disposable shell VM, so its HOME mount cannot replace a live
 shell's mount. marsh coexists with other stock SBX clients.
 
 The launch project is mounted read/write at its natural Mac path in the shell
-VM and in every job container. The guest username matches the Mac user, and
+VM and ordinary job containers. Split jobs instead receive their fork view,
+described below. The guest username matches the Mac user, and
 guest `$HOME` is the natural Mac home path backed by `$MARSH_HOME/home`
 (default `~/.marsh/home`), never the real Mac home. Home persists by
 default. `--ephemeral-home` uses one of 16 private owner-only slots, does not
@@ -65,7 +67,7 @@ VM accepts no new jobs until `marsh workers reset KIT` retires it. A dead idle
 transport may be replaced after liveness validation.
 
 Any process in a Kit job can start registered commands too
-(`docs/processes.md`). Every job gets a read-only `/run/marsh` with
+([process design](../design/processes.md)). Every job gets a read-only `/run/marsh` with
 `cap.sock`, `job.json`, `context.md`, and one link per registered name first
 on `PATH`; `bash`, `sh`, and the image's other tools stay the image's own
 (agents learn about marsh from injected context, `marsh context`). A registered
@@ -75,7 +77,8 @@ child job with the parent's mounts, recorded under its parent
 covers every job: 8 concurrent per daemon, depth 4, 4 live children per job,
 the same Kit at most twice in a row, 64 per tree, and the spawn set
 (`MARSH_SPAWN`, `marsh run --spawn/--no-spawn`) that only narrows. Refusals
-exit 125 and leave no receipt. A job's end cancels its children with
+exit 125 (126 for a registered-name link outside its spawn set) and leave no
+receipt. A job's end cancels its children with
 verified deletion; children never get a TTY.
 
 `--load KIT,...` and `--load all` prepare the selected Kit VMs and job images
@@ -87,9 +90,11 @@ receive the native OCI environment plus validated `HOME`, `USER`, `LOGNAME`,
 and `MARSH_SELECTED_HOME`. When stock SBX provides them, the adapter also
 passes only the fixed proxy endpoint, bounded non-secret credential-mode
 sentinels, a read-only CA bundle, and the sandbox-local MCP Gateway URL plus
-sentinel name as a validated pair. Jobs receive no raw keys, SBX control, or
+sentinel name as a validated pair. Jobs receive no proxy-held raw keys, SBX control, or
 Docker/containerd/daemon socket; their only daemon channel is the scoped job
-capability socket. marsh does not inspect inference requests.
+capability socket. An agent's explicit login can persist credentials in the
+shared guest home; see the [security model](../security.md). marsh does not
+inspect inference requests.
 
 ## VMs, ownership, and mounts
 
@@ -120,27 +125,35 @@ unlabeled `x; y` is one.
 Stdin is read once, up to 64 MiB, before any branch starts. Branches share one
 16 MiB stdout/stderr capture budget; crossing either limit cancels and reaps
 all branches (each branch's whole process group: every process it started)
-and renders nothing. Per-Kit capacity (8) is independent, so more
-than 8 branches on one Kit produce visible capacity failures. `collect` emits
+and renders nothing. The daemon's eight-job pool is independent of the
+16-branch fanout limit, so branches that start Kit jobs can hit admission
+failures. `collect` emits
 declaration-ordered bytes, supports `--timing` and `--json`, and is nonzero if
 a branch fails; normal `pipefail` rules apply downstream.
 
 `marsh split [-n] [-b LABEL=STRING]... [::: LABEL CMD ARGS...]...`, `marsh
 join [--json] [--keep] [-- CMD ARGS...]`, and `marsh splits` run branches in
 daemon-owned private forks of the caller's tree under
-`<root>/.marsh/split/<id>/` (`../workspaces.md`). Shell branches (`-b`) are
+`<root>/.marsh/split/<id>/` ([workspace design](../design/workspaces.md)). Shell branches (`-b`) are
 trusted and run in the shell VM; argv branches (`:::`) run one registered Kit
-command that mounts only its fork and read-only Git metadata. Results are
-`out/<label>/{stdout,stderr,status,diff.patch,files}`; marsh never writes the
-user's tree or `.git`. Only the split's creator can join it; an unjoined split
+command with the fork, private writable Git state, read-only Git control files
+and object sources, and the selected guest home mounted. Results are
+`out/<label>/{stdout,stderr,status,diff.patch,files}`. Split machinery writes its
+state under `.marsh`, but never edits the source files or original `.git`.
+Trusted shell-branch code retains the shell's authority over the project.
+Only the split's creator can join it; an unjoined split
 is kept after 60 s. The Brush sugar `split { ... } | join | CMD...` keeps its
 grammar, `PIPESTATUS`, and `SPLIT_*` scoping as a thin client of the same
-requests. Ignored files are not copied into forks.
+requests. In a Git project, ignore rules filter the snapshot even for tracked
+files. A root whose `.git` is a gitfile (a linked worktree or submodule checkout)
+is refused; split from the main checkout instead.
 
-`marsh results` (alias `marsh jobs`) shows newest-first structural receipts and
-does not replace Brush's `history`. The journal is owner-only, bounded, and
-checksummed under the host control directory. It never stores prompt, stdout,
-or stderr bytes. Work active across a daemon exit becomes `unknown`; receipts
+`marsh results` shows newest-first structural receipts; `marsh jobs` provides
+flat and tree views of the same job records. Neither replaces Brush's
+`history`. The journal is owner-only, bounded, and
+checksummed under the host control directory. It retains bounded invocation
+arguments, which may contain prompt text, but captures no stdin, stdout, or
+stderr. Work active across a daemon exit becomes `unknown`; receipts
 do not resume workloads.
 
 ## ACP and MCP
@@ -163,19 +176,20 @@ code running in that shell.
 shell whose `sbx` is a host broker confined to one revocable grant: random VM
 name prefix, project and per-project scratch roots, at most 8 VMs, removed when
 the session ends. `make dev-inner` / `make dev-inner-run` build and run a Linux
-candidate there. See `../self-development.md`.
+candidate there. The grant belongs to the dev shell; Kit jobs cannot use its
+relay. See [self-development](../design/self-development.md).
 
 ## Release gate
 
 A release passes every observation in `../../tests/acceptance/CONTRACT.md`
 with `make acceptance` on stock SBX, using a freshly built candidate and an
 immutable fixture Kit. Unit and mock tests support but do not replace that run.
-No private SBX fork, patched binary, or direct-in-VM command fallback is
-allowed.
 
 ## Out of scope
 
 Cloud execution, general M:N scheduling, isolating shell-VM commands in a
-`split` branch, copying ignored files into split worktrees, workload restart recovery, multi-device history, additional host architectures, and
-public signing or notarization. There is no flight recorder: marsh keeps no transcripts of shell, job,
-ACP or MCP bytes; `marsh results` holds structural receipts only.
+`split` branch, copying ignored files into split forks, workload restart recovery,
+multi-device history, additional host architectures, and public signing or
+notarization. There is no flight recorder. Split artifacts retain branch output;
+`marsh results` stores structural receipts and bounded display arguments, not
+execution transcripts.

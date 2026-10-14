@@ -1,122 +1,82 @@
 # Review a change with a panel
 
-Before you commit, put one reviewer on each concern and run your tests beside
-them, all at once:
+Ask two reviewers different questions about the same uncommitted change.
+Each gets a project copy, so an unexpected agent edit stays out of your
+working tree.
 
-```console
-marsh-0.5$ split {
->   security: claude -p "Review the uncommitted changes (git diff) for security problems. Do not edit files. At most 3 lines."
->   coverage: codex exec "List behavior in the uncommitted changes (git diff) that no test covers. Do not edit files. At most 3 lines."
->   tests:    make test
-> } | join
-# split 601f3cabd349: 3 branches; manifest …/out/manifest.json
-
-== security (exited 0, shell-vm) ==
-`slug.py:12` — `eval(f.read())` executes arbitrary code from the file; anyone who can write that path gets RCE.
-Fix: use `ast.literal_eval`, or better, `json.load(f)` with a JSON-format export.
-`slugify` itself is unchanged and fine (no leading/trailing-hyphen stripping, but that's a correctness nit, not security).
--- security: no changes --
-
-== coverage (exited 0, shell-vm) ==
-- `load_titles()` has no tests for reading valid lists, malformed input, missing files, or non-list results.
-- No test covers arbitrary code execution through `eval(f.read())`.
-- No child agents were started.
--- coverage: no changes --
-
-== tests (exited 2, shell-vm) ==
-python3 -m unittest -q
--- tests stderr (last 4 KiB) --
-…
-AssertionError: 'hello--world-' != 'hello-world'
-…
-FAILED (failures=2)
-make: *** [Makefile:2: test] Error 1
--- tests: no changes --
-split: kept …/.marsh/split/601f3cabd349 (last stage exited 2); inspect, then: marsh splits rm 601f3cabd349
-```
-
-The whole panel took 7 seconds. Claude found the `eval`, Codex found the
-missing tests, and the test run showed two failures that predate the change.
-`-- LABEL: no changes --` means no project diff was captured. It does not prove
-that a reviewer made no writes: ignored files, shared guest-home files, and
-edits reverted before capture are not shown.
-
-Use a panel on changes where a miss is expensive: auth, input parsing,
-concurrency, migrations. It is not worth it for a typo.
+Use a Git repository with a change visible in `git diff HEAD`, and finish
+the [Quickstart](../quickstart.md) first. Both reviewers below use Claude
+and the same Anthropic credential. The review covers staged and unstaged
+changes to tracked files; it does not include untracked files.
 
 ## Run the panel
 
-<!-- doc-test: shell replace=["split {\n  security: claude -p \"Review git diff main...HEAD for security problems. Do not edit files.\"\n  races:    codex exec \"Review git diff main...HEAD for data races and misuse of concurrency. Do not edit files.\"\n  tests:    make test\n} | join\n", "echo gamma >> notes.txt\nsplit {\n  security: fixture identity\n  races:    fixture identity\n  tests:    grep -q gamma notes.txt\n} | join | tee panel.out\ngrep -q '^== security (exited 0' panel.out\ngrep -q '^== races (exited 0' panel.out\ngrep -q '^== tests (exited 0' panel.out\nrm panel.out\n"] -->
+At the **marsh prompt**:
+
+<!-- doc-test: shell replace=["split {\n  security: claude -p 'Review git diff HEAD for security defects. Do not edit files or start other agents. For each finding, give the file, line, and a concrete failure scenario. Say when you found none.'\n  coverage: claude -p 'Review git diff HEAD for changed behavior that tests do not cover. Do not edit files or start other agents. Point to the behavior and the missing test; distinguish guesses from findings.'\n} | join --keep", "printf 'gamma\\n' >> notes.txt\nsplit {\n  security: fixture identity\n  coverage: fixture identity\n} | join --keep"] stdout="== coverage (exited 0, shell-vm) ==" -->
 ```sh
 split {
-  security: claude -p "Review git diff main...HEAD for security problems. Do not edit files."
-  races:    codex exec "Review git diff main...HEAD for data races and misuse of concurrency. Do not edit files."
-  tests:    make test
-} | join
+  security: claude -p 'Review git diff HEAD for security defects. Do not edit files or start other agents. For each finding, give the file, line, and a concrete failure scenario. Say when you found none.'
+  coverage: claude -p 'Review git diff HEAD for changed behavior that tests do not cover. Do not edit files or start other agents. Point to the behavior and the missing test; distinguish guesses from findings.'
+} | join --keep
 ```
 
-Every branch starts from the same snapshot of your working tree, uncommitted
-changes included. Each gets its own copy, so a reviewer that edits a file by
-mistake changes only its copy, and the `--` line shows it.
+Both reviewers start from the same project snapshot, including uncommitted
+work. The prompts name the same diff and assign different concerns. If you
+want a committed branch reviewed instead, change **both** prompts to the
+same base comparison, such as `git diff main...HEAD` when your base is
+`main`.
 
-Prompts that work:
+Review the findings against the source. Neither a quiet reviewer nor exit
+status zero establishes that the change is sound. When a report names a
+missing test, check whether an existing test already exercises that case.
 
-- **One concern per reviewer.** "Security problems" finds different things
-  than "review this change", and the answer stays short.
-- **Name the diff.** `git diff main...HEAD` is your branch's commits since it
-  left main. `git diff HEAD` is uncommitted work, staged or not; untracked
-  files are in neither, so name them if they matter.
-- **Cap the length.** "At most 3 lines" keeps a panel readable.
-- **Say "Do not edit files".** The copy contains any slip, but a reviewer that
-  edits is not reviewing.
+If a reviewer edited files, `join` also shows that diff. Inspect it
+separately from the findings and leave it unapplied unless you want the
+change.
 
 ## Run checks without copies
 
-`fanout` runs commands side by side on your real project, with no copies,
-and `collect` prints the output in order. Use it for commands that can share a
-working directory, such as most linters and type checkers. Two test runs that
-write the same fixture or cache files can collide.
+Run the repository's real checks alongside the review or afterward. The
+following recipe assumes your project already has working `make lint` and
+`make typecheck` targets; substitute its documented commands if not. Verify
+they work on Linux arm64 before using them here.
 
-<!-- doc-test: shell replace=["fanout {\n  lint:  make lint\n  types: make typecheck\n} | collect\n", "fanout {\n  lint:  grep -q alpha notes.txt\n  types: grep -q beta notes.txt\n} | collect\n"] stdout="== types (complete) ==" -->
+<!-- doc-test: shell replace=["fanout {\n  lint: make lint\n  types: make typecheck\n} | collect", "fanout {\n  lint: grep -q alpha notes.txt\n  types: grep -q beta notes.txt\n} | collect"] stdout="== types (complete) ==" -->
 ```sh
 fanout {
-  lint:  make lint
+  lint: make lint
   types: make typecheck
 } | collect
 ```
 
-The exit status is the first failing branch's. Keep agents out of `fanout`: there
-they work on your real files, and nothing stops an edit.
+`fanout` uses your real files. Only use this form when the commands can
+safely share a directory: checks that rewrite the same cache, fixture, or
+generated file may interfere with each other. `collect` prints results in
+declaration order and reports a nonzero status if a branch fails. These
+checks run as you in the shell VM, without confinement to the project.
 
-## Combine them
+## Finish the review
 
-A split branch can run a fanout on its own copy:
+Make or request the intended fix, run the relevant checks,
+and review the resulting diff. Remove the saved panel with the split ID
+printed by `join`:
 
-<!-- doc-test: shell replace=["split {\n  security: claude -p \"Review git diff main...HEAD for security problems. Do not edit files.\"\n  checks:   fanout { lint: make lint, types: make typecheck } | collect\n} | join\n", "split {\n  security: fixture identity\n  checks:   fanout { lint: grep -q alpha notes.txt, types: grep -q beta notes.txt } | collect\n} | join | tee panel.out\ngrep -q '^== checks (exited 0' panel.out\nrm panel.out\n"] -->
+<!-- doc-test: shell replace=["marsh splits rm YOUR_SPLIT_ID", "set -e\nsplit_id=$(marsh split -n ::: review fixture identity)\nsplit_id=$(marsh join --keep -- sh -c 'cat >/dev/null; printf \"%s\\n\" \"$SPLIT_ID\"' <<<\"$split_id\")\nmarsh splits rm \"$split_id\""] -->
 ```sh
-split {
-  security: claude -p "Review git diff main...HEAD for security problems. Do not edit files."
-  checks:   fanout { lint: make lint, types: make typecheck } | collect
-} | join
+marsh splits rm YOUR_SPLIT_ID
 ```
-
-`marsh jobs --tree` draws the fanout under the `checks` branch
-([A fanout inside a branch](../split.md#a-fanout-inside-a-branch)).
 
 ## Limits and failure modes
 
-- **A failing check keeps the split.** When any branch exits nonzero, `join`
-  exits nonzero and keeps the copies. They were never applied to your tree.
-  Read the output, then `marsh splits rm ID`.
-- **Reviewers are wrong sometimes.** They miss things and report things that
-  are not there. Two agents widen what gets looked at; they do not certify the
-  change. Check each finding against the code.
-- **Cost.** One model run per reviewer. A split takes up to 16 branches, and
-  at most 8 jobs run at once per daemon.
+This panel starts two billed agent runs. If a reviewer fails, `join`
+reports the failure and keeps the copies. Ctrl-C stops the foreground panel
+and its child jobs. For copy restrictions and capture limits, see
+[Split and join](../split.md).
 
 ## Next
 
-- [Let an agent farm out work](farm-out-work.md) to have an agent run a panel
-  on its own work before it reports back.
-- [Race two agents on one bug](race-two-agents.md) when you want fixes, not
-  findings.
+[Make independent changes in parallel](race-two-agents.md) uses split for
+edits. [Let an agent farm out work](farm-out-work.md) starts a review from
+inside another job. See [Split and join](../split.md) for capture limits and
+full patch paths.

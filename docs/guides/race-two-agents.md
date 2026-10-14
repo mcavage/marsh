@@ -1,136 +1,101 @@
-# Race two agents on one bug
+# Make independent changes in parallel
 
-Two agents fix the same failing test at the same time, each on a private copy
-of your project, and each copy runs your tests. marsh waits for both, then
-shows both patches and both test results. The agents never touch your working
-tree; you apply the patch you choose.
+Give one agent the CLI's JSON output and another the API's pagination.
+Each works on a project copy and runs the tests there. Inspect both patches,
+then test the combined change in your working tree.
 
-```console
-marsh-0.5$ split {
->   claude: claude -p "make test fails. Fix slug.py without editing the tests. Reply in one line." && make test
->   codex:  codex exec "make test fails. Fix slug.py without editing the tests. Reply in one line." && make test
-> } | join --keep
-# split 3c8145fd9046: 2 branches; manifest …/.marsh/split/3c8145fd9046/out/manifest.json
-
-== claude (exited 0, shell-vm) ==
-Fixed `slug.py:6` to collapse runs of non-alphanumerics into one hyphen and strip leading/trailing hyphens — all 3 tests pass (no children spawned; the edit was a one-liner).
-python3 -m unittest -q
--- claude: 1 file (M slug.py); diff …/out/claude/diff.patch --
-diff --git a/slug.py b/slug.py
-…
--    return re.sub(r"[^a-z0-9]", "-", title.lower())
-+    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-
-== codex (exited 0, shell-vm) ==
-Fixed `slug.py` to collapse separators and trim hyphens; all 3 tests pass, tests unchanged, no child agents used.
-python3 -m unittest -q
--- codex: 1 file (M slug.py); diff …/out/codex/diff.patch --
-diff --git a/slug.py b/slug.py
-…
-split: kept …/.marsh/split/3c8145fd9046 (join --keep); inspect, then: marsh splits rm 3c8145fd9046
-```
-
-That run took 12 seconds on a three-test Python project with warm VMs (not a
-benchmark). Both agents found the same one-line fix. When the patches differ,
-compare their scope and their test output before you apply one. `…` marks
-output trimmed here.
-
-Use a race when a fix is worth a second attempt and you have a failure you
-can reproduce: a regression, or a failing CI check that also fails locally.
-For a flaky test, gate on a repeated run (`go test -count=20 -run TestX`);
-one passing run proves nothing. Skip races for changes your tests cannot
-judge.
-
-You need a test command that exits nonzero on failure, and a credential for
-each agent ([Agent credentials](../quickstart.md#agent-credentials)).
+Use this recipe in an existing project with a CLI and a paginated API.
+Complete the
+[Quickstart](../quickstart.md) to configure Anthropic. Both jobs use Claude.
+Adjust the prompts to name your CLI command, API handler, and test files.
+Choose responsibilities that can change independently; settle any shared
+response format before delegating.
 
 ## Make sure the tests run in marsh
 
-The `&& make test` part of each branch runs in marsh's shell VM, not on your
-Mac. The VM is Debian on arm64 with git, make, gcc, Python 3, Node.js, and
-Rust. Run your test command at the marsh prompt once. If it needs something
-else, install it there; packages stay until the VM is removed:
+The examples below use `make test` as a placeholder; replace every occurrence
+with your repository's test command. Run it at the marsh prompt first and
+install any Linux arm64
+dependencies it requires. Split copies omit Git-ignored files, so tests
+that depend on ignored artifacts need to recreate them in each copy.
 
-```sh
-sudo apt-get install -y python3-pytest
-```
+## Run the tasks
 
-If the tests fail in the VM for reasons unrelated to the bug, every branch
-fails and the race tells you nothing.
+At the **marsh prompt**, adapt the scopes and test command, then run:
 
-## Run the race
-
-<!-- doc-test: shell replace=["split {\n  claude: claude -p \"make test fails. Fix the code, not the tests.\" && make test\n  codex:  codex exec \"make test fails. Fix the code, not the tests.\" && make test\n} | join --keep\n", "out=$(split {\n  claude: fixture project-write notes.txt $'alpha\\nbeta\\ngamma\\n' && grep -q gamma notes.txt\n  codex:  fixture project-write notes.txt $'alpha\\nbeta\\n' && grep -q gamma notes.txt\n} | join --keep)\nprintf '%s\\n' \"$out\" | grep -q '^== claude (exited 0'\nprintf '%s\\n' \"$out\" | grep -q '^== codex (exited 1'\nid=$(printf '%s\\n' \"$out\" | head -1 | cut -d' ' -f3 | tr -d :)\ngit apply \".marsh/split/$id/out/claude/diff.patch\"\ngrep -q gamma notes.txt\nmarsh splits rm \"$id\"\n"] -->
+<!-- doc-test: shell replace=["split {\n  cli: claude -p 'Add a JSON output option to the existing list command. Keep the current text output as the default. Change only CLI code and its tests; do not change the API or start other agents.' && make test\n  api: claude -p 'Add tests for the existing pagination contract: the final page and an invalid cursor. Fix the API handler if those cases fail. Change only API code and its tests; do not change the CLI or start other agents.' && make test\n} | join --keep", "split {\n  cli: fixture project-write notes.txt $'alpha\\nbeta\\ngamma\\n' && grep -q gamma notes.txt\n  api: fixture project-write pagination.txt cursor && grep -qx cursor pagination.txt\n} | join --keep"] stdout="== api (exited 0, shell-vm) ==" -->
+<!-- doc-test: shell replace=["split {\n  cli: claude -p 'Add a JSON output option to the existing list command. Keep the current text output as the default. Change only CLI code and its tests; do not change the API or start other agents.' && make test\n  api: claude -p 'Add tests for the existing pagination contract: the final page and an invalid cursor. Fix the API handler if those cases fail. Change only API code and its tests; do not change the CLI or start other agents.' && make test\n} | join --keep", "split {\n  cli: fixture project-write notes.txt $'alpha\\nbeta\\ngamma\\n' && grep -q gamma notes.txt\n  api: fixture project-write pagination.txt cursor && grep -qx missing pagination.txt\n} | join --keep"] status=1 stdout="== api (exited 1, shell-vm) ==" -->
 ```sh
 split {
-  claude: claude -p "make test fails. Fix the code, not the tests." && make test
-  codex:  codex exec "make test fails. Fix the code, not the tests." && make test
+  cli: claude -p 'Add a JSON output option to the existing list command. Keep the current text output as the default. Change only CLI code and its tests; do not change the API or start other agents.' && make test
+  api: claude -p 'Add tests for the existing pagination contract: the final page and an invalid cursor. Fix the API handler if those cases fail. Change only API code and its tests; do not change the CLI or start other agents.' && make test
 } | join --keep
 ```
 
-Each line inside the braces is a branch: a label, a colon, and ordinary Bash.
-marsh gives each branch its own copy of your working tree, uncommitted changes
-included, and runs the branches at once. `agent && make test` runs the tests
-on that copy only if the agent exits 0.
-
-The agent runs in a fresh container that mounts only its branch's copy.
-`make test` runs in the shell VM as you, starting in the branch's copy. It is
-your own command, so marsh does not confine it: a test that writes to a fixed
-path outside the project writes the real one.
+Both branches start from the same snapshot. `&&` runs a branch's tests only
+after its agent exits successfully. The agent container mounts only its
+fork of the project; the test command runs as you in the shell VM, starting
+in that fork but unconfined.
 
 ## Read the result
 
-For each branch, `join` prints:
+`join` prints each branch's status, output, and patch. A zero status here
+means the agent and that branch's test command both exited successfully.
+A failed branch makes `join` exit nonzero without discarding its sibling's
+result. `--keep` saves both copies and their patches.
 
-- A header with the exit status. `exited 0` means the agent finished and the
-  tests passed on that copy. Anything else means one of them failed; the
-  branch's stderr follows.
-- What the agent and the tests printed.
-- A `--` line listing the files changed, then the diff.
-
-Look at the files list before the diff. A patch that lists a test file
-(`M test_slug.py`) may have passed by changing the test. The prompt says not
-to; check anyway.
-
-`join` exits with the first nonzero branch status. With `--keep`, the copies
-and patches stay on disk either way, so you can apply one.
+Read the changed-file lists and diffs. Check that the CLI preserves existing
+text output, and that the API tests exercise the intended cursor behavior.
+The prompts do not enforce file boundaries. If both agents changed shared
+code, resolve the overlap before applying their patches together.
 
 ## Apply one
 
-The split id is on the first line. Apply the patch you chose, then remove
-the kept split:
+Use the split ID from the first join output line. If you want both patches,
+apply them one at a time, stopping if either check fails. Replace
+`YOUR_SPLIT_ID` and the test command below:
 
+<!-- doc-test: shell replace=["split_id=YOUR_SPLIT_ID\ngit apply --check \".marsh/split/$split_id/out/cli/diff.patch\"\ngit apply \".marsh/split/$split_id/out/cli/diff.patch\"\ngit apply --check \".marsh/split/$split_id/out/api/diff.patch\"\ngit apply \".marsh/split/$split_id/out/api/diff.patch\"\nmake test\ngit diff --check\ngit diff", "set -e\nsplit_id=$(marsh split -n -b cli=\"fixture project-write notes.txt gamma && grep -qx gamma notes.txt\" -b api=\"fixture project-write pagination.txt cursor && grep -qx cursor pagination.txt\")\nsplit_id=$(marsh join --keep -- sh -c 'cat >/dev/null; printf \"%s\\n\" \"$SPLIT_ID\"' <<<\"$split_id\")\ntest \"$(wc -l < notes.txt)\" -eq 2\ntest ! -e pagination.txt\ngit apply --check \".marsh/split/$split_id/out/cli/diff.patch\"\ngit apply \".marsh/split/$split_id/out/cli/diff.patch\"\ngit apply --check \".marsh/split/$split_id/out/api/diff.patch\"\ngit apply \".marsh/split/$split_id/out/api/diff.patch\"\ngrep -qx gamma notes.txt\ngrep -qx cursor pagination.txt\ngit diff --check\nmarsh splits rm \"$split_id\""] -->
 ```sh
-git apply .marsh/split/3c8145fd9046/out/claude/diff.patch
-marsh splits rm 3c8145fd9046
+split_id=YOUR_SPLIT_ID
+git apply --check ".marsh/split/$split_id/out/cli/diff.patch"
+git apply ".marsh/split/$split_id/out/cli/diff.patch"
+git apply --check ".marsh/split/$split_id/out/api/diff.patch"
+git apply ".marsh/split/$split_id/out/api/diff.patch"
+make test
+git diff --check
+git diff
 ```
 
-That `git apply` is the step that brings an agent's change into your working
-tree. If you edited the same lines while the agents worked, use
-`git apply --3way`
-([Merging when your tree has moved](../split.md#merging-when-your-tree-has-moved)).
+The combined test run matters: each branch passed against its own starting
+copy, without the other branch's changes. Read the final diff before
+committing. You can also take only one patch and run the tests on that tree.
+If your files moved while the agents worked, see
+[Merging when your tree has moved](../split.md#merging-when-your-tree-has-moved).
+
+Remove the saved split when you have finished inspecting its results:
+
+<!-- doc-test: shell replace=["marsh splits rm \"$split_id\"", "set -e\nsplit_id=$(marsh split -n ::: cli fixture identity)\nsplit_id=$(marsh join --keep -- sh -c 'cat >/dev/null; printf \"%s\\n\" \"$SPLIT_ID\"' <<<\"$split_id\")\nmarsh splits rm \"$split_id\""] -->
+```sh
+marsh splits rm "$split_id"
+```
 
 ## When it goes wrong
 
-| What you see | What it means | What to do |
-|---|---|---|
-| Both branches `exited 1` or `exited 2` | Neither fix passed | Read both stderr sections. Sharpen the prompt (name the file, paste the error) and race again |
-| A branch exits nonzero with an authentication error | No credential for that agent | `sbx secret set anthropic` or `sbx secret set openai`, then rerun |
-| `[starting codex worker VM…]` and a long wait | First use of that agent boots its VM and may download its image (about 600 MB) | Wait once; later runs reuse the warm VM. `marsh --load claude,codex` starts them ahead of time |
-| One branch never finishes | An agent is stuck | Ctrl-C stops every branch and anything they started |
-| `capacity: 8 jobs` in a branch's stderr | Eight jobs were already running on this daemon, so that agent never started | Wait for some to finish and rerun |
-| `git apply` fails | Your tree moved since the split | `git apply --3way`, as above |
+Read a failed branch's stderr before rerunning it. A missing dependency can
+make a valid edit fail its check. A capacity refusal means the agent did not
+start. Ctrl-C stops the foreground split and its children.
 
 ## Cost
 
-Each branch is a full agent run, billed to that agent's account. A two-way
-race costs two runs for one fix. You wait for the slower branch, not for both
-in turn. A split takes up to 16 branches; at most 8 jobs run at once per
-daemon.
+This starts two billed agent runs and waits for both. Kept copies use disk
+space; copy-on-write cloning shares unchanged data where the filesystem
+supports it. See [Split and join](../split.md) for copy restrictions and
+capture limits.
 
 ## Next
 
-- [Let a judge pick the winner](add-a-judge.md) when both branches pass.
-- [Let an agent farm out work](farm-out-work.md) to have an agent run this
-  race itself.
-- [Split and join](../split.md) for every option.
+[Review split results in a pipeline](add-a-judge.md) creates a fresh split
+and sends its report to another agent before you apply anything.
+[Review a change with a panel](review-with-a-panel.md) examines one existing
+diff from different angles.

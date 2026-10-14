@@ -1,10 +1,12 @@
 # Agents running agents
 
-Inside a marsh job, every registered command (`claude`, `codex`, `pi`, ...) is
-on `PATH`. An agent that calls one starts a child job in its own container.
-`marsh jobs --tree` shows both, and one Ctrl-C stops both.
+An agent running in marsh can call registered commands to start child jobs.
+Each child gets a fresh container, appears under its parent in
+`marsh jobs --tree`, and stops when its parent ends. Ctrl-C cancels the whole
+foreground job tree.
 
-From your marsh shell:
+With [marsh installed](install.md) and both
+[providers configured](kits.md#signing-in), try this from your marsh shell:
 
 <!-- doc-test: shell replace=["claude -p \"use your Bash tool to run: codex exec 'reply with the number 7'\"", "fixture pipeline '|' bash -c \"shell -c 'echo 7'\""] stdout="└─ shell -c \"echo 7\"" -->
 ```sh
@@ -12,52 +14,35 @@ claude -p "use your Bash tool to run: codex exec 'reply with the number 7'"
 marsh jobs --tree
 ```
 
-```text
-ID        STARTED   STATE      EXIT      RUN  COMMAND
-301c56d6  2m ago    finished      0   2m12s  claude -p "use your Bash tool to run: codex exec 'reply with th…
-8e41f0a2  1m ago    finished      0    14.2s  └─ codex exec "reply with the number 7"
-```
-
-The child job sees the same project files as its parent, not a copy. It runs
-under its own Kit's network policy and credentials. Any agent can start any other, or itself, up
-to the [limits](#limits-and-messages). To restrict which commands a job may
-start, see [Narrowing what an agent may start](#narrowing-what-an-agent-may-start).
+If Claude makes the requested call, Codex appears as its child in the tree.
+The child inherits its parent's project mounts and shared guest home, with
+its own Kit's network policy and credentials. A [split](split.md) can narrow
+its project mount to a fork. Any registered command is allowed by default,
+including another invocation of the same agent, subject to the
+[limits](#limits-and-messages) and [spawn set](#narrowing-what-an-agent-may-start).
 
 ## Signing in
 
-marsh has no login. Docker Sandboxes holds each agent's credential on your Mac
-([Signing in](kits.md#signing-in)). A child job uses its own Kit's credential,
-not its parent's.
+Configure each child's provider through
+[Docker Sandboxes](kits.md#signing-in), as you would for a direct call.
 
 ## Split from inside an agent
 
-An agent can split work across private forks of its files and read the results
-back as patches. From a job, each branch is `::: LABEL CMD ARG...`. It runs as
-a child job that sees only its fork of the project.
+An agent can split work across private forks and read the results back as
+patches. From a job, each branch must be `::: LABEL CMD ARG...`, naming a
+registered command. The child mounts its fork at the fork's own host path;
+the guest home is still shared.
 
 <!-- doc-test: shell replace=["marsh split ::: fix codex exec 'fix the typo in notes.txt' ::: review claude -p 'review notes.txt' | marsh join", "fixture pipeline '|' bash -c 'marsh split ::: fix fixture project-write notes.txt fixed ::: review fixture identity | marsh join'"] stdout="-- fix: 1 file (M notes.txt)" -->
 ```sh
 marsh split ::: fix codex exec 'fix the typo in notes.txt' ::: review claude -p 'review notes.txt' | marsh join
 ```
 
-`marsh join` prints one section per branch. `kit:NAME` is the Kit that ran the
-branch:
-
-```text
-# split 8d5c8fdd1563: 2 branches; manifest …/out/manifest.json
-
-== fix (exited 0, kit:codex) ==
-Fixed the typo "recieve" in notes.txt.
--- fix: 1 file (M notes.txt); diff …/out/fix/diff.patch --
-diff --git a/notes.txt b/notes.txt
-…
-== review (exited 0, kit:claude) ==
-notes.txt reads correctly after the fix. No other issues.
--- review: no changes --
-```
-
-A split does not write to your project. You apply the patches you want. See
-[Split and join](split.md).
+This assumes `notes.txt` exists. Both branches begin with the same snapshot;
+the reviewer does not see the fixer's edits. `marsh join` prints one section
+per branch, with `kit:NAME` identifying the Kit and a patch for any captured
+changes. It never applies the patches. Use `marsh join --keep` if you want
+to inspect or apply them after join exits. See [Split and join](split.md).
 
 Shell branches (`marsh split -b`, `split { a: ...; b: ... }`) run only from
 your own shell. A job that asks for one is refused:
@@ -68,37 +53,29 @@ split: a: shell branches (-b, split { }) run only from the session shell
 
 ## Parallel work on the same files
 
-`marsh fanout` runs its branches at once on the same files, with no fork.
-Writes are real and can race. It runs in the caller's environment: the job's
-container, or the shell VM. A branch that names a registered command starts it
-as a child job.
+Inside a job, `marsh fanout` runs commands concurrently in that job's
+container, sharing its files. A registered command starts a child job;
+other commands use the container's own tools. Writes can race.
 
 <!-- doc-test: shell replace=["claude -p \"run tests and lint at once with marsh fanout\"", "fixture pipeline '|' bash -c \"marsh fanout -n ::: tests echo ok ::: lint echo clean | marsh collect\""] stdout="== lint (complete) ==\nclean" -->
 ```sh
 claude -p "run tests and lint at once with marsh fanout"
 ```
 
-The agent would run:
+The agent can run argv branches directly:
 
+<!-- doc-test: shell replace=["marsh fanout ::: tests make test ::: lint make lint | marsh collect", "fixture pipeline '|' bash -c 'marsh fanout -n ::: tests printf tests-finished ::: lint printf lint-finished | marsh collect'"] stdout="== lint (complete) ==\nlint-finished" -->
 ```sh
 marsh fanout ::: tests make test ::: lint make lint | marsh collect
 ```
 
 `collect` prints each branch's output in the order written, and exits with the
-first failing branch's status:
+first failing branch's status. This example needs the project's `test` and
+`lint` Makefile targets.
 
-```text
-== tests (complete) ==
-ok
-
-== lint (complete) ==
-clean
-```
-
-From a job, branches must be `::: LABEL CMD ARG...`, as for `split`. In your
-own shell, `marsh fanout` also takes shell branches (`-b LABEL=STRING`), and
-you can write `fanout { a: CMD; b: CMD } | collect`. See
-[Fanout and collect](fanout.md).
+From a job, branches must be `::: LABEL CMD ARG...`, as for `split`. The
+[fanout reference](fanout.md) also covers shell branches and Brush blocks
+for use from your own shell.
 
 ## Ctrl-C and cleanup
 
@@ -106,8 +83,8 @@ Ctrl-C in your shell cancels the foreground job's whole tree:
 
 1. Every job gets `INT`.
 2. Anything still running 10 seconds later gets `KILL`.
-3. marsh checks that each container is deleted and records every job as
-   `cancelled`.
+3. marsh checks each container's deletion and records the cancellation and
+   cleanup result. A job that had already ended keeps its completed state.
 4. Your command exits 130.
 
 A job that ends cancels its own children the same way: `INT`, then `KILL`
@@ -119,7 +96,7 @@ the slot ([Troubleshooting](troubleshooting.md#cleanup-uncertain-and-quarantine)
 
 ## Narrowing what an agent may start
 
-By default any job may start any registered command. To narrow that, set
+To restrict child commands, set
 `MARSH_SPAWN` in your shell to a comma-separated list of names, or `none`.
 
 `marsh run --spawn a,b NAME` and `--no-spawn` do the same for one command.
@@ -127,7 +104,7 @@ Nothing inside a job can widen the list.
 
 <!-- doc-test: shell replace=["claude -p \"use your Bash tool to run: shell -c true\"", "fixture pipeline '|' bash -c 'shell -c true'"] status=126 stderr="spawn refused: shell not in this job's spawn set (MARSH_SPAWN)" -->
 ```sh
-export MARSH_SPAWN=codex,fixture
+export MARSH_SPAWN=codex
 claude -p "use your Bash tool to run: shell -c true"
 ```
 
@@ -146,23 +123,28 @@ A name outside `MARSH_SPAWN` exits 126. `marsh status` counts refusals
 | Depth 4 (your command is depth 1) | `depth limit 4` |
 | The same Kit at most twice in a row | `claude → claude → claude refused: same-Kit chain limit 2` |
 | 4 live children per job | `fan-out limit 4` |
-| 64 jobs per tree | `total limit 64` |
+| 64 launches per tree, counting refused child calls | `total limit 64` |
+| 4 distinct Kit VMs used by live jobs in one tree, by default | `tree already uses 4 Kit VMs (...) (MARSH_TREE_KIT_VMS)` |
+| At least one second must remain before the parent's deadline | `deadline: parent job ... has ... ms of wall time left` |
 | A name outside `MARSH_SPAWN` | `spawn refused: NAME not in this job's spawn set (MARSH_SPAWN)` |
 | No terminal for a child | `interactive child jobs are not supported yet` |
 
-A child job gets no terminal. If its stdin or stdout is a terminal, marsh
+A child job gets no terminal. If either stdin or stdout is a terminal, marsh
 refuses it. Run the command as `codex exec '...' </dev/null | cat`. Agents'
 tool calls already run without a terminal.
 
-After `capacity` or `fan-out limit`, wait for running jobs to finish and
-retry. The other refusals do not clear by waiting. Change the plan: use a
-different Kit, fewer levels, or fewer jobs in the tree.
+After `capacity`, `fan-out limit`, or the Kit VM limit, let running jobs finish
+before retrying. Repeated refusals consume the tree's launch budget. Depth,
+same-Kit, and total limits need a different plan, such as fewer levels or
+fewer child calls. The Kit VM limit is configurable through
+[`MARSH_TREE_KIT_VMS`](configuration.md#job-limits); children share their
+parent's deadline.
 
 ## Reading the job tree
 
 The `marsh jobs --tree` columns:
 
-- `ID`: the short job id. Any prefix works with `marsh jobs show`.
+- `ID`: the short job id. An unambiguous prefix works with `marsh jobs show`.
 - `STATE`: `queued`, `running`, `finished`, `failed`, `cancelled`, or
   `unknown`.
 - `RUN`: from the job's start in its warm Kit VM to its end. VM boot time is
@@ -178,12 +160,12 @@ on where you run the command:
 | A host terminal | Running trees, trees from the last hour, and the five newest |
 | Inside a job | That job's own subtree |
 
-`--all` lists every recorded job.
+From a shell or host terminal, `--all` lists every recorded job in the scope.
+Inside a job, it still shows only that job's subtree.
 
-A split or fanout you ran is a node too. Its branches hang under it, and the
-jobs each branch started hang under those
-([split](split.md#seeing-a-split-in-marsh-jobs---tree)). A job started after
-`join` ends with `(consumes split ID)`.
+A split or fanout also appears as a node, with its branch jobs below it
+([split](split.md#seeing-a-split-in-marsh-jobs---tree)). A job started in a
+stage downstream of `join` is marked `(consumes split ID)`.
 
 Related commands:
 
@@ -193,19 +175,11 @@ Related commands:
 - `marsh results` has a `WALL` column. It covers the whole request, from the
   call to verified cleanup, including any Kit VM boot.
 
-A command you start with `&` prints `[1] PID` as in Bash. If its Kit VM has to
-boot first, the `[starting NAME worker VM…]` notice is not printed for it. A
-foreground command prints it.
-
 ## How a child job starts
 
-Every registered name (`claude`, `codex`, `shell`, ...) is in
-`/run/marsh/bin`, on the job's `PATH`. Calling one, from any shell or program,
-starts a child job: a fresh container in that Kit's VM, with this job's files,
-under the child Kit's own network policy and credentials.
-
-stdin, stdout, stderr, and the exit status pass through as for a local
-command.
+Registered commands are links in `/run/marsh/bin`, first on the job's `PATH`.
+Any process in the container can call one to request a child job. stdin,
+stdout, stderr, and exit status pass through.
 
 `bash`, `sh`, and every other tool in the job come from the image. The in-job
 `marsh` command is also in `/run/marsh/bin`. It has `run`, `split`, `join`,
@@ -213,11 +187,11 @@ command.
 
 ## Variables
 
-A variable you export in your shell reaches every job in the tree. So does a
-variable a job exports or changes, for its children. Image `ENV` and
-credential-shaped names (`*_TOKEN`, `*_SECRET`, `*_KEY`, ...) are never
-forwarded. A job that needs a credential gets it through the Docker Sandboxes
-proxy, not an exported variable.
+Ordinary exported variables pass to jobs and their children. A job can change
+one for its own children. marsh filters unchanged image `ENV` defaults,
+credential-shaped names (`*_TOKEN`, `*_SECRET`, `*_KEY`), and control variables
+from this forwarding. Supply provider credentials through
+[Docker Sandboxes](kits.md#signing-in).
 
 <!-- doc-test: shell replace=["claude -p \"use your Bash tool to run: codex exec 'print the value of TICKET'\"", "fixture pipeline '|' bash -c \"shell -c 'echo TICKET=\\$TICKET'\""] stdout="TICKET=ABC-123" -->
 ```sh
@@ -248,8 +222,8 @@ for that run only:
 | `codex` | `-c developer_instructions="…"` | `developer_instructions` in codex-acp's `CODEX_CONFIG` (a caller's `CODEX_CONFIG` object is kept) |
 | `pi` | `--append-system-prompt /run/marsh/context.md` | the same: pi-acp starts Pi through the Kit entrypoint |
 
-Nothing is written into your project, your home, `CLAUDE.md`, `AGENTS.md`,
-`~/.codex`, or `~/.pi`.
+This instruction injection does not change project files, guest-home files,
+`CLAUDE.md`, or `AGENTS.md`.
 
 Exceptions:
 
@@ -260,20 +234,22 @@ Exceptions:
 
 ## Agent sandboxes and permission prompts
 
-Inside a job, an agent can read and change everything the job can reach. That
-includes your project files, which it can delete, and the guest home, which
-every job in the scope can read. The container is the only sandbox.
+An agent can read, edit, or delete writable files mounted in its job,
+including the project (or split fork) and shared guest home. Jobs start as
+nonroot users without Docker or SBX sockets. Your shell VM user has
+passwordless sudo and the VM's Docker Engine.
 
-The agents' own sandboxes cannot run in the container, because bubblewrap
-cannot create namespaces there. The agent Kits turn those sandboxes off, along
-with permission prompts:
+The packaged Kits disable the agents' own sandboxes and permission prompts.
+Their namespace-based sandbox tools cannot run with the container's
+permissions:
 
 - `claude` runs with `--dangerously-skip-permissions` and
   `--settings '{"sandbox":{"enabled":false}}'`. This stops a project's
   `sandbox.enabled`, meant for your Mac, from failing Bash calls in the job.
 - `codex` runs with `--dangerously-bypass-approvals-and-sandbox` for `codex`
   and `codex exec`. That means approval `never` and sandbox
-  `danger-full-access`. Its new `config.toml` says the same.
+  `danger-full-access`. The default `config.toml` the Kit writes sets the
+  same options.
 - Pi has no OS-level sandbox of its own. It runs with `--approve` so project
   resources load without a trust prompt.
 
@@ -286,8 +262,8 @@ same Kit in its ACP mode and keep these defaults:
   (`INITIAL_AGENT_MODE=agent-full-access`) unless you export another
   `INITIAL_AGENT_MODE`. The ACP client can still switch modes.
 
-To keep an agent's edits off your files, run it in a
-[split](split.md) and apply the patch yourself.
+Run an agent in a [split](split.md) to review its project edits as a patch.
+The [security model](security.md) covers shared files and additional grants.
 
 Next: [Split and join](split.md), [Fanout and collect](fanout.md),
 [design: processes](design/processes.md).

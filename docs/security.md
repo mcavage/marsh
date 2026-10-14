@@ -1,19 +1,18 @@
 # Security model
 
-A job is an agent or tool run by marsh in a fresh container inside a Docker
-Sandbox VM. A direct job can change your project files and the shared guest
-home; a registered agent in a split mounts its private project copy instead.
-Ordinary job commands execute in Linux, not on your Mac. Proxy-managed provider
-keys stay behind the Docker Sandboxes proxy, but saved guest logins are readable
-files. Explicit integration and development grants are described below.
+A marsh job runs an agent or tool in a fresh container inside a Docker Sandbox
+VM. It can change or delete the project files it mounts and read credentials
+saved in the guest home. A registered command in a split mounts a private
+project copy instead. Ordinary jobs have no host-command channel; MCP tools
+and development shells have the explicit grants described below.
 
 | Can a job ... | Answer | What enforces it |
 |---|---|---|
-| Run a command directly on your Mac | Not through ordinary job execution | Docker Sandboxes VM boundary; no Docker, containerd, or `sbx` socket is mounted; explicit grants can add authority |
+| Run a command directly on your Mac | Not through ordinary job execution | The VM boundary; jobs receive no host-command relay or Docker, containerd, or `sbx` control socket |
 | Read your real home directory | No | Only the project and the guest home are mounted |
 | Read proxy-managed provider keys | No | The `sbx` proxy holds them; the job sees placeholders |
 | Change or delete project files | Yes | The project is mounted read/write |
-| Read other jobs' logins and history | Yes | All jobs share the guest home |
+| Read other jobs' logins and history | Yes, when they use the same guest home | The persistent guest home is shared within a scope |
 | Start other registered commands | Yes, within limits | The job capability socket; `MARSH_SPAWN` narrows it |
 | Reach the network | As its Kit's policy allows | `sbx` enforces the policy; marsh does not inspect traffic |
 
@@ -33,8 +32,8 @@ Your own shell commands in a branch are not confined to that copy
 - Your Mac account. The marsh daemon runs as you, keeps its files readable
   only by your account, and can do only what your account can do.
 - `sbx`. Docker Sandboxes creates the VMs, enforces each VM's network policy,
-  and holds your credentials behind a proxy. marsh uses its public command line
-  and ships no modified copy. The VM boundary is `sbx`'s; marsh adds none.
+  and holds proxy-managed provider credentials. marsh uses its public command
+  line and ships no modified copy. Docker Sandboxes supplies the VM boundary.
 - The Kits you register. A Kit's image and descriptor decide what runs and what
   network access it gets. marsh does not verify that a registered Kit does what
   it claims.
@@ -43,15 +42,17 @@ Your own shell commands in a branch are not confined to that copy
 
 ### Mac
 
-By default, guest commands execute inside Linux VMs, without a host-command
-channel. MCP publications grant access to the declared pipeline or agent
-session, not unrestricted host execution. The `--dev` broker grants bounded
-host authority to the development shell; Kit jobs still receive no broker
-relay ([below](#what-is-not-isolated)). The real home directory is not mounted
-as the guest home. Two directories are shared:
+The guest does not mount your real home as its home directory. It shares two
+directories with the Mac:
 
 - the project you started in, read/write, at its Mac path
-- the guest home (`~/.marsh/home`), the home directory every job sees
+- the guest home (`$MARSH_HOME/home`, normally `~/.marsh/home`)
+
+`--ephemeral-home` uses a private disposable home and separate VMs for that
+session. It does not make the project read-only.
+
+MCP integrations and `--dev` can add access beyond these mounts, as described
+[below](#what-is-not-isolated).
 
 The host control directory, the install, and Kit sources are never mounted.
 marsh refuses to start in a directory that contains them.
@@ -59,8 +60,9 @@ marsh refuses to start in a directory that contains them.
 ### Shell VM
 
 Your shell runs here as your user, with passwordless `sudo` and a private
-Docker Engine. That is root inside this VM only. The VM has no Mac Docker socket
-and no `sbx` control. Root here can still read the project and the guest home.
+Docker Engine. That is root inside this VM only. By default, the VM has no Mac
+Docker socket or `sbx` control. Root here can still read the project and the
+guest home.
 
 All projects in one scope share one shell VM, one user, and one guest home.
 They can read each other's files. For work that must stay private from other
@@ -83,9 +85,8 @@ is a socket that lets it:
   [limits](agents.md#limits-and-messages) and `MARSH_SPAWN`
 - list its own jobs
 
-Containers in one Kit VM share that VM's kernel. A kernel escape from one job
-reaches the other jobs in the same Kit VM. The VM separates Kits from each
-other. The container does not.
+Containers for the same Kit share a VM kernel, so a kernel escape can expose
+other jobs in that VM. Different Kits run in separate VMs.
 
 ### Split branches
 
@@ -99,27 +100,28 @@ the fork's changes are captured. A registered command the branch starts, such
 as `claude`, runs in a container that mounts only the fork, like an argv
 branch.
 
-Every branch mounts the guest home read/write, because agents keep settings
-and history there.
+Agents in split branches still share the guest home read/write. A private
+project copy does not isolate their settings, login files, or history.
 
 ## What is not isolated
 
 The project
-: A direct job can read and write it. An agent that deletes files deletes them.
-  Registered agents in a split mount their private project copies instead.
+: A direct job can read, change, or delete project files. Registered agents in
+  a split mount their private project copies instead.
 
 The guest home
-: Every job reads and writes it. Agents keep settings and history there, so an
-  agent in one Kit can read another agent's settings. Credentials bound with
-  `sbx secret` go through the `sbx` proxy and are not stored here. A login an
-  agent makes from inside its container is stored here as ordinary files.
+: Jobs using the same guest home can read and write one another's settings,
+  history, and saved logins, even across Kits. Provider credentials bound with
+  `sbx secret` stay behind the proxy. An agent's own login flow can instead save
+  credentials here as ordinary files, readable by other jobs.
 
 Agents' own sandboxes
-: Claude Code and Codex sandboxes do not work inside a container, so the
-  packaged Kits turn them off. They run Claude Code with
+: The packaged Kits turn off Claude Code's and Codex's own sandboxes and
+  permission prompts because those sandboxes cannot create the namespaces
+  they need inside these containers. The Kits run Claude Code with
   `--dangerously-skip-permissions` and Codex with
   `--dangerously-bypass-approvals-and-sandbox`. Pi has no OS-level sandbox. The
-  only enforcement is the container and its VM.
+  job's container and VM enforce access to files and the network.
 
 Network
 : Docker Sandboxes enforces each Kit's network policy. The agent Kits can reach
@@ -133,15 +135,21 @@ Agents running agents
 
 MCP and ACP publications
 : Every client that loads a published pipeline can run it with your project's
-  privileges. Every client that loads a published session can steer that agent
-  the same way. A server loaded into a Kit VM is available to every job in that
-  VM. `marsh mcp install` gives a client full control of the project's marsh
-  shell. See [MCP](mcp.md) and [ACP](acp.md).
+  shell privileges. A published session gives its callers control of that
+  agent. A server loaded into a Kit VM is available to every job there.
+  Publishing registers the tool with the host broker, and loading makes it
+  available to clients in the target VM. Jobs get no general host-command relay,
+  but can use whatever operations a loaded MCP server offers, including host
+  access if that server provides it.
+  `marsh mcp install` gives a client control of the project's marsh shell and
+  managed VM lifecycle. The optional `--allow-full-sbx-control` server flag
+  also permits fixed repository test gates on the Mac, which execute the
+  checkout's Makefile. See [MCP](mcp.md) and [ACP](acp.md).
 
 `marsh --dev`
 : The development shell's `sbx` is a broker on the Mac. It is limited to VMs
   with a random prefix and a few directories, but it is real host authority.
-  Use it only for developing marsh.
+  Kit jobs do not receive this broker relay. Use it only for developing marsh.
 
 ## What marsh records
 
@@ -152,17 +160,19 @@ For each job marsh records:
 - exit status and cleanup result
 - timing
 
-It does not record prompts, terminal content, or command output.
-
-Command arguments and paths appear in `marsh results` and `marsh jobs`. Do not
-put secrets in them.
+The results journal does not capture terminal streams, command output, or ACP
+conversation content. It does store command arguments and paths, including a
+prompt passed as an argument. These appear in `marsh results` and `marsh jobs`;
+do not put secrets in them. Agents can also keep their own logs in the guest
+home.
 
 ## Known limitations
 
-- `sbx mount` takes a path, so the path could be swapped between marsh's check
-  and the mount. marsh checks the directory's identity before and after. A gap
-  remains. Exploiting it needs a process that can replace the directory. marsh
-  accepts it because `sbx` is trusted.
+- marsh opens project and home directories without following symlinks and
+  checks their device and inode identities before and after mounting. Because
+  `sbx mount` reopens a pathname rather than using marsh's directory descriptor,
+  a process on the Mac that can replace that directory could swap it during
+  the mount. marsh accepts this race under its trusted-host assumption.
 - When marsh cannot confirm that a container was removed, it does not retry the
   job. It marks the job `cleanup uncertain` and quarantines the VM until you
   run `marsh workers reset KIT`.

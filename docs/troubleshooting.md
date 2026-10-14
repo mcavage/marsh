@@ -1,7 +1,8 @@
 # Troubleshooting
 
-Start with these three commands:
+Use marsh's status and job records to find the failing part of a command:
 
+<!-- doc-test: host -->
 ```sh
 marsh status
 marsh jobs --tree
@@ -19,16 +20,17 @@ marsh results
 | The first call to an agent takes a while | [The first command is slow](#the-first-command-is-slow) |
 | Error before a shell opens | [marsh will not start](#marsh-will-not-start) |
 | A command exits 125 or 126 | [A job was refused](#a-job-was-refused) |
-| `cleanup uncertain` in `jobs --tree` | [Cleanup uncertain, and quarantine](#cleanup-uncertain-and-quarantine) |
+| `cleanup uncertain` in `jobs --tree` | [Cleanup uncertain and quarantine](#cleanup-uncertain-and-quarantine) |
 | A VM will not go away | [Removing VMs](#removing-vms) |
 | `join` left a split behind | [A split was kept](#a-split-was-kept) |
 | `ephemeral home capacity exhausted` | [Ephemeral home slots](#ephemeral-home-slots) |
 
 ## The first command is slow
 
-The first shell boots the shell VM. The first call to each Kit boots that
-Kit's VM, loads its image, and prints `[starting NAME worker VM…]`. Later
-calls reuse warm VMs.
+Starting with no VMs requires the shell VM to boot and each Kit VM to boot
+and load its image on first use. A foreground call prints
+`[starting NAME worker VM…]` when it boots a Kit VM; background calls suppress
+that notice. Later calls reuse warm VMs.
 
 To boot them up front, use `marsh --load all` or `marsh --load claude,codex`.
 
@@ -64,12 +66,6 @@ registry) in its Kit sources policy.
 The message is `cannot mount DIR into the VM: it contains marsh's private host
 state at PATH`. It can also end `it is inside ...`.
 
-Start marsh from your project, or from a scratch directory:
-
-```sh
-mkdir -p ~/scratch && cd ~/scratch
-```
-
 The directory you started in contains, or is inside, one of marsh's own paths:
 
 - the install prefix
@@ -77,7 +73,9 @@ The directory you started in contains, or is inside, one of marsh's own paths:
 - a Kit source
 - the daemon's runtime directory
 
-`/tmp` itself fails for this reason.
+For example, `/tmp` contains the daemon's private runtime directory and
+cannot be mounted as a project. Start marsh from your project or a scratch
+directory outside the protected paths.
 
 ## A job was refused
 
@@ -90,11 +88,17 @@ a name that `MARSH_SPAWN` excludes.
 | `depth limit 4` | the tree is already 4 jobs deep |
 | `fan-out limit 4` | this job already has 4 running children |
 | `... refused: same-Kit chain limit 2` | the call would make the same Kit three times in a row |
-| `total limit 64` | the tree has started 64 jobs |
+| `total limit 64` | the tree has used its 64 launches, including refused child calls |
+| `tree already uses ... Kit VMs (...) (MARSH_TREE_KIT_VMS)` | live jobs in the tree already use the configured number of distinct Kits; let one finish before adding another |
+| `deadline: parent job ... has ... ms of wall time left` | less than one second remains before the parent's deadline; a child cannot outlive it |
 | `spawn refused: NAME not in this job's spawn set` | `MARSH_SPAWN` or `--spawn` excludes it (exit 126) |
 | `interactive child jobs are not supported yet` | a child job was given a terminal; redirect its stdin and stdout |
 
-## Cleanup uncertain, and quarantine
+Refused child calls count toward the tree's 64-launch budget. Avoid retry
+loops. A depth or same-Kit-chain refusal needs a different call structure;
+waiting will not clear it. See [job-tree limits](agents.md#limits-and-messages).
+
+## Cleanup uncertain and quarantine
 
 marsh checks that every container it starts is deleted. Sometimes it cannot
 confirm that, for example because the connection to a Kit VM was lost
@@ -104,11 +108,8 @@ mid-job. Then marsh:
 - marks the job `cleanup_uncertain` (`cleanup uncertain` in `jobs --tree`)
 - quarantines that Kit VM, so no new jobs go to it
 
-To clear it:
-
-```sh
-marsh workers reset KIT        # the Kit named in the message, or: all
-```
+Run `marsh workers reset KIT`, using the Kit name in the message, or
+`marsh workers reset all` to retire all idle or quarantined Kit VMs.
 
 This removes the VM, and the next call creates a new one. Files the job wrote
 to your project stay as they are. Review them with `git status` and
@@ -116,11 +117,12 @@ to your project stay as they are. Review them with `git status` and
 
 ## Removing VMs
 
-```sh
-marsh workers reset KIT|all    # idle Kit VMs
-marsh reset                    # every VM in this scope; daemon keeps running
-marsh stop                     # every VM in this scope, then stop the daemon
-```
+| Command | Effect |
+|---|---|
+| `marsh workers reset KIT` | Remove one idle or quarantined Kit VM |
+| `marsh workers reset all` | Remove all idle or quarantined Kit VMs |
+| `marsh reset` | Remove the scope's VMs; keep the daemon running |
+| `marsh stop` | Remove the scope's VMs and stop its daemon |
 
 `reset` and `stop` refuse while shells or jobs are open. Each prints the VMs it
 removed.
@@ -151,14 +153,15 @@ prove which VMs are its own.
 
 ## A split was kept
 
-`join` keeps a split if its command failed or if a branch could not be
-confirmed stopped:
+`join --keep` retains results deliberately. A nonzero join status, interrupted
+join, expired lease, or unconfirmed branch cleanup also keeps them. Bare join
+returns the branch status; with a downstream command, retention follows that
+command's status. `pipefail` does not change retention.
 
-```sh
-marsh splits               # list them
-marsh splits ID            # one split's branches and states
-marsh splits rm ID         # delete it
-```
+List results with `marsh splits`, inspect a split's state with
+`marsh splits ID`, and remove it with `marsh splits rm ID`. Removal deletes
+the forks and patches, so apply anything you want first. Join never applies
+a patch itself.
 
 If a branch's VM was lost, run `marsh workers reset all` before `rm`.
 
@@ -170,11 +173,8 @@ See [split and join](split.md) for details.
 holds data, which happens when a shell's cleanup was not verified. When no slot
 is free, it fails with `ephemeral home capacity exhausted`.
 
-When nothing is using the slot, discard it. This deletes the slot's data:
-
-```sh
-marsh recover-home SLOT --discard
-```
+When nothing is using the slot, run `marsh recover-home SLOT --discard`,
+substituting its slot number. This deletes the slot's data.
 
 ## Stale daemon after an upgrade
 
@@ -200,10 +200,10 @@ in [SECURITY.md](../SECURITY.md).
 
 ## Local Kit build does not match
 
-A local-source Kit is built twice: once by marsh (Buildx, plus its per-user
-Kit image cache) and once by stock `sbx create`, and the two image digests
-must agree. Kit builds are not reproducible from scratch, so they agree only
-when both come out of one BuildKit cache. marsh runs `sbx create` with
+A local-source Kit is built by marsh through Buildx and by stock
+`sbx create`. Their image digests must agree. Independent builds can produce
+different digests, so both need to reuse the same BuildKit cache. marsh runs
+`sbx create` with
 `SBX_KIT_BUILDER=host` (your own `SBX_KIT_BUILDER` does not reach it), and
 stock SBX reuses any build it already holds for the same source tree, however
 old. On a mismatch marsh recovers on its own: it drops a stale cache entry and
@@ -213,3 +213,5 @@ If `marsh` still reports a mismatch ("still mismatched after stock SBX rebuilt
 the Kit"), the two builds did not share a cache. Check that `docker buildx ls`
 selects a local builder (the `*` entry, for example `desktop-linux`), not a
 remote or cloud builder, then retry.
+
+Next: [Configuration](configuration.md), [Commands and Kits](kits.md).

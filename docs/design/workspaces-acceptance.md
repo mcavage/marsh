@@ -1,15 +1,15 @@
 # Workspaces acceptance scenarios
 
-Black-box scenarios for `docs/workspaces.md` (cited as `sN`), written before
-the implementation. Harness: `tests/acceptance/workspaces_uat.py`, run by
+Black-box scenarios for [workspaces](workspaces.md), with section references
+written as `sN`. Harness: `tests/acceptance/workspaces_uat.py`, run by
 `make regress ONLY=workspaces` (or `ONLY=W01-plain-bash`) against `~/.marsh-dev` (`--prefix`).
 There are no unit tests or mocks. Callers are host bash, `marsh -c` sessions,
 the host CLI, and registered fixture Kit commands. Inside Kit jobs the caller is
 the shipped `marsh` shim, driven by the fixture's argv-only `pipeline SEP ARGV
 [SEP ARGV]...` mode. That mode turns `%%%` into `:::` one level at a time,
-because a job argument cannot be the literal `:::`. The OCI fixture published
-before this change lacks `pipeline`. With it, W17-W21 fail and say so; pass
-`--kit tests/acceptance/fixture` or republish.
+because a job argument cannot be the literal `:::`. An older fixture without
+`pipeline` cannot run W17–W21. Use a current immutable fixture reference for
+release qualification; a local source fixture is an authoring option.
 
 The harness observes only stdout/stderr bytes, exit statuses, `PIPESTATUS`,
 the user's tree, and the user's `.git`: index bytes and mtime, HEAD, refs,
@@ -41,7 +41,7 @@ stop at the first failure. Evidence goes to `<evidence>/workspaces.json`.
 | W11 kit-confinement | s8 mounts (`NoWriteToUserTree`, `SnapshotImmutable`, `AdminReadOnly`); s4 no sockets; s5 lineage | Kit branches write absolute `<proj>/x`, `../../../../x`, `.git/x`, `.git/objects/x`, `../store.git/x`; plus `ok`, `authority`, `identity` | escapes fail and nothing appears; `ok` = `A\tinside.txt`; no sockets or authority env; cwd = fork; each receipt's mounts ⊇ the s8 table (admin dir read-write, its config/HEAD/info/packed-refs and the gitfile read-only) and no other user-tree path; store and user objects read-only; receipts carry `lineage`; containers deleted |
 | W12 admin-tamper | s8 capture verification; s11 bullet 4; review M6 | Kit writes `../.admin/lk/COMMIT_EDITMSG` (must succeed: Git state stays writable) and writes `../.admin/L/{config,HEAD,info/exclude}` (fsmonitor and hooksPath to real host scripts) and replaces the `.git` gitfile; `join --keep`; host `git -C <fork> status` and `commit` | each branch is `rejected:` or failed with EROFS/EBUSY/EACCES (not ENOENT); fork config has no `core.fsmonitor/hooksPath`; marker files absent. A control repo first proves host git runs fsmonitor |
 | W13 nested-dotgit | s8 no nested `.git` at any depth (case-insensitive APFS) | Kit writes `src/.git` and `src/.GiT` gitfiles that point at a repo with an fsmonitor marker | both `rejected:` and fork removed; sibling branch `exited 0`; marker absent |
-| W14 hostile-user-repo | s8 isolated gix; s11 bullet 5 | user repo config: fsmonitor, required clean/smudge filter, `diff.external`, hooksPath, `include.path`; dirty file | split and join succeed; no marker from any of them |
+| W14 hostile-user-repo | s8 metadata read as data, no host Git execution; s11 bullet 5 | user repo config: fsmonitor, required clean/smudge filter, `diff.external`, hooksPath, `include.path`; dirty file | split and join succeed; no marker from any of them |
 | W15 label-and-argv-refusal | s2 labels; s2 registered CMD; s7 all-or-nothing | `../x`, `a/b`, `A`+`a`, duplicate, `out`, `Base`, `.admin`, `::: ../y`, `::: k /bin/sh -c`, `::: k bash -c` | each exits 2 with a diagnostic; marker absent; no new split dir; no Kit job |
 | W16 caps-and-pool | s4 fan-out cap 16; pool of 8 (`BudgetBound`) | 17 branches; then 9 × `sleep 6` with `join -- CMD` | 17 gives 2 and nothing runs; 9 gives exactly one `failed: capacity` and 8 `exited 0`, both visible in the rendering, and CMD runs |
 | W17 nested-from-kit | s2 shim; s3 creator-only join; s1 sibling forks; s5 lineage | session: `::: p fixture pipeline \| marsh split %%% c ... \| tee /dev/stderr \| marsh join --keep`; then the session joins the child handle | child created and kept; the ancestor's join exits nonzero and its CMD never runs; child lineage names the parent; child `out/` is a sibling under `.marsh/split/`; `c.txt` absent from the user tree; receipts verified deleted |
@@ -59,14 +59,23 @@ stop at the first failure. Evidence goes to `<evidence>/workspaces.json`.
 | W30 capture-ignored | s8 capture of ignored output, rendering, phase times | Git repo with `.gitignore` = `__pycache__/`, `*.log`; a shell branch runs `python3 -c 'import x'`, writes `build/__pycache__/y.pyc` and `run.log`, adds `notes.txt` to `.gitignore`, edits `notes.txt`, appends to `blob.bin`; `join --timing -- CMD` | the branch made a `.pyc`; `files` = `M .gitignore`, `M notes.txt`, `M blob.bin`; no `diff --git` names a `.pyc` or `run.log`; the rendering shows `binary file changed: blob.bin (5 bytes; full patch in $SPLIT_DIR/py/diff.patch)`; stderr has `timing: snapshot …; forks …; run …; capture py …; consumer …` |
 | W24 performance | proposed budget (spec states none) | 10k-file committed repo, warm; median of 3 for `split -b a=true \| join` vs `marsh -c true` | overhead ≤ 1.5 s |
 
-## Open questions found while writing these
+## Historical questions from scenario design
 
-1. Host CLI creator identity. s2 shows `marsh split … | marsh join` and the
-   two-step `h=$(…); marsh join <<<"$h"` from a plain terminal. In that case
-   each process opens its own ephemeral session. W01, W04, and W05 assume the
-   host user is one creator. W23 uses two `marsh -c` sessions.
-2. JSON shapes are not specified for `splits --json`, `status --json` split
-   counts, manifest branches, or receipt `lineage`. The harness only searches
-   for records with `id`/`state`/`label`/`placement` and for `kept` counts.
-3. Depth numbering. The harness takes the root split as depth 1.
-4. The state string after a cancel (`cancel`, `cancelled`, or `done`).
+These were resolved in `workspaces.md`, section 16. Host CLI callers share the
+`host` creator, JSON shapes are specified, the root split is depth 1, and a
+cancelled split is recorded as `cancelled`. The original questions follow for
+review history.
+
+1. **Host CLI creator identity.** The draft showed both the pipeline and
+   two-step handle forms from a plain terminal without explaining how their
+   separate sessions shared creator identity. W01, W04, and W05 assumed one
+   host creator; section 16 confirmed it. W23 continues to check two distinct
+   `marsh -c` session creators.
+2. **JSON shapes.** The draft omitted shapes for `splits --json`, status
+   counts, manifest branches, and receipt lineage. The original harness
+   searched for IDs, states, labels, placements, and kept counts; section 16
+   supplied the shapes.
+3. **Depth numbering.** The harness assumed a root split at depth 1, which
+   section 16 adopted.
+4. **Cancellation state.** The draft left `cancel`, `cancelled`, and `done`
+   unresolved. Section 16 selected `cancelled` for the public record.

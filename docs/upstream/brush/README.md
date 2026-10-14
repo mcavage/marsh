@@ -6,6 +6,19 @@ These patches target pinned Brush revision
 and the marsh build compiles it directly. `vendor/brush/UPSTREAM_REVISION` and
 `vendor/brush/MARSH-VENDORING.md` record how to reproduce the vendored tree.
 
+The `.patch` files are the queue inventory, applied in filename order. IDs
+include suffixes and the intentionally unused `0011`; count the files with:
+
+```sh
+find docs/upstream/brush -maxdepth 1 -name '*.patch' -type f | wc -l
+```
+
+Each entry below describes what that patch changed when introduced. Later
+patches can supersede it: `0035` replaces shell-owned splits, `0073` replaces
+`0055`'s byte handling, and `0090` extends `0025`'s name references. Current
+qualification and known gaps are in
+[Bash compatibility](../../design/bash-compatibility.md).
+
 - `0001` turns bundled registrations into process-backed builtin shims. Command
   lookup keeps special builtin, function, and ordinary builtin precedence, but
   returns the normal external `StartedProcess`, including the pipeline process
@@ -27,8 +40,7 @@ and the marsh build compiles it directly. `vendor/brush/UPSTREAM_REVISION` and
 - `0005a` records preexisting composition/parser/runtime-manifest changes that
   were present in the preserved pre-audit vendor snapshot but missing from the
   older queue. It also records rightmost status selection needed by `0007`.
-  This prerequisite reconstructs historical source; it introduces no new
-  runtime edits in this audit.
+  This prerequisite reconstructs the historical source snapshot.
 - `0006` exports the marsh session command directory and authority context
   through Brush's entry path, including after startup files. This is product
   wiring, not a Bash compatibility change.
@@ -57,16 +69,16 @@ and the marsh build compiles it directly. `vendor/brush/UPSTREAM_REVISION` and
   rightmost PID from `0009`. On non-Unix platforms, unsupported descriptor
   closure fails explicitly rather than substituting a successful null writer.
 
-The former `0011` native-shell/lexical-alias fork (including a vendored
-reedline fork) was dropped; `0011` is intentionally unused. `vendor/brush/` is
-now the pristine pin plus `0001` through `0010` (with `0005a` and `0008a`) and
-`0012` through `0046` applied with
-`git apply --exclude=MARSH-VENDORING.md --exclude=README.md` in filename
-order. Of the behavior previously attributed to `0011`, small readable slices
-were re-ported as `0018` (ENOEXEC fallback), `0022` (read units), and `0023`
-(lexical aliases). Native subprocess snapshots, lossless byte values, and the
-regex helper are not present; any remaining Bash gaps are `#[ignore]`d with
-reasons in `crates/marsh/tests/bash_audit.rs`.
+The former `0011` native-shell/lexical-alias fork, including its vendored
+Reedline fork, was dropped; `0011` is intentionally unused. The vendored tree
+is the upstream pin plus the queue above, applied with
+`git apply --exclude=MARSH-VENDORING.md --exclude=README.md` in filename order.
+Parts of `0011` were reintroduced in smaller patches: `0018` (ENOEXEC), `0022`
+(read units), and `0023` (lexical aliases). Later patches add process subshells
+(`0024`), lossless bytes (`0073`, `0079`), and libc POSIX regex matching
+(`0084`), without restoring that fork or its regex helper. Remaining differences
+are classified in the compatibility document and executable divergence registry;
+`bash_audit.rs` currently has no ignored differential tests.
 
 - `0012` gives in-process background lists (`(exit 7) &`, `false &`,
   `a && b &`) a waitable identity above every platform PID limit, so `$!`,
@@ -285,7 +297,7 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   token text and `ParsingAtEndOfInput` the end position (both are matched in
   `brush-core` read units and `brush-interactive` completeness). Covered by a
   line-number differential in `bash_audit.rs`.
-- `0040` describes a process-backed registration (an marsh registered
+- `0040` describes a process-backed registration (a marsh registered
   command) in `type`, `type -t`, `type -a`, `command -v` and `command -V` as
   the first `PATH` executable that resolves to the registration's
   executable, i.e. its session command-directory link: `NAME is PATH`, `file`.
@@ -316,8 +328,9 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   too. One known leniency: Bash rejects a long option after a short one
   (`bash -c --login CMD`); Brush accepts it. Covered by a Bash differential
   of thirteen orders in `bash_audit.rs`
-  (`command_flag_takes_the_first_operand_in_bash_option_order`) and in a
-  job by `processes_uat.py` P26.
+  (`command_flag_takes_the_first_operand_in_bash_option_order`). The former
+  in-job Brush check, `processes_uat.py` P26, was retired when jobs kept their
+  image's own shells.
 - `0043` prints Bash's interactive job-control lines. The launch line is
   `[N] PID` (Brush printed `[N]+<TAB>PID`); a completion notification is
   `[N]A  STATE<pad>CMD` with Bash's 27-column state field, `Done` for status
@@ -355,6 +368,10 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   all stderr went to `collect`'s stderr ahead of the rendering, so headers
   and their stderr could appear out of order. marsh-specific; covered by
   P38 in `tests/acceptance/processes_uat.py`.
+
+- `0047` exports `FANOUT_BRANCH=<id>/<label>` in each branch's cloned shell
+  context so jobs it starts can be grouped under the fanout in
+  `marsh jobs --tree`. This is marsh-specific lineage metadata.
 
 - `0048` normalizes a `fanout { }` or `split { }` nested in a branch, right
   after the branch label (`review: fanout { a: x, b: y } | collect`), and
@@ -397,7 +414,7 @@ reasons in `crates/marsh/tests/bash_audit.rs`.
   `fanout` starts three capture threads per branch and forks straight after,
   a pipeline starts a pool thread for a leading builtin before forking the next
   stage, and a child's own runtime is still starting workers when its body
-  forks. Two parts. The Brush-owned thread starts (`spawn_running`) wait for
+  forks. The fix has two parts. Brush-owned thread starts (`spawn_running`) wait for
   the thread to be past its start, removing the systematic collisions without
   a delay. `fork` then waits for the child to claim its start in a word of
   shared memory (compare-and-swap, so exactly one side decides); a child that
@@ -771,15 +788,21 @@ The `0005` delta is covered through the embedded marsh caller with a real
 foreground process group: SIGINT interrupts the child, invokes the registered
 trap, preserves its output, and exits with status 130.
 
-The vendored directory is a runtime-source snapshot, so it omits upstream's
-test harness and development corpus. The maintained regression gate for these
-first nine deltas is `crates/marsh/tests/smoke.rs`; the full upstream suite is run
-in an isolated checkout when refreshing the pin. Patch `0010` has a separate
-real-caller differential gate:
+## Regression gates
+
+The vendored runtime-source snapshot omits upstream's test harness and
+development corpus. `crates/marsh/tests/smoke.rs` covers embedding and shell
+journeys; `bash_audit.rs` compares behavior with Bash. Run the full upstream
+suite in an isolated checkout when refreshing the pin. The differential gate is:
 
 ```sh
 cargo test -p marsh --test bash_audit -- --test-threads=1
 ```
+
+## Historical qualification runs
+
+The following results describe earlier patch sets, not a fresh run of the
+current candidate.
 
 The original `0010` gate compared six GNU Bash differentials through the
 embedded Brush driver. That historical Linux ARM64 result did not cover the

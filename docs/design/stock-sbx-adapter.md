@@ -10,8 +10,8 @@ run a registered command directly in a VM. Host `sbx` is trusted.
 
 Startup requires stock SBX v0.45.0 or newer (stable or coherent nightly),
 checks the exact reported version and commit, and probes the local Kit v3
-create surface before creating product state. Smoke currently runs against
-v0.46.0. The version check does not prove that a build has the EROFS
+create surface before creating product state. The recorded smoke baseline is
+v0.46.0; it is not qualification of every later version. The version check does not prove that a build has the EROFS
 writable-layer discard fix; acceptance checks container cleanup directly.
 
 Homebrew owns installation of `sbx`. marsh resolves `MARSH_SBX`, otherwise
@@ -62,7 +62,11 @@ Jobs keep the image's static environment plus validated `HOME`, `USER`,
 also passes only the fixed proxy endpoint, bounded credential-mode sentinels, a
 read-only CA bundle, and the sandbox-local MCP Gateway URL and sentinel name as
 a pair. Gateway tools loaded into a Kit VM are visible to every job in it. Jobs
-receive no raw credentials, worker environment, or Docker/SBX socket.
+receive no proxy-held raw credentials, worker environment, or Docker/SBX socket.
+Their daemon requests go through the scoped job capability socket
+(`docs/design/processes.md`). An agent's explicit login can persist state in
+the shared guest home; the [security model](../security.md) distinguishes that
+from SBX's proxy-held credentials.
 
 `--load` prepares the VM, worker, and job image before returning.
 

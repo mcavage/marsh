@@ -1,8 +1,8 @@
 # marsh architecture
 
-This describes the current implementation. The user-visible contract is
-`plan/local-product-contract.md`; cross-component state is specified in
-`model/README.md`.
+This describes the current implementation. Read the
+[local product contract](plan/local-product-contract.md) for user-visible
+behavior and the [model](model/README.md) for cross-component state.
 
 ## Topology
 
@@ -18,8 +18,10 @@ macOS host
     natural Mac paths                    (VM-private Docker; no sockets passed in)
 ```
 
-All shells for one user and selected `MARSH_HOME` share the daemon and its
-warm VMs. Session, job, attempt, worker, VM, and container identities are
+All shells for one user and selected `MARSH_HOME` share the daemon. Ordinary
+persistent shells share a warm shell VM; dev shells and ephemeral homes use
+separate shell-VM slots. Kit VMs are shared by Kit identity. Session, job,
+attempt, worker, VM, and container identities are
 distinct and are never derived from each other.
 
 ## Data flow
@@ -29,23 +31,32 @@ distinct and are never derived from each other.
    socket with a bearer token. It starts `marshd` if none is running.
 2. The daemon admits the project and home sources through no-follow directory
    descriptors, ensures an owned shell VM, mounts the sources (kept while the
-   VM is warm), and starts the guest relay over one long-lived `sbx exec`.
+   VM is warm), and starts a session through the VM's retained root-supervisor
+   transport (`sbx exec -i`). The supervisor starts the shell and guest relay
+   as one session attempt and verifies its containment is empty at teardown.
 3. The guest runs Brush (vendored upstream plus `docs/upstream/brush/`
    patches), or, if the user chose it, the VM's own bash or zsh as a child of
    the guest marsh with the same session links first on `PATH`
-   (`shells.md`, `marsh/src/shell_choice.rs`). Registered command names resolve through Brush's process shim and
+    (`shells.md`, `marsh/src/shell_choice.rs`). Registered command names resolve
+    through Brush's process shim and
    private links on `PATH`; each call goes back to the daemon over the relay.
    `marsh split` / `join` / `splits` (and the Brush sugar
    `split { ... } | join | CMD`, patch `0035`, a thin client) are daemon
-   requests (`docs/workspaces.md`): `marsh-daemon/src/split.rs` journals the
+    requests ([workspace design](design/workspaces.md)):
+    `marsh-daemon/src/split.rs` journals the
    split, `split_fs.rs` snapshots the caller's tree by stat-checked clone into
    `<root>/.marsh/split/<id>/base`, clones one fork per branch with
    daemon-written Git metadata, and runs each branch through the daemon's own
    endpoint (a fresh session shell for `-b`, `Execute` for `:::`). A Kit job
-   in a fork mounts only the fork plus read-only Git metadata
-   (`split_confinement.rs`). Results are `git apply`-compatible patches in
-   `out/`; the user's tree and `.git` are never written.
-4. Every Kit job gets a read-only `/run/marsh` (`docs/processes.md`): the
+    in a fork mounts the fork, its private writable Git state, read-only Git
+    control files and object sources, and the selected guest home
+    (`split_confinement.rs`). Results are `git apply`-compatible patches in
+    `out/`; split machinery never writes the user's source files or `.git`.
+    Snapshot and fork copies use macOS `clonefileat`, with descriptor-based
+    copying only when cloning returns `Unsupported`. There is no gix or host
+    `git` execution in this path.
+4. Every Kit job gets a read-only `/run/marsh`
+   ([process design](design/processes.md)): the
    per-attempt capability socket `cap.sock` (worker `capability.rs`, backend
    `CapabilityBridges`), `job.json`, `context.md`, and `bin/` links
    (`#!/run/marsh/marsh --link=NAME`) to the static musl artifact
@@ -53,8 +64,9 @@ distinct and are never derived from each other.
    runs the entry rule, keeps an image-provided name local, or sends
    `ProcessRun`; the daemon (`process.rs`) admits it under one lineage tree
    and runs it through its own `Execute` with the parent's mounts. The
-   capability admits only `ProcessRun`, `ProcessShow`, the job's own
-   `jobs`, `SplitCreate`, and `SplitJoin`.
+   capability admits only `ProcessRun`, `ProcessShow`, `Jobs`, `ShowJob`,
+   `SplitCreate`, and `SplitJoin`. Job inspection is limited to the caller's
+   own subtree.
 5. The daemon resolves the Kit, ensures an owned Kit VM, and sends the attempt
    over that VM's retained worker transport. The worker creates one fresh
    container from the exact Kit image with nonroot identity and resource
@@ -62,7 +74,8 @@ distinct and are never derived from each other.
    the container, and verifies its absence.
 6. The daemon writes a structural receipt (identities, state, exit cause,
    cleanup, phase timings) to an owner-only journal under the host control
-   directory. No prompt or output bytes are stored.
+   directory. The journal stores bounded invocation arguments for display,
+   which can include prompt text, but captures no stdin, stdout, or stderr.
 
 Transport loss with active attempts marks them `cleanup_uncertain` and
 quarantines the VM; jobs are never replayed. `marsh workers reset KIT` retires
@@ -119,10 +132,13 @@ module to the responsible crate before adding a crate or service.
   Projects sharing a selected home share this VM.
 - **Kit job container**: nonroot, resource-limited, fresh per call, with only
   the project and home grants (a child job: its parent's mounts). It
-  receives no Docker, containerd, or SBX socket and no raw credentials; its
-  only daemon channel is the scoped job capability socket. Stock SBX applies the Kit's network
+  receives no Docker, containerd, or SBX socket and no proxy-held raw credentials;
+  its only daemon channel is the scoped job capability socket. Stock SBX applies the Kit's network
   policy and credential proxy at the VM boundary. Containers in one Kit VM
   share a kernel.
+- **Guest home**: agent settings, history, and any explicit login state persist
+  in the selected home and are shared by jobs in that scope. Proxy-held keys
+  do not enter it through marsh. See the [security model](security.md).
 - **MCP Gateway**: servers loaded into a Kit VM are available to every job in
   it. Do not load a host-control server such as `marsh-dev` into a Kit VM
   unless that authority is intended.
@@ -130,7 +146,8 @@ module to the responsible crate before adding a crate or service.
 ## Extending
 
 - New command: add a registry mapping to a native Kit v3 source or immutable
-  reference (`command-registry.md`). marsh has no Kit schema of its own.
+  reference ([command registry](design/command-registry.md)). marsh has no Kit
+  schema of its own.
 - Shell behavior: change Brush through a small patch in
   `docs/upstream/brush/` and add a Bash differential test.
 - Ownership, worker lifecycle, mounts, cancellation, or grants: update

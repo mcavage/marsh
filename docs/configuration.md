@@ -1,28 +1,25 @@
 # Configuration
 
-Raise a job's memory limit, or give a project its own state:
+marsh keeps configuration and runtime state per `MARSH_HOME`. Use this page
+to change job limits, choose a shell, or find the files used by your
+[installation](install.md).
 
-```sh
-marsh stop
-MARSH_JOB_MEMORY_BYTES=17179869184 marsh     # 16 GiB per job
-```
-
-```sh
-MARSH_HOME=~/.marsh-work marsh               # a separate scope
-```
+For a separate guest home and set of VMs, launch with
+`MARSH_HOME=~/.marsh-work marsh`. To raise the per-job memory limit to 16 GiB,
+finish active work, exit open shells, run `marsh stop`, then launch with
+`MARSH_JOB_MEMORY_BYTES=17179869184 marsh`.
 
 `marsh status` shows the limits in effect. It prints a block that starts
 `Per-job defaults (daemon first-launch snapshot):`, then one line per limit,
 each ending in `[built-in default]` or
 `[daemon launch environment: VARIABLE]`.
 
-The rest of this page is lookup: variables, files, and where marsh keeps state.
-
 ## Scopes
 
-A *scope* is one `MARSH_HOME`. It has its own daemon, shell VM, Kit VMs, guest
-home, and record of finished jobs. The default scope is `~/.marsh`. Everything
-run with the same `MARSH_HOME` shares that state.
+A *scope* is one canonical `MARSH_HOME` path. It has its own daemon, VMs,
+guest home, and job records. The default scope is `~/.marsh`.
+Persistent-home shells in that scope share the shell VM; an
+[ephemeral-home shell](shell.md#ephemeral-home) gets a separate VM and home.
 
 Use separate scopes when work must not share a VM or guest home, for example
 a client project and your personal agent logins. Scopes do not separate your
@@ -33,7 +30,7 @@ project files: a job in any scope can write the project it runs in.
 | Variable | Meaning |
 |---|---|
 | `MARSH_HOME` | Absolute scope root. Default `~/.marsh`. The guest home is `$MARSH_HOME/home`. |
-| `MARSH_SHELL` | Shell to run: `marsh` (Brush, the default), `bash`, or `zsh`. See [Choosing a shell](shells.md). |
+| `MARSH_SHELL` | Shell to run: `marsh` (Brush, the default), `bash`, or `zsh`. See [Choosing your shell](shells.md). |
 | `MARSH_SBX` | Path to `sbx`. Default: `sbx` on `PATH`. |
 | `MARSH_CONTROL_HOME` | Host-only state root. See [Control home](#control-home). |
 | `MARSH_SPAWN` | Names that jobs started from this shell may start. A comma-separated list, or `none`. It can only narrow. A refused name exits 126 ([Agents running agents](agents.md#narrowing-what-an-agent-may-start)). |
@@ -53,14 +50,14 @@ job in the scope. Values are positive integers.
 | `MARSH_JOB_WRITABLE_BYTES` | 10737418240 (10 GiB). Counts the container's own files, not mounted directories. |
 | `MARSH_JOB_OUTPUT_BYTES` | 268435456 (256 MiB). stdout and stderr together. |
 | `MARSH_JOB_WALL_SECONDS` | 86400 (24 hours) |
-| `MARSH_TREE_KIT_VMS` | 4. Distinct Kit VMs one job tree may use, 1 to 64. |
+| `MARSH_TREE_KIT_VMS` | 4. Distinct Kit VMs used by live jobs in one tree, 1 to 64. Aliases of the same Kit share a VM. |
 
 To see the values in effect, run `marsh status` (or `marsh status --json` and
 read `job_defaults`).
 
 To change them:
 
-1. Let running work finish.
+1. Let running work finish and exit open shells.
 2. Run `marsh stop`.
 3. Start marsh with the new values, as in the example at the top.
 
@@ -76,14 +73,19 @@ limit by whatever it writes in that interval.
 
 #### Fixed limits
 
-These cannot be changed. Each refusal prints a message and exits 125
+These cannot be changed. A call that exceeds one is refused with exit 125
 ([messages](agents.md#limits-and-messages)).
 
 - 8 jobs at once per daemon
 - depth 4
 - 4 live children per job
 - the same Kit at most twice in a row
-- 64 jobs per tree
+- 64 launches per tree, including refused child calls
+
+Children also inherit their parent's wall-time deadline. With less than one
+second remaining, a new child is refused. Parallel composition has separate
+[fanout](fanout.md#limits) and [split capture](split.md#what-is-captured)
+limits.
 
 ### Control home
 
@@ -102,14 +104,14 @@ When unset, control directories are in
 
 ## Files
 
-| Path | What |
+| Path | Contents |
 |---|---|
 | `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`. Default path `~/.marsh/config.json`. |
 | `$MARSH_HOME/home/` | The guest home. Agent logins and settings (`.claude`, `.codex`) live here. Every job in the scope can read it. Default path `~/.marsh/home/`. |
 | `CONTROL/HASH/` | Host-only control directory for a scope. `marsh status` prints it. Never mounted into a VM. |
 | `CONTROL/HASH/commands.json` | Your command registry. Overrides packaged entries by name. See [Commands and Kits](kits.md#adding-a-command). |
 | `CONTROL/HASH/agents.json` | Your ACP agent list. Replaces the packaged list; `[]` disables ACP. See [ACP](acp.md#adding-agents). |
-| `CONTROL/HASH/state/results.journal` | Finished jobs, for `marsh results`. |
+| `CONTROL/HASH/state/results.journal` | Structural job receipts, for `marsh results`. |
 | `PREFIX/libexec/marsh/` | Packaged `commands.json`, `agents.json`, `shell-image`, and the Linux binaries. |
 | `~/Library/Application Support/marsh/published-mcp/`, `published-acp/` | Host-only MCP and ACP publication declarations. Under `MARSH_CONTROL_HOME` when it is set. |
 | `~/Library/Application Support/marsh-mcp-scopes/` | Generated scope roots for `marsh mcp install sbx` and `marsh-mcp` broker modes. |
@@ -128,8 +130,10 @@ to change the prompt. See [The shell](shell.md#startup-files).
 
 ## Results
 
-`marsh results` lists finished jobs: the command and where it ran, its exit
-status, whether its container's deletion was verified, and timing. It does not
-store prompts or output. The newest 1,000 entries are kept.
+`marsh results` lists job receipts with the registered command name, where it
+ran, exit status, cleanup verification, and timing. The journal retains up to
+1,000 terminal receipts, including at most 16 arguments of 200 characters
+each. Prompts passed as arguments can be stored; stdin, stdout, and stderr
+are not recorded. marsh does not resume work after a daemon restart.
 
 Next: [Commands and Kits](kits.md), [Troubleshooting](troubleshooting.md).

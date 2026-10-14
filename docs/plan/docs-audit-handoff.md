@@ -1,5 +1,9 @@
 # Homepage and docs audit handoff
 
+This is the October 13 initial review. The later decisions and authorization
+are in [the editorial brief](docs-site-refresh.md); the findings below describe
+the documentation as it stood before the rewrite.
+
 ## Status
 
 Initial audit completed October 13, 2026. No product copy, code, or agent

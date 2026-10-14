@@ -74,11 +74,11 @@
     var command = session.querySelector(".session-command");
     var motion = matchMedia("(prefers-reduced-motion: reduce)");
     var phases = [
-      { label: "A Linux shell at your project's path.", command: "marsh", delay: 1100 },
-      { label: "split snapshots the project and creates private copies.", command: "split { … }", delay: 1300 },
-      { label: "Both branches run, each on its own files.", command: "claude … && make test\ncodex … && make test", delay: 1500 },
-      { label: "join returns each branch's output, status, and patch.", command: "} | join --keep", delay: 1100 },
-      { label: "Back at the prompt: inspect, apply, and test.", command: "less …/api/diff.patch\ngit apply …/api/diff.patch\nmake test", delay: 1400 }
+      { label: "marsh opens a Linux shell in your project.", command: "marsh", delay: 1100 },
+      { label: "split makes a copy for each branch.", command: "split { … }", delay: 1300 },
+      { label: "Claude and Codex work on separate copies.", command: "claude … && make test\ncodex … && make test", delay: 1500 },
+      { label: "join prints the results and patch paths.", command: "} | join --keep", delay: 1100 },
+      { label: "Apply the patches you want to keep.", command: "less …/api/diff.patch\ngit apply …/api/diff.patch\nmake test", delay: 1400 }
     ];
     var timer = null;
     var playing = false;
@@ -97,7 +97,7 @@
         button.textContent = "Replay";
         button.setAttribute("aria-label", "Replay shell session animation");
       });
-      stage.textContent = "A Linux shell. Private copies. Patches you choose.";
+      stage.textContent = "You choose which patches to apply.";
       if (command) command.textContent = "split { … } | join --keep";
     }
     function step(index) {

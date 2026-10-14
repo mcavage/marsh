@@ -26,8 +26,8 @@ establish builder provenance or replace a provider redistribution review.
 
 ## Keeping pins current
 
-Every input above is pinned, so freshness is a job for automation that proposes
-changes, not for builds that silently take the latest. Renovate
+Builds keep these pinned inputs; Renovate proposes updates for review.
+Renovate
 (`.github/renovate.json5`, run on a schedule by `.github/workflows/renovate.yml`)
 opens a PR when any of these moves:
 
@@ -160,17 +160,18 @@ created private; make each one public once in its settings.
 
 ## Pi's nested shrinkwrap
 
-Both Pi Kits install their runtime and gateway dependencies with `npm ci` and
-lifecycle scripts disabled. Their package locks carry integrity hashes. Native
-Pi's declared Kit version must match its exact package version.
+The Pi Kit installs its runtime and gateway dependencies with `npm ci` and
+lifecycle scripts disabled. Its package lock carries integrity hashes, and its
+declared Kit version must match the exact package version. The shell template
+separately locks the Pi used by `pi-dev` under `packaging/shell/pi`.
 
-Pi 1.0.0 (like 0.86.1) embedded an npm shrinkwrap containing `brace-expansion` 5.0.9. npm can
-install that version despite a root override and a changed outer lock entry.
-Consequently, a clean audit of a manually changed outer lock is insufficient.
-Pi 1.1.0 no longer nests `brace-expansion`; its `minimatch` resolves the
-top-level package.
+Pi 1.0.0, like 0.86.1, shipped its own npm shrinkwrap with `brace-expansion`
+5.0.9. npm could install that nested copy despite a root override and a changed
+outer lock, so checking the outer lock alone missed what Pi actually used.
+Pi 1.1.0 removed the nested copy, and its `minimatch` resolves the top-level
+package instead.
 
-Each Pi Kit separately locks `brace-expansion` 5.0.12. After installation, for
+The Pi Kit locks `brace-expansion` 5.0.12. After installation, for
 any Pi release, `patch-pi-dependencies.mjs` requires the fixed `brace-expansion`
 (5.0.12 or later), fails if Pi bundles its own `brace-expansion` again, checks
 that Pi's own `minimatch` resolves the fixed package, and exercises
@@ -303,32 +304,35 @@ linked.
 Codex release (exact-tag lock and source, the canonical collectors, provider
 legal files); `add-claude-release.py --version V` records a Claude Code
 release's npm legal files and native manifest and refuses a changed LICENSE.md.
-`primary-source-notices.json` supersedes the historical 23/22/23 gap counts:
-eighteen unique gaps now retain actual archived declarations and copyright
-headers with declared Apache-2.0 terms (or the explicitly permitted alternative).
-Plain Apache declarations are not miscalled alternative elections; no copyright is
-manufactured. Original difflib and fax upstream material is now supplied with its
-version/copyright caveats: difflib's Kevin B. Knapp attribution is unchanged, and
-fax's later clarification is not claimed to be in the old crate. Original upstream
-full-text/rights disposition remains external for debugserver-types and icudata.
-Npm and Rust now use one policy: informational standard permission text may
-accompany a declaration, but is not an acquired upstream grant, invented copyright
-or self-approved rights guarantee. Source-default feature analysis remains
-supporting scope, not actual compiled linkage or a shipping-notice waiver.
+`primary-source-notices.json` replaced the historical 23/22/23 gap counts with
+records for eighteen unique gaps, retaining archived declarations and copyright
+headers under Apache-2.0 or an explicitly permitted alternative. A plain Apache
+declaration is recorded as such, without inventing a license election or holder.
+The collected difflib material keeps Kevin B. Knapp's attribution, while fax's
+later clarification is identified separately from the old crate. Original
+upstream full text and rights disposition remain external for debugserver-types
+and icudata.
 
-Available native materials are now collected from actual pins: libcap2.75,
-OpenSSL3.6.4, eleven voice source archives, original V8/rusty_v8/LLVM/ICU and
-additional native dependency grants, producer-pinned musl1.2.6, and official
-rustc1.95 release compiler legal documents. The V8 producer's own tag commit
+For both npm and Rust, informational standard permission text may accompany a
+declaration, but it does not supply a missing upstream grant. Default-feature
+analysis helps identify possible dependencies; it cannot establish which code
+was compiled or excuse missing shipping notices.
+
+Collected native materials follow the actual pins: libcap 2.75,
+OpenSSL 3.6.4, eleven voice source archives, V8/rusty_v8/LLVM/ICU and
+additional native dependency grants, producer-pinned musl 1.2.6, and official
+rustc 1.95 release compiler legal documents. The V8 producer's tag commit
 `12b3e88028b983051913fb6bb95d7a11218bdceb`, Bazel overrides/registry hashes and
-both consumer-pinned musl archive/binding manifests are retained. Its ICU input
-is 77.1, not blindly the newer crate submodule; icudata identifies ICU77 data,
-which is not generically relicensed MIT. Sandbox/default libc++/pointer-compression
-selection is source-grounded. Release Cargo commands omit `--locked`, the main
-helper's apt musl-tools version is unpinned, and the v8 crate records `dirty=true`.
-Those limits do not become invented clean-source, signature or reproducible-build
-claims. Release-compiler notices are not an inventory of the Rust toolchain copied into
-the shell image.
+both consumer-pinned musl archive/binding manifests are retained. The producer
+used ICU 77.1 rather than the newer crate submodule; icudata identifies ICU 77
+data, whose terms remain separate from the crate's MIT declaration. The source
+configuration records sandbox, default libc++, and pointer-compression choices.
+
+There are limits to the build evidence: release Cargo commands omit `--locked`,
+the main helper's apt musl-tools version is unpinned, and the v8 crate records
+`dirty=true`. These records cannot establish clean source, verified signatures,
+or reproducible builds. The release-compiler notices also do not inventory the
+Rust toolchain copied into the shell image.
 Ripgrep elects MIT; both archive legal members and original PCRE2 10.46 licence
 including JIT attribution and its precise binary-library exception are retained.
 
@@ -344,9 +348,9 @@ built-image lookup/version guard. ACP 0.160.1 and Claude SDK 0.3.293 package
 members and required retained texts are independently bound to SHA512-checked
 public packages. Other npm coverage is metadata/notices only, not full-code approval.
 
-A single notice vocabulary excludes whole source-code name matches; exact legal
-comment excerpts are separately typed. The authoritative README ships inside
-`collected/`. Corresponding source for the DHI-built packages and DHI's Debian
+The notice inventory distinguishes exact legal-comment excerpts from full
+notice texts and excludes whole-source-code name matches. Its authoritative
+README ships inside `collected/`. Corresponding source for the DHI-built packages and DHI's Debian
 package patches is not linked or bundled. Rust toolchain additions to the shell
 template require a separate exact notice/payload inventory. See
 [`packaging/dhi-notices/README.md`](../../packaging/dhi-notices/README.md) for the

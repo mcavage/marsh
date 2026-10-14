@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install marsh — marshal your agents.
+# Install marsh on an Apple Silicon Mac.
 #
 #   curl -fsSL https://runmar.sh/install | sh
 #   curl -fsSL https://runmar.sh/install | sh -s -- --prefix /usr/local
@@ -30,7 +30,7 @@ warn() { printf 'marsh install: warning: %s\n' "$*" >&2; }
 die() { printf 'marsh install: %s\n' "$*" >&2; exit 1; }
 usage() {
   cat <<'USAGE'
-Install marsh (marshal your agents) on an Apple Silicon Mac.
+Install marsh on an Apple Silicon Mac.
 
   curl -fsSL https://runmar.sh/install | sh -s -- [OPTIONS]
 

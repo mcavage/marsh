@@ -8,7 +8,7 @@ manual: User Commands
 
 # NAME
 
-marsh, msh - a Bash-compatible Linux shell for composing agents
+marsh, msh - shell for composing agents
 
 # SYNOPSIS
 
@@ -35,15 +35,16 @@ Registered commands work in pipelines, scripts, **make**, and background jobs
 like any other command. A registered command started from inside another one
 becomes its child job.
 
-**split** runs commands in parallel, each on its own private copy of the
-project, and **join** prints what each said and a patch of what it changed.
-An agent in a split branch, whether a **:::** branch or a command started from
-a shell branch, mounts only its fork; you apply its patch. A shell branch's own
-shell code (**-b**) is not confined.
+**split** runs commands in parallel on private copies of the project.
+**join** prints each branch's output and patch. Registered commands in a split
+mount only their fork; use **join --keep** to retain patches for inspection
+and application. A shell branch's own code (**-b**) is not confined to its
+fork. **fanout** runs branches on shared files, and **collect** prints their
+output in declaration order.
 
-marsh does not sandbox the project from its commands. Every job can read and
-write the project directory and the guest home. Keep the project in Git, and
-use **split** to review changes before applying them. See
+Direct jobs can change or delete project files. Jobs using the same guest
+home can read one another's settings, history, and saved logins. Keep the
+project in Git, and use **split** for agent changes you want to review first. See
 https://runmar.sh/docs/security.html.
 
 **msh** is a symbolic link to **marsh** and behaves identically.
@@ -68,8 +69,9 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   cannot be released, the slot is retained; see **recover-home**.
 
 **--dev**
-: Open a development shell whose **sbx** is a confined broker on the host. For
-  developing marsh itself; requires a development install.
+: Open a development shell whose **sbx** is a scoped host broker. Its grant
+  belongs to the shell, not Kit jobs. For developing marsh itself; requires a
+  development-enabled install or daemon.
 
 **-h**, **--help**
 : Print a summary of commands and exit.
@@ -118,13 +120,23 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 
 **join** [**--json**] [**--keep**] [**--timing**] [**--** *CMD* [*ARG*...]]
 : Read a split handle on stdin and print each branch's status, output, and
-  patch. With **--** *CMD*, run *CMD* on that output with **SPLIT_ID**,
+  patch. Only the split's creator can join it. **--keep** retains the split
+  and its patches, even on success; without it, success removes them.
+  **--json** prints the manifest instead of the text rendering. **--timing**
+  prints phase timings to stderr. With **--** *CMD*, run *CMD* on that output with **SPLIT_ID**,
   **SPLIT_DIR**, **SPLIT_MANIFEST** and **SPLIT_OBJECTS** set; the split is
-  removed if *CMD* exits 0 and kept otherwise.
+  removed if *CMD* exits 0, unless **--keep** is set, and kept otherwise.
+  *CMD* runs even if a branch failed, and **join** returns its status. Without
+  *CMD*, **join** returns the first nonzero branch status.
 
 **splits** [**--json**] [*ID*]
-: List splits. **splits cancel** *ID* cancels a running split;
-  **splits rm** *ID* removes a kept one.
+: List splits. With *ID*, show its state and phase timings, even after joining.
+
+**splits cancel** *ID*
+: Cancel a running split.
+
+**splits rm** *ID*
+: Remove a kept split and its patches.
 
 **fanout** [**-n**] [**-b** *LABEL*=*STRING*]... [**:::** *LABEL* *CMD* [*ARG*...]]... | **collect** [**--json**] [**--timing**] [**--stderr**]
 : Run branches at once on the same files (no copies). Print each branch's
@@ -159,38 +171,134 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 **mcp install** **codex**|**claude**|**sbx**
 : Register marsh as an MCP server for this project. **codex** and **claude**
   launch it on demand; **sbx** gives selected sandboxes a shared per-project
-  host broker.
+  host broker. Run this on the Mac. The server uses a separate managed scope
+  root rather than the CLI's default home.
 
-**mcp install-published**|**remove-published codex** *NAME*
+**mcp install-published codex** *NAME*, **mcp remove-published codex** *NAME*
 : Register or remove a published pipeline as a tool for host Codex. Only
-  **codex** is supported.
+  **codex** is supported. Run on the Mac from the publishing project with the
+  same **MARSH_HOME**. Removing the registration does not revoke the publication.
 
-**mcp** **serve**|**export-serve**|**start**|**stop**|**load**|**unpublish** ...
-: The rest of the MCP commands. See **marsh mcp --help**.
+**mcp serve** [*MCP_OPTIONS*...]
+: Serve MCP over stdio from a host process. Without **--scope-root** or
+  **--home**, use the CLI's selected home and disable creation of managed scopes.
 
-**acp install-published**|**remove-published codex** *NAME*
+**mcp export-serve** [*MCP_OPTIONS*...] **--declaration** *PATH*
+: Serve only the tool in a publication declaration. Requires **--home**.
+
+**mcp start**, **mcp stop**
+: Start or stop the project's host MCP broker. **stop** refuses while a sandbox
+  is attached.
+
+**mcp load** *NAME* **--sandbox** *SANDBOX*
+: Load an existing publication into a running same-user sandbox. Does not
+  replace the publication or invalidate other clients.
+
+**mcp unpublish** *NAME*
+: Revoke a publication, including calls from clients that already loaded it.
+
+**acp install-published codex** *NAME*, **acp remove-published codex** *NAME*
 : Register or remove a published ACP control tool with host Codex. Only
-  **codex** is supported.
+  **codex** is supported. Run on the Mac from the publishing project with the
+  same **MARSH_HOME**.
+
+**help** [*COMMAND*]
+: Show general help or help for a host command that has a help section.
+
+# MCP SERVER OPTIONS
+
+**--workspace** *PATH*
+: Manage this project directory. Defaults to the current directory.
+
+**--scope-root** *PATH*
+: Use a private root for separate managed scopes.
+
+**--home** *PATH*
+: Use one **MARSH_HOME**, with managed-scope creation disabled. Cannot be
+  combined with **--scope-root**.
+
+**--marsh** *PATH*, **--sbx** *PATH*
+: Select the installed marsh and stock Docker Sandboxes executables.
+
+**--allow-full-sbx-control**
+: Enable fixed repository qualification gates on the Mac. These execute the
+  project's Makefile; use only with a trusted checkout. Does not enable a
+  generic host-command tool.
 
 # SHELL COMMANDS
 
 Inside the shell, these commands are also available:
 
 **ps --marsh** [**--verbose**|**--json**], **top --marsh** [**--verbose**] [**--once**]
-: Show this project's shell, Kit jobs, and ACP sessions. **top** cannot show
+: Show this project's shell, Kit jobs, and ACP sessions. **top --marsh** cannot show
   CPU or memory.
 
-**acp reserve** *AGENT*, **acp run** [**--reservation** *ID*] *AGENT* **&**, **acp list** [**--mine**] [**--wait** [*ID*]] [**--json**], **acp ask** *ID* *TEXT*, **acp prompt** [**--key** *UUID*] *ID* *TEXT*, **acp status** *ID* [*CURSOR*] [**--json**], **acp cancel** *ID*, **acp permissions** *ID*, **acp respond** *ID* *REQUEST* *OPTION*, **acp attach**|**release** *ID*, **acp stop** *ID*, **acp publish** *ID* **--name** *NAME* [**--kit** *KIT*|**--sandbox** *SANDBOX*], **acp unpublish** *NAME*
-: Start and drive ACP agent sessions. Failures print **acp:** *MESSAGE* and
-  exit 125; usage errors exit 2. See https://runmar.sh/docs/acp.html.
+**acp reserve** *AGENT*
+: Reserve a session ID for this shell and print it. Start the session within
+  15 seconds or reserve again.
 
-**mcp publish** *NAME* [**--description** *TEXT*] [**--kit** *KIT*|**--sandbox** *SANDBOX*] **--** '*PIPELINE*', **mcp load** *NAME* **--kit** *KIT*|**--sandbox** *SANDBOX*, **mcp unpublish** *NAME*
+**acp run** [**--reservation** *ID*] *AGENT* **&**
+: Start an agent session as a background Kit job. Print its session and job
+  IDs to stderr when ready.
+
+**acp list** [**--mine**] [**--wait** [*ID*]] [**--json**]
+: List this project's sessions. **--mine** selects those this shell started.
+  **--wait** waits at most four minutes for readiness; without an ID it
+  requires exactly one live session. Use a reserved ID to wait for a new one.
+
+**acp ask** *ID* *TEXT*
+: Send a prompt and print the answer. A sole **-** reads UTF-8 stdin.
+  Text and its encoded control messages must each fit 1 MiB. After an
+  uncertain failure, inspect **acp status** before retrying through
+  **acp prompt --key** with the reported key and identical text.
+
+**acp prompt** [**--key** *UUID*] *ID* *TEXT*
+: Submit a prompt without waiting for the answer; **-** reads stdin as for
+  **ask**. Use **status** to read updates. Reuse a key only with identical text.
+
+**acp status** *ID* [*CURSOR*] [**--json**]
+: Show state, agent updates, and pending permissions. Pass the JSON reply's
+  **next_cursor** back unchanged to read only newer updates.
+
+**acp permissions** *ID* [**--json**]
+: List requests awaiting one-time approval and the options for answering them.
+
+**acp respond** *ID* *REQUEST* *OPTION*
+: Answer a pending permission request with one of its offered options.
+
+**acp cancel** *ID*
+: Cancel the current turn without stopping the session.
+
+**acp attach** *ID*, **acp release** *ID*
+: Take control of an unowned session or release this shell's control.
+
+**acp stop** *ID*
+: Stop the session and its Kit job.
+
+**acp publish** *ID* **--name** *NAME* [**--kit** *KIT*|**--sandbox** *SANDBOX*]
+: Publish an idle session as an MCP control tool. Callers can prompt, cancel,
+  and answer one-time permissions. With a target, load it there immediately;
+  start a new client agent session to discover it.
+
+**acp unpublish** *NAME*
+: Revoke the control tool. Unpublish before steering the agent from its shell.
+
+ACP usage errors exit 2. Other failures print **acp:** *MESSAGE* and exit 125.
+See https://runmar.sh/docs/acp.html.
+
+**mcp publish** *NAME* [**--description** *TEXT*] [**--kit** *KIT*|**--sandbox** *SANDBOX*] **--** '*PIPELINE*'
 : Publish a fixed pipeline as an MCP tool. With **--kit** or **--sandbox** it is
   loaded there now. With neither, every agent Kit VM created from now on loads
   it before its first job. Kit VMs already running are not changed; use
   **mcp load** *NAME* **--kit** *KIT* to load into one now.
 
-**split {** *label*: *commands* ... **} | join** [| *CMD*], **fanout {** ... **} | collect**
+**mcp load** *NAME* **--kit** *KIT*|**--sandbox** *SANDBOX*
+: Load an existing publication into the named Kit VM or running sandbox.
+
+**mcp unpublish** *NAME*
+: Revoke the tool everywhere it was loaded.
+
+**split {** *label*: *commands* ... **} | join** [**--keep**] [| *CMD*], **fanout {** ... **} | collect**
 : Brush forms of **split** and **fanout**.
 
 # ENVIRONMENT
@@ -281,7 +389,8 @@ Talk to one agent across turns, inside the shell:
     id=$(acp reserve pi-session)
     acp run --reservation "$id" pi-session &
     acp list --mine --wait "$id"
-    acp ask "$id" 'What does src/main.rs do?'
+    acp ask "$id" 'What project files can you see? Do not change files.'
+    acp ask "$id" 'Which of those describe how to run the tests? Do not change files.'
     acp stop "$id"
 
 Run tests and lint at once:
@@ -291,6 +400,9 @@ Run tests and lint at once:
 Publish a pipeline in the shell, then give it to Codex on the Mac:
 
     mcp publish lint -- 'make lint 2>&1'
+
+From a Mac terminal in the same project and **MARSH_HOME**:
+
     marsh mcp install-published codex lint
 
 # SEE ALSO

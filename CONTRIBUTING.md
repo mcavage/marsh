@@ -1,15 +1,12 @@
 # Contributing to marsh
 
-This page covers building, testing, and sending changes. The
-[design index](docs/design/README.md) explains how the parts fit together, and
-[AGENTS.md](AGENTS.md) is the short version of the project rules.
+Build a development install, test your change, and send a pull request. The
+[design index](docs/design/README.md) explains how the parts fit together;
+[AGENTS.md](AGENTS.md) lists the project rules.
 
 Open an issue first for a large or cross-component change. Small fixes can go
-straight to a pull request. Doc fixes are welcome. The workspace acceptance suite
-runs marked guide examples, replacing agent calls with deterministic fixtures
-where specified. It does not verify every transcript or a fresh install-to-agent
-journey. A broken example is still a bug. To share a Kit, a pipeline, or an
-AGENTS.md recipe instead of code, post it in
+straight to a pull request. A broken documentation example is a bug too.
+To share a Kit, a pipeline, or an AGENTS.md recipe instead of code, post it in
 [Show and tell](https://github.com/mcavage/marsh/discussions).
 
 ## Building on a Mac
@@ -33,8 +30,8 @@ make dev
 ~/.marsh-dev/bin/marsh                 # run it from any project
 ```
 
-That install also enables `marsh --dev`, a shell whose `sbx` is a confined
-broker, so you can build and test marsh from inside marsh
+That install also enables `marsh --dev`. Its shell gets a scoped host `sbx`
+broker so you can build and test marsh from inside marsh
 ([design/self-development.md](docs/design/self-development.md)):
 
 ```sh
@@ -52,33 +49,34 @@ To publish your own fixture instead:
 
 ## Testing
 
-There are two kinds of tests: VM-free ones (`make test`, which CI runs) and
-ones that drive real `sbx` microVMs (only on a Mac, by hand).
+Run `make test` without VMs or credentials. Use the Mac-only gates to test the
+real `sbx` stack:
 
 | command | runs | where |
 |---|---|---|
 | `make test` | `test-rust`, `test-harness`, `test-model` (below); no VMs, no credentials | your machine; CI on Linux arm64 and macOS |
-| `make test-rust` | `cargo fmt --check`, clippy, every workspace test under `cargo-nextest` (one process per test), doctests, the `#[ignore]`d MCP load callers against the built binaries | CI on both |
+| `make test-rust` | `cargo fmt --check`, clippy, every workspace test under `cargo-nextest` (one process per test), doctests, the ignored binary callers, and the typed ACP host caller | CI on both |
 | `make test-harness` | onboarding journeys through the shipped binaries, MCP protocol callers, the Kit publisher, kit adapter scripts, self-tests of the acceptance/perf/release tooling; on Linux, the Bash differential suites (`tests/acceptance/bash_suites.py`, GNU Bash 5.3.0) | CI on both (suites: Linux) |
 | `make test-model` | quick TLA+ sweep (Docker, or `TLC_RUNNER=java`) | CI's model job runs every config |
-| `make check` | fast real smoke of the installed dev product (~7 s warm) | Mac, after `make dev` |
-| `make verify` | `check` plus the highest-signal sbx suites (~3 min) | Mac, before you push |
-| `make regress` | every sbx suite (~12 min), then `make test` with the full model | Mac, before a release |
+| `make check` | real smoke test of the installed dev product | Mac, after `make dev` |
+| `make verify` | `check` plus the highest-signal sbx suites | Mac, before you push |
+| `make regress` | every sbx suite, then `make test` with the full model | Mac, before a release |
 | `make acceptance` | builds a fresh candidate, runs the full gate with a receipt | Mac, the release run |
 
 `make test` needs `cargo-nextest`; it stops with an install hint rather than
 falling back to `cargo test`, so it runs exactly what CI runs. CI uses the
-nextest `ci` profile (`NEXTEST_PROFILE=ci`: no fail-fast). A test that runs
-longer than its slow timeout (`.config/nextest.toml`) is killed and reported
-by name. There are no retries. After the tests, a process they started that is
-still running (from the test build directory, or carrying the run's
-`MARSH_TEST_RUN` marker) is printed and killed, and the run fails
-(`tests/leaked_processes.py`). A test that puts a child in its own process
-group or session (beyond nextest's group kill) spawns it through
-`common::spawn_group` / `common::wait_for_exit`, which kill that group when the
-test fails or the child overstays its budget.
+nextest `ci` profile (`NEXTEST_PROFILE=ci`: no fail-fast). Nextest kills tests
+that exceed their slow timeout (`.config/nextest.toml`) and reports them by
+name, without retrying. Afterward, `tests/leaked_processes.py` finds surviving
+processes by their test-build path or `MARSH_TEST_RUN` marker. It prints and
+kills those processes, then fails the run.
 
-Tests never hand a shell your login environment, which holds credentials.
+If your test starts a child in a separate process group or session, use
+`common::spawn_group` and `common::wait_for_exit`. They clean up the whole
+group if the test fails or the child exceeds its time budget, even when
+nextest's own group kill cannot reach it.
+
+Tests must not pass your login environment to a shell: it can hold credentials.
 Shells and the product start from an allowlist (`PATH`, `HOME`, `TERM`,
 `LANG`, `LC_*`, `TMPDIR`, `USER`, `LOGNAME`, plus what each caller sets):
 `common::command` in the Rust tests, `tests/acceptance/launch_env.py` in the
@@ -86,12 +84,12 @@ harnesses and `tests/regress.py`. `make test`, `make check` and `make regress`
 export a credential-shaped canary (`MARSH_TEST_CANARY_API_KEY`), and the
 checks fail if any credential-shaped name reaches a test shell.
 
-`make verify` and `make regress` run `tests/regress.py`, the one scheduler for
-sbx suites. Each suite gets its own scope and evidence directory, at most 3 run
-at once (`REGRESS_JOBS=N`; `REGRESS_JOBS=1` runs them one at a time; it backs
-off when load or disk is high), and a failure keeps its log in
-`target/regress/` (`last.json` is the summary). `ONLY=` and `SKIP=` take suite
-names, families, or scenario ids: `make regress ONLY=smoke`,
+`make verify` and `make regress` use `tests/regress.py` to schedule sbx suites.
+Each suite gets its own scope and evidence directory. Up to 3 run at once;
+set `REGRESS_JOBS=N` to change that, or `REGRESS_JOBS=1` to run them serially.
+The scheduler reduces concurrency when load or disk use is high. Failures keep
+their logs in `target/regress/`; `last.json` is the summary. `ONLY=` and `SKIP=`
+take suite names, families, or scenario ids: `make regress ONLY=smoke`,
 `make regress ONLY=workspaces`, `make regress ONLY=W01-plain-bash,P02-self-spawn-bash-c`
 (list them with `python3 tests/regress.py --list --kit REF`). With `ONLY`,
 `make regress` runs just those suites. `VERIFY_DEPS=` skips the `make dev`
@@ -116,10 +114,9 @@ man page, and install-script checks run in a separate parallel job. Rust jobs
 use content-addressed `sccache` compiler results across source changes; Cargo
 build-output caches still require an exact source key. The isolated Python
 harness tests run concurrently (`HARNESS_JOBS=3`; set it to 1 to serialize).
-On Linux that includes the shell and its Bash differential tests (against
-GNU Bash 5.3) and every other
-workspace crate; host-side tests use a fake `sbx` and temporary homes. Nothing in CI
-starts a microVM, so `make check`, `make verify`, `make regress`, and
+On Linux that includes the shell's Bash differential tests (against GNU Bash
+5.3) and every workspace crate. Host-side tests use a fake `sbx` and temporary
+homes. Nothing in CI starts a microVM, so `make check`, `make verify`, `make regress`, and
 `make acceptance` run only on a Mac. The reasons:
 
 - A microVM needs a hypervisor. GitHub's hosted macOS runners are themselves
@@ -135,8 +132,9 @@ and amd64 guests, which is product work. Until then, the real gate is a Mac:
 `make verify` before you push, `make regress` before a release.
 
 Prefer tests that run the shipped binaries and check output, exit status,
-receipts, and cleanup over unit tests that restate the implementation. Tests
-never use real credentials.
+receipts, and cleanup over unit tests that restate the implementation. Never
+use real credentials in unit tests or VM-free harnesses. The sbx acceptance
+suites use fixture Kits, not provider accounts.
 
 ## Building on Linux
 
@@ -183,7 +181,7 @@ make test-model                        # quick sweep; MODEL_FLAGS= runs every co
 docs/model/check.sh                    # every config (Docker, or TLC_RUNNER=java with a local JDK)
 ```
 
-A model pass supports a review; it is not evidence about the Rust code.
+TLC checks the model. Review and test the corresponding Rust code too.
 
 ### Pins and license records
 
@@ -206,12 +204,19 @@ branch and posts the delta on the PR
 
 ### Docs
 
-User docs live in `docs/` and become [runmar.sh](https://runmar.sh). Commands
-shown must match `marsh --help`. `make site` builds the site and checks every
-link; `make man` renders the manual page from `docs/man/marsh.1.md`. Examples
-marked `<!-- doc-test: ... -->` in `docs/split.md`, `docs/agents.md`, and
-`docs/guides/` run in the acceptance suite (a guide swaps its model calls for
-fixture commands with `replace=`).
+User docs live in `docs/` and become [runmar.sh](https://runmar.sh). Check
+commands against the CLI and its subcommand help. `make site` builds the site
+and checks internal links; `make site-check` also checks relative links in
+Markdown. `make man` renders `docs/man/marsh.1.md`.
+
+The workspace suite's `W29-doc-examples` runs examples marked
+`<!-- doc-test: ... -->` across the public docs listed by
+`tests/acceptance/doc_examples.py`, including the README, guides, manual, and
+agent primer. `P31-agents-doc-examples` runs the examples in `docs/agents.md`.
+`replace=` substitutes fixture commands for model calls; these runs check the
+surrounding shell composition, not model answers. They do not cover unmarked
+transcripts or the full journey from a fresh install to a working agent.
+Label fixture results as such.
 
 ## Pull requests
 
@@ -225,7 +230,8 @@ By contributing you agree that your work is licensed under the Apache License
 
 ## Releases
 
-Nobody edits a version number. CI stamps it into the build and never commits it.
+CI stamps the release version into the build without committing it. Do not
+edit a version number in the source.
 
 - **Nightly.** Every commit on `main` whose CI run passes is published as
   `X.Y.(Z+1)-nightly.<UTC commit time>.g<sha>`: a GitHub prerelease (the
@@ -248,8 +254,8 @@ documents the secrets and the stages.
 
 ## Thanks
 
-marsh's shell is built on [Brush](https://github.com/reubeno/brush): upstream
-revision `1389a8e` plus the patch queue in
+marsh's shell is built on [Brush](https://github.com/reubeno/brush), with its
+vendored revision and patch queue recorded in
 [docs/upstream/brush](docs/upstream/brush/README.md). Most of the patches fix
 Bash compatibility (job control, signals and traps, `wait`, aliases, namerefs,
 subshells, globstar, redirections, startup files); the rest add marsh's

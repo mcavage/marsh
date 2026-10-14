@@ -1,73 +1,48 @@
 # marsh manual
 
-marsh is a Bash-compatible shell for Apple Silicon Macs in which agent CLIs
-are ordinary commands. Each call runs in a fresh container in a Docker Sandbox
-microVM, with your project at its Mac path.
-
-```sh
-marsh split -n ::: a claude -p 'fix the failing test' \
-               ::: b codex exec 'fix the failing test' | marsh join
-```
-
-```text
-# split 8d5c8fdd1563: 2 branches; manifest …/out/manifest.json
-
-== a (exited 0, kit:claude) ==
-The test raced on a fixed port; it now asks the kernel for a free one.
--- a: 1 file (M net/dial_test.go); diff …/out/a/diff.patch --
-…
-```
-
-Each agent worked on a private copy of the project. `join` printed what each
-one said and changed, as a patch. Your files change only when you apply one.
-
-Start with the [Quickstart](quickstart.md).
+marsh is a shell for composing agents on Apple Silicon Macs. It opens your
+project in Linux at its Mac path, runs registered agent commands in fresh
+containers, and lets you combine their work with shell syntax.
 
 ## Getting started
 
-- [Install](install.md): requirements, Homebrew, curl, upgrade, uninstall
-- [Quickstart](quickstart.md): split two agents, apply a patch, set up
-  credentials
+- [Install](install.md): requirements, installation methods, upgrades, removal.
+- [Quickstart](quickstart.md): one agent job on a project copy to find the
+  repository's test command and verify its source.
 
 ## Guides
 
-Each guide does one job, with real output, costs, and failure modes
-([all guides](guides/README.md)):
-
-- [Race two agents on one bug](guides/race-two-agents.md): two attempts, each
-  gated on your tests, and the patch you choose
-- [Let a judge pick the winner](guides/add-a-judge.md): a third agent reads
-  both results and names one
-- [Review a change with a panel](guides/review-with-a-panel.md): one reviewer
-  per concern, plus your checks, at once
-- [Let an agent farm out work](guides/farm-out-work.md): an agent starts other
-  agents from its shell, with an AGENTS.md snippet
+- [Make independent changes in parallel](guides/race-two-agents.md): give
+  each task a project copy and bring the patches back yourself.
+- [Review a change with a panel](guides/review-with-a-panel.md): ask two
+  reviewers different questions about the same diff.
+- [Let an agent farm out work](guides/farm-out-work.md): have an agent start
+  one bounded child job from its shell tool.
+- [Review split results in a pipeline](guides/add-a-judge.md): send results
+  to another agent for an optional second opinion.
 
 ## Using marsh
 
-- [The shell](shell.md): where you are, startup files, Bash compatibility
-- [Using bash or zsh instead](shells.md): GNU bash or zsh with your own startup files
-- [Commands and Kits](kits.md): registered commands, adding your own
-- [Agents running agents](agents.md): child jobs, limits, Ctrl-C
-- [Split and join](split.md): parallel attempts on private copies
-- [Fanout and collect](fanout.md): parallel work on the same files
-- [Agent sessions (ACP)](acp.md): long-lived agent sessions for ACP clients
-- [MCP](mcp.md): marsh as a server; publishing tools
+- [The shell](shell.md): guest paths, startup files, Bash compatibility.
+- [Using bash or zsh instead](shells.md): shell selection and startup files.
+- [Commands and Kits](kits.md): packaged commands and your own registrations.
+- [Agents running agents](agents.md): child jobs, launch limits, cancellation.
+- [Split and join](split.md): project copies and patch handling.
+- [Fanout and collect](fanout.md): parallel commands on shared files.
+- [Agent sessions (ACP)](acp.md): long-lived sessions for ACP clients.
+- [MCP](mcp.md): server setup and published pipelines.
 
 ## Reference
 
-- [Configuration](configuration.md): environment, files, limits
-- [Troubleshooting](troubleshooting.md): error messages, stuck jobs, reset,
-  stop, quarantine
-- [Security model](security.md): what each job can reach, and what marsh does
-  not protect
-- [FAQ](faq.md)
-- `man marsh`: every command and option ([source](man/marsh.1.md))
+- [Configuration](configuration.md): settings and paths.
+- [Troubleshooting](troubleshooting.md): refused jobs, stuck VMs, cleanup.
+- [Security model](security.md): process authority and isolation boundaries.
+- [FAQ](faq.md): costs, authentication, comparisons with other tools.
+- `man marsh`: command options ([source](man/marsh.1.md)).
 
 ## Working on marsh
 
-- [CONTRIBUTING.md](../CONTRIBUTING.md): building, tests, the dev loop
-- [Design documents](design/README.md): architecture, contracts, the TLA+
-  model
-- [GitHub Discussions](https://github.com/mcavage/marsh/discussions): Kits,
-  registries, and split recipes in Show and tell
+- [CONTRIBUTING.md](../CONTRIBUTING.md): build and test loop.
+- [Design documents](design/README.md): architecture, contracts, TLA+ model.
+- [GitHub Discussions](https://github.com/mcavage/marsh/discussions): Kits
+  and recipes from other users.

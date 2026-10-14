@@ -400,10 +400,10 @@ def page_map() -> dict[pathlib.Path, str]:
 NAV_GROUPS = [
     ("Start", [("Overview", "docs/index.html"), ("Install", "docs/install.html"),
                ("Quickstart", "docs/quickstart.html")]),
-    ("Guides", [("Overview", "docs/guides/index.html"), ("Race two agents", "docs/guides/race-two-agents.html"),
-                ("Let a judge pick", "docs/guides/add-a-judge.html"),
-                ("Review with a panel", "docs/guides/review-with-a-panel.html"),
-                ("Let an agent farm out work", "docs/guides/farm-out-work.html")]),
+    ("Guides", [("Overview", "docs/guides/index.html"), ("Parallel changes", "docs/guides/race-two-agents.html"),
+                 ("Review a change", "docs/guides/review-with-a-panel.html"),
+                 ("Delegate a subtask", "docs/guides/farm-out-work.html"),
+                 ("Review split results", "docs/guides/add-a-judge.html")]),
     ("Use", [("The shell", "docs/shell.html"), ("Choosing a shell", "docs/shells.html"),
              ("Commands and Kits", "docs/kits.html")]),
     ("Compose", [("Agents running agents", "docs/agents.html"), ("Split and join", "docs/split.html"),
@@ -421,12 +421,12 @@ NAV = [item for _, items in NAV_GROUPS for item in items]
 DESCRIPTIONS = {
     "docs/index.html": "Manual index: what marsh is and where each topic lives.",
     "docs/install.html": "Install marsh and Docker Sandboxes with Homebrew or the install script. Upgrade, uninstall, build from source.",
-    "docs/quickstart.html": "Open a shell, run an agent, split work across two agents, apply a patch, and set up credentials.",
-    "docs/guides/index.html": "Guides: race agents on a bug, have a judge pick, review with a panel, and let an agent farm out work.",
-    "docs/guides/race-two-agents.html": "Two agents fix one failing test at once, each on a private copy that runs your tests. Apply the patch you choose.",
-    "docs/guides/add-a-judge.html": "Pipe join's output to a third agent that names the patch to apply. Optionally apply it after checking the label and branch status.",
-    "docs/guides/review-with-a-panel.html": "One reviewer agent per concern plus your tests, at once, on copies of your working tree.",
-    "docs/guides/farm-out-work.html": "An agent in marsh starts other agents from its shell: subtasks, parallel reviews, and races gated on tests. With an AGENTS.md snippet.",
+    "docs/quickstart.html": "Install marsh, configure one provider, and run an agent on a copy of your repository.",
+    "docs/guides/index.html": "Guides for parallel changes, reviewing a patch, and delegating work from an agent.",
+    "docs/guides/race-two-agents.html": "Work on separate changes in parallel, inspect the patches, and test them together.",
+    "docs/guides/add-a-judge.html": "Send split results to another agent for review before applying a patch.",
+    "docs/guides/review-with-a-panel.html": "Ask reviewers different questions about the same change and check their findings against the code.",
+    "docs/guides/farm-out-work.html": "Have an agent start a child job from its shell tool and check what the child did.",
     "docs/shell.html": "The Bash-compatible shell: where it runs, startup files, and the documented differences from Bash.",
     "docs/shells.html": "Use the shell VM's own bash or zsh instead of Brush, and what you lose.",
     "docs/kits.html": "Registered commands and Kits: the default claude, codex, and pi commands, signing in, adding your own, and limits.",
@@ -578,19 +578,23 @@ def agent_markdown(text: str, source: pathlib.Path, site_path: str,
 
 
 LLMS_SUMMARY = (
-    "marsh is a Bash-compatible shell for Apple Silicon Macs in which agent CLIs (claude, codex, pi) "
-    "are shell commands. Each call runs in a fresh container in a Docker Sandbox microVM, with the "
-    "project at its Mac path. `split { } | join` runs branches on private copies and returns patches; "
-    "`fanout { } | collect` runs branches on the same files. Agents inside marsh can use the same "
-    "commands to start other agents."
+    "marsh is a Bash-compatible Linux shell for Apple Silicon Macs. Agent commands run in fresh "
+    "containers inside Docker Sandbox VMs. Use `split { } | join` for private project copies, or "
+    "`fanout { } | collect` for shared files. These commands also work inside jobs, where agent "
+    "calls start child jobs."
 )
 # Hand-written: enough to install and use marsh with no other context.
 LLMS_INTRO = SITE_SRC / "llms-intro.md"
 
 
+def primer_text() -> str:
+    """Keep documentation-test annotations out of the published primer."""
+    return re.sub(r"<!--.*?-->", "", LLMS_INTRO.read_text(), flags=re.S).strip()
+
+
 def llms_txt(base_url: str, entries: dict[str, tuple[str, str]]) -> str:
     """entries: site path -> (title, description)."""
-    lines = ["# marsh", "", "> " + LLMS_SUMMARY, "", LLMS_INTRO.read_text().strip(), "",
+    lines = ["# marsh", "", "> " + LLMS_SUMMARY, "", primer_text(), "",
              "## Manual", "",
              f"Every manual page is also available as Markdown at the same path with a .md "
              f"extension. The whole manual is in one file: [llms-full.txt]({base_url}/llms-full.txt).", ""]
@@ -689,7 +693,7 @@ def build(out: pathlib.Path, base_url: str) -> None:
         if target in markdown_copies and not target.startswith("docs/design/"):
             full.append(f"<!-- Source: {base_url}/{md_path(target)} -->\n\n{markdown_copies[target]}")
     (out / "llms-full.txt").write_text("# marsh manual\n\n> " + LLMS_SUMMARY + "\n\n" +
-                                      LLMS_INTRO.read_text().strip() + "\n\n---\n\n" +
+                                      primer_text() + "\n\n---\n\n" +
                                       "\n---\n\n".join(full))
     shutil.copy(ROOT / "scripts/install.sh", out / "install")
     (out / "CNAME").write_text(base_url.split("://", 1)[1].rstrip("/") + "\n")

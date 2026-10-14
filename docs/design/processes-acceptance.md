@@ -1,7 +1,8 @@
 # Nested processes acceptance scenarios
 
-Black-box scenarios (P01-P38, P26 retired in revision 5; P32 is billed and runs only with `--live`) for `docs/processes.md` (cited as `sN`), written from the
-spec before the implementation. Harness: `tests/acceptance/processes_uat.py`,
+Black-box scenarios for [nested processes](processes.md), with section references
+written as `sN`. P26 was retired in revision 5; P32 makes billed model calls and
+runs only with `--live`. Harness: `tests/acceptance/processes_uat.py`,
 run by `make regress ONLY=processes` (or `ONLY=P02-self-spawn-bash-c`) against `~/.marsh-dev`
 (`--prefix`). It reuses the `workspaces_uat.py` callers and run.py isolation:
 own MARSH_HOME and control home, timeouts and process-group kills on every
@@ -67,49 +68,58 @@ scenario is `blocked` before any VM work. Use `--only`, `--list`,
 | P37 split-lineage-tree | s9 splits in the forest | one `marsh -c` session: `split { fix: fixture pipeline '\|' bash -c 'fixture identity'; review: fixture identity } \| join \| fixture identity`, then `marsh jobs --tree` | 4 jobs; the fix job's `lineage.parent` is `split:<id>/fix`, its bash child is its child; the review job's parent is `split:<id>/review`; the consumer's `lineage.consumes` is the split id; the session's tree shows `<id8> … joined 0 … split (fix, review)`, then `├─ fix: …` (ID `<id8>/fix`), the fix job, its child, `└─ review: …` (ID `<id8>/review`), the review job, in that order, and the consumer row ends `(consumes split <id8>)` |
 | P38 fanout-cli | s15 CLI fanout | host bash: `printf input \| marsh fanout ::: copy cat ::: upper tr a-z A-Z \| marsh collect`; `marsh fanout ::: a` (usage); `-b w='printf shared > p38-shared.txt'` + `::: id fixture identity` + a branch exiting 4, `collect --timing`; a session running the sugar, the same CLI, and `-b s='echo $((6*7))'` with `collect --json` | host frame exact, `ps=0 0 0`; usage 2; `ps=4 4`, branches in order, `Timing:`, `== bad stderr ==` after its header on stdout, a successful branch's stderr hidden (shown by `collect --stderr`), the shared file written in the user's project, one fixture job rooted in a session; session sugar frame == CLI frame; JSON branch `s` stdout `42` |
 
-## Fixture changes (`tests/acceptance/fixture`)
+## Required fixture features (`tests/acceptance/fixture`)
 
 - New modes: `exec ARGV`, `bench N SEP ARGV…`, and `cap-flood COUNT [PATH]`.
   The ELF entrypoint is unchanged, so existing harnesses behave the same.
 - The image now ships `/usr/local/bin/fixture`, a symlink to `marsh-fixture`.
   The entry case and the image-tool case need it.
 - New `ENV FIXTURE_IMAGE_ENV=image-config`, which P11 needs to observe forwarding.
-- A fixture published before this change lacks these. The scenarios then fail
-  and say so. Pass `--kit tests/acceptance/fixture` or republish.
+- An older fixture without these modes cannot run the scenarios. Use a current
+  immutable fixture reference for release qualification; a local source fixture
+  is an authoring option.
 
-## Spec gaps found while writing these
+## Historical spec gaps
 
-1. **Entry case vs PATH routing.** After a script entry, s5 removes
-   `/run/marsh/bin` from PATH for the image binary. It and its descendants
-   then reach the image's `bash`, and their registered names fail or stay
-   local. Only `$SHELL` re-adds the links. That contradicts the s4 rows for
-   Codex `bash -lc` and Node `spawn('bash')` under a script entrypoint.
-   P04 asserts the literal s5 text.
-2. **Same-Kit chain definition.** It may count consecutive parent→child
-   steps or occurrences in the ancestry. "Kit" may mean the registry name or
-   the Kit image (`fixture-alt` shares the fixture's source). P12 assumes
-   consecutive steps.
-3. **Depth base.** It is unstated whether the root job is depth 0 or 1. P12
-   works for either.
-4. **Refused admissions.** It is unstated whether a refusal leaves a receipt.
-   The harness assumes none, because admission precedes the record (s3).
-5. **Spawn-set refusals.** No refusal text is specified. It is also unclear
-   whether `--spawn` beyond the parent's set is refused or clamped. A
-   non-spawnable name has no link, so it gives 127 rather than the s11
-   "refused, with the message".
+These findings were written before implementation. `processes.md`, sections
+13–15, records their resolutions: entry dispatch keeps PATH, every registered
+name has a link, the root is depth 1, and the process pool is daemon-wide.
+The old job-shell and PATH-removal descriptions below are retained as review
+evidence, not current behavior. Item 12 records coverage limits rather than
+an unresolved product decision.
+
+1. **Entry case vs PATH routing.** The pre-resolution draft of s5 removed
+   `/run/marsh/bin` after script entry and relied on `$SHELL` to restore the
+   links. That would have left registered names unreachable from Codex's
+   `bash -lc` or Node's `spawn('bash')`, contradicting s4. Resolution 13.1
+   kept PATH intact; P04 now checks that behavior.
+2. **Same-Kit chain definition.** The draft left unclear whether the cap
+   counted consecutive steps or all ancestry, and whether Kit meant registry
+   name or image identity (`fixture-alt` shares the fixture's source).
+   Resolution 13.2 defined consecutive steps by Kit identity.
+3. **Depth base.** The draft did not specify whether a root was depth 0 or 1.
+   Resolution 13.3 chose depth 1; P12's original checks tolerated either.
+4. **Refused admissions.** The draft did not say whether a refusal left a
+   receipt. The harness expected none because admission preceded recording;
+   resolution 13.4 confirmed that choice.
+5. **Spawn-set refusals.** The draft specified neither refusal text nor
+   whether an excessive `--spawn` request was refused or clamped. It also
+   omitted links for disallowed names, yielding 127 instead of a spawn
+   diagnostic. Resolution 13.5 kept every link, defined the diagnostic, and
+   chose intersection with a warning.
 6. **Split shell branches from a job.** Resolved (s13.6, B2): refused by the
    daemon for every job creator; P27.
-7. **Pool scope.** Each host CLI call opens its own ephemeral session, so
-   the "session pool" scope is unclear. P15 uses one session.
-8. **Unspecified formats.** No JSON shape is given for the lineage `parent`
-   (`job:<id>`, `split:<id>/<label>`), for `jobs --tree`, for `status.nested`,
-   or for `job.json`. The harness only searches for ids.
-9. **Restart exit code.** It is unspecified which client "exits 125 with
-   `job uncertain`": the root session, or links inside dead jobs. P21
-   requires only a nonzero exit.
-10. **Connection cap counting.** It is unclear whether idle connections count
-    against the cap, so whether the refusal comes at accept or at the first
-    request. P22 holds idle connections.
+7. **Pool scope.** Separate host CLI sessions made the draft's "session pool"
+   ambiguous. Resolution 13.7 made process admission daemon-wide; P15 uses one
+   session.
+8. **Unspecified formats.** The draft lacked JSON shapes for lineage,
+   `jobs --tree`, status counts, and `job.json`. The original harness searched
+   for IDs; resolution 13.8 specified the formats.
+9. **Restart exit code.** The draft did not identify which client returned
+   125 with `job uncertain`. Resolution 13.9 named the root client attached to
+   the tree; P21 requires only a nonzero exit.
+10. **Connection cap counting.** The draft left idle connections unspecified.
+    Resolution 13.10 counted them, and P22 holds idle connections to check it.
 11. **TTY test.** A child with either stdin or stdout on a terminal is
     refused; the message suggests `</dev/null | cat` (P18).
 12. **Not covered.** The total cap of 64 (too costly), the default Kit VM
