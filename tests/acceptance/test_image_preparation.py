@@ -155,6 +155,15 @@ class ImageCallerTests(unittest.TestCase):
         path = self.root / "calls.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    def verify_proof(self):
+        # The real candidate consumer, not just the producer's own JSON fields.
+        code = ("import sys; from pathlib import Path; "
+                f"sys.path.insert(0, {str(ROOT / 'tests/acceptance')!r}); "
+                "from provenance import verify_shell_image_proof; "
+                "verify_shell_image_proof(Path(sys.argv[1]), Path(sys.argv[2]), None, False)")
+        return subprocess.run([sys.executable, "-c", code, str(self.source), str(self.output.parent)],
+                              env=self.env, capture_output=True, text=True, timeout=WAIT_TIMEOUT)
+
     def test_public_make_local_default_imports_exact_archive_without_push(self):
         shutil.copy2(ROOT / "Makefile", self.source / "Makefile")
         result = subprocess.run(["make", "prepare-shell-image", f"DOCKER={self.root / 'docker'}",
@@ -170,6 +179,28 @@ class ImageCallerTests(unittest.TestCase):
         self.assertTrue(any(row[1:3] == ["template", "load"] for row in self.calls()))
         self.assertFalse(any("push=true" in word for row in self.calls() for word in row))
         self.assertFalse(any(row[1:2] in (["create"], ["run"]) for row in self.calls()))
+        verified = self.verify_proof()
+        self.assertEqual(verified.returncode, 0, verified.stderr)
+
+    def test_candidate_consumer_rejects_missing_or_changed_produced_tag_and_digest(self):
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        proof_path = self.output.with_name("shell-image.build.json")
+        original = proof_path.read_text()
+        proof = json.loads(original)
+        named, digest = proof["reference"].split("@")
+        repository = named.rsplit(":", 1)[0]
+        for reference in (repository + "@" + digest,
+                          repository + ":sha256-" + "0" * 64 + "@" + digest,
+                          named + "@sha256:" + "0" * 64):
+            with self.subTest(reference=reference):
+                changed = json.loads(original)
+                changed["reference"] = changed["local_image"]["reference"] = reference
+                self.output.write_text(reference + "\n")
+                proof_path.write_text(json.dumps(changed))
+                verified = self.verify_proof()
+                self.assertNotEqual(verified.returncode, 0)
+                self.assertIn("invalid produced local image identity/proof", verified.stderr)
 
     def test_docker_familiar_repository_spellings_keep_full_identity_in_both_producers(self):
         for script in ('prepare-shell-image.py',):
