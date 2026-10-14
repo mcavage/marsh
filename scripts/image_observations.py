@@ -253,7 +253,7 @@ def verify_local_image_proof(proof: dict, reference: str, kind: str) -> None:
     digest, config = archive.get("platform_manifest_digest", ""), archive.get("config_digest", "")
     if (image.get("schema") != "marsh.local-image-import/v1" or not DIGEST.fullmatch(digest)
             or not DIGEST.fullmatch(config) or archive.get("platform") != PLATFORM
-            or reference != repository + "@" + digest or image.get("reference") != reference
+            or reference != repository + ":sha256-" + config[7:] + "@" + digest or image.get("reference") != reference
             or not DIGEST.fullmatch(archive.get("archive_sha256", ""))):
         raise ValueError("invalid produced local image identity/proof")
     if (type(archive.get("archive_bytes")) is not int or not 0 < archive["archive_bytes"] <= MAX_ARCHIVE_BYTES
