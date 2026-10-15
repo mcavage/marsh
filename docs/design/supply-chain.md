@@ -151,10 +151,10 @@ The public images therefore redistribute DHI-based builds. Each one carries
 every Debian package's own copyright file, the notices collected in
 `packaging/dhi-notices/collected/` for the rest, and the DHI license text for
 the definitions, patches and build scripts it inherits; packaged binaries keep
-their own terms. The images no longer derive from the Docker Sandboxes
+their own terms. The images do not derive from the Docker Sandboxes
 templates, so neither the templates' redistribution terms nor their
-preinstalled agents and proprietary clipboard component apply. One point
-remains for the owner, recorded in
+preinstalled agents and proprietary clipboard component apply. One
+redistribution question remains open, recorded in
 `packaging/dhi-notices/collected/qualification-boundaries.json`: the Claude Kit
 redistributes Claude Code (the native binary and the one inside the Claude
 Agent SDK), which is proprietary to Anthropic and distributed under its terms.
@@ -170,19 +170,17 @@ lifecycle scripts disabled. Its package lock carries integrity hashes, and its
 declared Kit version must match the exact package version. The shell template
 separately locks the Pi used by `pi-dev` under `packaging/shell/pi`.
 
-Pi 1.0.0, like 0.86.1, shipped its own npm shrinkwrap with `brace-expansion`
-5.0.9. npm could install that nested copy despite a root override and a changed
-outer lock, so checking the outer lock alone missed what Pi actually used.
-Pi 1.1.0 removed the nested copy, and its `minimatch` resolves the top-level
-package instead.
+Some earlier Pi releases shipped their own npm shrinkwrap with a vulnerable
+`brace-expansion` (5.0.9). npm installed that nested copy despite a root
+override and a changed outer lock, so checking the outer lock alone missed what
+Pi actually used.
 
 The Pi Kit locks `brace-expansion` 5.0.12. After installation, for
 any Pi release, `patch-pi-dependencies.mjs` requires the fixed `brace-expansion`
 (5.0.12 or later), fails if Pi bundles its own `brace-expansion` again, checks
 that Pi's own `minimatch` resolves the fixed package, and exercises
 representative brace/glob behavior. A Pi bump that reintroduces a nested copy
-fails the image build (Pi 1.0.0 needed a real-copy replacement of the nested
-5.0.9; see the git history).
+fails the image build.
 
 The fixed release addresses the publisher's
 [quadratic expansion](https://github.com/advisories/GHSA-q2hr-2g5m-vwhr),
@@ -238,8 +236,7 @@ Native Claude 2.1.296 carries the publisher's exact-version npm LICENSE and
 README, retrieved with tarball integrity verification, alongside the unchanged
 native binary. Native Codex 0.162.1 carries its exact-release LICENSE, NOTICE,
 and bundled native notices. Codex ACP's separately locked npm release is 0.160.1
-and receives that release's notices. No other agent is installed: the images
-are not built on the templates that preinstalled one. The final
+and receives that release's notices. No other agent is installed. The final
 `--profile claude-kit --version 2.1.296` and
 `--profile codex-kit --version 0.162.1` gates check the exact selected native
 files, owners, modes and links and the required legal files after
@@ -260,10 +257,10 @@ Where GPL/LGPL components are redistributed, the corresponding-source and
 relinking requirements must be met for those exact binaries; a generic image
 license, SBOM or link to an unrelated current source tree is insufficient.
 
-The supporting audit distinguishes collected text from unverified provider
-build provenance and incomplete image/source-offer coverage. Public release
-signing and notarization remain deferred under the product contract. A dependency
-audit does not establish runtime isolation or readiness to release.
+The notice records distinguish collected text from provider build provenance,
+which is not verified, and from image/source-offer coverage, which is
+incomplete. Public release signing and notarization are deferred under the
+product contract.
 
 ## Image notices
 
@@ -286,7 +283,7 @@ independent source inputs. The MIT template retained for `proxy-agent-negotiate`
 is informational, not a replacement for missing attribution or a redistribution
 grant.
 
-The patched Zsh binary is now tied to `codex-zsh-v0.1.0`'s actual tag commit
+The patched Zsh binary is tied to `codex-zsh-v0.1.0`'s actual tag commit
 `891f1f4c8584a082fc4658cabd48f1a8b01354e0`, its workflow's upstream
 `77045ef899e53b9598bebc5a41db93a548a40ca6`, the exact LICENCE, patch,
 manifest and both archive/member hashes. This records modified-source identity,
@@ -295,10 +292,6 @@ platform package, whose members pass SHA512 integrity checks
 (`adapter-payloads.json`); **Sigstore signatures/trust/transparency were not
 cryptographically verified**. Claude's exact native checksum manifests are
 recorded separately from npm legal texts.
-
-Codex 0.160.1's Linux `codex-voice-host` grew from 12.7 MB (0.156.1) to 67 MB
-because it now ships unstripped DWARF debug sections (54 MB); its code and data
-sections, dynamic libraries and voice runtime manifest are unchanged.
 
 Available original Codex and ripgrep exact-release-lock Rust licence/NOTICE
 texts are collected, with immutable `.cargo_vcs_info`-commit supplements for
@@ -309,19 +302,12 @@ linked.
 Codex release (exact-tag lock and source, the canonical collectors, provider
 legal files); `add-claude-release.py --version V` records a Claude Code
 release's npm legal files and native manifest and refuses a changed LICENSE.md.
-`primary-source-notices.json` replaced the historical 23/22/23 gap counts with
-records for eighteen unique gaps, retaining archived declarations and copyright
-headers under Apache-2.0 or an explicitly permitted alternative. A plain Apache
-declaration is recorded as such, without inventing a license election or holder.
-The collected difflib material keeps Kevin B. Knapp's attribution, while fax's
-later clarification is identified separately from the old crate. Original
-upstream full text and rights disposition remain external for debugserver-types
-and icudata.
-
-For both npm and Rust, informational standard permission text may accompany a
-declaration, but it does not supply a missing upstream grant. Default-feature
-analysis helps identify possible dependencies; it cannot establish which code
-was compiled or excuse missing shipping notices.
+`primary-source-notices.json` records notice gaps and the archived declarations,
+copyright headers, or later clarifications collected for each. Original upstream
+full text and rights disposition remain external for debugserver-types and
+icudata. Informational standard license text does not supply a missing upstream
+grant. See [notice collection](../../packaging/dhi-notices/README.md) for the
+per-component records and collection procedure.
 
 Collected native materials follow the actual pins: libcap 2.75,
 OpenSSL 3.6.4, eleven voice source archives, V8/rusty_v8/LLVM/ICU and
@@ -333,10 +319,11 @@ used ICU 77.1 rather than the newer crate submodule; icudata identifies ICU 77
 data, whose terms remain separate from the crate's MIT declaration. The source
 configuration records sandbox, default libc++, and pointer-compression choices.
 
-There are limits to the build evidence: release Cargo commands omit `--locked`,
-the main helper's apt musl-tools version is unpinned, and the v8 crate records
-`dirty=true`. These records cannot establish clean source, verified signatures,
-or reproducible builds. The release-compiler notices also do not inventory the
+There are limits to the upstream build evidence: the Codex release workflow's
+Cargo commands omit `--locked`, its musl build helper installs an unpinned apt
+`musl-tools`, and the v8 crate records `dirty=true`. marsh's own Cargo builds
+use the checked-in lockfile. Upstream build reproducibility and signatures are
+not verified. The release-compiler notices also do not inventory the
 Rust toolchain copied into the shell image.
 Ripgrep elects MIT; both archive legal members and original PCRE2 10.46 licence
 including JIT attribution and its precise binary-library exception are retained.

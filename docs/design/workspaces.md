@@ -1,15 +1,13 @@
 # Workspaces: snapshots, forks, and split lineage
 
-Status: implemented. The daemon replaced the earlier shell-side workspace
-hook. The [user guide](../split.md) covers usage; the
+Status: implemented. The [user guide](../split.md) covers usage; the
 [acceptance scenarios](workspaces-acceptance.md) cover observable behavior.
 The model is `docs/model/Workspace.tla`.
 
-Sections 1–8 describe the implementation. Sections 9–15 retain the original
-proposal, migration budget, and review record as history. Section 16 specifies
-creator identity and JSON shapes; section 17 adds implementation limits and
-later process integration. Historical budgets are not current size or
-performance measurements.
+Sections 1–8 describe the implementation. Section 9 records the model scope,
+section 10 non-goals and v1 limits, section 11 the acceptance requirements,
+section 12 creator identity and JSON shapes, and section 13 implementation
+bounds and process integration.
 
 ## 1. Concepts and trust
 
@@ -79,7 +77,7 @@ marsh join <<<"$h" -- ./apply.sh
   including when stdout is a terminal.
 - `marsh join [--json] [--keep] [-- CMD ARGS...]` reads a handle and is
   accepted only from the split's **creator**: the same session, the same job,
-  or a host caller holding a host-created split's handle (section 16).
+  or a host caller holding a host-created split's handle (section 12).
   It works on awaiting and kept splits.
   - With `-- CMD`, CMD runs even if branches failed. It gets the rendering
     on stdin (statuses included) and `SPLIT_ID`, `SPLIT_DIR` (the `out/`
@@ -93,7 +91,8 @@ marsh join <<<"$h" -- ./apply.sh
     status when nonzero, otherwise split's.
 - `marsh splits [--json] [ID]`, `marsh splits cancel ID`, and
   `marsh splits rm ID` (the creator's own kept splits; operator authority
-  for any).
+  for any). These are not available from a Kit job, whose capability admits
+  only `SplitCreate` and `SplitJoin` (section 3).
 - **Host CLI** (a plain Mac terminal): `marsh split` opens a temporary
   ordinary session without a TTY so shell branches have a
   shell VM. `SplitCreate` carries the exported environment, minus
@@ -182,7 +181,7 @@ kept splits; its text counts only attached shells.
 ## 6. Lifecycle and cleanup
 
 Split states: `run -> await -> joined | kept`, or `run -> cancelled`.
-Unfinished work becomes `uncertain` on daemon restart. Section 16 lists the
+Unfinished work becomes `uncertain` on daemon restart. Section 12 lists the
 public state strings.
 
 - **Capture** happens once every writer is confirmed gone: the shell
@@ -283,8 +282,8 @@ public state strings.
 - **Patch writer**: text hunks use `similar` in unified format with full blob
   IDs on `index` lines. Binary changes use Git's `GIT binary patch` / `literal`
   forward and reverse hunks (zlib + base85, no delta). Capture writes the changed
-  blobs to `store.git`. The daemon never executes `git`. The original review
-  rejected host `git diff --binary` for three reasons:
+  blobs to `store.git`. The daemon never executes `git`, including
+  `git diff --binary`, because:
   - stock macOS may have no `git`;
   - every exec of git keeps a config, attribute, and environment surface
     to audit;
@@ -292,36 +291,38 @@ public state strings.
 
   Renames show as delete + add.
 
-## 9. Historical proposal: Cloud mapping (not built)
+## 9. Model scope
 
-Placement is recorded per branch. A Cloud-placed argv branch ships the
-objects of `S` the VM's cache lacks (once per snapshot and VM), runs on an
-overlay or reflink of `S`, and returns new objects plus `out/<label>/`.
-There is no live sync. The patch-only `out/` contract is exactly what local
-nested splits already use. This stays out of the model until it is built.
+`model/Workspace.tla` covers nested splits created by any branch (nested
+ones argv-only), snapshots from the caller's tree, trusted shell branches
+(C1) and adversarial Kit branches (they write anything mounted, including
+a nested `.git`), the session pool, creator-only join, ancestor and
+session cancel, exit cascade, capture after confirmed exit with
+verification, the lease with kept-and-joinable, and one daemon crash
+between any two steps. It checks 16 invariants plus `EventuallySettled`,
+split across four positive configs to stay tractable (`model/README.md`).
+Each negative control removes one guard in a real action. Not modeled: C1
+itself, Git, bytes, and dir identity.
 
-## 10. Historical migration plan
+## 10. Non-goals and v1 limits
 
-This was the implementation sequence, not a current task list. The gix step
-was replaced by the descriptor-based implementation in section 8.
+Non-goals: confining shell branches, `join --apply`, replay or resume,
+Brush functions in branches, cross-daemon lineage, and Cloud execution.
+Placement is recorded per branch (`shell-vm` or `kit:<command>`); only local
+placements exist.
 
-1. Daemon split module with journal, requests, lease, and pool. Port the
-   rendering and manifest code from `split_workspace.rs`.
-2. Snapshot, fork, capture, and verification with gix. The patch writer.
-3. Shell branches as supervisor attempts; argv branches as `Execute`.
-   Adapt `split_confinement.rs` mounts.
-4. CLI (host, guest, `marsh-local` as `marsh` in Kit containers), and the
-   ephemeral session for the host CLI.
-5. Worker capability socket.
-6. The Brush hook becomes a thin client (delete branch forking from
-   `split_interp.rs`). Delete the guest `split_workspace.rs`. Update
-   the user guide (`split.md`), `architecture.md`, the contract, and `CONTRACT.md`.
-   Retire `Split.tla` (`Workspace.tla` replaces it; deleted).
+v1 limits: no nested shell branches, no `--with-ignored`, no `--shell`; the
+job capability's split operations are `SplitCreate` and `SplitJoin`; one split pool per
+creating session, with no finer-grained shares; no per-branch uid or per-branch byte quotas.
 
-## 11. Historical acceptance additions
+The `git clean -xfd` hazard (section 6) is reported, not prevented. Moving
+`.marsh/split` outside `git clean`'s reach would need a new stock mount; the
+daemon instead re-checks directory identity before capture and release.
 
-These requirements informed `workspaces-acceptance.md`; that page and its
-harness define the maintained scenarios.
+## 11. Acceptance requirements
+
+These requirements are maintained as scenarios in `workspaces-acceptance.md`;
+that page and its harness are authoritative.
 
 - A plain-bash pipeline with `-b` and `:::`, and the two-step handle.
 - `join -- CMD` after a failed branch.
@@ -338,92 +339,7 @@ harness define the maintained scenarios.
 - `git clean -xfd` mid-split gives `workspace replaced`.
 - A restart mid-split gives uncertain and untrusted, with no replay.
 
-## 12. Model scope recorded during design
-
-`model/Workspace.tla` covers nested splits created by any branch (nested
-ones argv-only), snapshots from the caller's tree, trusted shell branches
-(C1) and adversarial Kit branches (they write anything mounted, including
-a nested `.git`), the session pool, creator-only join, ancestor and
-session cancel, exit cascade, capture after confirmed exit with
-verification, the lease with kept-and-joinable, and one daemon crash
-between any two steps. It checks 16 invariants plus `EventuallySettled`,
-split across four positive configs to stay tractable (`model/README.md`).
-Each negative control removes one guard in a real action. Not modeled: C1
-itself, Git, bytes, dir identity, and Cloud.
-
-## 13. Historical implementation size budget (excluding tests)
-
-The estimates and measured deltas below were recorded at implementation time.
-They are not an inventory of the current source.
-
-| Component | LOC (budget) | Built (non-test Rust, `+added/-removed`) | Reuses |
-|---|---|---|---|
-| Daemon split module: journal, requests, lease, pool, cancel cascade, lineage in receipts | 900 | `split.rs` 1,554 (with branch execution), `lib.rs` +205 | ownership-map atomic store (`vm_ownership.rs`), receipt journal, request authority plumbing |
-| Snapshot, fork, capture: walk, ignores, clonefile, `store.git`, admin writer, verification | 1,100 | `split_fs.rs` 1,166 (descriptor layer, snapshot walker, patch writer); `marsh-host-identity` `clone_at` +57 | `ignore` crate as data, `std::fs::copy`/`clonefile` |
-| Patch writer (text + literal binary), manifest, `out/`, rendering | 550 | in `split_fs.rs` / `split.rs` | `similar`, `flate2`, `sha1` |
-| Branch execution: shell attempts, argv `Execute`, signals, capture trigger | 550 | in `split.rs` | the daemon's own `OpenShell`/`Execute` endpoint |
-| Kit confinement: read-only admin binds, mount set | 200 | `split_confinement.rs` 123 (net -138), backend +95, runtime +28, contracts +20 | `JobMount::subpath`, `resolve_grant_subpath` |
-| Capability socket: worker bind, forwarding, allowlist, credits | 400 | worker 209 + 55, backend +115, daemon +105, sbx +19, contracts +6 | worker transport frames |
-| CLI `split`/`join`/`splits`, host ephemeral session, `marsh` shim in Kit | 500 | `split_cli.rs` 642 (with the sugar client), `main.rs` +73, `marsh_local.rs` +37 | `AttachShell`, `marsh-local` |
-| Brush thin client (net of deletions in `split_interp.rs`) | 200 | +105/-571 (patch `0035`) | existing parser, `PIPESTATUS`, and env push |
-| **Total** | **4,400** | **about +4.5k non-test (review fixes added ~0.85k net); -2.4k non-test removed (`split_workspace.rs` -1,673, Brush -571); tests -0.9k superseded, +0.4k boundary tests** | |
-
-**v1 cuts**: no nested shell branches, no `--with-ignored`, no `--shell`;
-socket verbs are only Create and Join; one pool instead of shares; no
-`snapshot_torn`, no Cloud, no per-branch uid. Kept: the journal, placement
-strings, `store.git`, and patch results.
-
-## 14. Historical non-goals and open questions
-
-Section 16 resolved these questions for v1: 60 s keeps an unjoined split, and
-split state remains under `.marsh` with identity checks.
-
-Non-goals: confining shell branches, Cloud execution, `join --apply`,
-replay or resume, Brush functions in branches, cross-daemon lineage.
-
-Open:
-
-1. Lease timeout (60 s proposed).
-2. Whether `.marsh/split` should move outside `git clean`'s reach. That
-   needs a new mount and is rejected for v1; identity checks report the
-   hazard instead.
-
-## 15. Historical review disposition
-
-This table preserves the decisions made in revisions 2 and 3. Its gix and
-stat-cache-hashing entries describe the proposal, superseded by section 8;
-the named invariants and negative controls remain in the model.
-
-| Round | Finding | Resolution |
-|---|---|---|
-| 1 | C1 host git runs repo config/filters/hooks | isolated gix, no git exec (8) |
-| 1 | C2 child forks inside parent mount | sibling forks, parent in journal; `ForkIsolation`/`nestedFork` |
-| 1 | C3 capture races writers; rw user objects | capture after confirmed exit; `store.git` read-only; user `.git` never written (6, 8); `CaptureStable`, `SnapshotImmutable` |
-| 1 | H1 parent exit, H2 nested source, H4 lease | cascade cancel (`orphanChildren`); snapshot from parent fork (`ChildFromParent`); lease (`noLease`) |
-| 1 | H3 vacuous controls | environment actions; every control removes a guard |
-| 1 | M1–M5 socket, quota, bytes, pins, drift | superseded in round 2 by the pool, the allowlist, and stat-checked cloning |
-| 2 | CRITICAL Kit-writable git metadata in the user tree | admin files bound read-only, only `objects/` and `index` writable; verify gitfile and admin, reject nested `.git`; consumers read `out/` (5, 8); acceptance test (11); `AdminReadOnly`/`adminRW`, `ExposedClean`/`noCaptureCheck` |
-| 2 | H1 shell branches unconfined | the branch's own code is documented as trusted; Kit commands it starts are confined by cwd (8); example fixed (1, 2) |
-| 2 | H2 ancestor join/release | creator only; ancestors get show/cancel; `ancestorJoin` -> `NoWriteToUserTree` |
-| 2 | H3 following fork git dirs | git dirs from the journal, alternates never followed, index caps (8) |
-| 2 | H4 host CLI has no shell VM | ephemeral session; env without tokens (2) |
-| 2 | H5 expiry loses results | kept and joinable; creator removes; two-step form (2, 6) |
-| 2 | M1 shares too complex | one session pool + depth + fan-out caps; Kit jobs from shell branches counted (4); `BudgetBound`/`freeOnRevoke` |
-| 2 | M2 snapshot method | stat-checked clonefile, then stat-cache hashing of the frozen base; `snapshot_torn` dropped (8) |
-| 2 | M3 ignore sources | `core.excludesFile` and XDG ignore read as data (8) |
-| 2 | M4 `git clean -xfd` | hazard stated; dir identity re-check; fd-based removal (6) |
-| 2 | M5 two shell semantics | one: session shell for `-b`; nested argv-only; sugar losses listed (2) |
-| 2 | M6 AGENTS.md vs socket | rule amended; per-attempt credits (4) |
-| 2 | Lows | declaration order; join runs after failures; pipefail; `SPLIT_OBJECTS` root-only; exact `out/` layout; regular depth-3 config; `marsh` shim in Kit |
-| 2 | Size (13k estimate) | v1 cuts; budget 4.4k (13) |
-| 2 | Binary patch | own literal-hunk writer; no git exec (8) |
-
-Round 2 accepted each finding. The `git clean` hazard remains reported rather
-than prevented.
-
-## 16. Decisions and JSON shapes (implementation)
-
-Resolved for v1 (GM decisions on the acceptance open questions):
+## 12. Decisions and JSON shapes
 
 - **Host creator identity.** A host `marsh split` attaches a temporary
   session only so shell branches have a shell VM. Its creator is `host`: the
@@ -470,7 +386,7 @@ marsh jobs show JOB --json      ... "lineage":{"split":"<id>","label":"<label>"}
 Branch codes: `exited N` is N, `failed:`/`rejected:` are 125, `cancelled`
 is 130. `split` exits with the first nonzero code in declaration order.
 
-## 17. Additional implementation bounds
+## 13. Implementation bounds and process integration
 
 - **Descriptor-based I/O.** `split_fs::Dir` enforces the no-follow operations
   used in section 8:
@@ -489,7 +405,7 @@ is 130. `split` exits with the first nonzero code in declaration order.
   limits are 32 MiB per file and 256 MiB of changed bytes in total
   (`rejected: capture limit`), with a 5 s deadline per text diff. Paths in
   `files` are C-quoted when they contain control characters, `"`, or `\`.
-- **Writers before capture (H1).** After a shell branch exits, capture waits
+- **Writers before capture.** After a shell branch exits, capture waits
   up to 30 s until no Kit job of the branch's session is queued or running.
   Otherwise, or when the branch's transport is lost, the branch is
   `uncertain` and `untrusted`. Its fork is never verified or removed, and
@@ -530,6 +446,5 @@ is 130. `split` exits with the first nonzero code in declaration order.
 - **Retention.** Kept splits are not collected automatically. `marsh
   splits` lists them with their state and creation time, and `marsh splits
   rm ID` removes one (the host can remove any).
-- **Kit VM limit.** The original 4-Kit-VM-per-session proposal was not
-  implemented. Process admission caps distinct live Kit VMs per job tree
-  (`processes.md`).
+- **Kit VM limit.** Splits add no Kit VM cap of their own. Process admission
+  caps distinct live Kit VMs per job tree (`processes.md`, section 6).

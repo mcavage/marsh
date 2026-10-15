@@ -89,8 +89,8 @@ removes marsh's VMs without deleting your project or saved guest home.
 ## Know what can change
 
 An agent called directly can edit or delete your project. In a split, its
-container mounts only that branch's project copy, along with the shared
-guest home and read-only Git metadata. Your own shell code, including tests
+container mounts that branch's project copy and private Git state, along with
+the shared guest home. Your own shell code, including tests
 in a split branch, runs unconfined in the shell VM.
 
 The guest home is backed by `~/.marsh/home` on your Mac, not your whole Mac
@@ -117,7 +117,7 @@ with a `.git` directory. See [Split and join](docs/split.md) for details.
 marsh runs on Apple Silicon Macs, with Linux arm64 guest tools. Builds that
 require Xcode or macOS frameworks cannot run in the guest. At most eight
 jobs run at once per daemon; a job tree has at most four levels, four live
-children per job, and 64 jobs in total.
+children per job, and 64 launches per tree, including refused child calls.
 
 marsh is early, and its release binaries are unsigned.
 

@@ -169,7 +169,7 @@ The publisher automatically binds the returned proof paths and shared verifier
 modules. The fixture requires sealed v2 inputs; raw maps and requests without the
 strong proof are refused. The public wrapper remains
 `verified_shell_image(path, *, source_tree=ROOT, build_receipt=None) → (reference,
-bindings)`, but the formerly optional receipt now fails closed when absent.
+bindings)`; it fails closed when the receipt is absent.
 `prepare-kit-inputs.map_tree(source, destination) → (files, inventory)` remains
 compatible. Explicit file origins are absolute; destinations cannot
 traverse, overwrite source files, or add Docker ignore controls.

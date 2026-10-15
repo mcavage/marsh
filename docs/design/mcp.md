@@ -15,32 +15,24 @@ described under [full-SBX-control opt-in](#deliberate-full-sbx-control-opt-in).
 
 ## Topology and boundary
 
-```mermaid
-flowchart TB
-  subgraph host["macOS · one user"]
-    client["Host MCP client"]
-    mcp["marsh-mcp · stdio\nfixed workspace + scope registry"]
-    client <-->|"MCP stdio"| mcp
-  end
-
-  subgraph default["default scope · independent MARSH_HOME"]
-    daemon1["same-user marsh daemon"]
-    shell1["project shell VM"]
-    kits1["peer Kit VMs\nfresh job container per invocation"]
-    daemon1 --> shell1
-    daemon1 --> kits1
-  end
-
-  subgraph generated["generated UUID scope · independent MARSH_HOME"]
-    daemon2["same-user marsh daemon"]
-    shell2["project shell VM"]
-    kits2["peer Kit VMs\nfresh job container per invocation"]
-    daemon2 --> shell2
-    daemon2 --> kits2
-  end
-
-  mcp -->|"typed requests · scope default"| daemon1
-  mcp -->|"typed requests · opaque scope ID"| daemon2
+```
+macOS, one user
+  host MCP client
+      | MCP stdio
+      v
+  marsh-mcp (stdio; fixed workspace + scope registry)
+      |
+      +-- typed requests, scope "default" --> default scope (own MARSH_HOME)
+      |                                          same-user marsh daemon
+      |                                            +-- project shell VM
+      |                                            +-- peer Kit VMs
+      |                                                (fresh job container
+      |                                                 per invocation)
+      |
+      +-- typed requests, opaque scope ID --> generated UUID scope (own MARSH_HOME)
+                                                 same-user marsh daemon
+                                                   +-- project shell VM
+                                                   +-- peer Kit VMs
 ```
 
 The MCP service runs on the Mac. Direct clients start a stdio process; stock
@@ -107,39 +99,34 @@ Before creating or using a scope home, the server binds every managed root to
 the canonical path and filesystem identity of the configured workspace. A
 later process can reuse that root only for that exact workspace identity. This
 also covers an explicit `--scope-root`, whose name may not encode a workspace.
-For fail-safe migration, a populated managed root that predates the binding is
-rejected rather than claimed automatically. Point the server at a new empty
+A populated managed root without a binding is rejected rather than claimed
+automatically. Point the server at a new empty
 root, or inspect and explicitly repair the owner-only old state. Missing or
 replaced persisted scope homes are isolated as failed records on restart; the
 server does not recreate them or bless a replacement directory with a new
 identity.
 
-The previous experimental `$HOME/.marsh/mcp/<workspace-hash>`,
-`$HOME/.marsh/.dev-mcp/<workspace-hash>`, and
-`$HOME/Library/Application Support/marsh/.dev-mcp/` locations are not part of
-this namespace. The server does not read, migrate, or delete that state; an
-operator may inspect and remove it separately after confirming it is unused.
 The scope root holds the host-managed registry and scope homes. The registry
 stays host-side; each scope's guest home backing is mounted by marsh.
+The server does not read, migrate, or delete MCP state in other locations.
 
 The `--marsh` and `--sbx` executables are trust anchors, not convenience paths.
 Both must be installed outside the mutable workspace and managed scope root. The
 server pins their identities at startup and revalidates them before each host
 invocation; replacement, permission changes, or an identity mismatch fail
 closed. `marsh` and its sibling `marshd` also require a trusted, non-writable
-ancestor chain. The external Homebrew-managed SBX executable retains strict
-regular-file, owner, mode, device, inode, and content-hash pinning, while its
-Caskroom ancestor permissions are not treated as marsh-managed trust state.
-Use `make install` first and point at that installed `marsh`.
-Homebrew owns the selected stock `sbx` installation.
-`make install` never
-installs, copies, signs, modifies, or removes SBX. marsh resolves `MARSH_SBX`
-when explicitly set, otherwise `sbx` on `PATH`, and canonicalizes that exact
-executable. Existing client registrations intentionally retain the canonical
-path they stored; after Homebrew upgrades the Cask, restart marsh and rerun the
+ancestor chain. The Homebrew-managed SBX executable keeps strict regular-file,
+owner, mode, device, inode, and content-hash pinning; its Caskroom ancestor
+permissions are not treated as marsh-managed trust state.
+
+Run `make install` first and point the server at that installed `marsh`, never
+at anything under `target/`, another file in the checkout, or a binary under
+the selected home. Homebrew owns the stock `sbx` installation; `make install`
+never installs, copies, signs, modifies, or removes SBX. marsh resolves
+`MARSH_SBX` when explicitly set, otherwise `sbx` on `PATH`, and canonicalizes
+that exact executable. Client registrations keep the canonical path they
+stored, so after Homebrew upgrades the Cask, restart marsh and rerun the
 applicable `marsh mcp install CLIENT` command.
-Do not point the MCP server at anything under `target/`, another file in the
-checkout, or a binary under the selected home.
 
 For host clients, run the applicable command from the workspace after
 `make install`:
@@ -155,18 +142,19 @@ workspace and resolved official SBX executable. Codex uses a durable private
 root beneath `${CODEX_HOME:-$HOME/.codex}/marsh/dev-mcp`; Claude uses
 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/marsh/dev-mcp`; SBX uses the generated
 scope root beside the host state root
-(`~/Library/Application Support/marsh-mcp-scopes/clients/sbx/<workspace-hash>`). Client names and the full workspace
-hash keep roots disjoint. Codex and Claude launch the stdio subprocess when
-needed; Claude uses its local workspace scope rather than
-writing shared project MCP configuration. For SBX, installation starts the
+(`~/Library/Application Support/marsh-mcp-scopes/clients/sbx/<workspace-hash>`).
+Client names and the full workspace hash keep roots disjoint. Codex and Claude
+launch the stdio subprocess when needed; Claude uses its local workspace scope
+rather than writing shared project MCP configuration. For SBX, installation starts the
 shared broker and registers the bounded `connect` proxy with its gateway for
 later `sbx mcp load`. Registrations for different workspaces and clients
 coexist. `marsh mcp start` restores the broker after a host restart without
 changing the registration. `marsh mcp stop` stops an idle broker and refuses
 while any sandbox proxy is attached; a session whose proxy has gone is not
 attached, and the stop waits (bounded) for its cleanup. A `connect` proxy that
-loses its broker exits non-zero. `marsh mcp install sbx` is explicitly
-replacing: it runs
+loses its broker exits non-zero.
+
+`marsh mcp install sbx` is explicitly replacing: it runs
 `sbx mcp rm --force NAME` before adding the current definition. It accepts
 success or the exact `MCP server "NAME" not found` diagnostic for that
 deterministic name; transport, authentication, lookalike-name, and all other
@@ -174,8 +162,6 @@ remove failures abort. Active sandboxes retain their already-loaded proxy and
 broker session; replacement changes future loads only. A changed installed
 broker build replaces an idle old broker automatically and refuses to replace
 a busy broker, so stop loaded sandboxes and rerun install for a clean upgrade.
-If SBX later provides explicit MCP unload,
-unload first and then load.
 An interruption between remove and add leaves the registration absent;
 rerunning the same install command is safe.
 
@@ -192,9 +178,9 @@ marsh-mcp serve \
 
 For an SBX agent sandbox, `marsh mcp install sbx` uses the canonical official SBX executable.
 `sbx mcp load` then gives the selected running sandbox access to its stdio
-protocol. It does not mount a host socket, expose a TCP port, or require
-Tailscale. The sandbox's agent receives exactly the server's tool surface, so treat
-loading this registration as granting that sandbox full marsh product authority
+protocol. It does not mount a host socket or expose a TCP port. The sandbox's
+agent receives exactly the server's tool surface, so treat loading this
+registration as granting that sandbox full marsh product authority
 for the configured workspace and its managed development scopes. The manual
 form below illustrates the gateway shape with an explicit private scope root:
 
@@ -281,7 +267,7 @@ rejected; only fields marked optional may be omitted.
 | `qualify` | fixed gate: `source`, `smoke`, `full`, or `perf`; optional bounded timeout | clear disabled failure by default; opaque operation ID when explicitly enabled | The only tool that can run a non-marsh host program. |
 | `operation_get`, `operation_output`, `operation_cancel` | opaque operation ID | state/metadata, terminal bounded output, or cancellation request | Limited to operations started by this client session. |
 
-The original `status`, `results_*`, `shell_run`, `prewarm`, and `workers_reset`
+The unscoped `status`, `results_*`, `shell_run`, `prewarm`, and `workers_reset`
 tools are aliases for the reserved `default` scope. Stopping that scope disables
 those aliases across MCP restarts rather than silently recreating its runtime. `scope_status` can
 still inspect it, and `scope_reset` recreates and validates its project shell.
@@ -425,6 +411,14 @@ load leaves the VM usable without that tool and is logged; it is not a
 preparation failure. `mcp load NAME --kit KIT` is the explicit way to load a
 running Kit VM.
 
+Servers declared in the scope's `sbxenv.yaml` (every Kit and the shell) or
+`sbxenvs/NAME.yaml` (command `NAME`; `shell.yaml` also covers the shell VM)
+are different: they are required. marsh registers or reuses each one through
+stock SBX, without overwriting a different definition, and loads it while
+preparing the VM, including after a worker reset. A failed inspection,
+registration, or load fails preparation (`marsh-backend/src/sbxenv.rs`,
+`marsh-sbx/src/mcp_environment.rs`).
+
 `--kit codex` (or another registered Kit command) prepares its worker and loads
 the tool into the exact Kit VM selected by preparation, including when the
 worker is already warm and older Kit generations are still running. Later
@@ -495,20 +489,21 @@ Host `--kit` requires the attached-shell context: run `marsh`, then
 target sandbox. Start a new agent session in the target to discover the tool;
 existing sessions can keep cached tool lists.
 
-For a plain Codex Kit demo from an attached marsh shell, publish and load in
-one command, then start a new Codex process so it discovers the tool:
+For example, from an attached marsh shell, publish and load a tool into the
+Codex Kit VM in one command, then start a new Codex process so it discovers
+the tool:
 
 ```sh
-mcp publish shout-in-espanol --kit codex -- "tr a-z A-Z | claude -p 'Translate the piped text to Spanish. Output only the translation.'"
-printf '%s\n' 'Call the MCP tool shout-in-espanol with input exactly: hi don, how are you? Reply only with its output.' | codex exec --skip-git-repo-check -
+mcp publish translate-es --kit codex -- "claude -p 'Translate the piped text to Spanish. Output only the translation.'"
+printf '%s\n' 'Call the MCP tool translate-es with input exactly: good morning. Reply only with its output.' | codex exec --skip-git-repo-check -
 ```
 
-The published pipeline runs when Codex calls the MCP tool; it calls Claude in
-print mode. `codex exec -` reads a prompt from stdin without a terminal. The
+The published pipeline runs when Codex calls the tool, and it calls Claude in
+print mode. `codex exec -` reads its prompt from stdin without a terminal. The
 Codex Kit adapter also accepts `printf 'hi' | codex summarize` or `printf 'hi'
-| codex 'Call the MCP tool with this input'` and sends the instruction and piped
-text as one prompt. Use `--prompt` if the instruction is also a Codex command,
-for example `printf 'hi' | codex --prompt review`.
+| codex 'Call the MCP tool with this input'`, sending the instruction and
+piped text as one prompt; use `--prompt` when the instruction is also a Codex
+subcommand (`printf 'hi' | codex --prompt review`).
 The optional description and tool output are untrusted content shown to the
 receiving agent; publish from a trusted attached shell only.
 
@@ -563,18 +558,12 @@ registration until the host removal command runs.
 
 The separate `marsh mcp install codex|claude` commands above install the
 broader **development-control server**, not this fixed published pipeline.
-Treat a one-off direct stdio call as protocol verification, not proof of
-native Codex tool discovery.
-The focused `tests/acceptance/published_codex_uat.py` journey uses stock SBX,
-a disposable publishing project and sandbox, and a private `CODEX_HOME`. It
-checks the real Codex CLI registration, calls the registered export server over
-MCP, verifies Gateway access and cached-call revocation, and rejects a
-same-name Codex collision. Native Codex desktop task discovery remains a
-separate manual acceptance check.
-Run it on a clean, packaged candidate with `--marsh`, `--sbx`,
-`--guest-artifacts`, `--codex`, `--source-tree`, `--source-revision`, and
-`--evidence` pointing to that exact build and an outside evidence directory.
-The report records source and binary hashes, stock SBX version, and cleanup.
+`tests/acceptance/published_codex_uat.py` runs against a packaged candidate
+with stock SBX, a disposable publishing project and sandbox, and a private
+`CODEX_HOME`. It checks the real Codex CLI registration, calls the registered
+export server over MCP, verifies Gateway access and cached-call revocation,
+and rejects a same-name Codex collision. Native Codex desktop task discovery
+is not automated and remains a manual check.
 
 `marsh-mcp export-serve` is separate from this development-control server. It
 loads one explicitly declared typed tool and exposes no `shell_run`, scope
@@ -587,8 +576,8 @@ still controls its workload and network/credential authority. Its guest HOME
 is the natural account home backed by that selected home, just as with an
 ordinary marsh command. The client must opt in to registering/loading the
 export-only server. A tool is not automatically published because its shell
-command is registered. See `tests/mcp/CONTRACT.md` items 28-35 for the
-candidate-specific proof still required before claiming stock-SBX support.
+command is registered. Stock-SBX support for the export server is claimed only
+for a candidate that passes `tests/mcp/CONTRACT.md` items 28-35.
 
 Published Brush pipelines run in the project-shell VM through marsh, so their
 result is a shell pipeline result rather than one Kit job receipt. A registered
@@ -610,10 +599,9 @@ registration to use the new publication. The export server does not send
 may continue showing the old tool until reloaded. Unpublishing likewise makes
 already loaded servers return an empty list and reject calls.
 
-## Qualification status
+## Qualification
 
-This document describes the implementation and required contracts. Qualification
-applies to an exact candidate, not to this prose. The required black-box protocol, security, and
-end-to-end cases are in [`tests/mcp/CONTRACT.md`](../../tests/mcp/CONTRACT.md).
-The normal local product release gate remains
+The black-box protocol, security, and end-to-end cases required for an exact
+candidate are in [`tests/mcp/CONTRACT.md`](../../tests/mcp/CONTRACT.md). The
+local product release gate is
 [`tests/acceptance/CONTRACT.md`](../../tests/acceptance/CONTRACT.md).

@@ -44,8 +44,8 @@ separate lines. Use a scratch project to try them. Agent examples also need
 
 The snapshot comes from your current files, including uncommitted edits and
 nonignored untracked files. It is not a checkout of `HEAD`. marsh uses
-copy-on-write filesystem clones, falling back to copies only when cloning
-returns `Unsupported`; other clone errors fail the split. Forks live and mount
+copy-on-write filesystem clones, falling back to ordinary copies on filesystems
+without cloning support. Other copy errors fail the split. Forks live and mount
 at their own host paths, such as `PROJECT/.marsh/split/ID/a`. In a shell
 branch, an absolute path to the original project still reaches your live
 files. A registered Kit command mounts the fork, not the original project
@@ -194,6 +194,9 @@ Input to the branches:
 With `-- CMD`, `marsh join` runs CMD with its output on stdin and the
 `SPLIT_*` variables set. It removes the split when CMD exits 0, unless
 `--keep` was set or cleanup is uncertain. A nonzero CMD status keeps it.
+
+CMD runs where you invoke `marsh join`: on the Mac from a Mac terminal, in
+the shell VM from a marsh shell, or in the container from a job.
 
 | Option | Effect |
 |---|---|

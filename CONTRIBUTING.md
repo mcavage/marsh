@@ -185,7 +185,7 @@ TLC checks the model. Review and test the corresponding Rust code too.
 
 ### Pins and license records
 
-Every image input is pinned, and the records the image build checks (release
+Managed image inputs are pinned, and the records the image build checks (release
 checksums, agent and adapter notice records, npm notice overrides, image
 inventories and Go notices) are derived from the pins. After changing a pin
 (a Kit's CLI version, a lock, a base digest, an image-base package list), run:
@@ -217,6 +217,15 @@ agent primer. `P31-agents-doc-examples` runs the examples in `docs/agents.md`.
 surrounding shell composition, not model answers. They do not cover unmarked
 transcripts or the full journey from a fresh install to a working agent.
 Label fixture results as such.
+
+Write task guides around what the reader needs to do. Keep schemas and exact
+limits in reference pages, and implementation rationale in design documents.
+Describe current behavior in one place rather than retaining review rounds
+alongside it. Preserve useful warnings where an example grants access.
+
+Keep agent handoffs, private machine paths, and session transcripts out of the
+repository. Add new user pages to the site navigation and descriptions so they
+also appear in the full manual. Check the deployed page after publishing.
 
 ## Pull requests
 

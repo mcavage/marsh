@@ -403,7 +403,8 @@ NAV_GROUPS = [
     ("Guides", [("Overview", "docs/guides/index.html"), ("Parallel changes", "docs/guides/race-two-agents.html"),
                  ("Review a change", "docs/guides/review-with-a-panel.html"),
                  ("Delegate a subtask", "docs/guides/farm-out-work.html"),
-                 ("Review split results", "docs/guides/add-a-judge.html")]),
+                 ("Review split results", "docs/guides/add-a-judge.html"),
+                 ("Set up your home", "docs/guides/set-up-your-home.html")]),
     ("Use", [("The shell", "docs/shell.html"), ("Choosing a shell", "docs/shells.html"),
              ("Commands and Kits", "docs/kits.html")]),
     ("Compose", [("Agents running agents", "docs/agents.html"), ("Split and join", "docs/split.html"),
@@ -422,11 +423,12 @@ DESCRIPTIONS = {
     "docs/index.html": "Manual index: what marsh is and where each topic lives.",
     "docs/install.html": "Install marsh and Docker Sandboxes with Homebrew or the install script. Upgrade, uninstall, build from source.",
     "docs/quickstart.html": "Install marsh, configure one provider, and run an agent on a copy of your repository.",
-    "docs/guides/index.html": "Guides for parallel changes, reviewing a patch, and delegating work from an agent.",
+    "docs/guides/index.html": "Set up your home, make parallel changes, review a patch, and delegate work from an agent.",
     "docs/guides/race-two-agents.html": "Work on separate changes in parallel, inspect the patches, and test them together.",
     "docs/guides/add-a-judge.html": "Send split results to another agent for review before applying a patch.",
     "docs/guides/review-with-a-panel.html": "Ask reviewers different questions about the same change and check their findings against the code.",
     "docs/guides/farm-out-work.html": "Have an agent start a child job from its shell tool and check what the child did.",
+    "docs/guides/set-up-your-home.html": "Set up agent skills, dotfiles, MCP connections, and extra directories in your marsh home.",
     "docs/shell.html": "The Bash-compatible shell: where it runs, startup files, and the documented differences from Bash.",
     "docs/shells.html": "Use the shell VM's own bash or zsh instead of Brush, and what you lose.",
     "docs/kits.html": "Registered commands and Kits: the default claude, codex, and pi commands, signing in, adding your own, and limits.",
@@ -580,8 +582,8 @@ def agent_markdown(text: str, source: pathlib.Path, site_path: str,
 LLMS_SUMMARY = (
     "marsh is a Bash-compatible Linux shell for Apple Silicon Macs. Agent commands run in fresh "
     "containers inside Docker Sandbox VMs. Use `split { } | join` for private project copies, or "
-    "`fanout { } | collect` for shared files. These commands also work inside jobs, where agent "
-    "calls start child jobs."
+    "`fanout { } | collect` for shared files. Inside jobs, use the `marsh split` and `marsh fanout` "
+    "CLI forms; registered agent calls start child jobs."
 )
 # Hand-written: enough to install and use marsh with no other context.
 LLMS_INTRO = SITE_SRC / "llms-intro.md"
@@ -621,6 +623,15 @@ def llms_txt(base_url: str, entries: dict[str, tuple[str, str]]) -> str:
 
 def build(out: pathlib.Path, base_url: str) -> None:
     pages = page_map()
+    # Every user page needs navigation and a description. The full manual uses
+    # this order too, so a newly discovered guide must not silently disappear.
+    manual = {target for target in pages.values()
+              if not target.startswith("docs/design/") and target != "docs/architecture.html"}
+    missing_nav = manual - {target for _, target in NAV}
+    missing_description = manual - DESCRIPTIONS.keys()
+    if missing_nav or missing_description:
+        raise ValueError(f"manual pages missing navigation: {sorted(missing_nav)}; "
+                         f"missing descriptions: {sorted(missing_description)}")
     by_source = {p.resolve(): site for p, site in pages.items()}
     if out.exists():
         shutil.rmtree(out)

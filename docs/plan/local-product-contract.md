@@ -204,6 +204,6 @@ immutable fixture Kit. Unit and mock tests support but do not replace that run.
 Cloud execution, general M:N scheduling, isolating shell-VM commands in a
 `split` branch, copying ignored files into split forks, workload restart recovery,
 multi-device history, additional host architectures, and public signing or
-notarization. There is no flight recorder. Split artifacts retain branch output;
+notarization. Split artifacts retain branch output;
 `marsh results` stores structural receipts and bounded display arguments, not
 execution transcripts.

@@ -393,7 +393,7 @@ pre:hover .copy, .copy:focus-visible, .copy.done { opacity: 1; }
 .side a:hover { color: var(--fg); background: var(--bg-3); }
 .side a[aria-current] { color: var(--fg); background: var(--bg-3); font-weight: 600; box-shadow: inset 2px 0 0 var(--accent); }
 .doc main { min-width: 0; padding: 2.2rem 0 1rem; }
-.prose { max-width: 46rem; }
+.prose { max-width: 46rem; overflow-wrap: anywhere; }
 .prose h1 { font: 790 clamp(2rem, 4vw, 2.85rem)/1.08 var(--display); letter-spacing: -0.04em; margin: 0 0 1.2rem; text-wrap: balance; }
 .prose h2 { font: 720 1.55rem/1.2 var(--display); letter-spacing: -0.025em; margin: 2.6rem 0 0.8rem; padding-top: 1.6rem; border-top: 1px solid var(--rule); }
 .prose h3 { font: 680 1.2rem/1.3 var(--display); letter-spacing: -0.015em; margin: 2rem 0 0.6rem; }
@@ -411,7 +411,7 @@ pre:hover .copy, .copy:focus-visible, .copy.done { opacity: 1; }
 .prose pre code { font-size: 0.86em; }
 .anchor { float: left; margin-left: -1.1em; width: 1.1em; color: var(--muted); text-decoration: none; opacity: 0; font-weight: 400; }
 h1:hover .anchor, h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:focus { opacity: 1; }
-.table { overflow-x: auto; margin: 1.2rem 0; border: 1px solid var(--rule); border-radius: 10px; }
+.table { overflow-x: auto; overflow-wrap: normal; margin: 1.2rem 0; border: 1px solid var(--rule); border-radius: 10px; }
 table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
 th, td { text-align: left; padding: 0.55rem 0.85rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
 th { background: var(--bg-2); font-weight: 650; }
@@ -470,7 +470,7 @@ tr:last-child td { border-bottom: 0; }
 @media (max-width: 520px) {
   .home .hero .install { height: auto; min-height: 2.9rem; padding-top: 0.4rem; padding-bottom: 0.4rem; }
   .home .hero .install code { white-space: normal; }
-  .home .top nav a[href="community.html"] { display: none; }
+  .top nav a[href$="community.html"] { display: none; }
   .reasons { grid-template-columns: minmax(0, 1fr); }
   .reasons dt { padding-bottom: 0.4rem; }
   .reasons dd { border-top: 0; padding-top: 0; }

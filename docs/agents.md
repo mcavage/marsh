@@ -113,8 +113,9 @@ does to your project files.
 
 ## Limits and messages
 
-A refused call starts nothing, prints the reason on stderr, and exits 125.
-A name outside `MARSH_SPAWN` exits 126. `marsh status` counts refusals
+A refused call starts nothing and prints the reason on stderr. A registered-name
+link outside `MARSH_SPAWN` exits 126; other refusals, including those through
+`marsh run`, exit 125. `marsh status` counts refusals
 (`processes: N running, N refused, N held`).
 
 | Limit | Message |
@@ -130,8 +131,8 @@ A name outside `MARSH_SPAWN` exits 126. `marsh status` counts refusals
 | No terminal for a child | `interactive child jobs are not supported yet` |
 
 A child job gets no terminal. If either stdin or stdout is a terminal, marsh
-refuses it. Run the command as `codex exec '...' </dev/null | cat`. Agents'
-tool calls already run without a terminal.
+refuses it. Run the command as `codex exec '...' </dev/null | cat`.
+With a pipe, enable `pipefail` to preserve the child's failure status.
 
 After `capacity`, `fan-out limit`, or the Kit VM limit, let running jobs finish
 before retrying. Repeated refusals consume the tree's launch budget. Depth,
@@ -188,9 +189,10 @@ stdout, stderr, and exit status pass through.
 ## Variables
 
 Ordinary exported variables pass to jobs and their children. A job can change
-one for its own children. marsh filters unchanged image `ENV` defaults,
-credential-shaped names (`*_TOKEN`, `*_SECRET`, `*_KEY`), and control variables
-from this forwarding. Supply provider credentials through
+one for its own children. marsh filters unchanged image `ENV` defaults and
+control variables. It also drops names containing `KEY`, `SECRET`, `PASS`,
+`TOKEN`, `CREDENTIAL`, or `COOKIE`, plus `AWS_*` and `*_PAT`, ignoring case.
+This includes ordinary names such as `KEYMAP`. Supply provider credentials through
 [Docker Sandboxes](kits.md#signing-in).
 
 <!-- doc-test: shell replace=["claude -p \"use your Bash tool to run: codex exec 'print the value of TICKET'\"", "fixture pipeline '|' bash -c \"shell -c 'echo TICKET=\\$TICKET'\""] stdout="TICKET=ABC-123" -->
@@ -213,21 +215,12 @@ Every Kit job gets `/run/marsh/context.md`, written for that job. It contains:
 `marsh context` prints it. Outside a job, it prints the shared text with no job
 name or spawn set filled in.
 
-The packaged agent Kits pass the file to their agent as extra instructions,
-for that run only:
-
-| Kit | CLI | ACP |
-|---|---|---|
-| `claude` | `--append-system-prompt "$(cat /run/marsh/context.md)"` | added to the Agent SDK's `--append-system-prompt` (or passed as one) by `claude-cli.sh` |
-| `codex` | `-c developer_instructions="…"` | `developer_instructions` in codex-acp's `CODEX_CONFIG` (a caller's `CODEX_CONFIG` object is kept) |
-| `pi` | `--append-system-prompt /run/marsh/context.md` | the same: pi-acp starts Pi through the Kit entrypoint |
-
-This instruction injection does not change project files, guest-home files,
-`CLAUDE.md`, or `AGENTS.md`.
+The packaged Kits pass this context as extra instructions in both CLI and ACP
+sessions, for that run only. They do not write it into your project or home.
 
 Exceptions:
 
-- For a codex run, `-c developer_instructions` replaces any
+- For a Codex run, marsh's context replaces any
   `developer_instructions` in your own `config.toml`.
 - Management subcommands (`claude mcp`, `codex login`, ...) get nothing.
 - Other Kits can read `/run/marsh/context.md` or run `marsh context`.

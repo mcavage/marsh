@@ -59,11 +59,17 @@ host/session bindings required by its product contract: nonroot Mac UID/GID,
 natural working directory and home path, selected home backing, terminal
 mode, and exact project/home grants.
 
-Directories under `kits/` are native v3 source for stock Docker tooling. The
-local-source runtime path currently cannot prove that its independent Buildx
-build and stock SBX's assembled workload are the same manifest. Use published
-digests for packaged acceptance and release; local-source mappings remain an
-authoring path without a qualification claim.
+Directories under `kits/` are native v3 source for stock Docker tooling. For a
+local-source Kit, marsh builds the job image with Buildx while stock SBX builds
+the Kit VM's image from the same source, so the two builds are independent.
+On a cold Kit VM, marsh requires the source fingerprint to be unchanged, the
+host build's manifest digest to equal the Kit VM's `image_digest`, and the
+image loaded into the VM to have that same ID. On a digest mismatch it has
+stock SBX rebuild the Kit once, then fails with `still mismatched after stock
+SBX rebuilt the Kit` (`marsh-sbx` `prepare_cold_local_kit`); the two builds
+agree only when they share a BuildKit cache. Use published digests for
+packaged acceptance and release; local-source mappings remain an authoring
+path without a qualification claim.
 
 For local v3 source, stock SBX derives Kit identity from the source directory
 basename. Packaged sources therefore use the `marsh-*` namespace so they do

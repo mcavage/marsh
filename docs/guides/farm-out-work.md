@@ -31,10 +31,9 @@ marsh jobs --tree
 marsh results
 ```
 
-Look for a child beneath the parent in the tree. The parent's claim that it
-delegated is not evidence of a launch. Job records show who started whom and
-their exit statuses; check the cited code to judge the answer itself. If no
-child appears, read the parent's report for an error before trying again.
+The job tree shows the child beneath its parent, with both exit statuses.
+Read the cited code alongside the report. If no child appears, check the
+parent's output for an error before trying again.
 
 `</dev/null | cat` keeps a terminal off the child's stdin and stdout, as
 required for child jobs. `--no-spawn` prevents that child from starting

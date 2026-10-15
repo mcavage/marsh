@@ -1,6 +1,6 @@
 # Make independent changes in parallel
 
-Give one agent the CLI's JSON output and another the API's pagination.
+Give one agent the CLI's JSON output and another the API's pagination tests.
 Each works on a project copy and runs the tests there. Inspect both patches,
 then test the combined change in your working tree.
 
@@ -55,15 +55,16 @@ Use the split ID from the first join output line. If you want both patches,
 apply them one at a time, stopping if either check fails. Replace
 `YOUR_SPLIT_ID` and the test command below:
 
-<!-- doc-test: shell replace=["split_id=YOUR_SPLIT_ID\ngit apply --check \".marsh/split/$split_id/out/cli/diff.patch\"\ngit apply \".marsh/split/$split_id/out/cli/diff.patch\"\ngit apply --check \".marsh/split/$split_id/out/api/diff.patch\"\ngit apply \".marsh/split/$split_id/out/api/diff.patch\"\nmake test\ngit diff --check\ngit diff", "set -e\nsplit_id=$(marsh split -n -b cli=\"fixture project-write notes.txt gamma && grep -qx gamma notes.txt\" -b api=\"fixture project-write pagination.txt cursor && grep -qx cursor pagination.txt\")\nsplit_id=$(marsh join --keep -- sh -c 'cat >/dev/null; printf \"%s\\n\" \"$SPLIT_ID\"' <<<\"$split_id\")\ntest \"$(wc -l < notes.txt)\" -eq 2\ntest ! -e pagination.txt\ngit apply --check \".marsh/split/$split_id/out/cli/diff.patch\"\ngit apply \".marsh/split/$split_id/out/cli/diff.patch\"\ngit apply --check \".marsh/split/$split_id/out/api/diff.patch\"\ngit apply \".marsh/split/$split_id/out/api/diff.patch\"\ngrep -qx gamma notes.txt\ngrep -qx cursor pagination.txt\ngit diff --check\nmarsh splits rm \"$split_id\""] -->
+<!-- doc-test: shell replace=["split_id=YOUR_SPLIT_ID", "handle=$(marsh split -n -b cli='printf gamma > notes.txt' -b api='printf cursor > pagination.txt')\nsplit_id=$(marsh join --keep -- sh -c 'cat >/dev/null; printf \"%s\\n\" \"$SPLIT_ID\"' <<<\"$handle\")\nmake() { grep -qx gamma notes.txt && grep -qx cursor pagination.txt; }"] stdout="+gamma" -->
+<!-- doc-test: shell replace=["split_id=YOUR_SPLIT_ID", "handle=$(marsh split -n -b cli='printf gamma > notes.txt' -b api='printf cursor > pagination.txt')\nsplit_id=$(marsh join --keep -- sh -c 'cat >/dev/null; printf \"%s\\n\" \"$SPLIT_ID\"' <<<\"$handle\")\nprintf conflict > notes.txt\nmake() { return 0; }"] status=1 stderr="patch failed" -->
 ```sh
 split_id=YOUR_SPLIT_ID
-git apply --check ".marsh/split/$split_id/out/cli/diff.patch"
-git apply ".marsh/split/$split_id/out/cli/diff.patch"
-git apply --check ".marsh/split/$split_id/out/api/diff.patch"
-git apply ".marsh/split/$split_id/out/api/diff.patch"
-make test
-git diff --check
+git apply --check ".marsh/split/$split_id/out/cli/diff.patch" &&
+git apply ".marsh/split/$split_id/out/cli/diff.patch" &&
+git apply --check ".marsh/split/$split_id/out/api/diff.patch" &&
+git apply ".marsh/split/$split_id/out/api/diff.patch" &&
+make test &&
+git diff --check &&
 git diff
 ```
 

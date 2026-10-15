@@ -141,8 +141,9 @@ are protected host inputs, not guest-home content.
   Docker, but no host Docker or SBX control. The relay grants only narrow,
   explicit operations (MCP publish/load, ACP publication, dev broker scope).
   Projects sharing a selected home share this VM.
-- **Kit job container**: nonroot, resource-limited, fresh per call, with only
-  the project and home grants (a child job: its parent's mounts). It
+- **Kit job container**: nonroot, resource-limited, fresh per call, with the
+  project, home, and configured extra mounts (a child job: its parent's mounts;
+  a split job: its fork, Git state, and home). It
   receives no Docker, containerd, or SBX socket and no proxy-held raw credentials;
   its only daemon channel is the scoped job capability socket. Stock SBX applies the Kit's network
   policy and credential proxy at the VM boundary. Containers in one Kit VM

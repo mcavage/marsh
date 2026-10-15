@@ -54,14 +54,10 @@ session. It does not make the project read-only.
 MCP integrations and `--dev` can add access beyond these mounts, as described
 [below](#what-is-not-isolated).
 
-Native `sbxenv.yaml`/`sbxenvs/NAME.yaml` additions can explicitly grant other
-directories and MCP sources ([home setup](guides/set-up-your-home.md)). Extras
-use normal source admission, appear in receipts, propagate only through a
-parent's recorded view, and are omitted from split Kit jobs. Environment files
-and local MCP executable paths are protected host inputs. Local MCP servers
-execute on the Mac with your privileges; their code and dependencies must be
-trusted and kept outside writable guest mounts. Connections are per Kit VM,
-not per project, and do not imply permission to send messages or mutate data.
+You can mount extra Mac directories through [environment files](configuration.md#servers-and-extra-directories).
+Child jobs inherit their parent's extra directories; split Kit jobs omit them.
+Use `readOnly: true` for reference material. MCP connections can grant access
+beyond mounted files, as described [below](#mcp-connections).
 
 The host control directory, the install, and Kit sources are never mounted.
 marsh refuses to start in a directory that contains them.
@@ -111,6 +107,22 @@ branch.
 
 Agents in split branches still share the guest home read/write. A private
 project copy does not isolate their settings, login files, or history.
+
+### MCP connections
+
+A server loaded into a Kit VM is available to every job in that VM, across
+projects in the scope. Its tools and account grants determine what it can
+read or change. The per-Kit YAML files select automatic loading; they do not
+restrict access to Docker Sandboxes' host-wide registry or prevent a client
+from using the gateway's discovery and loading features.
+
+Local MCP `command` servers run on your Mac with your account's permissions.
+Keep their executable, scripts, and configuration outside guest-writable
+directories. marsh prevents mounting the environment YAML and resolved
+executable, but does not discover every file that executable may load.
+
+Removing a declaration or stopping marsh does not remove its Docker Sandboxes
+registration or OAuth grant. Manage those with `sbx mcp` on the Mac.
 
 ## What is not isolated
 

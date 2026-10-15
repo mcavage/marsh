@@ -20,9 +20,8 @@ wait for this session, even if another one is already ready.
 
 To start one session with no reservation, run `acp run AGENT &`, then
 `acp list --wait`. This works only when exactly one session is live in the
-project. With more than one, `--wait` fails and asks for an exact ID. A
-reservation is safer in scripts: an older ready session does not prove the
-new one started.
+project. With more than one, `--wait` fails and asks for an exact ID. Use a
+reservation in scripts to wait for the session you just started.
 
 ## What a session can change
 
@@ -139,6 +138,11 @@ terminal in the same project and with the same `MARSH_HOME`:
 
 ```sh
 marsh acp install-published codex reviewer
+```
+
+To remove the Mac client's registration:
+
+```sh
 marsh acp remove-published codex reviewer
 ```
 
