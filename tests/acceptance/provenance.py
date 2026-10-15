@@ -105,6 +105,7 @@ def verify_shell_image_proof(source: Path, guest: Path, repository: str, insecur
     expected_inputs = {name: file_digest(source / name) for name in (
         "packaging/shell-image", "packaging/shell/Dockerfile", "scripts/prepare-shell-image.py")}
     expected_inputs["packaging/image-repair"] = input_files(source / "packaging/image-repair")
+    expected_inputs["packaging/image-base"] = input_files(source / "packaging/image-base")
     expected_inputs["packaging/dhi-notices/collected"] = input_files(source / "packaging/dhi-notices/collected")
     expected_inputs["packaging/shell/pi"] = input_files(source / "packaging/shell/pi")
     expected_inputs["packaging/shell/editors"] = input_files(source / "packaging/shell/editors")

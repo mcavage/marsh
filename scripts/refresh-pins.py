@@ -359,6 +359,7 @@ def images(docker, work):
     shell = work / "shell"
     copy_tree(ROOT / "packaging/shell", shell)
     copy_tree(ROOT / "packaging/image-repair", shell / "image-repair")
+    copy_tree(ROOT / "packaging/image-base", shell / "image-base")
     copy_tree(BUNDLE, shell / "dhi-notices")
     base = (ROOT / "packaging/shell-image").read_text().strip()
     contexts.append(("marsh-shell-template", shell, shell / "Dockerfile",
