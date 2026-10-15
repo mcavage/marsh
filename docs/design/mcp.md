@@ -131,7 +131,7 @@ ancestor chain. The external Homebrew-managed SBX executable retains strict
 regular-file, owner, mode, device, inode, and content-hash pinning, while its
 Caskroom ancestor permissions are not treated as marsh-managed trust state.
 Use `make install` first and point at that installed `marsh`.
-Homebrew owns the selected stock `sbx` installation, stable or nightly.
+Homebrew owns the selected stock `sbx` installation.
 `make install` never
 installs, copies, signs, modifies, or removes SBX. marsh resolves `MARSH_SBX`
 when explicitly set, otherwise `sbx` on `PATH`, and canonicalizes that exact

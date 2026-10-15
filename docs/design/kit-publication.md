@@ -124,7 +124,7 @@ overwritten. Consumers can verify the receipt filename and `registry_sha256`.
 A failure before registry commit preserves the previous registry and receipts,
 but a crash can leave an unreferenced new receipt: the receipt and registry are
 separate local commits. Remote pushes can also partially succeed, leaving images
-and moving the mutable tag (`:release`, or `--tag`; nightlies use `:nightly`).
+and moving the mutable tag (`:release`, or `--tag`).
 Consumers pin by digest, so a moved tag does not change their selected image.
 
 The receipt binds source and staged bytes to reported digests. It does not

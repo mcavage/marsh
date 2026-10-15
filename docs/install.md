@@ -117,36 +117,6 @@ shell VM. Later launches reuse that VM.
 Agent calls need a provider credential as well as `sbx login`. Follow the
 [Quickstart](quickstart.md) before making your first call.
 
-## Nightly builds
-
-CI publishes passing commits on `main` as nightly builds. Use a release
-unless you need a change that has not been released yet; nightlies can break
-compatibility. The nightly and stable Homebrew packages conflict. Uninstall
-your stable formula before switching:
-
-```sh
-brew uninstall marsh
-brew install mcavage/tap/marsh-nightly
-```
-
-To update a nightly:
-
-```sh
-brew upgrade mcavage/tap/marsh-nightly
-```
-
-`marsh --version` identifies it as `X.Y.Z-nightly.TIME.gSHA`, using the next
-release number. The newest ten nightlies are kept as GitHub prereleases on
-the [releases page](https://github.com/mcavage/marsh/releases). The curl
-installer also accepts their full version with `--version`.
-
-Stable and nightly installs share `~/.marsh`. To switch back:
-
-```sh
-brew uninstall marsh-nightly
-brew install mcavage/tap/marsh
-```
-
 ## Upgrade
 
 For Homebrew:
@@ -203,8 +173,8 @@ if you no longer need its contents:
 ## Docker Sandboxes policy
 
 The release shell image and Kits are published as
-`docker.io/mcavage/marsh-*`, with version tags and `:latest`; nightlies use
-`:nightly`. If your Docker Sandboxes policy restricts Kit sources, allow
+`docker.io/mcavage/marsh-*`, with version tags and `:latest`.
+If your Docker Sandboxes policy restricts Kit sources, allow
 `docker.io/mcavage`.
 
 ## From source
