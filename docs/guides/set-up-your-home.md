@@ -1,132 +1,109 @@
 # Set up your marsh home
 
-marsh mounts `~/.marsh/home` as the Linux user's home. Put your agent settings,
-skills and dotfiles there, not in your real Mac home. Nothing needs to be
-packaged as a profile or installed from a registry.
+From your Mac, put marsh's dotfiles and agent settings in `~/.marsh/home`.
+Inside marsh, that directory appears as your home (`~`). Its files survive
+`marsh stop` and VM resets.
+
+## Agent settings and skills
+
+Use these paths on your Mac:
 
 | Agent | Skills | Global instructions |
 |---|---|---|
 | Pi | `~/.marsh/home/.agents/skills/NAME/SKILL.md` | `~/.marsh/home/.pi/agent/AGENTS.md` |
-| Codex | the same `.agents/skills` directory | `~/.marsh/home/.codex/AGENTS.md` |
+| Codex | `~/.marsh/home/.agents/skills/NAME/SKILL.md` | `~/.marsh/home/.codex/AGENTS.md` |
 | Claude | `~/.marsh/home/.claude/skills/NAME/SKILL.md` | `~/.marsh/home/.claude/CLAUDE.md` |
 
-Normal agent login, settings and history files live alongside these files. Do
-not put the entire guest home in Git. Track only selected personal content;
-exclude authentication, sessions, caches, plugins and runtime state. Keep any
-repository containing internal workflows private. Shell startup files are
-described in [Choosing a shell](../shells.md).
+Put shell startup files here too: `~/.marsh/home/.bashrc` on the Mac is
+`~/.bashrc` inside marsh. See [Choosing your shell](../shells.md) for startup
+files and [The shell](../shell.md#editor-settings) for editor settings.
 
-## MCP servers and additional directories
+Jobs share this home, including any saved logins and history. If you keep
+dotfiles in Git, track the files you choose rather than the entire home.
 
-Two optional locations configure native SBX environment **additions**:
+For example, add an alias and prompt in the **marsh shell**:
 
-```text
-~/.marsh/
-  home/                  # guest home: agent settings, skills, dotfiles
-  sbxenv.yaml            # shared additions for every Kit and the shell
-  sbxenvs/
-    pi.yaml              # additions for the registered pi command
-    claude.yaml
-    codex.yaml
-    shell.yaml           # shell VM and registered shell command
+<!-- doc-test: shell stdout="ll=" -->
+```sh
+cat >> ~/.bashrc <<'EOF'
+alias ll='ls -lah'
+PS1='\w \$ '
+EOF
+source ~/.bashrc
+alias ll
 ```
 
-With another `MARSH_HOME`, use that scope's directories instead. No file is
-required. Shared lists are followed by the matching command's lists, as in
-SBX's additive environment layering. Duplicate MCP names and overlapping extra
-directories are errors, not replacement rules. There is no subtraction syntax;
-put a connection in the per-Kit file if it should not reach every Kit. Aliases
-of the same workload must have identical additions, because they share one VM.
+## Connect an MCP server
 
-For example, `~/.marsh/sbxenvs/pi.yaml`:
+Save connections for one registered command in `~/.marsh/sbxenvs/NAME.yaml`.
+Create the `sbxenvs` directory if needed. For example, save this as
+`~/.marsh/sbxenvs/pi.yaml` on your Mac:
 
 ```yaml
 schemaVersion: "1"
-additionalWorkspaces:
-  - path: /Users/me/reference
-    readOnly: true
 mcp:
   servers:
     - name: granola
       url: https://mcp.granola.ai/mcp
 ```
 
-The supported native fields are `schemaVersion`, `additionalWorkspaces` and
-`mcp.servers` (`name`, `url` or `command` with `args`). These are additions,
-not a complete standalone `sbx env create` document: marsh supplies the Kit,
-random owned VM name, primary workspace, guest home and worker. Other fields,
-including `agent`, `name`, `kits`, `workspace`, `env`, `secrets`, `bindings`,
-`sandboxOptions`, `ports`, `args` and `lifecycle`, are refused explicitly.
-
-Files are read once when the scope's daemon starts. After editing, let jobs and
-shells finish, run `marsh stop`, then start marsh again. Configuration generations
-have distinct owned VM names; existing VMs are not silently reconfigured. A
-worker reset recreates its VM with the daemon's same snapshot and reloads MCP.
-Kit files for commands registered after daemon startup take effect after a
-daemon restart. Ephemeral-home sessions do not receive personal additions.
-
-### MCP authentication and authority
-
-marsh reuses a matching SBX registration, or registers a missing one without
-opening an OAuth browser. It refuses to overwrite a different registration
-under the same name. Registrations and authentication remain managed by SBX on
-the Mac, not by files in the guest home:
+Exit your marsh shells, run `marsh stop` from your Mac terminal, then start
+marsh again. The next Pi job loads the connection. If it reports that sign-in
+is required, run this on your Mac, then retry:
 
 ```sh
 sbx mcp auth granola
 ```
 
-If first use reports missing authorization, authorize on the Mac, then retry.
-Required registration/load failures stop Kit preparation; marsh does not silently
-continue without a declared connection. Loaded servers are available to every
-job in that Kit VM, across projects. Verify a small read-only request; a tool
-listing is not evidence that the account's data can be read. The shell can have
-a gateway too, but loading a server does not add a shell MCP client command.
+To load a connection for every Kit and the shell, put it in
+`~/.marsh/sbxenv.yaml` instead. Shared entries are added to each command's
+entries; do not repeat the same server in both files.
 
-Per-Kit files select automatic loading; they are not an MCP permission sandbox
-or an allowlist for SBX's host-global registry. SBX and the server's own grants
-determine connection authority, including any gateway discovery/loading it offers.
+Loaded servers are shared by jobs in that Kit VM, across projects. Removing
+an entry stops future automatic loading; it does not remove the server's
+Docker Sandboxes registration or sign-in. Manage those with `sbx mcp` on the Mac.
 
-A local server uses native SBX `command`/`args`, for example:
+### Local servers
+
+Use `command` and `args` instead of `url`:
 
 ```yaml
 schemaVersion: "1"
 mcp:
   servers:
     - name: my-reader
-      command: /absolute/host/path/to/trusted-mcp-reader
+      command: /absolute/path/to/my-reader
       args: ["--readonly"]
 ```
 
-**Local MCP commands run on your Mac with your account's permissions.** Writing
-the declaration opts in to that host execution when the gateway connects. Trust
-the executable and every script/configuration it loads; do not keep those inputs
-in writable guest mounts. The environment files and resolved executable itself
-are protected against guest mounting. Files must be yours, not symlinks, and not
-writable by group or others. Use SBX-managed authentication or trusted host-side
-credential handling; never store keys in YAML, arguments or the guest home.
+**Local MCP servers run on your Mac with your account's permissions.**
+Keep their executable, scripts, and configuration outside directories that
+jobs can modify. Use the server's host-side authentication setup; keep keys
+out of YAML and command arguments.
 
-SBX registrations are host-global. Removing a declaration or stopping marsh
-does not delete the registration or its OAuth grant. Use `sbx mcp` to manage
-them explicitly, without disrupting another sandbox that uses the same server.
+## Mount a reference directory
 
-### Mount behavior
+Add `additionalWorkspaces` to the same YAML file. For example, this makes an
+existing Mac directory available to Pi at `/Users/me/reference`, read-only:
 
-Directories must exist and pass marsh's normal descriptor-bound source checks.
-They appear at their canonical Mac paths in Linux. Relative paths are resolved
-against the file declaring them; `~`, `${HOME}` and other variables are not
-expanded. `readOnly` defaults to false, as in native SBX; set it to true for
-reference material.
+```yaml
+schemaVersion: "1"
+additionalWorkspaces:
+  - path: /Users/me/reference
+    readOnly: true
+```
 
-Extra sources must not overlap the project, the managed home backing directory,
-another extra source, or marsh's protected host control/configuration/artifacts.
-They may be below the guest user's home path (for example `~/reference`) but may
-not replace the whole guest home. The shell sees shared plus `shell.yaml`
-directories; each root Kit job sees shared plus its own file. Receipts include
-every added mount and its access mode.
+Replace the path with your directory's absolute path. YAML paths do not expand
+`~` or environment variables. Set `readOnly: true` for files the agent should
+only read; the default is read-write. You can include both `mcp` and
+`additionalWorkspaces` in one file.
 
-Nested jobs inherit the parent's recorded mounts, not new mounts from the
-child's Kit file. Split Kit jobs omit all extra directories: they get the fork,
-its Git metadata, and the guest home only. This prevents an extra mount from
-bypassing the split's project isolation. MCP access still follows the child's
-Kit VM, as network policy and credentials do.
+Restart marsh after saving, as above. Child jobs inherit their parent's extra
+directories. Agents in a split do not receive extra directories.
+
+With a different `MARSH_HOME`, use its `home`, `sbxenv.yaml`, and `sbxenvs`
+paths instead. Ephemeral-home sessions skip these additions.
+
+See [Configuration](../configuration.md#servers-and-extra-directories) for
+file rules and limits, [Troubleshooting](../troubleshooting.md#environment-files-and-mcp-connections)
+for setup errors, and [Security](../security.md#mcp-connections) for MCP access.

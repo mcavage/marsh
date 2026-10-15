@@ -23,7 +23,6 @@ Usage:
   marsh join [--json] [--keep] [-- CMD [ARG...]]
   marsh fanout [-n] [::: LABEL CMD [ARG...]]... | marsh collect [--json] [--timing]
                                                            Concurrent, same files
-  marsh splits [--json] [ID]
   marsh jobs [--json] | jobs --tree [--json] | jobs show JOB [--json]   This job's subtree
   marsh context                                            Print this job's context
 

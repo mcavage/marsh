@@ -35,39 +35,6 @@ download its VM template. First use of Claude also starts its Kit VM and
 may download an image of about 600 MB. Allow a few minutes for these cold
 starts; later launches reuse warm VMs.
 
-## Make it your shell
-
-marsh keeps its own home directory, backed by `~/.marsh/home` on your Mac
-in the default scope. Your Mac's dotfiles stay untouched.
-
-Vim and terminal Emacs are included. At the **marsh prompt**, open
-`~/.bashrc` with `vim ~/.bashrc` or `emacs -nw ~/.bashrc`. You can also
-open `~/.marsh/home/.bashrc` in your Mac editor.
-
-For example, add an alias and set your prompt:
-
-<!-- doc-test: shell stdout="ll=" -->
-```sh
-cat >> ~/.bashrc <<'EOF'
-alias ll='ls -lah'
-PS1='\w \$ '
-EOF
-source ~/.bashrc
-alias ll
-```
-
-Brush reads `~/.bashrc` when you open an interactive shell. Your editor
-settings live in the same guest home: `~/.vimrc` for Vim, or
-`~/.emacs.d/init.el` for Emacs. See [Editor settings](shell.md#editor-settings)
-for examples.
-
-Your dotfiles survive VM removal. Jobs using this guest home can read them
-too, along with any saved logins. Keep credentials out of
-the files you copy from your Mac.
-
-For other startup files or zsh configuration, see
-[The shell](shell.md#startup-files) and [Choosing your shell](shells.md).
-
 ## Split a task
 
 At the **marsh prompt**:
@@ -85,17 +52,13 @@ work but omits Git-ignored files. Copy-on-write cloning shares unchanged
 file data where the filesystem supports it.
 
 `join` prints the job's exit status, report, and any captured changes.
-Read the report, then open the cited source file yourself. Check whether
-the command actually runs tests and whether it requires services, generated
-files, or dependencies. If you have the Linux dependencies installed, try
-that command at the marsh prompt. If not, the cited definition still gives
-you something concrete to verify before setting up the environment.
+Open the cited test definition and install any required Linux dependencies.
+Then try the test command at the marsh prompt.
 
 Ctrl-C stops the foreground job and its children.
 
-This task requests no edits, so there is normally no patch to apply. If
-`join` shows a diff, inspect it; do not apply an unsolicited change. For a
-task that changes code, continue with
+This task normally returns a report without a patch. For a task that changes
+code, continue with
 [Make independent changes in parallel](guides/race-two-agents.md).
 
 ## Inspect and clean up
@@ -108,8 +71,7 @@ marsh results
 ```
 
 The tree shows parent-child relationships. Results record exit status,
-timing, and whether marsh confirmed container deletion. They do not verify
-the agent's conclusions.
+timing, and whether marsh confirmed container deletion.
 
 `--keep` preserved this split's output. Once you have read it, replace
 `YOUR_SPLIT_ID` below with the ID from the first join output line, remove
@@ -132,9 +94,8 @@ your project, guest home, and job records.
 ## Run an agent directly
 
 A direct command such as `claude -p 'Explain this repository'` mounts your
-original project read-write. The agent can change or delete files despite
-a request only to read. Packaged agents run without their own permission
-prompts or internal sandboxes.
+original project read-write. The agent can change or delete files; packaged
+agents run without their own permission prompts or internal sandboxes.
 
 Your own shell commands, including tests, run unconfined in the shell VM.
 A test started inside a split branch begins in its fork but can write
@@ -147,11 +108,16 @@ The example uses a proxy-managed Anthropic credential. For Codex, configure
 `sbx secret ls` lists stored credentials. OAuth options are in
 [Signing in](kits.md#signing-in).
 
-Docker Sandboxes keeps proxy-managed provider keys on your Mac and adds
-them to outgoing requests; containers receive placeholders. Saved guest
-logins are files in the shared guest home, backed by `~/.marsh/home` on
-your Mac. Every job in the scope can read that home, including settings,
-history, and login files. It is not your actual Mac home.
+Docker Sandboxes adds proxy-managed keys to outgoing requests; containers
+receive placeholders. Agent logins saved in the guest home are instead
+readable by other jobs sharing that home.
+
+## Make it your shell
+
+Your dotfiles and agent settings live in `~/.marsh/home` on your Mac and
+appear under `~` inside marsh. They survive VM removal. See
+[Set up your marsh home](guides/set-up-your-home.md) for skills, startup
+files, and MCP connections. Vim and terminal Emacs are included.
 
 ## Agents running agents
 

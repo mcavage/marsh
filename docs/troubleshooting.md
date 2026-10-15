@@ -19,11 +19,13 @@ marsh results
 |---|---|
 | The first call to an agent takes a while | [The first command is slow](#the-first-command-is-slow) |
 | Error before a shell opens | [marsh will not start](#marsh-will-not-start) |
+| An environment file or MCP connection fails | [Environment files and MCP connections](#environment-files-and-mcp-connections) |
 | A command exits 125 or 126 | [A job was refused](#a-job-was-refused) |
 | `cleanup uncertain` in `jobs --tree` | [Cleanup uncertain and quarantine](#cleanup-uncertain-and-quarantine) |
 | A VM will not go away | [Removing VMs](#removing-vms) |
 | `join` left a split behind | [A split was kept](#a-split-was-kept) |
 | `ephemeral home capacity exhausted` | [Ephemeral home slots](#ephemeral-home-slots) |
+| A local Kit's image digest does not match | [Local Kit builds](#local-kit-build-does-not-match) |
 
 ## The first command is slow
 
@@ -58,7 +60,7 @@ registry) in its Kit sources policy.
 
 | Message | Cause and fix |
 |---|---|
-| `install must provide libexec/marsh/shell-image` | `bin/` and `libexec/marsh/` are not under the same prefix. Reinstall with `brew reinstall mcavage/tap/marsh`. |
+| `install must provide libexec/marsh/shell-image` | `bin/` and `libexec/marsh/` are not under the same prefix. Reinstall with the method you used: `brew reinstall mcavage/tap/marsh`, rerun the install script, or copy the tarball's `bin/` and `libexec/` under one prefix. |
 | A message naming `commands.json` or `agents.json` | That file in the control directory is malformed. Fix it. `marsh status` shows the control directory. |
 
 ### Cannot mount the directory
@@ -77,10 +79,31 @@ For example, `/tmp` contains the daemon's private runtime directory and
 cannot be mounted as a project. Start marsh from your project or a scratch
 directory outside the protected paths.
 
+## Environment files and MCP connections
+
+Configuration errors name the YAML file. Edit it on the Mac, then finish jobs,
+exit marsh shells, run `marsh stop`, and start marsh again.
+
+| Error | Fix |
+|---|---|
+| Unsupported field or schema version | Use `schemaVersion: "1"` and the [supported fields](configuration.md#servers-and-extra-directories). |
+| File ownership, permissions, or symlink | Use a regular YAML file owned by your Mac account; remove group/other write permission. `sbxenvs` must be a real directory too. |
+| Duplicate MCP name or overlapping directory | Remove the duplicate from the shared or per-command file. Lists add together; they do not override each other. |
+| Aliases have different environments | Give names for the same Kit identical combined configuration. |
+| Server already has a different host-global definition | Choose another server name, or update the existing registration with `sbx mcp` on the Mac. Other sandboxes may use it. |
+| Missing MCP authorization | Run `sbx mcp auth NAME` on the Mac and retry the job. |
+| MCP registration or loading failed | Check the reported `sbx` error and retry after fixing the connection. Declared servers must load before the VM can be used. |
+
+Restart after changing YAML. Authentication changes alone can be retried
+without editing the file. A worker reset uses the daemon's existing YAML
+snapshot. Published pipeline defaults have a different failure policy:
+see [MCP defaults](mcp.md#changing-or-removing-a-default).
+
 ## A job was refused
 
-A refused job starts nothing, prints a reason, and exits 125. It exits 126 for
-a name that `MARSH_SPAWN` excludes.
+A refused job starts nothing and prints a reason. A registered-name link
+excluded by `MARSH_SPAWN` exits 126; other refusals, including those through
+`marsh run`, exit 125.
 
 | Message | Cause |
 |---|---|
@@ -91,7 +114,7 @@ a name that `MARSH_SPAWN` excludes.
 | `total limit 64` | the tree has used its 64 launches, including refused child calls |
 | `tree already uses ... Kit VMs (...) (MARSH_TREE_KIT_VMS)` | live jobs in the tree already use the configured number of distinct Kits; let one finish before adding another |
 | `deadline: parent job ... has ... ms of wall time left` | less than one second remains before the parent's deadline; a child cannot outlive it |
-| `spawn refused: NAME not in this job's spawn set` | `MARSH_SPAWN` or `--spawn` excludes it (exit 126) |
+| `spawn refused: NAME not in this job's spawn set` | `MARSH_SPAWN` or `--spawn` excludes it (126 from a registered-name link, 125 from `marsh run`) |
 | `interactive child jobs are not supported yet` | a child job was given a terminal; redirect its stdin and stdout |
 
 Refused child calls count toward the tree's 64-launch budget. Avoid retry
@@ -200,18 +223,11 @@ in [SECURITY.md](../SECURITY.md).
 
 ## Local Kit build does not match
 
-A local-source Kit is built by marsh through Buildx and by stock
-`sbx create`. Their image digests must agree. Independent builds can produce
-different digests, so both need to reuse the same BuildKit cache. marsh runs
-`sbx create` with
-`SBX_KIT_BUILDER=host` (your own `SBX_KIT_BUILDER` does not reach it), and
-stock SBX reuses any build it already holds for the same source tree, however
-old. On a mismatch marsh recovers on its own: it drops a stale cache entry and
-recreates the Kit VM once with `SBX_KIT_REBUILD=1`.
-
-If `marsh` still reports a mismatch ("still mismatched after stock SBX rebuilt
-the Kit"), the two builds did not share a cache. Check that `docker buildx ls`
-selects a local builder (the `*` entry, for example `desktop-linux`), not a
-remote or cloud builder, then retry.
+marsh and Docker Sandboxes must build the same image for a local-source Kit.
+marsh retries once if their digests differ. If it reports "still mismatched
+after stock SBX rebuilt the Kit", run `docker buildx ls` and select a local
+builder (the `*` entry, for example `desktop-linux`), then retry. Both builds
+need to use the same BuildKit cache. See the [registry design](design/command-registry.md)
+for the build and image checks.
 
 Next: [Configuration](configuration.md), [Commands and Kits](kits.md).

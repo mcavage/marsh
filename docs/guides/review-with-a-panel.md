@@ -27,9 +27,7 @@ want a committed branch reviewed instead, change **both** prompts to the
 same base comparison, such as `git diff main...HEAD` when your base is
 `main`.
 
-Review the findings against the source. Neither a quiet reviewer nor exit
-status zero establishes that the change is sound. When a report names a
-missing test, check whether an existing test already exercises that case.
+Check each finding against the source and existing tests before making a fix.
 
 If a reviewer edited files, `join` also shows that diff. Inspect it
 separately from the findings and leave it unapplied unless you want the

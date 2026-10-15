@@ -36,8 +36,7 @@ For a large change, `join` may truncate a printed diff; use the full
 
 ## Apply or discard the changes
 
-The reviewer supplies comments, not an approval signal or a machine-readable
-winner. Apply the patches you want using the
+Apply the patches you want using the
 [parallel guide's application steps](race-two-agents.md#apply-one), then run
 your checks on the combined tree. Substitute this run's ID, not one from a
 previous session.

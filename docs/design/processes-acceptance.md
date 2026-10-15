@@ -1,8 +1,8 @@
 # Nested processes acceptance scenarios
 
 Black-box scenarios for [nested processes](processes.md), with section references
-written as `sN`. P26 was retired in revision 5; P32 makes billed model calls and
-runs only with `--live`. Harness: `tests/acceptance/processes_uat.py`,
+written as `sN`. P26 is retired; P32 makes billed model calls and runs only
+with `--live`. Harness: `tests/acceptance/processes_uat.py`,
 run by `make regress ONLY=processes` (or `ONLY=P02-self-spawn-bash-c`) against `~/.marsh-dev`
 (`--prefix`). It reuses the `workspaces_uat.py` callers and run.py isolation:
 own MARSH_HOME and control home, timeouts and process-group kills on every
@@ -33,7 +33,7 @@ scenario is `blocked` before any VM work. Use `--only`, `--list`,
 | P01 job-surface | s4 environment, nothing shadowed, read-only binds; s15 real bash | `/bin/sh` probe in a job | PATH starts `/run/marsh/bin:`; `SHELL` not under `/run/marsh`; `MARSH_JOB` = receipt id; PATH `bash` is the image's GNU bash (same `--version` as `/bin/bash`); no `bash` or `sh` link; links for `marsh`, `fixture`, `fixture-alt`, `shell`; `type fixture` = `fixture is /run/marsh/bin/fixture`; `context.md` names the job and its spawn set; artifact, `bin/`, and `job.json` not writable; `job.json` names the job and `fixture`; 1 job |
 | P02 self-spawn-bash-c | s1, s5 child case, s9 lineage, s3 `ProcessShow` | job: `bash -c 'fixture identity; "$SHELL" -c "fixture identity"; marsh jobs --tree'` | 3 jobs; each child's parent is the job, same root, depth+1; `jobs show` lists the child ids; host `--tree` shows all 3; the in-job tree shows its own subtree and not an earlier unrelated job; all deleted |
 | P03 direct-execve | s4 table row "registered name… direct execvp"; s1 any shell | `pipeline \| fixture streams 'a b'`; `/bin/sh -c` running the link path, the bare name, and `env fixture` | exact child bytes and status 23 relayed; 2 and 4 jobs with correct lineage |
-| P04 entry-once | s5 entry case (`EntryOnce`, `NoEntryRecursion`) and both guards | `fixture exec fixture identity`; the same `exec` then a PATH/`MARSH_ENTRY` probe; then the image's `bash -c fixture`; control `exec env -u MARSH_ENTRY fixture` | 1 job (no recursion); marker unset and PATH still starts with the links after entry (GM 1); the image's bash still reaches the links (2 jobs); without the marker the own name is a child (2 jobs) |
+| P04 entry-once | s5 entry case (`EntryOnce`, `NoEntryRecursion`) and both guards | `fixture exec fixture identity`; the same `exec` then a PATH/`MARSH_ENTRY` probe; then the image's `bash -c fixture`; control `exec env -u MARSH_ENTRY fixture` | 1 job (no recursion); marker unset and PATH still starts with the links after entry (s13.1); the image's bash still reaches the links (2 jobs); without the marker the own name is a child (2 jobs) |
 | P05 image-tool-local | s5 image tool case | `fixture-alt identity`; in a `fixture-alt` job, `fixture` and `/usr/local/bin/marsh-fixture` | both run locally: 1 job each, output present |
 | P06 cross-kit-default | s6 cross-Kit default | `fixture` job runs `shell -c …` and `fixture-alt` with no flags | both succeed; children `shell` and `fixture-alt` under the job; the shell child runs in a different VM with its own `MARSH_JOB` |
 | P07 run-three-callers | s3 `ProcessRun`, s5 "`marsh run N` always child" | `printf in \| marsh run fixture streams x` from the host CLI, a session, and a job | the same stdout bytes and exit 23 in all three; the host and session runs are session roots; the in-job run is a child of the job |
@@ -45,19 +45,19 @@ scenario is `blocked` before any VM work. Use `--only`, `--list`,
 | P13 same-kit-chain | s6 same-Kit 2 (`SameKitBound`) | fixture → `bash -c fixture` → `bash -c fixture` | L3 = 125 with `fixture → fixture → fixture refused: same-Kit chain limit 2 (see /run/marsh/context.md)`; exactly 2 jobs |
 | P14 fan-out-cap | s6 fan-out 4 (`FanOutBound`); fail fast | 4 gated live `shell` children, then a fifth | the fifth exits 125 within 10 s with `fan-out limit 4`; 4 children under the job |
 | P15 pool-fail-fast | s6 pool 8 (`BudgetBound`); never queues | session: 7 held jobs, then a job whose child is the 9th | the child exits 125 with `capacity: 8 jobs`; its parent finishes within 30 s (no deadlock); 8 jobs, all deleted |
-| P16 spawn-narrowing | s6 narrowing only (`SpawnSetAttenuates`) | `MARSH_SPAWN=fixture`: `shell` by name, `marsh run shell`, an in-job `MARSH_SPAWN=` widen, `--spawn fixture,shell`, own name; host `run --no-spawn` | the name fails (also in the grandchild, which still has every link, GM 5); `run` exits 125 naming spawn/shell; neither widen works; no `shell` job; lineage `spawn` never holds `shell`; own name works; `--no-spawn` keeps the socket (review L11) but no working name or `marsh run` |
+| P16 spawn-narrowing | s6 narrowing only (`SpawnSetAttenuates`) | `MARSH_SPAWN=fixture`: `shell` by name, `marsh run shell`, an in-job `MARSH_SPAWN=` widen, `--spawn fixture,shell`, own name; host `run --no-spawn` | the name fails (also in the grandchild, which still has every link, s13.5); `run` exits 125 naming spawn/shell; neither widen works; no `shell` job; lineage `spawn` never holds `shell`; own name works; `--no-spawn` keeps the socket but no working name or `marsh run` |
 | P17 branch-confinement | s7 view copied verbatim; capture waits for the subtree | host split branch `b`, whose `bash -c` children probe `<project>/README.md`, write outside, write `child.txt`, and run `identity` | `missing`, escape fails, and `A\tchild.txt` is in `files`; child cwd is in the fork; child `mounts` equal the branch's and exclude the project; user tree unchanged |
 | P18 tty-child-refused | s6 no TTY children | under a real pty: `fixture pipeline \| fixture identity` | `interactive child jobs are not supported yet` and nonzero; 1 job |
 | P19 ctrl-c-tree | s8 Ctrl-C cancels the whole tree | job runs `shell -c 'sleep 600' & fixture hold 600 & wait`; SIGINT to the root caller | nonzero within 25 s; 3 jobs across ≥ 2 VMs, all verified deleted |
 | P20 parent-exit-cascade | s8 job end (`CancelPropagates`, `NoOrphanRunning`) | `pipeline \| --exit-after 15 shell -c 'sleep 600'` | parent exits 7; the shell child is deleted within the bound |
 | P21 daemon-restart | s8 restart (`RestartUncertain`, `NoReplay`) | parent + child running; SIGKILL the verified owned daemon | client nonzero; both jobs uncertain/`daemon_restarted`; no job created after; `workers reset fixture` exits 0 |
-| P22 cap-socket-cap | s3 capability socket fixes | in-job `cap-flood 24` (image binary, local), then `fixture identity` | ≥ 8 admitted; excess connections get `too many concurrent daemon requests in this job`; none silently dropped; a spawn works afterwards |
+| P22 cap-socket-cap | s3 capability socket cap | in-job `cap-flood 24` (image binary, local), then `fixture identity` | ≥ 8 admitted; excess connections get `too many concurrent daemon requests in this job`; none silently dropped; a spawn works afterwards |
 | P23 awareness-context | s9 awareness | host and session `marsh context`; in-job `marsh context` vs `/run/marsh/context.md` | mentions `marsh run` and `MARSH_SPAWN`; host = session; in-job print = file; project and home unchanged, no `CLAUDE.md`/`AGENTS.md`; `status` has `processes` |
 | P24 real-bash-startup | s15 performance | `fixture bench 40` interleaving `bash -c true`, `/bin/bash -c true`, `/run/marsh/bin/marsh --help`, `/bin/true` | PATH bash p50 within 2 ms of `/bin/bash`; `marsh --help` p50 ≤ `/bin/true` + 20 ms; no failures |
-| P25 child-after-first-split | s7 view copied verbatim (review H1) | a job in a fresh repo (no `.marsh`) runs `marsh split ::: k fixture identity \| marsh join`, then `fixture identity` | split and child exit 0; 3 jobs (job, branch, child) under one root; the child's mounts include the parent's; user tree unchanged |
-| P27 no-shell-branch-from-job | s13.6 (B2): the daemon refuses shell branches from any job | in a job: `marsh split -b` and mixed `-b` + `:::` | each fails with the session-shell message naming `::: LABEL CMD`; the shell branch never ran; no new job, split record, or user-tree change |
-| P28 env-whole-tree | s6 (B3) | root `export P28_ROOT=… API_TOKEN=…`; fixture → shell → shell, the middle re-exporting the same value and a new `P28_MID` | depth 1, 2, 3 all see `P28_ROOT`; depth 3 sees `P28_MID`; no depth sees `API_TOKEN` |
-| P29 root-interrupt-cascade | s8 Ctrl-C (B4) | `marsh -c "shell -c \"shell -c 'sleep 300' </dev/null \| cat\""` and fixture → shell → shell, then SIGINT to the root caller | returns in < 15 s with 130; every job `cancelled`; deletion verified |
+| P25 child-after-first-split | s7 view copied verbatim | a job in a fresh repo (no `.marsh`) runs `marsh split ::: k fixture identity \| marsh join`, then `fixture identity` | split and child exit 0; 3 jobs (job, branch, child) under one root; the child's mounts include the parent's; user tree unchanged |
+| P27 no-shell-branch-from-job | s13.6: the daemon refuses shell branches from any job | in a job: `marsh split -b` and mixed `-b` + `:::` | each fails with the session-shell message naming `::: LABEL CMD`; the shell branch never ran; no new job, split record, or user-tree change |
+| P28 env-whole-tree | s6 environment for children | root `export P28_ROOT=… API_TOKEN=…`; fixture → shell → shell, the middle re-exporting the same value and a new `P28_MID` | depth 1, 2, 3 all see `P28_ROOT`; depth 3 sees `P28_MID`; no depth sees `API_TOKEN` |
+| P29 root-interrupt-cascade | s8 Ctrl-C | `marsh -c "shell -c \"shell -c 'sleep 300' </dev/null \| cat\""` and fixture → shell → shell, then SIGINT to the root caller | returns in < 15 s with 130; every job `cancelled`; deletion verified |
 | P30 inspection-text | s9 text forms | a fixture job with one child | `jobs --tree` lines `SHORTID  Ns ago  finished  0  N.Ns  fixture pipeline "|" bash -c "...`, child drawn `└─ fixture identity`; `jobs show SHORTID` finds the job; `jobs show` text has `parent`/`depth` and `children`; `results` rows end with the parent's short id; status text has `processes:`; `marsh -c` sessions do not accumulate in status `shells`; a refused `marsh run` reports before the caller's next output |
 | P31 agents-doc-examples | `docs/agents.md` | every `doc-test` example, agents replaced by fixture callers | status, stdout, stderr as marked |
 | P32 live-claude-codex (`--live`, billed) | s4/s5 with a real agent | `claude -p "use your Bash tool to run: echo hi-from-bash; then run: codex exec 'reply with the number 7'"`, no `CLAUDE_CODE_SHELL` | the turn exits 0 with both outputs; codex is claude's child in the receipts and in `jobs --tree` |
@@ -79,50 +79,10 @@ scenario is `blocked` before any VM work. Use `--only`, `--list`,
   immutable fixture reference for release qualification; a local source fixture
   is an authoring option.
 
-## Historical spec gaps
+## Coverage gaps
 
-These findings were written before implementation. `processes.md`, sections
-13–15, records their resolutions: entry dispatch keeps PATH, every registered
-name has a link, the root is depth 1, and the process pool is daemon-wide.
-The old job-shell and PATH-removal descriptions below are retained as review
-evidence, not current behavior. Item 12 records coverage limits rather than
-an unresolved product decision.
-
-1. **Entry case vs PATH routing.** The pre-resolution draft of s5 removed
-   `/run/marsh/bin` after script entry and relied on `$SHELL` to restore the
-   links. That would have left registered names unreachable from Codex's
-   `bash -lc` or Node's `spawn('bash')`, contradicting s4. Resolution 13.1
-   kept PATH intact; P04 now checks that behavior.
-2. **Same-Kit chain definition.** The draft left unclear whether the cap
-   counted consecutive steps or all ancestry, and whether Kit meant registry
-   name or image identity (`fixture-alt` shares the fixture's source).
-   Resolution 13.2 defined consecutive steps by Kit identity.
-3. **Depth base.** The draft did not specify whether a root was depth 0 or 1.
-   Resolution 13.3 chose depth 1; P12's original checks tolerated either.
-4. **Refused admissions.** The draft did not say whether a refusal left a
-   receipt. The harness expected none because admission preceded recording;
-   resolution 13.4 confirmed that choice.
-5. **Spawn-set refusals.** The draft specified neither refusal text nor
-   whether an excessive `--spawn` request was refused or clamped. It also
-   omitted links for disallowed names, yielding 127 instead of a spawn
-   diagnostic. Resolution 13.5 kept every link, defined the diagnostic, and
-   chose intersection with a warning.
-6. **Split shell branches from a job.** Resolved (s13.6, B2): refused by the
-   daemon for every job creator; P27.
-7. **Pool scope.** Separate host CLI sessions made the draft's "session pool"
-   ambiguous. Resolution 13.7 made process admission daemon-wide; P15 uses one
-   session.
-8. **Unspecified formats.** The draft lacked JSON shapes for lineage,
-   `jobs --tree`, status counts, and `job.json`. The original harness searched
-   for IDs; resolution 13.8 specified the formats.
-9. **Restart exit code.** The draft did not identify which client returned
-   125 with `job uncertain`. Resolution 13.9 named the root client attached to
-   the tree; P21 requires only a nonzero exit.
-10. **Connection cap counting.** The draft left idle connections unspecified.
-    Resolution 13.10 counted them, and P22 holds idle connections to check it.
-11. **TTY test.** A child with either stdin or stdout on a terminal is
-    refused; the message suggests `</dev/null | cat` (P18).
-12. **Not covered.** The total cap of 64 (too costly), the default Kit VM
-    cap of 4 (P36 checks the cap at 1; four distinct Kits need billed agent
-    Kits), the stdin credit window, and `bash -lc` in the real claude
-    image with a selected home (P24 uses the fixture image).
+Not covered by these scenarios: the total cap of 64 (too costly), the default
+Kit VM cap of 4 (P36 checks the cap at 1; four distinct Kits need billed agent
+Kits), the stdin credit window (deferred, `processes.md` section 14), and
+`bash -lc` in the real claude image with a selected home (P24 uses the fixture
+image).

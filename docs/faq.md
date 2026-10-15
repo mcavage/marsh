@@ -23,7 +23,7 @@ Worktrees give you separate checkouts. A process in one still has your Mac
 user's authority unless you arrange confinement yourself.
 
 A registered agent in a marsh split mounts only its fork of the project,
-plus the shared guest home and read-only Git metadata. The fork includes
+plus its private Git state and the shared guest home. The fork includes
 uncommitted work, and copy-on-write cloning shares unchanged file data where
 the filesystem supports it. `join` returns patches without merging them.
 You inspect and apply the changes you want.
@@ -123,7 +123,8 @@ Use `marsh workers reset KIT` to retire the VM before using that Kit again.
 
 A launch would have exceeded a limit or used a command outside its allowed
 spawn set. At a limit, marsh starts nothing, prints the reason, and exits
-125. A command outside the spawn set exits 126.
+125. A registered-name link outside the spawn set exits 126; `marsh run`
+returns 125 for that refusal too.
 See [A job was refused](troubleshooting.md#a-job-was-refused).
 
 ### Has marsh had a security review?

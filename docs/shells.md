@@ -42,9 +42,8 @@ login shell.
   program it runs. Each starts a Kit job.
 - `acp`, `mcp`, `ps`, and `top` remain available. Without `--marsh`, `ps` and
   `top` run the system binaries.
-- Every `marsh` subcommand: `run`, `split`, `join`, `splits`, `fanout`,
-  `collect`, `jobs`, `status`, `context`, `results`, and `kit install`. A Kit
-  you install later is available at once.
+- The `marsh` CLI keeps working. A Kit you install later with `marsh kit install`
+  is available at once.
 - Terminal input and window resizing work as before.
 - Ctrl-C reaches a local command or a Kit job.
 - marsh returns the chosen shell's exit status, or 128+N if a signal kills it.
@@ -61,8 +60,6 @@ directory at the front of `PATH`. `$MARSH_SESSION_BIN` names it.
   [`marsh fanout`](fanout.md#from-any-shell) instead.
 - `-b LABEL=STRING` strings always run in a fresh Brush shell. Your bash or
   zsh aliases and functions are not visible there.
-- After `acp run AGENT &`, the session can take a moment to appear in
-  `acp list`. `acp list --wait` waits for it.
 - A file without a shebang runs by your chosen shell's rule, not with Brush.
 
 ## Startup files
@@ -108,13 +105,5 @@ first, prepend `$MARSH_SESSION_BIN` to `PATH` at the end of your profile.
 |---|---|
 | `MARSH_SHELL` | the running shell |
 | `MARSH_SESSION_BIN` | the session command directory |
-
-## How it works
-
-The guest marsh sets up the session and the command links as it does for
-Brush. It then runs bash or zsh as a child and exits with the child's
-status. `zsh` is installed in the shell image.
-
-Code: `crates/marsh/src/shell_choice.rs`.
 
 Next: [The shell](shell.md), [Commands and Kits](kits.md).

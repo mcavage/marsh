@@ -10,9 +10,9 @@ run a registered command directly in a VM. Host `sbx` is trusted.
 
 Startup requires stock SBX v0.47.0 or newer,
 checks the exact reported version and commit, and probes the local Kit v3
-create surface before creating product state. The historical smoke baseline
-was v0.46.0, below the current supported floor. Older inventory fixtures remain
-as parser and model coverage, not supported releases. The version check does
+create surface before creating product state. Older inventory fixtures (from
+v0.46.0, for example) remain as parser and model coverage, not supported
+releases. The version check does
 not qualify every later version or prove that a build has the EROFS
 writable-layer discard fix; acceptance checks container cleanup directly.
 

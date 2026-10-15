@@ -1,9 +1,8 @@
 # Design documents
 
 These documents explain the implementation and its contracts for contributors
-and reviewers. Revision histories retain earlier proposals; headings and status
-notes distinguish those from current behavior. To use marsh, read the
-[manual](../README.md).
+and reviewers. They describe current behavior; earlier proposals and review
+rounds are in the Git history. To use marsh, read the [manual](../README.md).
 
 Read in order:
 

@@ -124,7 +124,7 @@ forms do not. See [Choosing your shell](shells.md).
 
 Edit `~/.bashrc` at the marsh prompt (or `~/.marsh/home/.bashrc` from your
 Mac in the default scope) to set aliases, environment variables, and your
-prompt. The [Quickstart](quickstart.md#make-it-your-shell) walks through setup.
+prompt. The [home guide](guides/set-up-your-home.md) walks through setup.
 Your dotfiles survive VM removal. Packages you install in the VM do not.
 
 Brush reads these startup files, with `~` referring to the guest home:
@@ -139,30 +139,9 @@ The prompt defaults to Bash's `\s-\v\$ `.
 
 ## Editor settings
 
-Vim and terminal Emacs are included in the shell VM. Their configuration
-files belong in the guest home, just like `.bashrc`.
-
-For Vim, edit `~/.vimrc`. For example:
-
-<!-- doc-test: shell -->
-```sh
-cat >> ~/.vimrc <<'EOF'
-set number
-set expandtab
-set shiftwidth=2
-EOF
-```
-
-For Emacs, edit `~/.emacs.d/init.el`. This enables column numbers:
-
-<!-- doc-test: shell -->
-```sh
-mkdir -p ~/.emacs.d
-printf '%s\n' '(column-number-mode 1)' >> ~/.emacs.d/init.el
-```
-
-Open files with `vim FILE` or `emacs -nw FILE`. From a Mac editor, the
-configuration files are `~/.marsh/home/.vimrc` and
+Vim and terminal Emacs are included: use `vim FILE` or `emacs -nw FILE`.
+They read `~/.vimrc` and `~/.emacs.d/init.el` from the guest home.
+From a Mac editor, those paths are `~/.marsh/home/.vimrc` and
 `~/.marsh/home/.emacs.d/init.el` in the default scope.
 
 ## Bash compatibility

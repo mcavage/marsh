@@ -99,6 +99,9 @@ Not loaded automatically:
   that tool. The reason is in the daemon log, and `mcp load NAME --kit KIT`
   retries.
 
+Servers declared in [environment files](configuration.md#servers-and-extra-directories)
+are required connections: a load failure blocks VM preparation instead.
+
 Revocation refuses later calls; a client may still display the stale tool.
 Publishing the same name again replaces its grant. Existing clients must
 reload it before they can call the replacement.
@@ -229,16 +232,16 @@ See [Security](security.md).
 
 ## MCP servers inside Kit jobs
 
-For persistent third-party MCP connections, declare `mcp.servers` in the
-scope's optional `sbxenv.yaml` or `sbxenvs/NAME.yaml`. marsh registers/reuses
-them through stock SBX and loads them when preparing the Kit VM, including
-after worker reset. See [Set up your marsh home](guides/set-up-your-home.md).
+For persistent third-party MCP connections, follow
+[Set up your marsh home](guides/set-up-your-home.md). marsh loads the declared
+servers when preparing the Kit VM, including after a worker reset.
 
 Docker Sandboxes can run an MCP gateway inside each Kit VM, and the packaged
 agent Kits connect to it. Every job in that Kit's VM then sees servers loaded
 by any of these:
 
 - `sbx mcp load`
+- `sbxenv.yaml` or `sbxenvs/NAME.yaml`
 - `mcp publish --kit` or `mcp load --kit`
 - an untargeted `mcp publish`, when the VM is created
 

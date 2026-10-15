@@ -9,16 +9,10 @@ For a separate guest home and set of VMs, launch with
 finish active work, exit open shells, run `marsh stop`, then launch with
 `MARSH_JOB_MEMORY_BYTES=17179869184 marsh`.
 
-`marsh status` shows the limits in effect. It prints a block that starts
-`Per-job defaults (daemon first-launch snapshot):`, then one line per limit,
-each ending in `[built-in default]` or
-`[daemon launch environment: VARIABLE]`.
+`marsh status` shows the limits in effect and whether each came from a built-in
+default or the daemon's launch environment.
 
 ## Scopes
-
-For skills, agent settings, per-Kit MCP connections and extra mounts, see
-[Set up your marsh home](guides/set-up-your-home.md). Optional scope-level
-`sbxenv.yaml` and `sbxenvs/NAME.yaml` files provide native SBX additions.
 
 A *scope* is one canonical `MARSH_HOME` path. It has its own daemon, VMs,
 guest home, and job records. The default scope is `~/.marsh`.
@@ -29,6 +23,9 @@ Use separate scopes when work must not share a VM or guest home, for example
 a client project and your personal agent logins. Scopes do not separate your
 project files: a job in any scope can write the project it runs in.
 
+For skills, dotfiles, MCP connections, and extra directories, see
+[Set up your marsh home](guides/set-up-your-home.md).
+
 ## Environment
 
 | Variable | Meaning |
@@ -37,7 +34,7 @@ project files: a job in any scope can write the project it runs in.
 | `MARSH_SHELL` | Shell to run: `marsh` (Brush, the default), `bash`, or `zsh`. See [Choosing your shell](shells.md). |
 | `MARSH_SBX` | Path to `sbx`. Default: `sbx` on `PATH`. |
 | `MARSH_CONTROL_HOME` | Host-only state root. See [Control home](#control-home). |
-| `MARSH_SPAWN` | Names that jobs started from this shell may start. A comma-separated list, or `none`. It can only narrow. A refused name exits 126 ([Agents running agents](agents.md#narrowing-what-an-agent-may-start)). |
+| `MARSH_SPAWN` | Names that jobs started from this shell may start. A comma-separated list, or `none`. See [spawn restrictions and refusal statuses](agents.md#limits-and-messages). |
 | `MARSH_PLACE` | Where registered commands run. Only `local` is accepted; any other value is an error (`MARSH_PLACE must be local`). |
 | `MARSH_KIT_IMAGE_CACHE` | Cache of Kit images built from source. Default `~/Library/Caches/marsh/kit-images`. |
 
@@ -70,10 +67,9 @@ refused. `marsh status` shows the daemon's values.
 
 #### Writable limit
 
-The writable limit is not preallocated. marsh measures a running job's
-writable layer about every 20 ms. It kills the job (cause `limit:writable`)
-once the layer is over the limit. A job that writes very fast can exceed the
-limit by whatever it writes in that interval.
+marsh periodically measures the container's writable layer and kills a job
+that exceeds the limit (`limit:writable`). A fast writer can overshoot between
+checks. Files in mounted directories do not count toward this limit.
 
 #### Fixed limits
 
@@ -112,6 +108,8 @@ When unset, control directories are in
 |---|---|
 | `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`. Default path `~/.marsh/config.json`. |
 | `$MARSH_HOME/home/` | The guest home. Agent logins and settings (`.claude`, `.codex`) live here. Every job in the scope can read it. Default path `~/.marsh/home/`. |
+| `$MARSH_HOME/sbxenv.yaml` | Shared MCP servers and extra directories for every Kit and the shell. |
+| `$MARSH_HOME/sbxenvs/NAME.yaml` | Additional servers and directories for registered command `NAME`; `shell.yaml` also configures the shell VM. |
 | `CONTROL/HASH/` | Host-only control directory for a scope. `marsh status` prints it. Never mounted into a VM. |
 | `CONTROL/HASH/commands.json` | Your command registry. Overrides packaged entries by name. See [Commands and Kits](kits.md#adding-a-command). |
 | `CONTROL/HASH/agents.json` | Your ACP agent list. Replaces the packaged list; `[]` disables ACP. See [ACP](acp.md#adding-agents). |
@@ -126,6 +124,66 @@ when unset. `HASH` is the SHA-256 of the canonical `MARSH_HOME` path.
 
 A malformed `commands.json` or `agents.json` stops the daemon from starting.
 The error names the file. Fix that file; deleting other state does not help.
+
+## Servers and extra directories
+
+The optional `sbxenv.yaml` and `sbxenvs/NAME.yaml` files use these fields:
+
+| Field | Meaning |
+|---|---|
+| `schemaVersion` | Required; the string `"1"` |
+| `mcp.servers` | List of servers, each with a `name` and either `url` or `command` |
+| `mcp.servers[].args` | Literal argument list for a local `command` server |
+| `additionalWorkspaces` | List of existing Mac directories, each with `path` and optional `readOnly` |
+| `additionalWorkspaces[].readOnly` | Defaults to `false`; use `true` for reference material |
+
+Other fields are rejected. For examples, see the [home guide](guides/set-up-your-home.md).
+
+### Files and merging
+
+- Each YAML file must be a regular file owned by your Mac account, not a
+  symlink, and not writable by group or others. The `sbxenvs` directory must
+  also be a real directory, not a symlink.
+- Shared lists are followed by the command's lists. Entries cannot remove or
+  override shared entries. Duplicate server names or overlapping directories
+  in the combined lists are errors.
+- The same MCP name must have the same definition across Kits. Aliases of one
+  Kit must have identical combined configuration because they share a VM.
+- Each file is limited to 64 KiB. A combined environment permits at most 32
+  MCP servers and 16 extra directories.
+
+### Paths and access
+
+Extra directories appear at their canonical Mac paths in Linux. Relative paths
+are resolved from the YAML file's directory; `~` and variables are not expanded.
+Directories cannot overlap the project, the guest home's backing directory,
+another extra directory, or marsh's install and host-control files. They cannot
+replace the guest home itself.
+
+Root jobs receive the shared directories plus their command's directories.
+Child jobs inherit the parent's mounts, without adding directories from the
+child Kit's file. Split Kit jobs omit extra directories.
+`marsh jobs show JOB --json` includes the mount targets and access modes.
+
+A local MCP `command` is an absolute path or an executable name on the Mac's
+`PATH`; its arguments are literal strings. Its resolved executable and the
+environment files cannot be guest-mounted. The YAML ownership and symlink rules
+above apply to the configuration files, not the executable.
+
+MCP servers are loaded per VM. The shell VM can load servers too, but you need
+an MCP client to call them. See [MCP access](security.md#mcp-connections).
+
+### Applying changes
+
+Files are read when the daemon starts. After editing them or adding a file for
+a newly registered command, finish jobs, exit shells, run `marsh stop` on the
+Mac, and launch marsh again. A worker reset reloads the daemon's existing
+configuration; it does not reread the YAML. Ephemeral-home sessions skip these
+files' servers and directories.
+
+A declared server must register and load successfully before its VM can be
+used. [Setup errors](troubleshooting.md#environment-files-and-mcp-connections)
+explain authentication and name conflicts.
 
 ## Shell prompt and startup files
 

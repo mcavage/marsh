@@ -71,14 +71,6 @@ test counts do not establish GNU Bash conformance. The canceled-wait fixture use
 completion barriers so its expected ordering does not depend on process
 startup speed.
 
-A historical 17-case audit compared the pinned upstream runtime, GNU Bash, and
-`marsh-local`. Fourteen differences came from Brush, one from marsh's `collect`
-collision, and one from ENOEXEC's need to retain Brush interpreter identity;
-the plain control agreed across all three. The upstream build kept its runtime
-source and default features, using isolated manifests without development
-dependencies and an available compatible lock. This was a targeted comparison,
-not a full upstream TCK run.
-
 ## Known gaps
 
 No differential test is currently `#[ignore]`d. Real-process subshells (patch
@@ -169,7 +161,7 @@ Classified divergences by design:
 ## Explicit enumeration and platform differences
 
 External environment arrays have no ordered-export contract. In the concrete
-`BASHPID=7 exec /usr/bin/env` caller, GNU5.3.20 emits its internal hash-table
+`BASHPID=7 exec /usr/bin/env` caller, GNU Bash 5.3.20 emits its internal hash-table
 order while Rust's command builder sorts the normal environment. Qualification
 retains that raw stdout difference and separately requires exact unique names,
 raw byte values, prefix precedence, status, stderr and filesystem effects.
@@ -182,15 +174,15 @@ add an artificial 1024 descriptor limit. Real reads and low/high OS-descriptor
 readiness are measured separately from closed-pipe, EOF, timeout, and
 invalid-descriptor behavior.
 
-GNU Bash 5.3.20 has an uninitialized-prefix divergence when a HUP trap's syntax
-error resets the input buffer during a partial, unedited interactive pipe read.
-The reproducible `singlequote-backslash`, `continued-singlequote`, and
-`one-error` cases (a local probe script, not checked in) produce changing command/history bytes, diagnostics and sometimes exit status
-on Linux. The official 5.3 sources plus patches 1–20 explain the retained outer
-read index followed by allocation of an uninitialized prefix; the strict
-comparison failures were retained as local evidence. Brush uses deterministic cleared-input
-resumption, matching the stable Mac GNU controls rather than reproducing
-allocator contents. The Linux comparison failures remain recorded.
+GNU Bash 5.3.20 has an uninitialized-prefix bug when a HUP trap's syntax error
+resets the input buffer during a partial, unedited interactive pipe read: the
+official 5.3 sources plus patches 1–20 retain the outer read index and then
+allocate an uninitialized prefix. On Linux, its command/history bytes,
+diagnostics, and sometimes exit status vary between runs. This was observed
+with a probe that is not in the repository (cases `singlequote-backslash`,
+`continued-singlequote`, and `one-error`), so no checked-in test reproduces it.
+Brush resumes from cleared input deterministically, matching the stable Mac
+GNU results rather than reproducing allocator contents.
 
 ## Differential suites
 

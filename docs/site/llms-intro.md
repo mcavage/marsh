@@ -18,9 +18,8 @@ sbx secret set openai        # interactive key entry; codex
 marsh --version
 ```
 
-An agent can run the `brew` command, but must ask the user to complete the
-interactive `sbx` steps. Do not invent credentials or export API keys into the
-shell. `sbx secret ls` lists stored credentials; marsh has no login of its own.
+The `sbx` sign-in and key-entry steps need an interactive terminal.
+`sbx secret ls` lists stored credentials; marsh has no login of its own.
 Provider keys managed by the `sbx` proxy stay outside jobs. An agent's own
 login flow can save credentials in the shared guest home, where other jobs
 can read them.
@@ -66,9 +65,9 @@ marsh -c 'split {
 ```
 
 Run `marsh -c 'make test'` once before starting agents to check that the test
-command works in Linux. A branch's `exited 0` means its command list succeeded;
-it does not establish that the patch is correct. Inspect the diff and test
-output before choosing a branch. With the reported split ID and chosen label:
+command works in Linux. A branch's `exited 0` means its command list succeeded.
+Inspect the diff and test output before choosing a branch. With the reported
+split ID and chosen label:
 
 ```sh
 git apply --check .marsh/split/ID/out/a/diff.patch
@@ -125,10 +124,12 @@ network policy and credentials.
   its children. Ctrl-C cancels the foreground tree with INT, then KILL after
   10 seconds if needed.
 
-Defaults are 8 concurrent jobs per daemon, depth 4, 4 live children per job,
-64 jobs per tree, and 4 distinct Kit VMs per tree. The same Kit may appear at
-most twice consecutively in a lineage. Refusals exit 125, or 126 for a name
-outside the spawn set. See https://runmar.sh/docs/agents.md for exact messages.
+Fixed limits are 8 concurrent jobs per daemon, depth 4, 4 live children per job,
+and 64 launches per tree, including refused child calls. The same Kit may
+appear at most twice consecutively in a lineage. The per-tree Kit VM cap
+defaults to 4 and can be set with `MARSH_TREE_KIT_VMS`. Refusals exit 125;
+registered-name links return 126 for a spawn-set refusal, while `marsh run`
+returns 125. See https://runmar.sh/docs/agents.md for exact messages.
 
 ## Inspect and clean up
 

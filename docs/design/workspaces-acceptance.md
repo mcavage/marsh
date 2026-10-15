@@ -39,7 +39,7 @@ stop at the first failure. Evidence goes to `<evidence>/workspaces.json`.
 | W09 retention | s2 release; s6; s5 status counts | four splits: bare/ok, bare/failed, `--keep`, `-- false` | first one removed; the other three are `kept` in `splits --json`; `status --json` kept count ≥ 3; `splits rm` removes each |
 | W10 environment | s2 env; s2 no tty | host: credential-shaped names (`*_KEY*`, `*TOKEN`, `*PASSWORD`, `*_PAT`, `*SECRET`, `*CREDENTIALS`, `AWS_*`) never reach a branch; exported, unexported, `MARSH_*`, `DOCKER_HOST`, `SBX_*`; session: function, unexported var, `set -f` | only the exported value arrives; `/dev/tty` fails; no function or `set` option inherited |
 | W11 kit-confinement | s8 mounts (`NoWriteToUserTree`, `SnapshotImmutable`, `AdminReadOnly`); s4 no sockets; s5 lineage | Kit branches write absolute `<proj>/x`, `../../../../x`, `.git/x`, `.git/objects/x`, `../store.git/x`; plus `ok`, `authority`, `identity` | escapes fail and nothing appears; `ok` = `A\tinside.txt`; no sockets or authority env; cwd = fork; each receipt's mounts ⊇ the s8 table (admin dir read-write, its config/HEAD/info/packed-refs and the gitfile read-only) and no other user-tree path; store and user objects read-only; receipts carry `lineage`; containers deleted |
-| W12 admin-tamper | s8 capture verification; s11 bullet 4; review M6 | Kit writes `../.admin/lk/COMMIT_EDITMSG` (must succeed: Git state stays writable) and writes `../.admin/L/{config,HEAD,info/exclude}` (fsmonitor and hooksPath to real host scripts) and replaces the `.git` gitfile; `join --keep`; host `git -C <fork> status` and `commit` | each branch is `rejected:` or failed with EROFS/EBUSY/EACCES (not ENOENT); fork config has no `core.fsmonitor/hooksPath`; marker files absent. A control repo first proves host git runs fsmonitor |
+| W12 admin-tamper | s8 capture verification; s11 bullet 4 | Kit writes `../.admin/lk/COMMIT_EDITMSG` (must succeed: Git state stays writable) and writes `../.admin/L/{config,HEAD,info/exclude}` (fsmonitor and hooksPath to real host scripts) and replaces the `.git` gitfile; `join --keep`; host `git -C <fork> status` and `commit` | each branch is `rejected:` or failed with EROFS/EBUSY/EACCES (not ENOENT); fork config has no `core.fsmonitor/hooksPath`; marker files absent. A control repo first proves host git runs fsmonitor |
 | W13 nested-dotgit | s8 no nested `.git` at any depth (case-insensitive APFS) | Kit writes `src/.git` and `src/.GiT` gitfiles that point at a repo with an fsmonitor marker | both `rejected:` and fork removed; sibling branch `exited 0`; marker absent |
 | W14 hostile-user-repo | s8 metadata read as data, no host Git execution; s11 bullet 5 | user repo config: fsmonitor, required clean/smudge filter, `diff.external`, hooksPath, `include.path`; dirty file | split and join succeed; no marker from any of them |
 | W15 label-and-argv-refusal | s2 labels; s2 registered CMD; s7 all-or-nothing | `../x`, `a/b`, `A`+`a`, duplicate, `out`, `Base`, `.admin`, `::: ../y`, `::: k /bin/sh -c`, `::: k bash -c` | each exits 2 with a diagnostic; marker absent; no new split dir; no Kit job |
@@ -51,31 +51,16 @@ stop at the first failure. Evidence goes to `<evidence>/workspaces.json`.
 | W21 daemon-restart | s6 restart; `NoReplay`; s7 quarantine | shell + Kit `hold` running; authenticated daemon shutdown; next command restarts the daemon | client exits nonzero; split `uncertain`, forks flagged `untrusted` and retained; no Kit job is created after the restart; `workers reset fixture` succeeds |
 | W22 git-clean-replaced | s6 `(dev, ino)` check; fd-based removal | branch gated; user runs `git clean -xfd`; recreates `<id>/w/sentinel` | split nonzero; `workspace replaced` reported; sentinel survives join and `splits rm` |
 | W23 non-creator-join | s2/s3 creator only | session A creates; session B runs `join -- touch m` | B nonzero; marker absent; split not released |
-| W25 planted-symlinks | review C1: descriptor-only host I/O | split running; an ordinary Kit job tries `project-symlink out/a/stdout -> <host file>`; the host plants `out/a/{stdout,status}` symlinks | the Kit job fails (`.marsh` is read-only to it); the host file is unchanged after capture and `splits rm`; `tampered` is recorded |
-| W26 nested-repository | review H2: nested `.git` pruned at snapshot | user tree holds a nested repository `vendor/lib` | split exits 0; the fork lists no `.git` there; `files` = `A\ta.txt`; the user's nested repository is intact |
+| W25 planted-symlinks | s13 descriptor-only host I/O | split running; an ordinary Kit job tries `project-symlink out/a/stdout -> <host file>`; the host plants `out/a/{stdout,status}` symlinks | the Kit job fails (`.marsh` is read-only to it); the host file is unchanged after capture and `splits rm`; `tampered` is recorded |
+| W26 nested-repository | s8 nested `.git` pruned at snapshot | user tree holds a nested repository `vendor/lib` | split exits 0; the fork lists no `.git` there; `files` = `A\ta.txt`; the user's nested repository is intact |
 | W27 sugar-interrupt | s2 signals for the Brush sugar | `split { a: ...; sleep 30; touch late } \| join \| touch joined`, SIGINT | exits within 25 s with 130; neither `late` nor `joined` appears; the split directory is removed |
 | W28 quarantine-retire | s7 quarantine; operator retire by recorded UUID | (1) stop the Kit VM under `fixture hold`; `workers reset fixture`. (2) a shell that ran `fixture` loses its VM; `workers reset all`, then `reset`. (3) Kit quarantine; `reset`. (4) shell loss; `stop` | every command exits 0, prints what it removed (or the cause), and the VMs are gone from `sbx ls` |
-| W29 doc-examples | `docs/split.md` as written | every marked example, from host bash and/or `marsh -c`, in a fresh repo or plain dir; the `--3way` recipe after the other side last wrote the index, plus a control run without the refresh | statuses and output as marked; the control fails; `status` text shows attached shells and split counts; `--help` lists no `flight` |
+| W29 doc-examples | public documentation examples as written | every `doc-test`-marked example in `README.md`, `docs/*.md` (except `agents.md`, which P31 covers), `docs/guides/*.md`, the man page source, and the site's LLM introduction (`tests/acceptance/doc_examples.py`), from host bash and/or `marsh -c`, in a fresh repo or plain dir; an example with a `control=` marker runs again with that text replaced by `true` | statuses and output as marked; every control run fails (the `docs/split.md` three-way merge recipe fails without `GIT_ALTERNATE_OBJECT_DIRECTORIES="$SPLIT_OBJECTS"`, because the split's starting version is not in the original object store); `status` text shows attached shells and split counts; `tee /dev/stderr` works in a session; `--help` lists no `flight` |
 | W30 capture-ignored | s8 capture of ignored output, rendering, phase times | Git repo with `.gitignore` = `__pycache__/`, `*.log`; a shell branch runs `python3 -c 'import x'`, writes `build/__pycache__/y.pyc` and `run.log`, adds `notes.txt` to `.gitignore`, edits `notes.txt`, appends to `blob.bin`; `join --timing -- CMD` | the branch made a `.pyc`; `files` = `M .gitignore`, `M notes.txt`, `M blob.bin`; no `diff --git` names a `.pyc` or `run.log`; the rendering shows `binary file changed: blob.bin (5 bytes; full patch in $SPLIT_DIR/py/diff.patch)`; stderr has `timing: snapshot …; forks …; run …; capture py …; consumer …` |
 | W24 performance | proposed budget (spec states none) | 10k-file committed repo, warm; median of 3 for `split -b a=true \| join` vs `marsh -c true` | overhead ≤ 1.5 s |
 
-## Historical questions from scenario design
+## Specified details
 
-These were resolved in `workspaces.md`, section 16. Host CLI callers share the
-`host` creator, JSON shapes are specified, the root split is depth 1, and a
-cancelled split is recorded as `cancelled`. The original questions follow for
-review history.
-
-1. **Host CLI creator identity.** The draft showed both the pipeline and
-   two-step handle forms from a plain terminal without explaining how their
-   separate sessions shared creator identity. W01, W04, and W05 assumed one
-   host creator; section 16 confirmed it. W23 continues to check two distinct
-   `marsh -c` session creators.
-2. **JSON shapes.** The draft omitted shapes for `splits --json`, status
-   counts, manifest branches, and receipt lineage. The original harness
-   searched for IDs, states, labels, placements, and kept counts; section 16
-   supplied the shapes.
-3. **Depth numbering.** The harness assumed a root split at depth 1, which
-   section 16 adopted.
-4. **Cancellation state.** The draft left `cancel`, `cancelled`, and `done`
-   unresolved. Section 16 selected `cancelled` for the public record.
+Creator identity (host CLI callers share the `host` creator; W23 checks two
+distinct `marsh -c` session creators), JSON shapes, root depth 1, and the
+`cancelled` state are specified in `workspaces.md`, section 12.

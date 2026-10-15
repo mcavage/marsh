@@ -1,15 +1,15 @@
 # Processes: nested jobs and authority
 
-Status: implemented (revision 5). Any process in a Kit job can call registered
-commands, `marsh run`, or `marsh split`. Each call or split argv branch starts
-a fresh job, subject to admission. The daemon records its parent and cancels
-the tree together. Kit jobs keep their image's own shells.
+Status: implemented. Any process in a Kit job can call registered commands,
+`marsh run`, or `marsh split`. Each call or split argv branch starts a fresh
+job, subject to admission. The daemon records its parent and cancels the tree
+together. Kit jobs keep their image's own shells.
 
 The model is `docs/model/Process.tla`. This builds on
 [workspaces](workspaces.md); [acceptance scenarios](processes-acceptance.md)
-define the external checks. Sections 11–12 retain the historical migration
-and review record. Section 13 records resolved contract details, section 14
-lists implementation limits, and section 15 explains the revision 5 changes.
+define the external checks. Section 11 summarizes acceptance, section 12 the
+design decisions, section 13 the exact contract details and formats, section
+14 implementation limits, and section 15 Kit job shells and CLI fanout.
 
 ## 1. Principle: one protocol, many authorities
 
@@ -73,6 +73,7 @@ session ─ job ─ job ...            (registered name or marsh run: own contai
 | `ProcessRun {argv, cwd, env, spawn}` + stdin → `job`, then `Execute` frames | yes | yes; `spawn` may only narrow; a dropped stream cancels the child |
 | `SplitCreate` / `SplitJoin` | yes | yes; the creator is the job and the snapshot is the job's view |
 | `ProcessShow`, `Jobs`, `ShowJob` | session-authorized job inspection | the job's own subtree |
+| `SplitShow` (`marsh splits`) | yes | no (a job sees its splits in `marsh jobs --tree`) |
 | `SplitCancel`, `jobs cancel`, `splits rm` | yes, within its tree | no (drop the stream instead) |
 | everything else (MCP, ACP, dev broker, lifecycle) | request-specific session grants; dev broker only for `--dev` | refused |
 
@@ -132,7 +133,7 @@ names and `marsh` get links; there is no `bash` or `sh` link.
 |---|---|
 | any shell (`bash -c`, Codex's `bash -lc`, `$SHELL`, `/bin/sh`, `system(3)`, Node `spawn('bash')`, Python `shell=True`) | the image's own shell |
 | a registered name from any of them, or a direct `execvp` | its link (below) |
-| `marsh VERB` (`run`, `split`, `join`, `splits`, `fanout`, `collect`, `jobs`, `context`) | the in-job CLI (the artifact's `marsh` link) |
+| `marsh VERB` (`run`, `split`, `join`, `fanout`, `collect`, `jobs`, `context`) | the in-job CLI (the artifact's `marsh` link) |
 | an absolute image binary (`/usr/local/bin/codex`) | that binary, in this container, with this job's authority |
 
 **The in-job `marsh`** starts from `job.json` alone (no `USER`, `HOME`, or
@@ -140,7 +141,8 @@ daemon), so `env -i /run/marsh/bin/codex …` and `env -i /run/marsh/bin/marsh
 jobs` work. It connects to `cap.sock` per request. `type codex` in the
 image's bash prints `codex is /run/marsh/bin/codex`. A login profile that
 resets PATH hides the links; `marsh run NAME` and the absolute link path
-still work.
+still work. The in-job CLI parses `marsh splits`, but the capability refuses
+its `SplitShow` request (section 3).
 
 ## 5. The links: name resolution and the job's own command
 
@@ -188,10 +190,13 @@ and `NoEntryRecursion` (an entrypoint never spawns its own Kit), with
 controls `linkIgnoresMarker` and `linkIgnoresPpid`. Every job's first step
 is the entry step: an ELF exec, or a script exec through the link.
 
-**Self-update.** `claude update` inside a job is an own-name call, so it
-runs as a child job. It can write only what that job's mounts allow, which
-includes the selected home. Kit images pin versions; a container-local
-update is discarded when the job's container is deleted.
+**Own-name subcommands.** An own-name call such as `codex exec …` from a codex
+job's shell is a child case, so it runs as a child job that can write only what
+its mounts allow, which includes the selected home. Kit images pin agent
+versions, and anything a job installs into its container is discarded when
+the container is deleted. The packaged Claude Kit refuses `claude update` and
+`claude upgrade` in its entrypoint (exit 125, `self-updates are disabled`) and
+sets `DISABLE_AUTOUPDATER=1`; the child job starts and exits without updating.
 
 ## 6. Authority and budgets
 
@@ -200,10 +205,10 @@ rights or fewer, never rights recomputed from the session's grants. The
 view is checked by `Attenuation` (control `widen`) and the spawn set by
 `SpawnSetAttenuates` (control `spawnWiden`).
 
-**Cross-Kit spawning is allowed by default (operator decision).** Any job
-may spawn any registered command. The user's command registry is the trust
-boundary: registering a Kit means trusting it to be started by any job in
-any session.
+**Cross-Kit spawning is allowed by default.** Any job may spawn any
+registered command, so the core use (claude → codex) works with no flags. The
+user's command registry is the trust boundary: registering a Kit means
+trusting it to be started by any job in any session.
 
 **A spawned child runs under its own Kit's policy, not its parent's.** It
 gets its own Kit's SBX network egress policy and SBX-proxied credentials,
@@ -232,7 +237,7 @@ received from *its* parent (or, for a root job, the user's exported shell
   variables), plus those the parent set or changed. A variable the user
 exports reaches the whole tree, and a child re-exporting a received name
 with the same value still passes it on. Image `ENV` is never forwarded
-unless the job changed it, and the split filter (`workspaces.md` s17) drops
+unless the job changed it, and the split filter (`workspaces.md` s13) drops
 credential-shaped names daemon-side.
 
 - The worker records the received names in `job.json` (`forwarded`, from
@@ -291,7 +296,7 @@ refused by the spawn set), and is counted in `marsh status`
 - **Narrowing.** Splits narrow the project view; the late `.marsh` read-only
   bind also reduces writes. Nothing widens a child's view.
 - **Splits.** A split created by a job snapshots the job's view root.
-  Capture waits for the creating branch's whole subtree (`workspaces.md` s17).
+  Capture waits for the creating branch's whole subtree (`workspaces.md` s13).
 - **No new writable paths.** The artifact and `/run/marsh` are read-only
   binds.
 
@@ -344,7 +349,9 @@ refused by the spawn set), and is counted in `marsh status`
   own subtree. `marsh jobs [--all]` lists the same jobs flat. The text forms
   are scoped (section 13): in a session, trees rooted in that session; from
   a host terminal, running trees, trees started in the last hour, and the
-  five newest trees; `--all`, every tree. `--json` is never scoped.
+  five newest trees; `--all`, every tree. `--json` is not scoped by session
+  or age. Inside a job, every form, `--all` and `--json` included, covers only
+  the job's own subtree (the capability filters `Jobs` and `ProcessShow`).
 - Splits are nodes of the forest. A split created by a session (or the
   host CLI) is a root whose children are its branches; a branch's children
   are the jobs it started: an argv branch's job, or every Kit command its
@@ -357,6 +364,12 @@ refused by the spawn set), and is counted in `marsh status`
   `join` (it sees `SPLIT_ID`) records `lineage.consumes` and is drawn with
   `  (consumes split ID)`. A job's own split (argv branches only) stays
   under the job: its branches are the job's children.
+- Fanouts are display nodes. `marsh fanout` gives each branch
+  `FANOUT_BRANCH=<fanout id>/<label>`; a root job or split-branch job started
+  with it records `lineage.fanout`, and the tree draws those jobs under one
+  fanout node at the first job's place. A registered command in a fanout
+  branch inside a job is an ordinary child of that job and gets no fanout
+  node. The grouping is for display only; it adds no authority or lifecycle.
 - An interactive shell's background job (stderr a terminal whose foreground
   process group is not the job's) does not print the cold-start notice
   `[starting NAME worker VM…]`. A foreground job prints it as before.
@@ -426,47 +439,19 @@ Not modeled:
 - `Workspace.tla`'s fork and capture, which compose through the shared
   cascade and the pool.
 
-## 11. Historical size estimate and migration
+## 11. Acceptance
 
-This section preserves the original implementation plan. In the built system,
-`marsh-local` remains the static job artifact and the split branch pool remains
-separate from process admission. The size figures are historical estimates.
+The acceptance goals, with real callers and any Kit, are below.
+[processes-acceptance.md](processes-acceptance.md) lists the maintained
+black-box scenarios and the gaps they do not cover.
 
-**Size** (non-test Rust): about 2.3k added and 0.3k removed.
-
-| Piece | LOC |
-|---|---|
-| Daemon process table: lineage, admission (pool, depth, same-Kit, fan, total, spawn set), cascade | 800 |
-| `ProcessRun`/`ProcessShow`, authority table, stdin credit, lock-ordered submission | 400 |
-| Split as a client | +200 / -250 |
-| Worker: artifact copy, stubs, `job.json`, env, connection cap fix | 250 |
-| Links and in-job CLI: stub modes, entry rule, image-tool rule, env diff | 250 |
-| CLI: `run --spawn/--no-spawn`, `jobs --tree`, `context`, status, receipts | 350 |
-| Delete `marsh-local` | -50 |
-
-**Migration.**
-
-1. Lineage fields and receipts. One admission. Top-level jobs now count
-   against the pool, which is a visible change.
-2. `marsh run` over the relay and from the host.
-3. Static artifact, stubs, `job.json`, the capability for every Kit job,
-   and the cascade. Initially only the registered-name links and `marsh`
-   are present.
-4. (Revision 5: the `bash` stub and `SHELL` were added and later removed;
-   section 15.)
-5. Split as a client. Delete the split pool and `marsh-local`.
-6. Amend the `AGENTS.md` rule to "the scoped job capability socket". Update
-   `architecture.md`, the contract, and `CONTRACT.md`.
-
-**Acceptance** (real callers, any Kit):
-
-- `claude`, then the Bash tool runs `claude -p`, which
-  runs `codex exec`: three containers with lineage. Ctrl-C in the root
-  shell gives verified deletion in each VM.
+- `claude`, then the Bash tool runs `claude -p`, which runs `codex exec`:
+  three containers with lineage. Ctrl-C in the root shell gives verified
+  deletion in each VM.
 - With `MARSH_SPAWN=claude`, `codex` from claude is refused, with the
   message, and a child cannot widen its set.
-- An unchanged third-party Kit (Alpine, with a `#!/bin/sh` ELF wrapper)
-  runs registered names, and `split` from `bash -c`.
+- An unchanged third-party Kit (for example Alpine, with a `#!/bin/sh`
+  entrypoint wrapper) runs registered names, and `split` from `bash -c`.
 - `env -i /run/marsh/bin/NAME` and `env -i /run/marsh/bin/marsh jobs` work.
 - A self-replicating `marsh run shell -c` stops at the caps.
 - A branch job's child cannot see the project.
@@ -474,32 +459,36 @@ separate from process admission. The size figures are historical estimates.
 - Exported variables reach the whole tree; image `ENV` and secrets never do.
 - The artifact bind is read-only.
 
-## 12. Historical review disposition (revision 2 → 3)
+## 12. Design decisions
 
-The table records revision 3, before revision 5 removed the job-shell wrapper.
-References to PATH `bash`, `SHELL`, and the job-shell gate here are historical;
-current shell behavior is specified in sections 4 and 15.
+- **The link holds the entry rule.** The marker and docker-init parent check
+  live in the artifact, not in a shell, so the rule works for any entrypoint
+  (section 5).
+- **Nothing is shadowed.** Only registered names and `marsh` get links;
+  `/bin/sh`, `/bin/bash`, PATH `bash`, and `SHELL` are the image's own
+  (sections 4 and 15).
+- **Cross-Kit spawning is on by default; only narrowing exists.** A child runs
+  under its own Kit's egress and credentials. `MARSH_SPAWN`, `--spawn`, and
+  `--no-spawn` narrow; nothing widens (`SpawnSetAttenuates`, section 6).
+- **The link mode comes from the kernel.** The shebang stub and
+  `/proc/self/exe` select the mode, never a caller-supplied argv0, and job mode
+  starts from `job.json` alone (section 4).
+- **Children receive only what the job received or changed.** Unchanged image
+  `ENV` is never forwarded; digests are keyed so a job cannot test guesses
+  (section 6).
+- **The capability socket refuses, never drops.** It uses a blocking accept,
+  at least `MaxFan + 4` connections, and a refusal frame (section 3).
+- **Spawn is ordered against cancel** by re-checking the parent's capability
+  under the process-table lock (section 3).
+- **Loops are bounded and refusals explain themselves.** The same-Kit chain cap
+  is 2; messages name the chain, `context.md`, and `marsh workers reset KIT`.
+- **No TTY children; image-provided names stay local; `marsh context` only
+  prints** (sections 5, 6, and 9).
+- **The model checks the link decision.** Per-Kit entrypoint kind and a
+  mandatory entry step make `EntryOnce` and `NoEntryRecursion` non-vacuous;
+  shell integrity is a runtime test, not an invariant (section 10).
 
-| Finding | Resolution |
-|---|---|
-| C1 entry rule in the shell | The link holds the rule (marker + docker-init parent, then exec the image binary); the shell-side rule is deleted (section 5) |
-| H1 shadowing `/bin/sh`, `/bin/bash` | Nothing is shadowed: PATH `bash` and `SHELL` only, no `sh` link; probe, cache, `real/`, and sh mode deleted (section 4) |
-| H2 egress widening | Operator decision: cross-Kit spawning is allowed by default and the registry is the trust boundary; a child runs under its own Kit's egress and credentials, which the doc states plainly. Only narrowing exists (`MARSH_SPAWN`, `--spawn`, `--no-spawn`); the spawn set never widens (`SpawnSetAttenuates`). Rationale: the core use (claude → codex) must work with no flags, and a registered Kit is one the user already trusts |
-| H3 four connections, silent drop, polled accept | ≥ `MaxFan + 4`, refusal frame, blocking accept (section 3) |
-| H4 vacuous entry model | Per-Kit entrypoint kind, mandatory entry step, link decision with marker and parent guards; `ShellIntegrity` dropped for a runtime test (section 10) |
-| M1 artifact location, absolute gate | VM-local copy; gate relative to real bash; pre-forked server rejected |
-| M2 environment dependencies | Job mode starts from `job.json` only |
-| M3 argv0 mode | Mode from the shebang stub and `/proc/self/exe` |
-| M4 `sh` link | None |
-| M5 env forwarding | Only variables the job exported on top of its starting environment |
-| M6 stdin, cancel race | Credit window; re-check under the process-table lock |
-| M7 same-Kit loops, opaque refusals | Chain cap 2; messages name the chain, `context.md`, and `workers reset KIT` |
-| Lows | Restart under `--dev` (section 8); `claude update` (section 5); size trimmed |
-| Q1–Q5 | Q1 superseded by the operator decision (H2); Q2 refuse TTY children; Q3 `marsh context`, print only; Q4 image-provided names stay local; Q5 relative gate |
-
-The review's questions were resolved in sections 13–15.
-
-## 13. GM resolutions (revision 4)
+## 13. Contract details
 
 1. **Entry rule keeps PATH.** The link takes the entry path, clears
    `MARSH_ENTRY`, and execs the image binary by absolute path (PATH searched
@@ -531,17 +520,20 @@ The review's questions were resolved in sections 13–15.
 8. **Formats.**
    - Receipt `lineage`: `{"parent": "session:<id>" | "job:<id>" |
      "split:<id>/<label>", "root": "<root job id>", "depth": 1.., "spawn":
-     ["name", ...], "split"?: "<id>", "label"?: "<label>", "consumes"?:
-     "<split id>"}`; `jobs show` adds `"children": ["<job id>", ...]`.
-     `split:` is the parent of a job a split branch started without a
-     parent job (an argv branch of a session's split, or a Kit command run
-     by a shell branch); `consumes` marks a root job started by a stage
-     after `join`.
+     ["name", ...], "split"?: "<id>", "label"?: "<label>",
+     "deadline_unix_ms"?: N, "parent_deadline"?: true, "consumes"?: "<split
+     id>", "fanout"?: "<fanout id>/<label>"}`; `jobs show` adds
+     `"children": ["<job id>", ...]`. `split:` is the parent of a job a split
+     branch started without a parent job (an argv branch of a session's
+     split, or a Kit command run by a shell branch); `consumes` marks a root
+     job started by a stage after `join`; `fanout` marks a job without a job
+     parent that a `marsh fanout` branch started (display grouping only).
    - Receipts carry `"args": ["...", ...]` for display: the invocation's
      first 16 arguments, each cut to 200 characters (lossy UTF-8; omitted
      when empty).
    - `marsh jobs --tree --json`: `{"schema": "marsh.jobs.tree/v1", "jobs":
-     [NODE]}`, roots newest first, every tree (unscoped). A `NODE` is one of
+     [NODE]}`, roots newest first, every tree (not scoped by session or age;
+     inside a job, the job's subtree). A `NODE` is one of
      - a job: `{"node": "job", "job_id", "session_id", "command", "args",
        "state", "cleanup", "exit_code", "created_unix_ms",
        "finished_unix_ms", "lineage", "children": [NODE]}`;
@@ -554,14 +546,21 @@ The review's questions were resolved in sections 13–15.
        `argv`), "command", "state" (`pending`, `running`, `captured`,
        `rejected`, `failed`, `cancelled`, `uncertain`), "status",
        "exit_code", "job_id" (an argv branch's job), "files",
-       "created_unix_ms", "finished_unix_ms", "children": [NODE]}`.
+       "created_unix_ms", "finished_unix_ms", "children": [NODE]}`;
+     - a fanout: `{"node": "fanout", "fanout_id", "session_id", "state"
+       (`running` | `finished`), "status" (the first nonzero branch exit,
+       else 0 once finished), "created_unix_ms", "finished_unix_ms",
+       "children": [FANOUT BRANCH]}`, where a fanout branch is `{"node":
+       "branch", "fanout_id", "label", "kind": "argv", "job_id", "state",
+       "children": [the job's NODE]}`.
      A daemon restart may forget a split whose jobs remain: it is drawn
      from their lineage with `state: null`. `marsh jobs --json` stays the
      `marsh.jobs/v1` document.
-   - Text (`jobs`, `jobs --tree`): a header `ID STARTED STATE EXIT TIME
+   - Text (`jobs`, `jobs --tree`): a header `ID STARTED STATE EXIT RUN
      [PARENT] COMMAND`, then one line per job: the first 8 characters of the
-     job id, start as `Ns|Nm|Nh|Nd ago`, state, exit code or `-`, duration
-     (`12.3s`, `2m13s`, `1h05m`), and `command arg...` with each argument
+     job id, start as `Ns|Nm|Nh|Nd ago`, state, exit code or `-`, `RUN` (from
+     the job record's creation, when its Kit VM is ready, to its end:
+     `12.3s`, `2m13s`, `1h05m`), and `command arg...` with each argument
      shell-quoted, cut to 64 characters with `…`, then `  cleanup uncertain
      (run marsh workers reset KIT)` when it applies. Trees containing a
      queued or running job come first, then newest first. `--tree` keeps
@@ -570,13 +569,17 @@ The review's questions were resolved in sections 13–15.
      same way and adds `PARENT` (the parent's short id, `-` for a root).
      A split row shows the split's first 8 id characters, `joined` (or
      `running`, `awaiting`, `kept`, `cancelled`, `uncertain`), its status,
-     its run time, and `split (LABEL, ...)`; a branch row shows `-` (an argv
-     branch: its job's id and fields), the branch state in job words
-     (`finished` for captured, `queued`, `rejected`, ...), and `LABEL:
-     COMMAND`. The flat form lists jobs only; a branch's job shows the
-     split's short id as `PARENT`. Scoped out trees end the listing with `(N older job trees not shown;
-     marsh jobs [--tree] --all lists every job)`; an empty listing prints
-     `no jobs in this session` or `no jobs recorded`.
+     its run time, and `split (LABEL, ...)`. A fanout row shows the fanout's
+     first 8 id characters, `running` or `finished`, its status, its run
+     time, and `fanout (LABEL, ...)`. An argv branch row is its job's row
+     (id and fields) with `LABEL: COMMAND`; a shell branch row has the ID
+     `<split8>/LABEL`, the branch state in job words (`queued` for pending,
+     `finished` for captured, `unknown` for uncertain, otherwise as
+     recorded), and `LABEL: COMMAND`. The flat form lists jobs only; a
+     branch's job shows the split's short id as `PARENT`. Scoped-out trees
+     end the listing with `(N older job trees not shown; marsh jobs [--tree]
+     --all lists every job)`; an empty listing prints `no jobs in this
+     session` or `no jobs recorded`.
    - `marsh status --json`: `"processes": {"running": N, "refused": N,
      "held": N}`.
    - `/run/marsh/job.json`: `{"version": 1, "job", "name", "spawn":
@@ -619,12 +622,11 @@ The review's questions were resolved in sections 13–15.
   Kit VM cap is `kit_vm_cap`, counted over the tree's live receipts by Kit
   identity (`kit_ref`), in both the pre-check and `begin_job_process`.
 
-## 15. Revision 5: real bash in Kit jobs, CLI fanout, agent context
+## 15. Kit job shells, CLI fanout, agent context
 
-**Operator decision: a Kit job's shells are the image's own.** The `bash`
-link and `SHELL=/run/marsh/bin/bash` are removed, with the job-shell mode of
-the artifact (Brush in a job), its `$SHELL`/PATH re-add special cases, and
-the job-shell startup gate. Rationale:
+**A Kit job's shells are the image's own.** marsh adds no `bash` or `sh` link
+and no `SHELL` override to a job, and the artifact has no job-shell mode
+(Brush is not a job shell). Rationale:
 
 - **Compatibility.** Agents and build tools run whatever Bash the image
   ships; no classified Brush divergence (`bash-compatibility.md`) can reach
@@ -633,16 +635,14 @@ the job-shell startup gate. Rationale:
   checks PATH `bash` is within 2 ms of `/bin/bash`).
 - **Debuggability.** What runs in a job is what the image author tested; a
   failing tool call reproduces with `docker run` of the same image.
-- **Nothing is lost.** Every capability the job shell offered has a CLI form
-  that works from any shell: registered names (links), `marsh run`,
-  `marsh split | marsh join`, `marsh fanout | marsh collect`, `marsh jobs`,
-  `marsh context`. Only the Brush sugar syntax is gone from jobs.
+- **CLI forms cover composition.** Registered names (links), `marsh run`,
+  `marsh split | marsh join`, `marsh fanout | marsh collect`, `marsh jobs`, and
+  `marsh context` work from any shell. Only the Brush sugar syntax is
+  unavailable in jobs.
 
-Kept: the links for every registered name, the entry rule, the in-job
-`marsh` CLI, `cap.sock`, lineage, and budgets. The static artifact stays
-(`marsh-local`, musl): it is the links and the in-job CLI, and it remains the
-Brush binary that the Bash-compatibility tests use.
-The Brush patches stay: they serve the session shell.
+The static artifact (`marsh-local`, musl) provides the links and the in-job
+CLI, and it is the Brush binary that the Bash-compatibility tests use. The
+Brush patches serve the session shell.
 
 **`marsh fanout [-n] [-b LABEL=STRING]... [::: LABEL CMD ARG...]... | marsh
 collect [--json] [--timing] [--stderr]`** has the sugar's semantics: branches run at

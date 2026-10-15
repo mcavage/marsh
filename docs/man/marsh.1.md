@@ -89,7 +89,8 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 : List Kit jobs, running first, then newest. **--tree** draws children under
   their parent. In a shell, only that session's jobs; from a host terminal,
   running trees, trees from the last hour, and the five newest. **--all** lists
-  every recorded job. **--json** prints the full, unscoped document.
+  every recorded job. **--json** omits the session/recent-jobs filter.
+  Inside a job, all forms remain limited to that job's subtree.
 
 **jobs show** *JOB* [**--json**]
 : Show one job. *JOB* may be an id prefix.
@@ -128,6 +129,8 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   removed if *CMD* exits 0, unless **--keep** is set, and kept otherwise.
   *CMD* runs even if a branch failed, and **join** returns its status. Without
   *CMD*, **join** returns the first nonzero branch status.
+  *CMD* runs in the caller's environment: on the Mac, in the shell VM, or
+  in the job container where **marsh join** was invoked.
 
 **splits** [**--json**] [*ID*]
 : List splits. With *ID*, show its state and phase timings, even after joining.
@@ -339,6 +342,11 @@ See https://runmar.sh/docs/acp.html.
 *$MARSH_HOME/config.json* (default *~/.marsh/config.json*)
 : The default shell set by **marsh config shell**.
 
+*$MARSH_HOME/sbxenv.yaml*, *$MARSH_HOME/sbxenvs/NAME.yaml*
+: Optional shared and per-command MCP servers and extra directories. Read at
+  daemon startup; changes require **marsh stop** and a new launch.
+  See https://runmar.sh/docs/configuration.html#servers-and-extra-directories.
+
 *~/Library/Application Support/marsh/control/HASH/*
 : Host-only control directory for a scope: **commands.json**,
   **agents.json**, the results journal. **marsh status** prints its path.
@@ -362,7 +370,8 @@ As for Bash, with these additions:
   125.
 
 126
-: A job start was refused because **MARSH_SPAWN** excludes the name.
+: A registered-name link was refused because **MARSH_SPAWN** excludes the
+  name. **marsh run** returns 125 for the same refusal.
 
 130
 : The job was interrupted.

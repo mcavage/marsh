@@ -75,7 +75,7 @@ job has only its job capability socket and cannot use the dev relay.
 - `PublicRequest::DevSbx { argv, pty, cwd }`, `RequestAuthority::RelayDevelopment`. The
   session is the relay token's owner, never a payload field. After admission the
   connection streams stdin (credited), stdout, stderr, and exit frames
-  (`dev_broker/stream.rs`, salvaged from the old attach framing). `cwd` lets the daemon's
+  (`dev_broker/stream.rs`). `cwd` lets the daemon's
   `sbx mount VM .` (mount from inside the admitted source) resolve the same way on the host.
 - At attach the host copies the **outer** build's guest `marsh` to `S/tmp/bin/sbx` and writes
   `S/tmp/bin/sbx-relay.json` (relay socket and token paths). Invoked as `sbx`, the binary is

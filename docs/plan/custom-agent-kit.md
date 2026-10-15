@@ -1,9 +1,8 @@
 # Plan: bring your own agent Kit
 
-Status: authoring plan, not a qualified third-party Kit recipe. marsh ships
-Kits for Claude Code, Codex and Pi. The existing registry accepts custom native
-Kits; the profile and packaging guidance below describes how to build one
-outside this repository.
+marsh ships Kits for Claude Code, Codex and Pi. The registry also accepts
+custom native Kits. This authoring outline starts from the packaged Pi Kit;
+build and test your customized image before registering it.
 
 ## Shape
 
@@ -39,9 +38,9 @@ Kit source must live outside the mounted project and guest home.
 
 ## Profiles
 
-Choose the declarative profile files to copy into the Kit source or selected
-home, review each one, and reject secret-bearing files. A read-only daemon-provided profile mount
-would need a new mount kind and a `docs/model/` change; it is out of scope.
+Copy the agent's settings and instructions into its Kit source or selected
+home. Keep credentials in Docker Sandboxes or the agent's login store rather
+than packaging them in the image.
 
 ## Publishing
 
