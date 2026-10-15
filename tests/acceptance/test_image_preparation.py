@@ -134,7 +134,7 @@ class ImageCallerTests(unittest.TestCase):
         (self.source / "packaging/shell/editors").mkdir()
         (self.source / "packaging/shell/editors/input").write_text("controlled editor input\n")
         (self.source / "packaging/shell-image").write_text("example/base@sha256:" + "b" * 64 + "\n")
-        for name in ("image-repair", "dhi-notices/collected"):
+        for name in ("image-base", "image-repair", "dhi-notices/collected"):
             directory = self.source / "packaging" / name
             directory.mkdir(parents=True)
             (directory / "NOTICE").write_text("controlled notice\n")
@@ -357,13 +357,14 @@ class ImageCallerTests(unittest.TestCase):
             self.assertNotEqual(failed.returncode, 0)
             self.assertEqual(previous, (self.output.read_bytes(), self.output.with_name("shell-image.build.json").read_bytes()))
             (self.root / "fail-build").unlink()
-            target = self.source / "packaging/dhi-notices/collected/NOTICE"
-            (self.root / "mutate-source").write_text(str(target))
-            failed = self.invoke("--repository", "example/published", script=script)
-            self.assertNotEqual(failed.returncode, 0)
-            self.assertIn("publication may have occurred", failed.stderr)
-            self.assertEqual(previous, (self.output.read_bytes(), self.output.with_name("shell-image.build.json").read_bytes()))
-            (self.root / "mutate-source").unlink()
+            for name in ("dhi-notices/collected", "image-base"):
+                target = self.source / "packaging" / name / "NOTICE"
+                (self.root / "mutate-source").write_text(str(target))
+                failed = self.invoke("--repository", "example/published", script=script)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn("publication may have occurred", failed.stderr)
+                self.assertEqual(previous, (self.output.read_bytes(), self.output.with_name("shell-image.build.json").read_bytes()))
+                (self.root / "mutate-source").unlink()
 
     def test_interrupted_builder_is_forwarded_to_its_owned_group_and_keeps_previous_output(self):
         peer = self.root / 'docker'
