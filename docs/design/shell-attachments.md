@@ -7,6 +7,12 @@ Linux artifacts on supported stock SBX. See the
 
 ## Streams and status
 
+Before starting a shell as the session user, the supervisor removes inherited
+`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_*`, and `GIT_CONFIG_VALUE_*` entries from
+the child environment. SBX's injected values can refer to its agent user's
+private home. Explicit session environment values are applied afterward;
+Git still reads the selected home's settings and ordinary configuration files.
+
 - Stdin EOF closes byte input, not the control connection. Signal and resize
   requests remain usable while the shell runs.
 - A connected slow reader applies backpressure. Pausing a pager or stopping the

@@ -72,13 +72,14 @@ SCENARIOS = {
     "W28-quarantine-retire": "quarantine_retire",
     "W29-doc-examples": "doc_examples",
     "W30-capture-ignored": "capture_ignored",
+    "W31-shell-git-config": "shell_git_config",
 }
 # Ordered so the scenario that quarantines the fixture VM runs last.
 ORDER = [
     "W03-snapshot-fidelity", "W01-plain-bash", "W07-status-pipefail",
     "W08-join-after-failure", "W10-environment", "W09-retention",
     "W05-patch-roundtrip", "W04-snapshot-consistency", "W06-non-git", "W30-capture-ignored",
-    "W29-doc-examples",
+    "W29-doc-examples", "W31-shell-git-config",
     "W11-kit-confinement", "W12-admin-tamper", "W13-nested-dotgit",
     "W14-hostile-user-repo", "W15-label-and-argv-refusal", "W16-caps-and-pool",
     "W17-nested-from-kit", "W18-depth-cap", "W23-non-creator-join",
@@ -93,7 +94,7 @@ KIT_SCENARIOS = {
     "W12-admin-tamper", "W13-nested-dotgit", "W15-label-and-argv-refusal",
     "W17-nested-from-kit", "W18-depth-cap", "W19-interrupt-subtree",
     "W20-creator-exit-cascade", "W21-daemon-restart", "W25-planted-symlinks",
-    "W28-quarantine-retire", "W29-doc-examples",
+    "W28-quarantine-retire", "W29-doc-examples", "W31-shell-git-config",
 }
 
 SPLIT_OVERHEAD_BUDGET_S = 1.5  # proposed (docs/design/workspaces-acceptance.md W24)
@@ -944,6 +945,37 @@ class Workspaces(ScenarioSuite):
         require(any(w.get("worker_id") == vm and w.get("health") == "quarantined" for w in workers),
                 f"{what}: stopping the VM under a job did not quarantine it: {workers}"[:600])
         return vm
+
+    def shell_git_config(self) -> None:
+        """Git uses the selected home, not SBX's agent-user config; session overrides still work."""
+        project = self.new_repo("w31-git-config", {"notes.txt": "alpha\n"})
+        config = self.guest_home / ".gitconfig"
+        previous = config.read_bytes() if config.exists() else None
+        settings = (b'[user]\n\tname = Marsh Test\n\temail = test@example.invalid\n'
+                    b'[core]\n\tabbrev = 12\n')
+        try:
+            config.write_bytes(settings)
+            result = self.brush('''set -e
+test -z "${GIT_CONFIG_COUNT+x}"
+test -z "${GIT_CONFIG_KEY_0+x}"
+test -z "${GIT_CONFIG_VALUE_0+x}"
+test "$(git config user.name)" = "Marsh Test"
+test "$(git config core.abbrev)" = 12
+printf 'beta\\n' >> notes.txt
+git add notes.txt
+git commit -qm 'shell git config'
+test -z "$(git status --porcelain)"
+test "$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.abbrev GIT_CONFIG_VALUE_0=9 git config core.abbrev)" = 9
+marsh split -n -b git='test "$(git config core.abbrev)" = 12 && git status --porcelain' | marsh join
+shell -c 'test -z "${GIT_CONFIG_COUNT+x}" && test "$(git config core.abbrev)" = 12 && git status --porcelain'
+''', project)
+            require(result.returncode == 0, f"shell Git configuration failed: {text(result.stderr)}")
+            require(config.read_bytes() == settings, "Git settings were changed")
+        finally:
+            if previous is None:
+                config.unlink(missing_ok=True)
+            else:
+                config.write_bytes(previous)
 
     def doc_examples(self) -> None:
         """Run marked public-documentation examples with declared fixture substitutions.
