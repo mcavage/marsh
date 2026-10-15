@@ -8,7 +8,7 @@ run a registered command directly in a VM. Host `sbx` is trusted.
 
 ## Version and installation
 
-Startup requires stock SBX v0.47.0 or newer (stable or coherent nightly),
+Startup requires stock SBX v0.47.0 or newer,
 checks the exact reported version and commit, and probes the local Kit v3
 create surface before creating product state. The historical smoke baseline
 was v0.46.0, below the current supported floor. Older inventory fixtures remain

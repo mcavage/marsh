@@ -50,8 +50,7 @@ User
 
 System
 : Debian on arm64 from the marsh shell image, with git, make, gcc, Node.js,
-  and Rust. [Nightly builds](install.md#nightly-builds) also include Vim and
-  terminal Emacs.
+  Rust, Vim, and terminal Emacs.
 
 ### Shared VM
 
@@ -140,9 +139,8 @@ The prompt defaults to Bash's `\s-\v\$ `.
 
 ## Editor settings
 
-The shell VM in [nightly builds](install.md#nightly-builds) includes Vim and
-terminal Emacs. Their configuration files belong in the guest home, just
-like `.bashrc`.
+Vim and terminal Emacs are included in the shell VM. Their configuration
+files belong in the guest home, just like `.bashrc`.
 
 For Vim, edit `~/.vimrc`. For example:
 

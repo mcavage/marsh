@@ -40,8 +40,7 @@ starts; later launches reuse warm VMs.
 marsh keeps its own home directory, backed by `~/.marsh/home` on your Mac
 in the default scope. Your Mac's dotfiles stay untouched.
 
-Vim and terminal Emacs are included in
-[nightly builds](install.md#nightly-builds). At the **marsh prompt**, open
+Vim and terminal Emacs are included. At the **marsh prompt**, open
 `~/.bashrc` with `vim ~/.bashrc` or `emacs -nw ~/.bashrc`. You can also
 open `~/.marsh/home/.bashrc` in your Mac editor.
 

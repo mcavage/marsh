@@ -32,7 +32,7 @@ class @CLASS@ < Formula
   def caveats
     <<~EOS
       marsh needs Docker Sandboxes: brew install docker/tap/sbx; then `sbx login`
-      (sbx 0.45.0 or newer). Then open a shell in a project:
+      (sbx 0.47.0 or newer). Then open a shell in a project:
         cd ~/your/project && marsh@CAVEAT_EXTRA@
     EOS
   end
