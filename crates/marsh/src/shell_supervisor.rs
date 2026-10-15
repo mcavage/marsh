@@ -318,6 +318,22 @@ type Spawned = (Kind, Option<File>, Option<[File; 3]>, std::process::Child);
 
 fn spawn_child(spec: StartSpec) -> io::Result<Spawned> {
     let mut command = Command::new(OsStr::from_bytes(&spec.program));
+    if matches!(&spec.kind, StartKind::Shell { .. }) {
+        // SBX's indexed Git config belongs to its built-in agent user and can
+        // include files in that user's private home. Session shells use their
+        // own UID/HOME. Drop the whole inherited set, rather than exporting a
+        // zero count that would override a Kit image's own Git configuration.
+        // Explicit values in the session spec are applied below.
+        for (name, _) in std::env::vars_os() {
+            let bytes = name.as_bytes();
+            if bytes == b"GIT_CONFIG_COUNT"
+                || bytes.starts_with(b"GIT_CONFIG_KEY_")
+                || bytes.starts_with(b"GIT_CONFIG_VALUE_")
+            {
+                command.env_remove(name);
+            }
+        }
+    }
     command
         .args(spec.arguments.iter().map(|word| OsStr::from_bytes(word)))
         .envs(

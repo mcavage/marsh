@@ -322,7 +322,7 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `no-runtime-authority`
 - `useful-phase-timing`
 
-### Workspaces (`workspaces_uat.py`, 30)
+### Workspaces (`workspaces_uat.py`, 31)
 
 - `W01-plain-bash`: s2 primary CLI from host bash: spool, -b and :::, join -- CMD, SPLIT_*, release.
 - `W02-lease-kept-joinable`: s6 lease: unheld 60 s -> kept, still joinable by its creator (two-step).
@@ -354,6 +354,7 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `W28-quarantine-retire`: Owned quarantined or orphan-pinned Kit VMs are always retirable, with the cause printed.
 - `W29-doc-examples`: Run marked public-documentation examples with declared fixture substitutions.
 - `W30-capture-ignored`: s8 capture: what a branch creates that the project's ignore rules exclude (`__pycache__/` from
+- `W31-shell-git-config`: Git uses the selected home, not SBX's agent-user config; session overrides still work.
 
 ### Processes (`processes_uat.py`, 37)
 
