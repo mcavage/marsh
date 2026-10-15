@@ -6,7 +6,7 @@
 # publishes, so the provide cannot claim a version the image does not ship.
 # codex-code-mode-host rides along: codex spawns it as a sibling executable
 # for Code Mode and fails that feature closed when it is missing.
-FROM dhi.io/node:24-debian13@sha256:f3575cf1e68ffe163703b691c465af833fd2d94cccc1e825d052c943018f2aa3 AS base
+FROM dhi.io/node:24-debian13@sha256:c6ddacf90691f33734423b06682a63b27abeeafee294830455e91c79614ece8b AS base
 
 FROM dhi.io/debian-base:trixie-dev@sha256:04a23b0daf5f06a4985703cce7942ea96be5448946f3e2ea2ef15ff9db0ae1e9 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
@@ -45,7 +45,7 @@ RUN case "$TARGETARCH" in \
 # ACP mode (`codex --acp`, packaging/agents.json codex-session): the official
 # codex-acp adapter, pinned by package-lock.json, with the Codex build it
 # depends on kept inside its own node_modules (never on PATH).
-FROM dhi.io/node:24-debian13-dev@sha256:81ee43ecd5e1741d4fbb1d66f9637e393c02b1ab0a056b10dbac400cbed2f2bc AS npm
+FROM dhi.io/node:24-debian13-dev@sha256:3d1547725ee170db15039a7ff14cd941fe2c329dcdad223f01144fcfe6d22534 AS npm
 WORKDIR /opt/marsh/codex-acp
 COPY package.json package-lock.json ./
 COPY collect-notices.mjs ./

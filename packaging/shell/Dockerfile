@@ -19,7 +19,9 @@ FROM ${SHELL_BASE_IMAGE} AS emacs
 USER root
 # Native compilation requires a GCC JIT package DHI does not supply; build
 # terminal Emacs without it, preserving DHI's compiler and runtime libraries.
+COPY image-base /tmp/marsh-image-base
 RUN apt-get update \
+ && sh /tmp/marsh-image-base/align-perl.sh \
  && apt-get install -y --no-install-recommends \
       gcc libc6-dev make autoconf automake dpkg-dev pkg-config texinfo \
       ca-certificates curl xz-utils \
@@ -60,7 +62,9 @@ USER root
 # pinned here. zsh is for `marsh --shell zsh` (docs/shells.md). Recommended
 # extras are not installed. Ordinary Debian tools are unpinned and retain their
 # package copyright files; Emacs is installed from source above.
+COPY image-base /tmp/marsh-image-base
 RUN apt-get update \
+ && sh /tmp/marsh-image-base/align-perl.sh \
  && apt-get install -y --no-install-recommends \
       docker-ce=5:29.8.2-1 docker-ce-cli=5:29.9.0-0 containerd.io=2.4.2-0 \
       docker-buildx-plugin=0.38.0-1 \
@@ -71,6 +75,7 @@ RUN apt-get update \
       libacl1 libattr1 libgmp10 libgnutls30t64 libsqlite3-0 libtinfo6 \
       libtree-sitter0.22 libxml2 zlib1g \
  && rm -rf /var/lib/apt/lists/* \
+ && rm -rf /tmp/marsh-image-base \
  && /usr/bin/zsh -fc 'echo $ZSH_VERSION' \
  && test -x /usr/bin/bash
 COPY --from=emacs /opt/emacs /opt/emacs

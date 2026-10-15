@@ -185,6 +185,7 @@ def main() -> None:
         if file_hash(context / "Dockerfile") != recipe_hash:
             raise ValueError("shell Dockerfile changed while staging")
         repair_inputs = copy_inputs(ROOT / "packaging/image-repair", context / "image-repair", budget)
+        base_inputs = copy_inputs(ROOT / "packaging/image-base", context / "image-base", budget)
         notice_inputs = copy_inputs(ROOT / "packaging/dhi-notices/collected", context / "dhi-notices", budget)
         pi_inputs = copy_inputs(ROOT / "packaging/shell/pi", context / "pi", budget)
         editor_inputs = copy_inputs(ROOT / "packaging/shell/editors", context / "editors", budget)
@@ -205,6 +206,7 @@ def main() -> None:
                    "--file", str(context / "Dockerfile"), *output,
                    "--metadata-file", str(metadata), str(context)]
         inputs = {"packaging/shell-image": base_hash, "packaging/shell/Dockerfile": recipe_hash,
+                  "packaging/image-base": base_inputs,
                   "scripts/prepare-shell-image.py": script_hash, "packaging/image-repair": repair_inputs,
                    "packaging/dhi-notices/collected": notice_inputs, "packaging/shell/pi": pi_inputs,
                    "packaging/shell/editors": editor_inputs,
@@ -216,6 +218,7 @@ def main() -> None:
             if (file_hash(base_file) != base_hash or file_hash(source_recipe) != recipe_hash
                     or file_hash(Path(__file__)) != script_hash
                     or input_tree(ROOT / "packaging/image-repair") != repair_inputs
+                    or input_tree(ROOT / "packaging/image-base") != base_inputs
                     or input_tree(ROOT / "packaging/dhi-notices/collected") != notice_inputs
                     or input_tree(ROOT / "packaging/shell/pi") != pi_inputs
                     or input_tree(ROOT / "packaging/shell/editors") != editor_inputs

@@ -143,7 +143,7 @@ def _captured_image_inputs(receipt, proof, kind):
         raise ValueError("LOCAL authority covers only the shell image")
     for name in ("packaging/shell-image", "packaging/shell/Dockerfile", "scripts/prepare-shell-image.py"):
         check(name, inputs.get(name))
-    for prefix in ("packaging/image-repair", "packaging/dhi-notices/collected", "packaging/shell/pi", "packaging/shell/editors"):
+    for prefix in ("packaging/image-base", "packaging/image-repair", "packaging/dhi-notices/collected", "packaging/shell/pi", "packaging/shell/editors"):
         tree(prefix, inputs.get(prefix))
 
 def _package(value, marsh: Path, guest: Path) -> dict:

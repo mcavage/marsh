@@ -3,7 +3,7 @@
 # toolchain a project's gate needs (make, gcc, python3) and ripgrep, assembled
 # from Debian packages in a -dev build stage (image-base/assemble-packages.sh).
 # npm runs only in the Node -dev stage.
-FROM dhi.io/node:24-debian13@sha256:f3575cf1e68ffe163703b691c465af833fd2d94cccc1e825d052c943018f2aa3 AS base
+FROM dhi.io/node:24-debian13@sha256:c6ddacf90691f33734423b06682a63b27abeeafee294830455e91c79614ece8b AS base
 
 FROM dhi.io/debian-base:trixie-dev@sha256:04a23b0daf5f06a4985703cce7942ea96be5448946f3e2ea2ef15ff9db0ae1e9 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
@@ -13,7 +13,7 @@ RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userlan
 
 # Pi, its MCP Gateway extension, and (for ACP mode, `pi --acp`) the community
 # pi-acp adapter, all pinned by package-lock.json.
-FROM dhi.io/node:24-debian13-dev@sha256:81ee43ecd5e1741d4fbb1d66f9637e393c02b1ab0a056b10dbac400cbed2f2bc AS npm
+FROM dhi.io/node:24-debian13-dev@sha256:3d1547725ee170db15039a7ff14cd941fe2c329dcdad223f01144fcfe6d22534 AS npm
 ARG PI_VERSION
 WORKDIR /opt/marsh/pi-gateway
 COPY package.json package-lock.json ./

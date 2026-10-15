@@ -1016,18 +1016,20 @@ fn pids_monitor_retains_the_last_valid_counter() {
 /// because it was woken, not because the interval elapsed.
 const UNREACHED_POLL_DELAY: Duration = Duration::from_hours(1);
 
-/// Wait for `samples` to reach 1, then stop the monitor; its result must come
+/// Wait for the monitor's first wait boundary, then stop it; its result must come
 /// back long before `UNREACHED_POLL_DELAY`.
 fn stop_after_first_sample(
     samples: &AtomicUsize,
     stop: &AtomicBool,
+    waiting: &mpsc::Receiver<()>,
     handle: thread::JoinHandle<Result<Option<u64>, RuntimeError>>,
 ) -> Option<u64> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(30);
-    while samples.load(Ordering::SeqCst) == 0 {
-        assert!(std::time::Instant::now() < deadline, "no first sample");
-        thread::sleep(Duration::from_millis(1));
-    }
+    // The evidence reader counts a sample before returning its bytes. Merely
+    // observing that count can stop the monitor before its first stop check,
+    // rather than exercising an exit between polls.
+    waiting
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the monitor did not reach its first wait");
     // One sample per interval: nothing more until it is woken.
     assert_eq!(samples.load(Ordering::SeqCst), 1);
     stop.store(true, Ordering::Release);
@@ -1048,10 +1050,18 @@ fn pids_monitor_samples_once_per_interval_and_wakes_on_exit() {
         current: Cursor::new(Vec::new()),
     };
     let thread_stop = Arc::clone(&stop);
+    let (waiting, receive_waiting) = mpsc::channel();
     let handle = thread::spawn(move || {
-        monitor_pids_events_with_delay(evidence, &thread_stop, UNREACHED_POLL_DELAY)
+        monitor_pids_events_with_wait(evidence, &thread_stop, || {
+            waiting.send(()).unwrap();
+            thread::park_timeout(UNREACHED_POLL_DELAY);
+            Ok(())
+        })
     });
-    assert_eq!(stop_after_first_sample(&samples, &stop, handle), Some(0));
+    assert_eq!(
+        stop_after_first_sample(&samples, &stop, &receive_waiting, handle),
+        Some(0)
+    );
 }
 
 #[test]
@@ -1063,10 +1073,18 @@ fn pids_monitor_takes_a_final_sample_when_the_process_exits_between_polls() {
         current: Cursor::new(Vec::new()),
     };
     let thread_stop = Arc::clone(&stop);
+    let (waiting, receive_waiting) = mpsc::channel();
     let handle = thread::spawn(move || {
-        monitor_pids_events_with_delay(evidence, &thread_stop, UNREACHED_POLL_DELAY)
+        monitor_pids_events_with_wait(evidence, &thread_stop, || {
+            waiting.send(()).unwrap();
+            thread::park_timeout(UNREACHED_POLL_DELAY);
+            Ok(())
+        })
     });
-    assert_eq!(stop_after_first_sample(&samples, &stop, handle), Some(1));
+    assert_eq!(
+        stop_after_first_sample(&samples, &stop, &receive_waiting, handle),
+        Some(1)
+    );
     assert_eq!(samples.load(Ordering::SeqCst), 2);
 }
 

@@ -8,6 +8,8 @@ set -eu
 for command in dockerd containerd runc docker git curl bash tar "$@"; do
   "$command" --version >/dev/null
 done
+# Git's Perl tools need the full interpreter, not just the base package.
+perl -e 'use strict; use warnings; use File::Spec;'
 test -x /bin/sh && test -x /bin/bash
 test -d /usr/lib/locale/C.utf8
 # Docker Sandboxes installs its proxy CA this way at VM start.
