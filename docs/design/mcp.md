@@ -566,18 +566,45 @@ and rejects a same-name Codex collision. Native Codex desktop task discovery
 is not automated and remains a manual check.
 
 `marsh-mcp export-serve` is separate from this development-control server. It
-loads one explicitly declared typed tool and exposes no `shell_run`, scope
+loads explicitly declared typed tools and exposes no `shell_run`, scope
 control, worker reset, or `qualify`. It requires `--home ABS` naming the exact
 normal marsh command-registry home (commonly `~/.marsh`); it rejects the
 generated development scope root for this workspace and `--scope-root`.
 Other manually chosen development roots are not detected: do not pass one as
 `--home`. The native Kit declaration
 still controls its workload and network/credential authority. Its guest HOME
-is the natural account home backed by that selected home, just as with an
+is the natural account home backed by `MARSH_HOME/home`, never the selected
+scope's host-control root, just as with an
 ordinary marsh command. The client must opt in to registering/loading the
 export-only server. A tool is not automatically published because its shell
 command is registered. Stock-SBX support for the export server is claimed only
 for a candidate that passes `tests/mcp/CONTRACT.md` items 28-35.
+
+A declaration may be one tool object or an object with a `tools` array. Without
+`--tool NAME`, all declared operations share one stdio connection and one
+shutdown/cancellation domain. `--tool NAME` selects a single operation. Documents
+are limited to 512 KiB and 64 uniquely named tools; every declaration is validated,
+including unselected siblings. Each tool retains its own typed schema, literal
+argv bindings, execution limits and declaration-change check. Removing/changing
+one valid declaration revokes that tool in already-connected clients; unchanged
+siblings remain callable. Invalidating the document refuses all tools.
+
+`result_format: "json"` is an opt-in for CLIs returning one JSON value.
+Successful, complete stdout is parsed into `result`; the envelope retains
+`ok`, invocation outcome, worker execution metadata, exit status, receipt/job
+selectors and cleanup/completeness facts. It omits captured text/base64 streams.
+Nonzero, incomplete, truncated or invalid-JSON output fails closed without
+returning partial output or raw stderr. The default `execution` format keeps the
+existing byte-faithful contract. The compact format is also a JSON text block:
+stock code mode consumes text, so callers use
+`JSON.parse(await tools.operation(arguments))` and inspect `ok` before using
+`result`. Untrusted service content remains data, not instructions.
+
+This does not change `mcp publish`'s pipeline syntax or install private service
+clients. Use stock SBX dynamic discovery/code mode on the gateway connection;
+there is no second discovery service. Keep the same gateway session when using
+its session-scoped code-mode executors. Multi-tool fixture protocol tests are
+not proof of stock-gateway interoperability or service authentication.
 
 Published Brush pipelines run in the project-shell VM through marsh, so their
 result is a shell pipeline result rather than one Kit job receipt. A registered

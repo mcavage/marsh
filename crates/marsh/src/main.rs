@@ -2101,6 +2101,7 @@ fn published_tool_declaration(
     workspace: &Path,
 ) -> Result<ToolDeclaration, RunError> {
     let declaration = ToolDeclaration {
+        result_format: marsh_mcp::ResultFormat::Execution,
         schema_version: "marsh.published_tool/v1".into(),
         tool_name: name.into(),
         description: description.map_or_else(

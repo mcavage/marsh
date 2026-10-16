@@ -10,8 +10,8 @@ pub mod export;
 pub use acp_export::{AcpDeclaration, AcpExportMcp};
 
 pub use export::{
-    ArgBinding, ExecutionOutcome, ExportConfig, ExportExecutionData, ExportMcp, StdinBinding,
-    ToolBindings, ToolDeclaration, WorkspaceIdentity,
+    ArgBinding, ExecutionOutcome, ExportBundle, ExportConfig, ExportExecutionData, ExportMcp,
+    ResultFormat, StdinBinding, ToolBindings, ToolDeclaration, WorkspaceIdentity,
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -66,11 +66,13 @@ pub(crate) const RELAY_ENV: [&str; 5] = [
     "MARSH_HOME_BACKING",
     "MARSH_RELAY_TOKEN",
 ];
-pub(crate) const INHERITED_ENV: [&str; 12] = [
+pub(crate) const INHERITED_ENV: [&str; 13] = [
     "HOME",
     // The host state root: every host-side write follows the caller's
     // override, including the daemon this server starts.
     "MARSH_CONTROL_HOME",
+    // Stock SBX resolves its approved credential bindings here, host-side only.
+    "XDG_CONFIG_HOME",
     "TMPDIR",
     "SHELL",
     "LANG",

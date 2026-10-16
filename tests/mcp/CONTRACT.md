@@ -258,10 +258,11 @@ not replace this boundary test.
     development-control MCP scope root and `--scope-root` are rejected.
     Explicitly configured other development roots must not be selected as
     export homes; this release does not identify them automatically. Export may not enable full SBX
-    control. It loads and validates one explicitly declared tool declaration
+    control. It loads and validates explicitly declared tool declarations
     (`marsh.published_tool/v1`); the job guest HOME remains the natural account
     home path, backed by the explicit selected home.
-29. Tool discovery (`tools/list`) exposes ONLY the single declared tool. All
+29. Tool discovery (`tools/list`) exposes ONLY the declared tools (or the one
+    selected with `--tool NAME`). All
     development-control tools (`doctor`, `status`, `results_list`, `result_get`,
     `shell_run`, `scope_*`, `prewarm`, `workers_reset`, `qualify`, `operation_*`)
     are absent from the tool list and rejected on invocation (MCP-05).
@@ -412,6 +413,16 @@ checks that public status 125 and legacy cause prose do not overwrite the worker
 fact. This is wire-fidelity evidence, not proof of real VM limit enforcement.
 
 ## Required evidence
+
+Multi-tool declaration qualification additionally checks a bounded (512 KiB,
+1–64 tools), uniquely named bundle over one initialized MCP connection. Calls
+route to their own registered commands with literal arguments; invalid inputs
+and undeclared names create no job. Changing one declaration revokes only that
+operation, while an invalid bundle fails closed. Server shutdown cancels every
+tool's in-flight jobs. `export_integration.rs` exercises these properties over
+MCP/daemon sockets and the Mac stdio entrypoint with a fixture Kit backend;
+stock SBX dynamic discovery/code-mode, real containers and authentication remain
+separate qualification, not implied by those fixture results.
 
 The UAT result identifies the exact `marsh-mcp`, `marsh`, and `sbx` binaries,
 their pinned identities, source revision and dirty state, platform, canonical

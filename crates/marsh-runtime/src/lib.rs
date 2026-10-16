@@ -57,6 +57,9 @@ const RESOURCE_EVENT_POLL_DELAY: Duration = Duration::from_millis(50);
 const ENGINE_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_ENGINE_RESPONSE: u64 = 16 * 1024;
 const TRUSTED_CA_BUNDLE: &str = "/etc/ssl/certs/ca-certificates.crt";
+mod guest_home;
+pub use guest_home::prepare_persistent_guest_home;
+
 const STOCK_SBX_PROXY_ENDPOINT: &[u8] = b"http://gateway.docker.internal:3128";
 const STOCK_SBX_MCP_URL: &[u8] = b"http://mcp-gateway.docker.internal/mcp";
 const PROXY_VARIABLES: &[&str] = &[
@@ -273,6 +276,7 @@ impl SystemCommandRunner {
             "DOCKER_SANDBOXES_API",
             "DOCKER_SANDBOXES_APP_NAME",
             "SANDBOXES_STORAGE_ROOT",
+            "XDG_CONFIG_HOME",
             "XDG_STATE_HOME",
         ]
         .into_iter()
