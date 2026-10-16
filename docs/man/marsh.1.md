@@ -187,7 +187,8 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   **--home**, use the CLI's selected home and disable creation of managed scopes.
 
 **mcp export-serve** [*MCP_OPTIONS*...] **--declaration** *PATH*
-: Serve only the tool in a publication declaration. Requires **--home**.
+: Serve only the tools in a publication declaration. **--tool** *NAME* selects
+  one operation from a bundle. Requires **--home**.
 
 **mcp start**, **mcp stop**
 : Start or stop the project's host MCP broker. **stop** refuses while a sandbox

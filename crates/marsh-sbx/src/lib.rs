@@ -4761,7 +4761,11 @@ impl StockSbx {
                     timeout,
                 });
             }
-            if let Err(error) = written {
+            // A rejected load closes stdin early. Preserve its actionable
+            // stock error rather than hiding it behind the resulting EPIPE.
+            if let Err(error) = written
+                && exit_code == 0
+            {
                 let _ = process.terminate();
                 let _ = process.wait();
                 return Err(error);

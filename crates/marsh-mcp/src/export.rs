@@ -1,6 +1,6 @@
 //! Export-only MCP server mode for one owner-declared Kit command or Brush pipeline.
 //!
-//! Exposes exactly one typed tool defined by a versioned declaration file.
+//! Exposes owner-declared typed tools defined by a versioned declaration file.
 //! Arguments are validated against the declared JSON Schema. Kit command arguments
 //! bind to literal argv/options; pipeline input binds only to bounded stdin. A
 //! pipeline runs through the marsh project shell and Brush, not host Bash.
@@ -22,8 +22,9 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     env, fs,
+    io::Read as _,
     os::unix::fs::MetadataExt as _,
     path::{Path, PathBuf},
     process::Stdio,
@@ -46,6 +47,8 @@ pub const DEFAULT_MAX_STDIN_BYTES: usize = 65_536; // 64 KiB
 pub const MAX_STDIN_BYTES_LIMIT: usize = 1_048_576; // 1 MiB
 pub const MAX_ARG_STRING_BYTES: usize = 65_536; // 64 KiB
 pub const SUPPORTED_SCHEMA_VERSION: &str = "marsh.published_tool/v1";
+pub const MAX_DECLARATION_BYTES: usize = 524_288;
+pub const MAX_DECLARED_TOOLS: usize = 64;
 
 fn default_max_output_bytes() -> usize {
     DEFAULT_MAX_OUTPUT_BYTES
@@ -74,6 +77,9 @@ pub struct ToolDeclaration {
     pub pipeline: Option<String>,
     pub input_schema: Value,
     pub bindings: ToolBindings,
+    /// JSON mode exposes a compact parsed result instead of captured streams.
+    #[serde(default)]
+    pub result_format: ResultFormat,
     #[serde(default = "default_max_output_bytes")]
     pub max_output_bytes: usize,
     #[serde(default = "default_timeout_ms")]
@@ -84,6 +90,14 @@ pub struct ToolDeclaration {
     pub canonical_workspace: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_identity: Option<WorkspaceIdentity>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ResultFormat {
+    #[default]
+    Execution,
+    Json,
 }
 
 /// Filesystem identity of the project that published a tool.
@@ -159,9 +173,48 @@ impl ToolDeclaration {
     /// Returns an error if the file cannot be read, JSON is invalid, or the declaration
     /// fails validation rules.
     pub fn load_from_path(path: &Path, selected_tool: Option<&str>) -> Result<Self, String> {
-        let content = fs::read_to_string(path)
+        Self::select(Self::load_all_from_path(path)?, selected_tool)
+    }
+
+    /// Load a bounded set of independently validated, uniquely named tools.
+    ///
+    /// # Errors
+    /// Rejects oversized/invalid files, empty bundles, and duplicate tool names.
+    pub fn load_all_from_path(path: &Path) -> Result<Vec<Self>, String> {
+        let mut content = String::new();
+        fs::File::open(path)
+            .map_err(|e| format!("cannot open declaration file {}: {e}", path.display()))?
+            .take((MAX_DECLARATION_BYTES + 1) as u64)
+            .read_to_string(&mut content)
             .map_err(|e| format!("cannot read declaration file {}: {e}", path.display()))?;
-        Self::load_from_str(&content, selected_tool)
+        Self::load_all_from_str(&content)
+    }
+
+    /// Parse one tool or a bundle without making another discovery/catalog layer.
+    ///
+    /// # Errors
+    /// Rejects invalid declarations, duplicate names, and document/count bounds.
+    pub fn load_all_from_str(content: &str) -> Result<Vec<Self>, String> {
+        if content.len() > MAX_DECLARATION_BYTES {
+            return Err("tool declaration document exceeds 512 KiB".into());
+        }
+        let parsed: DeclarationFileFormat = serde_json::from_str(content)
+            .map_err(|e| format!("invalid tool declaration JSON: {e}"))?;
+        let tools = match parsed {
+            DeclarationFileFormat::Single(tool) => vec![*tool],
+            DeclarationFileFormat::Envelope { tools, .. } => tools,
+        };
+        if tools.is_empty() || tools.len() > MAX_DECLARED_TOOLS {
+            return Err("declaration must contain between 1 and 64 tools".into());
+        }
+        let mut names = HashSet::new();
+        for tool in &tools {
+            tool.validate()?;
+            if !names.insert(&tool.tool_name) {
+                return Err(format!("duplicate declared tool name '{}'", tool.tool_name));
+            }
+        }
+        Ok(tools)
     }
 
     /// Load and validate a declaration from a JSON string.
@@ -169,44 +222,23 @@ impl ToolDeclaration {
     /// # Errors
     /// Returns an error if JSON is invalid or fails validation rules.
     pub fn load_from_str(content: &str, selected_tool: Option<&str>) -> Result<Self, String> {
-        let parsed: DeclarationFileFormat = serde_json::from_str(content)
-            .map_err(|e| format!("invalid tool declaration JSON: {e}"))?;
-        let declaration = match parsed {
-            DeclarationFileFormat::Single(decl) => {
-                if let Some(tool) = selected_tool
-                    && decl.tool_name != tool
-                {
-                    return Err(format!(
-                        "declaration specifies tool '{}', but requested '{}'",
-                        decl.tool_name, tool
-                    ));
-                }
-                *decl
-            }
-            DeclarationFileFormat::Envelope { tools, .. } => {
-                if tools.is_empty() {
-                    return Err("declaration file contains no tools".to_string());
-                }
-                if let Some(tool) = selected_tool {
-                    tools
-                        .into_iter()
-                        .find(|t| t.tool_name == tool)
-                        .ok_or_else(|| format!("tool '{tool}' not found in declaration file"))?
-                } else if tools.len() == 1 {
-                    tools
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| "declaration file contains no tools".to_string())?
-                } else {
-                    return Err(format!(
-                        "declaration file contains multiple tools (count={}); specify tool name explicitly",
-                        tools.len()
-                    ));
-                }
-            }
-        };
-        declaration.validate()?;
-        Ok(declaration)
+        Self::select(Self::load_all_from_str(content)?, selected_tool)
+    }
+
+    fn select(tools: Vec<Self>, selected_tool: Option<&str>) -> Result<Self, String> {
+        if let Some(name) = selected_tool {
+            return tools
+                .into_iter()
+                .find(|tool| tool.tool_name == name)
+                .ok_or_else(|| format!("tool '{name}' not found in declaration file"));
+        }
+        if tools.len() != 1 {
+            return Err("declaration file contains multiple tools; select one explicitly".into());
+        }
+        tools
+            .into_iter()
+            .next()
+            .ok_or_else(|| "declaration file contains no tools".into())
     }
 
     /// Validate the declaration's schema, names, bounds, and binding consistency.
@@ -557,6 +589,65 @@ pub struct ExportMcp {
     next_exec_id: Arc<AtomicU64>,
 }
 
+/// One protocol connection for several owner-declared tools. This multiplexes
+/// existing exports; the daemon remains the only job admission/scheduling path.
+#[derive(Clone)]
+pub struct ExportBundle {
+    exports: Arc<BTreeMap<String, ExportMcp>>,
+}
+
+impl ExportBundle {
+    /// Assemble uniquely named exports with one host scope and shutdown domain.
+    ///
+    /// # Errors
+    /// Rejects empty/oversized bundles, duplicate names and mixed host scopes.
+    pub fn new(configs: Vec<ExportConfig>) -> Result<Self, String> {
+        let first = configs.first().ok_or("export bundle contains no tools")?;
+        if configs.len() > MAX_DECLARED_TOOLS {
+            return Err("export bundle exceeds 64 tools".into());
+        }
+        for config in &configs {
+            if config.host_config.workspace() != first.host_config.workspace()
+                || config.host_config.home() != first.host_config.home()
+                || config.host_config.marsh() != first.host_config.marsh()
+                || config.host_config.marshd() != first.host_config.marshd()
+                || config.host_config.sbx() != first.host_config.sbx()
+            {
+                return Err("export bundle tools must share one pinned host scope".into());
+            }
+            config.declaration.validate()?;
+        }
+        let in_flight = Arc::new(TokioMutex::new(HashMap::new()));
+        let next_exec_id = Arc::new(AtomicU64::new(1));
+        let mut exports = BTreeMap::new();
+        for config in configs {
+            let name = config.declaration.tool_name.clone();
+            let mut export = ExportMcp::new(config);
+            export.in_flight = Arc::clone(&in_flight);
+            export.next_exec_id = Arc::clone(&next_exec_id);
+            if exports.insert(name.clone(), export).is_some() {
+                return Err(format!("duplicate declared tool name '{name}'"));
+            }
+        }
+        Ok(Self {
+            exports: Arc::new(exports),
+        })
+    }
+
+    /// Cancel all tools' in-flight jobs under the existing bounded shutdown.
+    ///
+    /// # Errors
+    /// Returns the existing exporter error if cleanup does not drain in time.
+    pub async fn shutdown_server(&self) -> Result<(), String> {
+        self.exports
+            .values()
+            .next()
+            .ok_or("export bundle contains no tools")?
+            .shutdown_server()
+            .await
+    }
+}
+
 impl ExportMcp {
     #[must_use]
     pub fn new(config: ExportConfig) -> Self {
@@ -602,6 +693,24 @@ impl ExportMcp {
             ToolDeclaration::load_from_path(path, Some(&self.config.declaration.tool_name)).as_ref()
                 == Ok(&self.config.declaration)
         })
+    }
+
+    fn listed_tool(&self) -> Option<Tool> {
+        if !self.publication_current() {
+            return None;
+        }
+        Some(Tool::new(
+            self.config.declaration.tool_name.clone(),
+            self.config.declaration.description.clone(),
+            Arc::new(
+                self.config
+                    .declaration
+                    .input_schema
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default(),
+            ),
+        ))
     }
 
     /// Validate caller inputs against schema and bindings, preventing unknown fields
@@ -1029,13 +1138,17 @@ impl ExportMcp {
         // Keep the shell's natural guest HOME distinct from the host-side
         // backing directory, exactly as ordinary marsh command sessions do.
         let guest_home = natural_guest_home()?;
+        let home_backing = marsh_runtime::prepare_persistent_guest_home(
+            &home.join("home"),
+            rustix::process::getuid().as_raw(),
+        )?;
         let session_authority = SessionAuthority {
             username: username.clone(),
             uid: rustix::process::getuid().as_raw(),
             gid: rustix::process::getgid().as_raw(),
             launch_directory: workspace.clone(),
             guest_home: guest_home.clone(),
-            home_backing: home.clone(),
+            home_backing: home_backing.clone(),
             ephemeral_home: false,
         };
         let session_id = attach_shell(&client, std::process::id(), session_authority)?;
@@ -1056,7 +1169,7 @@ impl ExportMcp {
                 gid: rustix::process::getgid().as_raw(),
                 launch_directory: workspace,
                 guest_home,
-                home_backing: home,
+                home_backing,
                 ephemeral_home: false,
                 terminal: false,
                 terminal_size: None,
@@ -1570,6 +1683,45 @@ fn execution_text(data: &ExportExecutionData) -> ContentBlock {
     ContentBlock::text(text)
 }
 
+fn json_execution_result(data: &ExportExecutionData) -> CallToolResult {
+    let parsed = if data.outcome == ExecutionOutcome::Success && data.output_complete {
+        base64::engine::general_purpose::STANDARD
+            .decode(&data.stdout_base64)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+    } else {
+        None
+    };
+    let ok = parsed.is_some();
+    let mut payload = json!({
+        "ok": ok,
+        "outcome": data.outcome,
+        "exit_code": data.exit_code,
+        "cleanup_certainty": data.cleanup_certainty,
+        "output_complete": data.output_complete,
+        "receipt_selector": data.receipt_selector,
+        "job_id": data.job_id,
+        "execution": data.execution,
+        "host_cleanup_certainty": data.host_cleanup_certainty,
+    });
+    if let Some(result) = parsed {
+        payload["result"] = result;
+    } else {
+        payload["error"] = Value::String(
+            if data.outcome == ExecutionOutcome::Success {
+                "command did not return one complete JSON value"
+            } else {
+                "command did not complete successfully; inspect its outcome and receipt"
+            }
+            .into(),
+        );
+    }
+    let mut result = CallToolResult::structured(payload.clone());
+    result.content = vec![ContentBlock::text(payload.to_string())];
+    result.is_error = Some(!ok);
+    result
+}
+
 pub(crate) fn bound_response_data(data: &mut ExportExecutionData) {
     const FRAME_PAYLOAD_LIMIT: usize = 1_000_000;
     let mut frame_len = measure_call_tool_result_frame(data);
@@ -1685,6 +1837,44 @@ fn format_arg_value(value: &Value) -> Vec<u8> {
 
 // `ServerHandler` declares these methods async; some bodies have nothing to await.
 #[allow(unknown_lints, clippy::unused_async_trait_impl)]
+impl ServerHandler for ExportBundle {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new("marsh-export", env!("CARGO_PKG_VERSION")))
+            .with_instructions("Owner-declared typed command tools. Use the connected gateway's discovery/code mode; execution follows normal marsh admission and cleanup.")
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        Ok(ListToolsResult::with_all_items(
+            self.exports
+                .values()
+                .filter_map(ExportMcp::listed_tool)
+                .collect(),
+        ))
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
+        let Some(export) = self.exports.get(request.name.as_ref()) else {
+            let mut result = CallToolResult::structured(json!({
+                "ok": false, "error": "tool is not declared by this export server"
+            }));
+            result.is_error = Some(true);
+            return Ok(result.into());
+        };
+        export.call_tool(request, context).await
+    }
+}
+
+// `ServerHandler` declares these methods async; some bodies have nothing to await.
+#[allow(unknown_lints, clippy::unused_async_trait_impl)]
 impl ServerHandler for ExportMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
@@ -1702,19 +1892,9 @@ impl ServerHandler for ExportMcp {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        if !self.publication_current() {
-            return Ok(ListToolsResult::with_all_items(Vec::new()));
-        }
-        let input_schema = match serde_json::to_value(&self.config.declaration.input_schema) {
-            Ok(Value::Object(map)) => Arc::new(map),
-            _ => Arc::new(Map::new()),
-        };
-        let tool = Tool::new(
-            self.config.declaration.tool_name.clone(),
-            self.config.declaration.description.clone(),
-            input_schema,
-        );
-        Ok(ListToolsResult::with_all_items(vec![tool]))
+        Ok(ListToolsResult::with_all_items(
+            self.listed_tool().into_iter().collect(),
+        ))
     }
 
     #[allow(clippy::too_many_lines)] // Early rejection and execution share this protocol boundary.
@@ -1777,6 +1957,9 @@ impl ServerHandler for ExportMcp {
         {
             Ok(mut data) => {
                 bound_response_data(&mut data);
+                if self.config.declaration.result_format == ResultFormat::Json {
+                    return Ok(json_execution_result(&data).into());
+                }
                 let is_err = data.outcome != ExecutionOutcome::Success;
                 let payload = json!({
                     "ok": !is_err,

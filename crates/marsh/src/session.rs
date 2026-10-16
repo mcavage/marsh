@@ -88,37 +88,9 @@ impl SessionConfig {
         if self.ephemeral_home {
             return Ok(());
         }
-        if !self.home_backing.exists() {
-            std::fs::create_dir(&self.home_backing)
-                .map_err(|_| SessionError("cannot create selected guest home"))?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(
-                    &self.home_backing,
-                    std::fs::Permissions::from_mode(0o700),
-                )
-                .map_err(|_| SessionError("cannot protect selected guest home"))?;
-            }
-        }
-        let metadata = std::fs::symlink_metadata(&self.home_backing)
-            .map_err(|_| SessionError("cannot inspect selected guest home"))?;
-        if !metadata.is_dir() || metadata.file_type().is_symlink() {
-            return Err(SessionError("selected guest home must be a directory"));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            if metadata.uid() != self.uid || metadata.mode() & 0o022 != 0 {
-                return Err(SessionError(
-                    "selected guest home ownership or mode is unsafe",
-                ));
-            }
-        }
-        self.home_backing = self
-            .home_backing
-            .canonicalize()
-            .map_err(|_| SessionError("cannot resolve selected guest home"))?;
+        self.home_backing =
+            marsh_runtime::prepare_persistent_guest_home(&self.home_backing, self.uid)
+                .map_err(SessionError)?;
         Ok(())
     }
 

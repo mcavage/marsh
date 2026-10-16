@@ -6,8 +6,8 @@ use marsh_daemon::{
     PreparationProgress, PreparationResult, Server, ServerAttachment, SessionSpec, ShellSpec,
 };
 use marsh_mcp::{
-    ArgBinding, ExportConfig, ExportMcp, HostConfig, StdinBinding, ToolBindings, ToolDeclaration,
-    WorkspaceIdentity,
+    ArgBinding, ExportBundle, ExportConfig, ExportMcp, HostConfig, StdinBinding, ToolBindings,
+    ToolDeclaration, WorkspaceIdentity,
 };
 use rmcp::{
     ClientHandler, RoleClient, ServiceExt,
@@ -348,7 +348,17 @@ impl TestHarness {
 
     /// Serves `declaration` over a Unix socket and connects an MCP client.
     async fn connect(&self, declaration: ToolDeclaration) -> Connection {
-        let server = ExportMcp::new(ExportConfig::new(self.host_config(), declaration).unwrap());
+        self.connect_bundle(vec![declaration]).await
+    }
+
+    async fn connect_bundle(&self, declarations: Vec<ToolDeclaration>) -> Connection {
+        let server = ExportBundle::new(
+            declarations
+                .into_iter()
+                .map(|declaration| ExportConfig::new(self.host_config(), declaration).unwrap())
+                .collect(),
+        )
+        .unwrap();
         let (server_socket, client_socket) = tokio::net::UnixStream::pair().unwrap();
         let serving = server.clone();
         let task = tokio::spawn(async move {
@@ -377,7 +387,7 @@ impl Drop for TestHarness {
 
 struct Connection {
     client: RunningService<RoleClient, TestClient>,
-    server: ExportMcp,
+    server: ExportBundle,
     _task: tokio::task::JoinHandle<()>,
 }
 
@@ -410,6 +420,7 @@ async fn notified(notify: &Notify, what: &str) {
 
 fn make_declaration(command: &str) -> ToolDeclaration {
     ToolDeclaration {
+        result_format: marsh_mcp::ResultFormat::Execution,
         schema_version: "marsh.published_tool/v1".into(),
         tool_name: "project_test".into(),
         description: "Run project tests".into(),
@@ -485,6 +496,209 @@ async fn test_tools_list_exposes_only_published_tool() {
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0].name, "project_test");
     assert_eq!(tools[0].description.as_deref(), Some("Run project tests"));
+}
+
+#[tokio::test]
+async fn compact_json_preserves_results_receipts_and_fails_closed_on_invalid_output() {
+    for (stdout, exit, expected_ok) in [
+        (br#"{"slides":[{"text":"fixture"}]}"#.to_vec(), 0, true),
+        (b"not JSON".to_vec(), 0, false),
+        (b"{\"secret\":\"must-not-be-returned\"}".to_vec(), 1, false),
+        ([b' '; 2048].to_vec(), 0, false),
+    ] {
+        let mut backend = TestKitBackend::new(vec!["test-report".into()]);
+        backend.injected_stdout = stdout;
+        backend.injected_exit_code = exit;
+        let harness = TestHarness::new(Arc::new(backend));
+        let mut declaration = make_declaration("test-report");
+        declaration.result_format = marsh_mcp::ResultFormat::Json;
+        let connection = harness.connect(declaration).await;
+        let result = connection.call(json!({"filter":"fixture"})).await;
+        let payload = structured(&result);
+        assert_eq!(payload["ok"], expected_ok);
+        assert_eq!(result.is_error, Some(!expected_ok));
+        assert!(payload["receipt_selector"].is_string());
+        assert!(payload.get("stdout_base64").is_none());
+        assert!(payload.get("stdout").is_none());
+        assert!(
+            !serde_json::to_string(&result)
+                .unwrap()
+                .contains("must-not-be-returned")
+        );
+        if expected_ok {
+            assert_eq!(payload["result"]["slides"][0]["text"], "fixture");
+        }
+        // Stock code mode receives text blocks, so the text must be parseable JSON too.
+        let text = result.content[0].as_text().unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&text.text).unwrap(), *payload);
+    }
+}
+
+#[tokio::test]
+async fn bundle_routes_typed_calls_without_shell_interpolation() {
+    let backend = Arc::new(TestKitBackend::new(vec![
+        "slides".into(),
+        "employees".into(),
+    ]));
+    let harness = TestHarness::new(backend.clone());
+    let mut slides = make_declaration("slides");
+    slides.tool_name = "read_slides".into();
+    let mut employees = make_declaration("employees");
+    employees.tool_name = "find_employee".into();
+    // Exercise the same bundle parser used by the stdio entrypoint.
+    let document = serde_json::to_string(&json!({"tools": [slides, employees]})).unwrap();
+    let declarations = ToolDeclaration::load_all_from_str(&document).unwrap();
+    let connection = harness.connect_bundle(declarations).await;
+    let tools = connection.client.list_all_tools().await.unwrap();
+    assert_eq!(
+        tools
+            .iter()
+            .map(|tool| tool.name.as_ref())
+            .collect::<Vec<_>>(),
+        ["find_employee", "read_slides"]
+    );
+    assert_eq!(tools[1].input_schema["additionalProperties"], false);
+
+    let literal = "deck; $(touch should-not-exist)\n--other-option";
+    for (name, command) in [("read_slides", "slides"), ("find_employee", "employees")] {
+        let mut params = call_params(json!({"filter": literal}));
+        params.name = name.into();
+        let result = connection.client.call_tool(params).await.unwrap();
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        let execution = backend.last_execution.lock().unwrap().clone().unwrap();
+        assert_eq!(execution.command, command);
+        assert_eq!(
+            execution.arguments,
+            [
+                b"--run".to_vec(),
+                b"--filter".to_vec(),
+                literal.as_bytes().to_vec()
+            ]
+        );
+        assert!(structured(&result)["data"]["receipt_selector"].is_string());
+    }
+    backend.last_execution.lock().unwrap().take();
+    for (name, arguments) in [
+        ("read_slides", json!({"filter": 7})),
+        ("find_employee", json!({"filter": "name", "extra": "no"})),
+        ("undeclared", json!({"filter": "name"})),
+    ] {
+        let mut params = call_params(arguments);
+        params.name = name.into();
+        assert_eq!(
+            connection.client.call_tool(params).await.unwrap().is_error,
+            Some(true)
+        );
+        assert!(backend.last_execution.lock().unwrap().is_none());
+    }
+    connection.server.shutdown_server().await.unwrap();
+}
+
+#[test]
+fn declaration_bundles_reject_duplicates_and_bounds() {
+    let declaration = make_declaration("test-report");
+    for document in [
+        json!({"tools": []}),
+        json!({"tools": [declaration.clone(), declaration.clone()]}),
+        json!({"tools": vec![declaration.clone(); 65]}),
+    ] {
+        assert!(ToolDeclaration::load_all_from_str(&document.to_string()).is_err());
+    }
+    assert!(ToolDeclaration::load_all_from_str(&" ".repeat(524_289)).is_err());
+    let mut invalid = declaration.clone();
+    invalid.tool_name = "other".into();
+    invalid.input_schema = json!({"type": "string"});
+    // Selecting one operation must not hide an invalid sibling declaration.
+    assert!(
+        ToolDeclaration::load_from_str(
+            &json!({"tools": [declaration, invalid]}).to_string(),
+            Some("project_test")
+        )
+        .is_err()
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn stdio_entrypoint_exposes_bundle_and_revokes_changed_tool() {
+    let backend = Arc::new(TestKitBackend::new(vec![
+        "slides".into(),
+        "employees".into(),
+    ]));
+    let harness = TestHarness::new(backend.clone());
+    let mut first = make_declaration("slides");
+    first.tool_name = "read_slides".into();
+    let mut second = make_declaration("employees");
+    second.tool_name = "find_employee".into();
+    let declarations_dir = harness.temp.path().join("declarations");
+    fs::create_dir(&declarations_dir).unwrap();
+    fs::set_permissions(&declarations_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    let path = declarations_dir.join("tools.json");
+    fs::write(
+        &path,
+        json!({"tools": [first.clone(), second.clone()]}).to_string(),
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_marsh-mcp"))
+        .arg("export-serve")
+        .arg("--workspace")
+        .arg(&harness.workspace)
+        .arg("--home")
+        .arg(&harness.home)
+        .arg("--marsh")
+        .arg(&harness.marsh)
+        .arg("--sbx")
+        .arg(&harness.sbx)
+        .arg("--declaration")
+        .arg(&path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let client = TestClient
+        .serve((child.stdout.take().unwrap(), child.stdin.take().unwrap()))
+        .await
+        .unwrap();
+    assert_eq!(client.list_all_tools().await.unwrap().len(), 2);
+    let params = || {
+        let mut params = call_params(json!({"filter": "deck"}));
+        params.name = "read_slides".into();
+        params
+    };
+    let result = client.call_tool(params()).await.unwrap();
+    assert_ne!(result.is_error, Some(true), "{result:?}");
+    assert_eq!(
+        backend
+            .last_execution
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .command,
+        "slides"
+    );
+    backend.last_execution.lock().unwrap().take();
+
+    first.description = "Changed grant".into();
+    fs::write(&path, json!({"tools": [first, second]}).to_string()).unwrap();
+    let tools = client.list_all_tools().await.unwrap();
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0].name, "find_employee");
+    assert_eq!(
+        client.call_tool(params()).await.unwrap().is_error,
+        Some(true)
+    );
+    assert!(backend.last_execution.lock().unwrap().is_none());
+    client.cancel().await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(20), child.wait())
+            .await
+            .unwrap()
+            .unwrap()
+            .success()
+    );
 }
 
 #[tokio::test]
@@ -580,7 +794,7 @@ async fn test_call_tool_rejects_unauthorized_tool_names() {
             .unwrap();
         assert_eq!(result.is_error, Some(true));
         assert_eq!(structured(&result)["ok"], false);
-        assert!(error_text(&result).contains("export-only server exposes only 'project_test'"));
+        assert!(error_text(&result).contains("tool is not declared by this export server"));
     }
 }
 
@@ -649,7 +863,10 @@ async fn test_call_tool_success_executes_real_daemon_path() {
     // The daemon receives exact literal argv and stdin, without shell interpolation.
     let recorded = backend.last_execution.lock().unwrap().clone().unwrap();
     assert_eq!(recorded.command, "test-report");
-    assert_eq!(recorded.home_backing, harness.home.canonicalize().unwrap());
+    assert_eq!(
+        recorded.home_backing,
+        harness.home.join("home").canonicalize().unwrap()
+    );
     let expected_guest = nix::unistd::User::from_uid(nix::unistd::Uid::effective())
         .unwrap()
         .unwrap()
@@ -665,6 +882,33 @@ async fn test_call_tool_success_executes_real_daemon_path() {
         vec!["--run", "--filter", "unit_suite", "--coverage"]
     );
     assert_eq!(String::from_utf8(recorded.stdin).unwrap(), "sample payload");
+}
+
+#[tokio::test]
+async fn typed_export_never_mounts_scope_control_files_or_a_symlinked_guest_home() {
+    let backend = Arc::new(TestKitBackend::new(vec!["test-report".into()]));
+    let harness = TestHarness::new(backend.clone());
+    fs::write(harness.home.join("sbxenv.yaml"), "schemaVersion: '1'\n").unwrap();
+    let target = harness.temp.path().join("host-private");
+    fs::create_dir(&target).unwrap();
+    std::os::unix::fs::symlink(&target, harness.home.join("home")).unwrap();
+    let connection = harness.connect(make_declaration("test-report")).await;
+    let rejected = connection.call(json!({"filter":"fixture"})).await;
+    assert_eq!(rejected.is_error, Some(true));
+    assert!(backend.last_execution.lock().unwrap().is_none());
+    fs::remove_file(harness.home.join("home")).unwrap();
+    let accepted = connection.call(json!({"filter":"fixture"})).await;
+    assert_eq!(accepted.is_error, Some(false), "{accepted:?}");
+    assert_eq!(
+        backend
+            .last_execution
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .home_backing,
+        harness.home.join("home").canonicalize().unwrap()
+    );
 }
 
 #[tokio::test]
@@ -904,6 +1148,36 @@ async fn shutdown_interrupts_an_in_flight_job_and_reports_cancelled() {
     assert_eq!(data["outcome"], "cancelled");
     assert_eq!(data["output_complete"], false);
     assert_eq!(backend.signals(), ["SIGINT"]);
+}
+
+#[tokio::test]
+async fn bundle_shutdown_interrupts_jobs_for_every_declared_tool() {
+    let mut backend = TestKitBackend::new(vec!["slides".into(), "employees".into()]);
+    backend.job = Job::HoldUntilSignalled;
+    let backend = Arc::new(backend);
+    let harness = TestHarness::new(backend.clone());
+    let mut first = make_declaration("slides");
+    first.tool_name = "read_slides".into();
+    let mut second = make_declaration("employees");
+    second.tool_name = "find_employee".into();
+    let connection = harness.connect_bundle(vec![first, second]).await;
+    let mut calls = Vec::new();
+    for name in ["read_slides", "find_employee"] {
+        let client = connection.client.peer().clone();
+        calls.push(tokio::spawn(async move {
+            let mut params = call_params(json!({"filter": "cancel_test"}));
+            params.name = name.into();
+            client.call_tool(params).await.unwrap()
+        }));
+        notified(&backend.started, "each tool's job to start").await;
+    }
+    connection.server.shutdown_server().await.unwrap();
+    for call in calls {
+        let result = call.await.unwrap();
+        assert_eq!(structured(&result)["data"]["outcome"], "cancelled");
+        assert_eq!(structured(&result)["data"]["output_complete"], false);
+    }
+    assert_eq!(backend.signals(), ["SIGINT", "SIGINT"]);
 }
 
 /// A caller that disconnects mid-call does not leave its job running: the
