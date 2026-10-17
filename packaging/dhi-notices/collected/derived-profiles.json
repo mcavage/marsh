@@ -82,75 +82,75 @@
     }
   },
   "codex-kit": {
-    "0.162.1": {
+    "0.163.0": {
       "arm64": {
         "required_notices": [
           {
-            "file": "provider-notices/codex-0.162.1-LICENSE",
+            "file": "provider-notices/codex-0.163.0-LICENSE",
             "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
           },
           {
-            "file": "provider-notices/codex-0.162.1-NOTICE",
+            "file": "provider-notices/codex-0.163.0-NOTICE",
             "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
           },
           {
-            "file": "provider-notices/codex-0.162.1-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+            "file": "provider-notices/codex-0.163.0-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
             "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
           },
           {
-            "file": "provider-notices/codex-0.162.1-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+            "file": "provider-notices/codex-0.163.0-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
             "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
           },
           {
-            "file": "provider-notices/codex-0.162.1-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+            "file": "provider-notices/codex-0.163.0-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
             "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
           },
           {
-            "file": "provider-notices/codex-0.162.1-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+            "file": "provider-notices/codex-0.163.0-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
             "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
           },
           {
-            "file": "provider-notices/codex-0.162.1-codex-rs-vendor-bubblewrap-COPYING",
+            "file": "provider-notices/codex-0.163.0-codex-rs-vendor-bubblewrap-COPYING",
             "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
           },
           {
-            "file": "provider-notices/codex-0.162.1-docs-license.md",
+            "file": "provider-notices/codex-0.163.0-docs-license.md",
             "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-NOTICE.md",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-NOTICE.md",
             "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-LGPL-2.1.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-LGPL-2.1.txt",
             "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-Opus.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-Opus.txt",
             "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-PCRE2.md",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-PCRE2.md",
             "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-libffi.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-libffi.txt",
             "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-proxy-libintl.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-proxy-libintl.txt",
             "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-sljit.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-sljit.txt",
             "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-zlib.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-zlib.txt",
             "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-wezterm-LICENSE",
+            "file": "provider-notices/codex-0.163.0-third_party-wezterm-LICENSE",
             "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
           }
         ],
@@ -161,8 +161,8 @@
             "mode": 493,
             "uid": 0,
             "gid": 0,
-            "sha256": "071cbe8d821cf1b02b6d8ba6c8b7991b228fcb8519dcb68a37d31222bb8cabe5",
-            "size": 254866040
+            "sha256": "8a96f66d059d653e68bfd5f3c79337e6f1d7d170d80bf705eb7d0249b34c0ece",
+            "size": 257816200
           },
           {
             "path": "/usr/local/bin/codex-code-mode-host",
@@ -170,79 +170,79 @@
             "mode": 493,
             "uid": 0,
             "gid": 0,
-            "sha256": "f6477b0357a8cc2291d628962876ecb1a2beb872f71a1e2734363c81ff21700d",
-            "size": 66855936
+            "sha256": "255eccc8a5c1d267dc0acbc815cc83aaa1f50955bd99943b29f00cafcdcab771",
+            "size": 67118080
           }
         ]
       },
       "amd64": {
         "required_notices": [
           {
-            "file": "provider-notices/codex-0.162.1-LICENSE",
+            "file": "provider-notices/codex-0.163.0-LICENSE",
             "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
           },
           {
-            "file": "provider-notices/codex-0.162.1-NOTICE",
+            "file": "provider-notices/codex-0.163.0-NOTICE",
             "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
           },
           {
-            "file": "provider-notices/codex-0.162.1-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
+            "file": "provider-notices/codex-0.163.0-codex-rs-skills-src-assets-samples-imagegen-LICENSE.txt",
             "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
           },
           {
-            "file": "provider-notices/codex-0.162.1-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
+            "file": "provider-notices/codex-0.163.0-codex-rs-skills-src-assets-samples-openai-docs-LICENSE.txt",
             "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9"
           },
           {
-            "file": "provider-notices/codex-0.162.1-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
+            "file": "provider-notices/codex-0.163.0-codex-rs-skills-src-assets-samples-skill-creator-license.txt",
             "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
           },
           {
-            "file": "provider-notices/codex-0.162.1-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
+            "file": "provider-notices/codex-0.163.0-codex-rs-skills-src-assets-samples-skill-installer-LICENSE.txt",
             "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
           },
           {
-            "file": "provider-notices/codex-0.162.1-codex-rs-vendor-bubblewrap-COPYING",
+            "file": "provider-notices/codex-0.163.0-codex-rs-vendor-bubblewrap-COPYING",
             "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
           },
           {
-            "file": "provider-notices/codex-0.162.1-docs-license.md",
+            "file": "provider-notices/codex-0.163.0-docs-license.md",
             "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-NOTICE.md",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-NOTICE.md",
             "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-LGPL-2.1.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-LGPL-2.1.txt",
             "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-Opus.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-Opus.txt",
             "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-PCRE2.md",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-PCRE2.md",
             "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-libffi.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-libffi.txt",
             "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-proxy-libintl.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-proxy-libintl.txt",
             "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-sljit.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-sljit.txt",
             "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-voice-licenses-zlib.txt",
+            "file": "provider-notices/codex-0.163.0-third_party-voice-licenses-zlib.txt",
             "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
           },
           {
-            "file": "provider-notices/codex-0.162.1-third_party-wezterm-LICENSE",
+            "file": "provider-notices/codex-0.163.0-third_party-wezterm-LICENSE",
             "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4"
           }
         ],
@@ -253,8 +253,8 @@
             "mode": 493,
             "uid": 0,
             "gid": 0,
-            "sha256": "628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1",
-            "size": 294415048
+            "sha256": "399ff69c431c066e40de318fba45c2b07f45a76b19939d247ee4828fc70c4215",
+            "size": 296865480
           },
           {
             "path": "/usr/local/bin/codex-code-mode-host",
@@ -262,8 +262,8 @@
             "mode": 493,
             "uid": 0,
             "gid": 0,
-            "sha256": "ec71830690a7c0024916ee0c99fbdc635bc6e747ff665ea4f03a8389bbcb6b30",
-            "size": 74036112
+            "sha256": "8724d73ec190536233ab4628d24a071bfbcf27e5124f08fe35129f26fe48b916",
+            "size": 74277776
           }
         ]
       }
