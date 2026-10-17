@@ -11,13 +11,13 @@
 # the platform binary directly into the layout install.sh would have left.
 FROM dhi.io/node:24-debian13@sha256:c6ddacf90691f33734423b06682a63b27abeeafee294830455e91c79614ece8b AS base
 
-FROM dhi.io/debian-base:trixie-dev@sha256:04a23b0daf5f06a4985703cce7942ea96be5448946f3e2ea2ef15ff9db0ae1e9 AS packages
+FROM dhi.io/debian-base:trixie-dev@sha256:7b1d6522b9a4e72e2ca3537c031ca3650c654ec81c181447bf952069eb827226 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
 RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
 
-FROM dhi.io/debian-base:trixie-dev@sha256:04a23b0daf5f06a4985703cce7942ea96be5448946f3e2ea2ef15ff9db0ae1e9 AS download
+FROM dhi.io/debian-base:trixie-dev@sha256:7b1d6522b9a4e72e2ca3537c031ca3650c654ec81c181447bf952069eb827226 AS download
 ARG CLAUDE_VERSION
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
@@ -42,7 +42,7 @@ RUN case "$TARGETARCH" in \
 # Claude ACP adapter, pinned by package-lock.json. Its Agent SDK carries the
 # matching native Claude Code build, which the adapter drives through
 # claude-cli.sh so the container, not bubblewrap, stays the sandbox.
-FROM dhi.io/node:24-debian13-dev@sha256:3d1547725ee170db15039a7ff14cd941fe2c329dcdad223f01144fcfe6d22534 AS npm
+FROM dhi.io/node:24-debian13-dev@sha256:39f55475c45417de6a7be329834ce5b19bdda6c347ecd98e42b89d76bf4afa82 AS npm
 WORKDIR /opt/marsh/claude-acp
 COPY package.json package-lock.json ./
 COPY collect-notices.mjs ./
