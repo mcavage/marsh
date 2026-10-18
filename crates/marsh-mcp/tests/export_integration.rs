@@ -701,6 +701,59 @@ async fn stdio_entrypoint_exposes_bundle_and_revokes_changed_tool() {
     );
 }
 
+/// A server started for an isolated stock SBX instance (`--app-name`) keeps
+/// its host commands on that instance even though the child environment is
+/// otherwise cleared.
+#[tokio::test]
+async fn stdio_entrypoint_keeps_host_commands_on_the_selected_sbx_instance() {
+    let harness = TestHarness::new(Arc::new(TestKitBackend::new(vec![])));
+    fs::write(
+        &harness.marsh,
+        b"#!/bin/sh\nprintf '%s|%s|%s' \"${DOCKER_SANDBOXES_APP_NAME-unset}\" \"${SANDBOXES_STORAGE_ROOT-unset}\" \"${UNRELATED_HOST_SECRET-unset}\"\n",
+    )
+    .unwrap();
+    let declarations_dir = harness.temp.path().join("declarations");
+    fs::create_dir(&declarations_dir).unwrap();
+    fs::set_permissions(&declarations_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    let path = declarations_dir.join("tools.json");
+    fs::write(&path, json!(pipeline_declaration(&harness)).to_string()).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_marsh-mcp"))
+        .arg("export-serve")
+        .arg("--workspace")
+        .arg(&harness.workspace)
+        .arg("--home")
+        .arg(&harness.home)
+        .arg("--marsh")
+        .arg(&harness.marsh)
+        .arg("--sbx")
+        .arg(&harness.sbx)
+        .arg("--declaration")
+        .arg(&path)
+        .arg("--expected-generation")
+        .arg("00000000-0000-4000-8000-000000000001")
+        .env("DOCKER_SANDBOXES_APP_NAME", "isolated-fixture")
+        .env("SANDBOXES_STORAGE_ROOT", "/fixture/storage")
+        .env("UNRELATED_HOST_SECRET", "must-not-leak")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let client = TestClient
+        .serve((child.stdout.take().unwrap(), child.stdin.take().unwrap()))
+        .await
+        .unwrap();
+    let response = client.call_tool(call_params(json!({}))).await.unwrap();
+    assert_eq!(
+        structured(&response)["data"]["stdout"],
+        "isolated-fixture|/fixture/storage|unset",
+        "{response:?}"
+    );
+    client.cancel().await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(20), child.wait()).await;
+}
+
 #[tokio::test]
 async fn published_pipeline_rejects_replaced_project_for_live_and_restarted_clients() {
     let harness = TestHarness::new(Arc::new(TestKitBackend::new(vec![])));

@@ -909,14 +909,7 @@ impl ExportMcp {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .process_group(0);
-        for name in crate::INHERITED_ENV {
-            if let Some(value) = env::var_os(name) {
-                process.env(name, value);
-            }
-        }
-        for name in crate::RELAY_ENV {
-            process.env_remove(name);
-        }
+        crate::forward_host_environment(process.as_std_mut());
         if let Some(expected) = declaration.workspace_identity {
             // The pathname can be replaced after the check above or chdir.
             // The host child must retain this publication identity through
