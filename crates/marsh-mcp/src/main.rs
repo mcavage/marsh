@@ -16,7 +16,7 @@ use std::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-const HELP: &str = "Usage: marsh-mcp MODE --sbx ABS [--workspace ABS] [--scope-root ABS | --home ABS] [--marsh ABS] [--allow-full-sbx-control] [--declaration PATH] [--expected-generation UUID]\n\nModes:\n  serve             run a direct bounded stdio MCP server (Codex/Claude)\n  export-serve      run an export-only stdio MCP server for one declared Kit command\n  acp-export-serve  run an export-only stdio MCP server for one published ACP session\n  --expected-generation pins export modes to one publication generation\n  broker-start      idempotently ensure the resident host broker is ready\n  broker-stop       stop an idle resident host broker\n  connect           proxy one bounded stdio MCP session to that broker (stock SBX)\n\nserve without --home/--scope-root drives the marsh CLI's selected home (MARSH_HOME or ~/.marsh); scope_start is then disabled.\nBroker modes default to the generated scope root ~/Library/Application Support/marsh-mcp-scopes/<workspace-hash>\n(<MARSH_CONTROL_HOME>-mcp-scopes/<workspace-hash> when MARSH_CONTROL_HOME is set). Export modes require an explicit command home.
+const HELP: &str = "Usage: marsh-mcp MODE --sbx ABS [--workspace ABS] [--scope-root ABS | --home ABS] [--marsh ABS] [--allow-full-sbx-control] [--declaration PATH] [--tool NAME] [--expected-generation UUID]\n\nModes:\n  serve             run a direct bounded stdio MCP server (Codex/Claude)\n  export-serve      run an export-only stdio MCP server for declared tools\n  acp-export-serve  run an export-only stdio MCP server for one published ACP session\n  --tool NAME      select one tool instead of exposing the declaration bundle\n  --expected-generation pins export modes to one publication generation\n  broker-start      idempotently ensure the resident host broker is ready\n  broker-stop       stop an idle resident host broker\n  connect           proxy one bounded stdio MCP session to that broker (stock SBX)\n\nserve without --home/--scope-root drives the marsh CLI's selected home (MARSH_HOME or ~/.marsh); scope_start is then disabled.\nBroker modes default to the generated scope root ~/Library/Application Support/marsh-mcp-scopes/<workspace-hash>\n(<MARSH_CONTROL_HOME>-mcp-scopes/<workspace-hash> when MARSH_CONTROL_HOME is set). Export modes require an explicit command home.
 Broker modes require --scope-root semantics.\nThe pinned SBX executable is required. Full SBX control is disabled unless explicitly enabled at startup.\n";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -189,15 +189,26 @@ async fn run() -> Result<(), String> {
             )?)
             .await;
         }
-        let declaration =
-            marsh_mcp::ToolDeclaration::load_from_path(&canonical_decl, selected_tool.as_deref())?;
-        if declaration.publication_generation != expected_generation {
-            return Err("MCP publication generation changed; reload this tool".into());
-        }
+        let declarations = if let Some(tool) = selected_tool.as_deref() {
+            vec![marsh_mcp::ToolDeclaration::load_from_path(
+                &canonical_decl,
+                Some(tool),
+            )?]
+        } else {
+            marsh_mcp::ToolDeclaration::load_all_from_path(&canonical_decl)?
+        };
         let host_config = HostConfig::new(&workspace, &home, &marsh, &sbx, false)?;
-        let export_config = marsh_mcp::ExportConfig::new(host_config, declaration)?
-            .with_declaration_path(canonical_decl);
-        return serve_export_stdio(marsh_mcp::ExportMcp::new(export_config)).await;
+        let mut configs = Vec::new();
+        for declaration in declarations {
+            if declaration.publication_generation != expected_generation {
+                return Err("MCP publication generation changed; reload this tool".into());
+            }
+            configs.push(
+                marsh_mcp::ExportConfig::new(host_config.clone(), declaration)?
+                    .with_declaration_path(canonical_decl.clone()),
+            );
+        }
+        return serve_export_stdio(marsh_mcp::ExportBundle::new(configs)?).await;
     }
     if mode != Mode::Serve && home_explicit {
         return Err("broker modes do not support legacy --home mode; use --scope-root".into());
@@ -288,7 +299,7 @@ async fn serve_stdio(server: HostMcp) -> Result<(), String> {
     shutdown
 }
 
-async fn serve_export_stdio(server: marsh_mcp::ExportMcp) -> Result<(), String> {
+async fn serve_export_stdio(server: marsh_mcp::ExportBundle) -> Result<(), String> {
     let reader = FramedRead::new(
         tokio::io::stdin(),
         JsonRpcMessageCodec::<RxJsonRpcMessage<RoleServer>>::new_with_max_length(

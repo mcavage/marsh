@@ -996,6 +996,12 @@ impl McpHostControl {
         if let Some(control) = crate::host_state_directory::control_override_from_env() {
             command.env("MARSH_CONTROL_HOME", control);
         }
+        // ...and talks to the same stock SBX instance as this daemon.
+        for name in marsh_runtime::STOCK_SBX_SELECTORS {
+            if let Some(value) = std::env::var_os(name).filter(|value| !value.is_empty()) {
+                command.env(name, value);
+            }
+        }
         let mut child = marsh_runtime::with_host_descriptor_creation_excluded(|| command.spawn())
             .map_err(|error| {
             PublicationOutcome::rejected(format!("cannot start pinned host marsh: {error}"))

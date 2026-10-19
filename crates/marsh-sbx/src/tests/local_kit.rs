@@ -489,18 +489,19 @@ struct Tracking {
 struct TrackingProcess {
     tracking: Arc<Tracking>,
     complete_immediately: bool,
+    exit_code: i32,
 }
 
 impl AttachedProcess for TrackingProcess {
     fn wait(&mut self) -> io::Result<i32> {
         self.tracking.reaped.store(true, Ordering::SeqCst);
-        Ok(0)
+        Ok(self.exit_code)
     }
 
     fn try_wait(&mut self) -> io::Result<Option<i32>> {
         if self.complete_immediately || self.tracking.terminated.load(Ordering::SeqCst) {
             self.tracking.reaped.store(true, Ordering::SeqCst);
-            Ok(Some(0))
+            Ok(Some(self.exit_code))
         } else {
             Ok(None)
         }
@@ -551,6 +552,7 @@ struct LoadCarrier {
 enum LoadMode {
     Pressure { fail_write: bool },
     Blocked,
+    Rejected,
 }
 
 impl CommandRunner for LoadCarrier {
@@ -582,6 +584,7 @@ impl CommandRunner for LoadCarrier {
                     process: Box::new(TrackingProcess {
                         tracking,
                         complete_immediately: true,
+                        exit_code: 0,
                     }),
                     control: no_attachment_control(),
                 }
@@ -593,6 +596,21 @@ impl CommandRunner for LoadCarrier {
                 process: Box::new(TrackingProcess {
                     tracking,
                     complete_immediately: false,
+                    exit_code: 0,
+                }),
+                control: no_attachment_control(),
+            },
+            LoadMode::Rejected => Attachment {
+                stdin: Box::new(PressureWriter {
+                    drained: Arc::new(Drained::default()),
+                    fail: true,
+                }),
+                stdout: Box::new(Cursor::new(Vec::new())),
+                stderr: Box::new(Cursor::new(b"sh: docker: command not found".to_vec())),
+                process: Box::new(TrackingProcess {
+                    tracking,
+                    complete_immediately: true,
+                    exit_code: 127,
                 }),
                 control: no_attachment_control(),
             },
@@ -640,6 +658,17 @@ fn nested_archive_transfer_failure_terminates_and_reaps_the_carrier() {
     ));
     assert!(tracking.terminated.load(Ordering::SeqCst));
     assert!(tracking.reaped.load(Ordering::SeqCst));
+}
+
+#[test]
+fn rejected_nested_archive_load_preserves_the_stock_error_instead_of_broken_pipe() {
+    let (tracking, result) = load_archive(LoadMode::Rejected);
+    assert!(
+        matches!(result, Err(SbxError::CommandFailed { status: Some(127), stderr, .. })
+        if stderr == "sh: docker: command not found")
+    );
+    assert!(tracking.reaped.load(Ordering::SeqCst));
+    assert!(!tracking.terminated.load(Ordering::SeqCst));
 }
 
 #[test]

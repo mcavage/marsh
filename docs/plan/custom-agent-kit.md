@@ -4,6 +4,10 @@ marsh ships Kits for Claude Code, Codex and Pi. The registry also accepts
 custom native Kits. This authoring outline starts from the packaged Pi Kit;
 build and test your customized image before registering it.
 
+For command/config/discovery separation and private MCP additions, see
+[Keep a personal agent separate from packaged Pi](../guides/build-a-personal-agent.md).
+That authoring recipe does not qualify or publish a third-party image.
+
 ## Shape
 
 An agent is a [native Kit v3 source](../../kits/README.md): a YAML descriptor, a

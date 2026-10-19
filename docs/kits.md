@@ -188,6 +188,11 @@ nonroot user in the caller's directory, with these mounts and variables:
   in-job `marsh`.
 - `/run/marsh/context.md`, a short text telling an agent what it may start.
 
+The same image also boots the outer Kit VM. That VM must provide Docker Engine
+and the stock sandbox runtime plumbing for marsh's fresh job containers; a
+standalone minimal Python or Alpine image is not enough. Derive from a suitable
+packaged marsh workload/base rather than putting host Docker sockets into jobs.
+
 Keep tool state under `$HOME` so it persists between calls. Other jobs in the
 scope can read it.
 

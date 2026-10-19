@@ -10,8 +10,8 @@ pub mod export;
 pub use acp_export::{AcpDeclaration, AcpExportMcp};
 
 pub use export::{
-    ArgBinding, ExecutionOutcome, ExportConfig, ExportExecutionData, ExportMcp, StdinBinding,
-    ToolBindings, ToolDeclaration, WorkspaceIdentity,
+    ArgBinding, ExecutionOutcome, ExportBundle, ExportConfig, ExportExecutionData, ExportMcp,
+    ResultFormat, StdinBinding, ToolBindings, ToolDeclaration, WorkspaceIdentity,
 };
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -66,11 +66,30 @@ pub(crate) const RELAY_ENV: [&str; 5] = [
     "MARSH_HOME_BACKING",
     "MARSH_RELAY_TOKEN",
 ];
-pub(crate) const INHERITED_ENV: [&str; 12] = [
+/// Copies the allowlisted host environment, including the stock SBX instance
+/// selectors, into an `env_clear`ed host command, and strips relay secrets.
+pub(crate) fn forward_host_environment(command: &mut std::process::Command) {
+    for name in INHERITED_ENV
+        .into_iter()
+        .chain(marsh_runtime::STOCK_SBX_SELECTORS)
+    {
+        if let Some(value) = env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    // These are denied even if the inherited allowlist grows in the future.
+    for name in RELAY_ENV {
+        command.env_remove(name);
+    }
+}
+
+pub(crate) const INHERITED_ENV: [&str; 13] = [
     "HOME",
     // The host state root: every host-side write follows the caller's
     // override, including the daemon this server starts.
     "MARSH_CONTROL_HOME",
+    // Stock SBX resolves its approved credential bindings here, host-side only.
+    "XDG_CONFIG_HOME",
     "TMPDIR",
     "SHELL",
     "LANG",
@@ -2713,15 +2732,7 @@ async fn run_bounded_cancel(
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .process_group(0);
-    for name in INHERITED_ENV {
-        if let Some(value) = env::var_os(name) {
-            command.env(name, value);
-        }
-    }
-    // These are denied even if the inherited allowlist grows in the future.
-    for name in RELAY_ENV {
-        command.env_remove(name);
-    }
+    forward_host_environment(command.as_std_mut());
     // On macOS a descriptor (another command's pipe, a daemon connection)
     // becomes close-on-exec only after creation; never spawn in between.
     let mut child = marsh_runtime::with_host_descriptor_creation_excluded(|| command.spawn())

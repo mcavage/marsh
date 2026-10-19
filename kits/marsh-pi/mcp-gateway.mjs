@@ -16,21 +16,51 @@ export default function (pi) {
     throw new Error("invalid stock MCP Gateway environment");
   }
   const dispatcher = new ProxyAgent(proxy);
+  let connection;
+  let stopping = false;
+  const shutdown = new AbortController();
+  const inFlight = new Set();
 
-  async function connected(signal, action) {
-    const deadline = AbortSignal.any([AbortSignal.timeout(120_000), ...(signal ? [signal] : [])]);
+  function getConnection(signal) {
+    if (connection) return connection;
     const client = new Client({ name: "marsh-pi", version: "1" }, { capabilities: {} });
     const transport = new StreamableHTTPClientTransport(new URL(gateway), {
       requestInit: { headers: { Authorization: `Bearer ${sentinel}` } },
       fetch: (url, init) => fetch(url, { ...init, dispatcher }),
     });
+    // One connection per Pi session preserves native dynamic tools and avoids
+    // restarting host MCP backends for each list/call. Never replay a call.
+    const attempt = client.connect(transport, { signal }).then(() => client);
+    connection = attempt;
+    client.onclose = () => { if (connection === attempt) connection = undefined; };
+    attempt.catch(() => {
+      if (connection === attempt) connection = undefined;
+      void client.close().catch(() => {});
+    });
+    return attempt;
+  }
+
+  async function connected(signal, action) {
+    if (stopping) throw new Error("MCP Gateway session is shutting down");
+    const deadline = AbortSignal.any([AbortSignal.timeout(120_000), shutdown.signal,
+      ...(signal ? [signal] : [])]);
+    const work = (async () => action(await getConnection(deadline), deadline))();
+    inFlight.add(work);
     try {
-      await client.connect(transport, { signal: deadline });
-      return await action(client, deadline);
+      return await work;
     } finally {
-      await client.close().catch(() => {});
+      inFlight.delete(work);
     }
   }
+
+  pi.on("session_shutdown", async () => {
+    stopping = true;
+    shutdown.abort();
+    await Promise.allSettled([...inFlight]);
+    const client = await connection?.catch(() => undefined);
+    await client?.close().catch(() => {});
+    await dispatcher.close().catch(() => {});
+  });
 
   async function tools(client, signal) {
     const found = [];

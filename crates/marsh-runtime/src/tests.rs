@@ -615,6 +615,10 @@ fn nested_job_rejects_forged_or_incomplete_mcp_gateway_before_create() {
 fn nested_job_rejects_incomplete_or_expanded_proxy_authority() {
     for (environment, offending) in [
         (
+            vec![("XDG_CONFIG_HOME".into(), "/host-only-bindings".into())],
+            "XDG_CONFIG_HOME",
+        ),
+        (
             vec![("HTTP_PROXY".into(), "http://proxy:3128".into())],
             "HTTP_PROXY",
         ),
@@ -691,6 +695,48 @@ fn nested_job_rejects_incomplete_or_expanded_proxy_authority() {
         ));
         assert!(error.to_string().contains(offending));
     }
+}
+
+#[test]
+fn stock_config_selector_is_forwarded_only_to_host_control_commands() {
+    const MARKER: &str = "MARSH_TEST_STOCK_CONFIG_SELECTOR";
+    if std::env::var_os(MARKER).is_none() {
+        let temp = tempfile::tempdir().unwrap();
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::stock_config_selector_is_forwarded_only_to_host_control_commands",
+            ])
+            .env(MARKER, "1")
+            .env("XDG_CONFIG_HOME", temp.path())
+            .env("PRIVATE_NOT_FOR_STOCK", "fixture-secret")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
+        return;
+    }
+    let runner = SystemCommandRunner::new(std::env::temp_dir());
+    let result = runner
+        .run(&Invocation {
+            program: "/usr/bin/env".into(),
+            arguments: vec![],
+            working_directory: None,
+            environment: vec![],
+        })
+        .unwrap();
+    let text = String::from_utf8(result.stdout).unwrap();
+    let expected = format!(
+        "XDG_CONFIG_HOME={}",
+        std::env::var("XDG_CONFIG_HOME").unwrap()
+    );
+    assert!(text.lines().any(|line| line == expected));
+    assert!(!text.contains("PRIVATE_NOT_FOR_STOCK"));
+    assert!(!text.contains("fixture-secret"));
 }
 
 #[test]

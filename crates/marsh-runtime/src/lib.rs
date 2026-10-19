@@ -57,6 +57,9 @@ const RESOURCE_EVENT_POLL_DELAY: Duration = Duration::from_millis(50);
 const ENGINE_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_ENGINE_RESPONSE: u64 = 16 * 1024;
 const TRUSTED_CA_BUNDLE: &str = "/etc/ssl/certs/ca-certificates.crt";
+mod guest_home;
+pub use guest_home::prepare_persistent_guest_home;
+
 const STOCK_SBX_PROXY_ENDPOINT: &[u8] = b"http://gateway.docker.internal:3128";
 const STOCK_SBX_MCP_URL: &[u8] = b"http://mcp-gateway.docker.internal/mcp";
 const PROXY_VARIABLES: &[&str] = &[
@@ -266,22 +269,29 @@ impl std::fmt::Debug for SystemCommandRunner {
     }
 }
 
+/// Host environment that selects which stock SBX instance and approval
+/// configuration a host command talks to. A host process that clears its
+/// environment must forward these, or a command started for an isolated
+/// instance (`--app-name`) silently reaches the default one.
+pub const STOCK_SBX_SELECTORS: [&str; 5] = [
+    "DOCKER_SANDBOXES_API",
+    "DOCKER_SANDBOXES_APP_NAME",
+    "SANDBOXES_STORAGE_ROOT",
+    "XDG_CONFIG_HOME",
+    "XDG_STATE_HOME",
+];
+
 impl SystemCommandRunner {
     #[must_use]
     pub fn new(home: impl Into<PathBuf>) -> Self {
-        let stock_environment = [
-            "DOCKER_SANDBOXES_API",
-            "DOCKER_SANDBOXES_APP_NAME",
-            "SANDBOXES_STORAGE_ROOT",
-            "XDG_STATE_HOME",
-        ]
-        .into_iter()
-        .filter_map(|key| {
-            std::env::var_os(key)
-                .filter(|value| !value.is_empty())
-                .map(|value| (key.into(), value))
-        })
-        .collect();
+        let stock_environment = STOCK_SBX_SELECTORS
+            .into_iter()
+            .filter_map(|key| {
+                std::env::var_os(key)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| (key.into(), value))
+            })
+            .collect();
         Self {
             home: home.into(),
             stock_environment,
