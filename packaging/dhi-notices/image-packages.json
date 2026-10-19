@@ -3092,7 +3092,7 @@
       },
       {
         "package": "linux-libc-dev",
-        "version": "6.12.113-1",
+        "version": "6.12.113-1+dhi0",
         "families": [
           "BSD",
           "GPL",
@@ -5052,7 +5052,7 @@
       },
       {
         "package": "linux-libc-dev",
-        "version": "6.12.113-1",
+        "version": "6.12.113-1+dhi0",
         "families": [
           "BSD",
           "GPL",
@@ -7012,7 +7012,7 @@
       },
       {
         "package": "linux-libc-dev",
-        "version": "6.12.113-1",
+        "version": "6.12.113-1+dhi0",
         "families": [
           "BSD",
           "GPL",
@@ -10916,7 +10916,7 @@
       },
       {
         "package": "linux-libc-dev",
-        "version": "6.12.113-1",
+        "version": "6.12.113-1+dhi0",
         "families": [
           "BSD",
           "GPL",
