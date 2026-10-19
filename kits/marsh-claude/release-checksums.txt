@@ -1,3 +1,3 @@
-# Publisher metadata: https://downloads.claude.ai/claude-code-releases/2.1.300/manifest.json
-ae2295ae2da156936bf5831ab01971ce924d0c9a0af174e28d96fffa8d5fa0a6  2.1.300/linux-arm64/claude
-674deba0bba9aee479f4503c438b49303b6fdd304b9a471b14977aaec5215453  2.1.300/linux-x64/claude
+# Publisher metadata: https://downloads.claude.ai/claude-code-releases/2.1.302/manifest.json
+2bd4f4e5ed5cb09955b490098f745321cb5491e7ea8c752ba1e3bb010cdadb10  2.1.302/linux-arm64/claude
+60d7eb7f12fbb28a52533fe8be5884097403562aa02dc73991a021c7067e29a5  2.1.302/linux-x64/claude
