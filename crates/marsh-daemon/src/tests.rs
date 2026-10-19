@@ -3199,6 +3199,46 @@ fn stop_scope_client_returns_complete_only_after_endpoint_owner_release() {
     assert_eq!(*calls.lock().unwrap(), vec![ScopeLifecycleAction::Stop]);
 }
 
+/// The owner unlinks its lock while the stopping client may be between the
+/// existence check and reading it. That is a release, not an incomplete stop.
+#[test]
+fn owner_release_tolerates_the_lock_vanishing_mid_check_but_not_other_errors() {
+    let paths = EndpointPaths {
+        runtime_directory: PathBuf::from("/fixture"),
+        socket: PathBuf::from("/fixture/s"),
+        lock: tempfile::NamedTempFile::new()
+            .unwrap()
+            .into_temp_path()
+            .keep()
+            .unwrap(),
+        token: PathBuf::from("/fixture/t"),
+    };
+    // The probe observes the lock, then the owner removes it before the read.
+    let vanished = wait_for_release(&paths, Duration::from_secs(2), |paths| {
+        fs::remove_file(&paths.lock).unwrap();
+        Err(DaemonError::Io(io::ErrorKind::NotFound.into()))
+    });
+    assert!(vanished.is_ok(), "{vanished:?}");
+
+    fs::write(&paths.lock, "1\n").unwrap();
+    let failing = wait_for_release(&paths, Duration::from_secs(2), |paths| {
+        Err(DaemonError::EndpointInconsistent(paths.lock.clone()))
+    });
+    assert!(
+        failing.is_err(),
+        "an error with the lock still present is not a release"
+    );
+
+    let live = wait_for_release(&paths, Duration::from_millis(100), |_| {
+        Ok(ReclaimOutcome::Live)
+    });
+    assert!(
+        live.is_err(),
+        "a live owner past the deadline is not a release"
+    );
+    fs::remove_file(&paths.lock).unwrap();
+}
+
 #[derive(Debug)]
 struct BlockingConnectionBackend;
 

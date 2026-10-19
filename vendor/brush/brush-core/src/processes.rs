@@ -94,6 +94,13 @@ impl ChildProcess {
                 output = &mut self.exec_future => {
                     #[cfg(unix)]
                     crate::signals::note_child_reaped();
+                    // The child can be reaped before the runtime's listener
+                    // wakes for an INT it already recorded; that INT still
+                    // arrived during the wait.
+                    #[cfg(unix)]
+                    if crate::signals::arrived(libc::SIGINT) {
+                        self.interrupted = true;
+                    }
                     break Ok(ProcessWaitResult::Completed {
                         output: output?,
                         interrupted: std::mem::take(&mut self.interrupted),

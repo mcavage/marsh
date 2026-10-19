@@ -123,6 +123,7 @@ Patch `0092` lets every catchable signal be trapped and handles SIGHUP at the pr
 Patch `0093` decodes prompts as Bash does.
 Patch `0094` makes `compgen` keep the word's spelling.
 Patch `0095` keeps `{name}` redirections off inherited descriptors.
+Patch `0096` keeps an `INT` recorded during a foreground wait when the child is reaped first.
 
 This directory contains only the runtime crate source, manifests, licenses,
 and build metadata needed by marsh. Upstream integration tests, snapshots,
