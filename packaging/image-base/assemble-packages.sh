@@ -104,6 +104,9 @@ sort -u "$paths" | tar -C / --no-recursion -cf - -T - | tar -C "$rootfs" -xpf -
 # DHI bases link /usr/bin/sh to bash outside any package; keep that shape
 # when bash itself is assembled here.
 if grep -qx bash "$selected"; then ln -sfn bash "$rootfs/usr/bin/sh"; fi
+# They also link /usr/bin/which to which.gnu outside gnu-which, which ships
+# only which.gnu.
+if grep -qx gnu-which "$selected"; then ln -sfn which.gnu "$rootfs/usr/bin/which"; fi
 
 if [ -f "$base/dpkg/status" ]; then
   awk -v keep="$selected" '
