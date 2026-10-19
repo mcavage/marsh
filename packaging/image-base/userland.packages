@@ -1,9 +1,10 @@
 # The POSIX text and process tools a Kit job may expect, plus which and the
-# GitHub CLI.
+# GitHub CLI. Real package names only: assemble-packages.sh copies the packages
+# it selects, and a virtual name (DHI's `which`) selects nothing.
 grep
 mawk
 diffutils
 procps
 gzip
-which
+gnu-which
 gh
