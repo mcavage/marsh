@@ -4,3 +4,4 @@ mawk
 diffutils
 procps
 gzip
+which
