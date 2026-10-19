@@ -779,6 +779,13 @@ are classified in the compatibility document and executable divergence registry;
   open, as Bash skips descriptors in use. Brush allocated from its own table,
   so with fd 10 inherited, `exec {x}>file` took 10 and clobbered it. Covered by
   `named_descriptors_skip_inherited_ones`.
+- `0096` treats an `INT` the shell recorded while waiting for a foreground
+  child as arriving during the wait even when the child is reaped before the
+  runtime's listener wakes. Previously the wait reported no interruption, the
+  recorded `INT` survived, and between commands it ended the shell, so a list
+  whose child handled `INT` and exited normally could die anyway (intermittent
+  on Linux CI). Covered by `group_sigint_during_a_surviving_childs_exit_is_the_childs`
+  and `noninteractive_group_sigint_ends_the_command_list`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

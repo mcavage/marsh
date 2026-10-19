@@ -5942,10 +5942,28 @@ fn verified_legacy_owner(
 }
 
 fn wait_for_owner_release(paths: &EndpointPaths) -> Result<(), DaemonError> {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    wait_for_release(paths, Duration::from_secs(5), reclaim_stale_endpoint)
+}
+
+/// Polls until the endpoint owner has released its lock. The owner unlinks the
+/// lock while this loop may be between its existence check and reading it, so
+/// a probe error is treated as release only when the lock is then gone; any
+/// other error is still reported.
+fn wait_for_release(
+    paths: &EndpointPaths,
+    timeout: Duration,
+    probe: impl Fn(&EndpointPaths) -> Result<ReclaimOutcome, DaemonError>,
+) -> Result<(), DaemonError> {
+    let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if !paths.lock.exists() || reclaim_stale_endpoint(paths)? == ReclaimOutcome::Reclaimed {
+        if !paths.lock.exists() {
             return Ok(());
+        }
+        match probe(paths) {
+            Ok(ReclaimOutcome::Reclaimed | ReclaimOutcome::Absent) => return Ok(()),
+            Ok(ReclaimOutcome::Live) => {}
+            Err(_) if !paths.lock.exists() => return Ok(()),
+            Err(error) => return Err(error),
         }
         thread::sleep(Duration::from_millis(20));
     }

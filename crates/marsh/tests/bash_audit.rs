@@ -1221,6 +1221,35 @@ fn noninteractive_group_sigint_ends_the_command_list() {
     }
 }
 
+/// A SIGINT that reaches the shell while it waits for a foreground child that
+/// survives it (the child ignores INT and exits on its own) is the child's to
+/// handle, even when the child is reaped before the shell's runtime notices the
+/// signal: the list continues (Brush patch 0096). The child signals the group
+/// and exits at once, so the reap races the signal; the loop makes the race
+/// likely (before the fix marsh died in most runs on Linux).
+///
+/// Not differential: Bash 5.3 itself occasionally loses this race (2 in 150
+/// stress runs on Linux arm64), so it is not a reliable oracle here.
+/// `noninteractive_group_sigint_ends_the_command_list` compares the non-racing
+/// case with Bash.
+#[test]
+fn group_sigint_during_a_surviving_childs_exit_is_the_childs() {
+    let script = "i=0; while [ $i -lt 40 ]; do sh -c 'trap \"\" INT; kill -INT 0; exit 3'; i=$((i+1)); done; echo after $? $i";
+    let directory = tempfile::tempdir().unwrap();
+    let mut command = shell(env!("CARGO_BIN_EXE_marsh-local"));
+    let child = common::spawn_group(
+        command
+            .args(["--no-config", "--noprofile", "--norc", "-c", script])
+            .current_dir(directory.path())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
+    let output = common::wait_for_exit(child, script, Duration::from_mins(1));
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"after 0 40\n", "{output:?}");
+}
+
 /// A shell that signals itself with SIGINT acts on it before its next command,
 /// as Bash does: an untrapped one ends a noninteractive shell by SIGINT, a
 /// trapped one runs its trap first. The preceding external command makes the
