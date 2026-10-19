@@ -11,6 +11,7 @@ import json
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import zipfile
@@ -111,6 +112,11 @@ def main():
         }
         (args.output / "go-module-notices.json").write_text(json.dumps(record, indent=2) + "\n")
         if failures or record["missing_notice"]:
+            for failure in failures:
+                module = failure["module"]
+                print(f"failed: {module['path']}@{module['version']}: {failure['error'][:300]}", file=sys.stderr)
+            for spec in record["missing_notice"]:
+                print(f"no notice file: {spec}", file=sys.stderr)
             raise SystemExit("notice inventory incomplete; inspect retained manifest")
 
 

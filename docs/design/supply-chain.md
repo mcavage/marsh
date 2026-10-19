@@ -123,7 +123,7 @@ whose user has `sudo` and `apt` for their own tools. A Kit image is also its
 Kit VM's root filesystem (`sbx create oci://KIT`), and the Kit's jobs run in
 that VM's Docker Engine from the same image. So every Kit image adds Docker
 Engine (the DHI-built `docker-ce`, `docker-ce-cli` and `containerd.io`), the
-sandbox `agent` user (uid 1000) in the `docker` group, `bash`, `tar` (for
+sandbox `agent` user (uid 1000) in the `docker` group, `bash`, `which`, the GitHub CLI `gh`, `tar` (for
 `sbx cp`), the tools `update-ca-certificates` needs to trust the sandbox
 proxy's CA at VM start, `git`, `curl`, and the
 `com.docker.sandboxes.start-docker=true` label that has Docker Sandboxes start

@@ -188,6 +188,16 @@
         ]
       },
       {
+        "package": "gh",
+        "version": "2.102.0-3",
+        "families": [
+          "MIT"
+        ],
+        "notices": [
+          "6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f"
+        ]
+      },
+      {
         "package": "git",
         "version": "1:2.47.3-0+deb13u1+dhi2",
         "families": [
@@ -255,7 +265,7 @@
       },
       {
         "package": "iptables",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -599,7 +609,7 @@
       },
       {
         "package": "libip4tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -611,7 +621,7 @@
       },
       {
         "package": "libip6tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -1144,7 +1154,7 @@
       },
       {
         "package": "libxtables12",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -1791,6 +1801,16 @@
         ]
       },
       {
+        "package": "gh",
+        "version": "2.102.0-3",
+        "families": [
+          "MIT"
+        ],
+        "notices": [
+          "6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f"
+        ]
+      },
+      {
         "package": "git",
         "version": "1:2.47.3-0+deb13u1+dhi2",
         "families": [
@@ -1809,6 +1829,18 @@
         ],
         "notices": [
           "263a2b847e1809cb78c2379802f090117888995d3f7773e030d2a7ebd80db3ec"
+        ]
+      },
+      {
+        "package": "gnu-which",
+        "version": "2.21+dfsg-5+dhi1",
+        "families": [
+          "CC0-1.0",
+          "GPL",
+          "LGPL"
+        ],
+        "notices": [
+          "a80a25dc831e32036c3f6504066f4a7012aa49fa90acd3507ca0b99a022d9928"
         ]
       },
       {
@@ -1846,7 +1878,7 @@
       },
       {
         "package": "iptables",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -2394,7 +2426,7 @@
       },
       {
         "package": "libip4tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -2406,7 +2438,7 @@
       },
       {
         "package": "libip6tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -3067,7 +3099,7 @@
       },
       {
         "package": "libxtables12",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -3751,6 +3783,16 @@
         ]
       },
       {
+        "package": "gh",
+        "version": "2.102.0-3",
+        "families": [
+          "MIT"
+        ],
+        "notices": [
+          "6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f"
+        ]
+      },
+      {
         "package": "git",
         "version": "1:2.47.3-0+deb13u1+dhi2",
         "families": [
@@ -3769,6 +3811,18 @@
         ],
         "notices": [
           "263a2b847e1809cb78c2379802f090117888995d3f7773e030d2a7ebd80db3ec"
+        ]
+      },
+      {
+        "package": "gnu-which",
+        "version": "2.21+dfsg-5+dhi1",
+        "families": [
+          "CC0-1.0",
+          "GPL",
+          "LGPL"
+        ],
+        "notices": [
+          "a80a25dc831e32036c3f6504066f4a7012aa49fa90acd3507ca0b99a022d9928"
         ]
       },
       {
@@ -3806,7 +3860,7 @@
       },
       {
         "package": "iptables",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -4354,7 +4408,7 @@
       },
       {
         "package": "libip4tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -4366,7 +4420,7 @@
       },
       {
         "package": "libip6tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -5027,7 +5081,7 @@
       },
       {
         "package": "libxtables12",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -5711,6 +5765,16 @@
         ]
       },
       {
+        "package": "gh",
+        "version": "2.102.0-3",
+        "families": [
+          "MIT"
+        ],
+        "notices": [
+          "6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f"
+        ]
+      },
+      {
         "package": "git",
         "version": "1:2.47.3-0+deb13u1+dhi2",
         "families": [
@@ -5729,6 +5793,18 @@
         ],
         "notices": [
           "263a2b847e1809cb78c2379802f090117888995d3f7773e030d2a7ebd80db3ec"
+        ]
+      },
+      {
+        "package": "gnu-which",
+        "version": "2.21+dfsg-5+dhi1",
+        "families": [
+          "CC0-1.0",
+          "GPL",
+          "LGPL"
+        ],
+        "notices": [
+          "a80a25dc831e32036c3f6504066f4a7012aa49fa90acd3507ca0b99a022d9928"
         ]
       },
       {
@@ -5766,7 +5842,7 @@
       },
       {
         "package": "iptables",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -6314,7 +6390,7 @@
       },
       {
         "package": "libip4tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -6326,7 +6402,7 @@
       },
       {
         "package": "libip6tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -6987,7 +7063,7 @@
       },
       {
         "package": "libxtables12",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -7529,6 +7605,16 @@
         ]
       },
       {
+        "package": "gh",
+        "version": "2.102.0-3",
+        "families": [
+          "MIT"
+        ],
+        "notices": [
+          "6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f"
+        ]
+      },
+      {
         "package": "git",
         "version": "1:2.47.3-0+deb13u1+dhi2",
         "families": [
@@ -7596,7 +7682,7 @@
       },
       {
         "package": "iptables",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -7940,7 +8026,7 @@
       },
       {
         "package": "libip4tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -7952,7 +8038,7 @@
       },
       {
         "package": "libip6tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -8485,7 +8571,7 @@
       },
       {
         "package": "libxtables12",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -9270,7 +9356,7 @@
       },
       {
         "package": "iptables",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -9988,7 +10074,7 @@
       },
       {
         "package": "libip4tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -10000,7 +10086,7 @@
       },
       {
         "package": "libip6tc2",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",
@@ -10880,7 +10966,7 @@
       },
       {
         "package": "libxtables12",
-        "version": "1.8.11-2+dhi2",
+        "version": "1.8.11-2+dhi3",
         "families": [
           "Artistic",
           "GPL",

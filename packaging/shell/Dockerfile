@@ -4,7 +4,7 @@
 # tools `make dev` needs (gcc, make, git, python3, node, npm), zsh, Vim and
 # terminal-only Emacs, the pinned Rust 1.95 toolchain with the aarch64 gnu and
 # musl targets `make dev-inner`
-# needs, and the Pi coding agent 1.1.0 (`pi-dev`, locked by
+# needs, and the Pi coding agent (`pi-dev`, locked by
 # pi/package-lock.json). `marsh --dev` uses this same image; it only adds the
 # dev broker. The caller supplies the exact reviewed upstream DHI digest. The
 # exported reference names this image, never the upstream input. No agent
