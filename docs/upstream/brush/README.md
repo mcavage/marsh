@@ -786,6 +786,29 @@ are classified in the compatibility document and executable divergence registry;
   whose child handled `INT` and exited normally could die anyway (intermittent
   on Linux CI). Covered by `group_sigint_during_a_surviving_childs_exit_is_the_childs`
   and `noninteractive_group_sigint_ends_the_command_list`.
+- `0097` adds the marsh-extension placement block `cloud { LIST; }`
+  (`ast::Command::Placement`). With marsh extensions off it is not parsed.
+  The block runs as one external command: the embedding's placement runner
+  (`split::install_placement_command`) with any option words before the
+  block (`cloud --cpus 4 { ... }`, expanded locally) and then the block's
+  source, quoted and unexpanded, as `-c SOURCE`. Redirections and pipes outside the block belong
+  to the caller; inside, the remote shell evaluates everything. Without an
+  installed runner the block is refused with status 125. The block's first
+  word is in command position, so `cloud { split { ... } | join; }` is
+  normalized like a top-level split. Because the block travels as displayed
+  source, `fanout`/`split` now display each branch body in braces
+  (`a: { x; y; }`), so a multi-item branch stays one branch when parsed
+  again. Covered by `cloud_block_runs_as_one_stage_with_unexpanded_source`.
+  Inside a cloud workload, a `fanout` with no prefix treats its stdin as a
+  terminal (reads nothing) when that stdin is the pipe named by
+  `MARSH_TERMINAL_STDIN` (`DEV:INO`, set by marsh when the caller typed into
+  a terminal), as the same fanout would at a local prompt; any other stdin
+  is still read. Covered live by `cloud_uat.py` (`stdin-terminal`).
+  A `cloud [WORD...] {` that does not form a block (for example no `;`
+  before `}`) is a syntax error, like a malformed `fanout {`, instead of an
+  ordinary command whose pieces would run locally (deliberate divergence:
+  Bash would run `cloud` with a `{` argument). Covered by
+  `cloud_block_runs_as_one_stage_with_unexpanded_source`.
 
 The `0004` delta is also covered through the embedded marsh caller: an empty
 `BASH_ENV` executes the requested command, and a nonempty `$HOME`-expanded

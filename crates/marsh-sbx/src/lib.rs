@@ -28,6 +28,7 @@ use std::{
 };
 use thiserror::Error;
 
+pub mod cloud;
 mod ephemeral_home;
 pub mod shell_supervisor;
 mod shell_template_reference;
@@ -939,6 +940,15 @@ enum ShellMountPhase {
 }
 
 impl StockSbx {
+    /// The owned cloud boundary over the same stock executable and runner.
+    /// Cloud and local ownership maps stay separate.
+    ///
+    /// # Errors
+    /// As [`cloud::CloudSbx::open`].
+    pub fn open_cloud(&self, directory: PathBuf) -> Result<cloud::CloudSbx, cloud::CloudError> {
+        cloud::CloudSbx::open(self.sbx.clone(), Arc::clone(&self.runner), directory)
+    }
+
     #[must_use]
     pub fn new(sbx: impl Into<PathBuf>, runner: Arc<dyn CommandRunner>) -> Self {
         Self {

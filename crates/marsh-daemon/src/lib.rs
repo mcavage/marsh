@@ -49,6 +49,7 @@ pub use daemon_startup::{
     DEFAULT_JOB_RESOURCES, JobDefaults, StartupFailure, adopt_startup_lock,
     finish_startup_diagnostics,
 };
+pub mod cloud_fs;
 pub mod process;
 mod shell_admission;
 mod shell_client;
@@ -878,6 +879,9 @@ pub struct SessionSpec {
 pub enum Placement {
     #[default]
     Local,
+    /// A shell or argv node in a disposable Docker Cloud sandbox
+    /// (`docs/design/cloud-placement.md`); session-origin only.
+    Cloud,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -992,6 +996,32 @@ pub enum AttachmentFrame {
     Failed {
         message: String,
     },
+    /// Directories whose listing the daemon just changed on the host (a
+    /// cloud write-back). A client inside a VM refreshes its file share's
+    /// cached listing of each; elsewhere it is ignored.
+    Refresh {
+        directories: Vec<String>,
+    },
+}
+
+/// Make a VM file share re-read each directory's listing: create and remove
+/// a probe entry there (a write through the share invalidates its cache).
+/// Best effort; only inside Linux VMs, where the project is a shared mount.
+pub fn refresh_listings(directories: &[String]) {
+    if !cfg!(target_os = "linux") {
+        return;
+    }
+    for directory in directories.iter().take(512) {
+        let probe = Path::new(directory).join(format!(".marsh-refresh-{}", std::process::id()));
+        if fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&probe)
+            .is_ok()
+        {
+            let _ = fs::remove_file(&probe);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1023,6 +1053,11 @@ pub enum PreparationFrame {
 #[must_use]
 pub fn cold_boot_notice(kit: &str, download: bool) -> String {
     match (download, kit) {
+        (_, "cloud") => "[starting a Docker Cloud sandbox…]".into(),
+        // `cloud:WHAT`: what the sandbox runs (a Kit, or the cloud shell).
+        (_, kit) if kit.starts_with("cloud:") => {
+            format!("[starting a Docker Cloud sandbox: {}…]", &kit["cloud:".len()..])
+        }
         (false, _) => format!("[starting {kit} worker VM…]"),
         (true, "shell") => {
             "[starting shell VM… first use may download the shell image, this can take a few minutes]"
@@ -2333,6 +2368,19 @@ impl DaemonStore {
         self.begin_job_inner(job, Placement::Local, Some((link, registered)))
     }
 
+    /// [`Self::begin_job_process`] for a session-origin cloud placement node.
+    ///
+    /// # Errors
+    /// As [`Self::begin_job_process`].
+    pub fn begin_cloud_job(
+        &self,
+        job: NewJob,
+        link: &process::ProcessLink,
+        registered: &[String],
+    ) -> Result<(String, String, JobLineage), DaemonError> {
+        self.begin_job_inner(job, Placement::Cloud, Some((link, registered)))
+    }
+
     fn begin_job_inner(
         &self,
         job: NewJob,
@@ -2506,6 +2554,49 @@ impl DaemonStore {
             ));
         }
         receipt.execution = ExecutionOutcome::Unknown;
+        Ok(())
+    }
+
+    /// Record a queued cloud node's owned sandbox as soon as it exists, so a
+    /// node cancelled or failed before execution still names what was cleaned.
+    pub fn record_cloud_sandbox(&self, job_id: &str, sandbox_id: &str) -> Result<(), DaemonError> {
+        let mut state = self.lock();
+        let receipt = state
+            .jobs
+            .get(job_id)
+            .ok_or_else(|| DaemonError::NotFound(job_id.into()))?;
+        if receipt.state != JobState::Queued || receipt.placement != Placement::Cloud {
+            return Err(DaemonError::InvalidState(
+                "only a queued cloud job records a cloud sandbox".into(),
+            ));
+        }
+        let mut updated = receipt.clone();
+        updated.vm_id = Some(sandbox_id.into());
+        state.journal.append(&updated, false)?;
+        state.jobs.insert(job_id.into(), updated);
+        Ok(())
+    }
+
+    /// A cloud placement node starts executing in its owned sandbox. The
+    /// sandbox ID is the receipt's `vm_id`; there is no local worker or
+    /// container identity (`docs/design/cloud-placement.md` s5).
+    pub fn mark_cloud_running(&self, job_id: &str, sandbox_id: &str) -> Result<(), DaemonError> {
+        let mut state = self.lock();
+        let receipt = state
+            .jobs
+            .get(job_id)
+            .ok_or_else(|| DaemonError::NotFound(job_id.into()))?;
+        if receipt.state != JobState::Queued || receipt.placement != Placement::Cloud {
+            return Err(DaemonError::InvalidState(
+                "only a queued cloud job may start in a cloud sandbox".into(),
+            ));
+        }
+        let mut updated = receipt.clone();
+        updated.vm_id = Some(sandbox_id.into());
+        updated.state = JobState::Running;
+        updated.execution = ExecutionOutcome::Unknown;
+        state.journal.append(&updated, false)?;
+        state.jobs.insert(job_id.into(), updated);
         Ok(())
     }
 
@@ -5811,7 +5902,23 @@ impl Client {
     }
 
     pub fn start_execution(&self, spec: ExecuteSpec) -> Result<ClientExecution, DaemonError> {
-        self.start_attached(PublicRequest::Execute(spec))
+        // A cloud node credits stdin (as a shell does), so the daemon reads
+        // signals and loss without ever waiting behind queued input.
+        let credited = spec.placement == Placement::Cloud;
+        let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
+        write_frame(
+            &mut stream,
+            &Envelope {
+                protocol: PROTOCOL.into(),
+                token: self.token.clone(),
+                body: PublicRequest::Execute(spec),
+            },
+        )?;
+        match read_frame::<PublicReply>(&mut stream)? {
+            PublicReply::ExecutionAccepted if credited => ClientExecution::new_shell(stream),
+            PublicReply::ExecutionAccepted => ClientExecution::new(stream),
+            reply => Err(unexpected_reply(reply)),
+        }
     }
 
     /// `ProcessRun` over a job's `cap.sock`, relayed like `Execute`.
@@ -6085,6 +6192,7 @@ fn relay_attachment<R: Read + Send + 'static, O: Write, E: Write>(
                 error.flush()?;
             }
             AttachmentFrame::JobStarted { .. } | AttachmentFrame::ShellReady => {}
+            AttachmentFrame::Refresh { directories } => refresh_listings(&directories),
             AttachmentFrame::ControlError {
                 operation, message, ..
             } => {

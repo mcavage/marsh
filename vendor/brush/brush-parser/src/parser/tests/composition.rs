@@ -55,9 +55,24 @@ fn malformed_blocks_fail_closed() {
         "fanout { }",
         "fanout { a: }",
         "fanout { a: true, a: false }",
+        "cloud { claude -p x; python3 t.py }",
+        "cloud --cpus 4 { make test }",
+        "cloud { make",
     ] {
         assert!(parse(input, true).is_err(), "accepted {input:?}");
     }
+}
+
+#[test]
+fn cloud_blocks_parse_and_cloud_stays_a_word_elsewhere() {
+    for input in [
+        "cloud { claude -p x; python3 t.py; }\n",
+        "cloud --cpus 4 { make test; }\n",
+        "echo cloud {\n",
+    ] {
+        assert!(parse(input, true).is_ok(), "rejected {input:?}");
+    }
+    assert!(parse("cloud { a; b }\n", false).is_ok());
 }
 
 #[test]

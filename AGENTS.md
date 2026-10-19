@@ -20,8 +20,14 @@ In scope:
 - ACP agent sessions and MCP publication/load;
 - `marsh --dev`: a scoped host broker for developing marsh from a marsh
   session (`docs/design/self-development.md`).
+- explicit cloud placement (`docs/design/cloud-placement.md`): session-origin
+  `cloud { ... }` / `marsh cloud` ships as a preview (`docs/cloud.md`,
+  `docs/plan/cloud-dispatch.md`, live gate `tests/acceptance/cloud_uat.py`);
+  registered Kits in cloud blocks, job-origin `marsh cloud` (in the job's own
+  Kit), and the interactive cloud shell are part of that preview; cloud ->
+  laptop crossings and `marsh run --place` are v2 work.
 
-Out of scope: Cloud execution, a Brush fork, cross-daemon source ledgers,
+Out of scope: a Brush fork, cross-daemon source ledgers,
 build-receipt authority binding, general M:N scheduling, workload restart
 recovery, and multi-device history. Third-party
 agent Kits live outside this repository (`docs/plan/custom-agent-kit.md`). The
@@ -61,6 +67,13 @@ make test-model MODEL_FLAGS=          # every TLA+ config, when cross-component 
 
 Add focused tests for the crate you changed. Avoid whole-workspace test churn.
 `make acceptance` builds a fresh candidate and is the release run.
+
+Prioritize real-caller end-to-end evidence over unit-test volume. Exercise the
+built product through its actual CLI/transports on stock SBX (and cloud when
+changing cloud behavior), checking output, authority, data preservation,
+receipts, cancellation, and verified cleanup. Unit tests support targeted
+validation/failure boundaries; they do not substitute for a working user
+journey. Do not grow mock suites or a parallel test framework to claim progress.
 
 ## Rules
 

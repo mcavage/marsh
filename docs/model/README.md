@@ -1,8 +1,17 @@
 # Cross-component model
 
-Six TLA+ modules specify cross-component state. TLC checks their bounded state
+Seven TLA+ modules specify current cross-component state (six local modules and
+the cloud ownership extension). An eighth, `Placement`,
+specifies the cloud placement extension; only its single-crossing,
+session-origin part is implemented (see
+[coverage and gaps](#proposed-placement-model)). TLC checks their bounded state
 spaces; a pass does not prove that the Rust code refines these specifications.
 The code-location table below records the implementation mapping and known gaps.
+
+- `CloudOwnership.tla`: the owned cloud adapter's persisted intents, delayed
+  create visibility/replies, cleanup-only restart recovery, immutable-ID effects,
+  quarantine, resource capacity and asynchronous deletion. See
+  [invariants, controls and implementation mapping](#cloud-ownership-extension).
 
 - `Sbxenv.tla`: snapshotted native MCP/extra-mount additions, required MCP load
   before VM readiness, registration reuse without overwrite, inherited extra
@@ -201,3 +210,175 @@ positive config fails or a negative control passes or fails for the wrong reason
 | Process: EntryLocal / EntryDispatch / AgentSelfLocal (link decision) | worker/runtime set `MARSH_ENTRY=1`, `MARSH_JOB`, and `PATH=/run/marsh/bin:<image PATH>` for every job (no `bash`/`sh` link and no `SHELL` override: shells are the image's own, `processes.md` s15) (`marsh-runtime` `job_environment`); stubs `#!/run/marsh/marsh --link=NAME` (`marsh-worker/src/capability.rs` `publish`); `marsh/src/job.rs` `link` -> `marsh-contracts` `process::link_decision` (own name + marker + `getppid()` = 1 -> clear marker, exec the image binary by absolute path with PATH intact; another image-provided name -> exec locally; else `ProcessRun`) |
 | Process: Spawn Kit VM cap (KitVMBound) | `process::kit_vm_cap` (from `child_lineage`, split branches included): distinct `kit_ref` among the tree's live receipts, at most `JobDefaults::tree_kit_vms` (4; `MARSH_TREE_KIT_VMS`), checked in the pre-check and in `begin_job_process` |
 | Process: Spawn spawn-set narrowing, same-Kit cap | `process::admit` (`child_lineage`): same-Kit = consecutive parent→child steps with equal `kit_ref`; `MARSH_SPAWN` / `marsh run --spawn` / `--no-spawn` narrow admission. The capability socket remains available for subtree inspection; disallowed spawn requests are refused. |
+
+## Proposed placement model
+
+`Placement.tla` accompanies the [cloud placement design](../design/cloud-placement.md).
+The [dispatch](../plan/cloud-dispatch.md) implements laptop -> cloud crossings
+from the session and one nested shape, cloud -> cloud agent calls (a child
+crossing from the block's current view, returned into that view). The table
+maps those actions. Job-origin placement (a local Kit job's `marsh cloud`,
+in its own Kit) is a laptop -> cloud crossing from the job's view, admitted
+as that job's child (`process::child_lineage`, `cloud.rs` `execute_cloud`).
+Cloud -> laptop crossings and remote workspace services remain
+**unimplemented**. A TLC pass is not
+evidence about the Rust code; the live acceptance run is.
+
+A crossing has an immediate caller, a local/cloud execution location, a logical
+workspace source/destination, immutable baseline, captured final contents, and
+per-path import progress. Nested crossings use the parent's materialization;
+a split-root crossing uses the fork, not the original checkout. All placements
+draw from one bounded pool. Loss/restart revoke authority and retain uncertain
+work; retirement can verify deletion but cannot replay execution or return.
+Delete acknowledgement and actual disappearance are separate transitions.
+Capturing a parent waits for its child returns, which hold workspace leases.
+
+`CallerEdit` races with per-path `Apply`. Deltas intentionally overwrite changed
+paths without a content comparison. Only changed paths participate, and import
+is neither a merge nor an atomic multi-file transaction. The model permits
+partial apply before restart and independent sibling returns. It does not
+assert that overlapping caller edits survive. Absence is the abstract value -1.
+
+| Invariant | Negative control | What must be caught |
+|---|---|---|
+| `ParentBound` | `ancestorReturn` | Return into the user tree instead of the owning fork/parent view |
+| `SourceBound` | `hostSnapshot` | Snapshot the original checkout instead of the parent's materialization |
+| `Attenuation` | `widen` | A location crossing restores broader view rights |
+| `StableCapture` | `captureLive` | Capture with possible writers |
+| `DeltaOnly` | `copySnapshot` | Return unchanged snapshot entries |
+| `NoLateReturn` | `lateReturn` | Import after loss/restart revoked its generation |
+| `NoReplay` | `replay` | Execute an uncertain job a second time |
+| `VerifiedAbsence` | `ackIsAbsent` | Treat accepted deletion as observed absence |
+| `ReturnBeforeComplete` | `earlyComplete` | Report completion with entries unapplied |
+| `SharedBudget` | `noCap` | Provision beyond the shared local/cloud pool |
+| `ParentCaptureSettled` | `pendingReturn` | Capture a parent view while any descendant return is pending, including before child capture |
+
+Positive configs also check `TypeOK`, `NoEarlyRelease`, `LossIsUncertain`, and
+`ReturnLease` (destination remains present/uncaptured for every pending child
+phase, not only active import).
+`Placement.cfg` covers two crossings, one file and racing edits, no restart;
+`Placement_partial_pass.cfg` covers two files and restart during partial import;
+`Placement_nested_pass.cfg` covers three crossings (including alternating
+locations in a constrained chain), one file, no restart. The two-crossing config
+covers sibling returns. Each bug removes a real action
+guard or changes its effect; its config checks the named invariant. Normal
+`check.sh` discovery includes these configs, including in `--quick`.
+
+Assumptions/gaps, not checked platform guarantees:
+
+- Each abstract crossing owns one sandbox; provisioning is atomic here.
+  Account-bound IDs, delayed creates, name reuse, visibility, inventory failures,
+  and orphan reconciliation require the `Ownership` extension. `DeleteLands`
+  models a deletion that the environment may delay indefinitely.
+- `Stop` abstracts verified termination and successful child settlement;
+  `Lose` abstracts unconfirmed cancellation/loss. The INT/KILL protocol,
+  bottom-up cancelled-result retention, and timeouts need integration with
+  `Process`/`Workspace`, not a claim that `Stop` implements cancellation.
+- Files/roots are abstract identities. Source inode pinning, safe manifests,
+  destination filename aliases, protected Git paths, symlinks, read-only rights,
+  and syscall races need code/real-caller checks. Rights here are root-view
+  rights, not the full placement/spawn/network/credential policy.
+- No stream credits, transfer-byte bounds, PTYs, deadline clock, remote split
+  operations, or liveness/fairness claims are modeled. A valid safety run must
+  not be presented as eventual settlement under network failure.
+- Kit descriptor versions are outside this lifecycle model. Local marsh uses
+  v3; live probes accepted cloud v2 on 2026-10-16 (v3 was not tested). A model pass
+  is not evidence of artifact, bootstrap, policy, or credential compatibility.
+- Per-path `Apply` is atomic in this model. Real replace plus journal ack is
+  not atomic: restart must conservatively mark ambiguous apply uncertain and
+  never repeat it automatically. Results already applied stay applied.
+
+| Placement action | Code (session-origin slice) / remaining gap |
+|---|---|
+| `Stage` (binding + one shared slot) | `marsh-backend/src/cloud.rs` `execute_cloud` selects the immediate caller's view (split fork via `split_confinement`, else the project; `ParentBound`, `SourceBound`); `DaemonStore::begin_cloud_job` admits under the shared `POOL_LIMIT` (`SharedBudget`). A job-origin node (`execute_cloud` with a parent job) uses the parent's own Kit (`cloud_bindings`, identity equal to the parent's `kit_ref`) and the parent's read-write view, admitted as its child under the `cloud` spawn name, with the parent's remaining wall time as its TTL; its delta is applied only while the parent is live. A nested agent call (`AgentCalls::run_call`) is admitted as a child of the cloud job (depth, fan-out, total, spawn set) and snapshots the parent's current materialization (`archive`), not the laptop checkout (`SourceBound`). Cloud -> laptop: **not implemented** |
+| `Start` / `Write` / `Stop` | `cloud_helper::run` (own process group); `Stop` = status file written only after `killpg` of the group and `kill_workload` (every process of the workload user), read back by the backend before capture. Cancellation: `Relay` + `JobControl` (INT, KILL after grace). Enforced for the session shell profile (root-owned control, separate `marsh-run` user). In a Kit sandbox (`Ctl { kit: true }`: no root, control steps as the Kit's user, the workload under no-new-privileges) the workload shares the control user, so `Stop` is only as trustworthy as that workload; `Apply`'s host checks still bound where its delta lands |
+| `Capture` | `cloud_helper::delta` refuses without the status (`StableCapture`); delta from the hashed unpack baseline, changed entries only (`DeltaOnly`) |
+| `Apply` (parent-bound delta, generation, per-path progress) | `cloud_fs::apply_delta` into the root pinned by identity at snapshot; per-entry staged rename; partial progress reported, payload retained; never re-applied (`NoLateReturn`). The generation is the job: a restarted daemon has no in-flight apply. A nested call's delta is applied into its immediate parent's live view (`AgentCalls::apply`, helper `apply`), never the laptop (`ParentBound`); `AgentCalls::settle` cancels and waits for running calls before the parent is captured (`ParentCaptureSettled`) |
+| `Lose` / `Restart` / `RetireUncertain` | Unconfirmed end: quarantine, retire, `ExecutionOutcome::Unknown`, no capture (`LossIsUncertain`, `NoReplay`). Restart: `DaemonStore::with_master_token` marks running cloud jobs unknown/uncertain; `marsh workers reset cloud` retires owned sandboxes |
+| `DeleteRequest` / `DeleteLands` / `ObserveAbsent` | `CloudSbx::retire` (observed absence, `VerifiedAbsence`), mapped in the cloud ownership extension below |
+| `Complete` (return + verified cleanup) | `Settlement::finish` after capture, retire, and apply (`ReturnBeforeComplete`); the client's exit follows that frame |
+
+Before changing the Rust lifecycle, extend the existing six modules and their
+code-location/negative-control tables as specified in design section 9.
+
+### Static runtime-profile boundary
+
+The first cloud implementation slice adds no scheduling/ownership/transport
+state transition. `marsh-runtime` `SbxRuntimeProfile`,
+`validate_sbx_environment`, and `system_with_profile` bind proxy authority to a
+trusted bootstrap profile. `marsh-worker/src/main.rs` selects cloud-v2 only via
+its root-only startup mode, before Ready. Job frames cannot choose the profile.
+Local selection is unchanged; unqualified cloud MCP is refused.
+
+This is static URL/environment/CA validation, **not established by TLC**.
+Supporting rejection checks are in `marsh-runtime/src/tests.rs`; the primary
+evidence is [fresh-worker cloud qualification](../plan/cloud-worker-profile.md)
+under native policy, including verified cleanup. A working internal worker
+mode is not a proof of the remaining lifecycle extensions. Session-origin
+dispatch (table above) does not use the worker profile.
+
+## Cloud ownership extension
+
+`CloudOwnership.tla` is the cloud counterpart to local `Ownership.tla`, mapped
+to `marsh-sbx/src/cloud.rs`. It uses the current stock sign-in, not account
+selection or a context-marker protocol. SDK calls are trusted; ID parsing and
+filesystem persistence are separate code obligations.
+
+The service can create after a lost reply or daemon restart and expose a new
+resource later. Unknown intents stay recorded. An ID returned before visibility
+is not evidence that a missing listing proves deletion: `seen` must first
+record a matching positive observation. Deletion acknowledgement is separate
+from the service deleting the actual resource. Observations can go stale after
+they were accurate; ID-addressed effects spare a foreign VM that reuses a name.
+
+| Invariant | Negative control | Required protection |
+|---|---|---|
+| `NoLeak` | `dropMissing` | Keep missing create intents; a delayed create may still land |
+| `NoLeak` | `forgetUnseen` | Keep a known ID that has not been positively observed |
+| `NoLeak` | `ackIsGone` | Delete acknowledgement is not actual disappearance |
+| `NoLeak` | `staleSeen` | A later sighting cannot validate an earlier caller's absence observation |
+| `NoForeignEffect` | `byName` | Effects address the recorded immutable ID, not a reused name |
+| `RestartInert` | `restartReady` | Recovered resources are cleanup-only |
+| `NoQuarantinedUse` | `useQuarantined` | No new submissions after quarantine |
+| `NoCreateReplay` | `replayCreate` | Reconciliation never repeats an uncertain create |
+| `CapacityBound` | `noCap` | Unresolved resources count toward capacity |
+| `NoUnsafeSubmission` | `stalePoison` | Recheck persistence poisoning under the admission lock, not before waiting |
+
+Positive configs also check `TypeOK` and `OwnedAreOurs`. Retirement has separate
+per-resource query state and a prior-sighting snapshot: another observer can
+update the shared flag after an absence query has completed. The poison model
+also separates a preliminary check from admission, allowing persistence failure
+while a submission waits. Those two negative controls reproduce the races
+found by adversarial code review; checking one shared `view` would miss them.
+`CloudOwnership.cfg`
+models one owned name, a foreign name, two IDs and one restart;
+`CloudOwnership_concurrent_pass.cfg` models two owned names, three IDs and a
+restart. Names abstract fresh requests and are not reused in these bounds.
+
+| Model action | Rust / platform mapping |
+|---|---|
+| Reserve / Submit | `CloudSbx::create`: validate, private durable intent, `CreationFlight`, one stock inline-image create |
+| CreateLands / Reply / Expose | Trusted stock service and create response; response ID persisted before control effects |
+| Observe / SeeOwned / Ready | `inventory`, `observe_owned` (durable `observed`), `wait_ready` |
+| BeginQuery / FinishQuery / NextQuery | `retire`: snapshot `observed` before each fresh query; retain its ordering through the forget decision |
+| LoseReply / Adopt | Create errors retain intent; `reconcile` adopts only for quarantine/cleanup, skipping live creation flights |
+| Quarantine / PrepareUse / FailPersistence / Use | `quarantine`, `ready`, `spawn_admitted`; all SDK carrier starts recheck storage/poisoning after acquiring the map lock, then submit under that lock |
+| Restart | `open` validates/locks the map and makes loaded Ready entries Quarantined |
+| BeginRemove / DeleteRequest / DeleteLands | `retire` persists Removing and requests removal by ID; actual deletion is provider state |
+| Forget | `retire`: successful complete inventory absence plus prior positive observation, then durable record removal |
+
+Assumptions/gaps: managed pending names are random/exclusive; other actors may
+reuse a known name after removing its old ID. Stock inventory is complete and
+accurate when observed once a resource has been exposed; newly created resources
+may initially be invisible. IDs are immutable and never recycled. SDK effects
+are atomic at their provider commit, not at local carrier exit. Current sign-in
+is ordinary trusted host configuration, not a modeled account-switch feature.
+No liveness is claimed for an indefinitely hidden/failed create. The model's
+poison transition abstracts a failed persistence operation; real filesystem
+failure mechanics are exercised separately by the opt-in caller. Disk atomicity,
+path/JSON validation, image qualification, streams, clocks/TTL, and job lineage
+are outside this bounded ownership model. It is not a composed proof of the
+whole cloud product.
+
+Primary implementation evidence is the [real cloud lifecycle caller](../plan/cloud-lifecycle.md),
+including foreign-ID refusal, streams, quarantine and cleanup after restart.

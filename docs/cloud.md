@@ -1,0 +1,298 @@
+# Run commands in Docker Cloud (preview)
+
+**Preview.** `cloud { ... }` and `marsh cloud` run shell work from your marsh
+session in a Docker Cloud sandbox and bring file changes back. This page
+describes what works now. Nested placement, registered Kits inside cloud work,
+and an interactive cloud shell are not available yet; see
+[Current limits](#current-limits). The design and remaining gates are in
+[cloud placement](design/cloud-placement.md).
+
+## Requirements
+
+- A Docker account with **Docker Cloud sandbox access** (subscription and
+  quota), signed in with stock `sbx login`. marsh uses whatever account the
+  stock CLI is signed in to. A model-provider subscription does not supply
+  cloud compute.
+- Cloud sandboxes, transfers, and run time may be billed. Check Docker's terms.
+- Your project files are uploaded to the sandbox (Git-ignored files excluded).
+  Ignore rules are not a secret scanner.
+
+## Run a block in the cloud
+
+From your marsh shell:
+
+```sh
+printf 'pear\napple\n' | cloud { sort; }
+```
+
+This prints `apple` then `pear`. The producer runs locally, `sort` runs in the
+cloud, and output streams back while the remote command runs. A cloud block
+works where a command does: in a pipeline, after `&&` or `;`, a
+`fanout` branch, or a `split` branch.
+
+The block is evaluated by a fresh shell in the sandbox, like a split shell
+branch. Exported variables and the current directory go with it (marsh drops
+credential-like names such as `*TOKEN*` or `*KEY*`, as it does for jobs).
+Aliases, functions, unexported variables, and shell options do not. Changes
+to the directory or variables inside the block do not affect your shell.
+
+Redirections outside the block are local; inside, they are remote:
+
+```sh
+cloud { cat input.txt; } > output.txt   # local output.txt
+cloud { cat input.txt > output.txt; }   # remote output.txt, written back
+```
+
+The same from bash, zsh, or a host terminal:
+
+```sh
+marsh cloud -c 'make test && ./bench > results.txt'
+marsh cloud -- python3 train.py --epochs 3      # argv, no shell parsing
+```
+
+stdin, stdout, stderr, and the exit status pass through; `PIPESTATUS` and
+`pipefail` behave as for a local command. A progress notice
+naming what the sandbox runs (`[starting a Docker Cloud sandbox: marsh cloud
+shell…]`, or `Kit claude` for an agent or a job's own Kit) and the write-back
+summary go to stderr, never into stdout. Each call starts a new sandbox; expect roughly
+20 seconds of setup before the command starts.
+
+## Sandbox size, lifetime, and image
+
+Options go before the block or the command:
+
+```sh
+cloud --cpus 8 --ttl 2h { make -j8 test; }
+marsh cloud --cpus 4 -- ./train.sh
+```
+
+- `--cpus N`: 1, 2, 4, 8, or 16, with 2 GiB of memory per CPU. Default 2.
+- `--ttl DURATION`: the sandbox's lifetime limit, from `1m` to `24h`. Default
+  `4h`. A command still running when it expires is lost, not written back.
+- `--image REF`: another image, pinned by digest
+  (`REPOSITORY@sha256:...`), Linux ARM64. It must provide `sudo` for the
+  `agent` user, `useradd`, `setsid`, and `gzip`, as the default image does.
+
+`MARSH_CLOUD_CPUS`, `MARSH_CLOUD_TTL`, and `MARSH_CLOUD_IMAGE` set defaults
+for the options you leave out ([configuration](configuration.md#environment)).
+
+## Interactive cloud shell
+
+Run `marsh cloud` with no command, from a terminal (your marsh shell or a host
+terminal), for an interactive shell in a new sandbox:
+
+```sh
+marsh cloud --cpus 4
+```
+
+It has a real terminal of your window's size, follows resizes, and supports
+line editing. When you exit, its file changes are written back, as for a
+block, and `marsh cloud` exits with the shell's status. Ctrl-C is sent to the
+remote program, as in any terminal; closing your terminal ends the session.
+
+## File changes come back automatically
+
+When the command ends, marsh compares the sandbox's project with the snapshot
+it uploaded and writes the differences back to your project before the
+command returns:
+
+```sh
+cloud { ./generate-assets; } && make test   # make sees the generated files
+```
+
+- Created, modified (including the executable bit), and deleted files and
+  directories return; symlinks return as links and are never followed.
+- Unchanged files do not, so your local edits to other files survive.
+- **A returned change overwrites your local edit to the same path.** There is
+  no merge or conflict check. Concurrent cloud calls that write the same file:
+  the last one applied wins.
+- A command that exits nonzero still returns its changes, as a local command
+  would have made them.
+- New files whose names match ignore rules (build outputs, logs) return too:
+  ignore rules filter what is uploaded, not what comes back.
+- `.marsh` is never uploaded. `.git` is never written back.
+
+## Git in the cloud
+
+The sandbox gets a private copy of the project's Git metadata, so `git status`,
+`git diff`, `git log`, and commits work in the block. In a split branch it is
+the branch's own repository view. The copy holds only what Git needs for that (`HEAD`,
+refs, objects, the index, `info/exclude`): no hooks, no remotes, no settings
+from your Git config except the repository format, and no tool state such as
+git-crypt keys; commits and
+other Git changes made in the cloud stay in the sandbox and are deleted with
+it. Only working-tree file changes come back. Metadata larger than 512 MiB (or
+with a file over 256 MiB) is not uploaded; marsh says so on stderr and the
+block runs without it.
+
+stderr reports what was written, for example
+`marsh: cloud: wrote back 3 changes (1 created, 2 modified, 0 deleted)`.
+
+A directory deleted in the cloud that still holds local files here (ones that
+were never uploaded, such as ignored caches) is kept, and the summary names
+it.
+
+The write-back is per file, not one transaction. If it stops (a local
+directory in the way of a returned file, a name that would alias another on
+your case-insensitive Mac volume, the project directory replaced meanwhile),
+marsh says which entry failed and how many changes were already written,
+exits 125, and keeps the full change set in your control home under
+`cloud/results/JOB.delta`. It never retries a write-back by itself. If the
+changes cannot be downloaded at all (for example a file over the size limit),
+nothing is written back and marsh keeps the sandbox instead of deleting it,
+naming its ID so you can recover files with `sbx --cloud exec ID sh`;
+`marsh workers reset cloud` deletes it.
+
+## Keep cloud changes off your source tree
+
+Run the block in a one-branch [split](split.md). Changes return to the
+branch's private copy, and `join` shows them as a patch:
+
+```sh
+split { fix: cloud { ./codemod.sh; } } | join --keep
+```
+
+## Fanout
+
+Each `cloud` block in a [fanout](fanout.md) is its own sandbox with its own
+snapshot, taken when that branch starts; their changes return to the shared
+project and can race:
+
+```sh
+fanout { a: cloud { ./gen a; }, b: cloud { ./gen b; } } | collect
+```
+
+A fanout inside one cloud block shares that sandbox's files:
+
+```sh
+cloud { fanout { tests: make test; lint: make lint; } | collect; }
+```
+
+## Registered commands inside a cloud block
+
+Registered commands whose Kit is pinned by digest (the packaged `claude`,
+`codex`, `pi`, and `shell`, and Kits you register by `REF@sha256:...`) can be
+called inside a block. Each runs in Docker Cloud from the same Kit it runs
+locally:
+
+```sh
+cloud { make build && claude -p 'fix the failing test, then run make test'; }
+```
+
+Each call runs in its own new cloud sandbox made from that Kit: its image,
+entrypoint, network policy, and the credentials you stored for Docker Cloud
+(for example with `sbx --cloud secret`; not your local Kit logins). It starts
+with the block's current files, including files the block generated, and a
+private Git copy. Its stdin, stdout, stderr, and exit status pass through to
+the block. When it ends, its file changes are written into the block's files
+before the call returns (`marsh: claude: wrote back ...` on stderr), and they
+come back to your project with the block's changes.
+
+- A block that is only one such call, with literal words (and at most
+  `</dev/null`), such as `cloud { claude -p 'fix the test' </dev/null; }`,
+  runs straight in that Kit's sandbox: one sandbox and one job (`claude`,
+  placement `cloud`), with no cloud shell in between. Anything more (a
+  second command, a pipe, `$VAR`, a glob, another redirection) uses the
+  cloud shell as above.
+- The call sees a copy, not the live block: something else in the block
+  writing at the same time does not see the agent's edits until it returns,
+  and an overlapping write is overwritten by the agent's change.
+- The call is a child job of the cloud job (`marsh jobs --tree`), under the
+  usual limits and `MARSH_SPAWN`. Ctrl-C reaches it; its confirmed changes
+  still return.
+- It runs as the Kit's own user, as it does locally.
+- A Kit registered from a source directory has no cloud form and is not
+  available in a block. To give it one, publish it and name the published
+  reference in `cloud-kits.json` in your control home:
+  `{"mytool": {"kit": "docker.io/me/mytool@sha256:..."}}`.
+- The first use of a Kit in a sandbox shape builds a small Docker Cloud
+  template from it (`sbx --cloud template ls` lists them); later calls reuse
+  it.
+
+## Cloud from a job
+
+A Kit job can place work in Docker Cloud with the in-job `marsh cloud`:
+
+```sh
+claude -p "use your Bash tool to run: marsh cloud -c 'make test'"
+```
+
+The work runs in a new cloud sandbox made from the job's own Kit, with the
+job's project view (its project or split fork) at the same path. Streams,
+status, Ctrl-C, write-back, and cleanup behave as for a block from your
+session, with these differences:
+
+- It is a child job of the calling job, under the usual limits. `cloud` is a
+  name in the spawn set: `MARSH_SPAWN` without `cloud` refuses it
+  (`spawn refused: cloud not in this job's spawn set (MARSH_SPAWN)`).
+- The sandbox lives no longer than the calling job's remaining wall time.
+- If the calling job ends first, the cloud work is cancelled and its changes
+  are kept on your Mac (the path is printed in the job's notes) instead of
+  being written into the job's files.
+- It is refused when the job's Kit has no cloud form (see above) or was
+  registered again since the job started, when the job cannot write its
+  project view, and with `--image`.
+- In a Kit sandbox, marsh's control steps run as the Kit's own user, so they
+  cannot stop processes the workload hides from them. The returned changes
+  are still checked on your Mac and written only into the job's project view. `marsh cloud` from a job takes `[--cpus N] [--ttl DURATION]
+-c SCRIPT` or `-- PROGRAM [ARG...]`; it has no interactive form.
+
+## Split inside a cloud block
+
+`split { ... } | join` works inside a block. The forks are made from the
+block's current files inside the sandbox, the branches run there, and `join`
+renders their patches there; the cloud block's own changes still come back
+as usual, but the split's forks do not:
+
+```sh
+cloud { ./prepare; split { fast: ./tune --fast, safe: ./tune --safe } | join; }
+```
+
+Branch placement shows as `cloud`. A split kept with `join --keep` stays in
+the sandbox and is deleted with it, so copy anything you want out of it
+within the block. Host `marsh splits` and `marsh jobs --tree` show only the
+cloud job, not the split inside it.
+
+## Jobs, Ctrl-C, and cleanup
+
+Each cloud call is a job: `marsh jobs` shows `cloud -c ...` with placement
+`cloud`, and `marsh jobs show JOB --json` records the sandbox ID (`vm_id`),
+the exit status, and the cleanup result. Cloud calls count toward the
+8-jobs-at-once limit.
+
+- **Ctrl-C** sends `INT` to the remote command (then `KILL` after 10 seconds).
+  When it has stopped, its changes so far are written back and the call exits
+  130. Ctrl-C during sandbox setup stops before anything runs.
+- Closing the pipe downstream (for example `| head -1`) cancels the call the
+  same way; the call still writes back before it exits, with status 141 (as
+  a process killed by `SIGPIPE`).
+- When the command ends, marsh stops every process it started, including
+  background ones, before reading its changes. (In a Kit sandbox this is
+  best effort; see [Cloud from a job](#cloud-from-a-job).)
+- After every call marsh deletes the sandbox and checks that it is gone.
+- `marsh workers reset` (all) and `marsh workers reset cloud` delete every
+  cloud sandbox this daemon owns, including those of calls still running;
+  such calls end as lost and write nothing back. `marsh stop` and
+  `marsh reset` delete owned cloud sandboxes too.
+- If marsh loses the connection or the daemon stops before it can confirm the
+  remote command ended, nothing is written back and nothing is re-run. The job
+  shows `cleanup uncertain` and holds its slot. Run
+  `marsh workers reset cloud` to delete every cloud sandbox this daemon owns
+  and release it. Sandboxes also expire on their own after 4 hours.
+
+## Current limits
+
+- Laptop to cloud only: cloud work starts from your marsh session, a host
+  terminal, or a local Kit job. From inside a cloud block or sandbox, `cloud`
+  is refused, and cloud work cannot call back to your laptop. A
+  `marsh run --place` form is not available yet.
+- Inside a block, only registered commands with a cloud form (above),
+  `split {}`, and `fanout {}` are available; `marsh` subcommands are not.
+- The block runs as an unprivileged user (`marsh-run`) in a fixed shell image
+  (`docker/sandbox-templates:shell-docker`, pinned by digest, Ubuntu) with
+  2 CPUs, 4 GiB of memory, Linux ARM64, the sandbox's network policy, and a
+  fresh home directory. It has no `sudo` and no Docker access. Your marsh home
+  is not uploaded. GPUs are not offered.
+- Blocks have no terminal (programs see pipes); use the
+  [interactive cloud shell](#interactive-cloud-shell) for one.
+- Limits: 256 MiB per file and 1 GiB per upload or change set.

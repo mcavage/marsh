@@ -183,7 +183,7 @@ pub(crate) fn admit(
         None => JobLineage {
             parent: format!("session:{session}"),
             depth: 1,
-            spawn: registered.to_vec(),
+            spawn: with_cloud(registered),
             ..JobLineage::default()
         },
         // A split argv branch is bounded by the split depth limit; it is
@@ -241,11 +241,7 @@ fn child_lineage(
     } else {
         inherited.root.clone()
     };
-    if !inherited.spawn.iter().any(|name| name == command) {
-        return Err(format!(
-            "spawn refused: {command} not in this job's spawn set (MARSH_SPAWN)"
-        ));
-    }
+    spawn_allowed(&inherited, command)?;
     let depth = inherited.depth.max(1) + 1;
     if depth > DEPTH_LIMIT {
         return Err(format!(
@@ -324,6 +320,29 @@ fn child_lineage(
         parent_deadline: inherited.deadline_unix_ms.is_some(),
         ..JobLineage::default()
     })
+}
+
+/// A root's spawn set: the registered names and `cloud`.
+fn with_cloud(registered: &[String]) -> Vec<String> {
+    let mut spawn = registered.to_vec();
+    if !spawn.iter().any(|name| name == "cloud") {
+        spawn.push("cloud".into());
+        spawn.sort();
+    }
+    spawn
+}
+
+/// The spawn-set check. `cloud` (a job's cloud placement, in its own Kit)
+/// is a name of its own, so `MARSH_SPAWN` can withhold sending work to
+/// Docker Cloud.
+fn spawn_allowed(inherited: &JobLineage, command: &str) -> Result<(), String> {
+    if inherited.spawn.iter().any(|name| name == command) {
+        Ok(())
+    } else {
+        Err(format!(
+            "spawn refused: {command} not in this job's spawn set (MARSH_SPAWN)"
+        ))
+    }
 }
 
 /// Wall time is inherited: a child cannot outlive its parent's deadline
@@ -999,7 +1018,11 @@ pub(crate) fn serve_run(
         terminal_size: None,
         ..session
     };
-    spec.placement = crate::Placement::Local;
+    // A job may ask for cloud placement (its own cloud Kit, refused without
+    // one); every other request runs locally.
+    if spec.placement != crate::Placement::Cloud {
+        spec.placement = crate::Placement::Local;
+    }
     // The daemon applies the split filter itself; the link's own filtering
     // is not authority (`docs/design/processes.md` s6).
     let link = spec.process.take().unwrap_or_default();

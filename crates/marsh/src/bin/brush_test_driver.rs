@@ -33,6 +33,7 @@ impl RegisteredCommandExecutor for PlacementProbe {
         }
         let placement = match invocation.placement {
             marsh_daemon::Placement::Local => "local",
+            marsh_daemon::Placement::Cloud => "cloud",
         };
         print!("{placement}:{}:{input}", invocation.command);
         0
@@ -53,6 +54,12 @@ fn main() {
     }
     if std::env::var_os("MARSH_TEST_CURRENT_THREAD_RUNTIME").is_some() {
         brush_shell::entry::use_current_thread_runtime();
+    }
+    if let Ok(program) = std::env::var("MARSH_TEST_PLACEMENT_PROGRAM") {
+        brush_core::split::install_placement_command(brush_core::split::PlacementCommand {
+            program,
+            arguments: vec!["cloud".into()],
+        });
     }
     if std::env::var_os("MARSH_TEST_EXTENSIONS").is_some() {
         brush_shell::entry::enable_marsh_extensions();

@@ -5,6 +5,7 @@
 
 #[cfg(unix)]
 pub mod byte_path;
+pub mod cloud;
 pub mod command_registry;
 pub mod execution;
 pub mod process;

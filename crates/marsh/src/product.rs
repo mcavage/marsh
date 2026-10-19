@@ -218,6 +218,13 @@ fn prepare_guest_shell(
     // shell: a child guest marsh attached to the same session, not /bin/sh.
     if let Ok(executable) = std::env::current_exe() {
         brush_shell::entry::install_script_interpreter(&executable, &shim_args);
+        // `cloud { LIST; }` runs as `marsh cloud -c SOURCE` through this binary.
+        if let Some(program) = executable.to_str() {
+            brush_core::split::install_placement_command(brush_core::split::PlacementCommand {
+                program: program.to_owned(),
+                arguments: vec!["cloud".into()],
+            });
+        }
     }
     let shim_args = shim_args
         .into_iter()
@@ -793,6 +800,7 @@ fn typed_value(value: &impl serde::Serialize) -> Result<String, ProductError> {
 fn placement_name(placement: marsh_daemon::Placement) -> &'static str {
     match placement {
         marsh_daemon::Placement::Local => "local",
+        marsh_daemon::Placement::Cloud => "cloud",
     }
 }
 

@@ -37,6 +37,9 @@ For skills, dotfiles, MCP connections, and extra directories, see
 | `MARSH_SPAWN` | Names that jobs started from this shell may start. A comma-separated list, or `none`. See [spawn restrictions and refusal statuses](agents.md#limits-and-messages). |
 | `MARSH_PLACE` | Where registered commands run. Only `local` is accepted; any other value is an error (`MARSH_PLACE must be local`). |
 | `MARSH_KIT_IMAGE_CACHE` | Cache of Kit images built from source. Default `~/Library/Caches/marsh/kit-images`. |
+| `MARSH_CLOUD_CPUS` | Default `--cpus` for [`cloud`](cloud.md#sandbox-size-lifetime-and-image) calls from this shell: 1, 2, 4, 8, or 16 (2 GiB of memory per CPU). Default 2. |
+| `MARSH_CLOUD_TTL` | Default `--ttl` for `cloud` calls: 1m to 24h, such as `30m` or `2h`. Default `4h`. |
+| `MARSH_CLOUD_IMAGE` | Default `--image` for `cloud` calls: an image pinned by digest. Read by the daemon too, as its own default. |
 
 ### Job limits
 

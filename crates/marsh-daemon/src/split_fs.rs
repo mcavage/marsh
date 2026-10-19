@@ -23,7 +23,7 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const INDEX_LIMIT: u64 = 64 << 20;
-const SMALL_LIMIT: u64 = 1 << 20;
+pub(crate) const SMALL_LIMIT: u64 = 1 << 20;
 /// Capture bounds (M1): one file, all changed bytes, one text diff.
 pub const FILE_LIMIT: u64 = 32 << 20;
 pub const CAPTURE_LIMIT: u64 = 256 << 20;
@@ -162,6 +162,58 @@ impl Dir {
         .map_err(rustix_err)?;
         let mut file = std::fs::File::from(fd);
         file.write_all(bytes)
+    }
+
+    /// Create a new, empty file for streaming writes (never through a
+    /// symlink, never over an entry).
+    // RawMode is u16 on macOS and u32 on Linux; mode bits fit either.
+    #[allow(clippy::cast_possible_truncation, clippy::unnecessary_cast)]
+    pub fn create_file(&self, name: impl AsRef<OsStr>, mode: u32) -> io::Result<std::fs::File> {
+        rustix::fs::openat(
+            &self.0,
+            name.as_ref(),
+            OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::from_raw_mode(mode as rustix::fs::RawMode),
+        )
+        .map(std::fs::File::from)
+        .map_err(rustix_err)
+    }
+
+    /// Open an existing regular file read-only without following a symlink
+    /// or blocking on a FIFO; the caller checks its kind with `fstat`.
+    pub fn open_file(&self, name: impl AsRef<OsStr>) -> io::Result<std::fs::File> {
+        rustix::fs::openat(
+            &self.0,
+            name.as_ref(),
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map(std::fs::File::from)
+        .map_err(rustix_err)
+    }
+
+    /// Create one directory with `mode` (umask applies, then it is set).
+    #[allow(clippy::cast_possible_truncation, clippy::unnecessary_cast)]
+    pub fn mkdir_mode(&self, name: impl AsRef<OsStr>, mode: u32) -> io::Result<()> {
+        rustix::fs::mkdirat(
+            &self.0,
+            name.as_ref(),
+            Mode::from_raw_mode(mode as rustix::fs::RawMode),
+        )
+        .map_err(rustix_err)?;
+        self.open(name)?.chmod(mode)
+    }
+
+    /// Set this directory's permission bits.
+    #[allow(clippy::cast_possible_truncation, clippy::unnecessary_cast)]
+    pub fn chmod(&self, mode: u32) -> io::Result<()> {
+        rustix::fs::fchmod(&self.0, Mode::from_raw_mode(mode as rustix::fs::RawMode))
+            .map_err(rustix_err)
+    }
+
+    /// Remove an empty subdirectory (`ENOTEMPTY` otherwise).
+    pub fn rmdir(&self, name: impl AsRef<OsStr>) -> io::Result<()> {
+        rustix::fs::unlinkat(&self.0, name.as_ref(), AtFlags::REMOVEDIR).map_err(rustix_err)
     }
 
     /// Read a regular file of at most `limit` bytes (a FIFO or device is
@@ -465,10 +517,10 @@ pub fn fork_git_source(
 }
 
 /// Gitignore rules for one directory level, read as data.
-struct Rules(Vec<ignore::gitignore::Gitignore>);
+pub(crate) struct Rules(pub(crate) Vec<ignore::gitignore::Gitignore>);
 
 impl Rules {
-    fn parse(root: &Path, bytes: &[u8]) -> Option<ignore::gitignore::Gitignore> {
+    pub(crate) fn parse(root: &Path, bytes: &[u8]) -> Option<ignore::gitignore::Gitignore> {
         let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
         for line in String::from_utf8_lossy(bytes).lines() {
             let _ = builder.add_line(None, line);
@@ -477,7 +529,7 @@ impl Rules {
     }
 
     /// Deepest rules first; the first decisive match wins.
-    fn ignored(&self, path: &Path, dir: bool) -> bool {
+    pub(crate) fn ignored(&self, path: &Path, dir: bool) -> bool {
         for rules in self.0.iter().rev() {
             match rules.matched(path, dir) {
                 ignore::Match::Ignore(_) => return true,
@@ -490,11 +542,11 @@ impl Rules {
 }
 
 /// Logical paths for matching only (never used for I/O).
-fn logical(relative: &Path) -> PathBuf {
+pub(crate) fn logical(relative: &Path) -> PathBuf {
     Path::new("/").join(relative)
 }
 
-fn is_dotgit(name: &OsStr) -> bool {
+pub(crate) fn is_dotgit(name: &OsStr) -> bool {
     name.as_bytes().eq_ignore_ascii_case(b".git")
 }
 

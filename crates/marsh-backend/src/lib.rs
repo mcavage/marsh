@@ -1,6 +1,7 @@
 //! Concrete local daemon backend built only on stock `sbx` CLI operations.
 
 pub mod account_home;
+mod cloud;
 pub mod command_registry;
 
 use marsh_acp::{AgentAdapterDeclaration, AgentRegistry};
@@ -102,6 +103,8 @@ pub struct StockDaemonBackend {
     configured_mcp_vms: Mutex<BTreeSet<String>>,
     /// The dev broker (`marsh --dev`); dev shells use the one shell image.
     dev: Option<Arc<marsh_daemon::DevBroker>>,
+    /// Session-origin cloud placement (`docs/design/cloud-placement.md`).
+    cloud: cloud::CloudPlacement,
 }
 
 impl StockDaemonBackend {
@@ -332,6 +335,7 @@ impl StockDaemonBackend {
             shared_sbxenv: sbxenv::Environment::default(),
             configured_mcp_vms: Mutex::new(BTreeSet::new()),
             dev: None,
+            cloud: cloud::CloudPlacement::default(),
         }
     }
 
@@ -916,6 +920,9 @@ impl DaemonBackend for StockDaemonBackend {
         selection: &LoadSelection,
         store: DaemonStore,
     ) -> Result<Vec<String>, DaemonError> {
+        if let Some(done) = self.reset_cloud_selection(selection, &store)? {
+            return Ok(done);
+        }
         let mut selected = match selection {
             LoadSelection::All => self.command_names(),
             LoadSelection::Kits(commands) => commands.clone(),
@@ -1166,6 +1173,31 @@ impl DaemonBackend for StockDaemonBackend {
                 detail,
             });
         }
+        // Owned Docker Cloud sandboxes (kept after an uncertain end) go with
+        // the scope; their record is in this control home.
+        if self.config.control_home.join("cloud").exists() {
+            match self.cloud.reset(self) {
+                Ok(removed) => components.extend(removed.into_iter().map(|name| {
+                    ScopeCleanupComponent {
+                        kind: "cloud".into(),
+                        label: name.clone(),
+                        state: ScopeCleanupState::Removed,
+                        vm: Some(name),
+                        detail: None,
+                    }
+                })),
+                Err(error) => components.push(ScopeCleanupComponent {
+                    kind: "cloud".into(),
+                    label: "cloud sandboxes".into(),
+                    state: ScopeCleanupState::CleanupUncertain,
+                    vm: None,
+                    detail: Some(format!(
+                        "owned cloud sandboxes could not be verified deleted: {error}; retry `marsh {}`",
+                        if action == ScopeLifecycleAction::Stop { "stop" } else { "reset" }
+                    )),
+                }),
+            }
+        }
         if store.shell_cleanup_pending() {
             components.push(ScopeCleanupComponent {
                 kind: "shell".into(),
@@ -1230,6 +1262,9 @@ impl DaemonBackend for StockDaemonBackend {
         attachment: ServerAttachment,
         store: DaemonStore,
     ) -> Result<(), DaemonError> {
+        if request.placement == marsh_daemon::Placement::Cloud {
+            return self.execute_cloud(request, attachment, store);
+        }
         let started = Instant::now();
         let started_unix_ms = unix_millis(SystemTime::now());
         // A Kit job started from a split branch mounts only that branch's

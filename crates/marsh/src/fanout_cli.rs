@@ -277,7 +277,7 @@ pub fn fanout(arguments: &[OsString], place: Place) -> i32 {
         ));
     }
     let mut input = Vec::new();
-    if !plan.no_input && !std::io::stdin().is_terminal() {
+    if !plan.no_input && !marsh_contracts::cloud::stdin_is_terminal() {
         let mut stdin = std::io::stdin().lock().take(INPUT_LIMIT + 1);
         if stdin.read_to_end(&mut input).is_err() || input.len() as u64 > INPUT_LIMIT {
             return usage("fanout: input exceeds 64 MiB limit");

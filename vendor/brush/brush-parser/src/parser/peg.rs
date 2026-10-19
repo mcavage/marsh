@@ -91,12 +91,18 @@ peg::parser! {
             marsh_extensions_enabled() command:fanout_command() { ast::Command::Fanout(command) } /
             marsh_extensions_enabled() command:split_command() { ast::Command::Split(command) } /
             marsh_extensions_enabled() command:collect_command() { ast::Command::Collect(command) } /
+            marsh_extensions_enabled() command:placement_command() { ast::Command::Placement(command) } /
             !fanout_command_start() c:simple_command() { ast::Command::Simple(c) } /
             c:compound_command() r:redirect_list()? { ast::Command::Compound(c, r) } /
             expected!("command")
 
         rule fanout_command_start() =
-            marsh_extensions_enabled() (specific_word("fanout") / specific_word("split")) specific_word("{")
+            marsh_extensions_enabled() (specific_word("fanout") / specific_word("split")) specific_word("{") /
+            // A `cloud [WORD...] {` that is not a well-formed block is a
+            // syntax error, never an ordinary command that would run its
+            // pieces locally.
+            marsh_extensions_enabled() specific_word("cloud")
+                (!specific_word("{") !io_redirect() word())* specific_word("{")
 
         rule split_command() -> ast::FanoutCommand =
             start:specific_word("split") specific_word("{") linebreak()
@@ -157,6 +163,24 @@ peg::parser! {
                     items[last].1 = separator;
                 }
                 ast::CompoundList(items)
+            }
+
+        rule placement_command() -> ast::PlacementCommand =
+            start:specific_word("cloud")
+            options:(!specific_word("{") !io_redirect() w:word() { ast::Word::from(w) })*
+            specific_word("{") body:compound_list() end:specific_word("}")
+            redirects:redirect_list()? {
+                let end = redirects
+                    .as_ref()
+                    .and_then(SourceLocation::location)
+                    .unwrap_or_else(|| end.location().clone());
+                ast::PlacementCommand {
+                    place: "cloud".into(),
+                    options,
+                    body,
+                    redirects,
+                    loc: SourceSpan::within(start.location(), &end),
+                }
             }
 
         rule collect_command() -> ast::CollectCommand =
@@ -899,6 +923,7 @@ fn add_pipe_extension_redirection(c: &mut ast::Command) -> Result<(), &'static s
         ast::Command::Fanout(_) | ast::Command::Split(_) | ast::Command::Collect(_) => {
             return Err("|& is unsupported for marsh composition stages");
         }
+        ast::Command::Placement(c) => add_to_redirect_list(&mut c.redirects, r),
         ast::Command::Simple(c) => {
             let r = ast::CommandPrefixOrSuffixItem::IoRedirect(r);
             if let Some(l) = &mut c.suffix {

@@ -70,3 +70,25 @@ pub fn install_split_workspace_hook(hook: Arc<dyn SplitWorkspace>) {
 pub(crate) fn workspace() -> Option<&'static Arc<dyn SplitWorkspace>> {
     SPLIT_WORKSPACE.get()
 }
+
+/// The program and leading arguments that run a placement block
+/// (`cloud { ... }`); the block's source follows as `-c SOURCE`.
+#[derive(Clone, Debug)]
+pub struct PlacementCommand {
+    /// Absolute path of the embedding's executable.
+    pub program: String,
+    /// Arguments before `-c SOURCE` (for marsh: `cloud`).
+    pub arguments: Vec<String>,
+}
+
+static PLACEMENT: OnceLock<PlacementCommand> = OnceLock::new();
+
+/// Install the placement runner; without one a placement block is refused.
+pub fn install_placement_command(command: PlacementCommand) {
+    let _ = PLACEMENT.set(command);
+}
+
+/// The installed placement runner.
+pub fn placement_command() -> Option<&'static PlacementCommand> {
+    PLACEMENT.get()
+}

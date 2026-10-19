@@ -23,6 +23,8 @@ Usage:
   marsh join [--json] [--keep] [-- CMD [ARG...]]
   marsh fanout [-n] [::: LABEL CMD [ARG...]]... | marsh collect [--json] [--timing]
                                                            Concurrent, same files
+  marsh cloud [--cpus N] [--ttl DURATION] -c SCRIPT | -- PROGRAM [ARG...]
+                                                           This job's Kit in Docker Cloud
   marsh jobs [--json] | jobs --tree [--json] | jobs show JOB [--json]   This job's subtree
   marsh context                                            Print this job's context
 
@@ -39,6 +41,14 @@ pub fn main() -> i32 {
     if let Some(name) = arguments
         .get(1)
         .and_then(|argument| argument.to_str())
+        .and_then(|argument| argument.strip_prefix("--cloud-link="))
+    {
+        // `#!marsh-local --cloud-link=NAME` in a cloud workload: an agent call.
+        return crate::cloud_helper::link(name, arguments.get(3..).unwrap_or_default());
+    }
+    if let Some(name) = arguments
+        .get(1)
+        .and_then(|argument| argument.to_str())
         .and_then(|argument| argument.strip_prefix("--link="))
     {
         // `#!/run/marsh/marsh --link=NAME` gives [artifact, --link=NAME, stub, args...]:
@@ -52,13 +62,33 @@ pub fn main() -> i32 {
     if let Some(verb) = arguments.get(1).and_then(|verb| verb.to_str())
         && matches!(
             verb,
-            "split" | "join" | "splits" | "run" | "jobs" | "context" | "fanout" | "collect"
+            "split"
+                | "join"
+                | "splits"
+                | "run"
+                | "jobs"
+                | "context"
+                | "fanout"
+                | "collect"
+                | "cloud"
         )
         && Path::new(JOB_JSON).exists()
     {
         return cli(&arguments[1..]);
     }
+    if arguments.get(1).is_some_and(|verb| verb == "cloud") {
+        // A cloud shell starting cloud work (cloud -> cloud) is not
+        // supported (`docs/design/cloud-placement.md` s8); refuse, never run.
+        eprintln!("marsh: cloud: a cloud workload cannot place further work in the cloud");
+        return 125;
+    }
     brush_shell::entry::enable_marsh_extensions();
+    // In a cloud block: `split { }` forks and joins inside the sandbox.
+    if let Some(root) = std::env::var_os(crate::cloud_split::ROOT_VARIABLE) {
+        brush_shell::bundled::install_split_workspace_hook(std::sync::Arc::new(
+            crate::cloud_split::CloudSplit { root: root.into() },
+        ));
+    }
     brush_shell::entry::run();
     0
 }
@@ -143,6 +173,49 @@ pub(crate) fn offered(
 
 /// Start `name` as a child job over `cap.sock` and relay it.
 fn child(name: &str, arguments: &[OsString], spawn: Option<Vec<String>>, from_link: bool) -> i32 {
+    child_at(
+        name,
+        arguments,
+        spawn,
+        from_link,
+        marsh_daemon::Placement::Local,
+    )
+}
+
+/// `marsh cloud` in a job: a cloud child that runs in this job's own Kit in
+/// Docker Cloud (refused when the Kit has none), with this job's view.
+fn cloud_child(arguments: &[OsString]) -> i32 {
+    let mut index = 0;
+    while arguments
+        .get(index)
+        .is_some_and(|word| matches!(word.to_str(), Some("--cpus" | "--ttl")))
+    {
+        index += 2;
+    }
+    if !matches!(
+        arguments.get(index).and_then(|word| word.to_str()),
+        Some("-c" | "--")
+    ) || arguments.len() <= index + 1
+    {
+        eprintln!("marsh: cloud: expected [--cpus N] [--ttl DURATION] -c SCRIPT or -- PROGRAM");
+        return 2;
+    }
+    child_at(
+        "cloud",
+        arguments,
+        None,
+        false,
+        marsh_daemon::Placement::Cloud,
+    )
+}
+
+fn child_at(
+    name: &str,
+    arguments: &[OsString],
+    spawn: Option<Vec<String>>,
+    from_link: bool,
+    placement: marsh_daemon::Placement,
+) -> i32 {
     let document = document().unwrap_or_default();
     let refused = if from_link { 126 } else { 125 };
     if !Path::new(SOCKET).exists() {
@@ -165,7 +238,7 @@ fn child(name: &str, arguments: &[OsString], spawn: Option<Vec<String>>, from_li
             .iter()
             .map(|argument| argument.as_bytes().to_vec())
             .collect(),
-        placement: marsh_daemon::Placement::Local,
+        placement,
         environment,
         working_directory: Some(cwd),
         // The daemon replaces this with the job's own session; only the
@@ -265,6 +338,7 @@ fn cli(arguments: &[OsString]) -> i32 {
             );
             0
         }
+        "cloud" => cloud_child(rest),
         "run" => match parse_run(rest) {
             Ok(None) => {
                 print!("{RUN_HELP}");

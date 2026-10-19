@@ -373,6 +373,8 @@ pub enum Command {
     Split(FanoutCommand),
     /// An marsh fanout result renderer.
     Collect(CollectCommand),
+    /// An marsh placement block (`cloud { LIST; }`).
+    Placement(PlacementCommand),
     /// A simple command, directly invoking an external command, a built-in command,
     /// a shell function, or similar.
     Simple(SimpleCommand),
@@ -400,6 +402,7 @@ impl SourceLocation for Command {
         match self {
             Self::Fanout(command) | Self::Split(command) => command.location(),
             Self::Collect(command) => command.location(),
+            Self::Placement(command) => command.location(),
             Self::Simple(s) => s.location(),
             Self::Compound(c, r) => {
                 match (c.location(), r.as_ref().and_then(SourceLocation::location)) {
@@ -418,6 +421,7 @@ impl Display for Command {
             Self::Fanout(command) => command.fmt_with_keyword(f, "fanout"),
             Self::Split(command) => command.fmt_with_keyword(f, "split"),
             Self::Collect(command) => write!(f, "{command}"),
+            Self::Placement(command) => write!(f, "{command}"),
             Self::Simple(simple_command) => write!(f, "{simple_command}"),
             Self::Compound(compound_command, redirect_list) => {
                 write!(f, "{compound_command}")?;
@@ -459,8 +463,16 @@ impl Display for FanoutCommand {
 impl FanoutCommand {
     fn fmt_with_keyword(&self, f: &mut std::fmt::Formatter<'_>, keyword: &str) -> std::fmt::Result {
         writeln!(f, "{keyword} {{")?;
+        // Each body in braces: a newline inside a multi-item body would
+        // otherwise end the branch when this text is parsed again (a block
+        // carried as source, e.g. to `cloud { ... }`).
         for branch in &self.branches {
-            writeln!(f, "{}: {}", branch.label, branch.body)?;
+            writeln!(
+                f,
+                "{}: {{ {} }}",
+                branch.label,
+                TerminatedCompoundList(&branch.body)
+            )?;
         }
         write!(f, "}}")
     }
@@ -508,6 +520,54 @@ impl Display for CollectCommand {
         for argument in &self.arguments {
             write!(f, " {argument}")?;
         }
+        if let Some(redirects) = &self.redirects {
+            write!(f, "{redirects}")?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[cfg_attr(
+    any(test, feature = "serde"),
+    derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)
+)]
+/// A command list evaluated by a fresh shell at another execution place.
+pub struct PlacementCommand {
+    /// The place keyword (`cloud`).
+    pub place: String,
+    /// Options before the block (`cloud --cpus 4 { ... }`), expanded by the
+    /// caller like ordinary arguments.
+    pub options: Vec<Word>,
+    /// The block's command list, evaluated by the remote shell.
+    pub body: CompoundList,
+    /// Redirections owned by the caller.
+    pub redirects: Option<RedirectList>,
+    /// Source location of the complete form.
+    pub loc: SourceSpan,
+}
+
+impl Node for PlacementCommand {}
+impl SourceLocation for PlacementCommand {
+    fn location(&self) -> Option<SourceSpan> {
+        Some(self.loc.clone())
+    }
+}
+impl Display for PlacementCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.place)?;
+        for option in &self.options {
+            write!(f, " {option}")?;
+        }
+        writeln!(f, " {{ ")?;
+        write!(
+            indenter::indented(f).with_str(DISPLAY_INDENT),
+            "{}",
+            TerminatedCompoundList(&self.body)
+        )?;
+        writeln!(f)?;
+        write!(f, "}}")?;
         if let Some(redirects) = &self.redirects {
             write!(f, "{redirects}")?;
         }

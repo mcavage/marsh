@@ -61,6 +61,7 @@ mod guest_home;
 pub use guest_home::prepare_persistent_guest_home;
 
 const STOCK_SBX_PROXY_ENDPOINT: &[u8] = b"http://gateway.docker.internal:3128";
+const CLOUD_V2_PROXY_ENDPOINT: &[u8] = b"http://192.0.2.1:8889";
 const STOCK_SBX_MCP_URL: &[u8] = b"http://mcp-gateway.docker.internal/mcp";
 const PROXY_VARIABLES: &[&str] = &[
     "HTTP_PROXY",
@@ -1106,6 +1107,25 @@ pub trait JobRuntime: Send + Sync {
     }
 }
 
+/// Trusted executor configuration, never a job-frame or exported-env choice.
+/// Each profile accepts only its qualified stock endpoint. Cloud MCP plumbing
+/// is not qualified yet and is rejected rather than inherited from local SBX.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SbxRuntimeProfile {
+    #[default]
+    Local,
+    CloudV2,
+}
+
+impl SbxRuntimeProfile {
+    const fn proxy_endpoint(self) -> &'static [u8] {
+        match self {
+            Self::Local => STOCK_SBX_PROXY_ENDPOINT,
+            Self::CloudV2 => CLOUD_V2_PROXY_ENDPOINT,
+        }
+    }
+}
+
 /// Docker CLI backend. The CLI and daemon endpoint stay in the trusted worker;
 /// neither is included in the job specification or container mounts.
 pub struct DockerCliRuntime<R> {
@@ -1113,6 +1133,7 @@ pub struct DockerCliRuntime<R> {
     executable: PathBuf,
     engine_socket: PathBuf,
     sbx_environment: Vec<(String, OsString)>,
+    sbx_profile: SbxRuntimeProfile,
     trusted_ca_bundle: PathBuf,
     trusted_ca_owner: u32,
     byte_carriers: byte_carrier::CarrierStore,
@@ -1129,6 +1150,7 @@ impl<R> DockerCliRuntime<R> {
             executable: executable.into(),
             engine_socket: "/var/run/docker.sock".into(),
             sbx_environment: Vec::new(),
+            sbx_profile: SbxRuntimeProfile::Local,
             trusted_ca_bundle: TRUSTED_CA_BUNDLE.into(),
             trusted_ca_owner: 0,
             byte_carriers: byte_carrier::CarrierStore::system(),
@@ -1139,6 +1161,13 @@ impl<R> DockerCliRuntime<R> {
     #[must_use]
     pub fn with_engine_socket(mut self, socket: impl Into<PathBuf>) -> Self {
         self.engine_socket = socket.into();
+        self
+    }
+
+    /// Selects trusted bootstrap policy, not authority supplied by a workload.
+    #[must_use]
+    pub fn with_sbx_profile(mut self, profile: SbxRuntimeProfile) -> Self {
+        self.sbx_profile = profile;
         self
     }
 
@@ -1169,6 +1198,7 @@ impl<R> DockerCliRuntime<R> {
 }
 
 impl DockerCliRuntime<SystemCommandRunner> {
+    /// The existing local worker profile. Its startup behavior is unchanged.
     #[must_use]
     pub fn system() -> Self {
         let environment = PROXY_VARIABLES
@@ -1183,6 +1213,22 @@ impl DockerCliRuntime<SystemCommandRunner> {
             TRUSTED_CA_BUNDLE,
             0,
         )
+    }
+
+    /// Snapshots and validates trusted SBX plumbing before a worker advertises
+    /// readiness. Cloud requires its exact proxy pair and root-owned CA bundle;
+    /// there is no empty-proxy or caller-selected-URL fallback.
+    ///
+    /// # Errors
+    /// Rejects unsupported endpoints, missing pairs, unqualified MCP settings,
+    /// and unsafe CA files before any Docker operation.
+    pub fn system_with_profile(profile: SbxRuntimeProfile) -> Result<Self, RuntimeError> {
+        let runtime = Self::system().with_sbx_profile(profile);
+        let environment = validate_sbx_environment(&runtime.sbx_environment, profile)?;
+        if environment.iter().any(|(name, _)| name == "HTTP_PROXY") {
+            validate_ca_bundle(&runtime.trusted_ca_bundle, runtime.trusted_ca_owner)?;
+        }
+        Ok(runtime)
     }
 }
 
@@ -1671,8 +1717,12 @@ fn parse_resource_state(bytes: &[u8]) -> Result<(bool, i32, u64), RuntimeError> 
 
 fn validate_sbx_environment(
     environment: &[(String, OsString)],
+    profile: SbxRuntimeProfile,
 ) -> Result<Vec<(String, OsString)>, RuntimeError> {
     if environment.is_empty() {
+        if profile == SbxRuntimeProfile::CloudV2 {
+            return Err(invalid_sbx_environment("HTTP_PROXY"));
+        }
         return Ok(Vec::new());
     }
     let mut validated = Vec::with_capacity(environment.len());
@@ -1693,7 +1743,7 @@ fn validate_sbx_environment(
             return Err(invalid_sbx_environment(name));
         }
         match name.as_str() {
-            "HTTP_PROXY" | "HTTPS_PROXY" if bytes != STOCK_SBX_PROXY_ENDPOINT => {
+            "HTTP_PROXY" | "HTTPS_PROXY" if bytes != profile.proxy_endpoint() => {
                 return Err(invalid_sbx_environment(name));
             }
             "NODE_USE_ENV_PROXY" if bytes != b"1" => {
@@ -1706,6 +1756,11 @@ fn validate_sbx_environment(
             | "SBX_CRED_GITHUB_MODE"
             | "SBX_CRED_SBX-LOGIN_MODE"
                 if !matches!(bytes, b"none" | b"apikey" | b"oauth") =>
+            {
+                return Err(invalid_sbx_environment(name));
+            }
+            "MCP_GATEWAY_URL" | "MCP_SENTINEL_TOKEN_NAME"
+                if profile == SbxRuntimeProfile::CloudV2 =>
             {
                 return Err(invalid_sbx_environment(name));
             }
@@ -1727,7 +1782,7 @@ fn validate_sbx_environment(
     }
     let has_proxy = validated.iter().any(|(name, _)| name == "HTTP_PROXY")
         || validated.iter().any(|(name, _)| name == "HTTPS_PROXY");
-    if has_proxy
+    if (has_proxy || profile == SbxRuntimeProfile::CloudV2)
         && let Some(required) = ["HTTP_PROXY", "HTTPS_PROXY"]
             .into_iter()
             .find(|required| !validated.iter().any(|(name, _)| name == required))
@@ -1900,7 +1955,7 @@ impl<R: CommandRunner> JobRuntime for DockerCliRuntime<R> {
                 JobSpecError::InvalidWorkingDirectory,
             ));
         }
-        let sbx_environment = validate_sbx_environment(&self.sbx_environment)?;
+        let sbx_environment = validate_sbx_environment(&self.sbx_environment, self.sbx_profile)?;
         let byte_bridge = byte_carrier::required(spec);
         let mut arguments = vec![
             OsString::from("create"),

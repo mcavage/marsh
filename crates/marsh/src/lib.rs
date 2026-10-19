@@ -2,6 +2,8 @@
 
 pub mod cli;
 pub mod client;
+pub mod cloud_helper;
+pub mod cloud_split;
 pub mod external_commands;
 pub mod fanout_cli;
 pub mod job;

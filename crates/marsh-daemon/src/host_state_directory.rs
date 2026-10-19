@@ -136,10 +136,18 @@ pub fn recorded_scope_vms(
         Path::to_path_buf,
     );
     let control_root = control_root.canonicalize().unwrap_or(control_root);
-    let map = control_root
-        .join(scope_control_leaf(&selected))
-        .join("vm-ownership.json");
-    let bytes = match fs::read(&map) {
+    let scope = control_root.join(scope_control_leaf(&selected));
+    // Local VMs, then owned Docker Cloud sandboxes.
+    let mut names = recorded_names(&scope.join("vm-ownership.json"), "vms")?;
+    names.extend(recorded_names(
+        &scope.join("cloud").join("cloud-ownership.json"),
+        "entries",
+    )?);
+    Ok(names)
+}
+
+fn recorded_names(map: &Path, key: &str) -> io::Result<Vec<String>> {
+    let bytes = match fs::read(map) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),
@@ -147,8 +155,8 @@ pub fn recorded_scope_vms(
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     Ok(value
-        .get("vms")
+        .get(key)
         .and_then(serde_json::Value::as_object)
-        .map(|vms| vms.keys().cloned().collect())
+        .map(|entries| entries.keys().cloned().collect())
         .unwrap_or_default())
 }

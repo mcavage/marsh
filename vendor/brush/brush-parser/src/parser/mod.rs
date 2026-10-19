@@ -258,6 +258,19 @@ fn normalize_marsh_fanout_tokens(tokens: &mut Vec<Token>) {
             (Token::Word(name, _), Token::Word(open, _))
                 if (name == "fanout" || name == "split") && open == "{");
         if !fanout {
+            // `cloud [WORD...] {`: the block's first word is in command
+            // position, so a `split {` or `fanout {` there is normalized too.
+            if command_start
+                && matches!(&tokens[start], Token::Word(word, _) if word == "cloud")
+                && let Some(open) = tokens[start + 1..]
+                    .iter()
+                    .position(|token| !matches!(token, Token::Word(..)) || token.to_str() == "{")
+                    .map(|offset| start + 1 + offset)
+                    .filter(|open| matches!(&tokens[*open], Token::Word(word, _) if word == "{"))
+            {
+                start = open + 1;
+                continue;
+            }
             update_fanout_command_start(&mut command_start, &tokens[start]);
             start += 1;
             continue;
