@@ -1,7 +1,9 @@
-# The POSIX text and process tools a Kit job may expect.
+# The POSIX text and process tools a Kit job may expect, plus which and the
+# GitHub CLI.
 grep
 mawk
 diffutils
 procps
 gzip
 which
+gh
