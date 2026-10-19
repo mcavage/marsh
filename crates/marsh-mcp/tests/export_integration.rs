@@ -703,7 +703,8 @@ async fn stdio_entrypoint_exposes_bundle_and_revokes_changed_tool() {
 
 /// A server started for an isolated stock SBX instance (`--app-name`) keeps
 /// its host commands on that instance even though the child environment is
-/// otherwise cleared.
+/// otherwise cleared. `export-serve` runs only on the macOS host.
+#[cfg(target_os = "macos")]
 #[tokio::test]
 async fn stdio_entrypoint_keeps_host_commands_on_the_selected_sbx_instance() {
     let harness = TestHarness::new(Arc::new(TestKitBackend::new(vec![])));
