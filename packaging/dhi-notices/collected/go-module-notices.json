@@ -35,6 +35,10 @@
       "sha256": "20bde2079ccfe3088e66a4ec9dc9b836829d028ab345bee77fea2107d6baf46b"
     },
     {
+      "path": "/usr/bin/gh",
+      "sha256": "a9c40e4bbd3e575291b1fa67c1be515ba68dda4aefcd98766ee0e9c4e956f9dd"
+    },
+    {
       "path": "/usr/bin/runc",
       "sha256": "607c96111a8b403142edd59238c9b60e12a384ca1de278eeb403e9fea702fe60"
     },
@@ -43,9 +47,77 @@
       "sha256": "93e5fc4ce3f3082878f21eb5cb0fc10e3ef0b384a854374177b068c50fcc9b69"
     }
   ],
-  "input_sha256": "1e2fb5cc45578488ffccd48276d0d8734b42e7b0a9e20970691b1c53cde6d8fc",
+  "input_sha256": "9200ca5afc1cb9d306390a0ca09d3b2131f76e0a49008a9f30057c1189e1378a",
   "checksum_database": "sum.golang.org",
   "modules": [
+    {
+      "path": "charm.land/bubbles/v2",
+      "version": "v2.2.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:Fq1+qm5hV6GkvzLQDhCBpXXE5tLgvh1PRriCLwSvIQU=",
+      "go_mod_sum": "h1:wdMgn+sje1KNXdwFizIWjbf328fIUBxqEmJ/vYPo8yc=",
+      "archive_sha256": "64292cdc965e4cdd81fae7b9b26f77ced179321ab014f49a442b4789078b0024",
+      "notices": [
+        {
+          "source_path": "charm.land/bubbles/v2@v2.2.1/LICENSE",
+          "sha256": "373b3931e66627aadcfebd7771df93f3439203147e587a924508c63e20184d7f",
+          "file": "texts/373b3931e66627aadcfebd7771df93f3439203147e587a924508c63e20184d7f.txt"
+        }
+      ]
+    },
+    {
+      "path": "charm.land/bubbletea/v2",
+      "version": "v2.0.10",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:oolvo20VBpI0PfqE7iFjkZ1bx0WpmXGfnKz5Yldjq5o=",
+      "go_mod_sum": "h1:QOatcnhOjYIfxzUSTz6raF7Ex4R/rIuHa3SnBdCCpMc=",
+      "archive_sha256": "a6f3e3ec997b59bda0efbd9139cf3e5e6ec0f561e6b17fae31e35791ba869d64",
+      "notices": [
+        {
+          "source_path": "charm.land/bubbletea/v2@v2.0.10/LICENSE",
+          "sha256": "373b3931e66627aadcfebd7771df93f3439203147e587a924508c63e20184d7f",
+          "file": "texts/373b3931e66627aadcfebd7771df93f3439203147e587a924508c63e20184d7f.txt"
+        }
+      ]
+    },
+    {
+      "path": "charm.land/huh/v2",
+      "version": "v2.0.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:2cJsMqEPwSywGHvdlKsJyQKPtSJLVnFKyFbsYZTlLkU=",
+      "go_mod_sum": "h1:93eEveeeqn47MwiC3tf+2atZ2l7Is88rAtmZNZ8x9Wc=",
+      "archive_sha256": "36b678812fc02d48ecd1d9eac232eef07abce4425b9fdd13eca1b5f4feabec83",
+      "notices": [
+        {
+          "source_path": "charm.land/huh/v2@v2.0.3/LICENSE",
+          "sha256": "7d6383ae24645c61294bad8cb1be56114af794c34f3c47ea52d1e468a5cec00f",
+          "file": "texts/7d6383ae24645c61294bad8cb1be56114af794c34f3c47ea52d1e468a5cec00f.txt"
+        }
+      ]
+    },
+    {
+      "path": "charm.land/lipgloss/v2",
+      "version": "v2.0.6",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:EaGKeuA8FvF+v2BT5VmZd2LoYLaMZJXA5n34th8nCIQ=",
+      "go_mod_sum": "h1:ipDDJNSGa1hlwDtSfW1s2/xR8Vdhbut4PXh2zEKZd0Q=",
+      "archive_sha256": "26b77e3a8159d4d084d04a32c63db22cf9a48553d3eee1b488e478b1bb592c23",
+      "notices": [
+        {
+          "source_path": "charm.land/lipgloss/v2@v2.0.6/LICENSE",
+          "sha256": "3f531fb89f23b218fbe16b24fb5950418fa1f0046db5cfddb2c1e0d6d39bfcc0",
+          "file": "texts/3f531fb89f23b218fbe16b24fb5950418fa1f0046db5cfddb2c1e0d6d39bfcc0.txt"
+        }
+      ]
+    },
     {
       "path": "cloud.google.com/go/auth",
       "version": "v0.20.0",
@@ -159,7 +231,8 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/docker",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ],
       "sum": "h1:85+piFYR1tMbRrLcDwR18y4UKJ3aH1Tbzi24VRW1TK8=",
       "go_mod_sum": "h1:E/hbnu0NxMFBjpMIE34DRGLWqDy0g5FuKDhCb31ngxA=",
@@ -169,6 +242,28 @@
           "source_path": "dario.cat/mergo@v1.0.2/LICENSE",
           "sha256": "cb7684632b729955293cab8a0bbf4134d53d9532a30761c33c8a4878302a7bd3",
           "file": "texts/cb7684632b729955293cab8a0bbf4134d53d9532a30761c33c8a4878302a7bd3.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/AlecAivazis/survey/v2",
+      "version": "v2.3.7",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:6I/u8FvytdGsgonrYsVn2t8t4QiRnh6QSTqkkhIiSjQ=",
+      "go_mod_sum": "h1:xUTIdE4KCOIjsBAE1JYsUPoCqYdZ1reCfTwbto0Fduo=",
+      "archive_sha256": "613a49c86cab69b67fbc8fb0f0b183c23bfdc2700122330c6b53020e01ebad60",
+      "notices": [
+        {
+          "source_path": "github.com/AlecAivazis/survey/v2@v2.3.7/LICENSE",
+          "sha256": "b97e345ab838c46facf556eff4af93b4068650f8ac9247180e0395e5091baf02",
+          "file": "texts/b97e345ab838c46facf556eff4af93b4068650f8ac9247180e0395e5091baf02.txt"
+        },
+        {
+          "source_path": "github.com/AlecAivazis/survey/v2@v2.3.7/terminal/LICENSE.txt",
+          "sha256": "ab09cc880fe030b021587f3142c6a2d51d1df0f75182d9c45871a37c84ffb676",
+          "file": "texts/ab09cc880fe030b021587f3142c6a2d51d1df0f75182d9c45871a37c84ffb676.txt"
         }
       ]
     },
@@ -241,9 +336,44 @@
       ]
     },
     {
+      "path": "github.com/MakeNowJust/heredoc",
+      "version": "v1.0.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:cXCdzVdstXyiTqTvfqk9SDHpKNjxuom+DOlyEeQ4pzQ=",
+      "go_mod_sum": "h1:mG5amYoWBHf8vpLOuehzbGGw0EHxpZZ6lCpQ4fNJ8LE=",
+      "archive_sha256": "062afe6e11aa3c3ac0035d08907b80d5e5b7563905603391ee774bda440abf16",
+      "notices": [
+        {
+          "source_path": "github.com/MakeNowJust/heredoc@v1.0.0/LICENSE",
+          "sha256": "3cf06d7751ecd37a2822b9fa6ca09510436c0abbfdf3c6261f59c0f0a7f92fe3",
+          "file": "texts/3cf06d7751ecd37a2822b9fa6ca09510436c0abbfdf3c6261f59c0f0a7f92fe3.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/Masterminds/goutils",
+      "version": "v1.1.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:5nUrii3FMTL5diU80unEVvNevw1nH4+ZV4DSLVJLSYI=",
+      "go_mod_sum": "h1:8cTjp+g8YejhMuvIA5y2vz3BpJxksy863GQaJW2MFNU=",
+      "archive_sha256": "ef8778a20c37e98a92e3b1db5ab027cc201743a2f5bfb26ba228bf0515e20b48",
+      "notices": [
+        {
+          "source_path": "github.com/Masterminds/goutils@v1.1.1/LICENSE.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/Masterminds/semver/v3",
       "version": "v3.4.0",
       "binaries": [
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=",
@@ -254,6 +384,23 @@
           "source_path": "github.com/Masterminds/semver/v3@v3.4.0/LICENSE.txt",
           "sha256": "2db9097f7b3750c1c9426996d21fe443d339131fb758c2167d2d5fabe8e6cbf9",
           "file": "texts/2db9097f7b3750c1c9426996d21fe443d339131fb758c2167d2d5fabe8e6cbf9.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/Masterminds/sprig/v3",
+      "version": "v3.3.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:mQh0Yrg1XPo6vjYXgtf5OtijNAKJRNcTdOOGZe3tPhs=",
+      "go_mod_sum": "h1:Zy1iXRYNqNLUolqCpL4uhk6SHUMAOSCzdgBfDb35Lz0=",
+      "archive_sha256": "c731370f7601711d1df9b4b0c9bb8488fc381b32fd3e7de97a03673e8287b719",
+      "notices": [
+        {
+          "source_path": "github.com/Masterminds/sprig/v3@v3.3.0/LICENSE.txt",
+          "sha256": "dbad9a1f3fee465db42b92cb8a41ddaae028248fdcc54f46f1e72f7707d21dc2",
+          "file": "texts/dbad9a1f3fee465db42b92cb8a41ddaae028248fdcc54f46f1e72f7707d21dc2.txt"
         }
       ]
     },
@@ -419,6 +566,23 @@
       ]
     },
     {
+      "path": "github.com/alecthomas/chroma/v2",
+      "version": "v2.27.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:FodwmyOBgJULFYmDqibcp9pvfDLWdtPRh9v/r5BXYZs=",
+      "go_mod_sum": "h1:NjJ3ciIgrqBNeIkWZ4e46nseoLDslxU1LmfCoL+wcY8=",
+      "archive_sha256": "8eb074aaf4a7b4cf406e81062cf5d6b54c32797be53f5287d88ef570fa73625f",
+      "notices": [
+        {
+          "source_path": "github.com/alecthomas/chroma/v2@v2.27.0/COPYING",
+          "sha256": "13654b052f885cb3fa47d7343e13975d9c8a64c3bcd84993c35d5eb01f22b23f",
+          "file": "texts/13654b052f885cb3fa47d7343e13975d9c8a64c3bcd84993c35d5eb01f22b23f.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/anchore/go-struct-converter",
       "version": "v0.1.0",
       "binaries": [
@@ -491,6 +655,7 @@
       "version": "v0.0.0-20230301143203-a9d515a09cc2",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:DklsrG3dyBCFEj5IhUbnKptjxatkF07cF2ak3yi77so=",
@@ -501,6 +666,23 @@
           "source_path": "github.com/asaskevich/govalidator@v0.0.0-20230301143203-a9d515a09cc2/LICENSE",
           "sha256": "e1a36eac3f3109d06869f57127cc32683f70a170dcefe5f143ee378ff313ddfe",
           "file": "texts/e1a36eac3f3109d06869f57127cc32683f70a170dcefe5f143ee378ff313ddfe.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/atotto/clipboard",
+      "version": "v0.1.4",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:EH0zSVneZPSuFR11BlR9YppQTVDbh5+16AmcJi4g1z4=",
+      "go_mod_sum": "h1:ZY9tmq7sm5xIbd9bOK4onWV4S6X0u6GY7Vn0Yu86PYI=",
+      "archive_sha256": "d67b2c36c662751309fd2ec351df3651584bea840bd27be9a90702c3a238b43f",
+      "notices": [
+        {
+          "source_path": "github.com/atotto/clipboard@v0.1.4/LICENSE",
+          "sha256": "2c4bac8e2a97180d6e7758c37de85d1cda1859aaf85b56da15d935d2d9a5564f",
+          "file": "texts/2c4bac8e2a97180d6e7758c37de85d1cda1859aaf85b56da15d935d2d9a5564f.txt"
         }
       ]
     },
@@ -821,6 +1003,40 @@
       ]
     },
     {
+      "path": "github.com/aymanbagabas/go-osc52/v2",
+      "version": "v2.0.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=",
+      "go_mod_sum": "h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=",
+      "archive_sha256": "939ebf2a5481f2172e1a5e0c318d05aef5b6d950a960556216c3da7879a927f8",
+      "notices": [
+        {
+          "source_path": "github.com/aymanbagabas/go-osc52/v2@v2.0.1/LICENSE",
+          "sha256": "11319e34d9dac2f45392f14f4f62e28b24173cfa13d39b32e7b7b66c2f3bdccd",
+          "file": "texts/11319e34d9dac2f45392f14f4f62e28b24173cfa13d39b32e7b7b66c2f3bdccd.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/aymerick/douceur",
+      "version": "v0.2.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuPk=",
+      "go_mod_sum": "h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=",
+      "archive_sha256": "dcbf69760cc1a8b32384495438e1086e4c3d669b2ebc0debd92e1865ffd6be60",
+      "notices": [
+        {
+          "source_path": "github.com/aymerick/douceur@v0.2.0/LICENSE",
+          "sha256": "a91ec19456c4efb3d9fc22dc9c1ec60ec3701a9e8f4be511ebcf908c04288ffb",
+          "file": "texts/a91ec19456c4efb3d9fc22dc9c1ec60ec3701a9e8f4be511ebcf908c04288ffb.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/beorn7/perks",
       "version": "v1.0.1",
       "binaries": [
@@ -861,6 +1077,7 @@
       "version": "v3.5.1+incompatible",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:cQNTCjp13qL8KC3Nbxr/y2Bqb63oX6wdnnjpJbkM4JQ=",
@@ -875,12 +1092,69 @@
       ]
     },
     {
+      "path": "github.com/briandowns/spinner",
+      "version": "v1.23.2",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:Zc6ecUnI+YzLmJniCfDNaMbW0Wid1d5+qcTq4L2FW8w=",
+      "go_mod_sum": "h1:LaZeM4wm2Ywy6vO571mvhQNRcWfRUnXOs0RcKV0wYKM=",
+      "archive_sha256": "d4e47d6807f7fc3584afe8e62e0bbd4e9e0bcb923715baa7b6beab5c8271fcb1",
+      "notices": [
+        {
+          "source_path": "github.com/briandowns/spinner@v1.23.2/LICENSE",
+          "sha256": "cc4d4de0920b0d3912203b5d9aa76728ac4a11087f55da9ea00576db7d1e34e2",
+          "file": "texts/cc4d4de0920b0d3912203b5d9aa76728ac4a11087f55da9ea00576db7d1e34e2.txt"
+        },
+        {
+          "source_path": "github.com/briandowns/spinner@v1.23.2/NOTICE.txt",
+          "sha256": "b53dce8cb12bce0b96fc3e6cc59f9fb65f104dd0675c6a7102e19da89030b57c",
+          "file": "texts/b53dce8cb12bce0b96fc3e6cc59f9fb65f104dd0675c6a7102e19da89030b57c.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/catppuccin/go",
+      "version": "v0.3.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:d+0/YicIq+hSTo5oPuRi5kOpqkVA5tAsU6dNhvRu+aY=",
+      "go_mod_sum": "h1:8IHJuMGaUUjQM82qBrGNBv7LFq6JI3NnQCF6MOlZjpc=",
+      "archive_sha256": "e3be1459f9d1e63d003c19bcd310ec35027f5596ce87a1836ac4f72e4133dcf4",
+      "notices": [
+        {
+          "source_path": "github.com/catppuccin/go@v0.3.0/LICENSE",
+          "sha256": "814096d2c34cc216c624738a49356f32b7237733b4f7edb0685f4e50ef5074ba",
+          "file": "texts/814096d2c34cc216c624738a49356f32b7237733b4f7edb0685f4e50ef5074ba.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/cenkalti/backoff/v4",
+      "version": "v4.3.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=",
+      "go_mod_sum": "h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=",
+      "archive_sha256": "ef220b1ebf3bff4c46bbad5b2e123030e812b722b9e9dc88bc35956f9c622c2a",
+      "notices": [
+        {
+          "source_path": "github.com/cenkalti/backoff/v4@v4.3.0/LICENSE",
+          "sha256": "5c0476add4c38b55d0ed5ac11b85e00c38f26e1caee20dfe3ab58190103d1fbc",
+          "file": "texts/5c0476add4c38b55d0ed5ac11b85e00c38f26e1caee20dfe3ab58190103d1fbc.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/cenkalti/backoff/v5",
       "version": "v5.0.3",
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:ZN+IMa753KfX5hd8vVaMixjnqRZ3y8CuJKRKj1xcsSM=",
@@ -902,6 +1176,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=",
@@ -912,6 +1187,210 @@
           "source_path": "github.com/cespare/xxhash/v2@v2.3.0/LICENSE.txt",
           "sha256": "f566a9f97bacdaf00d9f21dd991e81dc11201c4e016c86b470799429a1c9a79c",
           "file": "texts/f566a9f97bacdaf00d9f21dd991e81dc11201c4e016c86b470799429a1c9a79c.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/colorprofile",
+      "version": "v0.4.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:QPa1IWkYI+AOB+fE+mg/5/4HRMZcaXex9t5KX76i20Q=",
+      "go_mod_sum": "h1:/zT4BhpD5aGFpqQQqw7a+VtHCzu+zrQtt1zhMt9mR4Q=",
+      "archive_sha256": "656472ff48f01a098418a31667f3253cf34e04d4e1cb6c1a0a80f76ad370b689",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/colorprofile@v0.4.3/LICENSE",
+          "sha256": "57d6eeeb336030b89c0e0d12cf869f84b97a481cd00b350ef21fca995da5a39a",
+          "file": "texts/57d6eeeb336030b89c0e0d12cf869f84b97a481cd00b350ef21fca995da5a39a.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/glamour",
+      "version": "v0.10.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:MtZvfwsYCx8jEPFJm3rIBFIMZUfUJ765oX8V6kXldcY=",
+      "go_mod_sum": "h1:f+uf+I/ChNmqo087elLnVdCiVgjSKWuXa/l6NU2ndYk=",
+      "archive_sha256": "980606e099a3f49bcbf2521f054e5205fdcd08db499975cdc374c5d0f14c79b8",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/glamour@v0.10.0/LICENSE",
+          "sha256": "30bf812ed0c30e86192cb609b74cf5f2a7303553f7e10ddbfc926172af115b89",
+          "file": "texts/30bf812ed0c30e86192cb609b74cf5f2a7303553f7e10ddbfc926172af115b89.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/lipgloss",
+      "version": "v1.1.1-0.20250404203927-76690c660834",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:ZR7e0ro+SZZiIZD7msJyA+NjkCNNavuiPBLgerbOziE=",
+      "go_mod_sum": "h1:aKC/t2arECF6rNOnaKaVU6y4t4ZeHQzqfxedE/VkVhA=",
+      "archive_sha256": "626c107b5c002b297a36aab58949904266eac5c6a030face80a771084bdb279a",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/lipgloss@v1.1.1-0.20250404203927-76690c660834/LICENSE",
+          "sha256": "699cffa88b62691ea09706d356e5ee0982e87ca2b1c58ca682f27d6ae87f9efc",
+          "file": "texts/699cffa88b62691ea09706d356e5ee0982e87ca2b1c58ca682f27d6ae87f9efc.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/ultraviolet",
+      "version": "v0.0.0-20260811164956-006e29f97886",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:rdnVWKgJpTVXKuKuJyxDJ+NFJdUaUqGvyGy61OcvlbA=",
+      "go_mod_sum": "h1:nAw0d9PhFp1qdzi2xhQU5YOu5sVpDIHWlaW2Uz/bCro=",
+      "archive_sha256": "f05a2aac1310f73700c7587db28429dacd345b1d68ca50c05048f9ac989c0f7f",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/ultraviolet@v0.0.0-20260811164956-006e29f97886/LICENSE",
+          "sha256": "8a77c755a1d1fbdc932e86f0449549121820b6f4cc1234b12fcfc8d38013c1de",
+          "file": "texts/8a77c755a1d1fbdc932e86f0449549121820b6f4cc1234b12fcfc8d38013c1de.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/x/ansi",
+      "version": "v0.11.8",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:JMFwp0CgDC2+jcOB162HH5k7I3FVbgFSMMYg7dSPBQQ=",
+      "go_mod_sum": "h1:ZNN+3mXny/516oTQPLMPIBeSINvNJJQ8uQXDgbeJxY0=",
+      "archive_sha256": "ac0870e7be61cbffe23d06404c77cfd43e11e162e1c79a4bf3bfaf57036d7407",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/x/ansi@v0.11.8/LICENSE",
+          "sha256": "0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b",
+          "file": "texts/0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/x/cellbuf",
+      "version": "v0.0.15",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:ur3pZy0o6z/R7EylET877CBxaiE1Sp1GMxoFPAIztPI=",
+      "go_mod_sum": "h1:J1YVbR7MUuEGIFPCaaZ96KDl5NoS0DAWkskup+mOY+Q=",
+      "archive_sha256": "2c5c421edef869c7f4b7b3fa29530a66897134764d95a750eed59ed5886d84f7",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/x/cellbuf@v0.0.15/LICENSE",
+          "sha256": "0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b",
+          "file": "texts/0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/x/exp/ordered",
+      "version": "v0.1.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:55/qLwjIh0gL0Vni+QAWk7T/qRVP6sBf+2agPBgnOFE=",
+      "go_mod_sum": "h1:5UHwmG+is5THxMyCJHNPCn2/ecI07aKNrW+LcResjJ8=",
+      "archive_sha256": "80554ac3bf96f3a1c4782708c820c757b9092652c5c1d6b421f397821d27689a",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/x/exp/ordered@v0.1.0/LICENSE",
+          "sha256": "0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b",
+          "file": "texts/0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/x/exp/slice",
+      "version": "v0.0.0-20250630141444-821143405392",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:VHLoEcL+kH60a4F8qMsPfOIfWjFE3ciaW4gge2YR3sA=",
+      "go_mod_sum": "h1:vI5nDVMWi6veaYH+0Fmvpbe/+cv/iJfMntdh+N0+Tms=",
+      "archive_sha256": "9276e4aa526d77efe0bfe3ffc34d903581d2cf49d48f86b95fde88d6fdbfe17c",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/x/exp/slice@v0.0.0-20250630141444-821143405392/LICENSE",
+          "sha256": "0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b",
+          "file": "texts/0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/x/exp/strings",
+      "version": "v0.0.0-20250630141444-821143405392",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:6ipGA1NEA0AZG2UEf81RQGJvEPvYLn/M18mZcdt4J8g=",
+      "go_mod_sum": "h1:Rgw3/F+xlcUc5XygUtimVSxAqCOsqyvJjqF5UHRvc5k=",
+      "archive_sha256": "61eb1b88a207afb7129ba657b9f366c2afe1079d81cb93b1a958c593b5e36507",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/x/exp/strings@v0.0.0-20250630141444-821143405392/LICENSE",
+          "sha256": "0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b",
+          "file": "texts/0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/x/term",
+      "version": "v0.2.2",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:xVRT/S2ZcKdhhOuSP4t5cLi5o+JxklsoEObBSgfgZRk=",
+      "go_mod_sum": "h1:kF8CY5RddLWrsgVwpw4kAa6TESp6EB5y3uxGLeCqzAI=",
+      "archive_sha256": "0452a430f7e6882393f81ba19a70a63709960acb9743e1199a7b04d908e6b506",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/x/term@v0.2.2/LICENSE",
+          "sha256": "0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b",
+          "file": "texts/0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/x/termios",
+      "version": "v0.1.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:o3Q2bT8eqzGnGPOYheoYS8eEleT5ZVNYNy8JawjaNZY=",
+      "go_mod_sum": "h1:rB7fnv1TgOPOyyKRJ9o+AsTU/vK5WHJ2ivHeut/Pcwo=",
+      "archive_sha256": "3dd9823ed5db08d398c276e216e4150560d3a6894814c4404251b4210b22abed",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/x/termios@v0.1.1/LICENSE",
+          "sha256": "0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b",
+          "file": "texts/0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/charmbracelet/x/windows",
+      "version": "v0.2.2",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:IofanmuvaxnKHuV04sC0eBy/smG6kIKrWG2/jYn2GuM=",
+      "go_mod_sum": "h1:/8XtdKZzedat74NQFn0NGlGL4soHB0YQZrETF96h75k=",
+      "archive_sha256": "fb3f82357ad9a8a25a42dfa1880434149dd6fcc43e0b32a03664f72082ce5c2f",
+      "notices": [
+        {
+          "source_path": "github.com/charmbracelet/x/windows@v0.2.2/LICENSE",
+          "sha256": "0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b",
+          "file": "texts/0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b.txt"
         }
       ]
     },
@@ -977,6 +1456,108 @@
       ]
     },
     {
+      "path": "github.com/cli/browser",
+      "version": "v1.3.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:LejqCrpWr+1pRqmEPDGnTZOjsMe7sehifLynZJuqJpo=",
+      "go_mod_sum": "h1:HH8s+fOAxjhQoBUAsKuPCbqUuxZDhQ2/aD+SzsEfBTk=",
+      "archive_sha256": "5d743729fcb6d5467f206328e476b0bdc124426a77e2d8e13320ad929afd0127",
+      "notices": [
+        {
+          "source_path": "github.com/cli/browser@v1.3.0/LICENSE",
+          "sha256": "4801bb0c5d70b980b3e1f63d1d2df8d84fec22548e3d73f03a68df1fb808791f",
+          "file": "texts/4801bb0c5d70b980b3e1f63d1d2df8d84fec22548e3d73f03a68df1fb808791f.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/cli/go-gh/v2",
+      "version": "v2.16.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:t8s29LToBmYjXeDXUnK7Wdm7NkYSyzGZK3t4Doa6GX0=",
+      "go_mod_sum": "h1:OaJTFtHJapQq670h/3L0vqm4NwZGoJmSAVctWiY+3pQ=",
+      "archive_sha256": "1220cee2967baeaefeb7f1eb390edd071adf65932a04c417104a3aec6d97eaae",
+      "notices": [
+        {
+          "source_path": "github.com/cli/go-gh/v2@v2.16.1/LICENSE",
+          "sha256": "e96f8a0a582ab45face583e87379731dca43f06b2d09fa73669f8846920c5a04",
+          "file": "texts/e96f8a0a582ab45face583e87379731dca43f06b2d09fa73669f8846920c5a04.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/cli/oauth",
+      "version": "v1.2.2",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:/qG/wok8jzu66tx7q+duGOIp4DT5P/ACXrdc33UoNUQ=",
+      "go_mod_sum": "h1:qd/FX8ZBD6n1sVNQO3aIdRxeu5LGw9WhKnYhIIoC2A4=",
+      "archive_sha256": "e6aa8a26ba87b8cab3f1e907faf33658f4224c31172a2c728e2bc928b73fcd64",
+      "notices": [
+        {
+          "source_path": "github.com/cli/oauth@v1.2.2/LICENSE",
+          "sha256": "ff13d7f814dc2e4ce2b81d8f33029fe4d80893a30dac2939883ffc5e4696dd53",
+          "file": "texts/ff13d7f814dc2e4ce2b81d8f33029fe4d80893a30dac2939883ffc5e4696dd53.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/cli/safeexec",
+      "version": "v1.0.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:e/C79PbXF4yYTN/wauC4tviMxEV13BwljGj0N9j+N00=",
+      "go_mod_sum": "h1:Z/D4tTN8Vs5gXYHDCbaM1S/anmEDnJb1iW0+EJ5zx3Q=",
+      "archive_sha256": "c867d2a3ad61200cc84e2604372e9bd5815cb283b2ff2b183e57fe29d00e01ba",
+      "notices": [
+        {
+          "source_path": "github.com/cli/safeexec@v1.0.1/LICENSE",
+          "sha256": "ae032828a823b28af2b6ade4f2ef453112642a3e4000643cd6623d32696b9fcb",
+          "file": "texts/ae032828a823b28af2b6ade4f2ef453112642a3e4000643cd6623d32696b9fcb.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/cli/shurcooL-graphql",
+      "version": "v0.0.4",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:6MogPnQJLjKkaXPyGqPRXOI2qCsQdqNfUY1QSJu2GuY=",
+      "go_mod_sum": "h1:3waN4u02FiZivIV+p1y4d0Jo1jc6BViMA73C+sZo2fk=",
+      "archive_sha256": "cbafac3fc126aa86fa6acf4ffed78ca6879473e09e3454608899b847a4a1b302",
+      "notices": [
+        {
+          "source_path": "github.com/cli/shurcooL-graphql@v0.0.4/LICENSE",
+          "sha256": "3e943be32a1cc9b52f52b10089a6a0775ab5998f5f801325e990a5abfb41e770",
+          "file": "texts/3e943be32a1cc9b52f52b10089a6a0775ab5998f5f801325e990a5abfb41e770.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/clipperhouse/displaywidth",
+      "version": "v0.11.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:lBc6kY44VFw+TDx4I8opi/EtL9m20WSEFgwIwO+UVM8=",
+      "go_mod_sum": "h1:bkrFNkf81G8HyVqmKGxsPufD3JhNl3dSqnGhOoSD/o0=",
+      "archive_sha256": "27830c91cdfb2a648748db21f7a2734dcb50d21c620edde51d488ba4e7967e3d",
+      "notices": [
+        {
+          "source_path": "github.com/clipperhouse/displaywidth@v0.11.0/LICENSE",
+          "sha256": "fcdcc889a11c39c73d36019b838af41b418eb7811af12b746ace40c3074bb96c",
+          "file": "texts/fcdcc889a11c39c73d36019b838af41b418eb7811af12b746ace40c3074bb96c.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/clipperhouse/uax29/v2",
       "version": "v2.6.0",
       "binaries": [
@@ -997,7 +1578,8 @@
       "path": "github.com/clipperhouse/uax29/v2",
       "version": "v2.7.0",
       "binaries": [
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/bin/gh"
       ],
       "sum": "h1:+gs4oBZ2gPfVrKPthwbMzWZDaAFPGYK72F0NJv2v7Vk=",
       "go_mod_sum": "h1:EFJ2TJMRUaplDxHKj1qAEhCtQPW2tJSwu5BF98AuoVM=",
@@ -1724,6 +2306,7 @@
       "version": "v0.0.0-20241213102144-19d51d7fe467",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:uX1JmpONuD549D73r6cgnxyUu18Zb7yHAy5AYU0Pm4Q=",
@@ -1798,6 +2381,7 @@
       "version": "v0.0.0-20230818184609-3a137a874352",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:ge14PCmCvPjpMQMIAH7uKg0lrtNSOdpYsRXlwk3QbaE=",
@@ -1830,6 +2414,23 @@
       ]
     },
     {
+      "path": "github.com/digitorus/timestamp",
+      "version": "v0.0.0-20250524132541-c45532741eea",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:ALRwvjsSP53QmnN3Bcj0NpR8SsFLnskny/EIMebAk1c=",
+      "go_mod_sum": "h1:GvWntX9qiTlOud0WkQ6ewFm0LPy5JUR1Xo0Ngbd1w6Y=",
+      "archive_sha256": "06fe173581b0896eb9e249cb55f3d55a04d1dfa18e2db70dbb4494c51e992527",
+      "notices": [
+        {
+          "source_path": "github.com/digitorus/timestamp@v0.0.0-20250524132541-c45532741eea/LICENSE",
+          "sha256": "431c937429b055c82e915716bd6be955b5b01d25d7932f219ec89e3af228bade",
+          "file": "texts/431c937429b055c82e915716bd6be955b5b01d25d7932f219ec89e3af228bade.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/dimchansky/utfbom",
       "version": "v1.1.1",
       "binaries": [
@@ -1854,6 +2455,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:0IXCQ5g4/QMHHkarYzh5l+u8T3t73zM5QvfrDyIgxBk=",
@@ -1864,6 +2466,55 @@
           "source_path": "github.com/distribution/reference@v0.6.0/LICENSE",
           "sha256": "cb5e8e7e5f4a3988e1063c142c60dc2df75605f4c46515e776e3aca6df976e14",
           "file": "texts/cb5e8e7e5f4a3988e1063c142c60dc2df75605f4c46515e776e3aca6df976e14.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/dlclark/regexp2/v2",
+      "version": "v2.2.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:mf4KkFUj0gJuarK8P+LgiS+Lit7m9N1yAwEfPbee7R0=",
+      "go_mod_sum": "h1:avUrQvPaLz2DrFNHJF0taWAFFX2C1GMSSoeiqFjcBmU=",
+      "archive_sha256": "b105eabacfc1b6e0dd48b2220ee985a8047392610ab35dd27956a49dc44dd9cd",
+      "notices": [
+        {
+          "source_path": "github.com/dlclark/regexp2/v2@v2.2.1/LICENSE",
+          "sha256": "9be5d04bb4d706914d5bf943710da4afeb42048f7c529902fb57c82762a991a9",
+          "file": "texts/9be5d04bb4d706914d5bf943710da4afeb42048f7c529902fb57c82762a991a9.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/docker/cli",
+      "version": "v29.7.2+incompatible",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:dlkwallR8XqfeVnA2ELEhdwvb4lsSwuB4IgsG8Q9cLY=",
+      "go_mod_sum": "h1:JLrzqnKDaYBop7H2jaqPtU4hHvMKP+vjCwu2uszcLI8=",
+      "archive_sha256": "d532f44e62ee4d1f43ef4bdd27ccaf2a22a22044151df61908169c7baa4abdd5",
+      "notices": [
+        {
+          "source_path": "github.com/docker/cli@v29.7.2+incompatible/AUTHORS",
+          "sha256": "4c58e13acbeafc2e56e3662bb8a3e7a687a08545b0b35ebe3f9a7945ff2d971f",
+          "file": "texts/4c58e13acbeafc2e56e3662bb8a3e7a687a08545b0b35ebe3f9a7945ff2d971f.txt"
+        },
+        {
+          "source_path": "github.com/docker/cli@v29.7.2+incompatible/LICENSE",
+          "sha256": "2d81ea060825006fc8f3fe28aa5dc0ffeb80faf325b612c955229157b8c10dc0",
+          "file": "texts/2d81ea060825006fc8f3fe28aa5dc0ffeb80faf325b612c955229157b8c10dc0.txt"
+        },
+        {
+          "source_path": "github.com/docker/cli@v29.7.2+incompatible/NOTICE",
+          "sha256": "a8c869fbda819afb8d80e0ac19bac52e766bc6c19cb38cf94f52d64c4be2aab6",
+          "file": "texts/a8c869fbda819afb8d80e0ac19bac52e766bc6c19cb38cf94f52d64c4be2aab6.txt"
+        },
+        {
+          "source_path": "github.com/docker/cli@v29.7.2+incompatible/cli/connhelper/internal/syntax/LICENSE",
+          "sha256": "ce63850f77649f00d1394045e2794ffb09a5596beabac51c9548edd958845d7c",
+          "file": "texts/ce63850f77649f00d1394045e2794ffb09a5596beabac51c9548edd958845d7c.txt"
         }
       ]
     },
@@ -1964,6 +2615,23 @@
           "source_path": "github.com/docker/docker@v28.5.2+incompatible/contrib/busybox/LICENSE",
           "sha256": "86f0bb11c1ad915869d7fa2ef594a173e195af4538417542f22b51d615b38130",
           "file": "texts/86f0bb11c1ad915869d7fa2ef594a173e195af4538417542f22b51d615b38130.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/docker/docker-credential-helpers",
+      "version": "v0.9.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:gAm/VtF9wgqJMoxzT3Gj5p4AqIjCBS4wrsOh9yRqcz8=",
+      "go_mod_sum": "h1:x+4Gbw9aGmChi3qTLZj8Dfn0TD20M/fuWy0E5+WDeCo=",
+      "archive_sha256": "d1d7e8680253fa217273bf0df542ae9183b07716a7e52582b7d51347db4db661",
+      "notices": [
+        {
+          "source_path": "github.com/docker/docker-credential-helpers@v0.9.3/LICENSE",
+          "sha256": "a6c2a5fdf40879f644bdb0da9042f245e7e263237d623264aafcf2470610ad8c",
+          "file": "texts/a6c2a5fdf40879f644bdb0da9042f245e7e263237d623264aafcf2470610ad8c.txt"
         }
       ]
     },
@@ -2090,7 +2758,8 @@
       "path": "github.com/dustin/go-humanize",
       "version": "v1.0.1",
       "binaries": [
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ],
       "sum": "h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=",
       "go_mod_sum": "h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=",
@@ -2135,6 +2804,23 @@
           "source_path": "github.com/erofs/go-erofs@v0.3.1/LICENSE",
           "sha256": "b3220819786647fbd89d135fa1db39a2e0c9495120e82aba27af3378afce5e6b",
           "file": "texts/b3220819786647fbd89d135fa1db39a2e0c9495120e82aba27af3378afce5e6b.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/fatih/color",
+      "version": "v1.18.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:S8gINlzdQ840/4pfAwic/ZE0djQEH3wM94VfqLTZcOM=",
+      "go_mod_sum": "h1:4FelSpRwEGDpQ12mAdzqdOukCy4u8WUtOY6lkT/6HfU=",
+      "archive_sha256": "4dc6907b7f6807b37c21ad527d966437d398f03472115f471eaa8fe5875363d3",
+      "notices": [
+        {
+          "source_path": "github.com/fatih/color@v1.18.0/LICENSE.md",
+          "sha256": "de95ed802d2f90e3c72cb3c9a927cca5f2aec234a3ef1250232db0f8178b2d93",
+          "file": "texts/de95ed802d2f90e3c72cb3c9a927cca5f2aec234a3ef1250232db0f8178b2d93.txt"
         }
       ]
     },
@@ -2251,6 +2937,62 @@
       ]
     },
     {
+      "path": "github.com/gabriel-vasile/mimetype",
+      "version": "v1.4.15",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:05iP/CYtZ/w455R/KZM6rZ5ieAdh99UPtd+d3YzLmaI=",
+      "go_mod_sum": "h1:azpTcoLcDZRNgFou5j+APrqQx9HqVPWa6ijYQIIVswQ=",
+      "archive_sha256": "33ca0896cfdc7e0b412d7b676ed461428b28a952f86170cea545e112a5e86ef1",
+      "notices": [
+        {
+          "source_path": "github.com/gabriel-vasile/mimetype@v1.4.15/LICENSE",
+          "sha256": "b5a867655833aca9e27c97e28e43dcfc62be0ba0e84f24157afedf8fdaaa2fc1",
+          "file": "texts/b5a867655833aca9e27c97e28e43dcfc62be0ba0e84f24157afedf8fdaaa2fc1.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/gdamore/encoding",
+      "version": "v1.0.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:YzKZckdBL6jVt2Gc+5p82qhrGiqMdG/eNs6Wy0u3Uhw=",
+      "go_mod_sum": "h1:0Z0cMFinngz9kS1QfMjCP8TY7em3bZYeeklsSDPivEo=",
+      "archive_sha256": "e584303c743306ae55be21a5703900d0628aa2ef840ce49d5f0bbf7c51379e33",
+      "notices": [
+        {
+          "source_path": "github.com/gdamore/encoding@v1.0.1/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/gdamore/tcell/v2",
+      "version": "v2.13.10",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:Afs3JKt83HnhuUKdZ3MnxUgOqQRWftj5JyDqv1LLynA=",
+      "go_mod_sum": "h1:+Wfe208WDdB7INEtCsNrAN6O2m+wsTPk1RAovjaILlo=",
+      "archive_sha256": "7664c451b58bb5fe7469e3dbda3711ac1d24206c13fff62f045e9e62ed1f2217",
+      "notices": [
+        {
+          "source_path": "github.com/gdamore/tcell/v2@v2.13.10/AUTHORS",
+          "sha256": "80f36739fc84fd8fb52a894ab022894249072aed052ee88c0a6dab0266be1386",
+          "file": "texts/80f36739fc84fd8fb52a894ab022894249072aed052ee88c0a6dab0266be1386.txt"
+        },
+        {
+          "source_path": "github.com/gdamore/tcell/v2@v2.13.10/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/go-jose/go-jose/v4",
       "version": "v4.1.5",
       "binaries": [
@@ -2281,6 +3023,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:tG4xh9yMsRCAiodLVTxyrkzSZ9+o0L1Kg/+cPVcbP/8=",
@@ -2302,6 +3045,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:hSWxHoqTgW2S2qGc0LTAI563KZ5YKYRhT3MFKZMbjag=",
@@ -2320,6 +3064,7 @@
       "version": "v0.25.5",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:xPYEvTb90o1y0epuiOPAoG4QqahjP3cdp5xNlHeKJRI=",
@@ -2338,6 +3083,7 @@
       "version": "v0.22.8",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:oP7sW7TWc3wFFjrzzj0nI83H2qMBkNjNfSd+XRejk/I=",
@@ -2356,6 +3102,7 @@
       "version": "v1.0.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:kR9tHqY0CtZaOPVFm622dPVNhrvYpwr4uCxgL3h1H8s=",
@@ -2379,6 +3126,7 @@
       "version": "v1.0.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:jlmTr6torcd1YgDQvSfNmRtKzYDO4FGBkrAdlAVWnpY=",
@@ -2402,6 +3150,7 @@
       "version": "v0.25.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:74Bc2snfaVlsHzwdQj/3gsA9XJz3daXTJVs+4ZaK7jI=",
@@ -2420,6 +3169,7 @@
       "version": "v0.33.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:Dd3Oj2ig+WH8ckK95l0Wn2V8a4bH/UqWPRZVT0vc8yU=",
@@ -2453,6 +3203,7 @@
       "version": "v0.30.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:8rPoJ/xv7JL8BsovaqboKETlpWBArVh8n+0L/GyePog=",
@@ -2471,6 +3222,7 @@
       "version": "v0.22.9",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:/vKIFDcGKp0ktZWGbym/tJEWbk6/XOEmAVU0kqKMH+w=",
@@ -2489,6 +3241,7 @@
       "version": "v0.27.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:kbcTeaD9TXuXD0hhMXzuYa1sdTo6+dWGvwjW93E80IM=",
@@ -2497,6 +3250,23 @@
       "notices": [
         {
           "source_path": "github.com/go-openapi/strfmt@v0.27.0/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag",
+      "version": "v0.26.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:l5sVEyVpwj+DDYeZyo7wQI/Ebn/mKYIyGB/pFwAfGoQ=",
+      "go_mod_sum": "h1:yNY38BbIVthxbkDtq1UHBCGasBqjakW3lCR6ANzdBEw=",
+      "archive_sha256": "dbb1f35052a5ded3c3f931b5d45f445536d44fa731cccc4dd109a91767be3d72",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag@v0.26.1/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -2522,6 +3292,23 @@
     },
     {
       "path": "github.com/go-openapi/swag/cmdutils",
+      "version": "v0.27.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:aIKiqhB29AaP+7xm8/CPg3uOpeHx2SUp6TvMpu/a31Y=",
+      "go_mod_sum": "h1:Sm1MVFMkF6guJJ+pQqHnQA3N0j9qALV3NxzDSv6bETM=",
+      "archive_sha256": "13df2831629f6ff3e0f712d7d5ebceefe5164d762f5bfc997044dc178d061a2e",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/cmdutils@v0.27.0/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/cmdutils",
       "version": "v0.28.0",
       "binaries": [
         "/usr/bin/dockerd",
@@ -2533,6 +3320,23 @@
       "notices": [
         {
           "source_path": "github.com/go-openapi/swag/cmdutils@v0.28.0/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/conv",
+      "version": "v0.27.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:iqJFmGEjmX3AY0lSszABFqRVqOSt99XS0LzNIMJYuhU=",
+      "go_mod_sum": "h1:nPRmN6jgNme99hpf+nM0auDZGALWIqlwhisKPK/bQhQ=",
+      "archive_sha256": "349d114bfe9ed6ed57d481eaaa00324c4a370803bbcaf74e26cd424a9cfded3d",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/conv@v0.27.3/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -2558,6 +3362,23 @@
     },
     {
       "path": "github.com/go-openapi/swag/fileutils",
+      "version": "v0.27.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:3UVoZ2RLaIs1lt+2jcKzL8RM3Yk0rmsDE9FLA/HGxFE=",
+      "go_mod_sum": "h1:VvJFZLTZS0AI854gEQz5tk7dBESdLjiNUMSZ/th2ry8=",
+      "archive_sha256": "c6dc133ced262aa0c5d95884d66c7b55ecbcd6d208a1f41a2b60cb4f89831458",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/fileutils@v0.27.3/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/fileutils",
       "version": "v0.28.0",
       "binaries": [
         "/usr/bin/dockerd",
@@ -2569,6 +3390,40 @@
       "notices": [
         {
           "source_path": "github.com/go-openapi/swag/fileutils@v0.28.0/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/jsonname",
+      "version": "v0.26.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:VReupaV6WxlAsCn0e4DUfgV6bPmINnPpyJDLqSfNPcE=",
+      "go_mod_sum": "h1:OvdW6BoWoj33pTfi7x9vFrgmT+fk7aw0BRwvCE0YOuc=",
+      "archive_sha256": "e6c28ba471827e89fd0b17bbb88f8fea0aaae842ede7f9810e73b5055d942de9",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/jsonname@v0.26.1/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/jsonutils",
+      "version": "v0.27.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:1DEz+O82frtSMBcos/7XIn1GnpNTbsD4Bru4Dc/uhRc=",
+      "go_mod_sum": "h1:qiDCoQvzkMxrV3G8FLEdIU5L+EFYc0zcDOHWT3Yofvo=",
+      "archive_sha256": "defd16d14cee2b5bbd020f5aa5e9f8d5fc386c0285180b0de3b892bbfa1bba85",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/jsonutils@v0.27.3/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -2594,6 +3449,23 @@
     },
     {
       "path": "github.com/go-openapi/swag/loading",
+      "version": "v0.27.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:L9nQkEgzU7QgFQL+pLEMfGUKxeM4pWwGwbET9Z3weW0=",
+      "go_mod_sum": "h1:rJ0NeaKsF4CVPnMGjPQl7JlSHzvD0bc2DKXLss1hiuE=",
+      "archive_sha256": "41fe157bb4919cb4c2cf1d744041a8ab2109087579e4a085736437b7485a1798",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/loading@v0.27.3/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/loading",
       "version": "v0.28.0",
       "binaries": [
         "/usr/bin/dockerd",
@@ -2605,6 +3477,23 @@
       "notices": [
         {
           "source_path": "github.com/go-openapi/swag/loading@v0.28.0/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/mangling",
+      "version": "v0.27.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:gRzzD1PAUoLTtGMgI3KpBmCSOlTuLTFWnviLxLcTnyg=",
+      "go_mod_sum": "h1:jtBE2+V+3pILxOR7Vgce+Cwp6A2PgZbvVqfNntbVs0w=",
+      "archive_sha256": "4f185e766981187c353a321f54e560773961052e5991c587ca60bef4151fbc96",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/mangling@v0.27.3/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -2630,6 +3519,23 @@
     },
     {
       "path": "github.com/go-openapi/swag/netutils",
+      "version": "v0.27.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:lEUG+hHvPvLggB3A8snFk0IRKNf9uC0YKc+7WYqvAF8=",
+      "go_mod_sum": "h1:J+WYyFMLtvtCGqa6jLv+YNUmIKI3ZRQRrvfNDMoQoEQ=",
+      "archive_sha256": "6c2939712697d5889627af5af5a595d4d4d46806b740ff201989491189858424",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/netutils@v0.27.0/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/netutils",
       "version": "v0.28.0",
       "binaries": [
         "/usr/bin/dockerd",
@@ -2641,6 +3547,23 @@
       "notices": [
         {
           "source_path": "github.com/go-openapi/swag/netutils@v0.28.0/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/pools",
+      "version": "v0.27.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:gXjImP3F6/56wRRcFgEPld084Y6u2gs21ikPBt8NKBk=",
+      "go_mod_sum": "h1:kVQefhSK5RWuRe7BXsL8htgBPAMpN7HDGpGEknqugeE=",
+      "archive_sha256": "2603ba4d04b97dfca8607bb5d1710bd97eaa1feaacfbc66977a69fdf3514ca32",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/pools@v0.27.3/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -2666,6 +3589,23 @@
     },
     {
       "path": "github.com/go-openapi/swag/stringutils",
+      "version": "v0.27.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:Ru28hnbAvN5wycALQYy8IobHvASq+FUFMlp1QzLM0JI=",
+      "go_mod_sum": "h1:lzRN95CxXmA03XcDWHLOb6nOMcxCqR5rGY0lOgsfRoM=",
+      "archive_sha256": "a11d200b500f814448e3944445815864562b774c679c28e2e6bcde55b2b0c63a",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/stringutils@v0.27.3/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/stringutils",
       "version": "v0.28.0",
       "binaries": [
         "/usr/bin/dockerd",
@@ -2684,6 +3624,23 @@
     },
     {
       "path": "github.com/go-openapi/swag/typeutils",
+      "version": "v0.27.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:l6SSrx5eR5/WVwrGNzN6bQ9WqL04mrxNBl9YgQ3rcJ4=",
+      "go_mod_sum": "h1:Srm0xFNRZ1Y+vCxJclo5qzx8aj+1pAKda/YfFPrG0dQ=",
+      "archive_sha256": "f1359ef3f84449403dc022e71c170234efc0227bfd5067a034ac833b48073cc0",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/typeutils@v0.27.3/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/typeutils",
       "version": "v0.28.0",
       "binaries": [
         "/usr/bin/dockerd",
@@ -2695,6 +3652,23 @@
       "notices": [
         {
           "source_path": "github.com/go-openapi/swag/typeutils@v0.28.0/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/go-openapi/swag/yamlutils",
+      "version": "v0.27.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:cRFCAoYtslYn9L9T0xWryHy1t7c1MACC+DMj3CLvwvs=",
+      "go_mod_sum": "h1:6JYBGj8sw/NawMllyZY+cTA8Mzk2etS3ZBASdcyPsiU=",
+      "archive_sha256": "883acb8774b22735cacebe87b711896095ae685ece3937dc8eb06b3992eae311",
+      "notices": [
+        {
+          "source_path": "github.com/go-openapi/swag/yamlutils@v0.27.3/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -2723,6 +3697,7 @@
       "version": "v0.26.1",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:pZSbvtRO8G2R2FpWTYRn3w8LrsNwbtaVhP2dWiBa0Us=",
@@ -2742,6 +3717,7 @@
       "binaries": [
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:vM5IJoUAy3d7zRSVtIwQgBj7BiWtMPfmPEgAXnvj1Ro=",
@@ -2795,7 +3771,8 @@
       "path": "github.com/godbus/dbus/v5",
       "version": "v5.2.2",
       "binaries": [
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ],
       "sum": "h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=",
       "go_mod_sum": "h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=",
@@ -2967,6 +3944,7 @@
       "version": "v1.3.3",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:hq/rSxztSkXN2tx/3jQqF6Xc0O565UQPdHrOWvZwybo=",
@@ -3026,6 +4004,23 @@
       ]
     },
     {
+      "path": "github.com/google/go-containerregistry",
+      "version": "v0.22.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:RZuuSYhTvlDvtsK+NkutoCZ//C0X2ebLK8X8l3ULs84=",
+      "go_mod_sum": "h1:bJR35SK8XgisYmhg/FMQ/5RK0S/XrOAqLBV5/LR2XE0=",
+      "archive_sha256": "74b381e8f3ea910c74bc20ec2524978fbb2cf5b4115bc58b12767eea55dec73b",
+      "notices": [
+        {
+          "source_path": "github.com/google/go-containerregistry@v0.22.1/LICENSE",
+          "sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+          "file": "texts/58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/google/go-dap",
       "version": "v0.12.1-0.20250904181021-d7a2259b058b",
       "binaries": [
@@ -3065,6 +4060,7 @@
       "binaries": [
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:El6M4kTTCOh6aBiKaUGG7oYTSPP8MxqL4YI3kZKwcP4=",
@@ -3086,6 +4082,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=",
@@ -3134,6 +4131,23 @@
       ]
     },
     {
+      "path": "github.com/gorilla/css",
+      "version": "v1.0.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:ntNaBIghp6JmvWnxbZKANoLyuXTPZ4cAMlo6RyhlbO8=",
+      "go_mod_sum": "h1:BvnYkspnSzMmwRK+b8/xgNPLiIuNZr6vbZBTPQ2A3b0=",
+      "archive_sha256": "870531962ce9787f8dfa2d7a5476be66e08a133c6c75155b20c551e7ac5bc25c",
+      "notices": [
+        {
+          "source_path": "github.com/gorilla/css@v1.0.1/LICENSE",
+          "sha256": "af11d643d903cb178a641d7512879285287844f7a6c0611e2d0c6b131e50188b",
+          "file": "texts/af11d643d903cb178a641d7512879285287844f7a6c0611e2d0c6b131e50188b.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/gorilla/mux",
       "version": "v1.8.1",
       "binaries": [
@@ -3148,6 +4162,28 @@
           "source_path": "github.com/gorilla/mux@v1.8.1/LICENSE",
           "sha256": "0b77fdea862f869ef4f201ac5649bdbd38ccb055c7f6454dffae9e2adb4941c1",
           "file": "texts/0b77fdea862f869ef4f201ac5649bdbd38ccb055c7f6454dffae9e2adb4941c1.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/gorilla/websocket",
+      "version": "v1.5.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=",
+      "go_mod_sum": "h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=",
+      "archive_sha256": "dbbd31dd0f08548c5dc43e4c2f12bbba66abff5252b224b1cd06afbb72783a76",
+      "notices": [
+        {
+          "source_path": "github.com/gorilla/websocket@v1.5.3/AUTHORS",
+          "sha256": "fdebefabdd93d9701887ac1fa4df716322f71651000442cfd947325648a06675",
+          "file": "texts/fdebefabdd93d9701887ac1fa4df716322f71651000442cfd947325648a06675.txt"
+        },
+        {
+          "source_path": "github.com/gorilla/websocket@v1.5.3/LICENSE",
+          "sha256": "2be1b548b0387ca8948e1bb9434e709126904d15f622cc2d0d8e7f186e4d122d",
+          "file": "texts/2be1b548b0387ca8948e1bb9434e709126904d15f622cc2d0d8e7f186e4d122d.txt"
         }
       ]
     },
@@ -3226,6 +4262,28 @@
           "source_path": "github.com/grpc-ecosystem/go-grpc-prometheus@v1.2.0/LICENSE",
           "sha256": "332c4f0a1a657a8937ad0caf7a335a31ec72343821481e364d8894f568c8b010",
           "file": "texts/332c4f0a1a657a8937ad0caf7a335a31ec72343821481e364d8894f568c8b010.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/grpc-ecosystem/grpc-gateway/v2",
+      "version": "v2.29.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:5VipnvEpbqr2gA2VbM+nYVbkIF28c5ZQfqCBQ5g2xfk=",
+      "go_mod_sum": "h1:Hyl3n6Twe1hvtd9XUXDec4pTvgMSEixRuQKPTMH2bNs=",
+      "archive_sha256": "92aa0dbc15037aeddca97ff7f8e4c61bdc3841a34a0df9bc27af30265e598f2d",
+      "notices": [
+        {
+          "source_path": "github.com/grpc-ecosystem/grpc-gateway/v2@v2.29.0/LICENSE",
+          "sha256": "a15b1d1b168954c92ff7fb1620382418f7c72f4f4d251ee791d1098ad68ab0c4",
+          "file": "texts/a15b1d1b168954c92ff7fb1620382418f7c72f4f4d251ee791d1098ad68ab0c4.txt"
+        },
+        {
+          "source_path": "github.com/grpc-ecosystem/grpc-gateway/v2@v2.29.0/internal/casing/LICENSE.md",
+          "sha256": "20873bd48d04a4e4075ee881ec2a5f3a3b14bf4920018b1131a7c52ec9b4a318",
+          "file": "texts/20873bd48d04a4e4075ee881ec2a5f3a3b14bf4920018b1131a7c52ec9b4a318.txt"
         }
       ]
     },
@@ -3425,6 +4483,23 @@
       ]
     },
     {
+      "path": "github.com/hashicorp/go-version",
+      "version": "v1.9.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:CeOIz6k+LoN3qX9Z0tyQrPtiB1DFYRPfCIBtaXPSCnA=",
+      "go_mod_sum": "h1:fltr4n8CU8Ke44wwGCBoEymUuxUHl09ZGVZPK5anwXA=",
+      "archive_sha256": "b6c05489bf11a28c81cf38119782284c859d6c2d193b811d3f0117592eb31fcb",
+      "notices": [
+        {
+          "source_path": "github.com/hashicorp/go-version@v1.9.0/LICENSE",
+          "sha256": "b31266a0a4ade23e6c0cb5a6ae1c7933b390f30b80550a715579989639b4f55e",
+          "file": "texts/b31266a0a4ade23e6c0cb5a6ae1c7933b390f30b80550a715579989639b4f55e.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/hashicorp/golang-lru",
       "version": "v1.0.2",
       "binaries": [
@@ -3498,6 +4573,23 @@
       ]
     },
     {
+      "path": "github.com/henvic/httpretty",
+      "version": "v0.2.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:U4pKgF9SV4uRrE/7PF85TVnCJxXA91zKFpYU0iFwFOw=",
+      "go_mod_sum": "h1:4LSlqxtJoYd+gt1lsqh9omUUziIVwoVsxdW15hZHTcI=",
+      "archive_sha256": "c151ab54be1405cde9d2481ad9dfd180ba0ad3ff3f1866b867ed0d0baa32b7ff",
+      "notices": [
+        {
+          "source_path": "github.com/henvic/httpretty@v0.2.0/LICENSE.md",
+          "sha256": "61e8affe5ce94a66fd749537fae93ca3531f4b329e1eba3d0c02add373417e0f",
+          "file": "texts/61e8affe5ce94a66fd749537fae93ca3531f4b329e1eba3d0c02add373417e0f.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/hiddeco/sshsig",
       "version": "v0.2.0",
       "binaries": [
@@ -3516,10 +4608,28 @@
       ]
     },
     {
+      "path": "github.com/huandu/xstrings",
+      "version": "v1.5.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:2ag3IFq9ZDANvthTwTiqSSZLjDc+BedvHPAp5tJy2TI=",
+      "go_mod_sum": "h1:y5/lhBue+AyNmUVz9RLU9xbLR0o4KIIExikq4ovT0aE=",
+      "archive_sha256": "74bd0e897e5c35b1fd0e598cb8d9dfcebcb820b6edf3abf850d5404bfaaca6a2",
+      "notices": [
+        {
+          "source_path": "github.com/huandu/xstrings@v1.5.0/LICENSE",
+          "sha256": "d298ca9d57c94e16547637f1d7122481ecdb83932c9b901fac349c4c382b82eb",
+          "file": "texts/d298ca9d57c94e16547637f1d7122481ecdb83932c9b901fac349c4c382b82eb.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/in-toto/attestation",
       "version": "v1.2.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:aPRUZ3azbqD7yEBD5fP3TD8Dszf+YHo284SOcpahjQk=",
@@ -3538,6 +4648,7 @@
       "version": "v0.11.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:nfidMYBFx+E0lnmX5KUnN2Pdm8zdNKal1ayjJuzzRoA=",
@@ -3594,6 +4705,40 @@
       ]
     },
     {
+      "path": "github.com/itchyny/gojq",
+      "version": "v0.12.19",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:ttXA0XCLEMoaLOz5lSeFOZ6u6Q3QxmG46vfgI4O0DEs=",
+      "go_mod_sum": "h1:5galtVPDywX8SPSOrqjGxkBeDhSxEW1gSxoy7tn1iZY=",
+      "archive_sha256": "e60af51ce35c663f9fdc78a2e1139c4897602f63c1deb28fca11ae2ad70e1cf9",
+      "notices": [
+        {
+          "source_path": "github.com/itchyny/gojq@v0.12.19/LICENSE",
+          "sha256": "9f2644f13f17c2d93faa7e715cf3fb150ab37fc9365fbad401cfb50f76ab4233",
+          "file": "texts/9f2644f13f17c2d93faa7e715cf3fb150ab37fc9365fbad401cfb50f76ab4233.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/itchyny/timefmt-go",
+      "version": "v0.1.8",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:1YEo1JvfXeAHKdjelbYr/uCuhkybaHCeTkH8Bo791OI=",
+      "go_mod_sum": "h1:5E46Q+zj7vbTgWY8o5YkMeYb4I6GeWLFnetPy5oBrAI=",
+      "archive_sha256": "d3c06a79ebe97f6940f419893873d27c6e139e6882682e710b21da17a12adece",
+      "notices": [
+        {
+          "source_path": "github.com/itchyny/timefmt-go@v0.1.8/LICENSE",
+          "sha256": "50b4d0bd3862101c6d7ce39144caee7c98cede382aab52da3fe7631d4ddd2553",
+          "file": "texts/50b4d0bd3862101c6d7ce39144caee7c98cede382aab52da3fe7631d4ddd2553.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/jmoiron/sqlx",
       "version": "v1.4.0",
       "binaries": [
@@ -3611,6 +4756,23 @@
       ]
     },
     {
+      "path": "github.com/joho/godotenv",
+      "version": "v1.5.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=",
+      "go_mod_sum": "h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=",
+      "archive_sha256": "f42307794eb323a7f173a75dec68fb91078c23f69882c1c6b642ffd9797c034c",
+      "notices": [
+        {
+          "source_path": "github.com/joho/godotenv@v1.5.1/LICENCE",
+          "sha256": "4334bf49b7e1a6736ce1b21814d5cce392000204d059ee6a845eeb966e7a1e31",
+          "file": "texts/4334bf49b7e1a6736ce1b21814d5cce392000204d059ee6a845eeb966e7a1e31.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/json-iterator/go",
       "version": "v1.1.12",
       "binaries": [
@@ -3624,6 +4786,23 @@
           "source_path": "github.com/json-iterator/go@v1.1.12/LICENSE",
           "sha256": "3247931083f058b00760a3c32a9ca0962c05e4d562ad2ffcc1753451fa8d4486",
           "file": "texts/3247931083f058b00760a3c32a9ca0962c05e4d562ad2ffcc1753451fa8d4486.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/kballard/go-shellquote",
+      "version": "v0.0.0-20180428030007-95032a82bc51",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:Z9n2FFNUXsshfwJMBgNA0RU6/i7WVaAegv3PtuIHPMs=",
+      "go_mod_sum": "h1:CzGEWj7cYgsdH8dAjBGEr58BoE7ScuLd+fwFZ44+/x8=",
+      "archive_sha256": "ae4cb7b097dc4eb0c248dff00ed3bbf0f36984c4162ad1d615266084e58bd6cc",
+      "notices": [
+        {
+          "source_path": "github.com/kballard/go-shellquote@v0.0.0-20180428030007-95032a82bc51/LICENSE",
+          "sha256": "3c0dbd7f2068b713b6784788ffde16a5b91baa86a61a1357e43beb97475a90b3",
+          "file": "texts/3c0dbd7f2068b713b6784788ffde16a5b91baa86a61a1357e43beb97475a90b3.txt"
         }
       ]
     },
@@ -3700,7 +4879,8 @@
       "version": "v1.20.1",
       "binaries": [
         "/usr/bin/docker",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ],
       "sum": "h1:T7kKElXUMXrUJ2E9QhQhxFtcK5rPyLdsGZvdbLMPdiQ=",
       "go_mod_sum": "h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=",
@@ -3951,6 +5131,74 @@
       ]
     },
     {
+      "path": "github.com/lucasb-eyer/go-colorful",
+      "version": "v1.4.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:1EO+WB73+EH8EVbzlrG3KLAfEypQWVHIBqlTf+2hNss=",
+      "go_mod_sum": "h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=",
+      "archive_sha256": "399a71ecf3e3aaa0af96a779f1c106688b095dbfd0a85455a7c706d3d7ff9ebd",
+      "notices": [
+        {
+          "source_path": "github.com/lucasb-eyer/go-colorful@v1.4.1/LICENSE",
+          "sha256": "1e4cf2a117516ec1b54041d68ed4f5d331878b04de3386f4790e7b5b9c04e1ec",
+          "file": "texts/1e4cf2a117516ec1b54041d68ed4f5d331878b04de3386f4790e7b5b9c04e1ec.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/mattn/go-colorable",
+      "version": "v0.1.15",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:+u9SLTRGnXv73cEsnsmoZBom+dMU88B2M0aDcWy0/jY=",
+      "go_mod_sum": "h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=",
+      "archive_sha256": "221144f51cc5eeda0a72bd7b5832181b94240c1d760bde0b3428895e63e63339",
+      "notices": [
+        {
+          "source_path": "github.com/mattn/go-colorable@v0.1.15/LICENSE",
+          "sha256": "88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9",
+          "file": "texts/88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/mattn/go-isatty",
+      "version": "v0.0.24",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:tGZZoVgT/KiqK1c8ocVLeDS8BSWMRd47J3Lbz7vsReI=",
+      "go_mod_sum": "h1:nMCL3Zebbrt45jsMDgnfIwz6ydEQApk5oEI3HqDio6A=",
+      "archive_sha256": "4fcffec0bae0ad4af7bf96e2497a817d85de64af19ffe31d82bda362148234b8",
+      "notices": [
+        {
+          "source_path": "github.com/mattn/go-isatty@v0.0.24/LICENSE",
+          "sha256": "08eab1118c80885fa1fa6a6dd7303f65a379fcb3733e063d20d1bbc2c76e6fa1",
+          "file": "texts/08eab1118c80885fa1fa6a6dd7303f65a379fcb3733e063d20d1bbc2c76e6fa1.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/mattn/go-runewidth",
+      "version": "v0.0.27",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:Feg/Oou5zI/wnpgDF6omIU0OokC9GxLC/WRknhVlIR0=",
+      "go_mod_sum": "h1:3qAiGCV4Koz/yuveO58qUefmUTRm8r0IGEXZ9jeHp/8=",
+      "archive_sha256": "78b1690bd2506faeeecff9cce615e5710c12fe25a5393abe3c2503d0ea4ee2ea",
+      "notices": [
+        {
+          "source_path": "github.com/mattn/go-runewidth@v0.0.27/LICENSE",
+          "sha256": "88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9",
+          "file": "texts/88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/mattn/go-runewidth",
       "version": "v0.0.29",
       "binaries": [
@@ -4058,6 +5306,72 @@
       ]
     },
     {
+      "path": "github.com/mgutz/ansi",
+      "version": "v0.0.0-20200706080929-d51e80ef957d",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:5PJl274Y63IEHC+7izoQE9x6ikvDFZS2mDVS3drnohI=",
+      "go_mod_sum": "h1:01TrycV0kFyexm33Z7vhZRXopbI8J3TDReVlkTgMUxE=",
+      "archive_sha256": "2e0c063f9597cb225904292981732f10298e95aa22a1b815297e318ba103dc1d",
+      "notices": [
+        {
+          "source_path": "github.com/mgutz/ansi@v0.0.0-20200706080929-d51e80ef957d/LICENSE",
+          "sha256": "66e8a6491399ee36b111ba6df0af68ee82b375fb6fbfd54c8382c9dc3fbd9c9a",
+          "file": "texts/66e8a6491399ee36b111ba6df0af68ee82b375fb6fbfd54c8382c9dc3fbd9c9a.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/microcosm-cc/bluemonday",
+      "version": "v1.0.27",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:MpEUotklkwCSLeH+Qdx1VJgNqLlpY2KXwXFM08ygZfk=",
+      "go_mod_sum": "h1:jFi9vgW+H7c3V0lb6nR74Ib/DIB5OBs92Dimizgw2cA=",
+      "archive_sha256": "dbbc62b06600331e29a4d453b8b3e95b1ba48e50baddfd981a3825f8d0043011",
+      "notices": [
+        {
+          "source_path": "github.com/microcosm-cc/bluemonday@v1.0.27/LICENSE.md",
+          "sha256": "a8e8489f1168b5f3e0ebb43d7fe1c78a2fd7db9939c1a6cb555940a4b631f8d2",
+          "file": "texts/a8e8489f1168b5f3e0ebb43d7fe1c78a2fd7db9939c1a6cb555940a4b631f8d2.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/microsoft/dev-tunnels",
+      "version": "v0.2.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:y0XwRz5ARoN34eOKHKeNs/XMLbKWBl96ayvD8Sxzafw=",
+      "go_mod_sum": "h1:Jvr6RlyjUXomM6KsDmIQbq+hhKd5mWrBcv3MEsa78dc=",
+      "archive_sha256": "cff7c24f721768e1257e5adb46f2943b6db44727f628b89bd39f9280b65ef82c",
+      "notices": [
+        {
+          "source_path": "github.com/microsoft/dev-tunnels@v0.2.0/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "file": "texts/c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383.txt"
+        },
+        {
+          "source_path": "github.com/microsoft/dev-tunnels@v0.2.0/ts/src/connections/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "file": "texts/c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383.txt"
+        },
+        {
+          "source_path": "github.com/microsoft/dev-tunnels@v0.2.0/ts/src/contracts/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "file": "texts/c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383.txt"
+        },
+        {
+          "source_path": "github.com/microsoft/dev-tunnels@v0.2.0/ts/src/management/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "file": "texts/c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/miekg/dns",
       "version": "v1.1.73",
       "binaries": [
@@ -4139,7 +5453,8 @@
       "path": "github.com/mitchellh/copystructure",
       "version": "v1.2.0",
       "binaries": [
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ],
       "sum": "h1:vpKXTN4ewci03Vljg/q9QvCGUDttBOGBIa15WveJJGw=",
       "go_mod_sum": "h1:qLl+cE2AmVv+CoeAwDPye/v+N2HKCj9FbZEVFJRxO9s=",
@@ -4170,10 +5485,28 @@
       ]
     },
     {
+      "path": "github.com/mitchellh/hashstructure/v2",
+      "version": "v2.0.2",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:vGKWl0YJqUNxE8d+h8f6NJLcCJrgbhC4NcD46KavDd4=",
+      "go_mod_sum": "h1:MG3aRVU/N29oo/V/IhBX8GR/zz4kQkprJgF2EVszyDE=",
+      "archive_sha256": "ef2ff4040e1877ba620c0c3f6d64b21f9b1fbcee551d211701c43f694bfd20ab",
+      "notices": [
+        {
+          "source_path": "github.com/mitchellh/hashstructure/v2@v2.0.2/LICENSE",
+          "sha256": "f48b778b7fccb6650f915cf4527c941a9578f8876a2911d035c4e44641a916be",
+          "file": "texts/f48b778b7fccb6650f915cf4527c941a9578f8876a2911d035c4e44641a916be.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/mitchellh/reflectwalk",
       "version": "v1.0.2",
       "binaries": [
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ],
       "sum": "h1:G2LzWKi524PWgd3mLHV8Y5k7s6XUvT0Gef6zxSIeXaQ=",
       "go_mod_sum": "h1:mSTlrgnPZtwu0c4WaC2kGObEpuNDbx0jmZXqmk4esnw=",
@@ -4850,6 +6183,74 @@
       ]
     },
     {
+      "path": "github.com/muesli/cancelreader",
+      "version": "v0.2.2",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELUXHmA=",
+      "go_mod_sum": "h1:3XuTXfFS2VjM+HTLZY9Ak0l6eUKfijIfMUZ4EgX0QYo=",
+      "archive_sha256": "f0654e7f8f8a49b02ff10a75ccaa0eb08a65aaacbc45f5ba93305276e2ac7f61",
+      "notices": [
+        {
+          "source_path": "github.com/muesli/cancelreader@v0.2.2/LICENSE",
+          "sha256": "8c139dbbc83b4fb055b4100b6b9402f7de3dd6bbca05015bdfcc4b392c8cfd5f",
+          "file": "texts/8c139dbbc83b4fb055b4100b6b9402f7de3dd6bbca05015bdfcc4b392c8cfd5f.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/muesli/reflow",
+      "version": "v0.3.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:IFsN6K9NfGtjeggFP+68I4chLZV2yIKsXJFNZ+eWh6s=",
+      "go_mod_sum": "h1:pbwTDkVPibjO2kyvBQRBxTWEEGDGq0FlB1BIKtnHY/8=",
+      "archive_sha256": "78e2cebf5a46a9b7c7c52d55d4ac4650cabd9135f180092e3f476293bb86696e",
+      "notices": [
+        {
+          "source_path": "github.com/muesli/reflow@v0.3.0/LICENSE",
+          "sha256": "233e8cf9a812999ccee4d3edb270b0f11ab3539658e680bcb873604915ca5038",
+          "file": "texts/233e8cf9a812999ccee4d3edb270b0f11ab3539658e680bcb873604915ca5038.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/muesli/termenv",
+      "version": "v0.16.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc=",
+      "go_mod_sum": "h1:ZRfOIKPFDYQoDFF4Olj7/QJbW60Ol/kL1pU3VfY/Cnk=",
+      "archive_sha256": "ba02d3ebd9c1d87e2c2133b1f2bb61a7001b3765196e8016029ce9fe54c5c0fc",
+      "notices": [
+        {
+          "source_path": "github.com/muesli/termenv@v0.16.0/LICENSE",
+          "sha256": "233e8cf9a812999ccee4d3edb270b0f11ab3539658e680bcb873604915ca5038",
+          "file": "texts/233e8cf9a812999ccee4d3edb270b0f11ab3539658e680bcb873604915ca5038.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/muhammadmuzzammil1998/jsonc",
+      "version": "v1.0.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:8o5gBQn4ZA3NBA9DlTujCj2a4w0tqWrPVjDwhzkgTIs=",
+      "go_mod_sum": "h1:saF2fIVw4banK0H4+/EuqfFLpRnoy5S+ECwTOCcRcSU=",
+      "archive_sha256": "29e262a198b105ae84bbeafe0d2a8a66e30b357ea5e309d1754792cd9e896e3f",
+      "notices": [
+        {
+          "source_path": "github.com/muhammadmuzzammil1998/jsonc@v1.0.0/LICENSE",
+          "sha256": "1f0e3f72d950eec07e7719821e67aaea46e7d5b9ca987eaa37f6750d4fa4c826",
+          "file": "texts/1f0e3f72d950eec07e7719821e67aaea46e7d5b9ca987eaa37f6750d4fa4c826.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/munnerz/goautoneg",
       "version": "v0.0.0-20191010083416-a7dc8b61c822",
       "binaries": [
@@ -4874,6 +6275,7 @@
       "version": "v2.1.1",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:suPZ4ARWLOJLegGFiZZ1dFAkqzhMjL3J1TzI+5wHz8s=",
@@ -4966,6 +6368,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=",
@@ -4993,6 +6396,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:y0fUlFfIZhPF1W537XOLg0/fcx6zcHCJwooC2xJA040=",
@@ -5059,6 +6463,23 @@
           "source_path": "github.com/opencontainers/selinux@v1.15.1/LICENSE",
           "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
           "file": "texts/b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/opentracing/opentracing-go",
+      "version": "v1.2.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:uEJPy/1a5RIPAJ0Ov+OIO8OxWu77jEv+1B0VhjKrZUs=",
+      "go_mod_sum": "h1:GxEUsuufX4nBwe+T+Wl9TAgYrxe9dPLANfrWvHYVTgc=",
+      "archive_sha256": "9b1a75e9a454a0cf01a26c18e48cd321e3b300943ac5adb9098ba033dbd40db5",
+      "notices": [
+        {
+          "source_path": "github.com/opentracing/opentracing-go@v1.2.0/LICENSE",
+          "sha256": "a34a9a108d9fc8b415ff4d2185c4dd1f9d260539fcf2c78e06732506fd89d54c",
+          "file": "texts/a34a9a108d9fc8b415ff4d2185c4dd1f9d260539fcf2c78e06732506fd89d54c.txt"
         }
       ]
     },
@@ -5157,6 +6578,7 @@
       "version": "v0.9.1",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=",
@@ -5469,6 +6891,57 @@
       ]
     },
     {
+      "path": "github.com/rivo/tview",
+      "version": "v0.42.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:b/ftp+RxtDsHSaynXTbJb+/n/BxDEi+W3UfF5jILK6c=",
+      "go_mod_sum": "h1:cSfIYfhpSGCjp3r/ECJb+GKS7cGJnqV8vfjQPwoXyfY=",
+      "archive_sha256": "49acb1cd8fcda0bda8702e25283b6651e444fb5f21deca81157299be624b9b12",
+      "notices": [
+        {
+          "source_path": "github.com/rivo/tview@v0.42.0/LICENSE.txt",
+          "sha256": "5d07c44385294d9a3c4c88a5708e64798d4af93b22d11b0d0b4950dfd5f500dc",
+          "file": "texts/5d07c44385294d9a3c4c88a5708e64798d4af93b22d11b0d0b4950dfd5f500dc.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/rivo/uniseg",
+      "version": "v0.4.7",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=",
+      "go_mod_sum": "h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=",
+      "archive_sha256": "b995e4aa0cc1e5779cc61138ac925cb8c1e963e40c80e4b93ee8553812ebb792",
+      "notices": [
+        {
+          "source_path": "github.com/rivo/uniseg@v0.4.7/LICENSE.txt",
+          "sha256": "a59885f5f0f3b3c07cf9444db5fe399b6f0791eac82055f7b85cc65500551039",
+          "file": "texts/a59885f5f0f3b3c07cf9444db5fe399b6f0791eac82055f7b85cc65500551039.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/rodaine/table",
+      "version": "v1.3.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:4/3S3SVkHnVZX91EHFvAMV7K42AnJ0XuymRR2C5HlGE=",
+      "go_mod_sum": "h1:47zRsHar4zw0jgxGxL9YtFfs7EGN6B/TaS+/Dmk4WxU=",
+      "archive_sha256": "613d897bf8cc2b5b91f8bac1c60d44a602c526430dae8c2f2e6e37c012902509",
+      "notices": [
+        {
+          "source_path": "github.com/rodaine/table@v1.3.0/license",
+          "sha256": "9c37e7af238d5a3eeb8fe852bf87d24212eb365ba7b1f46a6af7b25ba5cc17f8",
+          "file": "texts/9c37e7af238d5a3eeb8fe852bf87d24212eb365ba7b1f46a6af7b25ba5cc17f8.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/rootless-containers/rootlesskit/v3",
       "version": "v3.3.0",
       "binaries": [
@@ -5542,6 +7015,7 @@
       "version": "v0.11.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:iuCR9kcMFD4QurdKrGvPLoKZLv9YvwPYVr0473BdtFs=",
@@ -5577,6 +7051,7 @@
       "version": "v1.3.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:QUyMZhFo0Md5B8zV8x2tesohbb5kfbpTi9rBnKh5dkI=",
@@ -5587,6 +7062,57 @@
           "source_path": "github.com/shibumi/go-pathspec@v1.3.0/LICENSE",
           "sha256": "a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae",
           "file": "texts/a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/shopspring/decimal",
+      "version": "v1.4.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:bxl37RwXBklmTi0C79JfXCEBD1cqqHt0bbgBAGFp81k=",
+      "go_mod_sum": "h1:gawqmDU56v4yIKSwfBSFip1HdCCXN8/+DMd9qYNcwME=",
+      "archive_sha256": "751d4cd3460984afc72973d2a0df56ed9b10499c5cd0508d7f2207245d9e3315",
+      "notices": [
+        {
+          "source_path": "github.com/shopspring/decimal@v1.4.0/LICENSE",
+          "sha256": "b92ba0f6ee02f2309628bfdadb123668a17c016e475ba477b857d33470d9d625",
+          "file": "texts/b92ba0f6ee02f2309628bfdadb123668a17c016e475ba477b857d33470d9d625.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/shurcooL/githubv4",
+      "version": "v0.0.0-20240727222349-48295856cce7",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:cYCy18SHPKRkvclm+pWm1Lk4YrREb4IOIb/YdFO0p2M=",
+      "go_mod_sum": "h1:zqMwyHmnN/eDOZOdiTohqIUKUrTFX62PNlu7IJdu0q8=",
+      "archive_sha256": "72bd088c5f0343373690848673deba90c8d620d019596c5ecd076242d5986602",
+      "notices": [
+        {
+          "source_path": "github.com/shurcooL/githubv4@v0.0.0-20240727222349-48295856cce7/LICENSE",
+          "sha256": "3e943be32a1cc9b52f52b10089a6a0775ab5998f5f801325e990a5abfb41e770",
+          "file": "texts/3e943be32a1cc9b52f52b10089a6a0775ab5998f5f801325e990a5abfb41e770.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/shurcooL/graphql",
+      "version": "v0.0.0-20230722043721-ed46e5a46466",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:17JxqqJY66GmZVHkmAsGEkcIu0oCe3AM420QDgGwZx0=",
+      "go_mod_sum": "h1:9dIRpgIY7hVhoqfe0/FcYp0bpInZaT7dc3BYOprrIUE=",
+      "archive_sha256": "0c35abdcd642f48e80e001963c412d668486b142a521ea81ecb91e7ebd717221",
+      "notices": [
+        {
+          "source_path": "github.com/shurcooL/graphql@v0.0.0-20230722043721-ed46e5a46466/LICENSE",
+          "sha256": "3e943be32a1cc9b52f52b10089a6a0775ab5998f5f801325e990a5abfb41e770",
+          "file": "texts/3e943be32a1cc9b52f52b10089a6a0775ab5998f5f801325e990a5abfb41e770.txt"
         }
       ]
     },
@@ -5629,10 +7155,48 @@
       ]
     },
     {
+      "path": "github.com/sigstore/protobuf-specs",
+      "version": "v0.5.2",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:RSWWUY8QrVTxbYH00jY/jg2e7YnjzrpwP+PeHTMll0E=",
+      "go_mod_sum": "h1:DRBzpFuE+LnvQMN10/dU6nBeKwVLGEQ6o2FovN2Rats=",
+      "archive_sha256": "5596deaa95e6cac342e4fb88c74f6ee110c508e1d46ef46d7b4337f8aa101fc5",
+      "notices": [
+        {
+          "source_path": "github.com/sigstore/protobuf-specs@v0.5.2/COPYRIGHT.txt",
+          "sha256": "193753bc913f7c55b3d762214e5cbb63eb7ec5de44f3987f84f3822f7bdea64e",
+          "file": "texts/193753bc913f7c55b3d762214e5cbb63eb7ec5de44f3987f84f3822f7bdea64e.txt"
+        },
+        {
+          "source_path": "github.com/sigstore/protobuf-specs@v0.5.2/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        },
+        {
+          "source_path": "github.com/sigstore/protobuf-specs@v0.5.2/gen/pb-python/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        },
+        {
+          "source_path": "github.com/sigstore/protobuf-specs@v0.5.2/gen/pb-ruby/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        },
+        {
+          "source_path": "github.com/sigstore/protobuf-specs@v0.5.2/gen/pb-typescript/LICENSE",
+          "sha256": "364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0",
+          "file": "texts/364a130d2ca340bd56eb1e6d045fc6929bb0f9d0aa018f2c1949b29517e1cdd0.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/sigstore/rekor",
       "version": "v1.5.3",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:0Tyolw3zreRgm7PUW8dccFLXGBThi08278jI8EXNSr4=",
@@ -5656,6 +7220,7 @@
       "version": "v2.3.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:HhMgH61UP0t899V8Fjt7pz1YdgOBptbaQdnCF+79cdc=",
@@ -5684,6 +7249,7 @@
       "version": "v1.10.8",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:1Mgkxvkw4AXMfIP1DOjc6kw0GkUgA8pGVpveN/EfOq4=",
@@ -5726,6 +7292,28 @@
       ]
     },
     {
+      "path": "github.com/sigstore/sigstore-go",
+      "version": "v1.3.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:hnIMHREyCNTYFtOE1o7ae3Axa9B5W5EjUSBJICP2NBE=",
+      "go_mod_sum": "h1:AyRQXfpH89py1twjE3kEZxlRersng90GSYqQV9zGJE8=",
+      "archive_sha256": "ff4d5a7900448808a23aeb5e79817621449a2a4c6fd5605a841ab1957fc0204a",
+      "notices": [
+        {
+          "source_path": "github.com/sigstore/sigstore-go@v1.3.0/COPYRIGHT.txt",
+          "sha256": "f84abba9ca72acd172bf17b234cb0eff6f0601cd0bf2d9a35364881e778916d3",
+          "file": "texts/f84abba9ca72acd172bf17b234cb0eff6f0601cd0bf2d9a35364881e778916d3.txt"
+        },
+        {
+          "source_path": "github.com/sigstore/sigstore-go@v1.3.0/LICENSE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+          "file": "texts/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/sigstore/timestamp-authority/v2",
       "version": "v2.1.2",
       "binaries": [
@@ -5743,6 +7331,28 @@
         },
         {
           "source_path": "github.com/sigstore/timestamp-authority/v2@v2.1.2/LICENSE",
+          "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
+          "file": "texts/43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/sigstore/timestamp-authority/v2",
+      "version": "v2.1.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:Fc+LjCTfik1lh3YLkaosENfkXa3R2Y1nswiUKutBdFA=",
+      "go_mod_sum": "h1:myoFOKJB/u5vNTFwvBBJVkG3NnOBeIJevbfjNeasLjo=",
+      "archive_sha256": "d6c9339e8777290eadb910bf66a3a291bb8284a345cb8134945c5c2064a12849",
+      "notices": [
+        {
+          "source_path": "github.com/sigstore/timestamp-authority/v2@v2.1.3/COPYRIGHT.txt",
+          "sha256": "0e486357a67e9e49da7200e773fb0a8474f055ad73422d07e6a7769a949af8a2",
+          "file": "texts/0e486357a67e9e49da7200e773fb0a8474f055ad73422d07e6a7769a949af8a2.txt"
+        },
+        {
+          "source_path": "github.com/sigstore/timestamp-authority/v2@v2.1.3/LICENSE",
           "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1",
           "file": "texts/43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1.txt"
         }
@@ -5767,6 +7377,23 @@
       "notices": [
         {
           "source_path": "github.com/sirupsen/logrus@v1.10.2/LICENSE",
+          "sha256": "51a0c9ec7f8b7634181b8d4c03e5b5d204ac21d6e72f46c313973424664b2e6b",
+          "file": "texts/51a0c9ec7f8b7634181b8d4c03e5b5d204ac21d6e72f46c313973424664b2e6b.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/sirupsen/logrus",
+      "version": "v1.9.4",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:TsZE7l11zFCLZnZ+teH4Umoq5BhEIfIzfRDZ1Uzql2w=",
+      "go_mod_sum": "h1:ftWc9WdOfJ0a92nsE2jF5u5ZwH8Bv2zdeOC42RjbV2g=",
+      "archive_sha256": "3847d00c5ee6948f1ff0d0120bc343c55ce852becb7720f8f08f53eecfe9e437",
+      "notices": [
+        {
+          "source_path": "github.com/sirupsen/logrus@v1.9.4/LICENSE",
           "sha256": "51a0c9ec7f8b7634181b8d4c03e5b5d204ac21d6e72f46c313973424664b2e6b",
           "file": "texts/51a0c9ec7f8b7634181b8d4c03e5b5d204ac21d6e72f46c313973424664b2e6b.txt"
         }
@@ -5812,11 +7439,29 @@
       ]
     },
     {
+      "path": "github.com/spf13/cast",
+      "version": "v1.10.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:h2x0u2shc1QuLHfxi+cTJvs30+ZAHOGRic8uyGTDWxY=",
+      "go_mod_sum": "h1:jNfB8QC9IA6ZuY2ZjDp0KtFO2LZZlg4S/7bzP6qqeHo=",
+      "archive_sha256": "7c7ba27f9979ada980c2a69f6b2fdf7b4ce1f2b766e245c0a4716f546ad7ddce",
+      "notices": [
+        {
+          "source_path": "github.com/spf13/cast@v1.10.0/LICENSE",
+          "sha256": "feb6d17a0e7a64e5ab0f7e2b0e0ee3e69c1a6396626fd554dc0cddaa06851b44",
+          "file": "texts/feb6d17a0e7a64e5ab0f7e2b0e0ee3e69c1a6396626fd554dc0cddaa06851b44.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/spf13/cobra",
       "version": "v1.10.2",
       "binaries": [
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:DMTTonx5m65Ic0GOoRY2c16WCbHxOOw6xxezuLaBpcU=",
@@ -5836,6 +7481,7 @@
       "binaries": [
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk=",
@@ -5867,10 +7513,28 @@
       ]
     },
     {
+      "path": "github.com/stretchr/objx",
+      "version": "v0.5.3",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:jmXUvGomnU1o3W/V5h2VEradbpJDwGrzugQQvL0POH4=",
+      "go_mod_sum": "h1:rDQraq+vQZU7Fde9LOZLr8Tax6zZvy4kuNKF+QYS+U0=",
+      "archive_sha256": "cdc804051b06efceea75ee9b0b6349d2f92f17cd46c6193c4a8dfb0f51465a44",
+      "notices": [
+        {
+          "source_path": "github.com/stretchr/objx@v0.5.3/LICENSE",
+          "sha256": "b2663894033a05fd80261176cd8da1d72546e25842d5c1abcc852ca23b6b61b0",
+          "file": "texts/b2663894033a05fd80261176cd8da1d72546e25842d5c1abcc852ca23b6b61b0.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/stretchr/testify",
       "version": "v1.12.1",
       "binaries": [
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ],
       "sum": "h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=",
       "go_mod_sum": "h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=",
@@ -5944,6 +7608,7 @@
       "version": "v2.4.2",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:w7976/W8uTwlsegP5nRymlpjPgrwSh+AXUf85is6nJk=",
@@ -5959,6 +7624,28 @@
           "source_path": "github.com/theupdateframework/go-tuf/v2@v2.4.2/NOTICE",
           "sha256": "86ce5e2bb72f603a8849e085524022bdac6668df4f0baca507033610237365f3",
           "file": "texts/86ce5e2bb72f603a8849e085524022bdac6668df4f0baca507033610237365f3.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/thlib/go-timezone-local",
+      "version": "v0.0.8",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:wPh1JtBHBqAKmYjHD4j6GbQMGGbOOOnB6YRMQUTzYAY=",
+      "go_mod_sum": "h1:/Tnicc6m/lsJE0irFMA0LfIwTBo4QP7A8IfyIv4zZKI=",
+      "archive_sha256": "b7ababa7051194f582aaad59e4a39604b3701ecb581052cad34160006e6ee258",
+      "notices": [
+        {
+          "source_path": "github.com/thlib/go-timezone-local@v0.0.8/LICENSE",
+          "sha256": "6b0382b16279f26ff69014300541967a356a666eb0b91b422f6862f6b7dad17e",
+          "file": "texts/6b0382b16279f26ff69014300541967a356a666eb0b91b422f6862f6b7dad17e.txt"
+        },
+        {
+          "source_path": "github.com/thlib/go-timezone-local@v0.0.8/LICENSE-APACHE.txt",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
       ]
     },
@@ -6141,6 +7828,7 @@
       "version": "v0.1.1",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:4bVHJc+KdBgpA1OJD1yjI+g0i5Z1graCppTMH8lWKJI=",
@@ -6159,6 +7847,7 @@
       "version": "v0.0.2",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:Q9nBoQcZcgPamMkGn7ghV8XiTZ/kRxn1yCG81+twTK4=",
@@ -6169,6 +7858,48 @@
           "source_path": "github.com/transparency-dev/merkle@v0.0.2/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/twitchtv/twirp",
+      "version": "v8.1.3+incompatible",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:+F4TdErPgSUbMZMwp13Q/KgDVuI7HJXP61mNV3/7iuU=",
+      "go_mod_sum": "h1:RRJoFSAmTEh2weEqWtpPE3vFK5YBhA6bqp2l1kfCC5A=",
+      "archive_sha256": "66ab7ec3ff7d8f8958e7fc3e9e03eca73488d5fb717213520c1452f3a70f197f",
+      "notices": [
+        {
+          "source_path": "github.com/twitchtv/twirp@v8.1.3+incompatible/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        },
+        {
+          "source_path": "github.com/twitchtv/twirp@v8.1.3+incompatible/NOTICE",
+          "sha256": "79947e17139d654f5b2269f2a42183ee37a749b5149872bec5d57651f6f3a1d4",
+          "file": "texts/79947e17139d654f5b2269f2a42183ee37a749b5149872bec5d57651f6f3a1d4.txt"
+        },
+        {
+          "source_path": "github.com/twitchtv/twirp@v8.1.3+incompatible/THIRD_PARTY",
+          "sha256": "3e3a4fc51bddee5e081f7030c273dd5d70426ec265c2b8d9599f2cf62d0c4cde",
+          "file": "texts/3e3a4fc51bddee5e081f7030c273dd5d70426ec265c2b8d9599f2cf62d0c4cde.txt"
+        },
+        {
+          "source_path": "github.com/twitchtv/twirp@v8.1.3+incompatible/_tools/src/github.com/kisielk/errcheck/LICENSE",
+          "sha256": "0ce4c88de32a297069615b5f314fbd4c7ffa806e760856a7c79bf908e6236c0a",
+          "file": "texts/0ce4c88de32a297069615b5f314fbd4c7ffa806e760856a7c79bf908e6236c0a.txt"
+        },
+        {
+          "source_path": "github.com/twitchtv/twirp@v8.1.3+incompatible/_tools/src/github.com/kisielk/gotool/LICENSE",
+          "sha256": "25ad56f47146a8c6e502d5b1eefe145933b460a8b314bbb66bb7fc964b92298b",
+          "file": "texts/25ad56f47146a8c6e502d5b1eefe145933b460a8b314bbb66bb7fc964b92298b.txt"
+        },
+        {
+          "source_path": "github.com/twitchtv/twirp@v8.1.3+incompatible/_tools/src/github.com/twitchtv/retool/LICENSE",
+          "sha256": "3f552a949c0023b9c833138f479bcc9632c7faa5c7bd3f54c6f8d345c7b5e3a3",
+          "file": "texts/3f552a949c0023b9c833138f479bcc9632c7faa5c7bd3f54c6f8d345c7b5e3a3.txt"
         }
       ]
     },
@@ -6302,6 +8033,40 @@
       ]
     },
     {
+      "path": "github.com/vmihailenco/msgpack/v5",
+      "version": "v5.4.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:cQriyiUvjTwOHg8QZaPihLWeRAAVoCpE00IUPn0Bjt8=",
+      "go_mod_sum": "h1:GaZTsDaehaPpQVyxrf5mtQlH+pc21PIudVV/E3rRQok=",
+      "archive_sha256": "f966b8091c59efce1b44e265097f239be5d4174a827be0a5debebae09517d2b8",
+      "notices": [
+        {
+          "source_path": "github.com/vmihailenco/msgpack/v5@v5.4.1/LICENSE",
+          "sha256": "1530185dd39cdde7cb2f786a7a5fcf8bc34368b6ae73c15e72bafe88fd80b9a2",
+          "file": "texts/1530185dd39cdde7cb2f786a7a5fcf8bc34368b6ae73c15e72bafe88fd80b9a2.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/vmihailenco/tagparser/v2",
+      "version": "v2.0.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:y09buUbR+b5aycVFQs/g70pqKVZNBmxwAhO7/IwNM9g=",
+      "go_mod_sum": "h1:Wri+At7QHww0WTrCBeu4J6bNtoV6mEfg5OIWRZA9qds=",
+      "archive_sha256": "70096ead331b4ac4efc0bf740674cbe55772beee6eace39507a610c5652aa8b5",
+      "notices": [
+        {
+          "source_path": "github.com/vmihailenco/tagparser/v2@v2.0.0/LICENSE",
+          "sha256": "0f02aac22084ef463aa5f42f566feeec6aa4c99653519744a8c25cb079da5b5d",
+          "file": "texts/0f02aac22084ef463aa5f42f566feeec6aa4c99653519744a8c25cb079da5b5d.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/weppos/publicsuffix-go",
       "version": "v0.30.0",
       "binaries": [
@@ -6390,6 +8155,23 @@
       ]
     },
     {
+      "path": "github.com/xo/terminfo",
+      "version": "v0.0.0-20220910002029-abceb7e1c41e",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=",
+      "go_mod_sum": "h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=",
+      "archive_sha256": "b8f4270191e08e135e932dfe168769046a4268ec7f3892593b1d773b2c5fa4cf",
+      "notices": [
+        {
+          "source_path": "github.com/xo/terminfo@v0.0.0-20220910002029-abceb7e1c41e/LICENSE",
+          "sha256": "1f5f51151ba96f0492ce288bd007242f924fdad9f04002e175e951644340a891",
+          "file": "texts/1f5f51151ba96f0492ce288bd007242f924fdad9f04002e175e951644340a891.txt"
+        }
+      ]
+    },
+    {
       "path": "github.com/yashtewari/glob-intersection",
       "version": "v0.2.0",
       "binaries": [
@@ -6411,6 +8193,7 @@
       "version": "v0.0.0-20240726163527-a2c0da244d78",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:ilQV1hzziu+LLM3zUTJ0trRztfwgjqKnBWNtSRkbmwM=",
@@ -6421,6 +8204,62 @@
           "source_path": "github.com/youmark/pkcs8@v0.0.0-20240726163527-a2c0da244d78/LICENSE",
           "sha256": "6d13d89b6c33df37f92553cc95cec278d8770ddc78c9de84620cc16dfb48cef6",
           "file": "texts/6d13d89b6c33df37f92553cc95cec278d8770ddc78c9de84620cc16dfb48cef6.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/yuin/goldmark",
+      "version": "v1.8.6",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:d0VcaP1sx9GkFVkoW+KtggpGi2KZ965i14b0+bDQST4=",
+      "go_mod_sum": "h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=",
+      "archive_sha256": "6cb11723302ba0dd45f8d7a26f7fa3c48be23523622c18293783ce82a3c5de46",
+      "notices": [
+        {
+          "source_path": "github.com/yuin/goldmark@v1.8.6/LICENSE",
+          "sha256": "c1d6f653c38c80294dc7994647ba0dcc508ce64a86996303c804efa2f7982bff",
+          "file": "texts/c1d6f653c38c80294dc7994647ba0dcc508ce64a86996303c804efa2f7982bff.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/yuin/goldmark-emoji",
+      "version": "v1.0.6",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:QWfF2FYaXwL74tfGOW5izeiZepUDroDJfWubQI9HTHs=",
+      "go_mod_sum": "h1:ukxJDKFpdFb5x0a5HqbdlcKtebh086iJpI31LTKmWuA=",
+      "archive_sha256": "a993ef47fd534db3246a5676611906bf9636dae575c6526410db4c60f38cdb2a",
+      "notices": [
+        {
+          "source_path": "github.com/yuin/goldmark-emoji@v1.0.6/LICENSE",
+          "sha256": "64ce0d485c3558737f049b960abc5dde745f4122daaae1869ebc066566cc35f1",
+          "file": "texts/64ce0d485c3558737f049b960abc5dde745f4122daaae1869ebc066566cc35f1.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/zalando/go-keyring",
+      "version": "v0.2.8",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:6sD/Ucpl7jNq10rM2pgqTs0sZ9V3qMrqfIIy5YPccHs=",
+      "go_mod_sum": "h1:tsMo+VpRq5NGyKfxoBVjCuMrG47yj8cmakZDO5QGii0=",
+      "archive_sha256": "af9d1310d6e1eaadb6c975f2f9b1c22c8a2d1ea2497645f5ee62eac26472c97a",
+      "notices": [
+        {
+          "source_path": "github.com/zalando/go-keyring@v0.2.8/LICENSE",
+          "sha256": "14bc00f1a298eb6af250216b9e60027a4386c8a84fa2c7ddc2b5c10908e06d0d",
+          "file": "texts/14bc00f1a298eb6af250216b9e60027a4386c8a84fa2c7ddc2b5c10908e06d0d.txt"
+        },
+        {
+          "source_path": "github.com/zalando/go-keyring@v0.2.8/internal/shellescape/LICENSE",
+          "sha256": "01a4609ac3c7ac0a26d65a967c26c0deb146aa01bdcc8531048a70be52695556",
+          "file": "texts/01a4609ac3c7ac0a26d65a967c26c0deb146aa01bdcc8531048a70be52695556.txt"
         }
       ]
     },
@@ -6593,6 +8432,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=",
@@ -6676,6 +8516,23 @@
       "notices": [
         {
           "source_path": "go.opentelemetry.io/contrib/processors/baggagecopy@v0.16.3/LICENSE",
+          "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40",
+          "file": "texts/1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40.txt"
+        }
+      ]
+    },
+    {
+      "path": "go.opentelemetry.io/otel",
+      "version": "v1.44.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:JjwHmHpA4iZ3wBxluu2fbbE7j4kqlE8jXyAyPXH7HqU=",
+      "go_mod_sum": "h1:BMgjTHL9WPRlRjL2oZCBTL4whCGtXch2H4BhOPIAyYc=",
+      "archive_sha256": "4b7ef50caaf3dc6fc1a058f9ce2ccda6aad2ab3e8657acc4c8bb3102f79c53bc",
+      "notices": [
+        {
+          "source_path": "go.opentelemetry.io/otel@v1.44.0/LICENSE",
           "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40",
           "file": "texts/1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40.txt"
         }
@@ -6899,6 +8756,23 @@
     },
     {
       "path": "go.opentelemetry.io/otel/metric",
+      "version": "v1.44.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:1w0gILTcHdr3YI+ixLyjemwrVnsMURbTZFrSYCdDdmc=",
+      "go_mod_sum": "h1:8O7hanEPBNgEMmybD3s2VBKcgWOCsA6tzHBPODAiquo=",
+      "archive_sha256": "4442ba5f269f81251f549acb14ac16176f23967f4a0706163440b0df91592f96",
+      "notices": [
+        {
+          "source_path": "go.opentelemetry.io/otel/metric@v1.44.0/LICENSE",
+          "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40",
+          "file": "texts/1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40.txt"
+        }
+      ]
+    },
+    {
+      "path": "go.opentelemetry.io/otel/metric",
       "version": "v1.46.0",
       "binaries": [
         "/usr/bin/docker",
@@ -7001,6 +8875,23 @@
       "notices": [
         {
           "source_path": "go.opentelemetry.io/otel/sdk/metric@v1.46.0/LICENSE",
+          "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40",
+          "file": "texts/1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40.txt"
+        }
+      ]
+    },
+    {
+      "path": "go.opentelemetry.io/otel/trace",
+      "version": "v1.44.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:jxF5CsGYCe74MCRx2X4g7WsY/VBKRqqpNvXlX/6gtIk=",
+      "go_mod_sum": "h1:oLl1jrMQAVo6v3GAggN+1VH9VIz9iUSvW53sW1Q8PIE=",
+      "archive_sha256": "cd1abf8dcec62fe9788fae9105760db1711e6e994d2e31cdda57ccb467e7ceec",
+      "notices": [
+        {
+          "source_path": "go.opentelemetry.io/otel/trace@v1.44.0/LICENSE",
           "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40",
           "file": "texts/1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40.txt"
         }
@@ -7135,6 +9026,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=",
@@ -7179,6 +9071,7 @@
       "path": "golang.org/x/crypto",
       "version": "v0.57.0",
       "binaries": [
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:3ZVCjf8Ggz7zneR/EHRVx68Ctf+2pmIMP2UFhh9cC6M=",
@@ -7225,6 +9118,7 @@
       "version": "v0.41.0",
       "binaries": [
         "/usr/bin/containerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=",
@@ -7270,6 +9164,7 @@
       "version": "v0.60.0",
       "binaries": [
         "/usr/bin/docker",
+        "/usr/bin/gh",
         "/usr/bin/runc",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
@@ -7354,6 +9249,7 @@
       "version": "v0.23.0",
       "binaries": [
         "/usr/bin/docker",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:KameEIfc1IkluZyXWLn39Wd4tURc6GbCiISGiZm2bQk=",
@@ -7401,7 +9297,8 @@
       "path": "golang.org/x/sys",
       "version": "v0.48.0",
       "binaries": [
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/bin/gh"
       ],
       "sum": "h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=",
       "go_mod_sum": "h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=",
@@ -7452,6 +9349,7 @@
       "version": "v0.46.0",
       "binaries": [
         "/usr/bin/docker",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:3+OXuTbaKDgwk8jTi3aSLHRlmWqHEUDUtxnbFigO4YE=",
@@ -7498,6 +9396,7 @@
       "version": "v0.42.0",
       "binaries": [
         "/usr/bin/docker",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:JbOZXgfeCPU9gacVtYliJqOhD+zhrEqK4LfdpmlUZqI=",
@@ -7611,6 +9510,23 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/api",
+      "version": "v0.0.0-20260526163538-3dc84a4a5aaa",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:Kjn0N0tCrDgiAFW+lGO4JZ3ck44CehvJQMAwj9QF0G8=",
+      "go_mod_sum": "h1:q4lMZS6kskjT5HvCPrnnypcDPVJqT/f4nfxmkE7gryY=",
+      "archive_sha256": "358fa722934401c762695c29893bb0f35e5e90545f6a1d6208df3207d63c11fd",
+      "notices": [
+        {
+          "source_path": "google.golang.org/genproto/googleapis/api@v0.0.0-20260526163538-3dc84a4a5aaa/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "google.golang.org/genproto/googleapis/api",
       "version": "v0.0.0-20260825221802-da73d73af1c5",
       "binaries": [
         "/usr/bin/docker",
@@ -7640,6 +9556,23 @@
       "notices": [
         {
           "source_path": "google.golang.org/genproto/googleapis/api@v0.0.0-20261012220534-4341edf3f941/LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
+        }
+      ]
+    },
+    {
+      "path": "google.golang.org/genproto/googleapis/rpc",
+      "version": "v0.0.0-20260526163538-3dc84a4a5aaa",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:mZHHdPZl0dbGHCflZgAq/Q468DWVFcU2whhB2KAo8fk=",
+      "go_mod_sum": "h1:4Hqkh8ycfw05ld/3BWL7rJOSfebL2Q+DVDeRgYgxUU8=",
+      "archive_sha256": "55f932b106d6f4f8cb76ae869e44f5d6d8400965fa441ee3532d09c96d64aac1",
+      "notices": [
+        {
+          "source_path": "google.golang.org/genproto/googleapis/rpc@v0.0.0-20260526163538-3dc84a4a5aaa/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -7690,7 +9623,8 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/docker"
+        "/usr/bin/docker",
+        "/usr/bin/gh"
       ],
       "sum": "h1:EManeRomTObA0BU7I8vXgg/78uE5MJ9M8B39EX2WscU=",
       "go_mod_sum": "h1:YPI1hK3kDked6iHvgX3tR0y+nX/qpMFKhPgFsokw1S8=",
@@ -7750,6 +9684,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:pJOKDDOyeXErUroCihFAd5LQuwXBSpVnKGrj5o/fwxc=",
@@ -7807,6 +9742,28 @@
           "source_path": "gopkg.in/inf.v0@v0.9.1/LICENSE",
           "sha256": "050855d9ceedf916a9e9f30d20c6f61a484448d2c2ed5810934bc8aef43861b4",
           "file": "texts/050855d9ceedf916a9e9f30d20c6f61a484448d2c2ed5810934bc8aef43861b4.txt"
+        }
+      ]
+    },
+    {
+      "path": "gopkg.in/yaml.v3",
+      "version": "v3.0.1",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=",
+      "go_mod_sum": "h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=",
+      "archive_sha256": "aab8fbc4e6300ea08e6afe1caea18a21c90c79f489f52c53e2f20431f1a9a015",
+      "notices": [
+        {
+          "source_path": "gopkg.in/yaml.v3@v3.0.1/LICENSE",
+          "sha256": "d18f6323b71b0b768bb5e9616e36da390fbd39369a81807cca352de4e4e6aa0b",
+          "file": "texts/d18f6323b71b0b768bb5e9616e36da390fbd39369a81807cca352de4e4e6aa0b.txt"
+        },
+        {
+          "source_path": "gopkg.in/yaml.v3@v3.0.1/NOTICE",
+          "sha256": "f6c2dd3a67b576eafb89b80200b8b1627230bf3821a0c14cb99a22ac19107d00",
+          "file": "texts/f6c2dd3a67b576eafb89b80200b8b1627230bf3821a0c14cb99a22ac19107d00.txt"
         }
       ]
     },
@@ -7930,6 +9887,7 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:Tf+J3AH7xnUzZyVVXhTgGhEKnFqye14aadWv7bzXdzc=",
