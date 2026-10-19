@@ -87,6 +87,36 @@
     </div>
   </section>
 
+  <section class="section" aria-labelledby="example-h">
+    <div class="wrap">
+      <h2 id="example-h">Example: Pix</h2>
+      <p class="lede">Pix is a coding and work agent that runs on marsh, next to the packaged
+      <code>pi</code>. It's built in two layers.</p>
+      <div class="share">
+        <div class="share-item">
+          <h3>Public Kit</h3>
+          <p>Upstream Pi plus public skills, role prompts and themes, published as
+          <code>docker.io/mcavage/marsh-pix</code>.
+          <a href="https://github.com/mcavage/pix/tree/main/marsh">Source and install</a>.</p>
+        </div>
+        <div class="share-item">
+          <h3>Private layer</h3>
+          <p>A second Kit built <code>FROM</code> the public image adds an organization's own
+          skills. Work tools (mail, documents, the staff directory, the data warehouse) are
+          small CLIs published as typed MCP tools; SBX injects their keys, so the agent never
+          holds them.</p>
+        </div>
+        <div class="share-item">
+          <h3>Orchestration</h3>
+          <p>No custom subagent runner: a skill teaches the agent marsh's fanout/collect and
+          split/join.</p>
+        </div>
+      </div>
+      <p class="note">To build your own, see
+      <a href="docs/guides/build-a-personal-agent.html">Build your own agent on marsh</a>.</p>
+    </div>
+  </section>
+
   <section class="section" aria-labelledby="recipes-h">
     <div class="wrap">
       <h2 id="recipes-h">Find a starting point</h2>

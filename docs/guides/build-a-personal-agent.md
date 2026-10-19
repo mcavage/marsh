@@ -1,105 +1,69 @@
-# Keep a personal agent separate from packaged Pi
+# Build your own agent on marsh
 
-You can register an upstream-Pi-based Kit as `pix` without replacing marsh's
-packaged `pi`. Keep public runtime content in the Kit and private settings/MCP
-in your marsh home. This is an authoring recipe, not a released third-party Kit
-or an authenticated-provider acceptance result.
+Package your own agent (your skills, prompts, defaults and tools) as a Kit and
+run it next to marsh's packaged `pi`. [Pix](https://github.com/mcavage/pix/tree/main/marsh)
+is a working example: upstream Pi plus a set of public skills, published as
+`docker.io/mcavage/marsh-pix`.
 
-The companion Pix prototype is being developed on `feat/public-pix-harness-20261015`
-in the Pix repository. Its public source and local checks are separate from
-marsh; this guide does not install it or publish an image.
+## The Kit
 
-## Separate commands, configuration and discovery
+Start from a Pi-based image and add your content. Three things matter:
 
-A native Kit's Dockerfile owns its entrypoint, environment and user; the Kit
-descriptor declares provider credentials and network access. See
-[native Kits](../../kits/README.md) and the [authoring outline](../plan/custom-agent-kit.md).
+- **Its own state directory.** Set `ENV PI_CODING_AGENT_DIR="~/.pix-agent/agent"`
+  (literally, with the `~`), so its settings and sessions don't mix with packaged
+  Pi's `~/.pi/agent`. Seed default settings only when none exist.
+- **Call Pi by absolute path** in the entrypoint and the ACP adapter. A bare
+  `pi` resolves to marsh's packaged Pi.
+- **Load skills explicitly** from inside the image. Don't put them in the shared
+  `.agents/skills` directory, or packaged Pi and Codex will pick them up too.
 
-Use a separate Pi agent directory, for example `~/.pix-agent/agent`, for both
-CLI and ACP. Pi supports `PI_CODING_AGENT_DIR` and expands `~` after HOME is set.
-A portable image can declare this literal default:
+No keys go in the image. Declare which providers it uses in the Kit file, and
+SBX inserts the keys at those providers' API hosts. See [native Kits](../../kits/README.md).
 
-```dockerfile
-ENV PI_CODING_AGENT_DIR="~/.pix-agent/agent"
-```
+## Register it
 
-The entrypoint selects the invocation's HOME and leaves that value literal.
-marsh filters unchanged image environment defaults when forwarding to children;
-do not dynamically export a personal agent-directory value into unrelated
-registered commands. Never put real keys in this variable or in image settings.
-
-Call the image's Pi executable by **absolute path**. Bare `pi` resolves through
-marsh's registered-command links and could start the separate packaged Pi as a
-child instead. Point the ACP adapter at the personal entrypoint for the same
-reason. Preserve `/run/marsh/context.md` injection and the normal MCP transport.
-
-Keep public package resources inside the image and load them explicitly. Do not
-put personal skills into the shared `.agents/skills` directory if packaged Pi
-and Codex should not discover them. Prefer one canonical copy with guest-visible
-relative links for any personal discovery directories. Preserve existing
-settings/authentication/history and seed only absent first-use defaults.
-
-## Register the personal command
-
-Prepare and build the native source outside the project and guest-home mounts.
-Merge a new entry into the scope's host-only `commands.json` (find its directory
-with `marsh status`), leaving packaged names alone:
+Find your control directory with `marsh status --json` (`control_home`) and add
+the command to its `commands.json`, keeping existing entries:
 
 ```json
-{"pix": "/absolute/path/to/prepared/pix-kit"}
+{"pix": "docker.io/mcavage/marsh-pix@sha256:<digest>"}
 ```
 
-Use an existing native source directory, not a mutable image tag. Published
-images use an actual immutable digest. A source path must remain outside mounts;
-do not point this mapping at a checkout that the job is editing.
+For a local build, use the absolute path of the prepared Kit directory instead,
+outside any project you open in marsh. For ACP, add a separate `pix-session`
+entry with `"command": "pix", "arguments": ["--acp"]` and leave `pi-session`
+alone ([ACP configuration](../acp.md#adding-agents)). Run `marsh stop` before
+the new mapping takes effect.
 
-For ACP, add a separate `pix-session` with command `pix` and arguments
-`["--acp"]`. Keep `pi-session` bound to packaged Pi. A local source can leave
-`workload_digest` empty for daemon-startup pinning; a published immutable Kit
-must declare its exact identity. See [ACP configuration](../acp.md#adding-agents).
+## Add private tools and skills
 
-Finish active work, close shells and run `marsh stop` before starting the new
-configuration. Do not restart an active user session just to test registration.
+Keep anything organization-specific out of the public image:
 
-## Keep business MCP private and command-scoped
+- **A private layer.** Build a second Kit `FROM` the public image that adds your
+  private skills, and register it as `pix` instead.
+- **Tools.** MCP servers only this agent should load go in
+  `~/.marsh/sbxenvs/pix.yaml`, not the shared `sbxenv.yaml`. Small CLIs can be
+  published as typed MCP tools (`marsh-mcp export-serve`), each running as a Kit
+  job whose API key SBX injects at the network proxy.
 
-Save private declarations in `~/.marsh/sbxenvs/pix.yaml`, **not** the shared
-`~/.marsh/sbxenv.yaml`. The shell and packaged agents then do not automatically
-load those additions. Keep credentials and organization-specific skills out of
-the public source/build context. Local MCP commands run on the host; use their
-normal host-side authentication, not keys baked into the agent image.
+This keeps other agents from loading those tools automatically. It is not a
+security boundary: jobs share the same guest home. Use a separate marsh home if
+you need one ([home setup](set-up-your-home.md), [security](../security.md)).
 
-This scopes configuration/automatic loading, not filesystem confidentiality or
-every explicit action an authorized caller can request. Jobs still share the
-guest home, SBX's management tools remain available, and a permitted parent can
-launch a Pix child with that child's own capabilities. Use separate homes or
-spawn restrictions when a stronger boundary is required. See
-[home setup](set-up-your-home.md) and [security](../security.md).
+## Orchestration
 
-## Use marsh for orchestration
+Your agent doesn't need its own subagent runner. Teach it marsh's commands:
+fanout/collect for independent work, split/join for parallel edits, and
+sequential calls when one step needs another's result ([agents running agents](../agents.md)).
+Join returns patches; it does not apply them.
 
-The personal package can provide role prompts, skills and display-only UI. It
-does not need a second subagent scheduler or cancellation/watchdog service.
-Teach it the actual registered commands, split/join, and fanout/collect from
-[agents running agents](../agents.md). Preserve dependency order: a reviewer
-that needs implementation changes runs after integration, not in a sibling
-split fork. Join returns patches; it does not apply them.
+## Before you share it
 
-Do not claim that role names enforce tools/models or that receipts prove model
-identity, token usage or semantic memory. Use actual response metadata and
-task-specific evidence. UI timers should clean up on shutdown and must not
-silently cancel/retry jobs or require Pi-internal patches.
-
-## Verify before switching or publishing
-
-- In an isolated home, compare packaged Pi and the personal Kit: only the latter
-  should discover the added package, defaults and UI.
-- Check preservation of existing settings/logins, malformed-input failures,
-  nonroot-readable resources, and clean CLI/RPC/PTY shutdown.
-- Inspect the exported build context, not just the Git diff, for private skills,
-  endpoints, account references, credentials and runtime files.
-- Separately exercise real marsh children, split patch handling/cancellation,
-  ACP and authorized provider/MCP calls. Offline discovery is not that proof.
-- Before redistributing a derived image, perform its own
-  [publication/legal checks](../design/kit-publication.md). Inherited base-image
-  receipts do not certify a derivative.
+- Compare it with packaged Pi in a fresh home: only your agent should see its
+  skills and defaults.
+- Check the exported build context, not just the Git diff, for private skills,
+  account names, endpoints or keys.
+- Run a real model turn and a real child job; listing tools offline proves
+  little.
+- If you redistribute a derived image, run its own
+  [publication checks](../design/kit-publication.md).

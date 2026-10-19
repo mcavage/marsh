@@ -1856,8 +1856,19 @@ impl ServerHandler for ExportBundle {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
         let Some(export) = self.exports.get(request.name.as_ref()) else {
+            let exposed = self
+                .exports
+                .values()
+                .filter_map(ExportMcp::listed_tool)
+                .map(|tool| format!("'{}'", tool.name))
+                .collect::<Vec<_>>()
+                .join(", ");
             let mut result = CallToolResult::structured(json!({
-                "ok": false, "error": "tool is not declared by this export server"
+                "ok": false,
+                "error": format!(
+                    "tool '{}' not found; export-only server exposes only {exposed}",
+                    request.name
+                )
             }));
             result.is_error = Some(true);
             return Ok(result.into());

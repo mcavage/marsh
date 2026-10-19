@@ -13,8 +13,8 @@ your project:
   from a downstream agent before you apply patches.
 - [Set up your marsh home](set-up-your-home.md): personal skills, dotfiles,
   shared and per-Kit MCP connections and mounted directories.
-- [Keep a personal agent separate from packaged Pi](build-a-personal-agent.md):
-  a public native Kit, private configuration, and marsh-owned orchestration.
+- [Build your own agent on marsh](build-a-personal-agent.md): package your
+  agent as a Kit next to the packaged `pi`, with private skills and tools kept separate.
 
 `split { ... } | join` creates project copies. `fanout { ... } | collect`
 runs on shared files. In another shell, or inside an agent job, use the CLI

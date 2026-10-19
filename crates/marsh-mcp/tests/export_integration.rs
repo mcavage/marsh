@@ -847,7 +847,12 @@ async fn test_call_tool_rejects_unauthorized_tool_names() {
             .unwrap();
         assert_eq!(result.is_error, Some(true));
         assert_eq!(structured(&result)["ok"], false);
-        assert!(error_text(&result).contains("tool is not declared by this export server"));
+        assert!(
+            error_text(&result).contains(&format!(
+                "tool '{forbidden}' not found; export-only server exposes only 'project_test'"
+            )),
+            "{result:?}"
+        );
     }
 }
 
