@@ -12962,9 +12962,9 @@
       ]
     },
     {
-      "name": "codex-0.162.1-rust",
-      "source_inventory": "source-records/codex-0.162.1-rust.json",
-      "source_inventory_sha256": "90e0626c0ec77f693c8438f3e89630a79e267f2d7a13db8e0f58fd80cece3cc8",
+      "name": "codex-0.163.0-rust",
+      "source_inventory": "source-records/codex-0.163.0-rust.json",
+      "source_inventory_sha256": "3ed191de13ffe2728b3e9186b7ed58edaddd0c7a58bc10d1d861dd0e81d8facb",
       "notices": [
         {
           "source_path": "rules_rust-b56cbaa8465e74127f1ea216f813cd377295ad81/AUTHORS",
@@ -13007,7 +13007,7 @@
           "file": "texts/d9a1b1e30d633d5732ea18e3cba9538d293ebc53e1a9e4e96ab739e0c5c4f1cb.txt"
         },
         {
-          "source_path": "rust-sdk-3e636cab26c013eca5131103c03d20237f12c4df/LICENSE",
+          "source_path": "rust-sdk-4048ac40e958fb1a7d614617a2ae8d26666ee2fa/LICENSE",
           "sha256": "0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a",
           "file": "texts/0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a.txt"
         },
@@ -13032,87 +13032,87 @@
           "file": "texts/7fea0ee51a4ca5d5cea7464135fd55e8b09caf3a61da3d451ac8a22af95c033f.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/LICENSE",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/LICENSE",
           "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
           "file": "texts/d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/NOTICE",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/NOTICE",
           "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
           "file": "texts/9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/skills/src/assets/samples/imagegen/LICENSE.txt",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/codex-rs/skills/src/assets/samples/imagegen/LICENSE.txt",
           "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9",
           "file": "texts/4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/skills/src/assets/samples/openai-docs/LICENSE.txt",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/codex-rs/skills/src/assets/samples/openai-docs/LICENSE.txt",
           "sha256": "4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9",
           "file": "texts/4dd13869245e356246a5b770723247bbb80a8f07a181d1d3d873a1734297cdb9.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/skills/src/assets/samples/skill-creator/license.txt",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/codex-rs/skills/src/assets/samples/skill-creator/license.txt",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/skills/src/assets/samples/skill-installer/LICENSE.txt",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/codex-rs/skills/src/assets/samples/skill-installer/LICENSE.txt",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/vendor/bubblewrap/COPYING",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/codex-rs/vendor/bubblewrap/COPYING",
           "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c",
           "file": "texts/b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/docs/license.md",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/docs/license.md",
           "sha256": "dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba",
           "file": "texts/dca51cd27a681f46b17d7867d1e8311c024ec1478a6e12b6463a71a4e2f869ba.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/third_party/voice/NOTICE.md",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/third_party/voice/NOTICE.md",
           "sha256": "40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48",
           "file": "texts/40097a1799441051aa0b6645cdc819cceb19be73cdd265eb602aa2b15e0b1f48.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/third_party/voice/licenses/LGPL-2.1.txt",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/third_party/voice/licenses/LGPL-2.1.txt",
           "sha256": "ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db",
           "file": "texts/ad2eec519ebd4b5df86ea84dff24ae3bfa2edea846a703b58902dd221ae375db.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/third_party/voice/licenses/Opus.txt",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/third_party/voice/licenses/Opus.txt",
           "sha256": "01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551",
           "file": "texts/01e1167d54a096d123cf6dfbbeb19587278845c6481d2d66d545669846079551.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/third_party/voice/licenses/PCRE2.md",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/third_party/voice/licenses/PCRE2.md",
           "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811",
           "file": "texts/197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/third_party/voice/licenses/libffi.txt",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/third_party/voice/licenses/libffi.txt",
           "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c",
           "file": "texts/17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/third_party/voice/licenses/proxy-libintl.txt",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/third_party/voice/licenses/proxy-libintl.txt",
           "sha256": "d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5",
           "file": "texts/d245807f90032872d1438d741ed21e2490e1175dc8aa3afa5ddb6c8e529b58e5.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/third_party/voice/licenses/sljit.txt",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/third_party/voice/licenses/sljit.txt",
           "sha256": "5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb",
           "file": "texts/5f216505c0f6ea3273caec89e766eef93cdeb7bbb0c429f9360116d7c938feeb.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/third_party/voice/licenses/zlib.txt",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/third_party/voice/licenses/zlib.txt",
           "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2",
           "file": "texts/e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2.txt"
         },
         {
-          "source_path": "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/third_party/wezterm/LICENSE",
+          "source_path": "codex-83086188ae0614bd882818ff1aa23f3194962012/third_party/wezterm/LICENSE",
           "sha256": "331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4",
           "file": "texts/331312c214f14dc1455a0e45e3a66f4b70bbc73916cffd525570e8cdb9d63bf4.txt"
         },
@@ -17282,9 +17282,9 @@
           "file": "texts/9e0a97848ea543aef745c98e84fde696a9a3e0735538f6daefdd3cb1942effc1.txt"
         },
         {
-          "source_path": "hyper-1.8.1/LICENSE",
-          "sha256": "8f2eee700f56dd8b381d92dc5b136befe09f90e186f2c1c8414a70c4c7534550",
-          "file": "texts/8f2eee700f56dd8b381d92dc5b136befe09f90e186f2c1c8414a70c4c7534550.txt"
+          "source_path": "hyper-1.11.1/LICENSE",
+          "sha256": "2d01890414494742ba4a509fcec8efa40f6d8be22cbd72be7cff08d6fda4ec89",
+          "file": "texts/2d01890414494742ba4a509fcec8efa40f6d8be22cbd72be7cff08d6fda4ec89.txt"
         },
         {
           "source_path": "i18n-config-0.4.8/LICENSE.txt",
@@ -17991,6 +17991,16 @@
           "source_path": "link-section-0.17.2/LICENSE-MIT",
           "sha256": "bccaa8b6c09f94e81f06696e179dbe058464bbdfbc823b6d49cada1d71e84ac3",
           "file": "texts/bccaa8b6c09f94e81f06696e179dbe058464bbdfbc823b6d49cada1d71e84ac3.txt"
+        },
+        {
+          "source_path": "linkify-0.11.0/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "file": "texts/a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2.txt"
+        },
+        {
+          "source_path": "linkify-0.11.0/LICENSE-MIT",
+          "sha256": "ee04163bfec76c4f977a0c0a5834fd285c0df4b3889da5bba27d2151f3833d95",
+          "file": "texts/ee04163bfec76c4f977a0c0a5834fd285c0df4b3889da5bba27d2151f3833d95.txt"
         },
         {
           "source_path": "linktime-proc-macro-0.1.0/LICENSE-APACHE",
@@ -20492,12 +20502,12 @@
           "file": "texts/7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c.txt"
         },
         {
-          "source_path": "quinn-proto-0.11.15/LICENSE-APACHE",
+          "source_path": "quinn-proto-0.11.18/LICENSE-APACHE",
           "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
           "file": "texts/c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4.txt"
         },
         {
-          "source_path": "quinn-proto-0.11.15/LICENSE-MIT",
+          "source_path": "quinn-proto-0.11.18/LICENSE-MIT",
           "sha256": "4b2d0aca6789fa39e03d6738e869ea0988cceba210ca34ebb59c15c463e93a04",
           "file": "texts/4b2d0aca6789fa39e03d6738e869ea0988cceba210ca34ebb59c15c463e93a04.txt"
         },
@@ -20685,6 +20695,21 @@
           "source_path": "rand_core-0.9.5/LICENSE-MIT",
           "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b",
           "file": "texts/209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b.txt"
+        },
+        {
+          "source_path": "rand_pcg-0.10.2/COPYRIGHT",
+          "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5",
+          "file": "texts/90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5.txt"
+        },
+        {
+          "source_path": "rand_pcg-0.10.2/LICENSE-APACHE",
+          "sha256": "6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51",
+          "file": "texts/6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51.txt"
+        },
+        {
+          "source_path": "rand_pcg-0.10.2/LICENSE-MIT",
+          "sha256": "2234e3cefee876aeb686ad89e978bdb07bf118a1186ab1cf161bcdf69d4b4f57",
+          "file": "texts/2234e3cefee876aeb686ad89e978bdb07bf118a1186ab1cf161bcdf69d4b4f57.txt"
         },
         {
           "source_path": "rand_regex-0.18.1/LICENSE.txt",
@@ -24600,9 +24625,9 @@
       ]
     },
     {
-      "name": "codex-0.162.1-rust-supplements",
-      "source_inventory": "source-records/codex-0.162.1-rust-supplements.json",
-      "source_inventory_sha256": "e9938790efad5b1a55fdbd2b9806dd86bcf7b38f03193dfe3e8cfa8b08c9077a",
+      "name": "codex-0.163.0-rust-supplements",
+      "source_inventory": "source-records/codex-0.163.0-rust-supplements.json",
+      "source_inventory_sha256": "eda53ed4a3eacbafc5c9479e9e75cc33670391625484fcd2adff450ebc9d532a",
       "notices": [
         {
           "url": "https://raw.githubusercontent.com/whatisinternet/inflector/a4a95eac75043f4bffb127c7c8ec886b5b106053/LICENSE.md",

@@ -1,6 +1,6 @@
 {
   "schema": "marsh.exact-crate-upstream-notices/v1",
-  "input_sha256": "90e0626c0ec77f693c8438f3e89630a79e267f2d7a13db8e0f58fd80cece3cc8",
+  "input_sha256": "3ed191de13ffe2728b3e9186b7ed58edaddd0c7a58bc10d1d861dd0e81d8facb",
   "supplements": [
     {
       "crate_url": "https://static.crates.io/crates/Inflector/Inflector-0.11.4.crate",
