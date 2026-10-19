@@ -68,7 +68,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       docker-ce=5:29.9.1-0 docker-ce-cli=5:29.9.1-0 containerd.io=2.4.2-0 \
       docker-buildx-plugin=0.38.0-2 \
-      nodejs-24=24.22.0-0 npm=11.21.1-0 \
+      nodejs-24=24.22.0-0 npm=11.21.1-1 \
       python-3.14=3.14.8-0 python3-pip=26.2.1-2 \
       sudo passwd ca-certificates curl git openssh-client less procps jq \
       gcc libc6-dev make zsh vim \
