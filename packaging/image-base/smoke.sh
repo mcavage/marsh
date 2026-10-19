@@ -5,12 +5,13 @@
 #
 #   smoke.sh [COMMAND...]
 set -eu
-for command in dockerd containerd runc docker git curl bash tar "$@"; do
+for command in dockerd containerd runc docker git curl bash tar gh "$@"; do
   "$command" --version >/dev/null
 done
 # Git's Perl tools need the full interpreter, not just the base package.
 perl -e 'use strict; use warnings; use File::Spec;'
 test -x /bin/sh && test -x /bin/bash
+which sh >/dev/null
 test -d /usr/lib/locale/C.utf8
 # Docker Sandboxes installs its proxy CA this way at VM start.
 test -d /usr/local/share/ca-certificates
