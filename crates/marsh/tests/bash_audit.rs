@@ -1245,7 +1245,7 @@ fn group_sigint_during_a_surviving_childs_exit_is_the_childs() {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped()),
     );
-    let output = common::wait_for_exit(child, script, Duration::from_secs(60));
+    let output = common::wait_for_exit(child, script, Duration::from_mins(1));
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     assert_eq!(output.stdout, b"after 0 40\n", "{output:?}");
 }
