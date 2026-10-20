@@ -11121,7 +11121,7 @@
       },
       {
         "package": "npm",
-        "version": "11.21.1-0",
+        "version": "11.21.1-1",
         "families": [
           "Apache-2.0",
           "Artistic",
