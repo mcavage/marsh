@@ -452,6 +452,7 @@ fn write_process_view(
 fn placement_name(place: marsh_daemon::Placement) -> &'static str {
     match place {
         marsh_daemon::Placement::Local => "local",
+        marsh_daemon::Placement::Cloud => "cloud",
     }
 }
 

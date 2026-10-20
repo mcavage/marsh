@@ -32,4 +32,14 @@ By topic:
 | [self-development.md](self-development.md) | `marsh --dev` and the dev broker |
 | [Brush patch record](../upstream/brush/README.md) | The upstream Brush revision and marsh's patch queue |
 
-Plans: [bring your own agent Kit](../plan/custom-agent-kit.md).
+Cloud placement (session-origin slice shipped as a preview; the rest proposed):
+
+- [Cloud placement](cloud-placement.md): shell-native remote commands, automatic
+  delta return, nested placement, model obligations, and acceptance gates.
+- [Session-origin dispatch](../plan/cloud-dispatch.md): what is implemented,
+  where, and its live evidence.
+- [Live cloud feasibility findings](../plan/cloud-feasibility.md): tested Kit v2
+  execution, two-policy sharing, limitations, and verified resource cleanup.
+- [Owned cloud lifecycle](../plan/cloud-lifecycle.md): implemented adapter,
+  real-caller qualification, and cloud ownership model.
+- [Bring your own agent Kit](../plan/custom-agent-kit.md).

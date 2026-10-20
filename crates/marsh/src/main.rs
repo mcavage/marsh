@@ -47,6 +47,8 @@ Usage:
   marsh jobs --tree [--all] [--json]   The same jobs, children under parents
   marsh run [--spawn NAME,...|--no-spawn] NAME [ARG...]
                                        Run a registered command as a new job
+  marsh cloud -c SCRIPT [NAME [ARG...]] | marsh cloud -- PROGRAM [ARG...]
+                                       Run in Docker Cloud; file changes come back
   marsh context                        Print the context text every job sees
   marsh results [--json]
   marsh results show CURSOR|JOB [--json]
@@ -499,6 +501,7 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
             return Ok(0);
         }
         Some("run") => return Ok(run_command(&arguments[2..])),
+        Some("cloud") => return Ok(cloud_command(&arguments[2..])),
         Some("jobs") if marsh::job::is_listing(&arguments[2..]) => {
             return match split_channel(false) {
                 Ok(channel) => {
@@ -833,6 +836,316 @@ fn run_command(arguments: &[OsString]) -> i32 {
                 other => other.to_string(),
             };
             eprintln!("marsh: {message}");
+            125
+        }
+    };
+    if let Some(session) = &channel.detach {
+        let _ = channel
+            .client
+            .request(marsh_daemon::PublicRequest::DetachShell {
+                session_id: session.clone(),
+            });
+    }
+    status
+}
+
+const CLOUD_HELP: &str = "Usage: marsh cloud [OPTION...] -c SCRIPT [NAME [ARG...]]
+       marsh cloud [OPTION...] -- PROGRAM [ARG...]
+       marsh cloud [OPTION...]          (an interactive cloud shell, from a terminal)
+       cloud { LIST; }                 (in the marsh shell)
+
+Options (defaults from MARSH_CLOUD_CPUS, MARSH_CLOUD_TTL, MARSH_CLOUD_IMAGE):
+  --cpus N        1, 2, 4, 8, or 16 CPUs, with 2 GiB of memory per CPU (default 2)
+  --ttl DURATION  sandbox lifetime limit, 1m to 24h, e.g. 30m or 2h (default 4h)
+  --image REF     sandbox image pinned by digest (REPOSITORY@sha256:...)
+
+Run a shell script or one program in a new Docker Cloud sandbox. The current
+project (or split fork) is uploaded as a snapshot, Git-ignored files excluded;
+stdin, stdout, stderr, and the exit status pass through. When the command
+ends, its file changes (created, modified, deleted) are written back to that
+project before marsh exits. Changes overwrite local edits to the same paths.
+Run it inside a one-branch split to review the changes as a patch instead.
+Needs a Docker sign-in with Docker Cloud sandbox access (`sbx login`).
+";
+
+/// stdout for `marsh cloud`. When the downstream reader closes the pipe,
+/// further output is discarded and the node is cancelled through the client's
+/// signal relay (SIGTERM to this process), so the client still waits for
+/// settlement and write-back instead of exiting on the first EPIPE.
+struct ClosedPipeStdout {
+    inner: std::io::Stdout,
+    closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl std::io::Write for ClosedPipeStdout {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+            return Ok(bytes.len());
+        }
+        match self.inner.write(bytes) {
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {
+                self.close();
+                Ok(bytes.len())
+            }
+            result => result,
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.closed.load(std::sync::atomic::Ordering::Acquire) {
+            return Ok(());
+        }
+        match self.inner.flush() {
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => {
+                self.close();
+                Ok(())
+            }
+            result => result,
+        }
+    }
+}
+
+impl ClosedPipeStdout {
+    fn close(&self) {
+        if !self.closed.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            let _ = nix::sys::signal::raise(nix::sys::signal::Signal::SIGTERM);
+        }
+    }
+}
+
+/// `marsh cloud`: one cloud placement node through `Execute`
+/// (`docs/design/cloud-placement.md` s2). The arguments travel as bytes.
+/// `marsh cloud` options before `-c`/`--`, with the `MARSH_CLOUD_*`
+/// defaults added for options not given. The daemon validates values.
+fn cloud_arguments(arguments: &[OsString]) -> Result<(Vec<OsString>, bool), String> {
+    const OPTIONS: [(&str, &str); 3] = [
+        ("--cpus", "MARSH_CLOUD_CPUS"),
+        ("--ttl", "MARSH_CLOUD_TTL"),
+        ("--image", "MARSH_CLOUD_IMAGE"),
+    ];
+    let mut given = Vec::new();
+    let mut index = 0;
+    while let Some(option) = arguments
+        .get(index)
+        .and_then(|word| word.to_str())
+        .filter(|word| OPTIONS.iter().any(|(name, _)| name == word))
+    {
+        if arguments.get(index + 1).is_none() {
+            return Err(format!("{option} needs a value"));
+        }
+        given.push(option.to_owned());
+        index += 2;
+    }
+    let interactive = match arguments.get(index).and_then(|word| word.to_str()) {
+        Some("-c" | "--") if arguments.len() > index + 1 => false,
+        None => true,
+        _ => return Err("expected -c SCRIPT or -- PROGRAM".into()),
+    };
+    let mut out = Vec::new();
+    for (name, variable) in OPTIONS {
+        if !given.iter().any(|option| option == name)
+            && let Some(value) = env::var_os(variable).filter(|value| !value.is_empty())
+        {
+            out.push(OsString::from(name));
+            out.push(value);
+        }
+    }
+    out.extend(arguments.iter().cloned());
+    if interactive {
+        out.push("-i".into());
+    }
+    Ok((out, interactive))
+}
+
+/// A block that is exactly one call with literal words (and at most stdin
+/// from `/dev/null`): `(argv, stdin_null)`. Anything else (expansions,
+/// globs, other redirections, pipelines, lists, assignments) is `None`; the
+/// daemon then runs the block in the cloud shell as usual.
+fn single_call(source: &str) -> Option<(Vec<String>, bool)> {
+    let source = source.trim_end();
+    let source = source.strip_suffix(';').unwrap_or(source);
+    let mut words = Vec::new();
+    let mut stdin_null = false;
+    let mut chars = source.chars().peekable();
+    loop {
+        while chars.next_if(|c| *c == ' ' || *c == '\t').is_some() {}
+        let Some(&first) = chars.peek() else { break };
+        if first == '<' {
+            chars.next();
+            while chars.next_if(|c| *c == ' ' || *c == '\t').is_some() {}
+            let target: String = chars
+                .by_ref()
+                .take_while(|c| *c != ' ' && *c != '\t')
+                .collect();
+            if target != "/dev/null" || stdin_null {
+                return None;
+            }
+            stdin_null = true;
+            continue;
+        }
+        let mut word = String::new();
+        let mut quoted = false;
+        while let Some(&c) = chars.peek() {
+            match c {
+                ' ' | '\t' => break,
+                '\'' => {
+                    chars.next();
+                    quoted = true;
+                    loop {
+                        match chars.next()? {
+                            '\'' => break,
+                            other => word.push(other),
+                        }
+                    }
+                }
+                '"' => {
+                    chars.next();
+                    quoted = true;
+                    loop {
+                        match chars.next()? {
+                            '"' => break,
+                            '$' | '`' | '\\' => return None,
+                            other => word.push(other),
+                        }
+                    }
+                }
+                c if c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c) => {
+                    chars.next();
+                    word.push(c);
+                }
+                _ => return None,
+            }
+        }
+        // `NAME=value cmd` is an assignment, not a call.
+        if words.is_empty() && (quoted || word.contains('=') || word.is_empty()) {
+            return None;
+        }
+        words.push(word);
+    }
+    (!words.is_empty()).then_some((words, stdin_null))
+}
+
+/// The daemon's words for a `cloud` call: the caller's arguments, after the
+/// client's internal `--stdin-terminal` and `--direct N WORD...`; and
+/// whether the one call reads `/dev/null`.
+fn cloud_words(arguments: &[OsString], interactive: bool) -> (Vec<Vec<u8>>, bool) {
+    // `-c SOURCE` that is one call: offered to the daemon, which runs it
+    // straight in that command's Kit when it has a cloud form.
+    let call = arguments
+        .iter()
+        .position(|word| word == "-c")
+        .filter(|index| arguments.len() == index + 2)
+        .filter(|_| !arguments.iter().any(|word| word == "--image"))
+        .and_then(|index| arguments[index + 1].to_str())
+        .and_then(single_call);
+    let stdin_null = call.as_ref().is_some_and(|(_, null)| *null);
+    let stdin_terminal =
+        !interactive && !stdin_null && std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let mut words: Vec<Vec<u8>> = Vec::new();
+    if stdin_terminal {
+        words.push(b"--stdin-terminal".to_vec());
+    }
+    if let Some((argv, _)) = &call {
+        words.push(b"--direct".to_vec());
+        words.push(argv.len().to_string().into_bytes());
+        words.extend(argv.iter().map(|word| word.as_bytes().to_vec()));
+    }
+    words.extend(
+        arguments
+            .iter()
+            .map(|argument| argument.as_encoded_bytes().to_vec()),
+    );
+    (words, stdin_null)
+}
+
+fn cloud_command(arguments: &[OsString]) -> i32 {
+    if matches!(
+        arguments.first().and_then(|word| word.to_str()),
+        Some("-h" | "--help")
+    ) {
+        print!("{CLOUD_HELP}");
+        return 0;
+    }
+    let (arguments, interactive) = match cloud_arguments(arguments) {
+        Ok(parsed) => parsed,
+        Err(message) => {
+            eprint!("marsh: cloud: {message}\n{CLOUD_HELP}");
+            return 2;
+        }
+    };
+    if interactive
+        && !(std::io::IsTerminal::is_terminal(&std::io::stdin())
+            && std::io::IsTerminal::is_terminal(&std::io::stdout()))
+    {
+        eprint!(
+            "marsh: cloud: an interactive cloud shell needs a terminal; use -c SCRIPT\n{CLOUD_HELP}"
+        );
+        return 2;
+    }
+    let channel = match split_channel(true) {
+        Ok(channel) => channel,
+        Err(message) => {
+            eprintln!("marsh: cloud: {message}");
+            return 125;
+        }
+    };
+    let Some(mut session) = channel.session.clone() else {
+        eprintln!("marsh: cloud: no session");
+        return 125;
+    };
+    session.terminal = interactive;
+    let (environment, _) = marsh::registered_commands::collect_exported_environment(env::vars_os());
+    // A block's stdin is relayed as a pipe; when it is this terminal, say so
+    // (`fanout` then reads nothing from it, as it would locally).
+    let (words, stdin_null) = cloud_words(&arguments, interactive);
+    let spec = marsh_daemon::ExecuteSpec {
+        command: "cloud".into(),
+        arguments: words,
+        placement: marsh_daemon::Placement::Cloud,
+        environment,
+        working_directory: env::current_dir().ok(),
+        session,
+        // MARSH_SPAWN narrows what agent calls inside the block may start.
+        process: env::var("MARSH_SPAWN")
+            .ok()
+            .map(|value| marsh_daemon::process::ProcessLink {
+                parent_job: None,
+                spawn: Some(marsh_contracts::process::parse_spawn(&value)),
+                branch: false,
+                start_env: std::collections::BTreeMap::new(),
+            }),
+    };
+    let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stdout = ClosedPipeStdout {
+        inner: std::io::stdout(),
+        closed: std::sync::Arc::clone(&closed),
+    };
+    let result = if interactive {
+        // Raw terminal, initial size, and resizes, as for a local terminal job.
+        channel.client.execute(spec)
+    } else {
+        // `< /dev/null` on the one call: the same empty input either way.
+        let input: Box<dyn std::io::Read + Send> = if stdin_null {
+            Box::new(std::io::empty())
+        } else {
+            Box::new(std::io::stdin())
+        };
+        channel
+            .client
+            .execute_with_io(spec, input, stdout, std::io::stderr())
+    };
+    let status = match result {
+        // The reader went away: the node was cancelled and has settled
+        // (including write-back); report it like a process killed by SIGPIPE.
+        Ok(_) if closed.load(std::sync::atomic::Ordering::Acquire) => 141,
+        Ok(code) => code,
+        Err(error) => {
+            let message = match error {
+                marsh_daemon::DaemonError::Remote(message)
+                | marsh_daemon::DaemonError::Refused(message) => message,
+                other => other.to_string(),
+            };
+            eprintln!("marsh: cloud: {message}");
             125
         }
     };
@@ -3143,6 +3456,38 @@ impl RunError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn single_call_is_only_one_literal_call() {
+        let call = |source: &str| super::single_call(source);
+        assert_eq!(
+            call("claude -p 'Fix it: now' < /dev/null;"),
+            Some((
+                vec!["claude".into(), "-p".into(), "Fix it: now".into()],
+                true
+            ))
+        );
+        assert_eq!(
+            call("codex exec \"a b\""),
+            Some((vec!["codex".into(), "exec".into(), "a b".into()], false))
+        );
+        for source in [
+            "claude -p x; python3 t.py",
+            "claude -p x | tee out",
+            "claude -p \"$PROMPT\"",
+            "claude -p $(cat p)",
+            "claude *.py",
+            "FOO=1 claude",
+            "claude > out",
+            "claude 0</dev/null",
+            "claude < input.txt",
+            "claude && make",
+            "'claude' -p x",
+            "",
+        ] {
+            assert_eq!(call(source), None, "{source}");
+        }
+    }
+
     use super::*;
 
     #[test]

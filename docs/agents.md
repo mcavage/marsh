@@ -184,7 +184,8 @@ stdout, stderr, and exit status pass through.
 
 `bash`, `sh`, and every other tool in the job come from the image. The in-job
 `marsh` command is also in `/run/marsh/bin`. It has `run`, `split`, `join`,
-`fanout`, `collect`, `jobs`, and `context`.
+`fanout`, `collect`, `jobs`, `context`, and `cloud`
+([Cloud from a job](cloud.md#cloud-from-a-job)).
 
 ## Variables
 

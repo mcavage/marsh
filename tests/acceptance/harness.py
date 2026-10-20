@@ -166,6 +166,17 @@ def stable_process_identity(pid: int) -> tuple[int, str] | None:
         raise RuntimeError(f"could not identify process {pid}") from error
 
 
+def exited_as(current: tuple[int, str], recorded: tuple[int, str] | None) -> bool:
+    """The recorded process has exited and awaits reaping: macOS `ps` shows
+    an exited process's command in parentheses, with the same birth time."""
+    if recorded is None or current[0] != recorded[0]:
+        return False
+    head, _, command = current[1].rpartition(" ")
+    recorded_head, _, recorded_command = recorded[1].rpartition(" ")
+    return (command.startswith("(") and command.endswith(")") and head == recorded_head
+            and command[1:-1] == recorded_command.rsplit("/", 1)[-1])
+
+
 def daemon_endpoint_paths(home: pathlib.Path) -> tuple[pathlib.Path, pathlib.Path]:
     canonical = home.resolve(strict=True)
     scope = hashlib.sha256(os.fsencode(canonical)).hexdigest()[:16]
@@ -422,11 +433,12 @@ class IsolatedScope:
                             f"could not verify isolated daemon termination: {error}"
                         )
                         return errors
-                    if current is None:
+                    if current is None or exited_as(current, self.owned_daemon_process_identity):
                         break
                     if current != self.owned_daemon_process_identity:
                         errors.append(
                             f"isolated daemon PID {self.owned_daemon_pid} was reused during shutdown"
+                            f" ({current!r} != {self.owned_daemon_process_identity!r})"
                         )
                         return errors
                     time.sleep(0.05)

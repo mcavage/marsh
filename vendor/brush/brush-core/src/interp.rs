@@ -1057,6 +1057,46 @@ pub(crate) fn join_capture(
         .map_err(|_| std::io::Error::other("composition capture thread panicked"))?
 }
 
+/// `cloud { LIST; }` runs as one external command: the embedding's placement
+/// runner with the block as `-c SOURCE`. Quoting makes every word literal;
+/// the remote shell, not this one, expands the block.
+fn placement_as_simple(command: &ast::PlacementCommand) -> Option<ast::SimpleCommand> {
+    let runner = crate::split::placement_command()?;
+    let quoted = |text: &str| format!("'{}'", text.replace('\'', "'\\''"));
+    let word = |text: &str| ast::Word {
+        value: quoted(text),
+        loc: Some(command.loc.clone()),
+    };
+    let mut suffix = runner
+        .arguments
+        .iter()
+        .map(|argument| ast::CommandPrefixOrSuffixItem::Word(word(argument)))
+        .collect::<Vec<_>>();
+    suffix.extend(
+        command
+            .options
+            .iter()
+            .cloned()
+            .map(ast::CommandPrefixOrSuffixItem::Word),
+    );
+    suffix.push(ast::CommandPrefixOrSuffixItem::Word(word("-c")));
+    suffix.push(ast::CommandPrefixOrSuffixItem::Word(word(
+        &command.body.to_string(),
+    )));
+    suffix.extend(
+        command
+            .redirects
+            .iter()
+            .flat_map(|redirects| redirects.0.iter().cloned())
+            .map(ast::CommandPrefixOrSuffixItem::IoRedirect),
+    );
+    Some(ast::SimpleCommand {
+        prefix: None,
+        word_or_name: Some(word(&runner.program)),
+        suffix: Some(ast::CommandSuffix(suffix)),
+    })
+}
+
 fn collect_as_simple(command: &ast::CollectCommand) -> ast::SimpleCommand {
     let mut suffix = command
         .arguments
@@ -1081,6 +1121,23 @@ fn collect_as_simple(command: &ast::CollectCommand) -> ast::SimpleCommand {
     }
 }
 
+/// A marsh cloud workload's stdin that relays the caller's terminal as a
+/// pipe (`MARSH_TERMINAL_STDIN` names that pipe as `DEV:INO`): treated as a
+/// terminal, as the same composition would treat it locally.
+fn relayed_terminal(file: &openfiles::OpenFile) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    let Some(expected) = std::env::var_os("MARSH_TERMINAL_STDIN") else {
+        return false;
+    };
+    file.try_borrow_as_fd()
+        .ok()
+        .and_then(|fd| fd.try_clone_to_owned().ok())
+        .and_then(|fd| std::fs::File::from(fd).metadata().ok())
+        .is_some_and(|metadata| {
+            expected == format!("{}:{}", metadata.dev(), metadata.ino()).as_str()
+        })
+}
+
 /// Runs the stages before a composition and spools their stdout (or this
 /// pipeline's stdin when there are none), bounded by the composition input
 /// limit. Returns `None` after reporting an oversized input.
@@ -1094,7 +1151,7 @@ pub(crate) async fn composition_input<SE: extensions::ShellExtensions>(
         let mut input = Vec::new();
         if !params
             .try_stdin(shell)
-            .is_some_and(|stdin| stdin.is_terminal())
+            .is_some_and(|stdin| stdin.is_terminal() || relayed_terminal(&stdin))
         {
             let mut reader = params.stdin(shell);
             reader
@@ -1893,6 +1950,17 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::Command {
                     .execute_in_pipeline(pipeline_context, params)
                     .await
             }
+            Self::Placement(command) => match placement_as_simple(command) {
+                Some(simple) => simple.execute_in_pipeline(pipeline_context, params).await,
+                None => {
+                    writeln!(
+                        params.stderr(&pipeline_context.shell),
+                        "{}: placement is not available in this shell",
+                        command.place
+                    )?;
+                    Ok(ExecutionResult::new(125).into())
+                }
+            },
             Self::Simple(simple) => simple.execute_in_pipeline(pipeline_context, params).await,
             Self::Compound(compound, redirects) => {
                 // Set up any additional redirects.

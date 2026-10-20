@@ -23,3 +23,7 @@ forms: `marsh split ::: LABEL CMD ARG... | marsh join` and
 
 For the full behavior and options, see [Split and join](../split.md),
 [Fanout and collect](../fanout.md), and [Agents running agents](../agents.md).
+
+Preview: [Docker Cloud](../cloud.md) runs a `cloud { ... }` block in a cloud
+sandbox and writes its file changes back. Requires a Docker Cloud subscription
+with sandbox access.

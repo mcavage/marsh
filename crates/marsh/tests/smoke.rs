@@ -2029,3 +2029,71 @@ fn a_term_trap_delivered_at_a_command_boundary_runs_once() {
     assert_eq!(output.stdout, b"TA", "{:?}", output.stderr);
     assert_eq!(output.status.code(), Some(0));
 }
+
+/// `cloud { LIST; }` is one external stage: the embedding's placement runner
+/// gets the block's source unexpanded as `-c SOURCE`, while redirections and
+/// pipes outside the block stay the caller's. Without a runner it is refused.
+#[test]
+fn cloud_block_runs_as_one_stage_with_unexpanded_source() {
+    let directory = tempfile::tempdir().unwrap();
+    let script = "set -o pipefail; printf in | cloud { cat input; echo \"$HOME\" 'a b'; } > out; \
+                  echo \"status=$?\"; cat out; \
+                  cloud { false; } | tr a-z A-Z; echo \"pipe=${PIPESTATUS[*]}\"; \
+                  n=4; cloud --cpus \"$n\" { true; }; \
+                  cloud { split { a: echo 1; echo 2, b: true } | join; }";
+    let output = composition_shell()
+        .current_dir(directory.path())
+        .env("MARSH_TEST_PLACEMENT_PROGRAM", "/bin/echo")
+        .args(["--no-config", "--noprofile", "--norc", "-c", script])
+        .output()
+        .expect("run marsh");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert!(
+        stdout.starts_with("status=0\ncloud -c cat input;\necho \"$HOME\" 'a b'\n"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("CLOUD -C FALSE\npipe=0 0\n"), "{stdout}");
+    // Options before the block are the caller's words, expanded locally.
+    assert!(stdout.contains("cloud --cpus 4 -c true\n"), "{stdout}");
+    // A nested composition keeps each multi-item branch as one branch.
+    assert!(
+        stdout.contains("a: { echo 1;\necho 2; }\nb: { true; }"),
+        "{stdout}"
+    );
+
+    let refused = composition_shell()
+        .args([
+            "--no-config",
+            "--noprofile",
+            "--norc",
+            "-c",
+            "cloud { true; }",
+        ])
+        .output()
+        .expect("run marsh");
+    assert_eq!(refused.status.code(), Some(125));
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("cloud: placement is not available"),
+        "{:?}",
+        refused.stderr
+    );
+
+    // A malformed block (no `;` before `}`) is a syntax error: none of its
+    // pieces run locally.
+    let malformed = composition_shell()
+        .current_dir(directory.path())
+        .env("MARSH_TEST_PLACEMENT_PROGRAM", "/bin/echo")
+        .args([
+            "--no-config",
+            "--noprofile",
+            "--norc",
+            "-c",
+            "cloud { echo first; touch local.txt }",
+        ])
+        .output()
+        .expect("run marsh");
+    assert!(!malformed.status.success(), "{malformed:?}");
+    assert!(malformed.stdout.is_empty(), "{malformed:?}");
+    assert!(!directory.path().join("local.txt").exists());
+}

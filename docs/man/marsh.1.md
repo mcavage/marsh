@@ -148,6 +148,19 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   the first nonzero branch status. Limits: 16 branches, 64 MiB of input, 16 MiB
   of combined branch output.
 
+**cloud** [**--cpus** *N*] [**--ttl** *DURATION*] [**--image** *REF*] [**-c** *SCRIPT* [*NAME* [*ARG*...]] | **--** *PROGRAM* [*ARG*...]]
+: Preview. Run a script or program in a new Docker Cloud sandbox; in the
+  marsh shell, **cloud** [*OPTION*...] **{** *LIST*; **}** does the same. With
+  no command, from a terminal, open an interactive cloud shell. A private,
+  hook-free copy of the project's Git metadata goes with it and is never
+  written back. The project (or split
+  fork) is uploaded without Git-ignored files, **.git**, or **.marsh**; stdin,
+  stdout, stderr, and the exit status pass through; file changes are written
+  back to it before the command returns, overwriting local edits to the same
+  paths. Needs a Docker sign-in with Docker Cloud sandbox access. Ctrl-C exits
+  130 after the remote command stops and its changes return. See
+  [Docker Cloud](../cloud.md).
+
 **config shell** [**bash**|**zsh**|**marsh**]
 : Set, or with no name print, the default shell for this **MARSH_HOME**.
 
@@ -156,7 +169,8 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 
 **workers reset** *KIT*[,*KIT*...]|**all**
 : Remove idle Kit VMs, including quarantined ones. The next use creates a new
-  VM.
+  VM. **workers reset cloud** deletes every Docker Cloud sandbox this daemon
+  owns and verifies they are gone.
 
 **reset** [**--json**]
 : Remove every VM this scope owns. The daemon keeps running. Refuses while

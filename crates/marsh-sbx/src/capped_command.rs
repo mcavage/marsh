@@ -1,6 +1,6 @@
 //! Bounded stock control-plane capture, shared by source observation and brokers.
 use crate::SbxError;
-use marsh_runtime::{CommandOutput, CommandRunner, Invocation, retain_for_reaping};
+use marsh_runtime::{Attachment, CommandOutput, CommandRunner, Invocation, retain_for_reaping};
 use std::{
     io::{self, Read},
     sync::{
@@ -55,10 +55,20 @@ fn capture(
 /// Rejects non-cancellable runners, excess output, deadline, I/O, unknown exit,
 /// or unverified cleanup. Teardown has a separate maximum two-second grace.
 /// The native macOS termination observation (at most 500ms) uses that grace.
-#[allow(clippy::too_many_lines)] // Retain process and both readers through one cleanup transaction.
 pub fn run_stock_command_capped(
     runner: &dyn CommandRunner,
     invocation: &Invocation,
+    timeout: Duration,
+    limit: usize,
+) -> Result<CommandOutput, SbxError> {
+    run_stock_command_capped_with_start(|| runner.spawn_attached(invocation), timeout, limit)
+}
+
+/// A cloud-owned operation checks its map under the same lock that admits the
+/// local carrier spawn. Do not hold that lock through remote I/O or teardown.
+#[allow(clippy::too_many_lines)] // Retain process and both readers through one cleanup transaction.
+pub(crate) fn run_stock_command_capped_with_start(
+    start: impl FnOnce() -> io::Result<Attachment>,
     timeout: Duration,
     limit: usize,
 ) -> Result<CommandOutput, SbxError> {
@@ -72,7 +82,7 @@ pub fn run_stock_command_capped(
     let deadline = Instant::now()
         .checked_add(timeout)
         .ok_or_else(|| io::Error::other("stock control deadline overflow"))?;
-    let mut attachment = runner.spawn_attached(invocation)?;
+    let mut attachment = start()?;
     drop(attachment.stdin);
     if !attachment.process.supports_io_cancellation() {
         let _ = attachment.process.terminate();

@@ -144,6 +144,7 @@ to your project stay as they are. Review them with `git status` and
 |---|---|
 | `marsh workers reset KIT` | Remove one idle or quarantined Kit VM |
 | `marsh workers reset all` | Remove all idle or quarantined Kit VMs |
+| `marsh workers reset cloud` | Delete every [Docker Cloud](cloud.md) sandbox this daemon owns |
 | `marsh reset` | Remove the scope's VMs; keep the daemon running |
 | `marsh stop` | Remove the scope's VMs and stop its daemon |
 
@@ -155,6 +156,10 @@ nonzero.
 
 Your project, guest home, and job results are kept. Packages installed in a VM
 are not.
+
+`reset` and `stop` do not delete Docker Cloud sandboxes. marsh deletes each
+one when its `cloud` call ends; if a call ended `cleanup uncertain`, run
+`marsh workers reset cloud`. Cloud sandboxes also expire after 4 hours.
 
 ### Which VMs marsh touches
 

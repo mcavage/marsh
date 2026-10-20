@@ -44,6 +44,7 @@ strip-ansi-escapes = "0.2"
 chrono = "0.4.44"
 uuid = { version = "1.18", features = ["v4"] }
 tempfile = "3.23"
+flate2 = "1"
 nix = { version = "0.31", features = ["fs", "signal", "user", "term", "ioctl", "process"] }
 rustix = { version = "1.1", features = ["process", "event", "termios"] }
 

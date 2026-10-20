@@ -1,5 +1,5 @@
 use marsh_contracts::WORKER_CONTAINER_CAPACITY;
-use marsh_runtime::DockerCliRuntime;
+use marsh_runtime::{DockerCliRuntime, SbxRuntimeProfile};
 use marsh_worker::{ThreadSupervisor, Worker, WorkerTransport, serve_retained};
 use std::{fs::File, io, os::fd::AsFd, sync::Arc};
 
@@ -13,9 +13,11 @@ fn main() {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args_os().skip(1);
     let mode = arguments.next();
-    if mode.as_deref() != Some(std::ffi::OsStr::new("--serve")) {
-        return Err("usage: marsh-worker --serve GENERATION".into());
-    }
+    let profile = match mode.as_deref().and_then(std::ffi::OsStr::to_str) {
+        Some("--serve") => SbxRuntimeProfile::Local,
+        Some("--serve-cloud-v2") => SbxRuntimeProfile::CloudV2,
+        _ => return Err("usage: marsh-worker (--serve|--serve-cloud-v2) GENERATION".into()),
+    };
     let generation = arguments
         .next()
         .ok_or("worker generation is required")?
@@ -28,8 +30,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if arguments.next().is_some() {
         return Err("unexpected worker arguments".into());
     }
+    let runtime = match profile {
+        SbxRuntimeProfile::Local => DockerCliRuntime::system(),
+        SbxRuntimeProfile::CloudV2 => {
+            if !rustix::process::geteuid().is_root() {
+                return Err("cloud-v2 worker requires trusted root bootstrap".into());
+            }
+            DockerCliRuntime::system_with_profile(profile)?
+        }
+    };
     let worker = Arc::new(Worker::new(
-        Arc::new(DockerCliRuntime::system()),
+        Arc::new(runtime),
         Arc::new(ThreadSupervisor::default()),
     ));
     let transport = WorkerTransport::from_files(

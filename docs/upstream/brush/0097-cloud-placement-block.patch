@@ -1,0 +1,346 @@
+diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
+index 819f8b1..3a36a04 100644
+--- a/brush-core/src/interp.rs
++++ b/brush-core/src/interp.rs
+@@ -1057,6 +1057,46 @@ pub(crate) fn join_capture(
+         .map_err(|_| std::io::Error::other("composition capture thread panicked"))?
+ }
+ 
++/// `cloud { LIST; }` runs as one external command: the embedding's placement
++/// runner with the block as `-c SOURCE`. Quoting makes every word literal;
++/// the remote shell, not this one, expands the block.
++fn placement_as_simple(command: &ast::PlacementCommand) -> Option<ast::SimpleCommand> {
++    let runner = crate::split::placement_command()?;
++    let quoted = |text: &str| format!("'{}'", text.replace('\'', "'\\''"));
++    let word = |text: &str| ast::Word {
++        value: quoted(text),
++        loc: Some(command.loc.clone()),
++    };
++    let mut suffix = runner
++        .arguments
++        .iter()
++        .map(|argument| ast::CommandPrefixOrSuffixItem::Word(word(argument)))
++        .collect::<Vec<_>>();
++    suffix.extend(
++        command
++            .options
++            .iter()
++            .cloned()
++            .map(ast::CommandPrefixOrSuffixItem::Word),
++    );
++    suffix.push(ast::CommandPrefixOrSuffixItem::Word(word("-c")));
++    suffix.push(ast::CommandPrefixOrSuffixItem::Word(word(
++        &command.body.to_string(),
++    )));
++    suffix.extend(
++        command
++            .redirects
++            .iter()
++            .flat_map(|redirects| redirects.0.iter().cloned())
++            .map(ast::CommandPrefixOrSuffixItem::IoRedirect),
++    );
++    Some(ast::SimpleCommand {
++        prefix: None,
++        word_or_name: Some(word(&runner.program)),
++        suffix: Some(ast::CommandSuffix(suffix)),
++    })
++}
++
+ fn collect_as_simple(command: &ast::CollectCommand) -> ast::SimpleCommand {
+     let mut suffix = command
+         .arguments
+@@ -1081,6 +1121,23 @@ fn collect_as_simple(command: &ast::CollectCommand) -> ast::SimpleCommand {
+     }
+ }
+ 
++/// A marsh cloud workload's stdin that relays the caller's terminal as a
++/// pipe (`MARSH_TERMINAL_STDIN` names that pipe as `DEV:INO`): treated as a
++/// terminal, as the same composition would treat it locally.
++fn relayed_terminal(file: &openfiles::OpenFile) -> bool {
++    use std::os::unix::fs::MetadataExt as _;
++    let Some(expected) = std::env::var_os("MARSH_TERMINAL_STDIN") else {
++        return false;
++    };
++    file.try_borrow_as_fd()
++        .ok()
++        .and_then(|fd| fd.try_clone_to_owned().ok())
++        .and_then(|fd| std::fs::File::from(fd).metadata().ok())
++        .is_some_and(|metadata| {
++            expected == format!("{}:{}", metadata.dev(), metadata.ino()).as_str()
++        })
++}
++
+ /// Runs the stages before a composition and spools their stdout (or this
+ /// pipeline's stdin when there are none), bounded by the composition input
+ /// limit. Returns `None` after reporting an oversized input.
+@@ -1094,7 +1151,7 @@ pub(crate) async fn composition_input<SE: extensions::ShellExtensions>(
+         let mut input = Vec::new();
+         if !params
+             .try_stdin(shell)
+-            .is_some_and(|stdin| stdin.is_terminal())
++            .is_some_and(|stdin| stdin.is_terminal() || relayed_terminal(&stdin))
+         {
+             let mut reader = params.stdin(shell);
+             reader
+@@ -1893,6 +1950,17 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::Command {
+                     .execute_in_pipeline(pipeline_context, params)
+                     .await
+             }
++            Self::Placement(command) => match placement_as_simple(command) {
++                Some(simple) => simple.execute_in_pipeline(pipeline_context, params).await,
++                None => {
++                    writeln!(
++                        params.stderr(&pipeline_context.shell),
++                        "{}: placement is not available in this shell",
++                        command.place
++                    )?;
++                    Ok(ExecutionResult::new(125).into())
++                }
++            },
+             Self::Simple(simple) => simple.execute_in_pipeline(pipeline_context, params).await,
+             Self::Compound(compound, redirects) => {
+                 // Set up any additional redirects.
+diff --git a/brush-core/src/split.rs b/brush-core/src/split.rs
+index 706008a..323994f 100644
+--- a/brush-core/src/split.rs
++++ b/brush-core/src/split.rs
+@@ -70,3 +70,25 @@ pub fn install_split_workspace_hook(hook: Arc<dyn SplitWorkspace>) {
+ pub(crate) fn workspace() -> Option<&'static Arc<dyn SplitWorkspace>> {
+     SPLIT_WORKSPACE.get()
+ }
++
++/// The program and leading arguments that run a placement block
++/// (`cloud { ... }`); the block's source follows as `-c SOURCE`.
++#[derive(Clone, Debug)]
++pub struct PlacementCommand {
++    /// Absolute path of the embedding's executable.
++    pub program: String,
++    /// Arguments before `-c SOURCE` (for marsh: `cloud`).
++    pub arguments: Vec<String>,
++}
++
++static PLACEMENT: OnceLock<PlacementCommand> = OnceLock::new();
++
++/// Install the placement runner; without one a placement block is refused.
++pub fn install_placement_command(command: PlacementCommand) {
++    let _ = PLACEMENT.set(command);
++}
++
++/// The installed placement runner.
++pub fn placement_command() -> Option<&'static PlacementCommand> {
++    PLACEMENT.get()
++}
+diff --git a/brush-parser/src/ast.rs b/brush-parser/src/ast.rs
+index 0a0533e..30cac07 100644
+--- a/brush-parser/src/ast.rs
++++ b/brush-parser/src/ast.rs
+@@ -373,6 +373,8 @@ pub enum Command {
+     Split(FanoutCommand),
+     /// An marsh fanout result renderer.
+     Collect(CollectCommand),
++    /// An marsh placement block (`cloud { LIST; }`).
++    Placement(PlacementCommand),
+     /// A simple command, directly invoking an external command, a built-in command,
+     /// a shell function, or similar.
+     Simple(SimpleCommand),
+@@ -400,6 +402,7 @@ impl SourceLocation for Command {
+         match self {
+             Self::Fanout(command) | Self::Split(command) => command.location(),
+             Self::Collect(command) => command.location(),
++            Self::Placement(command) => command.location(),
+             Self::Simple(s) => s.location(),
+             Self::Compound(c, r) => {
+                 match (c.location(), r.as_ref().and_then(SourceLocation::location)) {
+@@ -418,6 +421,7 @@ impl Display for Command {
+             Self::Fanout(command) => command.fmt_with_keyword(f, "fanout"),
+             Self::Split(command) => command.fmt_with_keyword(f, "split"),
+             Self::Collect(command) => write!(f, "{command}"),
++            Self::Placement(command) => write!(f, "{command}"),
+             Self::Simple(simple_command) => write!(f, "{simple_command}"),
+             Self::Compound(compound_command, redirect_list) => {
+                 write!(f, "{compound_command}")?;
+@@ -459,8 +463,16 @@ impl Display for FanoutCommand {
+ impl FanoutCommand {
+     fn fmt_with_keyword(&self, f: &mut std::fmt::Formatter<'_>, keyword: &str) -> std::fmt::Result {
+         writeln!(f, "{keyword} {{")?;
++        // Each body in braces: a newline inside a multi-item body would
++        // otherwise end the branch when this text is parsed again (a block
++        // carried as source, e.g. to `cloud { ... }`).
+         for branch in &self.branches {
+-            writeln!(f, "{}: {}", branch.label, branch.body)?;
++            writeln!(
++                f,
++                "{}: {{ {} }}",
++                branch.label,
++                TerminatedCompoundList(&branch.body)
++            )?;
+         }
+         write!(f, "}}")
+     }
+@@ -515,6 +527,54 @@ impl Display for CollectCommand {
+     }
+ }
+ 
++#[derive(Clone, Debug)]
++#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
++#[cfg_attr(
++    any(test, feature = "serde"),
++    derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)
++)]
++/// A command list evaluated by a fresh shell at another execution place.
++pub struct PlacementCommand {
++    /// The place keyword (`cloud`).
++    pub place: String,
++    /// Options before the block (`cloud --cpus 4 { ... }`), expanded by the
++    /// caller like ordinary arguments.
++    pub options: Vec<Word>,
++    /// The block's command list, evaluated by the remote shell.
++    pub body: CompoundList,
++    /// Redirections owned by the caller.
++    pub redirects: Option<RedirectList>,
++    /// Source location of the complete form.
++    pub loc: SourceSpan,
++}
++
++impl Node for PlacementCommand {}
++impl SourceLocation for PlacementCommand {
++    fn location(&self) -> Option<SourceSpan> {
++        Some(self.loc.clone())
++    }
++}
++impl Display for PlacementCommand {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        write!(f, "{}", self.place)?;
++        for option in &self.options {
++            write!(f, " {option}")?;
++        }
++        writeln!(f, " {{ ")?;
++        write!(
++            indenter::indented(f).with_str(DISPLAY_INDENT),
++            "{}",
++            TerminatedCompoundList(&self.body)
++        )?;
++        writeln!(f)?;
++        write!(f, "}}")?;
++        if let Some(redirects) = &self.redirects {
++            write!(f, "{redirects}")?;
++        }
++        Ok(())
++    }
++}
++
+ /// Represents a compound command, potentially made up of multiple nested commands.
+ #[derive(Clone, Debug)]
+ #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+diff --git a/brush-parser/src/parser/mod.rs b/brush-parser/src/parser/mod.rs
+index 097d8d1..4ebc41a 100644
+--- a/brush-parser/src/parser/mod.rs
++++ b/brush-parser/src/parser/mod.rs
+@@ -258,6 +258,19 @@ fn normalize_marsh_fanout_tokens(tokens: &mut Vec<Token>) {
+             (Token::Word(name, _), Token::Word(open, _))
+                 if (name == "fanout" || name == "split") && open == "{");
+         if !fanout {
++            // `cloud [WORD...] {`: the block's first word is in command
++            // position, so a `split {` or `fanout {` there is normalized too.
++            if command_start
++                && matches!(&tokens[start], Token::Word(word, _) if word == "cloud")
++                && let Some(open) = tokens[start + 1..]
++                    .iter()
++                    .position(|token| !matches!(token, Token::Word(..)) || token.to_str() == "{")
++                    .map(|offset| start + 1 + offset)
++                    .filter(|open| matches!(&tokens[*open], Token::Word(word, _) if word == "{"))
++            {
++                start = open + 1;
++                continue;
++            }
+             update_fanout_command_start(&mut command_start, &tokens[start]);
+             start += 1;
+             continue;
+diff --git a/brush-parser/src/parser/peg.rs b/brush-parser/src/parser/peg.rs
+index 906271d..15a3fe3 100644
+--- a/brush-parser/src/parser/peg.rs
++++ b/brush-parser/src/parser/peg.rs
+@@ -91,12 +91,18 @@ peg::parser! {
+             marsh_extensions_enabled() command:fanout_command() { ast::Command::Fanout(command) } /
+             marsh_extensions_enabled() command:split_command() { ast::Command::Split(command) } /
+             marsh_extensions_enabled() command:collect_command() { ast::Command::Collect(command) } /
++            marsh_extensions_enabled() command:placement_command() { ast::Command::Placement(command) } /
+             !fanout_command_start() c:simple_command() { ast::Command::Simple(c) } /
+             c:compound_command() r:redirect_list()? { ast::Command::Compound(c, r) } /
+             expected!("command")
+ 
+         rule fanout_command_start() =
+-            marsh_extensions_enabled() (specific_word("fanout") / specific_word("split")) specific_word("{")
++            marsh_extensions_enabled() (specific_word("fanout") / specific_word("split")) specific_word("{") /
++            // A `cloud [WORD...] {` that is not a well-formed block is a
++            // syntax error, never an ordinary command that would run its
++            // pieces locally.
++            marsh_extensions_enabled() specific_word("cloud")
++                (!specific_word("{") !io_redirect() word())* specific_word("{")
+ 
+         rule split_command() -> ast::FanoutCommand =
+             start:specific_word("split") specific_word("{") linebreak()
+@@ -159,6 +165,24 @@ peg::parser! {
+                 ast::CompoundList(items)
+             }
+ 
++        rule placement_command() -> ast::PlacementCommand =
++            start:specific_word("cloud")
++            options:(!specific_word("{") !io_redirect() w:word() { ast::Word::from(w) })*
++            specific_word("{") body:compound_list() end:specific_word("}")
++            redirects:redirect_list()? {
++                let end = redirects
++                    .as_ref()
++                    .and_then(SourceLocation::location)
++                    .unwrap_or_else(|| end.location().clone());
++                ast::PlacementCommand {
++                    place: "cloud".into(),
++                    options,
++                    body,
++                    redirects,
++                    loc: SourceSpan::within(start.location(), &end),
++                }
++            }
++
+         rule collect_command() -> ast::CollectCommand =
+             start:specific_word("collect") arguments:(!io_redirect() w:word() { w })* redirects:redirect_list()? !word() !io_redirect() {
+                 let end = redirects
+@@ -899,6 +923,7 @@ fn add_pipe_extension_redirection(c: &mut ast::Command) -> Result<(), &'static s
+         ast::Command::Fanout(_) | ast::Command::Split(_) | ast::Command::Collect(_) => {
+             return Err("|& is unsupported for marsh composition stages");
+         }
++        ast::Command::Placement(c) => add_to_redirect_list(&mut c.redirects, r),
+         ast::Command::Simple(c) => {
+             let r = ast::CommandPrefixOrSuffixItem::IoRedirect(r);
+             if let Some(l) = &mut c.suffix {
+diff --git a/brush-parser/src/parser/tests/composition.rs b/brush-parser/src/parser/tests/composition.rs
+index 2dca716..5283874 100644
+--- a/brush-parser/src/parser/tests/composition.rs
++++ b/brush-parser/src/parser/tests/composition.rs
+@@ -55,11 +55,26 @@ fn malformed_blocks_fail_closed() {
+         "fanout { }",
+         "fanout { a: }",
+         "fanout { a: true, a: false }",
++        "cloud { claude -p x; python3 t.py }",
++        "cloud --cpus 4 { make test }",
++        "cloud { make",
+     ] {
+         assert!(parse(input, true).is_err(), "accepted {input:?}");
+     }
+ }
+ 
++#[test]
++fn cloud_blocks_parse_and_cloud_stays_a_word_elsewhere() {
++    for input in [
++        "cloud { claude -p x; python3 t.py; }\n",
++        "cloud --cpus 4 { make test; }\n",
++        "echo cloud {\n",
++    ] {
++        assert!(parse(input, true).is_ok(), "rejected {input:?}");
++    }
++    assert!(parse("cloud { a; b }\n", false).is_ok());
++}
++
+ #[test]
+ fn assignment_prefixed_fanout_remains_an_ordinary_command() {
+     let program = parse("MARKER=ordinary fanout { a,b }\n", true).unwrap();

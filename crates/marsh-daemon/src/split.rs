@@ -1925,3 +1925,286 @@ fn without_binary_hunks(patch: &[u8], label: &str) -> Vec<u8> {
 pub fn valid_id(id: &str) -> bool {
     split_id(id)
 }
+
+/// A split run by one process without a daemon: inside a cloud sandbox,
+/// where the cloud placement node is the admitted job and the branches are
+/// its processes (`docs/design/cloud-placement.md`, decision of 2026-10-17).
+/// Same layout, snapshot rules, capture, rendering, and manifest as a daemon
+/// split; nothing is journaled, and its directory goes with the sandbox.
+/// The filesystem's own clock: a probe file's ctime. Linux stamps files
+/// with a coarse clock (a few ms), so an edit in the fork's last tick has a
+/// ctime equal to this, never below it, and is still compared.
+fn filesystem_now(split: &Dir) -> i64 {
+    let probe = std::ffi::OsStr::new(".fork-clock");
+    let _ = split.unlink(probe);
+    let stamped = split
+        .write_new_mode(probe, b"", 0o600)
+        .and_then(|()| split.stat(probe));
+    let _ = split.unlink(probe);
+    stamped
+        .ok()
+        .and_then(|stat| i64::try_from(stat.ctime).ok())
+        .unwrap_or_else(now_ns)
+}
+
+pub struct LocalSplit {
+    record: SplitRecord,
+}
+
+impl LocalSplit {
+    /// Snapshot `project` and make one fork per label (with its private Git
+    /// admin when the project has Git metadata).
+    ///
+    /// # Errors
+    /// Returns why the split could not be set up; nothing is left behind.
+    #[allow(clippy::too_many_lines)] // The daemon split's setup, in one place.
+    pub fn create(project: &Path, cwd: &Path, labels: &[String]) -> Result<Self, String> {
+        let relative = cwd
+            .strip_prefix(project)
+            .map_err(|_| format!("{} is outside the project", cwd.display()))?
+            .to_path_buf();
+        if relative.starts_with(".marsh") {
+            return Err("split inside a split fork is not supported in a cloud block".into());
+        }
+        let git = split_fs::git_source(project)?;
+        let id = new_id();
+        let io = |e: std::io::Error| e.to_string();
+        let splits = split_fs::splits_dir(project, true)
+            .map_err(|e| format!("{}/.marsh/split: {e}", project.display()))?;
+        let split = splits.create(&id).map_err(io)?;
+        let identity = split.fstat().map_err(io)?.identity;
+        let dir = project.join(".marsh/split").join(&id);
+        let mut admin_digest = BTreeMap::new();
+        let result = (|| -> Result<Vec<BranchRecord>, String> {
+            let source = Dir::open_root(project).map_err(io)?;
+            split_fs::snapshot(&source, &split.create("base").map_err(io)?, git.as_ref())?;
+            split
+                .create("store.git")
+                .and_then(|store| store.create("objects"))
+                .map_err(io)?;
+            let out = split.create("out").map_err(io)?;
+            let admin_root = git
+                .as_ref()
+                .map(|_| split.create(".admin"))
+                .transpose()
+                .map_err(io)?;
+            let contents = git
+                .as_ref()
+                .map(|git| split_fs::admin_contents(git, &dir.join("store.git")));
+            if let Some(contents) = &contents {
+                admin_digest = split_fs::admin_digest(contents);
+            }
+            let mut branches = Vec::new();
+            for label in labels {
+                let name = std::ffi::OsStr::new(label);
+                split
+                    .clone_to(std::ffi::OsStr::new("base"), &split, name)
+                    .map_err(io)?;
+                let fork = split.open(name).map_err(io)?;
+                let fork_identity = fork.fstat().map_err(io)?.identity;
+                if let (Some(git), Some(contents), Some(admin_root)) =
+                    (&git, &contents, &admin_root)
+                {
+                    let admin_path = dir.join(".admin").join(name);
+                    let admin = admin_root.create(name).map_err(io)?;
+                    split_fs::write_admin(git, contents, &admin, &admin_path, &fork).map_err(io)?;
+                }
+                let forked_ns = filesystem_now(&split).min(now_ns());
+                out.create(name).map_err(io)?;
+                branches.push(BranchRecord {
+                    label: label.clone(),
+                    kind: "shell".into(),
+                    placement: "cloud".into(),
+                    state: BranchState::Running,
+                    status: None,
+                    code: None,
+                    job_id: None,
+                    files: 0,
+                    trust: None,
+                    fork: dir.join(name),
+                    identity: fork_identity,
+                    forked_ns,
+                    started_unix_ms: Some(unix_ms()),
+                    finished_unix_ms: None,
+                    spec: None,
+                });
+            }
+            Ok(branches)
+        })();
+        let branches = match result {
+            Ok(branches) => branches,
+            Err(message) => {
+                let _ = split_fs::remove_verified(&splits, &id, identity);
+                return Err(message);
+            }
+        };
+        Ok(Self {
+            record: SplitRecord {
+                id,
+                state: SplitState::Run,
+                creator: Creator::Host,
+                session: String::new(),
+                parent: None,
+                depth: 1,
+                root: project.to_path_buf(),
+                dir,
+                cwd: relative,
+                created_unix_ms: unix_ms(),
+                status: None,
+                reason: None,
+                git: git.map(|git| git.source),
+                admin_digest,
+                identity,
+                branches,
+                timing_ms: BTreeMap::new(),
+                finished_unix_ms: None,
+            },
+        })
+    }
+
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.record.id
+    }
+
+    /// The branch's working directory: its fork at the caller's relative cwd.
+    #[must_use]
+    pub fn cwd(&self, index: usize) -> PathBuf {
+        self.record.branches[index].fork.join(&self.record.cwd)
+    }
+
+    /// Where the branch's `stdout` and `stderr` files go.
+    #[must_use]
+    pub fn out(&self, index: usize) -> PathBuf {
+        self.record.out().join(&self.record.branches[index].label)
+    }
+
+    /// Record a branch's end and capture its changes. Its processes must be
+    /// gone (the caller waited for the branch's whole process group).
+    pub fn finish(&mut self, index: usize, code: Option<i32>) {
+        let captured = (|| -> Result<usize, String> {
+            let io = |e: std::io::Error| e.to_string();
+            let split = self.record.open()?;
+            let branch = &self.record.branches[index];
+            let fork = split.open(&branch.label).map_err(io)?;
+            let exclude = self.record.git.as_ref().map(|_| {
+                split
+                    .open(".admin")
+                    .and_then(|admin| admin.open(&branch.label))
+                    .and_then(|admin| admin.open("info"))
+                    .and_then(|info| info.read("exclude", 1 << 20))
+                    .unwrap_or_default()
+            });
+            let out = split
+                .open("out")
+                .and_then(|out| out.open(&branch.label))
+                .map_err(io)?;
+            let changes = split_fs::capture(
+                &split.open("base").map_err(io)?,
+                &fork,
+                exclude.as_deref(),
+                &out,
+                &split.open("store.git").map_err(io)?,
+                i128::from(branch.forked_ns),
+            )?;
+            Ok(changes.len())
+        })();
+        let branch = &mut self.record.branches[index];
+        branch.finished_unix_ms = Some(unix_ms());
+        branch.code = code;
+        match (code, captured) {
+            (None, _) => {
+                branch.state = BranchState::Cancelled;
+                branch.status = Some("cancelled".into());
+            }
+            (Some(code), Ok(files)) => {
+                branch.state = BranchState::Captured;
+                branch.files = files;
+                branch.status = Some(format!("exited {code}"));
+            }
+            (Some(_), Err(message)) => {
+                branch.state = BranchState::Failed;
+                branch.status = Some(format!("capture failed: {message}"));
+            }
+        }
+    }
+
+    /// Settle the split after every branch ended: its status (the first
+    /// nonzero branch status, or 130 when cancelled) and the manifest.
+    pub fn settle(&mut self, cancelled: bool) -> i32 {
+        let status = if cancelled {
+            130
+        } else {
+            self.record
+                .branches
+                .iter()
+                .find_map(|branch| match (branch.state, branch.code) {
+                    (BranchState::Failed, _) => Some(1),
+                    (_, Some(code)) if code != 0 => Some(code),
+                    _ => None,
+                })
+                .unwrap_or(0)
+        };
+        self.record.status = Some(status);
+        self.record.state = if cancelled {
+            SplitState::Cancelled
+        } else {
+            SplitState::Await
+        };
+        self.record.finished_unix_ms = Some(unix_ms());
+        if let Ok(out) = self
+            .record
+            .open()
+            .and_then(|split| split.open("out").map_err(|e| e.to_string()))
+        {
+            let _ = out.write_new(
+                "manifest.json",
+                self.record.manifest().to_string().as_bytes(),
+            );
+        }
+        status
+    }
+
+    #[must_use]
+    pub fn render(&self) -> Vec<u8> {
+        render(&self.record)
+    }
+
+    #[must_use]
+    pub fn manifest(&self) -> String {
+        self.record.manifest().to_string()
+    }
+
+    /// `SPLIT_ID`, `SPLIT_DIR`, `SPLIT_MANIFEST`, `SPLIT_OBJECTS`.
+    #[must_use]
+    pub fn environment(&self) -> Vec<(String, String)> {
+        let out = self.record.out();
+        vec![
+            ("SPLIT_ID".into(), self.record.id.clone()),
+            ("SPLIT_DIR".into(), out.display().to_string()),
+            (
+                "SPLIT_MANIFEST".into(),
+                out.join("manifest.json").display().to_string(),
+            ),
+            (
+                "SPLIT_OBJECTS".into(),
+                self.record
+                    .dir
+                    .join("store.git/objects")
+                    .display()
+                    .to_string(),
+            ),
+        ]
+    }
+
+    /// Remove the split directory (after a successful join without keep).
+    pub fn remove(&self) -> Result<(), String> {
+        let splits = split_fs::splits_dir(&self.record.root, false).map_err(|e| e.to_string())?;
+        split_fs::remove_verified(&splits, &self.record.id, self.record.identity)
+    }
+
+    #[must_use]
+    pub fn dir(&self) -> &Path {
+        &self.record.dir
+    }
+}

@@ -1523,6 +1523,7 @@ dependencies = [
  "brush-core",
  "brush-shell",
  "chrono",
+ "flate2",
  "marsh-acp",
  "marsh-contracts",
  "marsh-daemon",
@@ -1566,6 +1567,7 @@ dependencies = [
 name = "marsh-backend"
 version = "0.1.2"
 dependencies = [
+ "flate2",
  "marsh-acp",
  "marsh-contracts",
  "marsh-daemon",

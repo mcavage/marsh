@@ -31,6 +31,8 @@ containers, and lets you combine their work with shell syntax.
 - [Agents running agents](agents.md): child jobs, launch limits, cancellation.
 - [Split and join](split.md): project copies and patch handling.
 - [Fanout and collect](fanout.md): parallel commands on shared files.
+- [Docker Cloud (preview)](cloud.md): `cloud { ... }` runs a block in a cloud
+  sandbox and writes its file changes back.
 - [Agent sessions (ACP)](acp.md): long-lived sessions for ACP clients.
 - [MCP](mcp.md): server setup and published pipelines.
 

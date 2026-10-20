@@ -350,8 +350,34 @@ fn validate_receipt_state(receipt: &JobReceipt) -> Result<(), DaemonError> {
             .exit
             .as_ref()
             .is_some_and(|exit| exit.code != Some(0));
-    let valid = match receipt.state {
-        JobState::Queued => {
+    // A cloud placement node has an owned sandbox ID (`vm_id`, recorded once
+    // it exists) but no local worker or container identity.
+    let cloud_sandbox = receipt.vm_id.as_deref().is_some_and(|id| {
+        id.strip_prefix("sbx_")
+            .is_some_and(|tail| !tail.is_empty() && tail.bytes().all(|c| c.is_ascii_alphanumeric()))
+    });
+    let valid = match (receipt.placement, receipt.state) {
+        (crate::Placement::Cloud, state) => {
+            receipt.worker_id.is_none()
+                && receipt.container_id.is_none()
+                && (receipt.vm_id.is_none() || cloud_sandbox)
+                && match state {
+                    JobState::Queued | JobState::Running => {
+                        (state == JobState::Queued || cloud_sandbox)
+                            && receipt.exit.is_none()
+                            && !receipt.output_complete
+                            && receipt.cleanup == crate::CleanupState::Pending
+                            && receipt.finished_unix_ms.is_none()
+                    }
+                    _ => {
+                        receipt.exit.is_some()
+                            && receipt.cleanup != crate::CleanupState::Pending
+                            && receipt.finished_unix_ms.is_some()
+                            && uncertain_cleanup_is_not_success
+                    }
+                }
+        }
+        (_, JobState::Queued) => {
             (receipt.worker_id.is_none() && receipt.vm_id.is_none()
                 || receipt.worker_id.is_some() && receipt.vm_id.is_some())
                 && receipt.container_id.is_none()
@@ -360,7 +386,7 @@ fn validate_receipt_state(receipt: &JobReceipt) -> Result<(), DaemonError> {
                 && receipt.cleanup == crate::CleanupState::Pending
                 && receipt.finished_unix_ms.is_none()
         }
-        JobState::Running => {
+        (_, JobState::Running) => {
             receipt.worker_id.is_some()
                 && receipt.vm_id.is_some()
                 && receipt.container_id.is_some()
@@ -369,7 +395,7 @@ fn validate_receipt_state(receipt: &JobReceipt) -> Result<(), DaemonError> {
                 && receipt.cleanup == crate::CleanupState::Pending
                 && receipt.finished_unix_ms.is_none()
         }
-        JobState::Finished | JobState::Failed | JobState::Cancelled | JobState::Unknown => {
+        (_, JobState::Finished | JobState::Failed | JobState::Cancelled | JobState::Unknown) => {
             receipt.exit.is_some()
                 && receipt.cleanup != crate::CleanupState::Pending
                 && receipt.finished_unix_ms.is_some()

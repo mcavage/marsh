@@ -410,60 +410,128 @@ fn job() -> JobSpec {
 
 #[test]
 fn nested_job_receives_only_exact_stock_sbx_proxy_plumbing() {
-    let ca = tempfile::NamedTempFile::new().unwrap();
-    let owner = ca.as_file().metadata().unwrap().uid();
-    let runtime = DockerCliRuntime::new(DockerModel::new(), "/trusted/docker")
-        .with_sbx_environment(
-            vec![
-                (
-                    "HTTP_PROXY".into(),
-                    "http://gateway.docker.internal:3128".into(),
-                ),
-                (
-                    "HTTPS_PROXY".into(),
-                    "http://gateway.docker.internal:3128".into(),
-                ),
-                ("NODE_USE_ENV_PROXY".into(), "1".into()),
-                ("SBX_CRED_ANTHROPIC_MODE".into(), "apikey".into()),
-                ("SBX_CRED_OPENAI_MODE".into(), "oauth".into()),
-            ],
-            ca.path(),
-            owner,
-        );
-
-    runtime.create(&job()).unwrap();
-    let call = &runtime.runner.create();
-    let environment = values(call, "--env");
-    for expected in [
-        "HTTP_PROXY=http://gateway.docker.internal:3128",
-        "HTTPS_PROXY=http://gateway.docker.internal:3128",
-        "NODE_USE_ENV_PROXY=1",
-        "SBX_CRED_ANTHROPIC_MODE=apikey",
-        "SBX_CRED_OPENAI_MODE=oauth",
+    for (profile, endpoint) in [
+        (
+            SbxRuntimeProfile::Local,
+            "http://gateway.docker.internal:3128",
+        ),
+        (SbxRuntimeProfile::CloudV2, "http://192.0.2.1:8889"),
     ] {
-        assert!(environment.contains(&expected), "{expected}");
-    }
-    for name in ["NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"] {
-        let expected = format!("{name}={}", ca.path().display());
-        assert!(environment.contains(&expected.as_str()), "{expected}");
-    }
-    assert!(
-        values(call, "--mount").contains(
-            &format!(
-                "type=bind,source={},target={},readonly",
-                ca.path().display(),
-                ca.path().display()
+        let ca = tempfile::NamedTempFile::new().unwrap();
+        let owner = ca.as_file().metadata().unwrap().uid();
+        let runtime = DockerCliRuntime::new(DockerModel::new(), "/trusted/docker")
+            .with_sbx_profile(profile)
+            .with_sbx_environment(
+                vec![
+                    ("HTTP_PROXY".into(), endpoint.into()),
+                    ("HTTPS_PROXY".into(), endpoint.into()),
+                    ("NODE_USE_ENV_PROXY".into(), "1".into()),
+                    ("SBX_CRED_ANTHROPIC_MODE".into(), "apikey".into()),
+                    ("SBX_CRED_OPENAI_MODE".into(), "oauth".into()),
+                ],
+                ca.path(),
+                owner,
+            );
+
+        runtime.create(&job()).unwrap();
+        let call = &runtime.runner.create();
+        let environment = values(call, "--env");
+        assert!(environment.contains(&format!("HTTP_PROXY={endpoint}").as_str()));
+        assert!(environment.contains(&format!("HTTPS_PROXY={endpoint}").as_str()));
+        for expected in [
+            "NODE_USE_ENV_PROXY=1",
+            "SBX_CRED_ANTHROPIC_MODE=apikey",
+            "SBX_CRED_OPENAI_MODE=oauth",
+        ] {
+            assert!(environment.contains(&expected), "{expected}");
+        }
+        for name in ["NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"] {
+            let expected = format!("{name}={}", ca.path().display());
+            assert!(environment.contains(&expected.as_str()), "{expected}");
+        }
+        assert!(
+            values(call, "--mount").contains(
+                &format!(
+                    "type=bind,source={},target={},readonly",
+                    ca.path().display(),
+                    ca.path().display()
+                )
+                .as_str()
             )
-            .as_str()
-        )
-    );
-    assert!(!call.iter().any(|argument| {
-        argument.starts_with("ANTHROPIC_API_KEY=")
-            || argument.starts_with("OPENAI_API_KEY=")
-            || argument.starts_with("NO_PROXY=")
-            || argument.starts_with("PROXY_CA_CERT_B64=")
-            || argument.contains("docker.sock")
-    }));
+        );
+        assert!(!call.iter().any(|argument| {
+            argument.starts_with("ANTHROPIC_API_KEY=")
+                || argument.starts_with("OPENAI_API_KEY=")
+                || argument.starts_with("NO_PROXY=")
+                || argument.starts_with("PROXY_CA_CERT_B64=")
+                || argument.contains("docker.sock")
+        }));
+    }
+}
+
+#[test]
+fn runtime_profile_rejects_cross_location_or_expanded_authority_before_docker() {
+    let cloud_pair = || {
+        vec![
+            ("HTTP_PROXY", "http://192.0.2.1:8889"),
+            ("HTTPS_PROXY", "http://192.0.2.1:8889"),
+        ]
+    };
+    let mut forbidden_mcp = cloud_pair();
+    forbidden_mcp.extend([
+        ("MCP_GATEWAY_URL", "http://mcp-gateway.docker.internal/mcp"),
+        ("MCP_SENTINEL_TOKEN_NAME", "proxy-managed"),
+    ]);
+    let mut bypass = cloud_pair();
+    bypass.push(("NO_PROXY", "**"));
+    let mut secret = cloud_pair();
+    secret.push(("OPENAI_API_KEY", "canary-not-a-credential"));
+    for (profile, environment, offending) in [
+        (SbxRuntimeProfile::Local, cloud_pair(), "HTTP_PROXY"),
+        (
+            SbxRuntimeProfile::CloudV2,
+            vec![
+                ("HTTP_PROXY", "http://gateway.docker.internal:3128"),
+                ("HTTPS_PROXY", "http://gateway.docker.internal:3128"),
+            ],
+            "HTTP_PROXY",
+        ),
+        (SbxRuntimeProfile::CloudV2, vec![], "HTTP_PROXY"),
+        (
+            SbxRuntimeProfile::CloudV2,
+            vec![("HTTP_PROXY", "http://192.0.2.1:8889")],
+            "HTTPS_PROXY",
+        ),
+        (
+            SbxRuntimeProfile::CloudV2,
+            vec![
+                ("HTTP_PROXY", "http://token@192.0.2.1:8889/?secret"),
+                ("HTTPS_PROXY", "http://192.0.2.1:8889"),
+            ],
+            "HTTP_PROXY",
+        ),
+        (SbxRuntimeProfile::CloudV2, forbidden_mcp, "MCP_GATEWAY_URL"),
+        (SbxRuntimeProfile::CloudV2, bypass, "NO_PROXY"),
+        (SbxRuntimeProfile::CloudV2, secret, "OPENAI_API_KEY"),
+    ] {
+        let runtime = DockerCliRuntime::new(DockerModel::new(), "/trusted/docker")
+            .with_sbx_profile(profile)
+            .with_sbx_environment(
+                environment
+                    .into_iter()
+                    .map(|(name, value)| (name.to_owned(), value.into()))
+                    .collect(),
+                "/nonexistent/ca.crt",
+                0,
+            );
+        let error = runtime.create(&job()).unwrap_err();
+        assert!(
+            matches!(&error, RuntimeError::InvalidSbxEnvironment { variable } if variable == offending),
+            "{error}"
+        );
+        assert!(runtime.runner.calls().is_empty());
+        assert!(!error.to_string().contains("canary-not-a-credential"));
+    }
 }
 
 #[test]
@@ -688,7 +756,7 @@ fn nested_job_rejects_incomplete_or_expanded_proxy_authority() {
             "HTTPS_PROXY",
         ),
     ] {
-        let error = validate_sbx_environment(&environment).unwrap_err();
+        let error = validate_sbx_environment(&environment, SbxRuntimeProfile::Local).unwrap_err();
         assert!(matches!(
             &error,
             RuntimeError::InvalidSbxEnvironment { variable } if variable == offending
@@ -741,7 +809,11 @@ fn stock_config_selector_is_forwarded_only_to_host_control_commands() {
 
 #[test]
 fn invalid_proxy_variable_diagnostic_escapes_control_bytes() {
-    let error = validate_sbx_environment(&[("BAD\nNAME".into(), "value".into())]).unwrap_err();
+    let error = validate_sbx_environment(
+        &[("BAD\nNAME".into(), "value".into())],
+        SbxRuntimeProfile::Local,
+    )
+    .unwrap_err();
     let diagnostic = error.to_string();
     assert!(diagnostic.contains(r"BAD\nNAME"));
     assert!(!diagnostic.contains('\n'));

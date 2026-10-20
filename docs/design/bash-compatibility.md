@@ -136,7 +136,10 @@ Classified divergences by design:
   (patch `0084`), without marsh-specific resource limits. The former native
   regex helper was removed with the Brush fork. Other platforms retain
   upstream's matcher.
-- Product composition syntax (`fanout`/`collect`, `split`/`join`) is a marsh extension. Its
+- Product composition syntax (`fanout`/`collect`, `split`/`join`, and the
+  `cloud { LIST; }` placement block) is a marsh extension. `cloud {` in command
+  position is the marsh form by design (Bash would run a `cloud` program with an
+  argument `{`). Its
   parser coexistence is checked by the focused journeys above; arbitrary Bash
   grammar with extensions enabled is not exhaustively qualified.
 - This is a focused real-caller corpus, not the complete upstream Brush TCK or

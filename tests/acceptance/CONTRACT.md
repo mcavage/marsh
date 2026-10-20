@@ -15,6 +15,14 @@ without Kit widening, split omission, credential-free MCP echo through a real
 job, restoration after worker reset, startup snapshots, and unsafe-config
 refusals without VM changes. It is included in `make verify`/`make regress`.
 
+`tests/acceptance/cloud_uat.py` is the opt-in live Docker Cloud family for
+`cloud { }` / `marsh cloud` (C02-C06 and C09-C12 of the
+[cloud placement design](../../docs/design/cloud-placement.md#10-observable-acceptance)).
+It creates billed sandboxes, needs `--i-accept-cloud-charges` and a signed-in
+account with cloud sandbox access, and is not part of `make verify`,
+`make regress`, or the release run. Evidence and coverage:
+[cloud dispatch](../../docs/plan/cloud-dispatch.md).
+
 There are three ways to run the gate (`run.py` is the full gate; `smoke.py`
 is its fast subset, sharing the same scope harness, `harness.py`):
 
