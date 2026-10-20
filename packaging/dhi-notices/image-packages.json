@@ -883,7 +883,7 @@
       },
       {
         "package": "libperl5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -1279,7 +1279,7 @@
       },
       {
         "package": "perl",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -1302,7 +1302,7 @@
       },
       {
         "package": "perl-base",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -1325,7 +1325,7 @@
       },
       {
         "package": "perl-modules-5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -2767,7 +2767,7 @@
       },
       {
         "package": "libperl5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -3233,7 +3233,7 @@
       },
       {
         "package": "perl",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -3256,7 +3256,7 @@
       },
       {
         "package": "perl-base",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -3279,7 +3279,7 @@
       },
       {
         "package": "perl-modules-5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -4749,7 +4749,7 @@
       },
       {
         "package": "libperl5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -5215,7 +5215,7 @@
       },
       {
         "package": "perl",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -5238,7 +5238,7 @@
       },
       {
         "package": "perl-base",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -5261,7 +5261,7 @@
       },
       {
         "package": "perl-modules-5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -6731,7 +6731,7 @@
       },
       {
         "package": "libperl5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -7197,7 +7197,7 @@
       },
       {
         "package": "perl",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -7220,7 +7220,7 @@
       },
       {
         "package": "perl-base",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -7243,7 +7243,7 @@
       },
       {
         "package": "perl-modules-5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -8300,7 +8300,7 @@
       },
       {
         "package": "libperl5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -8696,7 +8696,7 @@
       },
       {
         "package": "perl",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -8719,7 +8719,7 @@
       },
       {
         "package": "perl-base",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -8742,7 +8742,7 @@
       },
       {
         "package": "perl-modules-5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -10538,7 +10538,7 @@
       },
       {
         "package": "libperl5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -11268,7 +11268,7 @@
       },
       {
         "package": "perl",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -11291,7 +11291,7 @@
       },
       {
         "package": "perl-base",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -11314,7 +11314,7 @@
       },
       {
         "package": "perl-modules-5.40",
-        "version": "5.40.1-6+deb13u1+dhi2",
+        "version": "5.40.1-6+deb13u1+dhi3",
         "families": [
           "Artistic",
           "BSD",
@@ -11446,7 +11446,7 @@
       },
       {
         "package": "python3-setuptools-whl",
-        "version": "84.0.0-0",
+        "version": "84.2.0-0",
         "families": [
           "Apache-2.0",
           "BSD",
