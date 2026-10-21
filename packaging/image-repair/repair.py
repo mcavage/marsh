@@ -162,10 +162,28 @@ def vendor_metadata(name, data, asset):
     return text.encode()
 
 
+# pip releases whose bootstrap wheel layout was reviewed for this repair.
+REVIEWED_PIP = {"26.2.1", "26.2.2"}
+
+
+def installed_pip_version():
+    """The installed pip's version: the bootstrap wheel must be the same release."""
+    init = Path("/usr/lib/python3/dist-packages/pip/__init__.py").read_text()
+    versions = [node.value.value for node in ast.parse(init).body
+                if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+                and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)]
+    if len(versions) != 1 or versions[0] not in REVIEWED_PIP:
+        raise ValueError("unreviewed pip release: " + repr(versions))
+    return versions[0]
+
+
 def repair_bootstrap_wheel(files, asset):
-    path = Path("/usr/share/python-wheels/pip-26.2.1-py3-none-any.whl")
-    if path.is_symlink() or path.resolve() != path or not path.is_file():
-        raise ValueError("unexpected pip bootstrap wheel")
+    version = installed_pip_version()
+    wheels = sorted(Path("/usr/share/python-wheels").glob("pip-*.whl"))
+    path = Path("/usr/share/python-wheels/pip-" + version + "-py3-none-any.whl")
+    if (wheels != [path] or path.is_symlink() or path.resolve() != path
+            or not path.is_file()):
+        raise ValueError("unexpected pip bootstrap wheel: " + ", ".join(map(str, wheels)))
     original = path.read_bytes()
     entries = {}
     with zipfile.ZipFile(io.BytesIO(original)) as archive:
@@ -182,7 +200,7 @@ def repair_bootstrap_wheel(files, asset):
         raise ValueError("oversized pip bootstrap wheel")
     prefix = "pip/_vendor/urllib3/"
     before = urllib3_version(entries[prefix + "_version.py"])
-    info = "pip-26.2.1.dist-info/"
+    info = "pip-" + version + ".dist-info/"
     if any(name in entries for name in [info + "RECORD.jws", info + "RECORD.p7s"]):
         raise ValueError("cannot preserve a signature on a modified bootstrap wheel")
     entries = {name: data for name, data in entries.items() if not name.startswith(prefix)}
@@ -214,7 +232,7 @@ def repair_bootstrap_wheel(files, asset):
             stage.replace(path)
         finally:
             stage.unlink(missing_ok=True)
-    return {"path": str(path), "name": "pip bootstrap vendored urllib3", "before": before,
+    return {"path": str(path), "name": "pip bootstrap vendored urllib3", "pip": version, "before": before,
             "after": "2.8.0", "wheel_before_sha256": digest(original),
             "wheel_after_sha256": digest(path.read_bytes()), "record_entries": len(entries),
             "adaptation": "pip._vendor namespace imports; complete wheel RECORD regenerated"}
