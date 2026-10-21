@@ -62,6 +62,9 @@ COPY --from=npm /opt/marsh/claude-acp /opt/marsh/claude-acp
 COPY --from=npm /usr/local/share/licenses/marsh-claude-acp /usr/local/share/licenses/marsh-claude-acp
 COPY --chmod=0755 marsh-entrypoint.sh /usr/local/bin/marsh-claude
 LABEL com.docker.sandboxes.start-docker=true
+# The marsh Kit contract this image implements (marsh_contracts::kit_source):
+# `marsh kit upgrade` moves a packaged command only to a supported one.
+LABEL org.marsh.kit.contract=1
 # v2's environment.variables, in the slot OCI already owns for static env.
 # The executable is a reviewed Kit input, not a per-container installation.
 ENV IS_SANDBOX=1 DISABLE_AUTOUPDATER=1 DISABLE_UPDATES=1 \

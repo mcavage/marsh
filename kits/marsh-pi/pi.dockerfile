@@ -36,6 +36,9 @@ COPY --from=npm /opt/marsh/pi-gateway /opt/marsh/pi-gateway
 COPY --from=npm /usr/local/share/licenses/marsh-pi /usr/local/share/licenses/marsh-pi
 COPY --chmod=0755 marsh-entrypoint.sh /usr/local/bin/marsh-pi
 LABEL com.docker.sandboxes.start-docker=true
+# The marsh Kit contract this image implements (marsh_contracts::kit_source):
+# `marsh kit upgrade` moves a packaged command only to a supported one.
+LABEL org.marsh.kit.contract=1
 ENV IS_SANDBOX=1 PATH=/opt/marsh/pi-gateway/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 USER agent
 WORKDIR /home/agent/workspace

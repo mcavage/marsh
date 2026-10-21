@@ -66,6 +66,9 @@ COPY --from=npm /opt/marsh/codex-acp /opt/marsh/codex-acp
 COPY --from=npm /usr/local/share/licenses/marsh-codex-acp /usr/local/share/licenses/marsh-codex-acp
 COPY --chmod=0755 marsh-entrypoint.sh /usr/local/bin/marsh-codex
 LABEL com.docker.sandboxes.start-docker=true
+# The marsh Kit contract this image implements (marsh_contracts::kit_source):
+# `marsh kit upgrade` moves a packaged command only to a supported one.
+LABEL org.marsh.kit.contract=1
 # v2's environment.variables, in the slot OCI already owns for static env.
 # Public command lookup and the absolute entrypoint selection must agree.
 ENV IS_SANDBOX=1 CODEX_HOME=/home/agent/.codex GIT_TERMINAL_PROMPT=0 \

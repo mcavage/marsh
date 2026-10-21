@@ -166,6 +166,30 @@ impl CommandRegistry {
         Ok(updated)
     }
 
+    /// Sets one mapping, replacing an existing one (an upgrade). The original
+    /// registry is unchanged on rejection.
+    ///
+    /// # Errors
+    /// Returns an error for invalid names/references or capacity.
+    pub fn with_set(&self, command: &str, reference: &str) -> Result<Self, RegistryError> {
+        let mut without = self.clone();
+        without.0.remove(command);
+        without.with_added(command, reference)
+    }
+
+    /// Removes one mapping if present (an uninstall).
+    #[must_use]
+    pub fn without(&self, command: &str) -> Self {
+        let mut updated = self.clone();
+        updated.0.remove(command);
+        updated
+    }
+
+    #[must_use]
+    pub fn contains(&self, command: &str) -> bool {
+        self.0.contains_key(command)
+    }
+
     /// Encodes the canonical on-disk form, including its final newline.
     ///
     /// # Errors

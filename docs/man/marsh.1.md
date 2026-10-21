@@ -164,8 +164,20 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 **config shell** [**bash**|**zsh**|**marsh**]
 : Set, or with no name print, the default shell for this **MARSH_HOME**.
 
-**kit install** *NAME* **--from** *REPOSITORY*@sha256:*DIGEST*
-: Register a published Kit under *NAME* in this scope.
+**kit install** *NAME* **--from** *REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*
+: Register a published Kit under *NAME* in this scope. A tag is resolved to its
+  digest now; only that digest runs.
+
+**kit upgrade** [**--check**] [*NAME*...]
+: Move each *NAME* (default: every Kit installed from a tag, and the packaged
+  commands on a release build) to the image its tag names now, preparing it
+  before switching. Packaged commands follow the release channel's tag and move
+  only to an image declaring a supported **org.marsh.kit.contract**. **--check**
+  only reports. Exits nonzero if a Kit was refused or failed.
+
+**kit uninstall** *NAME*
+: Remove a Kit added with **kit install**, or return an upgraded packaged
+  command to the version this marsh shipped.
 
 **workers reset** *KIT*[,*KIT*...]|**all**
 : Remove idle Kit VMs, including quarantined ones. The next use creates a new

@@ -89,6 +89,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         &guest_artifacts.join("agents.json"),
         &control_home.join("agents.json"),
     )?;
+    // The Kits this marsh shipped, before host overrides: `marsh kit upgrade`
+    // follows their release channel and `uninstall` reverts to them.
+    let packaged = load_commands(
+        &guest_artifacts.join("commands.json"),
+        &guest_artifacts.join(".packaged-only-no-user-registry"),
+    )?;
+    let channel = release_channel(
+        env!("CARGO_PKG_VERSION"),
+        guest_artifacts.join("local-build").exists()
+            || guest_artifacts.join("dev-enabled").exists(),
+    );
     let mut protected_guest_roots =
         vec![product_root, control_home.clone(), guest_artifacts.clone()];
     protected_guest_roots.push(install_prefix.to_path_buf());
@@ -180,14 +191,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         resources: defaults.resources,
         env: EnvironmentConfig::default(),
     };
-    let backend =
-        backend_with_agents(Arc::clone(&stock), commands, config, &agents).map_err(|error| {
-            format!(
-                "invalid ACP Kit binding ({error}); check {} and {} against commands.json",
-                control_home.join("agents.json").display(),
-                guest_artifacts.join("agents.json").display(),
-            )
-        })?;
+    let backend = backend_with_agents(
+        Arc::clone(&stock),
+        commands,
+        config,
+        &agents,
+        Some((packaged, channel)),
+    )
+    .map_err(|error| {
+        format!(
+            "invalid ACP Kit binding ({error}); check {} and {} against commands.json",
+            control_home.join("agents.json").display(),
+            guest_artifacts.join("agents.json").display(),
+        )
+    })?;
     let backend = backend.with_sbxenvs()?;
     let protected_guest_roots = backend.protected_guest_roots().to_vec();
     // All registry/configuration validation precedes even the stock version probe.
@@ -278,7 +295,7 @@ fn check_config(arguments: &[std::ffi::OsString]) -> Result<String, Box<dyn std:
         )),
     ));
     let declared = agents.declarations().count();
-    backend_with_agents(stock, commands.clone(), config, &agents).map_err(|error| {
+    backend_with_agents(stock, commands.clone(), config, &agents, None).map_err(|error| {
         format!(
             "invalid ACP Kit binding ({error}); {} against commands.json",
             guest_artifacts.join("agents.json").display()
@@ -569,8 +586,26 @@ fn backend_with_agents(
     commands: BTreeMap<String, RegisteredKit>,
     config: BackendConfig,
     agents: &AgentRegistry,
+    packaged: Option<(BTreeMap<String, RegisteredKit>, Option<String>)>,
 ) -> Result<StockDaemonBackend, marsh_daemon::DaemonError> {
-    StockDaemonBackend::new(stock, commands, config).with_agents(agents)
+    let backend = StockDaemonBackend::new(stock, commands, config);
+    match packaged {
+        Some((packaged, channel)) => backend.with_packaged(packaged, channel),
+        None => backend,
+    }
+    .with_agents(agents)
+}
+
+/// The image tag packaged Kits follow on `marsh kit upgrade`: releases push
+/// `:latest`, nightlies `:nightly`. A local or dev build follows none.
+fn release_channel(version: &str, local: bool) -> Option<String> {
+    if local {
+        None
+    } else if version.contains("-nightly.") {
+        Some("nightly".into())
+    } else {
+        Some("latest".into())
+    }
 }
 
 #[cfg(test)]
@@ -765,7 +800,70 @@ mod tests {
         .unwrap();
         let mismatched = load_agents(&packaged, &user).unwrap();
         assert!(mismatched.resolve_acp("agent-session").is_ok());
-        assert!(backend_with_agents(stock, commands, config, &mismatched).is_err());
+        assert!(
+            backend_with_agents(
+                Arc::clone(&stock),
+                commands.clone(),
+                config.clone(),
+                &mismatched,
+                None
+            )
+            .is_err()
+        );
+
+        // `marsh kit upgrade` moved agent-kit from its packaged digest (c…) to
+        // a…: the packaged declaration follows the command instead of failing.
+        let shipped = BTreeMap::from([(
+            "agent-kit".into(),
+            RegisteredKit {
+                workload: NativeKitRef::immutable_oci(format!(
+                    "example/agent@sha256:{}",
+                    "c".repeat(64)
+                ))
+                .unwrap(),
+            },
+        )]);
+        assert!(
+            backend_with_agents(
+                Arc::clone(&stock),
+                commands.clone(),
+                config.clone(),
+                &mismatched,
+                Some((shipped, Some("latest".into())))
+            )
+            .is_ok()
+        );
+        // A declaration pinned to anything but the packaged digest stays strict.
+        let other = BTreeMap::from([(
+            "agent-kit".into(),
+            RegisteredKit {
+                workload: NativeKitRef::immutable_oci(format!(
+                    "example/agent@sha256:{}",
+                    "d".repeat(64)
+                ))
+                .unwrap(),
+            },
+        )]);
+        assert!(
+            backend_with_agents(
+                stock,
+                commands,
+                config,
+                &mismatched,
+                Some((other, Some("latest".into())))
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn release_channels_follow_the_build() {
+        assert_eq!(release_channel("0.1.6", false).as_deref(), Some("latest"));
+        assert_eq!(
+            release_channel("0.1.6-nightly.20261019194017.g79ddbd5", false).as_deref(),
+            Some("nightly")
+        );
+        assert_eq!(release_channel("0.1.6", true), None);
     }
 
     #[test]

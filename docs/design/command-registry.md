@@ -104,6 +104,23 @@ duplicate-key configuration must be fixed, not silently rewritten. Concurrent
 installs are serialized, and a host edit detected during preparation is not
 overwritten.
 
+`marsh kit install NAME --from repository:TAG` resolves the tag once through
+`sbx kit inspect`, accepting only a digest of the same repository, and installs
+that digest; the tag is recorded in the control directory's `kit-sources.json`.
+`marsh kit upgrade` re-resolves recorded tags, and on a release build the
+packaged commands' channel tags (`:latest` or `:nightly` of their pinned
+repository). A new digest must carry an `org.marsh.kit.contract` image label in
+`marsh_contracts::kit_source::SUPPORTED_KIT_CONTRACTS` (required for packaged
+commands, checked when present otherwise), read with `docker buildx imagetools`.
+The upgrade claims the old worker first (refusing one with running jobs),
+prepares the new VM, persists the override to `commands.json`, switches the
+live registry and retires the old VM unless another name still uses it. A
+failure before the switch releases the claim and changes nothing. Packaged ACP
+declarations pin the packaged digest, so they follow an upgraded command; a
+declaration pinned to any other digest blocks the upgrade. `marsh kit
+uninstall` drops an installed command, or an upgraded packaged command's
+override, and retires its VM.
+
 After changing a registry entry, local Kit source, or stock-SBX service secret,
 the host can discard idle cached workers with
 `marsh workers reset KIT[,KIT...]` or `marsh workers reset all`, then recreate

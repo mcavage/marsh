@@ -58,7 +58,8 @@ Usage:
   marsh splits [--json] [ID] | cancel ID | rm ID
   marsh fanout [-n] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]... | marsh collect [--json] [--timing]
                                        Run branches at once on the same files
-  marsh kit install NAME --from REPOSITORY@sha256:DIGEST
+  marsh kit install NAME --from REPOSITORY:TAG|REPOSITORY@sha256:DIGEST
+  marsh kit upgrade [--check] [NAME...] | marsh kit uninstall NAME
   marsh config shell [marsh|bash|zsh]  Show or set this home's default shell
   marsh stop [--json]                  Remove this home's VMs and stop its daemon
   marsh reset [--json]                 Remove this home's VMs; keep the daemon
@@ -215,7 +216,24 @@ const STATUS_HELP: &str = "Usage: marsh status [--json]\n\nShow scoped daemon, h
 const JOBS_HELP: &str = "Usage: marsh jobs [--all] [--json]\n       marsh jobs --tree [--all] [--json]\n       marsh jobs show JOB [--json]\n\nList Kit jobs, running first, then newest: short id, start, state, exit,\nRUN time (in the ready Kit VM; `marsh results` WALL adds VM preparation),\nand command. Inside a session only its jobs are listed; from a\nhost terminal, running trees, trees started in the last hour, and the five\nnewest trees. --all lists every recorded job. --tree draws child\njobs under their parent. JOB may be an id prefix. --json prints the full,\nunscoped document.\n";
 const RESULTS_HELP: &str = "Usage: marsh results [--json]\n       marsh results show CURSOR|JOB [--json]\n\nList durable Kit results or inspect one result.\n";
 const WORKERS_HELP: &str = "Usage: marsh workers reset KIT[,KIT...]|all\n\nStop and recreate selected Kit workers on their next use.\n";
-const KIT_HELP: &str = "Usage: marsh kit install NAME --from REPOSITORY@sha256:DIGEST\n\nInstall and prepare an alternate native Kit in this daemon scope.\n";
+const KIT_HELP: &str =
+    "Usage: marsh kit install NAME --from REPOSITORY:TAG|REPOSITORY@sha256:DIGEST
+       marsh kit upgrade [--check] [NAME...]
+       marsh kit uninstall NAME
+
+install  Install and prepare a published Kit as NAME in this daemon scope. A tag
+         is resolved to its digest now; marsh runs only that digest, and
+         `marsh kit upgrade` follows the tag later.
+upgrade  Re-resolve each NAME's tag (default: every Kit installed from a tag,
+         and the packaged commands on a release build, which follow the
+         release's :latest or :nightly tag) and switch to a newer digest,
+         preparing it first. A packaged Kit moves only to an image declaring a
+         Kit contract this marsh supports. --check reports without switching.
+         Run from a host terminal; a Kit with running jobs is not changed.
+uninstall
+         Remove a Kit added with `marsh kit install`, or return an upgraded
+         packaged command to the version this marsh shipped.
+";
 const STOP_HELP: &str = "Usage: marsh stop [--json]\n\nRemove the shell and Kit VMs owned by the selected MARSH_HOME, then stop its daemon.\nRefuses while shells or jobs are active. Home and results are kept.\nPrints what was removed on stderr; --json also writes the daemon report on stdout.\nExits nonzero if any cleanup could not be verified. Run a script named `stop` as `marsh ./stop`.\n";
 const RESET_HELP: &str = "Usage: marsh reset [--json]\n\nRemove the shell and Kit VMs owned by the selected MARSH_HOME; the daemon keeps running.\nRefuses while shells or jobs are active. Home and results are kept.\nPrints what was removed on stderr; --json also writes the daemon report on stdout.\nExits nonzero if any cleanup could not be verified. Run a script named `reset` as `marsh ./reset`.\n";
 const RECOVER_HOME_HELP: &str = "Usage: marsh recover-home SLOT --discard\n\nrecover-home explicitly selects one retained private slot (0..15), after all shell/Kit owners and pending work are closed. Use the SAME SDK selection; unknown/live authority remains retained. It never removes VMs or sweeps other slots.\n";
@@ -406,7 +424,7 @@ fn recognized_help_subcommand(command: &str, subcommand: &str) -> bool {
         (command, subcommand),
         ("jobs" | "results", "show")
             | ("workers", "reset")
-            | ("kit", "install")
+            | ("kit", "install" | "upgrade" | "uninstall")
             | ("acp", "install-published" | "remove-published")
             | (
                 "mcp",
@@ -564,12 +582,23 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
     if let cli::ProductCommand::KitInstall { command, reference } = &parsed.command {
         marsh_contracts::command_registry::CommandName::parse(command.clone())
             .map_err(|error| RunError::new(error.to_string(), 2))?;
-        marsh_contracts::OciImage::parse(reference.clone()).map_err(|_| {
-            RunError::new(
-                "Kit install requires an immutable REPOSITORY@sha256:DIGEST reference",
+        if marsh_contracts::OciImage::parse(reference.clone()).is_err()
+            && marsh_contracts::kit_source::KitTag::parse(reference).is_err()
+        {
+            return Err(RunError::new(
+                "Kit install requires REPOSITORY:TAG or REPOSITORY@sha256:DIGEST",
                 2,
-            )
-        })?;
+            ));
+        }
+    }
+    let kit_names = match &parsed.command {
+        cli::ProductCommand::KitUpgrade { commands, .. } => commands.clone(),
+        cli::ProductCommand::KitUninstall { command } => vec![command.clone()],
+        _ => Vec::new(),
+    };
+    for name in kit_names {
+        marsh_contracts::command_registry::CommandName::parse(name)
+            .map_err(|error| RunError::new(error.to_string(), 2))?;
     }
     if let [_, dispatch, name, args @ ..] = parsed.brush_args.as_slice()
         && dispatch == "--invoke-bundled"
