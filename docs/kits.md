@@ -10,8 +10,8 @@ shell -c 'uname -sm'
 ```
 
 `shell` is a packaged command. To add your own, use
-`marsh kit install NAME --from REPOSITORY@sha256:DIGEST`, substituting its
-published reference. marsh uses the native Docker Sandboxes Kit v3 format.
+`marsh kit install NAME --from REPOSITORY:TAG`, substituting its published
+image. marsh uses the native Docker Sandboxes Kit v3 format.
 
 ## The default commands
 
@@ -124,11 +124,44 @@ agent as a child job. See [Agents running agents](agents.md).
 
 ## Adding a command
 
-`marsh kit install NAME --from REPOSITORY@sha256:DIGEST` validates and registers
-a published Kit through `sbx`. Open shells see the name immediately, and the
-mapping persists for later launches. The reference must be pinned by digest.
-An existing name, including a packaged one, is refused. To replace a name,
-edit `commands.json` below.
+```sh
+marsh kit install pix --from docker.io/mcavage/marsh-pix:stable
+marsh kit upgrade --check      # what would change
+marsh kit upgrade              # move to newer images
+marsh kit uninstall pix
+```
+
+`marsh kit install NAME --from REPOSITORY:TAG` asks `sbx` which image the tag
+names now, prepares that image, and registers NAME. marsh records the digest,
+never the tag, so the command keeps running exactly that image until you
+upgrade. You can also install a digest (`REPOSITORY@sha256:DIGEST`); such a
+command never changes. Open shells see the name immediately. An existing name,
+including a packaged one, is refused.
+
+### Upgrading commands
+
+`marsh kit upgrade [NAME...]` looks up each tag again. If it names a newer
+image, marsh prepares the new image first, then switches NAME to it and
+removes the old Kit VM, so a failed upgrade leaves the old one working. A Kit
+with running jobs is left alone; try again when they finish. `--check` only
+reports. Run it from a host terminal.
+
+Without names, `upgrade` covers every command installed from a tag, plus the
+packaged `claude`, `codex`, `pi` and `shell` on a release build. Those follow
+the image tag of your release channel (`:latest` for stable, `:nightly` for
+nightly), so you can pick up a new agent version without a new marsh. marsh
+moves a packaged command only to an image whose `org.marsh.kit.contract` label
+names a version it supports; an image that needs a newer marsh is refused with
+that message. ACP agents for a packaged command, or for a command installed
+from a tag, follow its upgrades.
+
+### Removing a command
+
+`marsh kit uninstall NAME` removes a command you installed. For a packaged
+command you upgraded, it returns to the version your marsh shipped.
+
+The tags installed commands follow are recorded in `kit-sources.json` next to
+`commands.json`.
 
 ### Changing or replacing a command
 

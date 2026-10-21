@@ -105,16 +105,10 @@ pub fn prepare(
         session.session_id = Some(session_id.clone());
     }
     match parsed.command {
-        ProductCommand::KitInstall { command, reference } => {
-            let installed = client.install_kit(&command, &reference)?;
-            if let Err(error) = external_commands::install_live_command(&command) {
-                writeln!(
-                    &mut stderr,
-                    "Kit installed; open a new shell to invoke {command}: {error}"
-                )?;
-            }
-            writeln!(&mut stdout, "installed {command} from {installed}")?;
-            return Ok(ProductOutcome::Complete(0));
+        command @ (ProductCommand::KitInstall { .. }
+        | ProductCommand::KitUpgrade { .. }
+        | ProductCommand::KitUninstall { .. }) => {
+            return run_kit_command(command, client.as_ref(), &mut stdout, &mut stderr);
         }
         ProductCommand::Status { json } => {
             let value = client.status_json()?;
@@ -844,6 +838,94 @@ fn format_duration(milliseconds: u64) -> String {
             milliseconds / 1_000,
             (milliseconds % 1_000) / 100
         )
+    }
+}
+
+/// `marsh kit install`, `upgrade` and `uninstall`.
+fn run_kit_command(
+    command: ProductCommand,
+    client: &dyn DaemonClient,
+    mut stdout: impl Write,
+    mut stderr: impl Write,
+) -> Result<ProductOutcome, ProductError> {
+    match command {
+        ProductCommand::KitInstall { command, reference } => {
+            let installed = client.install_kit(&command, &reference)?;
+            if let Err(error) = external_commands::install_live_command(&command) {
+                writeln!(
+                    &mut stderr,
+                    "Kit installed; open a new shell to invoke {command}: {error}"
+                )?;
+            }
+            if installed == reference {
+                writeln!(&mut stdout, "installed {command} from {installed}")?;
+            } else {
+                writeln!(
+                    &mut stdout,
+                    "installed {command} from {reference} ({}); `marsh kit upgrade {command}` follows it",
+                    short_digest(&installed)
+                )?;
+            }
+            Ok(ProductOutcome::Complete(0))
+        }
+        ProductCommand::KitUpgrade { commands, check } => {
+            let kits = client.upgrade_kits(&commands, check)?;
+            if kits.is_empty() {
+                writeln!(
+                    &mut stdout,
+                    "no Kits to upgrade: install one from a tag with `marsh kit install NAME --from REPOSITORY:TAG`"
+                )?;
+            }
+            for kit in &kits {
+                writeln!(&mut stdout, "{}", describe_upgrade(kit))?;
+            }
+            let failed = kits.iter().any(|kit| {
+                matches!(
+                    kit.state,
+                    marsh_daemon::KitUpgradeState::Refused | marsh_daemon::KitUpgradeState::Failed
+                )
+            });
+            Ok(ProductOutcome::Complete(i32::from(failed)))
+        }
+        ProductCommand::KitUninstall { command } => {
+            let detail = client.uninstall_kit(&command)?;
+            writeln!(&mut stdout, "{detail}")?;
+            Ok(ProductOutcome::Complete(0))
+        }
+        _ => unreachable!("only Kit commands are dispatched here"),
+    }
+}
+
+/// `sha256:` and the first 12 hex digits of a digest reference.
+fn short_digest(reference: &str) -> String {
+    reference.rsplit_once("@sha256:").map_or_else(
+        || reference.to_owned(),
+        |(_, digest)| format!("sha256:{}", &digest[..digest.len().min(12)]),
+    )
+}
+
+fn describe_upgrade(kit: &marsh_daemon::KitUpgrade) -> String {
+    use marsh_daemon::KitUpgradeState as State;
+    let from = short_digest(&kit.current);
+    let to = kit
+        .resolved
+        .as_deref()
+        .map(short_digest)
+        .unwrap_or_default();
+    let detail = kit.detail.as_deref().unwrap_or("");
+    let name = &kit.command;
+    match kit.state {
+        State::UpToDate => format!(
+            "{name}: up to date ({})",
+            kit.source.as_deref().unwrap_or(&from)
+        ),
+        State::Available => {
+            format!("{name}: {from} -> {to} available; run `marsh kit upgrade {name}`")
+        }
+        State::Upgraded => format!("{name}: upgraded {from} -> {to}"),
+        State::Skipped => format!("{name}: skipped: {detail}"),
+        State::Refused => format!("{name}: not upgraded: {detail}"),
+        State::Failed => format!("{name}: failed: {detail}"),
     }
 }
 

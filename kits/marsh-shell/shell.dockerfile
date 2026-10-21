@@ -15,6 +15,9 @@ COPY --from=packages /rootfs/ /
 COPY dhi-notices /usr/local/share/licenses/marsh-dhi
 COPY --chmod=0755 marsh-entrypoint.sh /usr/local/bin/marsh-shell
 LABEL com.docker.sandboxes.start-docker=true
+# The marsh Kit contract this image implements (marsh_contracts::kit_source):
+# `marsh kit upgrade` moves a packaged command only to a supported one.
+LABEL org.marsh.kit.contract=1
 USER agent
 WORKDIR /home/agent/workspace
 ENTRYPOINT ["/usr/local/bin/marsh-shell"]

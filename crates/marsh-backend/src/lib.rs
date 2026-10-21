@@ -7,20 +7,22 @@ pub mod command_registry;
 use marsh_acp::{AgentAdapterDeclaration, AgentRegistry};
 pub mod config;
 mod ephemeral;
+mod kit_lifecycle;
 mod sbxenv;
 mod shell_attachment;
 
 use marsh_contracts::{
     ExecutionOutcome, JobIdentity, JobMount, JobResources, JobSignal, JobSpec, MountAccess,
-    ResourceLimit, TerminalSize, WORKER_CONTAINER_CAPACITY,
+    OciImage, ResourceLimit, TerminalSize, WORKER_CONTAINER_CAPACITY,
     command_registry::{CommandName, CommandRegistry, validate_count},
+    kit_source::{KitTag, check_contract},
 };
 use marsh_daemon::{
     AttachmentFrame, CLEANUP_UNCERTAIN_EXIT_CODE, CleanupState, DaemonBackend, DaemonError,
-    DaemonStore, EndpointPaths, ExecuteSpec, ExitStatus, LoadSelection, NewJob,
-    PreparationProgress, PreparationResult, PublicMount, ScopeCleanupComponent, ScopeCleanupState,
-    ScopeLifecycleAction, ScopeLifecycleReport, ServerAttachment, SessionSpec, ShellSpec,
-    TimingReport, WorkerHealth, WorkerStatus,
+    DaemonStore, EndpointPaths, ExecuteSpec, ExitStatus, KitUpgrade, KitUpgradeState,
+    LoadSelection, NewJob, PreparationProgress, PreparationResult, PublicMount,
+    ScopeCleanupComponent, ScopeCleanupState, ScopeLifecycleAction, ScopeLifecycleReport,
+    ServerAttachment, SessionSpec, ShellSpec, TimingReport, WorkerHealth, WorkerStatus,
 };
 use marsh_sbx::{
     AdmittedHostGrant, KitVmSpec, NativeKitRef, PreparedGrants, ReadyKitVm, SessionGrantPins,
@@ -86,9 +88,19 @@ pub struct StockDaemonBackend {
     sbx: Arc<StockSbx>,
     commands: BTreeMap<String, RegisteredKit>,
     installed_commands: Mutex<BTreeMap<String, RegisteredKit>>,
+    /// Names `marsh kit uninstall` removed while the daemon runs.
+    removed_commands: Mutex<BTreeSet<String>>,
+    /// The Kits this marsh shipped, before host overrides.
+    packaged: BTreeMap<String, RegisteredKit>,
+    /// The tag packaged Kits follow on upgrade (`latest`, `nightly`); none for
+    /// a local or dev build.
+    packaged_channel: Option<String>,
     registry_install: Mutex<()>,
     agents: AgentRegistry,
     acp_pins: BTreeMap<String, String>,
+    /// Commands whose ACP declarations pin the packaged digest: they follow
+    /// the command through `marsh kit upgrade` instead of pinning it.
+    acp_follows: BTreeSet<String>,
     config: BackendConfig,
     registered_workers: Mutex<BTreeSet<String>>,
     ready_kits: Mutex<BTreeMap<String, ReadyKitVm>>,
@@ -321,9 +333,13 @@ impl StockDaemonBackend {
             sbx,
             commands,
             installed_commands: Mutex::new(BTreeMap::new()),
+            removed_commands: Mutex::new(BTreeSet::new()),
+            packaged: BTreeMap::new(),
+            packaged_channel: None,
             registry_install: Mutex::new(()),
             agents: AgentRegistry::new(),
             acp_pins: BTreeMap::new(),
+            acp_follows: BTreeSet::new(),
             config,
             registered_workers: Mutex::new(BTreeSet::new()),
             ready_kits: Mutex::new(BTreeMap::new()),
@@ -347,6 +363,19 @@ impl StockDaemonBackend {
         self
     }
 
+    /// The Kits this marsh shipped (before host overrides) and the release
+    /// channel tag they follow on upgrade. Call before [`Self::with_agents`].
+    #[must_use]
+    pub fn with_packaged(
+        mut self,
+        packaged: BTreeMap<String, RegisteredKit>,
+        channel: Option<String>,
+    ) -> Self {
+        self.packaged = packaged;
+        self.packaged_channel = channel;
+        self
+    }
+
     /// Pin registered ACP agents to the exact Kit generation resolved at startup.
     ///
     /// # Errors
@@ -354,6 +383,8 @@ impl StockDaemonBackend {
     pub fn with_agents(mut self, agents: &AgentRegistry) -> Result<Self, DaemonError> {
         let mut pinned = AgentRegistry::new();
         let mut pins = BTreeMap::new();
+        // Commands installed from a tag were chosen to follow it.
+        let followed = kit_lifecycle::read_sources(&self.config.control_home)?;
         for declaration in agents.declarations() {
             let kit = self
                 .commands
@@ -365,13 +396,28 @@ impl StockDaemonBackend {
                     "immutable ACP Kit requires an explicit workload digest".into(),
                 ));
             }
+            // A packaged declaration pins its packaged command, and a command
+            // installed from a tag follows that tag: through `marsh kit
+            // upgrade`, the declaration follows the command.
+            let follows = !declaration.workload_digest.is_empty()
+                && (followed.contains_key(&declaration.command)
+                    || self
+                        .packaged
+                        .get(&declaration.command)
+                        .is_some_and(|packaged| {
+                            declaration.workload_digest == packaged.workload.identity()
+                        }));
             if !declaration.workload_digest.is_empty()
                 && declaration.workload_digest != exact.identity()
+                && !follows
             {
                 return Err(DaemonError::InvalidState(format!(
                     "ACP Kit identity mismatch for {}",
                     declaration.name
                 )));
+            }
+            if follows {
+                self.acp_follows.insert(declaration.command.clone());
             }
             let mut resolved = declaration.clone();
             resolved.workload_digest = exact.identity().into();
@@ -397,10 +443,11 @@ impl StockDaemonBackend {
             .workload
             .capture_generation()
             .map_err(backend_error)?;
-        if self
-            .acp_pins
-            .get(command)
-            .is_some_and(|expected| expected != workload.identity())
+        if !self.acp_follows.contains(command)
+            && self
+                .acp_pins
+                .get(command)
+                .is_some_and(|expected| expected != workload.identity())
         {
             return Err(DaemonError::InvalidState(format!(
                 "ACP Kit {command} changed since daemon startup"
@@ -411,6 +458,9 @@ impl StockDaemonBackend {
     }
 
     fn registered_kit(&self, command: &str) -> Result<RegisteredKit, DaemonError> {
+        if self.is_removed(command) {
+            return Err(DaemonError::NotFound(command.into()));
+        }
         let installed = self
             .installed_commands
             .lock()
@@ -422,15 +472,29 @@ impl StockDaemonBackend {
             .ok_or_else(|| DaemonError::NotFound(command.into()))
     }
 
+    fn is_removed(&self, command: &str) -> bool {
+        self.removed_commands
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(command)
+    }
+
     /// Registered command names whose workload is `identity`.
     fn kit_names_for_workload(&self, identity: &str) -> Vec<String> {
+        let removed = self
+            .removed_commands
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let installed = self
             .installed_commands
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.commands
             .iter()
+            .filter(|(name, _)| !installed.contains_key(*name))
             .chain(installed.iter())
+            .filter(|(name, _)| !removed.contains(*name))
             .filter(|(_, kit)| {
                 // A local source Kit's VM carries its captured generation,
                 // `<registry identity>@<fingerprint>`.
@@ -451,9 +515,14 @@ impl StockDaemonBackend {
             .installed_commands
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let removed = self
+            .removed_commands
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.commands
             .keys()
             .chain(installed.keys())
+            .filter(|name| !removed.contains(*name))
             .cloned()
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
@@ -855,6 +924,18 @@ impl DaemonBackend for StockDaemonBackend {
                 "Kit command {command} is already registered"
             )));
         }
+        // A tag is resolved once, here; the registry records only the digest.
+        let mut sources = kit_lifecycle::read_sources(&self.config.control_home)?;
+        let source = KitTag::parse(&reference).ok();
+        let reference = match &source {
+            Some(tag) => {
+                let image = self.sbx.resolve_kit_tag(tag).map_err(backend_error)?;
+                let contract = self.sbx.kit_contract(&image).map_err(backend_error)?;
+                check_contract(contract, false).map_err(DaemonError::InvalidState)?;
+                image.as_str().to_owned()
+            }
+            None => reference,
+        };
         let path = self.config.control_home.join("commands.json");
         let previous = command_registry::read_declaration(&path).map_err(backend_error)?;
         let updated = previous
@@ -880,11 +961,139 @@ impl DaemonBackend for StockDaemonBackend {
         let vm = self.prepare_one_with_progress(&spec, &store, |_| Ok(()))?;
         self.register_worker(&store, &vm)?;
         self.persist_installed_command(&previous, &updated)?;
+        if let Some(tag) = source {
+            sources.insert(command.clone(), tag);
+            kit_lifecycle::write_sources(&self.config.control_home, &sources)?;
+        }
+        self.removed_commands
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&command);
         self.installed_commands
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(command, RegisteredKit { workload });
         Ok(reference)
+    }
+
+    fn upgrade_kits(
+        &self,
+        commands: &[String],
+        check_only: bool,
+        store: DaemonStore,
+    ) -> Result<Vec<KitUpgrade>, DaemonError> {
+        let _install = self
+            .registry_install
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let sources = kit_lifecycle::read_sources(&self.config.control_home)?;
+        let names = self.command_names();
+        let mut selected = if commands.is_empty() {
+            names
+                .iter()
+                .filter(|name| {
+                    sources.contains_key(*name)
+                        || (self.packaged_channel.is_some() && self.packaged.contains_key(*name))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        } else {
+            if let Some(unknown) = commands.iter().find(|name| !names.contains(name)) {
+                return Err(DaemonError::NotFound(unknown.clone()));
+            }
+            commands.to_vec()
+        };
+        selected.sort();
+        selected.dedup();
+        Ok(selected
+            .iter()
+            .map(|command| self.upgrade_one(command, sources.get(command), check_only, &store))
+            .collect())
+    }
+
+    fn uninstall_kit(&self, command: String, store: DaemonStore) -> Result<String, DaemonError> {
+        let _install = self
+            .registry_install
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let path = self.config.control_home.join("commands.json");
+        let overlay = command_registry::read_declaration(&path).map_err(backend_error)?;
+        let mut sources = kit_lifecycle::read_sources(&self.config.control_home)?;
+        let packaged = self.packaged.get(&command).cloned();
+        let plan = kit_lifecycle::plan_uninstall(
+            &command,
+            self.command_names().contains(&command),
+            packaged.is_some(),
+            overlay.contains(&command),
+        )
+        .map_err(DaemonError::InvalidState)?;
+        let replacement = match plan {
+            kit_lifecycle::Uninstall::RevertToPackaged => packaged,
+            kit_lifecycle::Uninstall::Remove => {
+                if let Some(agent) = self
+                    .agents
+                    .declarations()
+                    .find(|agent| agent.command == command)
+                {
+                    return Err(DaemonError::InvalidState(format!(
+                        "ACP agent {} uses {command}; remove it from agents.json first",
+                        agent.name
+                    )));
+                }
+                None
+            }
+        };
+        let current = self.registered_kit(&command)?;
+        let old_spec = self.kit_spec(&command)?;
+        let still_used = self
+            .kit_names_for_workload(current.workload.identity())
+            .iter()
+            .any(|name| *name != command)
+            || replacement
+                .as_ref()
+                .is_some_and(|kit| kit.workload.identity() == current.workload.identity());
+        let lock = self.kit_lock(&old_spec)?;
+        let _guard = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let claim = if still_used {
+            None
+        } else {
+            Some(Self::claim_retirement(&store, vec![old_spec.name.clone()])?)
+        };
+        if let Err(error) = self.persist_installed_command(&overlay, &overlay.without(&command)) {
+            if let Some(claim) = &claim {
+                store.cancel_workers_reset(&claim.worker_ids);
+            }
+            return Err(error);
+        }
+        sources.remove(&command);
+        kit_lifecycle::write_sources(&self.config.control_home, &sources)?;
+        let message = if let Some(kit) = replacement {
+            self.installed_commands
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(command.clone(), kit);
+            format!("{command} is back to the version this marsh shipped")
+        } else {
+            self.installed_commands
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&command);
+            self.removed_commands
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(command.clone());
+            format!("removed {command}")
+        };
+        if let Some(claim) = claim {
+            self.retire_claimed(
+                &store,
+                &BTreeMap::from([(old_spec.name.clone(), old_spec)]),
+                &claim,
+            )?;
+        }
+        Ok(message)
     }
 
     fn resolve_acp_agent(&self, name: &str) -> Result<AgentAdapterDeclaration, DaemonError> {
@@ -894,6 +1103,11 @@ impl DaemonBackend for StockDaemonBackend {
             .map_err(|error| DaemonError::InvalidState(error.to_string()))?;
         let kit = self.registered_kit(&declaration.command)?;
         let exact = kit.workload.capture_generation().map_err(backend_error)?;
+        if self.acp_follows.contains(&declaration.command) {
+            let mut following = declaration.clone();
+            following.workload_digest = exact.identity().into();
+            return Ok(following);
+        }
         if declaration.workload_digest != exact.identity() {
             return Err(DaemonError::InvalidState(format!(
                 "ACP agent '{}' Kit identity changed; expected {}, got {}",
@@ -962,56 +1176,8 @@ impl DaemonBackend for StockDaemonBackend {
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
             })
             .collect::<Vec<_>>();
-        let worker_ids = specs.keys().cloned().collect::<Vec<_>>();
-        // An owned quarantined VM is always retirable; pins held by shells
-        // that are no longer attached are leftovers of ended sessions.
-        let quarantined = store
-            .status(None)
-            .workers
-            .into_iter()
-            .filter(|worker| worker.health == WorkerHealth::Quarantined)
-            .map(|worker| worker.worker_id)
-            .collect::<BTreeSet<_>>();
-        let live = store.attached_session_ids();
-        store.begin_workers_reset(&worker_ids)?;
-
-        for (index, (worker_id, spec)) in specs.iter().enumerate() {
-            let retired = self.sbx.retire_kit_vm_before(
-                spec,
-                Instant::now() + Duration::from_hours(24),
-                Some((&live, quarantined.contains(worker_id))),
-            );
-            if let Err(error) = retired {
-                store.finish_worker_reset(worker_id, false)?;
-                store.cancel_workers_reset(&worker_ids[index + 1..]);
-                return Err(backend_error(error));
-            }
-            self.ready_kits
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .retain(|_, ready| ready.name != *worker_id);
-            self.kit_validation_flights
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .entry(self.kit_flight_key(spec, false)?)
-                .and_modify(|completion| {
-                    completion.epoch = completion.epoch.saturating_add(1);
-                    completion.error = None;
-                })
-                .or_insert(KitFlightCompletion {
-                    epoch: 1,
-                    error: None,
-                });
-            self.registered_workers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .remove(worker_id);
-            self.configured_mcp_vms
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .remove(worker_id);
-            store.finish_worker_reset(worker_id, true)?;
-        }
+        let claim = Self::claim_retirement(&store, specs.keys().cloned().collect())?;
+        self.retire_claimed(&store, &specs, &claim)?;
         Ok(selected)
     }
 
@@ -3176,6 +3342,270 @@ fn completed_flight_outcome(
     }
 }
 
+/// Why an upgrade did not switch: the Kit has running jobs, or anything else.
+enum UpgradeFailure {
+    Busy(DaemonError),
+    Failed(DaemonError),
+}
+
+impl From<DaemonError> for UpgradeFailure {
+    fn from(error: DaemonError) -> Self {
+        Self::Failed(error)
+    }
+}
+
+/// Workers claimed for retirement by [`StockDaemonBackend::claim_retirement`].
+struct RetirementClaim {
+    worker_ids: Vec<String>,
+    live: BTreeSet<String>,
+    quarantined: BTreeSet<String>,
+}
+
+impl StockDaemonBackend {
+    /// Marks workers as being reset, refusing any with running jobs. Release an
+    /// unused claim with [`DaemonStore::cancel_workers_reset`].
+    fn claim_retirement(
+        store: &DaemonStore,
+        worker_ids: Vec<String>,
+    ) -> Result<RetirementClaim, DaemonError> {
+        // An owned quarantined VM is always retirable; pins held by shells
+        // that are no longer attached are leftovers of ended sessions.
+        let quarantined = store
+            .status(None)
+            .workers
+            .into_iter()
+            .filter(|worker| worker.health == WorkerHealth::Quarantined)
+            .map(|worker| worker.worker_id)
+            .collect::<BTreeSet<_>>();
+        let live = store.attached_session_ids();
+        store.begin_workers_reset(&worker_ids)?;
+        Ok(RetirementClaim {
+            worker_ids,
+            live,
+            quarantined,
+        })
+    }
+
+    fn kit_lock(&self, spec: &KitVmSpec) -> Result<Arc<Mutex<()>>, DaemonError> {
+        let key = self.kit_flight_key(spec, false)?;
+        Ok(self
+            .kit_locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(key)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone())
+    }
+
+    /// One Kit's `marsh kit upgrade` outcome; failures are reported, not raised.
+    fn upgrade_one(
+        &self,
+        command: &str,
+        recorded: Option<&KitTag>,
+        check_only: bool,
+        store: &DaemonStore,
+    ) -> KitUpgrade {
+        let mut report = KitUpgrade {
+            command: command.to_owned(),
+            source: None,
+            current: String::new(),
+            resolved: None,
+            state: KitUpgradeState::Skipped,
+            detail: None,
+        };
+        let finish = |mut report: KitUpgrade, state, detail: String| {
+            report.state = state;
+            report.detail = Some(detail);
+            report
+        };
+        let current = match self.registered_kit(command) {
+            Ok(kit) => kit,
+            Err(error) => return finish(report, KitUpgradeState::Failed, error.to_string()),
+        };
+        current.workload.identity().clone_into(&mut report.current);
+        if current.workload.source_dir().is_some() && recorded.is_none() {
+            return finish(
+                report,
+                KitUpgradeState::Skipped,
+                "runs from a local Kit source".into(),
+            );
+        }
+        let packaged = self.packaged.get(command);
+        let source = match kit_lifecycle::upgrade_source(
+            recorded,
+            packaged.and_then(|kit| kit.workload.workload_image()),
+            self.packaged_channel.as_deref(),
+        ) {
+            Ok(source) => source,
+            Err(reason) => return finish(report, KitUpgradeState::Skipped, reason.into()),
+        };
+        report.source = Some(source.to_string());
+        let image = match self.sbx.resolve_kit_tag(&source) {
+            Ok(image) => image,
+            Err(error) => return finish(report, KitUpgradeState::Failed, error.to_string()),
+        };
+        report.resolved = Some(image.as_str().to_owned());
+        if image.as_str() == report.current {
+            report.state = KitUpgradeState::UpToDate;
+            return report;
+        }
+        let contract = match self.sbx.kit_contract(&image) {
+            Ok(contract) => contract,
+            Err(error) => return finish(report, KitUpgradeState::Failed, error.to_string()),
+        };
+        if let Err(reason) = check_contract(contract, packaged.is_some()) {
+            return finish(report, KitUpgradeState::Refused, reason);
+        }
+        if self.acp_pins.contains_key(command) && !self.acp_follows.contains(command) {
+            return finish(
+                report,
+                KitUpgradeState::Refused,
+                "an ACP agent in agents.json pins this Kit's digest; update its workload_digest instead".into(),
+            );
+        }
+        if check_only {
+            report.state = KitUpgradeState::Available;
+            return report;
+        }
+        match self.apply_upgrade(command, &current, &image, store) {
+            Ok(()) => {
+                report.state = KitUpgradeState::Upgraded;
+                report
+            }
+            Err(UpgradeFailure::Busy(error)) => {
+                finish(report, KitUpgradeState::Refused, error.to_string())
+            }
+            Err(UpgradeFailure::Failed(error)) => {
+                finish(report, KitUpgradeState::Failed, error.to_string())
+            }
+        }
+    }
+
+    /// Prepares the new Kit VM before switching the name, so a failed upgrade
+    /// leaves the old one registered and running; then retires the old VM
+    /// unless another name still uses it.
+    fn apply_upgrade(
+        &self,
+        command: &str,
+        current: &RegisteredKit,
+        image: &OciImage,
+        store: &DaemonStore,
+    ) -> Result<(), UpgradeFailure> {
+        let workload = NativeKitRef::immutable_oci(image.as_str()).map_err(backend_error)?;
+        let environment = self.environment(command);
+        for name in self.command_names() {
+            if name != command
+                && self.registered_kit(&name)?.workload.identity() == workload.identity()
+                && self.environment(&name).fingerprint() != environment.fingerprint()
+            {
+                return Err(DaemonError::InvalidState("aliases of the same Kit must have identical environments; restart after adding the matching sbxenvs file".into()).into());
+            }
+        }
+        let old_spec = self.kit_spec(command)?;
+        let still_used = self
+            .kit_names_for_workload(current.workload.identity())
+            .iter()
+            .any(|name| name != command);
+        let lock = self.kit_lock(&old_spec)?;
+        let _guard = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let claim = if still_used {
+            None
+        } else {
+            Some(
+                Self::claim_retirement(store, vec![old_spec.name.clone()])
+                    .map_err(UpgradeFailure::Busy)?,
+            )
+        };
+        let release = |claim: &Option<RetirementClaim>| {
+            if let Some(claim) = claim {
+                store.cancel_workers_reset(&claim.worker_ids);
+            }
+        };
+        let path = self.config.control_home.join("commands.json");
+        let switched = (|| {
+            let spec = self.kit_spec_for_environment(workload.clone(), &environment)?;
+            let vm = self.prepare_one_with_progress(&spec, store, |_| Ok(()))?;
+            self.register_worker(store, &vm)?;
+            let previous = command_registry::read_declaration(&path).map_err(backend_error)?;
+            let updated = previous
+                .with_set(command, image.as_str())
+                .map_err(backend_error)?;
+            command_registry::validate_references(&path, &updated).map_err(backend_error)?;
+            self.persist_installed_command(&previous, &updated)
+        })();
+        if let Err(error) = switched {
+            release(&claim);
+            return Err(error.into());
+        }
+        self.installed_commands
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(command.to_owned(), RegisteredKit { workload });
+        if let Some(claim) = claim {
+            self.retire_claimed(
+                store,
+                &BTreeMap::from([(old_spec.name.clone(), old_spec)]),
+                &claim,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Removes the claimed workers' VMs and forgets their cached state.
+    fn retire_claimed(
+        &self,
+        store: &DaemonStore,
+        specs: &BTreeMap<String, KitVmSpec>,
+        claim: &RetirementClaim,
+    ) -> Result<(), DaemonError> {
+        let RetirementClaim {
+            worker_ids,
+            live,
+            quarantined,
+        } = claim;
+        for (index, (worker_id, spec)) in specs.iter().enumerate() {
+            let retired = self.sbx.retire_kit_vm_before(
+                spec,
+                Instant::now() + Duration::from_hours(24),
+                Some((live, quarantined.contains(worker_id))),
+            );
+            if let Err(error) = retired {
+                store.finish_worker_reset(worker_id, false)?;
+                store.cancel_workers_reset(&worker_ids[index + 1..]);
+                return Err(backend_error(error));
+            }
+            self.ready_kits
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retain(|_, ready| ready.name != *worker_id);
+            self.kit_validation_flights
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(self.kit_flight_key(spec, false)?)
+                .and_modify(|completion| {
+                    completion.epoch = completion.epoch.saturating_add(1);
+                    completion.error = None;
+                })
+                .or_insert(KitFlightCompletion {
+                    epoch: 1,
+                    error: None,
+                });
+            self.registered_workers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(worker_id);
+            self.configured_mcp_vms
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(worker_id);
+            store.finish_worker_reset(worker_id, true)?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod typed_receipt_callers;
 
@@ -5070,5 +5500,387 @@ mod tests {
             component.label == "stale-generations"
                 && component.state == ScopeCleanupState::CleanupUncertain
         }));
+    }
+}
+
+#[cfg(test)]
+mod kit_lifecycle_callers {
+    use super::*;
+    use std::io;
+
+    const OLD: &str = "docker.io/example/pix@sha256:1111111111111111111111111111111111111111111111111111111111111111";
+    const NEW: &str = "docker.io/example/pix@sha256:2222222222222222222222222222222222222222222222222222222222222222";
+    const SHIPPED: &str = "docker.io/example/pi@sha256:3333333333333333333333333333333333333333333333333333333333333333";
+    const PI_NEW: &str = "docker.io/example/pi@sha256:4444444444444444444444444444444444444444444444444444444444444444";
+
+    /// Stock SBX and Docker as seen by `marsh kit`: `sbx kit inspect` resolves
+    /// every tag to `resolved`, `docker buildx imagetools` reports `contract`,
+    /// and anything else (VM creation) fails.
+    struct Registry {
+        resolved: Mutex<String>,
+        contract: Mutex<Option<u32>>,
+        runs: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl Registry {
+        fn new(resolved: &str, contract: Option<u32>) -> Arc<Self> {
+            Arc::new(Self {
+                resolved: Mutex::new(resolved.into()),
+                contract: Mutex::new(contract),
+                runs: Mutex::new(Vec::new()),
+            })
+        }
+        fn calls(&self, needle: &str) -> usize {
+            self.runs
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|argv| argv.iter().any(|argument| argument == needle))
+                .count()
+        }
+    }
+
+    impl marsh_runtime::CommandRunner for Registry {
+        fn run(
+            &self,
+            invocation: &marsh_runtime::Invocation,
+        ) -> io::Result<marsh_runtime::CommandOutput> {
+            let mut argv = vec![invocation.program.to_string_lossy().into_owned()];
+            argv.extend(
+                invocation
+                    .arguments
+                    .iter()
+                    .map(|argument| argument.to_string_lossy().into_owned()),
+            );
+            self.runs.lock().unwrap().push(argv.clone());
+            let ok = |stdout: String| {
+                Ok(marsh_runtime::CommandOutput {
+                    exit_code: Some(0),
+                    stdout: stdout.into_bytes(),
+                    stderr: Vec::new(),
+                })
+            };
+            if argv[1..3] == ["kit", "inspect"] {
+                return ok(format!(
+                    r#"{{"sandbox":{{"image":"{}"}}}}"#,
+                    self.resolved.lock().unwrap()
+                ));
+            }
+            if argv[0] == "docker" {
+                let labels = match *self.contract.lock().unwrap() {
+                    Some(value) => format!(r#"{{"org.marsh.kit.contract":"{value}"}}"#),
+                    None => "{}".into(),
+                };
+                return ok(format!(r#"{{"config":{{"Labels":{labels}}}}}"#));
+            }
+            if argv[1..] == ["ls", "--json"] {
+                return ok(r#"{"sandboxes":[]}"#.into());
+            }
+            Ok(marsh_runtime::CommandOutput {
+                exit_code: Some(1),
+                stdout: Vec::new(),
+                stderr: b"sandbox not found".to_vec(),
+            })
+        }
+        fn run_bounded(
+            &self,
+            invocation: &marsh_runtime::Invocation,
+            _: Duration,
+        ) -> io::Result<marsh_runtime::CommandOutput> {
+            self.run(invocation)
+        }
+        fn spawn_attached(
+            &self,
+            _: &marsh_runtime::Invocation,
+        ) -> io::Result<marsh_runtime::Attachment> {
+            Err(io::Error::other("unexpected attachment"))
+        }
+    }
+
+    fn kit(reference: &str) -> RegisteredKit {
+        RegisteredKit {
+            workload: NativeKitRef::immutable_oci(reference).unwrap(),
+        }
+    }
+
+    /// A daemon whose host overlay maps `pix` to OLD (following a tag) and,
+    /// optionally, `pi` to `pi_override` over its packaged SHIPPED digest.
+    fn daemon(
+        home: &Path,
+        registry: &Arc<Registry>,
+        pi_override: Option<&str>,
+        channel: Option<&str>,
+    ) -> StockDaemonBackend {
+        let mut commands = BTreeMap::from([("pix".to_owned(), kit(OLD))]);
+        let mut overlay = BTreeMap::from([("pix".to_owned(), OLD.to_owned())]);
+        commands.insert("pi".into(), kit(pi_override.unwrap_or(SHIPPED)));
+        if let Some(reference) = pi_override {
+            overlay.insert("pi".into(), reference.to_owned());
+        }
+        let template = tests::backend_for_kit_identity(home, commands.clone());
+        fs::create_dir_all(&template.config.control_home).unwrap();
+        fs::write(
+            template.config.control_home.join("commands.json"),
+            serde_json::to_vec(&overlay).unwrap(),
+        )
+        .unwrap();
+        kit_lifecycle::write_sources(
+            &template.config.control_home,
+            &BTreeMap::from([(
+                "pix".to_owned(),
+                KitTag::parse("example/pix:stable").unwrap(),
+            )]),
+        )
+        .unwrap();
+        StockDaemonBackend::new(
+            Arc::new(StockSbx::new("sbx", registry.clone())),
+            commands,
+            template.config,
+        )
+        .with_packaged(
+            BTreeMap::from([("pi".to_owned(), kit(SHIPPED))]),
+            channel.map(str::to_owned),
+        )
+    }
+
+    fn overlay(backend: &StockDaemonBackend) -> String {
+        fs::read_to_string(backend.config.control_home.join("commands.json")).unwrap()
+    }
+
+    fn only(reports: Vec<KitUpgrade>) -> KitUpgrade {
+        assert_eq!(reports.len(), 1, "{reports:?}");
+        reports.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn upgrades_report_each_outcome_and_change_nothing_unless_the_switch_succeeds() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(OLD, Some(1));
+        let backend = daemon(home.path(), &registry, None, None);
+        let store = DaemonStore::new(home.path());
+        let before = overlay(&backend);
+        let upgrade = |check| {
+            only(
+                backend
+                    .upgrade_kits(&["pix".into()], check, store.clone())
+                    .unwrap(),
+            )
+        };
+
+        let current = upgrade(false);
+        assert_eq!(current.state, KitUpgradeState::UpToDate);
+        assert_eq!(
+            current.source.as_deref(),
+            Some("docker.io/example/pix:stable")
+        );
+        assert_eq!(
+            registry.calls("docker"),
+            0,
+            "an unchanged digest needs no label read"
+        );
+
+        *registry.resolved.lock().unwrap() = NEW.into();
+        *registry.contract.lock().unwrap() = Some(SUPPORTED_CONTRACT_PLUS_ONE);
+        let newer = upgrade(false);
+        assert_eq!(newer.state, KitUpgradeState::Refused);
+        assert!(newer.detail.unwrap().contains("upgrade marsh first"));
+
+        *registry.contract.lock().unwrap() = Some(1);
+        let available = upgrade(true);
+        assert_eq!(available.state, KitUpgradeState::Available);
+        assert_eq!(available.resolved.as_deref(), Some(NEW));
+
+        // Preparing the new VM fails: the old digest stays registered.
+        let failed = upgrade(false);
+        assert_eq!(failed.state, KitUpgradeState::Failed, "{failed:?}");
+        assert_eq!(overlay(&backend), before);
+        assert_eq!(
+            backend.registered_kit("pix").unwrap().workload.identity(),
+            OLD
+        );
+    }
+
+    const SUPPORTED_CONTRACT_PLUS_ONE: u32 =
+        *marsh_contracts::kit_source::SUPPORTED_KIT_CONTRACTS.end() + 1;
+
+    #[test]
+    fn packaged_kits_need_a_channel_and_a_declared_contract() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(PI_NEW, None);
+        let store = DaemonStore::new(home.path());
+
+        let local = daemon(home.path(), &registry, None, None);
+        let skipped = only(
+            local
+                .upgrade_kits(&["pi".into()], false, store.clone())
+                .unwrap(),
+        );
+        assert_eq!(skipped.state, KitUpgradeState::Skipped);
+        assert_eq!(registry.calls("inspect"), 0);
+        // Without a channel, "all" covers only Kits that follow a tag.
+        let all = local.upgrade_kits(&[], true, store.clone()).unwrap();
+        assert_eq!(
+            all.iter()
+                .map(|kit| kit.command.as_str())
+                .collect::<Vec<_>>(),
+            ["pix"]
+        );
+
+        let home = tempfile::tempdir().unwrap();
+        let release = daemon(home.path(), &registry, None, Some("latest"));
+        let unlabelled = only(
+            release
+                .upgrade_kits(&["pi".into()], false, store.clone())
+                .unwrap(),
+        );
+        assert_eq!(
+            unlabelled.source.as_deref(),
+            Some("docker.io/example/pi:latest")
+        );
+        assert_eq!(unlabelled.state, KitUpgradeState::Refused);
+        assert!(
+            unlabelled
+                .detail
+                .unwrap()
+                .contains("org.marsh.kit.contract")
+        );
+        *registry.contract.lock().unwrap() = Some(1);
+        let labelled = only(release.upgrade_kits(&["pi".into()], true, store).unwrap());
+        assert_eq!(labelled.state, KitUpgradeState::Available);
+    }
+
+    #[test]
+    fn digest_installs_have_nothing_to_follow_and_unknown_names_are_refused() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(NEW, Some(1));
+        let backend = daemon(home.path(), &registry, None, None);
+        let store = DaemonStore::new(home.path());
+        kit_lifecycle::write_sources(&backend.config.control_home, &BTreeMap::new()).unwrap();
+        let pinned = only(
+            backend
+                .upgrade_kits(&["pix".into()], false, store.clone())
+                .unwrap(),
+        );
+        assert_eq!(pinned.state, KitUpgradeState::Skipped);
+        assert!(pinned.detail.unwrap().contains("installed by digest"));
+        assert!(matches!(
+            backend.upgrade_kits(&["nope".into()], false, store),
+            Err(DaemonError::NotFound(_))
+        ));
+        assert_eq!(registry.calls("inspect"), 0);
+    }
+
+    #[test]
+    fn a_kit_with_running_jobs_is_neither_upgraded_nor_uninstalled() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(NEW, Some(1));
+        let backend = daemon(home.path(), &registry, None, None);
+        let store = DaemonStore::new(home.path());
+        let worker = backend.kit_spec("pix").unwrap().name;
+        let session = store.attach_shell(
+            1,
+            marsh_daemon::SessionAuthority {
+                username: "alice".into(),
+                uid: 501,
+                gid: 20,
+                launch_directory: home.path().into(),
+                guest_home: "/Users/alice".into(),
+                home_backing: home.path().into(),
+                ephemeral_home: false,
+            },
+        );
+        store
+            .register_worker(WorkerStatus {
+                worker_id: worker.clone(),
+                vm_id: worker.clone(),
+                scope_id: store.status(None).scope_id,
+                kit_ref: OLD.into(),
+                kits: vec!["pix".into()],
+                warm: true,
+                health: WorkerHealth::Ready,
+                container_capacity: 4,
+                active_container_ids: Vec::new(),
+            })
+            .unwrap();
+        let (job, _) = store
+            .begin_job(NewJob {
+                session_id: session,
+                command: "pix".into(),
+                kit_ref: OLD.into(),
+                workload_image: OLD.into(),
+                mounts: Vec::new(),
+            })
+            .unwrap();
+        store.reserve_worker(&job, &worker, &worker).unwrap();
+        let before = overlay(&backend);
+        let busy = only(
+            backend
+                .upgrade_kits(&["pix".into()], false, store.clone())
+                .unwrap(),
+        );
+        assert_eq!(busy.state, KitUpgradeState::Refused, "{busy:?}");
+        assert!(busy.detail.unwrap().contains("active jobs"));
+        assert!(
+            backend
+                .uninstall_kit("pix".into(), store)
+                .unwrap_err()
+                .to_string()
+                .contains("active jobs")
+        );
+        assert_eq!(overlay(&backend), before);
+        assert_eq!(
+            backend.registered_kit("pix").unwrap().workload.identity(),
+            OLD
+        );
+        assert_eq!(
+            kit_lifecycle::read_sources(&backend.config.control_home)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn uninstall_removes_installed_kits_and_reverts_upgraded_packaged_ones() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(OLD, Some(1));
+        let backend = daemon(home.path(), &registry, Some(PI_NEW), Some("latest"));
+        let store = DaemonStore::new(home.path());
+
+        assert_eq!(
+            backend.uninstall_kit("pix".into(), store.clone()).unwrap(),
+            "removed pix"
+        );
+        assert!(!overlay(&backend).contains("pix"));
+        assert!(
+            kit_lifecycle::read_sources(&backend.config.control_home)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            !backend
+                .registered_commands()
+                .unwrap()
+                .contains(&"pix".to_owned())
+        );
+        assert!(matches!(
+            backend.registered_kit("pix"),
+            Err(DaemonError::NotFound(_))
+        ));
+
+        assert!(
+            backend
+                .uninstall_kit("pi".into(), store.clone())
+                .unwrap()
+                .contains("back to the version this marsh shipped")
+        );
+        assert_eq!(
+            backend.registered_kit("pi").unwrap().workload.identity(),
+            SHIPPED
+        );
+        assert!(!overlay(&backend).contains("\"pi\""));
+        // Nothing left to revert.
+        assert!(backend.uninstall_kit("pi".into(), store.clone()).is_err());
+        assert!(backend.uninstall_kit("nope".into(), store).is_err());
     }
 }

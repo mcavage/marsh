@@ -3,7 +3,10 @@
 //! This crate deliberately shells out only to the public `sbx` CLI. It neither
 //! starts a private sandbox daemon nor depends on SBX implementation details.
 
-use marsh_contracts::{JobMount, MountAccess, OciImage, TerminalSize};
+use marsh_contracts::{
+    JobMount, MountAccess, OciImage, TerminalSize,
+    kit_source::{KIT_CONTRACT_LABEL, KitTag, parse_contract},
+};
 use marsh_runtime::{Attachment, CommandOutput, CommandRunner, Invocation};
 use marsh_worker::{WorkerRequest, WorkerResponse, read_frame, write_frame};
 use serde::{Deserialize, Serialize};
@@ -83,6 +86,8 @@ const SHELL_SETUP_SCRIPT: &str = concat!(
 pub const GRANT_ROOT: &str = "/run/marsh/grants";
 const MINIMUM_SBX_VERSION: (u64, u64, u64) = (0, 47, 0);
 const SBX_COMPATIBILITY_TIMEOUT: Duration = Duration::from_secs(10);
+/// Registry reads for `marsh kit install/upgrade`.
+const KIT_RESOLUTION_TIMEOUT: Duration = Duration::from_mins(2);
 const KEEPALIVE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const LOCAL_SCRATCH_STALE_AFTER: Duration = Duration::from_hours(1);
 const PREPARATION_SBX_TIMEOUT: Duration = Duration::from_mins(5);
@@ -1442,6 +1447,56 @@ impl StockSbx {
         }
 
         Ok(())
+    }
+
+    /// Resolves a moving Kit tag to the immutable image it names now, through
+    /// stock SBX (its registry sign-in and Kit source policy apply).
+    ///
+    /// # Errors
+    /// Fails when stock SBX cannot inspect the tag or answers with anything but
+    /// a digest of the same repository.
+    pub fn resolve_kit_tag(&self, tag: &KitTag) -> Result<OciImage, SbxError> {
+        let output = self.run_bounded_os(
+            "resolve Kit tag",
+            KIT_RESOLUTION_TIMEOUT,
+            [
+                "kit".to_owned(),
+                "inspect".to_owned(),
+                tag.to_string(),
+                "--format".to_owned(),
+                "json".to_owned(),
+            ],
+        )?;
+        Self::require_success("resolve Kit tag", output.clone())?;
+        let image = resolved_kit_image(&output.stdout).ok_or_else(|| {
+            SbxError::KitResolution(format!("stock SBX did not report an image for {tag}"))
+        })?;
+        tag.check_resolution(&image)
+            .map_err(SbxError::KitResolution)
+    }
+
+    /// Reads the marsh Kit contract an image declares in its
+    /// [`KIT_CONTRACT_LABEL`] label, from the registry with Docker Buildx (the
+    /// host's Docker sign-in applies). `None` means the image declares none.
+    ///
+    /// # Errors
+    /// Fails when Docker cannot read the image configuration.
+    pub fn kit_contract(&self, image: &OciImage) -> Result<Option<u32>, SbxError> {
+        let output = self.run_program_bounded_os(
+            "read Kit contract label",
+            Path::new("docker"),
+            KIT_RESOLUTION_TIMEOUT,
+            [
+                "buildx",
+                "imagetools",
+                "inspect",
+                image.as_str(),
+                "--format",
+                "{{json .Image}}",
+            ],
+        )?;
+        Self::require_success("read Kit contract label", output.clone())?;
+        image_contract_label(&output.stdout).map_err(SbxError::KitResolution)
     }
 
     #[cfg(test)]
@@ -6786,6 +6841,37 @@ fn missing_vm_message(message: &str) -> bool {
         || message.contains("container missing before start")
 }
 
+/// `sandbox.image` from `sbx kit inspect --format json`.
+fn resolved_kit_image(stdout: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(stdout).ok()?;
+    value
+        .get("sandbox")?
+        .get("image")?
+        .as_str()
+        .map(str::to_owned)
+}
+
+/// The contract label from `docker buildx imagetools inspect --format
+/// '{{json .Image}}'`: one image configuration, or a map of them by platform
+/// for an index (marsh Kits run on linux/arm64).
+fn image_contract_label(stdout: &[u8]) -> Result<Option<u32>, String> {
+    let value: serde_json::Value = serde_json::from_slice(stdout)
+        .map_err(|_| "Docker returned an unreadable image configuration".to_owned())?;
+    let configuration = if value.get("config").is_some() {
+        &value
+    } else {
+        value
+            .get("linux/arm64")
+            .ok_or_else(|| "the image has no linux/arm64 configuration".to_owned())?
+    };
+    Ok(configuration
+        .get("config")
+        .and_then(|config| config.get("Labels"))
+        .and_then(|labels| labels.get(KIT_CONTRACT_LABEL))
+        .and_then(serde_json::Value::as_str)
+        .and_then(parse_contract))
+}
+
 #[derive(Debug, Error)]
 pub enum SbxError {
     #[error("stock SBX I/O failed: {0}")]
@@ -6819,6 +6905,8 @@ pub enum SbxError {
     ForeignVm(String),
     #[error("invalid SBX identifier: {0}")]
     InvalidIdentifier(String),
+    #[error("Kit tag resolution failed: {0}")]
+    KitResolution(String),
     #[error("unsafe worker artifact: {0}")]
     UnsafeWorker(PathBuf),
     #[error("unsafe grant or result path: {0}")]
@@ -6919,3 +7007,97 @@ pub enum SbxError {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod kit_resolution_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    const DIGEST: &str = "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+
+    /// Answers every invocation with one fixed stdout and records the argv.
+    struct Scripted {
+        stdout: String,
+        calls: Mutex<Vec<Vec<String>>>,
+    }
+    impl CommandRunner for Scripted {
+        fn run(&self, invocation: &Invocation) -> io::Result<CommandOutput> {
+            let mut argv = vec![invocation.program.to_string_lossy().into_owned()];
+            argv.extend(
+                invocation
+                    .arguments
+                    .iter()
+                    .map(|argument| argument.to_string_lossy().into_owned()),
+            );
+            self.calls.lock().unwrap().push(argv);
+            Ok(CommandOutput {
+                exit_code: Some(0),
+                stdout: self.stdout.clone().into_bytes(),
+                stderr: Vec::new(),
+            })
+        }
+        fn run_bounded(&self, invocation: &Invocation, _: Duration) -> io::Result<CommandOutput> {
+            self.run(invocation)
+        }
+        fn spawn_attached(&self, _: &Invocation) -> io::Result<Attachment> {
+            Err(io::Error::other("not used"))
+        }
+    }
+
+    fn stock(stdout: String) -> (StockSbx, Arc<Scripted>) {
+        let runner = Arc::new(Scripted {
+            stdout,
+            calls: Mutex::new(Vec::new()),
+        });
+        (StockSbx::new("sbx", runner.clone()), runner)
+    }
+
+    #[test]
+    fn tags_resolve_through_stock_kit_inspect_to_a_same_repository_digest() {
+        let tag = KitTag::parse("mcavage/marsh-pix:stable").unwrap();
+        let (sbx, runner) = stock(format!(
+            r#"{{"name":"marsh-pix","sandbox":{{"image":"docker.io/mcavage/marsh-pix@{DIGEST}"}}}}"#
+        ));
+        assert_eq!(
+            sbx.resolve_kit_tag(&tag).unwrap().as_str(),
+            format!("docker.io/mcavage/marsh-pix@{DIGEST}")
+        );
+        assert_eq!(
+            runner.calls.lock().unwrap()[0][1..],
+            [
+                "kit",
+                "inspect",
+                "docker.io/mcavage/marsh-pix:stable",
+                "--format",
+                "json"
+            ]
+        );
+        for answer in [
+            format!(r#"{{"sandbox":{{"image":"docker.io/other/marsh-pix@{DIGEST}"}}}}"#),
+            r#"{"sandbox":{"image":"docker.io/mcavage/marsh-pix:stable"}}"#.to_owned(),
+            r#"{"sandbox":{}}"#.to_owned(),
+            "not json".to_owned(),
+        ] {
+            let (sbx, _) = stock(answer.clone());
+            assert!(
+                matches!(sbx.resolve_kit_tag(&tag), Err(SbxError::KitResolution(_))),
+                "{answer}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_contract_label_is_read_for_single_images_and_arm64_in_an_index() {
+        let image = OciImage::parse(format!("docker.io/mcavage/marsh-pi@{DIGEST}")).unwrap();
+        let labelled = format!(r#"{{"config":{{"Labels":{{"{KIT_CONTRACT_LABEL}":"1"}}}}}}"#);
+        let (sbx, runner) = stock(labelled.clone());
+        assert_eq!(sbx.kit_contract(&image).unwrap(), Some(1));
+        assert_eq!(runner.calls.lock().unwrap()[0][0], "docker");
+        let (sbx, _) = stock(format!(r#"{{"linux/arm64":{labelled}}}"#));
+        assert_eq!(sbx.kit_contract(&image).unwrap(), Some(1));
+        let (sbx, _) = stock(r#"{"config":{"Labels":{"other":"1"}}}"#.into());
+        assert_eq!(sbx.kit_contract(&image).unwrap(), None);
+        let (sbx, _) = stock(r#"{"linux/amd64":{"config":{}}}"#.into());
+        assert!(sbx.kit_contract(&image).is_err());
+    }
+}

@@ -518,6 +518,34 @@ struct Envelope<T> {
     body: T,
 }
 
+/// One Kit's outcome from `marsh kit upgrade`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct KitUpgrade {
+    pub command: String,
+    /// The tag it follows, if any.
+    pub source: Option<String>,
+    /// The digest it ran before.
+    pub current: String,
+    /// The digest the tag names now, when it was resolved.
+    pub resolved: Option<String>,
+    pub state: KitUpgradeState,
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KitUpgradeState {
+    UpToDate,
+    /// `--check`: a newer digest is available and compatible.
+    Available,
+    Upgraded,
+    /// Nothing to follow (installed by digest, or a local build).
+    Skipped,
+    /// The new image is not compatible with this marsh, or the Kit is busy.
+    Refused,
+    Failed,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PublicRequest {
@@ -680,6 +708,15 @@ pub enum PublicRequest {
         command: String,
         reference: String,
     },
+    /// `marsh kit upgrade`: empty `commands` means every Kit that follows a tag.
+    UpgradeKits {
+        commands: Vec<String>,
+        check_only: bool,
+    },
+    /// `marsh kit uninstall`.
+    UninstallKit {
+        command: String,
+    },
     /// `marsh split`: streamed stdin frames follow (`docs/design/workspaces.md` s3).
     SplitCreate(split::SplitCreateSpec),
     /// Creator only; a `SplitRelease` frame follows the reply.
@@ -786,6 +823,13 @@ pub enum PublicReply {
     InstalledKit {
         command: String,
         reference: String,
+    },
+    KitsUpgraded {
+        kits: Vec<KitUpgrade>,
+    },
+    UninstalledKit {
+        command: String,
+        detail: String,
     },
     SplitStarted {
         id: String,
@@ -1100,6 +1144,22 @@ pub trait DaemonBackend: Send + Sync + 'static {
         _reference: String,
         _store: DaemonStore,
     ) -> Result<String, DaemonError> {
+        Err(DaemonError::BackendUnavailable)
+    }
+    /// Re-resolves each selected Kit's tag and, unless `check_only`, moves it
+    /// to the digest the tag names now. Per-Kit outcomes are reported, not
+    /// raised, so one refused Kit does not hide the others.
+    fn upgrade_kits(
+        &self,
+        _commands: &[String],
+        _check_only: bool,
+        _store: DaemonStore,
+    ) -> Result<Vec<KitUpgrade>, DaemonError> {
+        Err(DaemonError::BackendUnavailable)
+    }
+    /// Removes a Kit added with `marsh kit install`, or returns an upgraded
+    /// packaged Kit to the version this marsh shipped.
+    fn uninstall_kit(&self, _command: String, _store: DaemonStore) -> Result<String, DaemonError> {
         Err(DaemonError::BackendUnavailable)
     }
     fn resolve_acp_agent(&self, _name: &str) -> Result<AgentAdapterDeclaration, DaemonError> {
@@ -1559,6 +1619,8 @@ impl PublicRequest {
             | Self::AttachEphemeralShell { .. }
             | Self::Shutdown
             | Self::ResetWorkers { .. }
+            | Self::UpgradeKits { .. }
+            | Self::UninstallKit { .. }
             | Self::ResetScope
             | Self::StopScope => RequestAuthority::HostLifecycle,
             Self::AcpPublishedPrompt { .. }
@@ -4610,6 +4672,29 @@ impl ConnectionHandler {
                 }
                 write_frame(&mut stream, &reply)
             }
+            body @ (PublicRequest::UpgradeKits { .. } | PublicRequest::UninstallKit { .. }) => {
+                let reply = dispatch_request(
+                    &self.store,
+                    self.backend.as_ref(),
+                    &self.build_identity,
+                    body,
+                );
+                // As for a worker reset: a Kit whose VM was retired no longer
+                // holds slots for its cleanup-uncertain jobs.
+                let retired = match &reply {
+                    PublicReply::KitsUpgraded { kits } => kits
+                        .iter()
+                        .filter(|kit| kit.state == KitUpgradeState::Upgraded)
+                        .map(|kit| kit.command.clone())
+                        .collect(),
+                    PublicReply::UninstalledKit { command, .. } => vec![command.clone()],
+                    _ => Vec::new(),
+                };
+                if !retired.is_empty() {
+                    self.store.release_process_slots(&retired);
+                }
+                write_frame(&mut stream, &reply)
+            }
             body => self.handle_authorized(stream, body),
         }
     }
@@ -4664,6 +4749,8 @@ fn authorize_request_session(
         | PublicRequest::RegisteredCommands
         | PublicRequest::RegisteredKits
         | PublicRequest::ResetWorkers { .. }
+        | PublicRequest::UpgradeKits { .. }
+        | PublicRequest::UninstallKit { .. }
         | PublicRequest::ResetScope
         | PublicRequest::StopScope
         | PublicRequest::AttachShell { .. }
@@ -4719,6 +4806,19 @@ fn dispatch_request(
         PublicRequest::InstallKit { command, reference } => {
             match backend.install_kit(command.clone(), reference, store.clone()) {
                 Ok(reference) => PublicReply::InstalledKit { command, reference },
+                Err(error) => public_error(&error),
+            }
+        }
+        PublicRequest::UpgradeKits {
+            commands,
+            check_only,
+        } => match backend.upgrade_kits(&commands, check_only, store.clone()) {
+            Ok(kits) => PublicReply::KitsUpgraded { kits },
+            Err(error) => public_error(&error),
+        },
+        PublicRequest::UninstallKit { command } => {
+            match backend.uninstall_kit(command.clone(), store.clone()) {
+                Ok(detail) => PublicReply::UninstalledKit { command, detail },
                 Err(error) => public_error(&error),
             }
         }
@@ -5113,6 +5213,36 @@ impl Client {
             Duration::from_mins(8),
         )? {
             PublicReply::InstalledKit { reference, .. } => Ok(reference),
+            reply => Err(unexpected_reply(reply)),
+        }
+    }
+
+    pub fn upgrade_kits(
+        &self,
+        commands: &[String],
+        check_only: bool,
+    ) -> Result<Vec<KitUpgrade>, DaemonError> {
+        // Preparing an upgraded Kit VM can take as long as an install.
+        match self.request_with_timeout(
+            PublicRequest::UpgradeKits {
+                commands: commands.to_vec(),
+                check_only,
+            },
+            Duration::from_mins(30),
+        )? {
+            PublicReply::KitsUpgraded { kits } => Ok(kits),
+            reply => Err(unexpected_reply(reply)),
+        }
+    }
+
+    pub fn uninstall_kit(&self, command: &str) -> Result<String, DaemonError> {
+        match self.request_with_timeout(
+            PublicRequest::UninstallKit {
+                command: command.into(),
+            },
+            Duration::from_mins(5),
+        )? {
+            PublicReply::UninstalledKit { detail, .. } => Ok(detail),
             reply => Err(unexpected_reply(reply)),
         }
     }
