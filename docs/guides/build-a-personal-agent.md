@@ -31,13 +31,13 @@ myagent/
 ## 1. The image
 
 ```dockerfile
-FROM docker.io/library/debian:trixie-slim AS download
+FROM dhi.io/debian-base:trixie-dev AS download
 ARG OPENCODE_VERSION=1.19.3
 ADD https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-arm64.tar.gz /tmp/opencode.tar.gz
-RUN tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode
+RUN tar -xzf /tmp/opencode.tar.gz -C /tmp opencode
 
 FROM docker.io/mcavage/marsh-shell:0.1.8
-COPY --from=download /usr/local/bin/opencode /usr/local/bin/opencode
+COPY --from=download /tmp/opencode /usr/local/bin/opencode
 COPY config /opt/myagent/config
 COPY skills /opt/myagent/config/skills
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/myagent
@@ -46,8 +46,11 @@ ENTRYPOINT ["/usr/local/bin/myagent"]
 
 Start from `marsh-shell`, at the version of your marsh. The same image boots
 the sandbox your jobs run in, which needs the Docker Engine and plumbing that
-`marsh-shell` provides. It has no package manager, so fetch or build your agent
-in a separate stage and copy the result in.
+`marsh-shell` provides. It's built on a [Docker Hardened Image](https://docs.docker.com/dhi/)
+and has no package manager, so fetch or build your agent in a separate stage
+and copy the result in. Use a hardened image there too: the `-dev` variants,
+like `dhi.io/debian-base:trixie-dev`, include the usual build tools and are
+free to pull.
 
 **Another agent:** change the download stage. Anything that ends up as a
 binary, or a runtime plus your agent's files, works.
