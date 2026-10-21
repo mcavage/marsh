@@ -110,7 +110,7 @@ Options:
   --ephemeral-home         Use a blank session home with no persistent writeback
   --dev                    Develop marsh: open a dev shell whose `sbx` is a confined host broker
   -h, --help               Show this host-local help and exit
-  -V, --version            Show the marsh version and exit
+  -V, --version, version   Show the marsh version and exit
 
 Environment:
   MARSH_HOME               Absolute scope root; guest home is $MARSH_HOME/home
@@ -379,6 +379,47 @@ fn run_with(
     }
 }
 
+/// `marsh SCRIPT [ARG...]` names a script the session shell would source.
+/// The launch directory is the same path in the VM, so a missing file is
+/// reported here, before any VM starts. A bare word gets a pointer to the
+/// commands, since it was more likely meant as one.
+fn missing_script(brush_args: &[OsString]) -> Option<String> {
+    let script = script_operand(brush_args.get(1..)?)?;
+    if Path::new(script).exists() {
+        return None;
+    }
+    let shown = Path::new(script).display();
+    Some(if script.as_encoded_bytes().contains(&b'/') {
+        format!("{shown}: no such file or directory")
+    } else {
+        format!(
+            "{shown}: no such command or script; run `marsh help` for commands, or `marsh ./{shown}` for a script"
+        )
+    })
+}
+
+/// The script a shell argument list names, as bash reads it: the first word
+/// after the options (and `-o`/`-O` values), or the word after `--`. `-c` and
+/// `-` read commands from elsewhere, so they name no script.
+fn script_operand(arguments: &[OsString]) -> Option<&OsString> {
+    let mut words = arguments.iter();
+    while let Some(word) = words.next() {
+        match word.to_str() {
+            Some("-c" | "-") => return None,
+            Some("--") => return words.next(),
+            Some("-o" | "+o" | "-O" | "+O") => {
+                words.next();
+            }
+            _ if word
+                .as_encoded_bytes()
+                .first()
+                .is_some_and(|b| matches!(b, b'-' | b'+')) => {}
+            _ => return Some(word),
+        }
+    }
+    None
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HostCommand {
     Help,
@@ -395,7 +436,9 @@ fn host_command(arguments: &[OsString]) -> Option<HostCommand> {
         .collect::<Option<Vec<_>>>()?;
     match words.as_slice() {
         [argument] if matches!(*argument, "-h" | "--help" | "help") => Some(HostCommand::Help),
-        [argument] if matches!(*argument, "-V" | "--version") => Some(HostCommand::Version),
+        [argument] if matches!(*argument, "-V" | "--version" | "version") => {
+            Some(HostCommand::Version)
+        }
         [mcp, help] if *mcp == "mcp" && matches!(*help, "-h" | "--help") => {
             Some(HostCommand::McpHelp)
         }
@@ -577,6 +620,12 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
     }
     let mut parsed =
         cli::parse_os(arguments).map_err(|error| RunError::new(error.to_string(), 2))?;
+    if !parsed.guest
+        && matches!(parsed.command, cli::ProductCommand::Shell)
+        && let Some(message) = missing_script(&parsed.brush_args)
+    {
+        return Err(RunError::new(message, 127));
+    }
     // Pure input validation precedes session/home creation and daemon startup.
     if let cli::ProductCommand::KitInstall { command, reference } = &parsed.command {
         marsh_contracts::command_registry::CommandName::parse(command.clone())
@@ -3553,6 +3602,43 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_script_is_reported_before_any_vm_starts() {
+        let directory = tempfile::tempdir().unwrap();
+        let present = directory.path().join("present.sh");
+        std::fs::write(&present, "true\n").unwrap();
+        let present = present.to_str().unwrap();
+        let absent = directory.path().join("absent.sh");
+        let absent = absent.to_str().unwrap();
+        let word = missing_script(&os_strings(&["marsh", "versoin"])).unwrap();
+        assert!(
+            word.contains("no such command or script") && word.contains("marsh help"),
+            "{word}"
+        );
+        let path = missing_script(&os_strings(&["marsh", absent])).unwrap();
+        assert!(
+            path.ends_with("absent.sh: no such file or directory"),
+            "{path}"
+        );
+        for arguments in [
+            vec!["marsh"],
+            vec!["marsh", present, "arg"],
+            vec!["marsh", "-c", "versoin"],
+            vec!["marsh", "-l"],
+            vec!["marsh", "-"],
+            vec!["marsh", "-o", "vi", present],
+            vec!["marsh", "-x", "--", present],
+        ] {
+            assert_eq!(
+                missing_script(&os_strings(&arguments)),
+                None,
+                "{arguments:?}"
+            );
+        }
+        assert!(missing_script(&os_strings(&["marsh", "-x", absent])).is_some());
+        assert!(missing_script(&os_strings(&["marsh", "-o", "vi", "--", absent])).is_some());
+    }
+
+    #[test]
     fn host_help_and_version_exit_without_running_the_product() {
         for (argument, expected) in [
             ("--help", "Usage:\n"),
@@ -3560,6 +3646,7 @@ mod tests {
             ("help", "Usage:\n"),
             ("--version", VERSION),
             ("-V", VERSION),
+            ("version", VERSION),
         ] {
             let product_called = std::cell::Cell::new(false);
             let mut output = Vec::new();
