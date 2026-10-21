@@ -85,7 +85,7 @@ ENTRYPOINT ["/usr/local/bin/marsh-codex"]
 FROM image AS smoke
 ARG CODEX_VERSION
 USER root
-RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 \
+RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 python \
  && test "$(command -v codex)" = /usr/local/bin/codex \
  && test "$(codex --version 2>/dev/null)" = "codex-cli ${CODEX_VERSION}"
 

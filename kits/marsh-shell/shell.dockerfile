@@ -1,6 +1,6 @@
 # marsh shell Kit: the DHI Debian runtime base plus the Kit VM floor (Docker
 # Engine, which runs this Kit's jobs from this same image), the POSIX text
-# tools and python3, assembled from Debian packages in a -dev build stage
+# tools and python3 (also as `python`), assembled from Debian packages in a -dev build stage
 # (image-base/assemble-packages.sh). The runtime image has no package manager.
 FROM dhi.io/debian-base:trixie@sha256:1bc990cfdb9a1c0b76491bb03921af347e408107e6769d49d1fc5668ad30ba5c AS base
 
@@ -8,7 +8,7 @@ FROM dhi.io/debian-base:trixie-dev@sha256:9b025768946856e44f9775005eb199f2e18204
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
-RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland python3
+RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland python3 python-is-python3
 
 FROM base AS image
 COPY --from=packages /rootfs/ /
@@ -26,7 +26,7 @@ ENTRYPOINT ["/usr/local/bin/marsh-shell"]
 # verify it, read-only, from the build stage.
 FROM image AS smoke
 USER root
-RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh
+RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh python
 
 FROM packages AS verify
 RUN sh /tmp/marsh-image-base/verifier.sh

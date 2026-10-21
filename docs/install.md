@@ -119,23 +119,40 @@ Agent calls need a provider credential as well as `sbx login`. Follow the
 
 ## Upgrade
 
-For Homebrew:
+Two things update separately:
+
+| What | Command | Changes |
+|---|---|---|
+| marsh | `brew upgrade mcavage/tap/marsh` | The `marsh` CLI, its daemon and shell VM, and the agent versions this release ships |
+| Commands | `marsh kit upgrade` | Each command to the newest image its tag names: `claude`, `codex`, `pi` and `shell` follow their release channel, and Kits you installed from a tag follow that tag |
+
+Do both, in that order:
 
 ```sh
 brew upgrade mcavage/tap/marsh
+marsh stop                   # when idle; the next launch uses the new marsh
+marsh kit upgrade --check    # what would change
+marsh kit upgrade
 ```
 
-For a script install, run the installer again. For a tarball install,
-repeat the extraction and copy steps with the new release.
+Between marsh releases, `marsh kit upgrade` alone picks up new agent versions.
+A command you upgraded keeps its upgraded image when marsh itself is
+upgraded, so run `marsh kit upgrade` afterwards too. `marsh kit uninstall NAME`
+returns a packaged command to the version your marsh shipped. See
+[Upgrading commands](kits.md#upgrading-commands).
 
-An existing daemon keeps using the old binaries. Finish its jobs and run
-`exit` in every marsh shell, then run `marsh stop` from your **Mac terminal**.
-The next launch uses the new version. Stop refuses while shells or jobs are
-active; see [Removing VMs](troubleshooting.md#removing-vms).
+For a script install, run the installer again instead of `brew upgrade`. For a
+tarball install, repeat the extraction and copy steps with the new release.
 
-After an `sbx` upgrade, marsh restarts its idle daemon automatically. In
-projects where you registered an MCP client, rerun `marsh mcp install CLIENT`
-with that client's name because the registration stores the `sbx` path.
+A running daemon keeps the old marsh until `marsh stop`: finish its jobs,
+`exit` every marsh shell, then run `marsh stop` from your **Mac terminal**.
+Stop refuses while shells or jobs are active; see
+[Removing VMs](troubleshooting.md#removing-vms).
+
+After an `sbx` upgrade, marsh replaces its daemon automatically once no shell
+or job is running. In projects where you registered an MCP client, rerun
+`marsh mcp install CLIENT` with that client's name because the registration
+stores the `sbx` path.
 
 ## Uninstall
 

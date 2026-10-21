@@ -80,7 +80,7 @@ ENTRYPOINT ["/usr/local/bin/marsh-claude"]
 # the canonical marsh-dhi bundle.
 FROM image AS smoke
 USER root
-RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3
+RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 python
 
 FROM packages AS verify
 ARG CLAUDE_VERSION
