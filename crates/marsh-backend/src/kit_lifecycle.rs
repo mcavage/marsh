@@ -14,7 +14,7 @@ use std::{
 pub(crate) const SOURCES_FILE: &str = "kit-sources.json";
 const MAX_SOURCES_BYTES: u64 = 256 * 1024;
 
-/// Tags followed by Kits installed with `marsh kit install NAME --from REPO:TAG`.
+/// Tags followed by Kits installed with `marsh kit install NAME REPO:TAG`.
 /// Missing means none. The command registry, not this file, says what runs.
 ///
 /// # Errors

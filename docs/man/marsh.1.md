@@ -164,7 +164,7 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 **config shell** [**bash**|**zsh**|**marsh**]
 : Set, or with no name print, the default shell for this **MARSH_HOME**.
 
-**kit install** *NAME* **--from** *REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*
+**kit install** *NAME* *REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*
 : Register a published Kit under *NAME* in this scope. A tag is resolved to its
   digest now; only that digest runs.
 

@@ -319,8 +319,8 @@ fn consume_bundled_handoff(
 fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<ParsedCli>, CliError> {
     let tail = &args[1..];
     let command = match tail {
-        [kit, install, command, from, reference]
-            if kit == "kit" && install == "install" && from == "--from" =>
+        [kit, install, command, reference]
+            if kit == "kit" && install == "install" && !reference.starts_with('-') =>
         {
             ProductCommand::KitInstall {
                 command: command.clone(),
@@ -431,7 +431,7 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         }
         [name, ..] if name == "kit" => {
             return Err(CliError(
-                "usage: marsh kit install NAME --from REPOSITORY@sha256:DIGEST".into(),
+                "usage: marsh kit install NAME REF | marsh kit upgrade [--check] [NAME...] | marsh kit uninstall NAME".into(),
             ));
         }
         _ => return Ok(None),
@@ -760,7 +760,6 @@ mod tests {
                 "kit".into(),
                 "install".into(),
                 "alternate".into(),
-                "--from".into(),
                 reference.clone().into(),
             ])
             .unwrap()
@@ -771,6 +770,13 @@ mod tests {
             }
         );
         assert!(parse(strings(&["marsh", "kit", "install"])).is_err());
+        assert!(
+            parse(strings(&[
+                "marsh", "kit", "install", "pix", "--from", "a/b:c"
+            ]))
+            .is_err()
+        );
+        assert!(parse(strings(&["marsh", "kit", "install", "pix", "--from"])).is_err());
     }
 
     #[test]

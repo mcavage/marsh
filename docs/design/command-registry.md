@@ -92,7 +92,7 @@ bare PTY invocation is an interactive shell. The normal worker lifecycle gives
 each call a fresh container while reusing the exact shell Kit VM.
 
 To add a published alternate Kit while the daemon is running, use
-`marsh kit install NAME --from repository@sha256:DIGEST`. The daemon checks
+`marsh kit install NAME repository@sha256:DIGEST`. The daemon checks
 the immutable reference through stock SBX, prepares its worker, and then
 registers the command in its current scope. It writes the pinned reference
 to that scope's private control registry for the next daemon start. Inside an
@@ -104,7 +104,7 @@ duplicate-key configuration must be fixed, not silently rewritten. Concurrent
 installs are serialized, and a host edit detected during preparation is not
 overwritten.
 
-`marsh kit install NAME --from repository:TAG` resolves the tag once through
+`marsh kit install NAME repository:TAG` resolves the tag once through
 `sbx kit inspect`, accepting only a digest of the same repository, and installs
 that digest; the tag is recorded in the control directory's `kit-sources.json`.
 `marsh kit upgrade` re-resolves recorded tags, and on a release build the
