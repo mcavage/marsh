@@ -50,7 +50,7 @@ the sandbox your jobs run in, which needs the Docker Engine and plumbing that
 and has no package manager, so fetch or build your agent in a separate stage
 and copy the result in. Use a hardened image there too: the `-dev` variants,
 like `dhi.io/debian-base:trixie-dev`, include the usual build tools and are
-free to pull.
+free with the Docker sign-in you already use for `sbx`.
 
 **Another agent:** change the download stage. Anything that ends up as a
 binary, or a runtime plus your agent's files, works.
