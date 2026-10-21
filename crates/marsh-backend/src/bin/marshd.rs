@@ -833,12 +833,14 @@ mod tests {
             )
             .is_ok()
         );
-        // A declaration pinned to anything but the packaged digest stays strict.
+        // A declaration pinned to another repository than the packaged
+        // command's stays strict. (One pinned to an earlier release of the
+        // same repository follows it, like the exact digest above.)
         let other = BTreeMap::from([(
             "agent-kit".into(),
             RegisteredKit {
                 workload: NativeKitRef::immutable_oci(format!(
-                    "example/agent@sha256:{}",
+                    "example/other-agent@sha256:{}",
                     "d".repeat(64)
                 ))
                 .unwrap(),

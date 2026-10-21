@@ -158,12 +158,20 @@ Codex registration alone does not revoke other clients. See [MCP](mcp.md) and
 The agent list comes from `agents.json`. A file of that name in the host
 control directory replaces the packaged list entirely. `[]` turns ACP off.
 
-Each entry names a registered command and the extra arguments that put its Kit
-in ACP mode:
+To add an agent and keep the packaged ones, start from a copy of the packaged
+list (`libexec/marsh/agents.json` in your marsh installation) and append your
+entry. Each entry names a registered command, the extra arguments that put its
+Kit in ACP mode, and the image digest the command runs (from `commands.json`;
+empty for a Kit run from a source directory):
 
 ```json
-[{"schema_version":1,"name":"claude-session","protocol":"acp_v1","command":"claude","arguments":["--acp"]}]
+{"schema_version":1,"name":"mytool-session","protocol":"acp_v1","command":"mytool",
+ "arguments":["--acp"],"workload_digest":"registry.example.com/me/mytool@sha256:…"}
 ```
+
+Copied packaged entries keep working when you upgrade marsh or run
+`marsh kit upgrade`: an entry for a packaged command follows that command. So
+does an entry for a command installed from a tag.
 
 [Configuration](configuration.md) says where the control directory is.
 
