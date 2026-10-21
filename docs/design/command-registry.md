@@ -115,9 +115,10 @@ commands, checked when present otherwise), read with `docker buildx imagetools`.
 The upgrade claims the old worker first (refusing one with running jobs),
 prepares the new VM, persists the override to `commands.json`, switches the
 live registry and retires the old VM unless another name still uses it. A
-failure before the switch releases the claim and changes nothing. Packaged ACP
-declarations pin the packaged digest, so they follow an upgraded command; a
-declaration pinned to any other digest blocks the upgrade. `marsh kit
+failure before the switch releases the claim and changes nothing. ACP declarations
+follow an upgraded command when they pin its packaged digest or the command was
+installed from a tag (it is in `kit-sources.json`); a declaration pinned to any
+other digest blocks the upgrade. `marsh kit
 uninstall` drops an installed command, or an upgraded packaged command's
 override, and retires its VM.
 

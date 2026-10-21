@@ -152,7 +152,8 @@ the image tag of your release channel (`:latest` for stable, `:nightly` for
 nightly), so you can pick up a new agent version without a new marsh. marsh
 moves a packaged command only to an image whose `org.marsh.kit.contract` label
 names a version it supports; an image that needs a newer marsh is refused with
-that message. ACP sessions for a packaged command follow its upgrade.
+that message. ACP agents for a packaged command, or for a command installed
+from a tag, follow its upgrades.
 
 ### Removing a command
 

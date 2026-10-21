@@ -857,6 +857,72 @@ mod tests {
     }
 
     #[test]
+    fn acp_declarations_follow_commands_installed_from_a_tag() {
+        let root = tempfile::tempdir().unwrap();
+        let control = root.path().join("control");
+        fs::create_dir(&control).unwrap();
+        let current = format!("docker.io/example/pix@sha256:{}", "a".repeat(64));
+        let earlier = format!("docker.io/example/pix@sha256:{}", "b".repeat(64));
+        let commands = BTreeMap::from([(
+            "pix".into(),
+            RegisteredKit {
+                workload: NativeKitRef::immutable_oci(current).unwrap(),
+            },
+        )]);
+        let agents_file = root.path().join("agents.json");
+        fs::write(
+            &agents_file,
+            format!(
+                "[{{\"schema_version\":1,\"name\":\"pix-session\",\"protocol\":\"acp_v1\",\"command\":\"pix\",\"workload_digest\":\"{earlier}\"}}]"
+            ),
+        )
+        .unwrap();
+        let agents = load_agents(&agents_file, &root.path().join("missing.json")).unwrap();
+        let config = BackendConfig {
+            worker_binary: root.path().join("worker"),
+            relay_binary: root.path().join("relay"),
+            daemon_home: root.path().to_path_buf(),
+            control_home: control.clone(),
+            protected_guest_roots: Vec::new(),
+            shell: ShellVmSpec {
+                name: "fixture-shell".into(),
+                image: OciImage::parse(format!("example/shell@sha256:{}", "c".repeat(64))).unwrap(),
+                shell_binary: root.path().join("shell"),
+                user: ShellUser {
+                    name: "fixture".into(),
+                    uid: 501,
+                    gid: 20,
+                    home: root.path().to_path_buf(),
+                },
+            },
+            resources: DEFAULT_JOB_RESOURCES,
+            env: EnvironmentConfig::default(),
+        };
+        let stock = Arc::new(StockSbx::new(
+            root.path().join("unused-sbx"),
+            Arc::new(SystemCommandRunner::new(root.path())),
+        ));
+        // Installed by digest: the stale pin is an error.
+        assert!(
+            backend_with_agents(
+                Arc::clone(&stock),
+                commands.clone(),
+                config.clone(),
+                &agents,
+                None
+            )
+            .is_err()
+        );
+        // Installed from a tag: the declaration follows `marsh kit upgrade`.
+        fs::write(
+            control.join("kit-sources.json"),
+            r#"{"pix":"docker.io/example/pix:stable"}"#,
+        )
+        .unwrap();
+        assert!(backend_with_agents(stock, commands, config, &agents, None).is_ok());
+    }
+
+    #[test]
     fn release_channels_follow_the_build() {
         assert_eq!(release_channel("0.1.6", false).as_deref(), Some("latest"));
         assert_eq!(

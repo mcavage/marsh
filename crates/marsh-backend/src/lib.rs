@@ -383,6 +383,8 @@ impl StockDaemonBackend {
     pub fn with_agents(mut self, agents: &AgentRegistry) -> Result<Self, DaemonError> {
         let mut pinned = AgentRegistry::new();
         let mut pins = BTreeMap::new();
+        // Commands installed from a tag were chosen to follow it.
+        let followed = kit_lifecycle::read_sources(&self.config.control_home)?;
         for declaration in agents.declarations() {
             let kit = self
                 .commands
@@ -394,15 +396,17 @@ impl StockDaemonBackend {
                     "immutable ACP Kit requires an explicit workload digest".into(),
                 ));
             }
-            // A packaged declaration pins its packaged command; when the host
-            // upgraded that command, the declaration follows it.
+            // A packaged declaration pins its packaged command, and a command
+            // installed from a tag follows that tag: through `marsh kit
+            // upgrade`, the declaration follows the command.
             let follows = !declaration.workload_digest.is_empty()
-                && self
-                    .packaged
-                    .get(&declaration.command)
-                    .is_some_and(|packaged| {
-                        declaration.workload_digest == packaged.workload.identity()
-                    });
+                && (followed.contains_key(&declaration.command)
+                    || self
+                        .packaged
+                        .get(&declaration.command)
+                        .is_some_and(|packaged| {
+                            declaration.workload_digest == packaged.workload.identity()
+                        }));
             if !declaration.workload_digest.is_empty()
                 && declaration.workload_digest != exact.identity()
                 && !follows
