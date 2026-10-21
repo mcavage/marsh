@@ -1910,6 +1910,10 @@ impl DaemonStore {
         scope_is_idle(&state)
     }
 
+    fn can_recover(&self) -> bool {
+        scope_can_recover(&self.lock())
+    }
+
     fn begin_ordinary_request(&self) -> Result<RequestAdmission, DaemonError> {
         let mut state = self.lock();
         if state.lifecycle_active {
@@ -3230,6 +3234,8 @@ pub struct Server {
     scope_lifecycle_timeout: Duration,
     acp: Arc<AcpSessionManager>,
     mcp_host: Option<McpHostControl>,
+    /// The stock SBX executable this daemon's identity pins.
+    stock_sbx: Option<PathBuf>,
     protected_guest_roots: Vec<PathBuf>,
     dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
@@ -3281,6 +3287,7 @@ impl Server {
             )
             .with_defaults_home(journal_home.to_path_buf()),
         );
+        server.stock_sbx = Some(stock_sbx.to_path_buf());
         Ok(server)
     }
 
@@ -3313,6 +3320,7 @@ impl Server {
             scope_lifecycle_timeout: SCOPE_LIFECYCLE_EXECUTION_TIMEOUT,
             acp: Arc::new(AcpSessionManager::new()?),
             mcp_host: None,
+            stock_sbx: None,
             protected_guest_roots: Vec::new(),
             dev_broker: None,
             splits,
@@ -3436,6 +3444,7 @@ impl Server {
             scope_lifecycle_timeout: self.scope_lifecycle_timeout,
             acp: Arc::clone(&self.acp),
             mcp_host: self.mcp_host.clone(),
+            stock_sbx: self.stock_sbx.clone(),
             protected_guest_roots: self.protected_guest_roots.clone(),
             dev_broker: self.dev_broker.clone(),
             splits: Arc::clone(&self.splits),
@@ -3452,6 +3461,8 @@ struct ConnectionHandler {
     scope_lifecycle_timeout: Duration,
     acp: Arc<AcpSessionManager>,
     mcp_host: Option<McpHostControl>,
+    /// The stock SBX executable this daemon's identity pins.
+    stock_sbx: Option<PathBuf>,
     protected_guest_roots: Vec<PathBuf>,
     dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
@@ -3619,8 +3630,19 @@ impl ConnectionHandler {
         )
     }
 
+    /// The pinned stock SBX was removed (a Homebrew upgrade deletes the old
+    /// version's directory): this daemon can no longer reach a VM, so it can
+    /// neither clean up nor serve, and only a new daemon can recover.
+    fn stock_sbx_removed(&self) -> bool {
+        self.stock_sbx.as_ref().is_some_and(|path| !path.is_file())
+    }
+
     fn handle_shutdown(&self, stream: &mut UnixStream) -> Result<(), DaemonError> {
-        if !self.store.safe_to_shutdown() {
+        // Never with live work attached: an open shell or a running job keeps
+        // working through its already-running SBX process.
+        let may_stop =
+            self.store.safe_to_shutdown() || (self.stock_sbx_removed() && self.store.can_recover());
+        if !may_stop {
             return write_frame(
                 stream,
                 &PublicReply::Error {

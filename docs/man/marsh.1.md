@@ -76,7 +76,7 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 **-h**, **--help**
 : Print a summary of commands and exit.
 
-**-V**, **--version**
+**-V**, **--version**, **version**
 : Print the version and exit.
 
 # COMMANDS

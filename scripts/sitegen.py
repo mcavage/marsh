@@ -431,7 +431,7 @@ DESCRIPTIONS = {
     "docs/guides/review-with-a-panel.html": "Ask reviewers different questions about the same change and check their findings against the code.",
     "docs/guides/farm-out-work.html": "Have an agent start a child job from its shell tool and check what the child did.",
     "docs/guides/set-up-your-home.html": "Set up agent skills, dotfiles, MCP connections, and extra directories in your marsh home.",
-    "docs/guides/build-a-personal-agent.html": "Package your own agent as a Kit next to the packaged pi, with private skills and tools kept out of the public image.",
+    "docs/guides/build-a-personal-agent.html": "Package any agent CLI with your defaults, skills and tools as your own marsh command.",
     "docs/shell.html": "The Bash-compatible shell: where it runs, startup files, and the documented differences from Bash.",
     "docs/shells.html": "Use the shell VM's own bash or zsh instead of Brush, and what you lose.",
     "docs/kits.html": "Registered commands and Kits: the default claude, codex, and pi commands, signing in, adding your own, and limits.",

@@ -2613,6 +2613,50 @@ fn changed_stock_sbx_refuses_to_replace_a_daemon_with_an_attached_shell() {
 }
 
 #[test]
+fn a_daemon_whose_stock_sbx_was_removed_can_be_replaced_unless_work_is_attached() {
+    let home = home();
+    let old_sbx = stock_sbx(b"stock-sbx-old");
+    let new_sbx = stock_sbx(b"stock-sbx-new");
+    let server = Arc::new(Server::bind_with_stock_sbx(home.path(), old_sbx.path()).unwrap());
+    // Unresolved cleanup that only a working SBX could settle.
+    let uncertain = server
+        .store
+        .attach_shell(1, authority("/Users/example/project", home.path()));
+    server.store.mark_shell_cleanup_uncertain(&uncertain);
+    let task_server = Arc::clone(&server);
+    let task = thread::spawn(move || task_server.serve_until(|| false).unwrap());
+    // Only the serving thread holds the server, so it releases its endpoint
+    // when it shuts down.
+    let store = server.store.clone();
+    drop(server);
+    let expected = runtime_identity(&std::env::current_exe().unwrap(), new_sbx.path()).unwrap();
+    let paths = EndpointPaths::for_home(home.path()).unwrap();
+
+    // While its SBX exists, the old daemon keeps the record and refuses.
+    assert!(matches!(
+        Client::reconcile_resident(home.path(), &paths, &expected),
+        Err(DaemonError::Remote(ref message)) if message == BUSY_LIFECYCLE_MESSAGE
+    ));
+    // An attached shell is live work: still refused after SBX is removed.
+    let attached = store.attach_shell(2, authority("/Users/example/project", home.path()));
+    let old_path = old_sbx.path().to_owned();
+    old_sbx.close().unwrap();
+    assert!(!old_path.exists());
+    assert!(matches!(
+        Client::reconcile_resident(home.path(), &paths, &expected),
+        Err(DaemonError::Remote(ref message)) if message == BUSY_LIFECYCLE_MESSAGE
+    ));
+    // Once nothing is attached, a daemon that cannot reach SBX steps aside.
+    store.detach_shell(&attached).unwrap();
+    assert!(
+        Client::reconcile_resident(home.path(), &paths, &expected)
+            .unwrap()
+            .is_none()
+    );
+    task.join().unwrap();
+}
+
+#[test]
 fn mismatched_authenticated_build_accepts_safe_replacement_shutdown() {
     let home = home();
     let server =
