@@ -2258,6 +2258,37 @@ fn push_docker_mounts(arguments: &mut Vec<OsString>, spec: &JobSpec) -> Result<(
     Ok(())
 }
 
+/// The Kit's skills destinations, each a read-only bind of the worker's
+/// `skills/<index>` links (`marsh_contracts::kit_assets`). A destination that
+/// overlaps a host mount is skipped rather than hiding or touching it.
+fn kit_skill_mounts(
+    arguments: &mut Vec<OsString>,
+    capability_dir: &Path,
+    spec: &JobSpec,
+    kit: &marsh_contracts::kit_assets::KitAssets,
+) -> Result<(), RuntimeError> {
+    if kit.skills.is_empty() {
+        return Ok(());
+    }
+    let targets: Vec<&Path> = spec
+        .mounts
+        .iter()
+        .map(|mount| mount.target.as_path())
+        .collect();
+    for (index, destination) in kit.deliverable_destinations(&targets) {
+        let source = docker_mount_field(
+            "source",
+            &capability_dir.join("skills").join(index.to_string()),
+        )?;
+        let target = docker_mount_field("target", destination)?;
+        arguments.extend([
+            "--mount".into(),
+            format!("type=bind,{source},{target},readonly").into(),
+        ]);
+    }
+    Ok(())
+}
+
 /// Resolves a split branch's subdirectory of one prepared grant. Every
 /// component must be a real directory, never a symlink, so a workspace path
 /// cannot redirect the bind outside the grant. (Writers that share the grant
@@ -2309,6 +2340,7 @@ impl<R: CommandRunner> DockerCliRuntime<R> {
             .into(),
         ]);
         if let Some(capability) = &spec.capability {
+            kit_skill_mounts(arguments, directory, spec, &capability.kit)?;
             let image_env = self.image_environment(spec, cancel)?;
             job_environment(arguments, directory, capability, &image_env, started)
                 .map_err(RuntimeError::Io)?;

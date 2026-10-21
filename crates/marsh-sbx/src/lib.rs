@@ -5,6 +5,7 @@
 
 use marsh_contracts::{
     JobMount, MountAccess, OciImage, TerminalSize,
+    kit_assets::{DESCRIPTOR_ANNOTATION, KitAssets},
     kit_source::{KIT_CONTRACT_LABEL, KitTag, parse_contract},
 };
 use marsh_runtime::{Attachment, CommandOutput, CommandRunner, Invocation};
@@ -1497,6 +1498,34 @@ impl StockSbx {
         )?;
         Self::require_success("read Kit contract label", output.clone())?;
         image_contract_label(&output.stdout).map_err(SbxError::KitResolution)
+    }
+
+    /// Reads the skills and instructions a published Kit declares, from its
+    /// descriptor annotation on the linux/arm64 manifest (`kit_assets`). A
+    /// bare image ID (a local source Kit) has no registry copy: nothing.
+    ///
+    /// # Errors
+    /// Fails when Docker cannot read the manifests or the descriptor is invalid.
+    pub fn kit_assets(&self, image: &OciImage) -> Result<KitAssets, SbxError> {
+        let Some((repository, _)) = image.as_str().rsplit_once('@') else {
+            return Ok(KitAssets::default());
+        };
+        let read = |reference: &str| {
+            let output = self.run_program_bounded_os(
+                "read Kit descriptor",
+                Path::new("docker"),
+                KIT_RESOLUTION_TIMEOUT,
+                ["buildx", "imagetools", "inspect", "--raw", reference],
+            )?;
+            Self::require_success("read Kit descriptor", output.clone())?;
+            Ok::<_, SbxError>(output.stdout)
+        };
+        let top = read(image.as_str())?;
+        let manifest = match arm64_manifest_digest(&top).map_err(SbxError::KitResolution)? {
+            Some(digest) => read(&format!("{repository}@{digest}"))?,
+            None => top,
+        };
+        manifest_kit_assets(&manifest).map_err(SbxError::KitResolution)
     }
 
     #[cfg(test)]
@@ -6872,6 +6901,46 @@ fn image_contract_label(stdout: &[u8]) -> Result<Option<u32>, String> {
         .and_then(parse_contract))
 }
 
+/// The linux/arm64 manifest digest of an OCI index, or `None` when `raw` is
+/// already a single image manifest.
+fn arm64_manifest_digest(raw: &[u8]) -> Result<Option<String>, String> {
+    let value: serde_json::Value = serde_json::from_slice(raw)
+        .map_err(|_| "Docker returned an unreadable image manifest".to_owned())?;
+    let Some(manifests) = value.get("manifests").and_then(serde_json::Value::as_array) else {
+        return Ok(None);
+    };
+    manifests
+        .iter()
+        .find(|manifest| {
+            let platform = manifest.get("platform");
+            let field = |name| {
+                platform
+                    .and_then(|platform| platform.get(name))
+                    .and_then(serde_json::Value::as_str)
+            };
+            field("os") == Some("linux") && field("architecture") == Some("arm64")
+        })
+        .and_then(|manifest| manifest.get("digest")?.as_str())
+        .filter(|digest| OciImage::parse(*digest).is_ok())
+        .map(|digest| Some(digest.to_owned()))
+        .ok_or_else(|| "the image has no linux/arm64 manifest".to_owned())
+}
+
+/// The assets in one image manifest's descriptor annotation; a manifest
+/// without one (an ordinary image) declares none.
+fn manifest_kit_assets(raw: &[u8]) -> Result<KitAssets, String> {
+    let value: serde_json::Value = serde_json::from_slice(raw)
+        .map_err(|_| "Docker returned an unreadable image manifest".to_owned())?;
+    match value
+        .get("annotations")
+        .and_then(|annotations| annotations.get(DESCRIPTOR_ANNOTATION))
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(descriptor) => KitAssets::from_descriptor(descriptor),
+        None => Ok(KitAssets::default()),
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum SbxError {
     #[error("stock SBX I/O failed: {0}")]
@@ -7099,5 +7168,49 @@ mod kit_resolution_tests {
         assert_eq!(sbx.kit_contract(&image).unwrap(), None);
         let (sbx, _) = stock(r#"{"linux/amd64":{"config":{}}}"#.into());
         assert!(sbx.kit_contract(&image).is_err());
+    }
+
+    #[test]
+    fn kit_assets_come_from_the_arm64_descriptor_annotation() {
+        let arm = format!("sha256:{}", "b".repeat(64));
+        let index = format!(
+            r#"{{"manifests":[
+                {{"digest":"sha256:{}","platform":{{"os":"linux","architecture":"amd64"}}}},
+                {{"digest":"{arm}","platform":{{"os":"linux","architecture":"arm64"}}}}]}}"#,
+            "c".repeat(64)
+        );
+        assert_eq!(arm64_manifest_digest(index.as_bytes()).unwrap(), Some(arm));
+        assert_eq!(arm64_manifest_digest(br#"{"layers":[]}"#).unwrap(), None);
+        assert!(arm64_manifest_digest(br#"{"manifests":[]}"#).is_err());
+
+        let descriptor = serde_json::to_string(
+            r#"{"capabilities":[{"type":"com.docker.sandbox/agent-context@2","config":{"content":"hi"}}]}"#,
+        )
+        .unwrap();
+        let manifest = format!(r#"{{"annotations":{{"{DESCRIPTOR_ANNOTATION}":{descriptor}}}}}"#);
+        let image = OciImage::parse(format!("docker.io/mcavage/pix@{DIGEST}")).unwrap();
+        let (sbx, runner) = stock(manifest);
+        let assets = sbx.kit_assets(&image).unwrap();
+        assert_eq!(
+            assets.contexts,
+            [marsh_contracts::kit_assets::KitContext::Text("hi".into())]
+        );
+        assert_eq!(
+            runner.calls.lock().unwrap()[0],
+            [
+                "docker",
+                "buildx",
+                "imagetools",
+                "inspect",
+                "--raw",
+                image.as_str()
+            ]
+        );
+        let (sbx, _) = stock(r#"{"layers":[]}"#.into());
+        assert!(sbx.kit_assets(&image).unwrap().is_empty());
+        let local = OciImage::parse(DIGEST).unwrap();
+        let (sbx, runner) = stock(String::new());
+        assert!(sbx.kit_assets(&local).unwrap().is_empty());
+        assert!(runner.calls.lock().unwrap().is_empty());
     }
 }

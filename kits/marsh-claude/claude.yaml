@@ -158,8 +158,3 @@ capabilities:
     optional: true
     config:
       path: /home/agent/.claude/skills
-
-  - type: com.docker.sandbox/agent-context@1
-    config:
-      filename: CLAUDE.md
-      contentFile: ./claude-context.md
