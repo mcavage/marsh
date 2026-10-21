@@ -399,14 +399,20 @@ impl StockDaemonBackend {
             }
             // A packaged declaration pins its packaged command, and a command
             // installed from a tag follows that tag: through `marsh kit
-            // upgrade`, the declaration follows the command.
+            // upgrade`, the declaration follows the command. A host copy of a
+            // packaged declaration names an earlier release's image of the
+            // same repository after marsh is upgraded; it still means the
+            // packaged command.
             let follows = !declaration.workload_digest.is_empty()
                 && (followed.contains_key(&declaration.command)
                     || self
                         .packaged
                         .get(&declaration.command)
                         .is_some_and(|packaged| {
-                            declaration.workload_digest == packaged.workload.identity()
+                            same_repository(
+                                &declaration.workload_digest,
+                                packaged.workload.identity(),
+                            )
                         }));
             if !declaration.workload_digest.is_empty()
                 && declaration.workload_digest != exact.identity()
@@ -3288,6 +3294,14 @@ fn unix_millis(time: SystemTime) -> u64 {
     time.duration_since(UNIX_EPOCH).map_or(0, millis)
 }
 
+/// Whether two digest references name images of one repository.
+fn same_repository(left: &str, right: &str) -> bool {
+    match (left.rsplit_once("@sha256:"), right.rsplit_once("@sha256:")) {
+        (Some((left, _)), Some((right, _))) => left == right,
+        _ => left == right,
+    }
+}
+
 fn identity_digest(identity: &str) -> String {
     marsh_contracts::process::hex(&Sha256::digest(identity.as_bytes()))
 }
@@ -4270,6 +4284,55 @@ mod tests {
         let commands = BTreeMap::from([("agent-kit".into(), RegisteredKit { workload })]);
         assert!(matches!(
             backend_for_kit_identity(home.path(), commands).with_agents(&wrong),
+            Err(DaemonError::InvalidState(_))
+        ));
+    }
+
+    #[test]
+    fn a_copied_packaged_acp_declaration_follows_the_packaged_command_after_an_upgrade() {
+        let home = tempfile::tempdir().unwrap();
+        let shipped = format!("docker.io/mcavage/marsh-claude@sha256:{}", "c".repeat(64));
+        let previous = format!("docker.io/mcavage/marsh-claude@sha256:{}", "d".repeat(64));
+        let kit = || RegisteredKit {
+            workload: NativeKitRef::immutable_oci(shipped.clone()).unwrap(),
+        };
+        let declaration = AgentAdapterDeclaration {
+            schema_version: 1,
+            name: "claude-session".into(),
+            protocol: marsh_acp::AgentProtocol::AcpV1,
+            command: "claude".into(),
+            // Copied into the host agents.json under the previous release.
+            workload_digest: previous,
+            required_capabilities: vec![],
+            arguments: vec![],
+            description: None,
+        };
+        let mut registry = AgentRegistry::new();
+        registry.register(declaration.clone()).unwrap();
+        let backend =
+            backend_for_kit_identity(home.path(), BTreeMap::from([("claude".into(), kit())]))
+                .with_packaged(BTreeMap::from([("claude".into(), kit())]), None)
+                .with_agents(&registry)
+                .unwrap();
+        assert_eq!(
+            backend
+                .resolve_acp_agent("claude-session")
+                .unwrap()
+                .workload_digest,
+            shipped
+        );
+        // A pin to another image is still the user's explicit choice: refused.
+        let mut other = AgentRegistry::new();
+        other
+            .register(AgentAdapterDeclaration {
+                workload_digest: format!("docker.io/someone/claude@sha256:{}", "e".repeat(64)),
+                ..declaration
+            })
+            .unwrap();
+        assert!(matches!(
+            backend_for_kit_identity(home.path(), BTreeMap::from([("claude".into(), kit())]))
+                .with_packaged(BTreeMap::from([("claude".into(), kit())]), None)
+                .with_agents(&other),
             Err(DaemonError::InvalidState(_))
         ));
     }
