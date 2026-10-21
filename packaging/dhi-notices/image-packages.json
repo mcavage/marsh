@@ -31,7 +31,7 @@
       },
       {
         "package": "ca-certificates",
-        "version": "20250419+dhi2",
+        "version": "20250419+deb13u1+dhi0",
         "families": [
           "GPL",
           "MPL-2.0"
@@ -1532,7 +1532,7 @@
       },
       {
         "package": "ca-certificates",
-        "version": "20250419+dhi2",
+        "version": "20250419+deb13u1+dhi0",
         "families": [
           "GPL",
           "MPL-2.0"
@@ -3514,7 +3514,7 @@
       },
       {
         "package": "ca-certificates",
-        "version": "20250419+dhi2",
+        "version": "20250419+deb13u1+dhi0",
         "families": [
           "GPL",
           "MPL-2.0"
@@ -5496,7 +5496,7 @@
       },
       {
         "package": "ca-certificates",
-        "version": "20250419+dhi2",
+        "version": "20250419+deb13u1+dhi0",
         "families": [
           "GPL",
           "MPL-2.0"
@@ -7448,7 +7448,7 @@
       },
       {
         "package": "ca-certificates",
-        "version": "20250419+dhi2",
+        "version": "20250419+deb13u1+dhi0",
         "families": [
           "GPL",
           "MPL-2.0"
@@ -8983,7 +8983,7 @@
       },
       {
         "package": "ca-certificates",
-        "version": "20250419+dhi2",
+        "version": "20250419+deb13u1+dhi0",
         "families": [
           "GPL",
           "MPL-2.0"
@@ -11374,7 +11374,7 @@
       },
       {
         "package": "python3-pip",
-        "version": "26.2.1-2",
+        "version": "26.2.2-0",
         "families": [
           "Apache-2.0",
           "BSD",
@@ -11410,7 +11410,7 @@
       },
       {
         "package": "python3-pip-whl",
-        "version": "26.2.1-2",
+        "version": "26.2.2-0",
         "families": [
           "Apache-2.0",
           "BSD",
@@ -11446,7 +11446,7 @@
       },
       {
         "package": "python3-setuptools-whl",
-        "version": "84.2.0-0",
+        "version": "84.2.1-0",
         "families": [
           "Apache-2.0",
           "BSD",

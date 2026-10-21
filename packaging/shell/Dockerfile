@@ -59,7 +59,9 @@ FROM ${SHELL_BASE_IMAGE} AS image
 USER root
 # The DHI-built Engine, Node.js and Python packages carry no Debian copyright
 # file: their notices are indexed by exact version in dhi-notices, so they are
-# pinned here. zsh is for `marsh --shell zsh` (docs/shells.md). Recommended
+# pinned here, with the DHI Python packages they pull in (otherwise the
+# bootstrap wheels drift as DHI publishes, and an unindexed version fails the
+# notice check). zsh is for `marsh --shell zsh` (docs/shells.md). Recommended
 # extras are not installed. Ordinary Debian tools are unpinned and retain their
 # package copyright files; Emacs is installed from source above.
 COPY image-base /tmp/marsh-image-base
@@ -69,7 +71,8 @@ RUN apt-get update \
       docker-ce=5:29.9.1-0 docker-ce-cli=5:29.9.1-0 containerd.io=2.4.2-0 \
       docker-buildx-plugin=0.38.0-2 \
       nodejs-24=24.22.0-0 npm=11.21.1-1 \
-      python-3.14=3.14.8-0 python3-pip=26.2.1-2 \
+      python-3.14=3.14.8-0 python3-pip=26.2.2-0 python3-pip-whl=26.2.2-0 \
+      python3-setuptools-whl=84.2.1-0 python3-wheel=0.48.0-0 \
       sudo passwd ca-certificates curl git openssh-client less procps jq \
       gcc libc6-dev make zsh vim \
       libacl1 libattr1 libgmp10 libgnutls30t64 libsqlite3-0 libtinfo6 \
