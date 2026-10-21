@@ -177,7 +177,8 @@ prints that directory. Entries there override the packaged ones by name:
 
 Each value is one of:
 
-- an image reference pinned by digest (tags are refused);
+- an image reference pinned by digest (tags are refused here; `marsh kit install`
+  resolves a tag to its digest and `marsh kit upgrade` follows it);
 - the absolute path of a Kit source directory.
 
 Manual edits take effect when the daemon starts: finish active work, exit
