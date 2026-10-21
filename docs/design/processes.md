@@ -396,10 +396,21 @@ refused by the spawn set), and is counted in `marsh status`
   the Agent SDK's value), Codex `-c developer_instructions=` (CLI) and
   codex-acp's `CODEX_CONFIG` (ACP), Pi `--append-system-prompt FILE` (both
   modes). Nothing is written into the project, the selected home, `CLAUDE.md`,
-  `AGENTS.md`, `~/.codex`, or `~/.pi` (`agents.md`). Stock SBX's
-  `agent-context@1` capability is not used by marsh jobs (it writes into the
-  agent's home); third-party Kits read `/run/marsh/context.md` or run
-  `marsh context`.
+  `AGENTS.md`, `~/.codex`, or `~/.pi` (`agents.md`). Third-party Kits read
+  `/run/marsh/context.md` or run `marsh context`.
+- **Kit skills and instructions.** Stock SBX applies `agent-context`,
+  `agent-skill@1` and `agent-skills@1` in the outer sandbox container, which
+  jobs never see. The daemon reads them instead from the image's
+  `vnd.docker.sandbox.kit.descriptor` annotation (linux/arm64 manifest; a kit
+  set's build has already composed its components there), once per digest,
+  cached in `kit-assets/` under the control home, and passes them in the job
+  capability (`marsh_contracts::kit_assets`). The worker appends each
+  instruction body to `context.md` (inline text, or a regular world-readable
+  file of the image, at most 64 KiB) and writes `skills/<index>/<name>` links;
+  the runtime binds each skills destination read-only when the Kit bundles
+  skills and the destination neither contains nor lies inside a job mount.
+  Nothing is written to the agent's home. A failed descriptor read starts the
+  job without them and says so on stderr; a local source Kit has none.
 
 ## 10. Model
 

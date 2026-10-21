@@ -51,6 +51,12 @@ pub struct JobCapability {
     /// salted digests into `job.json` and never publishes it to the job.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub env_key: String,
+    /// Skills and instructions the Kit image declares (`kit_assets`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::kit_assets::KitAssets::is_empty"
+    )]
+    pub kit: crate::kit_assets::KitAssets,
 }
 
 /// `/run/marsh/job.json`, written by the worker (docs/design/processes.md s4).

@@ -15,6 +15,7 @@ use marsh_contracts::{
     ExecutionOutcome, JobIdentity, JobMount, JobResources, JobSignal, JobSpec, MountAccess,
     OciImage, ResourceLimit, TerminalSize, WORKER_CONTAINER_CAPACITY,
     command_registry::{CommandName, CommandRegistry, validate_count},
+    kit_assets::KitAssets,
     kit_source::{KitTag, check_contract},
 };
 use marsh_daemon::{
@@ -548,6 +549,38 @@ impl StockDaemonBackend {
         temporary.persist(&path).map_err(|error| error.error)?;
         fs::File::open(&self.config.control_home)?.sync_all()?;
         Ok(())
+    }
+
+    /// The skills and instructions a published Kit image declares, read from
+    /// the registry once per immutable digest and kept under the control home
+    /// (`kit-assets/`), so a warm Kit VM keeps them offline.
+    fn kit_assets(&self, image: &OciImage) -> Result<KitAssets, String> {
+        if !image.as_str().contains('@') {
+            return Ok(KitAssets::default());
+        }
+        let directory = self.config.control_home.join("kit-assets");
+        let path = directory.join(format!("{}.json", identity_digest(image.as_str())));
+        if let Ok(bytes) = fs::read(&path)
+            && let Ok(assets) = serde_json::from_slice(&bytes)
+        {
+            return Ok(assets);
+        }
+        let assets = self
+            .sbx
+            .kit_assets(image)
+            .map_err(|error| error.to_string())?;
+        let store = || -> std::io::Result<()> {
+            fs::create_dir_all(&directory)?;
+            fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+            let mut temporary = tempfile::NamedTempFile::new_in(&directory)?;
+            serde_json::to_writer(&mut temporary, &assets)?;
+            temporary.as_file().sync_all()?;
+            temporary.persist(&path).map_err(|error| error.error)?;
+            Ok(())
+        };
+        // The cache only saves a registry read; failing to write it is harmless.
+        let _ = store();
+        Ok(assets)
     }
 
     fn kit_spec_for_environment(
@@ -1698,6 +1731,16 @@ impl DaemonBackend for StockDaemonBackend {
         };
         // Wall time is the Kit's own limit or the parent's remaining time,
         // whichever ends first (`docs/design/processes.md` s6); the worker enforces it.
+        let kit = self.kit_assets(&image).unwrap_or_else(|message| {
+            let _ = attachment.send(&AttachmentFrame::Stderr {
+                bytes: format!(
+                    "marsh: starting {} without its Kit skills and instructions: {message}\n",
+                    request.command
+                )
+                .into_bytes(),
+            });
+            KitAssets::default()
+        });
         let mut resources = self.config.resources;
         let (wall_seconds, parent_deadline) =
             store.set_job_deadline(&job_id, resources.wall_seconds);
@@ -1729,6 +1772,7 @@ impl DaemonBackend for StockDaemonBackend {
                 // so an exported variable reaches the whole tree (s6).
                 forwarded: forwarded_names,
                 env_key: marsh_contracts::process::hex(marsh_daemon::process::env_key()),
+                kit,
             }),
         };
         let output_budget = spec.resources.output_bytes;
@@ -3899,6 +3943,75 @@ mod tests {
         ) -> io::Result<marsh_runtime::Attachment> {
             Err(io::Error::other("unexpected stock SBX attachment"))
         }
+    }
+
+    /// Answers every invocation with one image manifest, counting calls.
+    struct ManifestRunner(String, std::sync::atomic::AtomicUsize);
+
+    impl marsh_runtime::CommandRunner for ManifestRunner {
+        fn run(
+            &self,
+            invocation: &marsh_runtime::Invocation,
+        ) -> io::Result<marsh_runtime::CommandOutput> {
+            self.run_bounded(invocation, Duration::ZERO)
+        }
+
+        fn run_bounded(
+            &self,
+            _invocation: &marsh_runtime::Invocation,
+            _timeout: Duration,
+        ) -> io::Result<marsh_runtime::CommandOutput> {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(marsh_runtime::CommandOutput {
+                exit_code: Some(0),
+                stdout: self.0.clone().into_bytes(),
+                stderr: Vec::new(),
+            })
+        }
+
+        fn spawn_attached(
+            &self,
+            _invocation: &marsh_runtime::Invocation,
+        ) -> io::Result<marsh_runtime::Attachment> {
+            Err(io::Error::other("unexpected stock SBX attachment"))
+        }
+    }
+
+    #[test]
+    fn kit_assets_are_read_once_per_published_image_and_never_for_a_local_one() {
+        let home = tempfile::tempdir().unwrap();
+        let descriptor = serde_json::to_string(
+            r#"{"capabilities":[
+                {"type":"com.docker.sandbox/agent-skills@1","config":{"path":"/opt/pix/kit-skills"}},
+                {"type":"com.docker.sandbox/agent-skill@1","config":{"path":"/opt/docker/hello"}}]}"#,
+        )
+        .unwrap();
+        let runner = Arc::new(ManifestRunner(
+            format!(
+                r#"{{"annotations":{{"{}":{descriptor}}}}}"#,
+                marsh_contracts::kit_assets::DESCRIPTOR_ANNOTATION
+            ),
+            std::sync::atomic::AtomicUsize::new(0),
+        ));
+        let config = backend_for_kit_identity(home.path(), BTreeMap::new()).config;
+        let backend = StockDaemonBackend::new(
+            Arc::new(test_stock(runner.clone())),
+            BTreeMap::new(),
+            config,
+        );
+        let image =
+            OciImage::parse(format!("docker.io/example/pix@sha256:{}", "d".repeat(64))).unwrap();
+        let first = backend.kit_assets(&image).unwrap();
+        assert_eq!(
+            first.skill_destinations,
+            [PathBuf::from("/opt/pix/kit-skills")]
+        );
+        assert_eq!(first.skills[0].name, "hello");
+        assert_eq!(backend.kit_assets(&image).unwrap(), first);
+        assert_eq!(runner.1.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let local = OciImage::parse(format!("sha256:{}", "e".repeat(64))).unwrap();
+        assert!(backend.kit_assets(&local).unwrap().is_empty());
+        assert_eq!(runner.1.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     fn test_stock(runner: Arc<dyn marsh_runtime::CommandRunner>) -> StockSbx {

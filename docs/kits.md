@@ -220,7 +220,8 @@ nonroot user in the caller's directory, with these mounts and variables:
   `MARSH_SELECTED_HOME`.
 - `/run/marsh/bin` first on `PATH`. It holds the registered commands and an
   in-job `marsh`.
-- `/run/marsh/context.md`, a short text telling an agent what it may start.
+- `/run/marsh/context.md`, a short text telling an agent what it may start,
+  followed by the Kit's own instructions (`agent-context`).
 
 The same image also boots the outer Kit VM. That VM must provide Docker Engine
 and the stock sandbox runtime plumbing for marsh's fresh job containers; a
@@ -233,6 +234,37 @@ scope can read it.
 The packaged Kits are in
 [`kits/`](https://github.com/mcavage/marsh/tree/main/kits). They show how the
 agent Kits pass `context.md` to their agent.
+
+### Adding skills and instructions with mixins
+
+To add to an existing agent without changing its image, publish a mixin with
+your skills and instructions, then combine it with the agent in a
+[kit set](https://docs.docker.com/ai/sandboxes/customize/author/kit-sets/):
+
+```yaml
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: set
+displayName: Team Pix
+kits:
+  - ref: docker.io/mcavage/marsh-pix
+    digest: sha256:…
+  - ref: registry.example.com/team/pix-skills
+    digest: sha256:…
+```
+
+Publish the set with Docker Buildx and install it like any other Kit
+(`marsh kit install team-pix registry.example.com/team/pix:stable`). Each job
+receives what the set declares:
+
+- **Instructions** (`agent-context`) are added to `/run/marsh/context.md`.
+- **Skills** (`agent-skill@1`) are linked, read-only, into each skills
+  folder the agent declares (`agent-skills@1`). A folder inside your home or
+  project is skipped, so marsh never creates files there.
+
+marsh reads these from the image's published descriptor the first time a
+command runs, and keeps the result. A Kit run from a source directory has
+none.
 
 ### Publishing a Kit
 

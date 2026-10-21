@@ -8,6 +8,7 @@ pub mod byte_path;
 pub mod cloud;
 pub mod command_registry;
 pub mod execution;
+pub mod kit_assets;
 pub mod kit_source;
 pub mod process;
 pub use execution::{ExecutionOutcome, ResourceLimit, SetupStage, WORKER_CONTAINER_CAPACITY};

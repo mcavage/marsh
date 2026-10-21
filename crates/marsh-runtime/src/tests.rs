@@ -1865,3 +1865,47 @@ fn later_host_commands_do_not_inherit_a_terminal_jobs_pty() {
     terminal.process.wait().unwrap();
     assert_eq!(during, before, "a later host command inherited the PTY");
 }
+
+#[test]
+fn kit_skills_bind_read_only_outside_host_mounts() {
+    let kit = marsh_contracts::kit_assets::KitAssets {
+        skill_destinations: vec![
+            "/opt/pix/kit-skills".into(),
+            "/Users/alice/.pi/skills".into(),
+        ],
+        skills: vec![marsh_contracts::kit_assets::KitSkill {
+            name: "hello".into(),
+            path: "/opt/skills/hello".into(),
+        }],
+        ..Default::default()
+    };
+    let mut arguments = Vec::new();
+    kit_skill_mounts(
+        &mut arguments,
+        Path::new("/run/marsh-cap/attempt-1"),
+        &job(),
+        &kit,
+    )
+    .unwrap();
+    assert_eq!(
+        words(&arguments),
+        [
+            "--mount",
+            "type=bind,source=/run/marsh-cap/attempt-1/skills/0,target=/opt/pix/kit-skills,readonly"
+        ]
+    );
+    // A destination with nothing bundled for it is not mounted.
+    let destinations_only = marsh_contracts::kit_assets::KitAssets {
+        skill_destinations: vec!["/home/agent/.claude/skills".into()],
+        ..Default::default()
+    };
+    let mut none = Vec::new();
+    kit_skill_mounts(
+        &mut none,
+        Path::new("/run/marsh-cap/a"),
+        &job(),
+        &destinations_only,
+    )
+    .unwrap();
+    assert!(none.is_empty());
+}

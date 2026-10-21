@@ -10,7 +10,10 @@
 //! connections get a refusal frame. Everything dies with the attempt.
 
 use crate::{WorkerResponse, transport::Publisher};
-use marsh_contracts::process::JobCapability;
+use marsh_contracts::{
+    kit_assets::{KitAssets, KitContext, MAX_CONTEXT_BYTES},
+    process::JobCapability,
+};
 use std::{
     collections::BTreeMap,
     fs,
@@ -94,16 +97,73 @@ fn publish(dir: &Path, capability: &JobCapability) -> std::io::Result<()> {
         fs::set_permissions(&stub, fs::Permissions::from_mode(0o755))?;
     }
     let context = dir.join("context.md");
-    fs::write(
-        &context,
-        marsh_contracts::process::job_context(&capability.name, &capability.spawn),
-    )?;
+    let mut text = marsh_contracts::process::job_context(&capability.name, &capability.spawn);
+    for body in &capability.kit.contexts {
+        if let Some(body) = kit_context(body) {
+            if !text.ends_with('\n') {
+                text.push('\n');
+            }
+            text.push('\n');
+            text.push_str(body.trim_end());
+            text.push('\n');
+        }
+    }
+    fs::write(&context, text)?;
     fs::set_permissions(&context, fs::Permissions::from_mode(0o644))?;
+    publish_skills(dir, &capability.kit)?;
     // The mountpoint Docker binds the artifact over (the runtime refuses a
     // job when the artifact is missing); unbound, it is not executable.
     let artifact = dir.join("marsh");
     fs::write(&artifact, b"")?;
     fs::set_permissions(&artifact, fs::Permissions::from_mode(0o000))?;
+    Ok(())
+}
+
+/// One Kit instruction body. Files are read from this container, which runs
+/// the job's own image; the worker is root, so only regular, world-readable
+/// files qualify (a Kit cannot use this to show a job a root-only file).
+fn kit_context(body: &KitContext) -> Option<String> {
+    use rustix::fs::{Mode, OFlags};
+    let path = match body {
+        KitContext::Text(text) => return Some(text.clone()),
+        KitContext::File(path) => path,
+    };
+    let file = fs::File::from(
+        rustix::fs::open(
+            path,
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+            Mode::empty(),
+        )
+        .ok()?,
+    );
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.permissions().mode() & 0o004 == 0 {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_CONTEXT_BYTES as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    String::from_utf8(bytes).ok()
+}
+
+/// `skills/<index>/<name>` links to each bundled skill, one directory per
+/// skills destination; the runtime binds the deliverable ones read-only.
+fn publish_skills(dir: &Path, kit: &KitAssets) -> std::io::Result<()> {
+    if kit.skill_destinations.is_empty() || kit.skills.is_empty() {
+        return Ok(());
+    }
+    let root = dir.join("skills");
+    fs::create_dir(&root)?;
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o755))?;
+    for index in 0..kit.skill_destinations.len() {
+        let destination = root.join(index.to_string());
+        fs::create_dir(&destination)?;
+        fs::set_permissions(&destination, fs::Permissions::from_mode(0o755))?;
+        for skill in &kit.skills {
+            std::os::unix::fs::symlink(&skill.path, destination.join(&skill.name))?;
+        }
+    }
     Ok(())
 }
 
@@ -285,5 +345,75 @@ impl Drop for Capability {
                 }
             });
         let _ = fs::remove_dir_all(&self.dir);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use marsh_contracts::kit_assets::KitSkill;
+
+    #[test]
+    fn publishes_kit_instructions_and_skill_links() {
+        let root = std::env::temp_dir().join(format!("marsh-kit-assets-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join("attempt");
+        fs::create_dir_all(&dir).unwrap();
+        let readable = root.join("context.md");
+        fs::write(&readable, "From the mixin.\n").unwrap();
+        fs::set_permissions(&readable, fs::Permissions::from_mode(0o644)).unwrap();
+        let private = root.join("private.md");
+        fs::write(&private, "root only").unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o600)).unwrap();
+        let capability = JobCapability {
+            name: "pix".into(),
+            kit: KitAssets {
+                skill_destinations: vec!["/opt/a".into(), "/opt/b".into()],
+                skills: vec![KitSkill {
+                    name: "hello".into(),
+                    path: "/opt/skills/hello".into(),
+                }],
+                contexts: vec![
+                    KitContext::Text("Inline.".into()),
+                    KitContext::File(readable),
+                    KitContext::File(private),
+                    KitContext::File(root.join("missing.md")),
+                ],
+            },
+            ..JobCapability::default()
+        };
+        publish(&dir, &capability).unwrap();
+        let context = fs::read_to_string(dir.join("context.md")).unwrap();
+        assert!(context.starts_with(&marsh_contracts::process::job_context("pix", &[])));
+        assert!(
+            context.ends_with("\n\nInline.\n\nFrom the mixin.\n"),
+            "{context}"
+        );
+        assert!(!context.contains("root only"));
+        for index in ["0", "1"] {
+            assert_eq!(
+                fs::read_link(dir.join("skills").join(index).join("hello")).unwrap(),
+                Path::new("/opt/skills/hello")
+            );
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_kit_without_assets_publishes_no_skills_directory() {
+        let root = std::env::temp_dir().join(format!("marsh-kit-none-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let capability = JobCapability {
+            name: "shell".into(),
+            ..JobCapability::default()
+        };
+        publish(&root, &capability).unwrap();
+        assert!(!root.join("skills").exists());
+        assert_eq!(
+            fs::read_to_string(root.join("context.md")).unwrap(),
+            marsh_contracts::process::job_context("shell", &[])
+        );
+        fs::remove_dir_all(&root).unwrap();
     }
 }
