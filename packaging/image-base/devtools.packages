@@ -1,7 +1,9 @@
 # What an agent Kit needs to run an ordinary project build or test gate in its
 # own container (`make test`, a C extension, `python3 -m unittest`): make, the
-# C compiler and libc headers, and python3. Node.js comes with the base.
+# C compiler and libc headers, and python3, also as `python` (agents often call
+# that name). Node.js comes with the base.
 make
 gcc
 libc6-dev
 python3
+python-is-python3

@@ -54,20 +54,17 @@ The Pi Kit declares an Anthropic API key only. `shell` has no credentials.
 
 ### Updating agent versions
 
-Kit images pin the agent CLI version. To get the images selected by a newer
-marsh release, [upgrade marsh](install.md#upgrade) on your Mac. For Homebrew:
+Each Kit image pins its agent's version. `marsh kit upgrade` moves the
+packaged commands to the newest images of your release channel, so you get a
+new Claude Code, Codex or Pi without waiting for a marsh release; upgrading
+marsh itself also brings the versions it ships. See
+[Upgrade](install.md#upgrade) for how the two fit together.
 
-```sh
-brew upgrade mcavage/tap/marsh
-```
-
-Finish jobs, exit marsh shells, and run `marsh stop` before reopening. Inside
-marsh, `claude --version`, `codex --version`, and `pi --version` show the
+Inside marsh, `claude --version`, `codex --version`, and `pi --version` show the
 installed versions. Resetting a VM alone does not update its pinned image.
 
 The packaged Claude Kit disables self-updates in CLI and ACP sessions;
-`claude update` and `claude upgrade` exit 125. To choose an agent version
-independently of marsh releases, [register your own Kit](#adding-a-command).
+`claude update` and `claude upgrade` exit 125.
 
 ## How a call runs
 

@@ -206,10 +206,11 @@ substituting its slot number. This deletes the slot's data.
 
 ## Stale daemon after an upgrade
 
-- Upgrading `sbx`: marsh restarts an idle daemon on its own. Rerun
+- Upgrading `sbx`: marsh replaces its daemon on its own once no shell or job
+  is running, including when the upgrade removed the old `sbx`. Rerun
   `marsh mcp install ...` for any MCP registrations.
 - Upgrading marsh: a running daemon keeps the old binaries. Run `marsh stop`
-  when idle.
+  when idle, then `marsh kit upgrade` ([Upgrade](install.md#upgrade)).
 
 ## Reporting a bug
 

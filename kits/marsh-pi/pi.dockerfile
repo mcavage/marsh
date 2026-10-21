@@ -49,7 +49,7 @@ ENTRYPOINT ["/usr/local/bin/marsh-pi"]
 # npm metadata/retained notices, not all npm code bytes.
 FROM image AS smoke
 USER root
-RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 pi
+RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 python pi
 
 FROM packages AS verify
 RUN sh /tmp/marsh-image-base/verifier.sh
