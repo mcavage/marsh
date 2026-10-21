@@ -101,7 +101,7 @@ def main() -> None:
     try:
         output.extend(send(process, "printf 'ATTACHED\\n'", "ATTACHED", 300))
         output.extend(send(process,
-                           f"marsh kit install alternate --from {args.alternate_kit}; printf 'INSTALL_EXIT:%s\\n' \"$?\"",
+                           f"marsh kit install alternate {args.alternate_kit}; printf 'INSTALL_EXIT:%s\\n' \"$?\"",
                            "INSTALL_EXIT:", 900))
         assert b"INSTALL_EXIT:0" in output, output[-4000:]
         assert f"installed alternate from {args.alternate_kit}".encode() in output, output[-4000:]

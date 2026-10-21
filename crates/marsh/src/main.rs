@@ -58,7 +58,7 @@ Usage:
   marsh splits [--json] [ID] | cancel ID | rm ID
   marsh fanout [-n] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]... | marsh collect [--json] [--timing]
                                        Run branches at once on the same files
-  marsh kit install NAME --from REPOSITORY:TAG|REPOSITORY@sha256:DIGEST
+  marsh kit install NAME REPOSITORY:TAG|REPOSITORY@sha256:DIGEST
   marsh kit upgrade [--check] [NAME...] | marsh kit uninstall NAME
   marsh config shell [marsh|bash|zsh]  Show or set this home's default shell
   marsh stop [--json]                  Remove this home's VMs and stop its daemon
@@ -216,8 +216,7 @@ const STATUS_HELP: &str = "Usage: marsh status [--json]\n\nShow scoped daemon, h
 const JOBS_HELP: &str = "Usage: marsh jobs [--all] [--json]\n       marsh jobs --tree [--all] [--json]\n       marsh jobs show JOB [--json]\n\nList Kit jobs, running first, then newest: short id, start, state, exit,\nRUN time (in the ready Kit VM; `marsh results` WALL adds VM preparation),\nand command. Inside a session only its jobs are listed; from a\nhost terminal, running trees, trees started in the last hour, and the five\nnewest trees. --all lists every recorded job. --tree draws child\njobs under their parent. JOB may be an id prefix. --json prints the full,\nunscoped document.\n";
 const RESULTS_HELP: &str = "Usage: marsh results [--json]\n       marsh results show CURSOR|JOB [--json]\n\nList durable Kit results or inspect one result.\n";
 const WORKERS_HELP: &str = "Usage: marsh workers reset KIT[,KIT...]|all\n\nStop and recreate selected Kit workers on their next use.\n";
-const KIT_HELP: &str =
-    "Usage: marsh kit install NAME --from REPOSITORY:TAG|REPOSITORY@sha256:DIGEST
+const KIT_HELP: &str = "Usage: marsh kit install NAME REPOSITORY:TAG|REPOSITORY@sha256:DIGEST
        marsh kit upgrade [--check] [NAME...]
        marsh kit uninstall NAME
 

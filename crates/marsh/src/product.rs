@@ -873,7 +873,7 @@ fn run_kit_command(
             if kits.is_empty() {
                 writeln!(
                     &mut stdout,
-                    "no Kits to upgrade: install one from a tag with `marsh kit install NAME --from REPOSITORY:TAG`"
+                    "no Kits to upgrade: install one from a tag with `marsh kit install NAME REPOSITORY:TAG`"
                 )?;
             }
             for kit in &kits {

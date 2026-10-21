@@ -10,7 +10,7 @@ shell -c 'uname -sm'
 ```
 
 `shell` is a packaged command. To add your own, use
-`marsh kit install NAME --from REPOSITORY:TAG`, substituting its published
+`marsh kit install NAME REPOSITORY:TAG`, substituting its published
 image. marsh uses the native Docker Sandboxes Kit v3 format.
 
 ## The default commands
@@ -125,13 +125,13 @@ agent as a child job. See [Agents running agents](agents.md).
 ## Adding a command
 
 ```sh
-marsh kit install pix --from docker.io/mcavage/marsh-pix:stable
+marsh kit install pix docker.io/mcavage/marsh-pix:stable
 marsh kit upgrade --check      # what would change
 marsh kit upgrade              # move to newer images
 marsh kit uninstall pix
 ```
 
-`marsh kit install NAME --from REPOSITORY:TAG` asks `sbx` which image the tag
+`marsh kit install NAME REPOSITORY:TAG` asks `sbx` which image the tag
 names now, prepares that image, and registers NAME. marsh records the digest,
 never the tag, so the command keeps running exactly that image until you
 upgrade. You can also install a digest (`REPOSITORY@sha256:DIGEST`); such a
