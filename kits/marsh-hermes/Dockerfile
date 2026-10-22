@@ -10,7 +10,7 @@ ADD https://github.com/NousResearch/hermes-agent.git#${HERMES_COMMIT} /opt/herme
 # Python that lives under /opt/hermes, so the result is copied as one tree.
 ENV UV_PYTHON_INSTALL_DIR=/opt/hermes/python UV_LINK_MODE=copy UV_NO_CACHE=1
 RUN cd /opt/hermes/src \
- && /tmp/uv-aarch64-unknown-linux-gnu/uv sync --frozen --no-dev --extra anthropic \
+ && /tmp/uv-aarch64-unknown-linux-gnu/uv sync --frozen --no-dev --extra anthropic --extra mcp \
       --python 3.14 --python-preference only-managed
 
 FROM docker.io/mcavage/marsh-shell@sha256:030b8c4f5a2f92af66f314ee48f4569c4b29ac3adbef834f481d51c1210c5499
