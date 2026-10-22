@@ -25,6 +25,13 @@ bundled skills stay in `~/.hermes/skills`, visible only to Hermes.
 A team can add skills with a mixin in a kit set; they appear in
 `/opt/hermes/kit-skills`, which Hermes also reads.
 
+## Tools
+
+Hermes uses the work tools in your marsh home's MCP connections (for example
+`~/.marsh/sbxenv.yaml` or `~/.marsh/sbxenvs/hermes.yaml`) through the sandbox's
+MCP gateway. Each run keeps an `mcp-gateway` entry in Hermes's config pointing
+at it; SBX holds the tools' credentials.
+
 ## Settings
 
 Hermes keeps its state in `~/.hermes` in your marsh home (`~/.marsh/home/.hermes`
