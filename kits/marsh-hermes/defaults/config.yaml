@@ -1,0 +1,6 @@
+# Hermes under marsh: first-run defaults, copied to ~/.hermes/config.yaml only
+# when none exists, after the provider of the key you stored in SBX.
+skills:
+  # The skills folder every agent in this marsh home shares.
+  external_dirs: [~/.agents/skills, /opt/hermes/kit-skills]
+  create_dir: ~/.agents/skills

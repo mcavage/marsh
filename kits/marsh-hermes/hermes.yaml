@@ -1,0 +1,42 @@
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: workload
+displayName: Hermes
+description: Hermes Agent on marsh, sharing the marsh home's skills folder
+sourceUrl: https://github.com/mcavage/marsh-hermes
+licenses: [MIT]
+provides: ["hermes-agent@0.21.7"]
+dockerfile: ./Dockerfile
+capabilities:
+  - type: com.docker.sandbox/sbx@1
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - api.anthropic.com:443
+          - generativelanguage.googleapis.com:443
+  - type: com.docker.sandbox/credential@1
+    optional: true
+    description: Anthropic API key
+    config:
+      service: anthropic
+      phase: runtime
+      apiKey:
+        name: ANTHROPIC_API_KEY
+        proxyManaged: true
+        inject:
+          - {domain: api.anthropic.com, header: x-api-key, format: "%s"}
+  - type: com.docker.sandbox/credential@1
+    optional: true
+    description: Google Gemini API key
+    config:
+      service: google
+      phase: runtime
+      apiKey:
+        name: GEMINI_API_KEY
+        proxyManaged: true
+        inject:
+          - {domain: generativelanguage.googleapis.com, header: x-goog-api-key, format: "%s"}
+  - type: com.docker.sandbox/agent-skills@1
+    config:
+      path: /opt/hermes/kit-skills
