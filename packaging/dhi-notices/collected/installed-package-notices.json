@@ -79,12 +79,12 @@
     },
     {
       "package": "gh",
-      "version": "2.102.0-3",
+      "version": "2.103.0-0",
       "notices": [],
       "archive_notices": [],
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/cli/cli/fc4b137cdef0a6bd28fd461b7cf9c84a5812a8cd/LICENSE",
+          "url": "https://raw.githubusercontent.com/cli/cli/7948e8056e45ac3c729b829e0eafe2d0797a95c6/LICENSE",
           "sha256": "6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f",
           "file": "texts/6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f.txt"
         }
@@ -137,6 +137,19 @@
       "upstream_notices": [
         {
           "url": "https://raw.githubusercontent.com/nodejs/node/f14cd3aa7bf9ca8df2cc5b8bb14beb0f335b1d93/LICENSE",
+          "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
+          "file": "texts/5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace.txt"
+        }
+      ]
+    },
+    {
+      "package": "nodejs-24",
+      "version": "24.22.1-0",
+      "notices": [],
+      "archive_notices": [],
+      "upstream_notices": [
+        {
+          "url": "https://raw.githubusercontent.com/nodejs/node/ce7aaf1cee78b8cf0ce17364260535c418d3ed26/LICENSE",
           "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
           "file": "texts/5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace.txt"
         }

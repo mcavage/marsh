@@ -189,7 +189,7 @@
       },
       {
         "package": "gh",
-        "version": "2.102.0-3",
+        "version": "2.103.0-0",
         "families": [
           "MIT"
         ],
@@ -1358,6 +1358,16 @@
         ]
       },
       {
+        "package": "python-is-python3",
+        "version": "3.13.3-1",
+        "families": [
+          "GPL"
+        ],
+        "notices": [
+          "6ea1bd50ae35c5c155cad4a6c483bf0e403076da8b7a0909081812f140f38e3d"
+        ]
+      },
+      {
         "package": "python3",
         "version": "3.13.5-1",
         "families": [
@@ -1802,7 +1812,7 @@
       },
       {
         "package": "gh",
-        "version": "2.102.0-3",
+        "version": "2.103.0-0",
         "families": [
           "MIT"
         ],
@@ -3191,7 +3201,7 @@
       },
       {
         "package": "nodejs-24",
-        "version": "24.22.0-0",
+        "version": "24.22.1-0",
         "families": [
           "Apache-2.0",
           "Artistic",
@@ -3309,6 +3319,16 @@
         ],
         "notices": [
           "90a66617c36d83068b52bbb77cbfef1234f526bfa287156d9d05f7df4d339539"
+        ]
+      },
+      {
+        "package": "python-is-python3",
+        "version": "3.13.3-1",
+        "families": [
+          "GPL"
+        ],
+        "notices": [
+          "6ea1bd50ae35c5c155cad4a6c483bf0e403076da8b7a0909081812f140f38e3d"
         ]
       },
       {
@@ -3784,7 +3804,7 @@
       },
       {
         "package": "gh",
-        "version": "2.102.0-3",
+        "version": "2.103.0-0",
         "families": [
           "MIT"
         ],
@@ -5173,7 +5193,7 @@
       },
       {
         "package": "nodejs-24",
-        "version": "24.22.0-0",
+        "version": "24.22.1-0",
         "families": [
           "Apache-2.0",
           "Artistic",
@@ -5291,6 +5311,16 @@
         ],
         "notices": [
           "90a66617c36d83068b52bbb77cbfef1234f526bfa287156d9d05f7df4d339539"
+        ]
+      },
+      {
+        "package": "python-is-python3",
+        "version": "3.13.3-1",
+        "families": [
+          "GPL"
+        ],
+        "notices": [
+          "6ea1bd50ae35c5c155cad4a6c483bf0e403076da8b7a0909081812f140f38e3d"
         ]
       },
       {
@@ -5766,7 +5796,7 @@
       },
       {
         "package": "gh",
-        "version": "2.102.0-3",
+        "version": "2.103.0-0",
         "families": [
           "MIT"
         ],
@@ -7155,7 +7185,7 @@
       },
       {
         "package": "nodejs-24",
-        "version": "24.22.0-0",
+        "version": "24.22.1-0",
         "families": [
           "Apache-2.0",
           "Artistic",
@@ -7273,6 +7303,16 @@
         ],
         "notices": [
           "90a66617c36d83068b52bbb77cbfef1234f526bfa287156d9d05f7df4d339539"
+        ]
+      },
+      {
+        "package": "python-is-python3",
+        "version": "3.13.3-1",
+        "families": [
+          "GPL"
+        ],
+        "notices": [
+          "6ea1bd50ae35c5c155cad4a6c483bf0e403076da8b7a0909081812f140f38e3d"
         ]
       },
       {
@@ -7606,7 +7646,7 @@
       },
       {
         "package": "gh",
-        "version": "2.102.0-3",
+        "version": "2.103.0-0",
         "families": [
           "MIT"
         ],
