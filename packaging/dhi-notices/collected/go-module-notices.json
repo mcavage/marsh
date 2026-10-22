@@ -36,7 +36,7 @@
     },
     {
       "path": "/usr/bin/gh",
-      "sha256": "a9c40e4bbd3e575291b1fa67c1be515ba68dda4aefcd98766ee0e9c4e956f9dd"
+      "sha256": "73761b092d7bce4a06f8d9cbf990c02109ab8c42a39d8c03a3d77224016fb55e"
     },
     {
       "path": "/usr/bin/runc",
@@ -47,7 +47,7 @@
       "sha256": "93e5fc4ce3f3082878f21eb5cb0fc10e3ef0b384a854374177b068c50fcc9b69"
     }
   ],
-  "input_sha256": "9200ca5afc1cb9d306390a0ca09d3b2131f76e0a49008a9f30057c1189e1378a",
+  "input_sha256": "a93c5d8fdc39feb99970936a4080ca44dfcdb8577c3a12326ce6b7c5953cd601",
   "checksum_database": "sum.golang.org",
   "modules": [
     {
@@ -69,18 +69,35 @@
     },
     {
       "path": "charm.land/bubbletea/v2",
-      "version": "v2.0.10",
+      "version": "v2.1.0",
       "binaries": [
         "/usr/bin/gh"
       ],
-      "sum": "h1:oolvo20VBpI0PfqE7iFjkZ1bx0WpmXGfnKz5Yldjq5o=",
-      "go_mod_sum": "h1:QOatcnhOjYIfxzUSTz6raF7Ex4R/rIuHa3SnBdCCpMc=",
-      "archive_sha256": "a6f3e3ec997b59bda0efbd9139cf3e5e6ec0f561e6b17fae31e35791ba869d64",
+      "sum": "h1:A9fj9h5LFrvQhQHFNggp8K8rvY6CUfgn9dMbb6p2HIw=",
+      "go_mod_sum": "h1:xWHeyxIX9/wiFU2kgPW04ojOZyTzrWf+8lGjUCaftiU=",
+      "archive_sha256": "d9d17cf9b480bc63a3b4c5fc463569d4874e8ab1f8d40db55dda3efa3033fed4",
       "notices": [
         {
-          "source_path": "charm.land/bubbletea/v2@v2.0.10/LICENSE",
+          "source_path": "charm.land/bubbletea/v2@v2.1.0/LICENSE",
           "sha256": "373b3931e66627aadcfebd7771df93f3439203147e587a924508c63e20184d7f",
           "file": "texts/373b3931e66627aadcfebd7771df93f3439203147e587a924508c63e20184d7f.txt"
+        }
+      ]
+    },
+    {
+      "path": "charm.land/glamour/v2",
+      "version": "v2.0.2-0.20261015065741-010543cac1a0",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:pnfN6r+BBGd0G4aRPGu28RjUZlh1Fg1ZtC4BCqyO2Zg=",
+      "go_mod_sum": "h1:wqGcmrnBmbunm0/LszemUKpYwWxvPPBkEno7KusMy6s=",
+      "archive_sha256": "fb9532ebdd6c6a3c4e20a354410ecd895c74cd398919a0f67d27bad532fb5a5d",
+      "notices": [
+        {
+          "source_path": "charm.land/glamour/v2@v2.0.2-0.20261015065741-010543cac1a0/LICENSE",
+          "sha256": "30bf812ed0c30e86192cb609b74cf5f2a7303553f7e10ddbfc926172af115b89",
+          "file": "texts/30bf812ed0c30e86192cb609b74cf5f2a7303553f7e10ddbfc926172af115b89.txt"
         }
       ]
     },
@@ -1208,51 +1225,17 @@
       ]
     },
     {
-      "path": "github.com/charmbracelet/glamour",
-      "version": "v0.10.0",
-      "binaries": [
-        "/usr/bin/gh"
-      ],
-      "sum": "h1:MtZvfwsYCx8jEPFJm3rIBFIMZUfUJ765oX8V6kXldcY=",
-      "go_mod_sum": "h1:f+uf+I/ChNmqo087elLnVdCiVgjSKWuXa/l6NU2ndYk=",
-      "archive_sha256": "980606e099a3f49bcbf2521f054e5205fdcd08db499975cdc374c5d0f14c79b8",
-      "notices": [
-        {
-          "source_path": "github.com/charmbracelet/glamour@v0.10.0/LICENSE",
-          "sha256": "30bf812ed0c30e86192cb609b74cf5f2a7303553f7e10ddbfc926172af115b89",
-          "file": "texts/30bf812ed0c30e86192cb609b74cf5f2a7303553f7e10ddbfc926172af115b89.txt"
-        }
-      ]
-    },
-    {
-      "path": "github.com/charmbracelet/lipgloss",
-      "version": "v1.1.1-0.20250404203927-76690c660834",
-      "binaries": [
-        "/usr/bin/gh"
-      ],
-      "sum": "h1:ZR7e0ro+SZZiIZD7msJyA+NjkCNNavuiPBLgerbOziE=",
-      "go_mod_sum": "h1:aKC/t2arECF6rNOnaKaVU6y4t4ZeHQzqfxedE/VkVhA=",
-      "archive_sha256": "626c107b5c002b297a36aab58949904266eac5c6a030face80a771084bdb279a",
-      "notices": [
-        {
-          "source_path": "github.com/charmbracelet/lipgloss@v1.1.1-0.20250404203927-76690c660834/LICENSE",
-          "sha256": "699cffa88b62691ea09706d356e5ee0982e87ca2b1c58ca682f27d6ae87f9efc",
-          "file": "texts/699cffa88b62691ea09706d356e5ee0982e87ca2b1c58ca682f27d6ae87f9efc.txt"
-        }
-      ]
-    },
-    {
       "path": "github.com/charmbracelet/ultraviolet",
-      "version": "v0.0.0-20260811164956-006e29f97886",
+      "version": "v0.0.0-20261008173134-6b8d4baf91b4",
       "binaries": [
         "/usr/bin/gh"
       ],
-      "sum": "h1:rdnVWKgJpTVXKuKuJyxDJ+NFJdUaUqGvyGy61OcvlbA=",
-      "go_mod_sum": "h1:nAw0d9PhFp1qdzi2xhQU5YOu5sVpDIHWlaW2Uz/bCro=",
-      "archive_sha256": "f05a2aac1310f73700c7587db28429dacd345b1d68ca50c05048f9ac989c0f7f",
+      "sum": "h1:hISLzUbwcvJbGoNR6A3L/TpguRRnACBmZOee8LcHLJw=",
+      "go_mod_sum": "h1:aJDVk+WOVM1K04rdc/71PMPoUGfjxjhvXfP3Pjz1Zio=",
+      "archive_sha256": "87eb57acb5fec6e392f7b3d0a1b2766161637d426c72288b2912752bdaa55796",
       "notices": [
         {
-          "source_path": "github.com/charmbracelet/ultraviolet@v0.0.0-20260811164956-006e29f97886/LICENSE",
+          "source_path": "github.com/charmbracelet/ultraviolet@v0.0.0-20261008173134-6b8d4baf91b4/LICENSE",
           "sha256": "8a77c755a1d1fbdc932e86f0449549121820b6f4cc1234b12fcfc8d38013c1de",
           "file": "texts/8a77c755a1d1fbdc932e86f0449549121820b6f4cc1234b12fcfc8d38013c1de.txt"
         }
@@ -1260,33 +1243,16 @@
     },
     {
       "path": "github.com/charmbracelet/x/ansi",
-      "version": "v0.11.8",
+      "version": "v0.11.9",
       "binaries": [
         "/usr/bin/gh"
       ],
-      "sum": "h1:JMFwp0CgDC2+jcOB162HH5k7I3FVbgFSMMYg7dSPBQQ=",
-      "go_mod_sum": "h1:ZNN+3mXny/516oTQPLMPIBeSINvNJJQ8uQXDgbeJxY0=",
-      "archive_sha256": "ac0870e7be61cbffe23d06404c77cfd43e11e162e1c79a4bf3bfaf57036d7407",
+      "sum": "h1:kIrqLBxtTVbLyyHO2Evoi93EjQo1mylWmpNEsfPxXAM=",
+      "go_mod_sum": "h1:DG/hpOnaI2QJ/KMMqLL2h0KVhluuJLazf8973P+Vy5w=",
+      "archive_sha256": "9815535699efc21636755cc84dbc92250182246e876e4ea83e87464d871cbf82",
       "notices": [
         {
-          "source_path": "github.com/charmbracelet/x/ansi@v0.11.8/LICENSE",
-          "sha256": "0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b",
-          "file": "texts/0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b.txt"
-        }
-      ]
-    },
-    {
-      "path": "github.com/charmbracelet/x/cellbuf",
-      "version": "v0.0.15",
-      "binaries": [
-        "/usr/bin/gh"
-      ],
-      "sum": "h1:ur3pZy0o6z/R7EylET877CBxaiE1Sp1GMxoFPAIztPI=",
-      "go_mod_sum": "h1:J1YVbR7MUuEGIFPCaaZ96KDl5NoS0DAWkskup+mOY+Q=",
-      "archive_sha256": "2c5c421edef869c7f4b7b3fa29530a66897134764d95a750eed59ed5886d84f7",
-      "notices": [
-        {
-          "source_path": "github.com/charmbracelet/x/cellbuf@v0.0.15/LICENSE",
+          "source_path": "github.com/charmbracelet/x/ansi@v0.11.9/LICENSE",
           "sha256": "0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b",
           "file": "texts/0baa4a5942a801d93f4050d2bc0039d8c037105fcd335230d118eec99a11782b.txt"
         }
@@ -1474,16 +1440,16 @@
     },
     {
       "path": "github.com/cli/go-gh/v2",
-      "version": "v2.16.1",
+      "version": "v2.17.0",
       "binaries": [
         "/usr/bin/gh"
       ],
-      "sum": "h1:t8s29LToBmYjXeDXUnK7Wdm7NkYSyzGZK3t4Doa6GX0=",
-      "go_mod_sum": "h1:OaJTFtHJapQq670h/3L0vqm4NwZGoJmSAVctWiY+3pQ=",
-      "archive_sha256": "1220cee2967baeaefeb7f1eb390edd071adf65932a04c417104a3aec6d97eaae",
+      "sum": "h1:F24s1Ow/6pgWO0FXXSTi7l4YLkcuS94XPv7npEGkrQc=",
+      "go_mod_sum": "h1:bc2VCe0OUSOuhDz5HeQrA7RAtc/d3PtyGogBXHbcp1o=",
+      "archive_sha256": "24f6e773c1ad635cc56bb36d9e929774c469f5323072f648a0d7b4e51f8d28ed",
       "notices": [
         {
-          "source_path": "github.com/cli/go-gh/v2@v2.16.1/LICENSE",
+          "source_path": "github.com/cli/go-gh/v2@v2.17.0/LICENSE",
           "sha256": "e96f8a0a582ab45face583e87379731dca43f06b2d09fa73669f8846920c5a04",
           "file": "texts/e96f8a0a582ab45face583e87379731dca43f06b2d09fa73669f8846920c5a04.txt"
         }
@@ -1491,16 +1457,16 @@
     },
     {
       "path": "github.com/cli/oauth",
-      "version": "v1.2.2",
+      "version": "v1.3.0",
       "binaries": [
         "/usr/bin/gh"
       ],
-      "sum": "h1:/qG/wok8jzu66tx7q+duGOIp4DT5P/ACXrdc33UoNUQ=",
-      "go_mod_sum": "h1:qd/FX8ZBD6n1sVNQO3aIdRxeu5LGw9WhKnYhIIoC2A4=",
-      "archive_sha256": "e6aa8a26ba87b8cab3f1e907faf33658f4224c31172a2c728e2bc928b73fcd64",
+      "sum": "h1:n+g95m4ht5dAlG1XGMcIT+oU+dbJZVr80fuOf5lOHUM=",
+      "go_mod_sum": "h1:h0lVJ2xkpgc0WGjM6KHPKb0T2D+YUfsz3GbRTPandyg=",
+      "archive_sha256": "4ea3377ed8c7c5b60db99714613b66c94d9587b9788b80119dc30fe5cc922fd4",
       "notices": [
         {
-          "source_path": "github.com/cli/oauth@v1.2.2/LICENSE",
+          "source_path": "github.com/cli/oauth@v1.3.0/LICENSE",
           "sha256": "ff13d7f814dc2e4ce2b81d8f33029fe4d80893a30dac2939883ffc5e4696dd53",
           "file": "texts/ff13d7f814dc2e4ce2b81d8f33029fe4d80893a30dac2939883ffc5e4696dd53.txt"
         }
@@ -2938,57 +2904,18 @@
     },
     {
       "path": "github.com/gabriel-vasile/mimetype",
-      "version": "v1.4.15",
+      "version": "v1.4.16",
       "binaries": [
         "/usr/bin/gh"
       ],
-      "sum": "h1:05iP/CYtZ/w455R/KZM6rZ5ieAdh99UPtd+d3YzLmaI=",
-      "go_mod_sum": "h1:azpTcoLcDZRNgFou5j+APrqQx9HqVPWa6ijYQIIVswQ=",
-      "archive_sha256": "33ca0896cfdc7e0b412d7b676ed461428b28a952f86170cea545e112a5e86ef1",
+      "sum": "h1:5izNFuvA37st1dDRAcA7TtmngBmRgiIPDmTtiEvjx1E=",
+      "go_mod_sum": "h1:3oFFwxX8kTklZwzIl2aQEDZT0lKY8xH92ST88bAwba4=",
+      "archive_sha256": "8b5a6b5e60c462072f9214676dc9a773f8c38844fa16eebeb37a2901abf26d3e",
       "notices": [
         {
-          "source_path": "github.com/gabriel-vasile/mimetype@v1.4.15/LICENSE",
+          "source_path": "github.com/gabriel-vasile/mimetype@v1.4.16/LICENSE",
           "sha256": "b5a867655833aca9e27c97e28e43dcfc62be0ba0e84f24157afedf8fdaaa2fc1",
           "file": "texts/b5a867655833aca9e27c97e28e43dcfc62be0ba0e84f24157afedf8fdaaa2fc1.txt"
-        }
-      ]
-    },
-    {
-      "path": "github.com/gdamore/encoding",
-      "version": "v1.0.1",
-      "binaries": [
-        "/usr/bin/gh"
-      ],
-      "sum": "h1:YzKZckdBL6jVt2Gc+5p82qhrGiqMdG/eNs6Wy0u3Uhw=",
-      "go_mod_sum": "h1:0Z0cMFinngz9kS1QfMjCP8TY7em3bZYeeklsSDPivEo=",
-      "archive_sha256": "e584303c743306ae55be21a5703900d0628aa2ef840ce49d5f0bbf7c51379e33",
-      "notices": [
-        {
-          "source_path": "github.com/gdamore/encoding@v1.0.1/LICENSE",
-          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
-        }
-      ]
-    },
-    {
-      "path": "github.com/gdamore/tcell/v2",
-      "version": "v2.13.10",
-      "binaries": [
-        "/usr/bin/gh"
-      ],
-      "sum": "h1:Afs3JKt83HnhuUKdZ3MnxUgOqQRWftj5JyDqv1LLynA=",
-      "go_mod_sum": "h1:+Wfe208WDdB7INEtCsNrAN6O2m+wsTPk1RAovjaILlo=",
-      "archive_sha256": "7664c451b58bb5fe7469e3dbda3711ac1d24206c13fff62f045e9e62ed1f2217",
-      "notices": [
-        {
-          "source_path": "github.com/gdamore/tcell/v2@v2.13.10/AUTHORS",
-          "sha256": "80f36739fc84fd8fb52a894ab022894249072aed052ee88c0a6dab0266be1386",
-          "file": "texts/80f36739fc84fd8fb52a894ab022894249072aed052ee88c0a6dab0266be1386.txt"
-        },
-        {
-          "source_path": "github.com/gdamore/tcell/v2@v2.13.10/LICENSE",
-          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-          "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
       ]
     },
@@ -4879,8 +4806,7 @@
       "version": "v1.20.1",
       "binaries": [
         "/usr/bin/docker",
-        "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd"
       ],
       "sum": "h1:T7kKElXUMXrUJ2E9QhQhxFtcK5rPyLdsGZvdbLMPdiQ=",
       "go_mod_sum": "h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=",
@@ -4947,6 +4873,7 @@
       "path": "github.com/klauspost/compress",
       "version": "v1.20.3",
       "binaries": [
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:zWNoFqq/lSuYQRim3dUXlXeA0IqwuZGicdG5ZTfY5j4=",
@@ -5149,16 +5076,16 @@
     },
     {
       "path": "github.com/mattn/go-colorable",
-      "version": "v0.1.15",
+      "version": "v0.1.16",
       "binaries": [
         "/usr/bin/gh"
       ],
-      "sum": "h1:+u9SLTRGnXv73cEsnsmoZBom+dMU88B2M0aDcWy0/jY=",
+      "sum": "h1:+2YjeAe7xP1OQbZW1jERPWWCDLlNqFNCvjiqGiAt84A=",
       "go_mod_sum": "h1:6LmQG8QLFO4G5z1gPvYEzlUgJ2wF+stgPZH1UqBm1s8=",
-      "archive_sha256": "221144f51cc5eeda0a72bd7b5832181b94240c1d760bde0b3428895e63e63339",
+      "archive_sha256": "1b43236db9dc34e69edf02373e3ba86c058cc34c672f3e3610425cadcf6efd57",
       "notices": [
         {
-          "source_path": "github.com/mattn/go-colorable@v0.1.15/LICENSE",
+          "source_path": "github.com/mattn/go-colorable@v0.1.16/LICENSE",
           "sha256": "88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9",
           "file": "texts/88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9.txt"
         }
@@ -5183,23 +5110,6 @@
     },
     {
       "path": "github.com/mattn/go-runewidth",
-      "version": "v0.0.27",
-      "binaries": [
-        "/usr/bin/gh"
-      ],
-      "sum": "h1:Feg/Oou5zI/wnpgDF6omIU0OokC9GxLC/WRknhVlIR0=",
-      "go_mod_sum": "h1:3qAiGCV4Koz/yuveO58qUefmUTRm8r0IGEXZ9jeHp/8=",
-      "archive_sha256": "78b1690bd2506faeeecff9cce615e5710c12fe25a5393abe3c2503d0ea4ee2ea",
-      "notices": [
-        {
-          "source_path": "github.com/mattn/go-runewidth@v0.0.27/LICENSE",
-          "sha256": "88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9",
-          "file": "texts/88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9.txt"
-        }
-      ]
-    },
-    {
-      "path": "github.com/mattn/go-runewidth",
       "version": "v0.0.29",
       "binaries": [
         "/usr/libexec/docker/cli-plugins/docker-buildx"
@@ -5210,6 +5120,23 @@
       "notices": [
         {
           "source_path": "github.com/mattn/go-runewidth@v0.0.29/LICENSE",
+          "sha256": "88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9",
+          "file": "texts/88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/mattn/go-runewidth",
+      "version": "v0.0.30",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:+KUuiDA4fF0R1p5FeueHefjDm+GIM+kWfFnDjybOPgk=",
+      "go_mod_sum": "h1:3qAiGCV4Koz/yuveO58qUefmUTRm8r0IGEXZ9jeHp/8=",
+      "archive_sha256": "97c50f943241d593c40c447773cce738edf0b9db36d68aeadc32773a2103af1e",
+      "notices": [
+        {
+          "source_path": "github.com/mattn/go-runewidth@v0.0.30/LICENSE",
           "sha256": "88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9",
           "file": "texts/88a2379b3ca34bf5c57127aff9dcb802bbb60ece0805cdbda65b3bd115f971d9.txt"
         }
@@ -6891,23 +6818,6 @@
       ]
     },
     {
-      "path": "github.com/rivo/tview",
-      "version": "v0.42.0",
-      "binaries": [
-        "/usr/bin/gh"
-      ],
-      "sum": "h1:b/ftp+RxtDsHSaynXTbJb+/n/BxDEi+W3UfF5jILK6c=",
-      "go_mod_sum": "h1:cSfIYfhpSGCjp3r/ECJb+GKS7cGJnqV8vfjQPwoXyfY=",
-      "archive_sha256": "49acb1cd8fcda0bda8702e25283b6651e444fb5f21deca81157299be624b9b12",
-      "notices": [
-        {
-          "source_path": "github.com/rivo/tview@v0.42.0/LICENSE.txt",
-          "sha256": "5d07c44385294d9a3c4c88a5708e64798d4af93b22d11b0d0b4950dfd5f500dc",
-          "file": "texts/5d07c44385294d9a3c4c88a5708e64798d4af93b22d11b0d0b4950dfd5f500dc.txt"
-        }
-      ]
-    },
-    {
       "path": "github.com/rivo/uniseg",
       "version": "v0.4.7",
       "binaries": [
@@ -7629,21 +7539,21 @@
     },
     {
       "path": "github.com/thlib/go-timezone-local",
-      "version": "v0.0.8",
+      "version": "v0.0.9",
       "binaries": [
         "/usr/bin/gh"
       ],
-      "sum": "h1:wPh1JtBHBqAKmYjHD4j6GbQMGGbOOOnB6YRMQUTzYAY=",
+      "sum": "h1:NJAmMmgFfjcyyx+M5EU4sSU35opbw4sVpk5n4Qk/bGk=",
       "go_mod_sum": "h1:/Tnicc6m/lsJE0irFMA0LfIwTBo4QP7A8IfyIv4zZKI=",
-      "archive_sha256": "b7ababa7051194f582aaad59e4a39604b3701ecb581052cad34160006e6ee258",
+      "archive_sha256": "0057ab75deba6882d9eb24ec9f10ae3a8facda0bf213e4ddcdacddfac62392ae",
       "notices": [
         {
-          "source_path": "github.com/thlib/go-timezone-local@v0.0.8/LICENSE",
+          "source_path": "github.com/thlib/go-timezone-local@v0.0.9/LICENSE",
           "sha256": "6b0382b16279f26ff69014300541967a356a666eb0b91b422f6862f6b7dad17e",
           "file": "texts/6b0382b16279f26ff69014300541967a356a666eb0b91b422f6862f6b7dad17e.txt"
         },
         {
-          "source_path": "github.com/thlib/go-timezone-local@v0.0.8/LICENSE-APACHE.txt",
+          "source_path": "github.com/thlib/go-timezone-local@v0.0.9/LICENSE-APACHE.txt",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -8156,16 +8066,16 @@
     },
     {
       "path": "github.com/xo/terminfo",
-      "version": "v0.0.0-20220910002029-abceb7e1c41e",
+      "version": "v1.0.0",
       "binaries": [
         "/usr/bin/gh"
       ],
-      "sum": "h1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=",
+      "sum": "h1:2ZpYzqWzyyytjk3TP6aJVDhkMAkc99/1xKQdA3TDTBY=",
       "go_mod_sum": "h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=",
-      "archive_sha256": "b8f4270191e08e135e932dfe168769046a4268ec7f3892593b1d773b2c5fa4cf",
+      "archive_sha256": "64619407a02afce2f1fb1ba6889c134c73f1be573678d7db75045487e7833a8d",
       "notices": [
         {
-          "source_path": "github.com/xo/terminfo@v0.0.0-20220910002029-abceb7e1c41e/LICENSE",
+          "source_path": "github.com/xo/terminfo@v1.0.0/LICENSE",
           "sha256": "1f5f51151ba96f0492ce288bd007242f924fdad9f04002e175e951644340a891",
           "file": "texts/1f5f51151ba96f0492ce288bd007242f924fdad9f04002e175e951644340a891.txt"
         }
@@ -9071,7 +8981,6 @@
       "path": "golang.org/x/crypto",
       "version": "v0.57.0",
       "binaries": [
-        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:3ZVCjf8Ggz7zneR/EHRVx68Ctf+2pmIMP2UFhh9cC6M=",
@@ -9095,7 +9004,8 @@
       "version": "v0.58.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ],
       "sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
       "go_mod_sum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w=",
@@ -9249,7 +9159,6 @@
       "version": "v0.23.0",
       "binaries": [
         "/usr/bin/docker",
-        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:KameEIfc1IkluZyXWLn39Wd4tURc6GbCiISGiZm2bQk=",
@@ -9275,7 +9184,8 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ],
       "sum": "h1:iqiDrGoDgyuvAKrhLQthUEzU/R378N78gXbBjxed7oA=",
       "go_mod_sum": "h1:sUUOizhqBxiL6pEWpqNLUiaJn1ShEbZ6BBqskPbjZm0=",
@@ -9297,8 +9207,7 @@
       "path": "golang.org/x/sys",
       "version": "v0.48.0",
       "binaries": [
-        "/usr/bin/docker",
-        "/usr/bin/gh"
+        "/usr/bin/docker"
       ],
       "sum": "h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=",
       "go_mod_sum": "h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=",
@@ -9325,6 +9234,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker-proxy",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/bin/runc",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
@@ -9349,7 +9259,6 @@
       "version": "v0.46.0",
       "binaries": [
         "/usr/bin/docker",
-        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:3+OXuTbaKDgwk8jTi3aSLHRlmWqHEUDUtxnbFigO4YE=",
@@ -9373,7 +9282,8 @@
       "version": "v0.47.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ],
       "sum": "h1:cpyOwQkr2Nzxe2p6KnrTG7Ei2wtzjsuSjhpXXepZ/BM=",
       "go_mod_sum": "h1:efAfAuG6RKABvg1ArGebRkvX6LXul14SM67o2e4mUCY=",
@@ -9396,7 +9306,6 @@
       "version": "v0.42.0",
       "binaries": [
         "/usr/bin/docker",
-        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:JbOZXgfeCPU9gacVtYliJqOhD+zhrEqK4LfdpmlUZqI=",
@@ -9421,7 +9330,8 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ],
       "sum": "h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=",
       "go_mod_sum": "h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=",
@@ -9510,16 +9420,16 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/api",
-      "version": "v0.0.0-20260526163538-3dc84a4a5aaa",
+      "version": "v0.0.0-20260706201446-f0a921348800",
       "binaries": [
         "/usr/bin/gh"
       ],
-      "sum": "h1:Kjn0N0tCrDgiAFW+lGO4JZ3ck44CehvJQMAwj9QF0G8=",
-      "go_mod_sum": "h1:q4lMZS6kskjT5HvCPrnnypcDPVJqT/f4nfxmkE7gryY=",
-      "archive_sha256": "358fa722934401c762695c29893bb0f35e5e90545f6a1d6208df3207d63c11fd",
+      "sum": "h1:admdQBe8jR3VWhBsUrAOaF2Qw6K/+p5pSm1GN8+6Fw4=",
+      "go_mod_sum": "h1:FPk7EXUKMtImne7AmknoYjT4QXqKIzzRbeQIXzLk6fQ=",
+      "archive_sha256": "2a15e6eff7b8ce4f5780f5e324334f238c27fab9db4c51b92b72312ed147a5b0",
       "notices": [
         {
-          "source_path": "google.golang.org/genproto/googleapis/api@v0.0.0-20260526163538-3dc84a4a5aaa/LICENSE",
+          "source_path": "google.golang.org/genproto/googleapis/api@v0.0.0-20260706201446-f0a921348800/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -9563,16 +9473,16 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/rpc",
-      "version": "v0.0.0-20260526163538-3dc84a4a5aaa",
+      "version": "v0.0.0-20260706201446-f0a921348800",
       "binaries": [
         "/usr/bin/gh"
       ],
-      "sum": "h1:mZHHdPZl0dbGHCflZgAq/Q468DWVFcU2whhB2KAo8fk=",
+      "sum": "h1:qEHAMpSaUhtD0p3NbEEI83HwNGFxEwaSJ1G9PLnCBZE=",
       "go_mod_sum": "h1:4Hqkh8ycfw05ld/3BWL7rJOSfebL2Q+DVDeRgYgxUU8=",
-      "archive_sha256": "55f932b106d6f4f8cb76ae869e44f5d6d8400965fa441ee3532d09c96d64aac1",
+      "archive_sha256": "42a0902eda416f038ae29a247e12a8932a566d8b18682ca8cd2d333a40c0f407",
       "notices": [
         {
-          "source_path": "google.golang.org/genproto/googleapis/rpc@v0.0.0-20260526163538-3dc84a4a5aaa/LICENSE",
+          "source_path": "google.golang.org/genproto/googleapis/rpc@v0.0.0-20260706201446-f0a921348800/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -9623,8 +9533,7 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/docker",
-        "/usr/bin/gh"
+        "/usr/bin/docker"
       ],
       "sum": "h1:EManeRomTObA0BU7I8vXgg/78uE5MJ9M8B39EX2WscU=",
       "go_mod_sum": "h1:YPI1hK3kDked6iHvgX3tR0y+nX/qpMFKhPgFsokw1S8=",
@@ -9652,6 +9561,7 @@
       "version": "v1.84.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:soMyaPJ8pAak5PIQ0DGBUir0XRo2fRoMqhNWMLlLxO0=",

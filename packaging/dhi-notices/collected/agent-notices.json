@@ -8,19 +8,19 @@
       "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5"
     },
     {
-      "file": "claude-2.1.304-package-LICENSE.md",
-      "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.304.tgz",
+      "file": "claude-2.1.307-package-LICENSE.md",
+      "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.307.tgz",
       "member": "package/LICENSE.md",
-      "package_integrity": "sha512-oAD2KLEUdAbsAMxQMWYHq/AHCUlkYuZ80ovkL0mVSy07z+EeDhIo19/XpRA2NVI+9/LZCC+NXCJm+/hIvhNWWQ==",
-      "archive_sha256": "94dcc84341b99d0b5f76d6c6ca24feb4109250a2bdba728fa2163aeb7fba00ac",
+      "package_integrity": "sha512-/G+XTieqaNEpug8R7iQSgEvWYO7nRsxs3Hm7f0bSHboVn1KYr5rBgUFwXnAqmbFEtVek+qbl5n/xdX5eezKNGA==",
+      "archive_sha256": "68267ff08af0e2bcc3dc43e1960bd2c560e712776d135b9f92bee479b0b475f2",
       "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a"
     },
     {
-      "file": "claude-2.1.304-package-README.md",
-      "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.304.tgz",
+      "file": "claude-2.1.307-package-README.md",
+      "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.307.tgz",
       "member": "package/README.md",
-      "package_integrity": "sha512-oAD2KLEUdAbsAMxQMWYHq/AHCUlkYuZ80ovkL0mVSy07z+EeDhIo19/XpRA2NVI+9/LZCC+NXCJm+/hIvhNWWQ==",
-      "archive_sha256": "94dcc84341b99d0b5f76d6c6ca24feb4109250a2bdba728fa2163aeb7fba00ac",
+      "package_integrity": "sha512-/G+XTieqaNEpug8R7iQSgEvWYO7nRsxs3Hm7f0bSHboVn1KYr5rBgUFwXnAqmbFEtVek+qbl5n/xdX5eezKNGA==",
+      "archive_sha256": "68267ff08af0e2bcc3dc43e1960bd2c560e712776d135b9f92bee479b0b475f2",
       "sha256": "da7cf15ce4e35bad6a107acd6a36b4fe052083068bb9e564b1aa3f2078b5d0ce"
     },
     {

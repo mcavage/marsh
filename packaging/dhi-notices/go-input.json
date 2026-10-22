@@ -35,7 +35,7 @@
     },
     {
       "path": "/usr/bin/gh",
-      "sha256": "a9c40e4bbd3e575291b1fa67c1be515ba68dda4aefcd98766ee0e9c4e956f9dd"
+      "sha256": "73761b092d7bce4a06f8d9cbf990c02109ab8c42a39d8c03a3d77224016fb55e"
     },
     {
       "path": "/usr/bin/runc",
@@ -56,7 +56,14 @@
     },
     {
       "path": "charm.land/bubbletea/v2",
-      "version": "v2.0.10",
+      "version": "v2.1.0",
+      "binaries": [
+        "/usr/bin/gh"
+      ]
+    },
+    {
+      "path": "charm.land/glamour/v2",
+      "version": "v2.0.2-0.20261015065741-010543cac1a0",
       "binaries": [
         "/usr/bin/gh"
       ]
@@ -505,36 +512,15 @@
       ]
     },
     {
-      "path": "github.com/charmbracelet/glamour",
-      "version": "v0.10.0",
-      "binaries": [
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/charmbracelet/lipgloss",
-      "version": "v1.1.1-0.20250404203927-76690c660834",
-      "binaries": [
-        "/usr/bin/gh"
-      ]
-    },
-    {
       "path": "github.com/charmbracelet/ultraviolet",
-      "version": "v0.0.0-20260811164956-006e29f97886",
+      "version": "v0.0.0-20261008173134-6b8d4baf91b4",
       "binaries": [
         "/usr/bin/gh"
       ]
     },
     {
       "path": "github.com/charmbracelet/x/ansi",
-      "version": "v0.11.8",
-      "binaries": [
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/charmbracelet/x/cellbuf",
-      "version": "v0.0.15",
+      "version": "v0.11.9",
       "binaries": [
         "/usr/bin/gh"
       ]
@@ -616,14 +602,14 @@
     },
     {
       "path": "github.com/cli/go-gh/v2",
-      "version": "v2.16.1",
+      "version": "v2.17.0",
       "binaries": [
         "/usr/bin/gh"
       ]
     },
     {
       "path": "github.com/cli/oauth",
-      "version": "v1.2.2",
+      "version": "v1.3.0",
       "binaries": [
         "/usr/bin/gh"
       ]
@@ -1235,21 +1221,7 @@
     },
     {
       "path": "github.com/gabriel-vasile/mimetype",
-      "version": "v1.4.15",
-      "binaries": [
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/gdamore/encoding",
-      "version": "v1.0.1",
-      "binaries": [
-        "/usr/bin/gh"
-      ]
-    },
-    {
-      "path": "github.com/gdamore/tcell/v2",
-      "version": "v2.13.10",
+      "version": "v1.4.16",
       "binaries": [
         "/usr/bin/gh"
       ]
@@ -2021,14 +1993,14 @@
       "version": "v1.20.1",
       "binaries": [
         "/usr/bin/docker",
-        "/usr/bin/dockerd",
-        "/usr/bin/gh"
+        "/usr/bin/dockerd"
       ]
     },
     {
       "path": "github.com/klauspost/compress",
       "version": "v1.20.3",
       "binaries": [
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -2091,7 +2063,7 @@
     },
     {
       "path": "github.com/mattn/go-colorable",
-      "version": "v0.1.15",
+      "version": "v0.1.16",
       "binaries": [
         "/usr/bin/gh"
       ]
@@ -2105,16 +2077,16 @@
     },
     {
       "path": "github.com/mattn/go-runewidth",
-      "version": "v0.0.27",
+      "version": "v0.0.29",
       "binaries": [
-        "/usr/bin/gh"
+        "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
     {
       "path": "github.com/mattn/go-runewidth",
-      "version": "v0.0.29",
+      "version": "v0.0.30",
       "binaries": [
-        "/usr/libexec/docker/cli-plugins/docker-buildx"
+        "/usr/bin/gh"
       ]
     },
     {
@@ -2778,13 +2750,6 @@
       ]
     },
     {
-      "path": "github.com/rivo/tview",
-      "version": "v0.42.0",
-      "binaries": [
-        "/usr/bin/gh"
-      ]
-    },
-    {
       "path": "github.com/rivo/uniseg",
       "version": "v0.4.7",
       "binaries": [
@@ -3056,7 +3021,7 @@
     },
     {
       "path": "github.com/thlib/go-timezone-local",
-      "version": "v0.0.8",
+      "version": "v0.0.9",
       "binaries": [
         "/usr/bin/gh"
       ]
@@ -3268,7 +3233,7 @@
     },
     {
       "path": "github.com/xo/terminfo",
-      "version": "v0.0.0-20220910002029-abceb7e1c41e",
+      "version": "v1.0.0",
       "binaries": [
         "/usr/bin/gh"
       ]
@@ -3663,7 +3628,6 @@
       "path": "golang.org/x/crypto",
       "version": "v0.57.0",
       "binaries": [
-        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -3672,7 +3636,8 @@
       "version": "v0.58.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ]
     },
     {
@@ -3731,7 +3696,6 @@
       "version": "v0.23.0",
       "binaries": [
         "/usr/bin/docker",
-        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -3742,15 +3706,15 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ]
     },
     {
       "path": "golang.org/x/sys",
       "version": "v0.48.0",
       "binaries": [
-        "/usr/bin/docker",
-        "/usr/bin/gh"
+        "/usr/bin/docker"
       ]
     },
     {
@@ -3762,6 +3726,7 @@
         "/usr/bin/ctr",
         "/usr/bin/docker-proxy",
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/bin/runc",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
@@ -3771,7 +3736,6 @@
       "version": "v0.46.0",
       "binaries": [
         "/usr/bin/docker",
-        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -3780,7 +3744,8 @@
       "version": "v0.47.0",
       "binaries": [
         "/usr/bin/containerd",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ]
     },
     {
@@ -3788,7 +3753,6 @@
       "version": "v0.42.0",
       "binaries": [
         "/usr/bin/docker",
-        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
@@ -3798,7 +3762,8 @@
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/ctr",
-        "/usr/bin/dockerd"
+        "/usr/bin/dockerd",
+        "/usr/bin/gh"
       ]
     },
     {
@@ -3827,7 +3792,7 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/api",
-      "version": "v0.0.0-20260526163538-3dc84a4a5aaa",
+      "version": "v0.0.0-20260706201446-f0a921348800",
       "binaries": [
         "/usr/bin/gh"
       ]
@@ -3850,7 +3815,7 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/rpc",
-      "version": "v0.0.0-20260526163538-3dc84a4a5aaa",
+      "version": "v0.0.0-20260706201446-f0a921348800",
       "binaries": [
         "/usr/bin/gh"
       ]
@@ -3880,8 +3845,7 @@
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr",
-        "/usr/bin/docker",
-        "/usr/bin/gh"
+        "/usr/bin/docker"
       ]
     },
     {
@@ -3889,6 +3853,7 @@
       "version": "v1.84.0",
       "binaries": [
         "/usr/bin/dockerd",
+        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
     },
