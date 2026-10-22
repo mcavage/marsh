@@ -34,11 +34,13 @@ provider. Each run also passes Hermes marsh's job context (which agents it can
 start, and how) through `HERMES_EPHEMERAL_SYSTEM_PROMPT`, which takes the place
 of a configured `agent.system_prompt` or personality.
 
-## Build and publish
+## Releases
 
-```sh
-make publish TAG=docker.io/you/marsh-hermes   # pushes :HERMES_VERSION and :stable
-```
+CI follows Hermes's releases: every six hours it builds the latest stable
+Hermes release, smoke-tests it, and publishes `:VERSION` and `:stable`
+(`.github/workflows/publish.yml`). `marsh kit upgrade hermes` picks it up.
+
+To build your own copy: `make publish TAG=docker.io/you/marsh-hermes`.
 
 The image builds Hermes from its lockfile at a pinned commit, with its own
 Python, in a Docker Hardened Image build stage, on marsh's `marsh-shell` base.
