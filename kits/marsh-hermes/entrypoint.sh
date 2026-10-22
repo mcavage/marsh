@@ -3,6 +3,9 @@ set -eu
 # marsh names the home; Hermes keeps its state in ~/.hermes there.
 export HOME="${MARSH_SELECTED_HOME:-$HOME}"
 mkdir -p "$HOME/.hermes" "$HOME/.agents/skills"
+# Each marsh job is a fresh container: a gateway socket left in the shared home
+# belongs to an earlier, finished job, and Hermes would refuse it as unsafe.
+rm -f "$HOME/.hermes/gateway.sock" "$HOME/.hermes/gateway.sock.path" "$HOME"/.hermes/state/*.sock
 # SBX replaces these placeholders with your real key at the provider's API.
 provider=
 if [ "${SBX_CRED_GOOGLE_MODE:-none}" != none ]; then

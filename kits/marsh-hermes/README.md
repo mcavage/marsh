@@ -32,6 +32,23 @@ Hermes uses the work tools in your marsh home's MCP connections (for example
 MCP gateway. Each run keeps an `mcp-gateway` entry in Hermes's config pointing
 at it; SBX holds the tools' credentials.
 
+## Privacy
+
+Your prompts, files and tool results go only to your model provider (and the
+tools you connected). The Kit's defaults turn off everything in Hermes that
+contacts Nous Research: the model catalog download, update checks and
+telemetry (already off in Hermes).
+
+To guarantee it, rather than rely on settings, block Nous's hosts for every
+sandbox:
+
+```sh
+sbx policy deny network "nousresearch.com,*.nousresearch.com"
+```
+
+This matters if your SBX network policy allows all hosts (`sbx policy init
+allow-all`); the Kit's own policy lists only the model providers.
+
 ## Settings
 
 Hermes keeps its state in `~/.hermes` in your marsh home (`~/.marsh/home/.hermes`

@@ -4,3 +4,14 @@ skills:
   # The skills folder every agent in this marsh home shares.
   external_dirs: [~/.agents/skills, /opt/hermes/kit-skills]
   create_dir: ~/.agents/skills
+
+# Private by default: nothing goes to Nous Research. Your prompts and data go
+# only to your model provider; `marsh kit upgrade hermes` handles updates.
+model_catalog:
+  enabled: false
+updates:
+  check: false
+telemetry:
+  shared_metrics:
+    enabled: false
+    send: false
