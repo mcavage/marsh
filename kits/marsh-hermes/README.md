@@ -35,19 +35,14 @@ at it; SBX holds the tools' credentials.
 ## Privacy
 
 Your prompts, files and tool results go only to your model provider (and the
-tools you connected). The Kit's defaults turn off everything in Hermes that
-contacts Nous Research: the model catalog download, update checks and
-telemetry (already off in Hermes).
+tools you connected). Hermes's telemetry to Nous Research is off. Hermes still
+downloads its model list and checks for updates, which sends no content.
 
-To guarantee it, rather than rely on settings, block Nous's hosts for every
-sandbox:
+To enforce the telemetry setting rather than rely on it:
 
 ```sh
-sbx policy deny network "nousresearch.com,*.nousresearch.com"
+sbx policy deny network telemetry.nousresearch.com
 ```
-
-This matters if your SBX network policy allows all hosts (`sbx policy init
-allow-all`); the Kit's own policy lists only the model providers.
 
 ## Settings
 

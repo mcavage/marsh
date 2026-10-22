@@ -5,12 +5,8 @@ skills:
   external_dirs: [~/.agents/skills, /opt/hermes/kit-skills]
   create_dir: ~/.agents/skills
 
-# Private by default: nothing goes to Nous Research. Your prompts and data go
-# only to your model provider; `marsh kit upgrade hermes` handles updates.
-model_catalog:
-  enabled: false
-updates:
-  check: false
+# Your prompts and data go only to your model provider. Telemetry to Nous
+# Research stays off; the model list and update checks are Hermes's defaults.
 telemetry:
   shared_metrics:
     enabled: false
