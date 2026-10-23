@@ -50,4 +50,9 @@ else
   HERMES_EPHEMERAL_SYSTEM_PROMPT=$rule
 fi
 export HERMES_EPHEMERAL_SYSTEM_PROMPT
+# The job container is the sandbox boundary, as for the claude, codex and pi
+# Kits, so Hermes's own command-approval prompts are off. Hermes still blocks
+# its hardline commands and honors approvals.deny rules. To get the prompts
+# back, `export HERMES_YOLO_MODE=0` before running hermes.
+export HERMES_YOLO_MODE="${HERMES_YOLO_MODE:-1}"
 exec /opt/hermes/src/.venv/bin/hermes "$@"

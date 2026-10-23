@@ -60,6 +60,14 @@ provider. Each run also passes Hermes marsh's job context (which agents it can
 start, and how) through `HERMES_EPHEMERAL_SYSTEM_PROMPT`, which takes the place
 of a configured `agent.system_prompt` or personality.
 
+## Approvals
+
+Hermes's command-approval prompts are off, as for marsh's `claude`, `codex` and
+`pi`: the job container is the sandbox boundary. Hermes still refuses its
+hardline commands and honors `approvals.deny` rules in `~/.hermes/config.yaml`.
+To get the prompts back, `export HERMES_YOLO_MODE=0` in your marsh shell before
+running `hermes`.
+
 ## Updates
 
 marsh checks `:stable` when its daemon starts and once a day, and switches to
