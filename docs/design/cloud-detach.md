@@ -141,11 +141,23 @@ and they say how many they kept.
 
 ## 6. What a detached run can't do (v1)
 
-- **No calls back to the laptop.** Inside an attached block, nested agent calls
-  are served by the laptop over the live stream. A detached block refuses them
-  at start. A one-command block that runs directly in a registered Kit
-  (`cloud -d { claude -p … }`, the existing `--direct` form) works, because its
-  provider credentials are supplied cloud-side by SBX.
+- **Nested agent calls need a cloud-side coordinator.** Credentials aren't the
+  obstacle: a Kit call in the cloud already uses the secrets stored for Docker
+  Cloud (`sbx --cloud secret`), not local logins. The obstacle is who creates
+  and wires up the child sandbox. Today the laptop does it: `sbx --cloud create`
+  from the Kit, with the user's Docker sign-in, then the file snapshot in, the
+  stream relay and the write-back into the block. The block's sandbox has no
+  Docker Cloud identity, and must not receive the user's sign-in, which would
+  let the workload create, read or delete any of the user's sandboxes.
+
+  The way to lift this is for the supervisor (§3) to take over the laptop's
+  coordinator role, using a **sandbox-scoped capability** from Docker Cloud,
+  injected at the proxy like any other credential: this sandbox may create
+  child sandboxes only from named Kits, within a budget and a time limit, and
+  they're deleted with it. Until the platform offers that, v1 refuses nested
+  calls in a detached block at start. A one-command block that runs directly
+  in a registered Kit (`cloud -d { claude -p … }`, the existing `--direct`
+  form) works, because it has no nested call.
 - **No terminal and no stdin.** Use the interactive cloud shell for those.
 - **No job-origin detach** (a job inside a Kit sandbox starting a detached run)
   until session-origin detach has shipped and been proven.
@@ -195,6 +207,11 @@ result reported), and with retention expiring.
 4. **`sbx attach` vs `sbx start`** for a stopped sandbox in a script
    (non-interactive start).
 5. **Network policy for long agent runs**: same as attached runs, confirm.
+6. **Scoped child-sandbox capability:** can a cloud sandbox get a credential,
+   injected at its proxy, that lets it create child sandboxes only from named
+   Kits, within a budget and time limit, deleted with it? This decides whether
+   detached blocks can call more agents (§6), and it's the same capability
+   cloud-hosted agent teams need.
 
 ## 10. Order of work
 
