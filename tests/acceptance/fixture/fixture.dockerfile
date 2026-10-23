@@ -1,5 +1,5 @@
 ARG SHELL_IMAGE
-FROM rust:1.95-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1 AS build
+FROM rust:1.99-bookworm@sha256:48b7f435b8fc6378ce43b44f15e3a47fd8919b2825f835c39bd4bd3da50af5b8 AS build
 
 WORKDIR /source
 COPY Cargo.toml Cargo.lock ./

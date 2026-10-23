@@ -269,7 +269,10 @@ elif a[1]!='load': sys.exit(64)
             .success()
     );
     assert_eq!(fs::read(root.path().join("effects")).unwrap(), effects);
-    assert!(client.list_all_tools().await.unwrap().is_empty());
+    assert_eq!(
+        client.list_all_tools().await.unwrap(),
+        [] as [rmcp::model::Tool; 0]
+    );
     assert_eq!(client.call_tool(call()).await.unwrap().is_error, Some(true));
     client.cancel().await.unwrap();
     server.await.unwrap();

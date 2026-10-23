@@ -3981,7 +3981,7 @@ mod tests {
             set: BTreeMap::from([("OVERRIDDEN".into(), vec![0xfe, 0xff])]),
         };
         let (merged, omitted) = merge_exported_environment(&inherited, &rules).unwrap();
-        assert!(omitted.is_empty());
+        assert_eq!(omitted, [] as [std::string::String; 0]);
         assert_eq!(merged["RAW_VALUE"], [0xff, 0xfe, b'=', b'\n']);
         assert_eq!(merged["OVERRIDDEN"], [0xfe, 0xff]);
         assert!(!merged.contains_key("DROP_ME"));
@@ -4460,8 +4460,11 @@ mod tests {
             error.to_string().contains("source batch overlaps"),
             "{error}"
         );
-        assert!(store.status(None).workers.is_empty());
-        assert!(store.jobs().jobs.is_empty());
+        assert_eq!(
+            store.status(None).workers,
+            [] as [marsh_daemon::WorkerStatus; 0]
+        );
+        assert_eq!(store.jobs().jobs, [] as [marsh_daemon::JobSummary; 0]);
     }
 
     #[test]
@@ -4527,8 +4530,11 @@ mod tests {
                 .contains("attached project identity changed before mount admission"),
             "{error}"
         );
-        assert!(store.status(None).workers.is_empty());
-        assert!(store.jobs().jobs.is_empty());
+        assert_eq!(
+            store.status(None).workers,
+            [] as [marsh_daemon::WorkerStatus; 0]
+        );
+        assert_eq!(store.jobs().jobs, [] as [marsh_daemon::JobSummary; 0]);
     }
 
     #[test]
@@ -5095,7 +5101,10 @@ mod tests {
                 .install_kit("alternate".into(), reference, store)
                 .is_err()
         );
-        assert!(backend.registered_commands().unwrap().is_empty());
+        assert_eq!(
+            backend.registered_commands().unwrap(),
+            [] as [std::string::String; 0]
+        );
         assert!(!backend.config.control_home.join("commands.json").exists());
         assert!(!runner.runs.lock().unwrap().is_empty());
     }
@@ -5443,8 +5452,8 @@ mod tests {
             b"marsh: container cleanup could not be verified; worker quarantined\n"
         );
         assert_eq!(cleanup_diagnostic("cleanup failed", 10, 6), b"mars");
-        assert!(cleanup_diagnostic("cleanup failed", 10, 10).is_empty());
-        assert!(cleanup_diagnostic("cleanup failed", 10, 11).is_empty());
+        assert_eq!(cleanup_diagnostic("cleanup failed", 10, 10), [] as [u8; 0]);
+        assert_eq!(cleanup_diagnostic("cleanup failed", 10, 11), [] as [u8; 0]);
     }
 
     #[test]
@@ -6397,7 +6406,10 @@ mod kit_lifecycle_callers {
         assert_eq!(registry.calls("kit"), 1, "not again the same day");
         backend.auto_update_pass(&store, 11 * DAY);
         assert_eq!(registry.calls("kit"), 2);
-        assert!(status(&backend).recent.is_empty());
+        assert_eq!(
+            status(&backend).recent,
+            [] as [marsh_daemon::KitUpdateRecord; 0]
+        );
     }
 
     #[test]
@@ -6423,11 +6435,11 @@ mod kit_lifecycle_callers {
         backend.auto_update_pass(&idle, DAY + 60_000);
         assert_eq!(registry.calls("kit"), 1);
         let after = status(&backend);
-        assert!(after.waiting.is_empty());
+        assert_eq!(after.waiting, [] as [std::string::String; 0]);
         let check = after.last_check.unwrap();
         assert_eq!(check.result, "error");
         assert!(check.problems[0].starts_with("pix: "), "{check:?}");
-        assert!(after.recent.is_empty());
+        assert_eq!(after.recent, [] as [marsh_daemon::KitUpdateRecord; 0]);
         assert_eq!(overlay(&backend), before);
         assert_eq!(
             backend.registered_kit("pix").unwrap().workload.identity(),
@@ -6481,7 +6493,10 @@ mod kit_lifecycle_callers {
         );
         kit_lifecycle::write_sources(&pinned.config.control_home, &BTreeMap::new()).unwrap();
         decline_builtins(&pinned);
-        assert!(pinned.auto_update_names(&sources).is_empty());
+        assert_eq!(
+            pinned.auto_update_names(&sources),
+            [] as [std::string::String; 0]
+        );
         pinned.auto_update_pass(&DaemonStore::new(home.path()), DAY);
         assert_eq!(registry.calls("kit"), 0);
         assert_eq!(status(&pinned).last_check.unwrap().result, "ok");
@@ -6490,7 +6505,10 @@ mod kit_lifecycle_callers {
         let shipped = daemon(home.path(), &registry, None, Some("latest"));
         assert_eq!(shipped.auto_update_names(&sources), ["pi"]);
         let local = daemon(home.path(), &registry, None, None);
-        assert!(local.auto_update_names(&sources).is_empty());
+        assert_eq!(
+            local.auto_update_names(&sources),
+            [] as [std::string::String; 0]
+        );
     }
 
     const HERMES: &str = "docker.io/mcavage/marsh-hermes@sha256:6666666666666666666666666666666666666666666666666666666666666666";

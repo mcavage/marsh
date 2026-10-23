@@ -19,7 +19,7 @@ KIT_PREPARED_INPUTS ?= $(TARGET_DIR)/kit-release/build-inputs.json
 KIT_FIXTURE_INPUTS ?= $(TARGET_DIR)/kit-release/fixture-inputs.json
 SHELL_IMAGE_REPOSITORY ?=
 SHELL_IMAGE_INSECURE_REGISTRY ?= 0
-RUST_IMAGE ?= rust:1.95-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1
+RUST_IMAGE ?= rust:1.99-bookworm@sha256:48b7f435b8fc6378ce43b44f15e3a47fd8919b2825f835c39bd4bd3da50af5b8
 BUILD_CACHE_ID ?= marsh-$(shell pwd -P | cksum | cut -d' ' -f1)
 ACCEPTANCE_EVIDENCE ?=
 ACCEPTANCE_HOST_FEATURES ?=
@@ -530,7 +530,7 @@ regress: $(VERIFY_DEPS)
 DEV_SCRATCH ?= $(MARSH_DEV_SCRATCH)
 DEV_INNER_ARTIFACTS ?= $(DEV_SCRATCH)/artifacts
 DEV_INNER_TARGET ?= /var/tmp/marsh-dev-target
-DEV_INNER_ENV = RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo RUSTUP_TOOLCHAIN=1.95.0 \
+DEV_INNER_ENV = RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo RUSTUP_TOOLCHAIN=1.99.1 \
 	CARGO_TARGET_DIR="$(DEV_INNER_TARGET)" CARGO_INCREMENTAL=0 CARGO_PROFILE_RELEASE_DEBUG=0
 DEV_INNER_RUN_ENV = env -u MARSH_DAEMON_SOCKET -u MARSH_DAEMON_TOKEN -u MARSH_EXTERNAL_SESSION \
 	MARSH_HOME="$(DEV_SCRATCH)/home" MARSH_CONTROL_HOME="$(DEV_SCRATCH)/control" \
@@ -542,7 +542,7 @@ dev-inner:
 	@test "$$(uname -s)" = Linux -a -n "$(DEV_SCRATCH)" || { echo 'make dev-inner: run inside marsh --dev' >&2; exit 1; }
 	$(DEV_INNER_ENV) cargo build --locked --release \
 		-p marsh --bin marsh --bin marsh-local -p marsh-daemon --bin marsh-relay -p marsh-backend --bin marshd
-	$(DEV_INNER_ENV) CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$$(RUSTUP_HOME=/usr/local/rustup RUSTUP_TOOLCHAIN=1.95.0 rustc --print sysroot)/lib/rustlib/aarch64-unknown-linux-gnu/bin/rust-lld" \
+	$(DEV_INNER_ENV) CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$$(RUSTUP_HOME=/usr/local/rustup RUSTUP_TOOLCHAIN=1.99.1 rustc --print sysroot)/lib/rustlib/aarch64-unknown-linux-gnu/bin/rust-lld" \
 		RUSTFLAGS='-C target-feature=+crt-static' cargo build --locked --release --target aarch64-unknown-linux-musl \
 		-p marsh-worker --bin marsh-worker -p marsh-runtime --bin marsh-byte-exec
 	@set -eu; out="$(DEV_INNER_ARTIFACTS)"; rel="$(DEV_INNER_TARGET)/release"; musl="$(DEV_INNER_TARGET)/aarch64-unknown-linux-musl/release"; \

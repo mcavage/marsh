@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests/acceptance")
 from provenance import (SCHEMA, artifact_manifest, file_digest, host_only_path,
                         capture_source, verify_build_receipt, verify_shell_image_proof)
 
-RUST_IMAGE = "rust:1.95-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1"
+RUST_IMAGE = "rust:1.99-bookworm@sha256:48b7f435b8fc6378ce43b44f15e3a47fd8919b2825f835c39bd4bd3da50af5b8"
 
 
 def main() -> int:
@@ -30,7 +30,7 @@ def main() -> int:
     for name in ("source-tree", "target-dir", "marsh", "guest-artifacts", "registry", "receipt"):
         parser.add_argument("--" + name, type=Path, required=True)
     parser.add_argument("--source-revision", required=True)
-    parser.add_argument("--toolchain", default="1.95.0")
+    parser.add_argument("--toolchain", default="1.99.1")
     parser.add_argument("--cargo", default="cargo")
     parser.add_argument("--rustc", default="rustc")
     parser.add_argument("--make", default="make")

@@ -219,7 +219,7 @@ fn capture(
         }
         let requested = read as u64;
         let granted = remaining
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |available| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |available| {
                 Some(available.saturating_sub(requested))
             })
             .unwrap_or(0)

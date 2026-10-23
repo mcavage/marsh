@@ -23,7 +23,7 @@ from image_observations import verify_local_image_proof
 from owned_process import run as run_owned
 
 SCHEMA = "marsh.observed-build/v1"
-RUST_IMAGE = "rust:1.95-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1"
+RUST_IMAGE = "rust:1.99-bookworm@sha256:48b7f435b8fc6378ce43b44f15e3a47fd8919b2825f835c39bd4bd3da50af5b8"
 def _source_snapshot(source_tree: Path, revision: str) -> tuple[dict, dict]:
     """One scanner for source identity and the private per-file edit fence."""
     source_tree = source_tree.resolve(strict=True)

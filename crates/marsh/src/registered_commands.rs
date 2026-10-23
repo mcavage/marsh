@@ -238,7 +238,7 @@ mod tests {
             ),
             ("MARSH_DAEMON_TOKEN".into(), OsString::from_vec(vec![0xff])),
         ]);
-        assert!(omitted.is_empty());
+        assert_eq!(omitted, [] as [std::string::String; 0]);
         assert_eq!(environment["RAW_VALUE"], bytes);
         assert_eq!(environment["EMPTY_VALUE"], b"");
         assert_eq!(environment["CARGO_BIN_EXE_a-b.c"], [0xff, 0xfe]);
@@ -283,7 +283,7 @@ mod tests {
             environment.get("PATH").map(Vec::as_slice),
             Some(b"/usr/bin:/bin".as_slice())
         );
-        assert!(!omitted.is_empty());
+        assert_ne!(omitted, [] as [std::string::String; 0]);
         assert!(marsh_contracts::validate_exported_environment(&environment).is_ok());
     }
 }

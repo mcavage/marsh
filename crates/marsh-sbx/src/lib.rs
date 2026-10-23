@@ -2521,7 +2521,7 @@ impl StockSbx {
             let mut acquired = ShellMounts {
                 vm: vm.name.clone(),
                 acquisition: NEXT_SHELL_MOUNT
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
                     .map_err(|_| {
                         SbxError::HostGrantFence("shell acquisition identity exhausted".into())
                     })?,
@@ -5287,7 +5287,7 @@ impl StockSbx {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let nonce = worker
             .next_ping
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |nonce| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |nonce| {
                 nonce.checked_add(1)
             })
             .map_err(|_| SbxError::WorkerLeaseLost("worker ping nonce exhausted".into()))?;

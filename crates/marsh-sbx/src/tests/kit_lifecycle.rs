@@ -75,7 +75,7 @@ fn unreadable_or_unknown_inventory_never_creates_a_vm() {
         let kit = KitFixture::published(KIT);
         assert!(model.adapter().ensure_kit_vm(&kit.spec).is_err());
         assert_eq!(model.count("create"), 0);
-        assert!(model.vm_names().is_empty());
+        assert_eq!(model.vm_names(), [] as [std::string::String; 0]);
     }
 }
 

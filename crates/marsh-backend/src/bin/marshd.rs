@@ -1058,12 +1058,12 @@ mod tests {
         )
         .unwrap();
         let registry = load_agents(&packaged, &user).unwrap();
-        assert!(
+        assert_eq!(
             registry
                 .resolve_acp("claude-session")
                 .unwrap()
-                .workload_digest
-                .is_empty()
+                .workload_digest,
+            ""
         );
     }
 

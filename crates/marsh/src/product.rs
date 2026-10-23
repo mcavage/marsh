@@ -1146,7 +1146,7 @@ mod tests {
             panic!("lifecycle report must complete");
         };
         assert_eq!(status, 0);
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [u8; 0]);
         assert_eq!(
             String::from_utf8(err).unwrap(),
             "marsh: stopped /Users/x/.marsh: 2 VMs removed (marsh-k-ab12cd34, marsh-s-9ntzlqaj), daemon stopped\n"

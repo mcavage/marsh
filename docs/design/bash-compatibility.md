@@ -244,7 +244,7 @@ behavior that needs more than a small Brush patch.
 
 ## Run focused comparisons
 
-Prerequisites: Rust 1.95.0, GNU Bash 5.3 on `PATH` (5.3.0 for the suites), a C
+Prerequisites: Rust 1.99.1, GNU Bash 5.3 on `PATH` (5.3.0 for the suites), a C
 linker and ordinary Unix utilities. No Docker, SBX, credentials or Cloud
 resources are needed.
 
