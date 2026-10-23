@@ -5,6 +5,8 @@ displayName: bamboohr
 description: Read-only BambooHR directory lookups for agents
 sourceUrl: https://github.com/mcavage/marsh-tools
 licenses: [MIT]
+# CI stamps the version: the date and commit of the last change to this folder.
+provides: ["bamboohr@0.0.0"]
 dockerfile: ./Dockerfile
 capabilities:
   - type: com.docker.sandbox/sbx@1
