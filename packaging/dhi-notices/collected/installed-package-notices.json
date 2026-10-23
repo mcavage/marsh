@@ -12,7 +12,7 @@
   "packages": [
     {
       "package": "containerd.io",
-      "version": "2.4.2-0",
+      "version": "2.4.2-1",
       "notices": [],
       "archive_notices": [],
       "upstream_notices": [
@@ -30,7 +30,7 @@
     },
     {
       "package": "docker-buildx-plugin",
-      "version": "0.38.0-2",
+      "version": "0.38.1-0",
       "notices": [],
       "archive_notices": [],
       "upstream_notices": [
@@ -43,17 +43,17 @@
     },
     {
       "package": "docker-ce",
-      "version": "5:29.9.1-0",
+      "version": "5:29.9.2-0",
       "notices": [],
       "archive_notices": [],
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/moby/moby/b26fb77d3e7b01f9d21b89539c1ab428f5ca431f/LICENSE",
+          "url": "https://raw.githubusercontent.com/moby/moby/0367cbeb49b9d98cb0b4f51e95f7b54b4803e76c/LICENSE",
           "sha256": "7c87873291f289713ac5df48b1f2010eb6963752bbd6b530416ab99fc37914a8",
           "file": "texts/7c87873291f289713ac5df48b1f2010eb6963752bbd6b530416ab99fc37914a8.txt"
         },
         {
-          "url": "https://raw.githubusercontent.com/moby/moby/b26fb77d3e7b01f9d21b89539c1ab428f5ca431f/NOTICE",
+          "url": "https://raw.githubusercontent.com/moby/moby/0367cbeb49b9d98cb0b4f51e95f7b54b4803e76c/NOTICE",
           "sha256": "a249c4197359eee43031d16cecb172326f92ee7b6701af99dfe5c3e5b3d5eca9",
           "file": "texts/a249c4197359eee43031d16cecb172326f92ee7b6701af99dfe5c3e5b3d5eca9.txt"
         }
@@ -61,17 +61,17 @@
     },
     {
       "package": "docker-ce-cli",
-      "version": "5:29.9.1-0",
+      "version": "5:29.9.2-0",
       "notices": [],
       "archive_notices": [],
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/docker/cli/dfc520dcc28994c4c699b9b219fd2f5a6bcec0ff/LICENSE",
+          "url": "https://raw.githubusercontent.com/docker/cli/a82e528901260c8df6073311379eac65f92db204/LICENSE",
           "sha256": "2d81ea060825006fc8f3fe28aa5dc0ffeb80faf325b612c955229157b8c10dc0",
           "file": "texts/2d81ea060825006fc8f3fe28aa5dc0ffeb80faf325b612c955229157b8c10dc0.txt"
         },
         {
-          "url": "https://raw.githubusercontent.com/docker/cli/dfc520dcc28994c4c699b9b219fd2f5a6bcec0ff/NOTICE",
+          "url": "https://raw.githubusercontent.com/docker/cli/a82e528901260c8df6073311379eac65f92db204/NOTICE",
           "sha256": "a8c869fbda819afb8d80e0ac19bac52e766bc6c19cb38cf94f52d64c4be2aab6",
           "file": "texts/a8c869fbda819afb8d80e0ac19bac52e766bc6c19cb38cf94f52d64c4be2aab6.txt"
         }
@@ -128,19 +128,6 @@
       ],
       "archive_notices": [],
       "upstream_notices": []
-    },
-    {
-      "package": "nodejs-24",
-      "version": "24.22.0-0",
-      "notices": [],
-      "archive_notices": [],
-      "upstream_notices": [
-        {
-          "url": "https://raw.githubusercontent.com/nodejs/node/f14cd3aa7bf9ca8df2cc5b8bb14beb0f335b1d93/LICENSE",
-          "sha256": "5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace",
-          "file": "texts/5888dbb9a1d2b18f2c3e6c5f6af1b39de658372b402a0577b002777f14c62ace.txt"
-        }
-      ]
     },
     {
       "package": "nodejs-24",
