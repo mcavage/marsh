@@ -1598,6 +1598,9 @@ impl DaemonBackend for StockDaemonBackend {
             &registered,
         )?;
         store.set_job_args(&job_id, &request.arguments);
+        if request.session.terminal && link.parent_job.is_none() {
+            store.mark_terminal_job(&job_id);
+        }
         // A root job started by a stage after `join` consumes that split.
         if link.parent_job.is_none()
             && let Some(split) = request.environment.get("SPLIT_ID")
@@ -2272,7 +2275,17 @@ impl DaemonBackend for StockDaemonBackend {
             if let Err(error) = relay.ready(&attachment) {
                 return Err(rollback(relay, error));
             }
-            let mut extra_environment = Vec::new();
+            // Programs that open a link find marsh's `xdg-open`
+            // (`docs/agents.md`); an interactive session also names the
+            // user's terminal, so programs enable what it supports.
+            let mut extra_environment = vec!["BROWSER=xdg-open".to_owned()];
+            if request.session.terminal {
+                extra_environment.extend(
+                    marsh_contracts::terminal::identity(&request.terminal_environment)
+                        .into_iter()
+                        .map(|(name, value)| format!("{name}={value}")),
+                );
+            }
             if let Some((broker, grant)) = &dev_grant {
                 if let Err(error) = broker.write_relay(grant, &socket_path, &token_path) {
                     return Err(rollback(relay, error));
@@ -4451,6 +4464,7 @@ mod tests {
                 terminal_size: None,
             },
             arguments: vec![b"-c".to_vec(), b"true".to_vec()],
+            terminal_environment: std::collections::BTreeMap::new(),
         };
         let (server, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
         let error = backend
@@ -4519,6 +4533,7 @@ mod tests {
                     dev: false,
                     session,
                     arguments: vec![],
+                    terminal_environment: std::collections::BTreeMap::new(),
                 },
                 ServerAttachment::new(server).unwrap(),
                 store.clone(),

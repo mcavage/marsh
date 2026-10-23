@@ -974,7 +974,12 @@ impl AcpSessionManager {
             .iter()
             .map(|argument| argument.as_bytes().to_vec())
             .collect();
-        let execution_caller = caller.clone();
+        // ACP speaks over pipes: never a terminal job (`open_url`).
+        let execution_caller = SessionSpec {
+            terminal: false,
+            terminal_size: None,
+            ..caller.clone()
+        };
         let execution_store = store.clone();
         std::thread::spawn(move || {
             let result = backend.execute(

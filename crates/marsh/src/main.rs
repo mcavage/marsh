@@ -62,6 +62,7 @@ Usage:
   marsh kit uninstall NAME
   marsh config shell [marsh|bash|zsh]  Show or set this home's default shell
   marsh config auto-update [on|off]    Show or set automatic Kit updates
+  marsh config open-urls [on|off]      Show or set opening job links on the Mac
   marsh stop [--json]                  Remove this home's VMs and stop its daemon
   marsh reset [--json]                 Remove this home's VMs; keep the daemon
   marsh recover-home SLOT --discard
@@ -250,6 +251,12 @@ fn main() -> ExitCode {
         if external_commands::SHELL_BUILTINS.contains(&name.as_str()) {
             return exit_code(run_shell_builtin_link(&name, arguments));
         }
+        if marsh_contracts::process::OPEN_LINKS.contains(&name.as_str()) {
+            return exit_code(run_open_link(
+                &name,
+                arguments.into_iter().skip(1).collect(),
+            ));
+        }
         return exit_code(run_external_command(
             &name,
             arguments.into_iter().skip(1).collect(),
@@ -304,6 +311,35 @@ fn run_shell_builtin_link(name: &str, arguments: Vec<OsString>) -> i32 {
     let error = Command::new(executable).arg0(name).args(arguments).exec();
     eprintln!("{name}: {error}");
     126
+}
+
+/// `xdg-open`/`open` in the shell VM: `marsh open`, unless a Kit of that
+/// name is registered.
+fn run_open_link(name: &str, args: Vec<OsString>) -> i32 {
+    if session_relay()
+        .and_then(|client| {
+            client
+                .registered_commands()
+                .map_err(|error| error.to_string())
+        })
+        .is_ok_and(|names| names.iter().any(|registered| registered == name))
+    {
+        return run_external_command(name, args);
+    }
+    marsh::open_link::run(&args, marsh::open_link::Place::Shell, session_relay)
+}
+
+fn session_relay() -> Result<marsh_daemon::Client, String> {
+    match (
+        env::var_os("MARSH_DAEMON_SOCKET"),
+        env::var_os("MARSH_DAEMON_TOKEN"),
+    ) {
+        (Some(socket), Some(token)) => {
+            marsh_daemon::Client::connect_relay(Path::new(&socket), Path::new(&token))
+                .map_err(|error| error.to_string())
+        }
+        _ => Err("not in an attached marsh session".to_owned()),
+    }
 }
 
 fn run_external_command(name: &str, args: Vec<OsString>) -> i32 {
@@ -561,6 +597,16 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
         Some("context") if arguments.len() == 2 => {
             print!("{}", marsh_contracts::process::CONTEXT);
             return Ok(0);
+        }
+        Some("open")
+            if env::var_os("MARSH_DAEMON_SOCKET").is_some()
+                && env::var_os(external_commands::SESSION_VARIABLE).is_some() =>
+        {
+            return Ok(marsh::open_link::run(
+                &arguments[2..],
+                marsh::open_link::Place::Shell,
+                session_relay,
+            ));
         }
         Some("run") => return Ok(run_command(&arguments[2..])),
         Some("cloud") => return Ok(cloud_command(&arguments[2..])),

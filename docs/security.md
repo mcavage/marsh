@@ -89,6 +89,31 @@ is a socket that lets it:
 - start registered commands and splits, within the
   [limits](agents.md#limits-and-messages) and `MARSH_SPAWN`
 - list its own jobs
+- ask the Mac to open a web link
+
+### Opening links on the Mac
+
+`xdg-open URL` in the shell VM or a job is the one action on your Mac that a
+guest can request without a registered command. The daemon runs
+`/usr/bin/open URL` directly, with no shell, and only when all of these hold:
+
+- the link is `http://` or `https://`, with a host, in plain ASCII, at most
+  4096 bytes; files, paths, and other link types are refused;
+- your terminal is attached to the session, and the request comes from the
+  session's shell or a job started from that terminal (or its children), not
+  from ACP, MCP, a split or fanout branch, or `cloud`;
+- the session has opened fewer than 3 links in the last 10 seconds;
+- `marsh config open-urls` is on and the daemon did not start with
+  `MARSH_OPEN_URLS=0`.
+
+Otherwise the link is only printed. The browser then loads the page as you,
+with your cookies, so treat a link from an agent like a link in an email. A job
+that opens a link records its site (`scheme://host`, no path or query) in its
+receipt.
+
+The shell and its jobs also see a few variables naming your terminal (such as
+`TERM_PROGRAM`; [the list](agents.md#your-terminal)). They name the terminal
+application, not you, and carry no credentials.
 
 Containers for the same Kit share a VM kernel, so a kernel escape can expose
 other jobs in that VM. Different Kits run in separate VMs.
@@ -180,6 +205,7 @@ For each job marsh records:
 - mount targets
 - exit status and cleanup result
 - timing
+- the sites (`scheme://host`) of links it opened on the Mac
 
 The results journal does not capture terminal streams, command output, or ACP
 conversation content. It does store command arguments and paths, including a

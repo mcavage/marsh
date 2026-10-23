@@ -189,7 +189,7 @@ class Processes(ScenarioSuite):
         require(v.get("bv") == "set", "the image's bash does not set BASH_VERSION")
         require((v.get("bashlink"), v.get("shlink")) == ("no", "no"), f"a bash/sh link exists: {v}")
         links = set(v.get("links", "").split())
-        require({"marsh", "fixture", ALT, "shell"} <= links, f"links lack registered names: {links}")
+        require({"marsh", "fixture", ALT, "shell", "xdg-open", "open"} <= links, f"links lack registered names: {links}")
         require(not v.get("binsh", "/run").startswith("/run/marsh") and
                 not v.get("binbash", "/run").startswith("/run/marsh"), f"image shells shadowed: {v}")
         require((v.get("w_art"), v.get("w_bin"), v.get("w_json")) == ("no", "no", "no"),

@@ -88,6 +88,12 @@ fn publish(dir: &Path, capability: &JobCapability) -> std::io::Result<()> {
             .filter(|name| valid_link(name))
             .cloned(),
     );
+    // Web links open on the Mac (`marsh open`) unless a Kit has the name.
+    for helper in marsh_contracts::process::OPEN_LINKS {
+        if !names.iter().any(|name| name == helper) {
+            names.push(helper.to_owned());
+        }
+    }
     for name in names {
         let stub = bin.join(&name);
         fs::write(
@@ -410,6 +416,12 @@ mod tests {
         };
         publish(&root, &capability).unwrap();
         assert!(!root.join("skills").exists());
+        for name in ["marsh", "xdg-open", "open"] {
+            assert_eq!(
+                fs::read_to_string(root.join("bin").join(name)).unwrap(),
+                format!("#!{} --link={name}\n", marsh_contracts::process::ARTIFACT)
+            );
+        }
         assert_eq!(
             fs::read_to_string(root.join("context.md")).unwrap(),
             marsh_contracts::process::job_context("shell", &[])

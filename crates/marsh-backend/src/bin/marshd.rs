@@ -224,6 +224,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let server = Server::bind_with_stock_sbx_and_control_home(&home, &stock_sbx, &control_home)?
         .with_protected_guest_roots(protected_guest_roots)
         .with_job_defaults(defaults)
+        .with_url_opener(marsh_daemon::open_url::Opener::from_environment(
+            env::var_os("MARSH_OPEN_COMMAND").as_deref(),
+            env::var_os("MARSH_OPEN_URLS").as_deref(),
+            &home,
+        ))
         .with_backend(backend)
         .with_dev_broker(dev_broker);
     let stopping = Arc::new(AtomicBool::new(false));

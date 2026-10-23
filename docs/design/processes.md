@@ -112,7 +112,8 @@ root-owned and read-only to the job:
   worker from the shared text with the job's name and spawn set.
 - `bin/`: one two-line stub per name. Stubs exist for `marsh` and every
   registered name (a name outside the spawn set is refused by its link,
-  section 13); never for `bash` or `sh`. For example
+  section 13), plus `xdg-open` and `open` (`marsh open`, an `OpenUrl`
+  request; a registered name wins); never for `bash` or `sh`. For example
   `#!/run/marsh/marsh --link=codex`. The kernel passes the mode and the stub
   path to the binary, so the mode comes from the kernel and the link name,
   never from a caller-supplied argv0. `/proc/self/exe` confirms that the
@@ -123,9 +124,11 @@ root-owned and read-only to the job:
 - `PATH=/run/marsh/bin:` followed by the PATH from the image config. The
   worker reads only the image config (`Env`); there is no probe container.
 - `MARSH_JOB` and `MARSH_ENTRY=1`. `SHELL` is left as the image sets it.
+- `BROWSER=xdg-open` when the job has no `BROWSER`.
 
 The image's shells, system tools, and entrypoint are unchanged. Only registered
-names and `marsh` get links; there is no `bash` or `sh` link.
+names, `marsh`, `xdg-open`, and `open` get links; there is no `bash` or `sh`
+link.
 
 **What each caller gets:**
 
@@ -475,7 +478,8 @@ black-box scenarios and the gaps they do not cover.
 - **The link holds the entry rule.** The marker and docker-init parent check
   live in the artifact, not in a shell, so the rule works for any entrypoint
   (section 5).
-- **Nothing is shadowed.** Only registered names and `marsh` get links;
+- **Nothing is shadowed.** Only registered names, `marsh`, `xdg-open`, and
+  `open` get links;
   `/bin/sh`, `/bin/bash`, PATH `bash`, and `SHELL` are the image's own
   (sections 4 and 15).
 - **Cross-Kit spawning is on by default; only narrowing exists.** A child runs

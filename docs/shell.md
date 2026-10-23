@@ -89,6 +89,7 @@ A script named like a marsh subcommand (`stop`, `reset`) must be run as
 | `acp run`, `acp ask`, ... | Agent sessions over ACP; see [ACP](acp.md) |
 | `mcp publish`, `mcp load`, ... | Publish a pipeline as an MCP tool; see [MCP](mcp.md) |
 | `marsh jobs`, `marsh split`, ... | The `marsh` CLI works inside the shell too |
+| `xdg-open URL`, `open URL` | Open a web link in your Mac's browser; see [Opening links](agents.md#opening-links) |
 
 `split {` and `join` directly after a split stage are marsh syntax. To reach
 the coreutils programs, use `command split` or `command join`.

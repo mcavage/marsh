@@ -2991,6 +2991,7 @@ fn failed_shell_setup_and_preparation_detach_their_sessions() {
                 dev: false,
                 session: session(&shell_session, home.path()),
                 arguments: Vec::new(),
+                terminal_environment: std::collections::BTreeMap::new(),
             })
             .is_err()
     );
@@ -3094,6 +3095,7 @@ fn execution_attachment_preserves_bytes_and_exit_status() {
                     dev: false,
                     arguments: vec![b"-c".to_vec(), b"printf ok".to_vec()],
                     session: selected,
+                    terminal_environment: std::collections::BTreeMap::new(),
                 },
                 File::open("/dev/null").unwrap(),
                 Vec::new(),
@@ -3418,6 +3420,7 @@ fn attached_open_shell_refuses_lifecycle_immediately_without_blocking_status() {
             dev: false,
             arguments: Vec::new(),
             session: session(&session_id, home.path()),
+            terminal_environment: std::collections::BTreeMap::new(),
         })
         .unwrap();
 
@@ -4733,6 +4736,7 @@ fn ended_shell_releases_acp_controller_without_explicit_detach() {
             dev: false,
             arguments: vec![],
             session: acp.first.clone(),
+            terminal_environment: std::collections::BTreeMap::new(),
         })),
         Ok(PublicReply::ShellAccepted)
     ));
