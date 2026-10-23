@@ -1,5 +1,12 @@
 #!/bin/sh
 set -eu
+# marsh updates this Kit's image itself (`marsh status` shows when). Upstream's
+# `hermes update` has nothing to update in a container, and its refusal tells
+# you to `docker pull` an image marsh does not use.
+if [ "${1-}" = update ]; then
+  echo 'hermes: update is handled by marsh, which keeps this Kit current on its own; `hermes --version` shows the installed release, and `marsh status` the last update' >&2
+  exit 125
+fi
 # marsh names the home; Hermes keeps its state in ~/.hermes there.
 export HOME="${MARSH_SELECTED_HOME:-$HOME}"
 mkdir -p "$HOME/.hermes" "$HOME/.agents/skills"
@@ -32,7 +39,8 @@ if [ "${MCP_GATEWAY_URL:-}" = http://mcp-gateway.docker.internal/mcp ] &&
     echo 'hermes kit: could not add the MCP gateway to config.yaml' >&2
 fi
 # Per-run instructions: marsh's job context, and the shared-skills rule.
-rule='Skills you create go to the shared folder that every agent in this marsh home reads. Create them flat, with no category.
+rule='You run in a marsh sandbox that marsh keeps up to date. `hermes --version` shows your installed release; do not run `hermes update`, which does not apply here.
+Skills you create go to the shared folder that every agent in this marsh home reads. Create them flat, with no category.
 To use other agents or models (a second opinion, parallel work, a different vendor), start them as marsh child jobs as described above, e.g. codex exec, claude -p, pix -p, with fanout or split; do not simulate them yourself.'
 if [ -r /run/marsh/context.md ]; then
   HERMES_EPHEMERAL_SYSTEM_PROMPT="$(cat /run/marsh/context.md)

@@ -12,8 +12,8 @@ hermes
 
 That's all the setup. On first run Hermes uses the provider of the key you
 stored (Anthropic, else Google Gemini). SBX inserts the key at the provider's
-API, so it is never in the sandbox. `marsh kit upgrade hermes` moves to new
-releases.
+API, so it is never in the sandbox. marsh keeps the Kit up to date on its own
+(see [Updates](#updates)).
 
 ## Skills
 
@@ -60,11 +60,19 @@ provider. Each run also passes Hermes marsh's job context (which agents it can
 start, and how) through `HERMES_EPHEMERAL_SYSTEM_PROMPT`, which takes the place
 of a configured `agent.system_prompt` or personality.
 
+## Updates
+
+marsh checks `:stable` when its daemon starts and once a day, and switches to
+a newer image when no job is using the Kit (`marsh status` shows the last
+update). Inside the Kit, `hermes --version` shows the installed release and
+`hermes update` is refused: it has no checkout to update, and the image is
+what changes.
+
 ## Releases
 
 CI follows Hermes's releases: every six hours it builds the latest stable
 Hermes release, smoke-tests it, and publishes `:VERSION` and `:stable`
-(`.github/workflows/publish.yml`). `marsh kit upgrade hermes` picks it up.
+(`.github/workflows/publish.yml`). marsh follows `:stable`.
 
 To build your own copy: `make publish TAG=docker.io/you/marsh-hermes`.
 

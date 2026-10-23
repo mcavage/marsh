@@ -5,7 +5,7 @@ displayName: Hermes
 description: Hermes Agent on marsh, sharing the marsh home's skills folder
 sourceUrl: https://github.com/mcavage/marsh-hermes
 licenses: [MIT]
-provides: ["hermes-agent@0.21.7"]
+provides: ["hermes-agent@0.22.5"]
 dockerfile: ./Dockerfile
 capabilities:
   - type: com.docker.sandbox/sbx@1
