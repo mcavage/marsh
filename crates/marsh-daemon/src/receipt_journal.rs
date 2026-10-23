@@ -180,7 +180,12 @@ impl ReceiptJournal {
 pub(crate) fn trim_receipts(receipts: &mut BTreeMap<String, JobReceipt>) -> bool {
     let mut terminal: Vec<_> = receipts
         .values()
-        .filter(|receipt| !matches!(receipt.state, JobState::Queued | JobState::Running))
+        .filter(|receipt| {
+            !matches!(
+                receipt.state,
+                JobState::Queued | JobState::Running | JobState::Detached
+            )
+        })
         .map(|receipt| (receipt.cursor, receipt.job_id.clone()))
         .collect();
     terminal.sort_by_key(|(cursor, _)| *cursor);
@@ -321,7 +326,7 @@ fn validate_record(
         if matches!(
             existing.state,
             JobState::Finished | JobState::Failed | JobState::Cancelled | JobState::Unknown
-        ) && existing != receipt
+        ) && !same_settlement(existing, receipt)
         {
             return Err(corrupt_journal("terminal receipt changed"));
         }
@@ -362,7 +367,7 @@ fn validate_receipt_state(receipt: &JobReceipt) -> Result<(), DaemonError> {
                 && receipt.container_id.is_none()
                 && (receipt.vm_id.is_none() || cloud_sandbox)
                 && match state {
-                    JobState::Queued | JobState::Running => {
+                    JobState::Queued | JobState::Running | JobState::Detached => {
                         (state == JobState::Queued || cloud_sandbox)
                             && receipt.exit.is_none()
                             && !receipt.output_complete
@@ -377,6 +382,7 @@ fn validate_receipt_state(receipt: &JobReceipt) -> Result<(), DaemonError> {
                     }
                 }
         }
+        (_, JobState::Detached) => false,
         (_, JobState::Queued) => {
             (receipt.worker_id.is_none() && receipt.vm_id.is_none()
                 || receipt.worker_id.is_some() && receipt.vm_id.is_some())
@@ -409,10 +415,23 @@ fn validate_receipt_state(receipt: &JobReceipt) -> Result<(), DaemonError> {
     Ok(())
 }
 
+/// A settled receipt never changes, except a detached cloud run's own label
+/// (a kept patch applied or discarded later).
+fn same_settlement(existing: &JobReceipt, receipt: &JobReceipt) -> bool {
+    if existing.detached.is_some() && receipt.detached.is_some() {
+        let mut relabelled = receipt.clone();
+        relabelled.detached.clone_from(&existing.detached);
+        existing == &relabelled
+    } else {
+        existing == receipt
+    }
+}
+
 fn valid_transition(previous: JobState, next: JobState) -> bool {
     match previous {
         JobState::Queued => true,
         JobState::Running => next != JobState::Queued,
+        JobState::Detached => !matches!(next, JobState::Queued | JobState::Running),
         JobState::Finished | JobState::Failed | JobState::Cancelled | JobState::Unknown => {
             previous == next
         }

@@ -22,7 +22,10 @@ use std::{
 use thiserror::Error;
 
 const MAX_DOCUMENT: usize = 4 * 1024 * 1024;
+/// Owned sandboxes of attached runs (and unresolved creates).
 const MAX_OWNED: usize = 8;
+/// Detached runs' sandboxes (`docs/design/cloud-detach.md` s5), apart.
+pub const MAX_DETACHED: usize = 8;
 const CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
 const CREATE_TIMEOUT: Duration = Duration::from_mins(5);
 const REMOVE_TIMEOUT: Duration = Duration::from_secs(90);
@@ -112,6 +115,9 @@ pub struct CloudImageSpec {
     pub cpus: u32,
     pub memory_mib: u32,
     pub ttl: Duration,
+    /// When the TTL lapses, stop (suspend in place) instead of deleting:
+    /// a detached run pauses and resumes on the next exec.
+    pub stop_on_timeout: bool,
 }
 
 /// A cloud sandbox from a v3 Kit: mixin directories (`--kit`) and
@@ -154,7 +160,12 @@ impl CloudImageSpec {
             "--ttl".into(),
             format!("{}s", self.ttl.as_secs()).into(),
             "--on-timeout".into(),
-            "delete".into(),
+            if self.stop_on_timeout {
+                "stop"
+            } else {
+                "delete"
+            }
+            .into(),
             "--no-progress".into(),
         ]);
         args
@@ -204,6 +215,9 @@ pub enum CloudPhase {
     Ready,
     Quarantined,
     Removing,
+    /// A detached run's sandbox: survives restart; read-only control,
+    /// signals and removal only, never a new submission.
+    Detached,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -222,6 +236,10 @@ pub struct CloudRecord {
     /// An unseen create can be hidden, so its absence cannot release ownership.
     #[serde(default)]
     pub observed: bool,
+    /// Its run is (or is about to be) detached: counted in
+    /// [`MAX_DETACHED`], and recovered as `Detached`, not quarantined.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub detached: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -413,7 +431,7 @@ impl CloudSbx {
             },
             Err(e) => return Err(e.into()),
         };
-        if file.version != 1 || file.entries.len() > MAX_OWNED {
+        if file.version != 1 || file.entries.len() > MAX_OWNED + MAX_DETACHED {
             return Err(CloudError::Invalid(
                 "invalid cloud ownership version/capacity",
             ));
@@ -429,12 +447,21 @@ impl CloudSbx {
                 || entry.image.chars().any(char::is_control)
                 || entry.id.as_ref().is_some_and(|id| !ids.insert(id.clone()))
                 || (entry.id.is_none() && (entry.phase == CloudPhase::Ready || entry.observed))
-                || (entry.phase == CloudPhase::Ready && !entry.observed)
+                || (matches!(entry.phase, CloudPhase::Ready | CloudPhase::Detached)
+                    && (!entry.observed || entry.id.is_none()))
+                || (entry.phase == CloudPhase::Detached && !entry.detached)
             {
                 return Err(CloudError::Invalid("invalid cloud ownership record"));
             }
+            // Restarted resources are cleanup-only, except a detached run's,
+            // which keeps read-only control (its run already started or
+            // never will: the start is at most once).
             if entry.phase == CloudPhase::Ready {
-                entry.phase = CloudPhase::Quarantined;
+                entry.phase = if entry.detached {
+                    CloudPhase::Detached
+                } else {
+                    CloudPhase::Quarantined
+                };
             }
         }
         let adapter = Self {
@@ -636,6 +663,7 @@ impl CloudSbx {
     /// # Errors
     /// Rejects invalid specs/capacity before creation. Ambiguous creates retain
     /// their persisted intent and are never automatically repeated.
+    #[allow(clippy::too_many_lines)] // One ordered probe, intent, create, and readiness sequence.
     pub fn create(&self, spec: &CloudImageSpec) -> Result<CloudRecord, CloudError> {
         spec.validate()?;
         let help = self.control(
@@ -663,7 +691,7 @@ impl CloudSbx {
             }
         };
         self.update(|file| {
-            if file.entries.len() >= MAX_OWNED {
+            if attached(file) >= MAX_OWNED {
                 return Err(CloudError::Invalid(
                     "cloud sandbox capacity includes unresolved resources; run `marsh workers reset cloud`",
                 ));
@@ -680,6 +708,7 @@ impl CloudSbx {
                     agent: spec.kit.as_ref().map(|kit| kit.name.clone()),
                     phase: CloudPhase::Pending,
                     observed: false,
+                    detached: false,
                 },
             );
             Ok(())
@@ -871,30 +900,7 @@ impl CloudSbx {
         args: &[OsString],
     ) -> Result<Attachment, CloudError> {
         self.ready(id)?;
-        if args.len() > 256
-            || program.len() > 4096
-            || args.iter().any(|arg| arg.len() > 65536)
-            || args.iter().map(|arg| arg.len()).sum::<usize>() > 128 * 1024
-        {
-            return Err(CloudError::Invalid("cloud control argv exceeds its bound"));
-        }
-        let mut command = vec![
-            "exec".into(),
-            "-i".into(),
-            id.as_str().into(),
-            program.into(),
-        ];
-        for arg in args {
-            if arg.to_str().is_none_or(|s| s.contains('\0')) {
-                return Err(CloudError::Invalid(
-                    "cloud control argv must be UTF-8 without NUL",
-                ));
-            }
-            command.push(arg.clone());
-        }
-        if program.is_empty() || program.contains('\0') {
-            return Err(CloudError::Invalid("invalid cloud control program"));
-        }
+        let command = exec_words(id, program, args)?;
         Ok(self.spawn_ready(id, &self.invocation(command))?)
     }
 
@@ -903,12 +909,12 @@ impl CloudSbx {
         id: &CloudSandboxId,
         invocation: &Invocation,
     ) -> std::io::Result<Attachment> {
-        self.spawn_admitted(Some(id), invocation)
+        self.spawn_admitted(Some((id, CloudPhase::Ready)), invocation)
     }
 
     fn spawn_admitted(
         &self,
-        ready: Option<&CloudSandboxId>,
+        ready: Option<(&CloudSandboxId, CloudPhase)>,
         invocation: &Invocation,
     ) -> std::io::Result<Attachment> {
         let state = self
@@ -919,12 +925,12 @@ impl CloudSbx {
         // before waiting on it could become stale and admit effects afterward.
         self.check_directory()
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        if ready.is_some_and(|id| {
+        if ready.is_some_and(|(id, phase)| {
             !state
                 .file
                 .entries
                 .values()
-                .any(|r| r.id.as_ref() == Some(id) && r.phase == CloudPhase::Ready)
+                .any(|r| r.id.as_ref() == Some(id) && r.phase == phase)
         }) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
@@ -1034,6 +1040,107 @@ impl CloudSbx {
         Ok(output.stdout)
     }
 
+    /// Before a run detaches: count its sandbox in the detached cap and
+    /// recover it as `Detached` (not quarantined) after a restart.
+    ///
+    /// # Errors
+    /// Refuses an unowned or unready sandbox, or a full detached cap.
+    pub fn mark_detached(&self, id: &CloudSandboxId) -> Result<(), CloudError> {
+        let record = self.record(id)?;
+        self.update(|file| {
+            if file
+                .entries
+                .values()
+                .filter(|entry| entry.detached && entry.name != record.name)
+                .count()
+                >= MAX_DETACHED
+            {
+                return Err(CloudError::Invalid(
+                    "detached cloud runs are at capacity; collect or discard one first",
+                ));
+            }
+            let entry = file
+                .entries
+                .get_mut(&record.name)
+                .ok_or(CloudError::Invalid("cloud record disappeared"))?;
+            if entry.phase != CloudPhase::Ready {
+                return Err(CloudError::NotReady(record.name.clone()));
+            }
+            entry.detached = true;
+            Ok(())
+        })
+    }
+
+    /// Detached sandboxes owned now.
+    ///
+    /// # Errors
+    /// Fails if ownership storage changed.
+    pub fn detached_count(&self) -> Result<usize, CloudError> {
+        Ok(self.records()?.iter().filter(|r| r.detached).count())
+    }
+
+    /// The run started: no more submissions, only control (`control`),
+    /// signals and removal.
+    ///
+    /// # Errors
+    /// Refuses an unowned sandbox or one not marked detached.
+    pub fn detach(&self, id: &CloudSandboxId) -> Result<(), CloudError> {
+        let record = self.record(id)?;
+        self.update(|file| {
+            let entry = file
+                .entries
+                .get_mut(&record.name)
+                .ok_or(CloudError::Invalid("cloud record disappeared"))?;
+            if !entry.detached || !matches!(entry.phase, CloudPhase::Ready | CloudPhase::Detached) {
+                return Err(CloudError::NotReady(record.name.clone()));
+            }
+            entry.phase = CloudPhase::Detached;
+            Ok(())
+        })
+    }
+
+    /// A detached sandbox's stock status (`running`, `stopped`, ...), or
+    /// `None` when a complete inventory no longer lists it.
+    ///
+    /// # Errors
+    /// Fails on an unowned ID, a foreign identity, or an incomplete inventory.
+    pub fn detached_status(&self, id: &CloudSandboxId) -> Result<Option<String>, CloudError> {
+        let record = self.record(id)?;
+        if record.phase != CloudPhase::Detached {
+            return Err(CloudError::NotReady(record.name));
+        }
+        Ok(self.observe_owned(id)?.map(|vm| vm.status))
+    }
+
+    /// A read-only control step or a signal in a detached sandbox, by its
+    /// recorded ID, in any daemon generation. Stock `exec` starts a
+    /// stopped sandbox first.
+    ///
+    /// # Errors
+    /// Rejects unowned, non-detached or changed resources and invalid argv.
+    pub fn control_detached(
+        &self,
+        id: &CloudSandboxId,
+        program: &str,
+        args: &[OsString],
+    ) -> Result<Attachment, CloudError> {
+        let record = self.record(id)?;
+        if record.phase != CloudPhase::Detached {
+            return Err(CloudError::NotReady(record.name));
+        }
+        match self.observe_owned(id)? {
+            Some(vm)
+                if match &record.agent {
+                    Some(kit) => vm.agent.as_ref() == Some(kit),
+                    None => vm.image.as_deref() == Some(record.image.as_str()),
+                } => {}
+            Some(_) => return Err(CloudError::Foreign(record.name)),
+            None => return Err(CloudError::NotReady(record.name)),
+        }
+        let command = exec_words(id, program, args)?;
+        Ok(self.spawn_admitted(Some((id, CloudPhase::Detached)), &self.invocation(command))?)
+    }
+
     /// Removal is ID-addressed; uncertain cleanup can be requested again while
     /// the ID remains owned. Only a fresh complete inventory
     /// proving absence releases the persisted record; an ack or timeout cannot.
@@ -1093,6 +1200,47 @@ impl Drop for CreationFlight<'_> {
     }
 }
 
+/// Records that count toward [`MAX_OWNED`]: not a detached run's.
+fn attached(file: &OwnershipFile) -> usize {
+    file.entries
+        .values()
+        .filter(|entry| !entry.detached)
+        .count()
+}
+
+/// `exec -i ID PROGRAM ARG...` for trusted control argv (bounded UTF-8).
+fn exec_words(
+    id: &CloudSandboxId,
+    program: &str,
+    args: &[OsString],
+) -> Result<Vec<OsString>, CloudError> {
+    if args.len() > 256
+        || program.len() > 4096
+        || args.iter().any(|arg| arg.len() > 65536)
+        || args.iter().map(|arg| arg.len()).sum::<usize>() > 128 * 1024
+    {
+        return Err(CloudError::Invalid("cloud control argv exceeds its bound"));
+    }
+    let mut command = vec![
+        "exec".into(),
+        "-i".into(),
+        id.as_str().into(),
+        program.into(),
+    ];
+    for arg in args {
+        if arg.to_str().is_none_or(|s| s.contains('\0')) {
+            return Err(CloudError::Invalid(
+                "cloud control argv must be UTF-8 without NUL",
+            ));
+        }
+        command.push(arg.clone());
+    }
+    if program.is_empty() || program.contains('\0') {
+        return Err(CloudError::Invalid("invalid cloud control program"));
+    }
+    Ok(command)
+}
+
 fn private_file(file: &File) -> Result<(), CloudError> {
     let md = file.metadata()?;
     if !md.is_file()
@@ -1132,4 +1280,77 @@ fn diagnostic(value: &str) -> String {
         .take(2048)
         .flat_map(char::escape_default)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    /// Opening never runs stock commands; any attempt fails the test.
+    struct NoEffects;
+
+    impl CommandRunner for NoEffects {
+        fn run(&self, _: &Invocation) -> std::io::Result<CommandOutput> {
+            Err(std::io::Error::other("unexpected stock effect"))
+        }
+        fn run_bounded(&self, _: &Invocation, _: Duration) -> std::io::Result<CommandOutput> {
+            Err(std::io::Error::other("unexpected stock effect"))
+        }
+        fn spawn_attached(&self, _: &Invocation) -> std::io::Result<Attachment> {
+            Err(std::io::Error::other("unexpected stock effect"))
+        }
+    }
+
+    fn record(name: &str, id: &str, detached: bool) -> CloudRecord {
+        CloudRecord {
+            name: name.into(),
+            id: Some(CloudSandboxId::parse(id.into()).unwrap()),
+            image: format!("docker.io/library/alpine@sha256:{}", "a".repeat(64)),
+            agent: None,
+            phase: CloudPhase::Ready,
+            observed: true,
+            detached,
+        }
+    }
+
+    #[test]
+    fn restart_quarantines_attached_sandboxes_but_keeps_detached_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let directory = dir.path().canonicalize().unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let attached = record("marsh-s-aaaaaaaa", "sbx_aaa", false);
+        let detached = record("marsh-s-bbbbbbbb", "sbx_bbb", true);
+        let file = OwnershipFile {
+            version: 1,
+            entries: BTreeMap::from([
+                (attached.name.clone(), attached),
+                (detached.name.clone(), detached),
+            ]),
+        };
+        let path = directory.join("cloud-ownership.json");
+        fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let adapter = CloudSbx::open(
+            PathBuf::from("/usr/bin/false"),
+            Arc::new(NoEffects),
+            directory,
+        )
+        .unwrap();
+        let phases = adapter
+            .records()
+            .unwrap()
+            .into_iter()
+            .map(|record| (record.name, record.phase))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(phases["marsh-s-aaaaaaaa"], CloudPhase::Quarantined);
+        assert_eq!(phases["marsh-s-bbbbbbbb"], CloudPhase::Detached);
+        assert_eq!(adapter.detached_count().unwrap(), 1);
+        // A detached sandbox takes no new submission.
+        let id = CloudSandboxId::parse("sbx_bbb".into()).unwrap();
+        assert!(matches!(
+            adapter.spawn(&id, "/bin/true", &[]),
+            Err(CloudError::NotReady(_))
+        ));
+    }
 }

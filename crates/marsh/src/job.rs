@@ -653,7 +653,19 @@ fn row_line(row: &Row<'_>, tree: bool, now: i64, id_width: usize) -> String {
                 labelled(text(job, "label"), &printable(text(job, "command"))),
             ),
         },
-        _ => (text(job, "state"), command_line(job)),
+        _ => match job.get("detached").and_then(serde_json::Value::as_str) {
+            // A detached cloud run: its own state, and the number its
+            // `marsh cloud` commands and notices use.
+            Some(detached) => (
+                detached,
+                format!(
+                    "{}  (cloud job {})",
+                    command_line(job),
+                    number(job, "cursor").unwrap_or_default()
+                ),
+            ),
+            None => (text(job, "state"), command_line(job)),
+        },
     };
     let row_node = row.merged.unwrap_or(job);
     let (exit, elapsed, started) = match row.merged {
@@ -894,7 +906,7 @@ fn number(node: &serde_json::Value, name: &str) -> Option<i64> {
 fn active(node: &serde_json::Value) -> bool {
     matches!(
         text(node, "state"),
-        "queued" | "running" | "run" | "pending"
+        "queued" | "running" | "run" | "pending" | "detached"
     ) || node
         .get("children")
         .and_then(serde_json::Value::as_array)

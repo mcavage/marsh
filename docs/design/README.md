@@ -36,8 +36,9 @@ Cloud placement (session-origin slice shipped as a preview; the rest proposed):
 
 - [Cloud placement](cloud-placement.md): shell-native remote commands, automatic
   delta return, nested placement, model obligations, and acceptance gates.
-- [Detached cloud work](cloud-detach.md) (proposed): start cloud work, close the
-  lid, and collect output and file changes later.
+- [Detached cloud work](cloud-detach.md) (implemented, v1 without nested
+  calls): start cloud work, close the lid, and collect output and file
+  changes later.
 - [Session-origin dispatch](../plan/cloud-dispatch.md): what is implemented,
   where, and its live evidence.
 - [Live cloud feasibility findings](../plan/cloud-feasibility.md): tested Kit v2

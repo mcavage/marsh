@@ -148,7 +148,7 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   the first nonzero branch status. Limits: 16 branches, 64 MiB of input, 16 MiB
   of combined branch output.
 
-**cloud** [**--cpus** *N*] [**--ttl** *DURATION*] [**--image** *REF*] [**-c** *SCRIPT* [*NAME* [*ARG*...]] | **--** *PROGRAM* [*ARG*...]]
+**cloud** [**--cpus** *N*] [**--ttl** *DURATION*] [**--image** *REF*] [**-d**] [**-c** *SCRIPT* [*NAME* [*ARG*...]] | **--** *PROGRAM* [*ARG*...]]
 : Preview. Run a script or program in a new Docker Cloud sandbox; in the
   marsh shell, **cloud** [*OPTION*...] **{** *LIST*; **}** does the same. With
   no command, from a terminal, open an interactive cloud shell. A private,
@@ -160,6 +160,20 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   paths. Needs a Docker sign-in with Docker Cloud sandbox access. Ctrl-C exits
   130 after the remote command stops and its changes return. See
   [Docker Cloud](../cloud.md).
+
+  With **-d** (**--detach**) the run is detached: marsh prints its job number
+  and returns at once, and the run continues with the laptop closed (no
+  terminal, no input; **--ttl** defaults to 2h and pauses the run rather than
+  ending it). marsh collects it by itself and writes its changes back only if
+  none of the files it changed were edited here meanwhile; otherwise they are
+  kept as a patch. A detached block that calls a registered Kit is refused.
+
+**cloud attach**|**collect**|**diff**|**apply**|**discard**|**stop** *JOB*
+: Control a detached cloud run: **attach** shows its output from the start and
+  follows it (Ctrl-C stops following, not the run); **collect** checks on it
+  now; **diff** shows a kept patch; **apply** applies a kept patch anyway;
+  **discard** deletes its sandbox and drops any kept patch; **stop** sends INT,
+  then KILL after 10 seconds.
 
 **config shell** [**bash**|**zsh**|**marsh**]
 : Set, or with no name print, the default shell for this **MARSH_HOME**.
@@ -183,15 +197,19 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 **workers reset** *KIT*[,*KIT*...]|**all**
 : Remove idle Kit VMs, including quarantined ones. The next use creates a new
   VM. **workers reset cloud** deletes every Docker Cloud sandbox this daemon
-  owns and verifies they are gone.
+  owns and verifies they are gone, except detached runs' sandboxes; with
+  **--detached** those runs are discarded too.
 
-**reset** [**--json**]
-: Remove every VM this scope owns. The daemon keeps running. Refuses while
+**reset** [**--json**] [**--detached**]
+: Remove every VM this scope owns (detached cloud runs are kept unless
+  **--detached** is given). The daemon keeps running. Refuses while
   shells or jobs are active. The guest home and results are kept. Exits
   nonzero if any cleanup could not be verified.
 
-**stop** [**--json**]
-: Remove every VM this scope owns and stop its daemon. Refuses while shells or
+**stop** [**--json**] [**--detached**]
+: Remove every VM this scope owns (detached cloud runs are kept, and collected
+  when the daemon starts again, unless **--detached** is given) and stop its
+  daemon. Refuses while shells or
   jobs are active. The guest home and results are kept. Exits nonzero if any
   cleanup could not be verified.
 
