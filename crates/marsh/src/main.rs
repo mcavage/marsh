@@ -4273,7 +4273,7 @@ exit 64
                 Ok(0)
             });
             assert_eq!(status, ExitCode::SUCCESS);
-            assert!(output.is_empty());
+            assert_eq!(output, [] as [u8; 0]);
         }
     }
 
@@ -4298,7 +4298,7 @@ exit 64
                 Ok(0)
             });
             assert_eq!(status, ExitCode::SUCCESS);
-            assert!(output.is_empty());
+            assert_eq!(output, [] as [u8; 0]);
         }
     }
 

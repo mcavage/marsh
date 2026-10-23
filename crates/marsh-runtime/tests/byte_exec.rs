@@ -33,7 +33,7 @@ fn native_exec_preserves_raw_values_stdin_stdout_and_status() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
     assert_eq!(output.stdout, [raw, b"\n".to_vec()].concat());
     let payload = Payload {
         argv: vec![b"/bin/cat".to_vec()],
@@ -56,7 +56,7 @@ fn native_exec_preserves_raw_values_stdin_stdout_and_status() {
     let output = child.wait_with_output().unwrap();
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(output.stdout, input);
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn malformed_nul_reserved_and_oversized_payloads_never_execute() {
             .unwrap();
         assert_eq!(output.status.code(), Some(125));
         assert_eq!(output.stderr, b"marsh: native byte launch failed\n");
-        assert!(output.stdout.is_empty());
+        assert_eq!(output.stdout, [] as [u8; 0]);
         assert!(!marker.exists());
     }
     let bad = Payload {
@@ -143,7 +143,7 @@ fn errno_status_and_payload_failure_are_distinct() {
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(expected));
-        assert!(output.stdout.is_empty());
+        assert_eq!(output.stdout, [] as [u8; 0]);
         assert!(!output.stderr.windows(6).any(|w| w == b"secret"));
     }
 }
@@ -174,7 +174,7 @@ fn closed_stderr_does_not_replace_typed_launch_status_with_a_panic() {
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(status));
-        assert!(output.stdout.is_empty());
+        assert_eq!(output.stdout, [] as [u8; 0]);
     }
 }
 

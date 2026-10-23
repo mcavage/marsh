@@ -6,5 +6,5 @@ that run inside stock Docker Sandbox VMs. They are exported under
 into Linux.
 
 Release builders set `RUST_IMAGE` to a reviewed immutable builder reference.
-The default `rust:1.95-bookworm` keeps a source checkout straightforward for
+The default `rust:1.99-bookworm` keeps a source checkout straightforward for
 local development.

@@ -156,7 +156,7 @@ fn create_intent_persists_before_create_and_restart_adopts_present_or_drops_abse
             .remove_owned_vm(&created, Instant::now() + Duration::from_secs(5))
             .unwrap()
     );
-    assert!(model.vm_names().is_empty());
+    assert_eq!(model.vm_names(), [] as [std::string::String; 0]);
 }
 
 #[test]

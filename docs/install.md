@@ -194,7 +194,7 @@ If your Docker Sandboxes policy restricts Kit sources, allow
 
 ## From source
 
-You need Docker Desktop with Buildx, Rust 1.95, Python 3.10 or newer, `jq`,
+You need Docker Desktop with Buildx, Rust 1.99, Python 3.10 or newer, `jq`,
 and the `sbx` version listed under [Requirements](#requirements). See
 [CONTRIBUTING.md](../CONTRIBUTING.md) for the development loop.
 

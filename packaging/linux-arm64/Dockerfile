@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
-ARG RUST_IMAGE=rust:1.95-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1
+ARG RUST_IMAGE=rust:1.99-bookworm@sha256:48b7f435b8fc6378ce43b44f15e3a47fd8919b2825f835c39bd4bd3da50af5b8
 FROM ${RUST_IMAGE} AS build
 
 WORKDIR /source
 ARG BUILD_CACHE_ID=marsh-default
 # Release builds stay serial; `make dev` raises this for its persistent cache.
 ARG CARGO_JOBS=1
-RUN rustup target add --toolchain 1.95.0 aarch64-unknown-linux-musl
+RUN rustup target add --toolchain 1.99.1 aarch64-unknown-linux-musl
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY vendor ./vendor

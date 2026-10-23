@@ -2216,7 +2216,7 @@ mod tests {
             }],
         }));
         assert_eq!(outcome, RequestPermissionOutcome::Cancelled);
-        assert!(inbox.pending().is_empty());
+        assert!(inbox.pending().is_empty(), "{:?}", inbox.pending());
     }
 
     #[test]
@@ -2249,7 +2249,7 @@ mod tests {
             }
             task.abort();
             let _ = task.await;
-            assert!(inbox.pending().is_empty());
+            assert!(inbox.pending().is_empty(), "{:?}", inbox.pending());
         });
     }
 
@@ -2263,7 +2263,7 @@ mod tests {
         let mut seen = Vec::new();
         loop {
             let (page, next_cursor, more) = log.page(after);
-            assert!(!page.is_empty());
+            assert!(!page.is_empty(), "expected at least one entry");
             assert!(page.len() <= MAX_STATUS_PAGE_UPDATES);
             assert_eq!(next_cursor, page.last().unwrap().cursor);
             seen.extend(page.iter().map(|update| update.cursor));
@@ -2294,7 +2294,7 @@ mod tests {
         assert!(more);
         assert_eq!(next_cursor, page.last().unwrap().cursor);
         let (second, _, more) = log.page(next_cursor);
-        assert!(!second.is_empty());
+        assert!(!second.is_empty(), "expected at least one entry");
         assert!(!more);
     }
 
@@ -2407,7 +2407,10 @@ mod tests {
             .unwrap(),
             expected_choices
         );
-        assert!(!bounded.status_omissions.is_empty());
+        assert!(
+            !bounded.status_omissions.is_empty(),
+            "expected at least one entry"
+        );
         assert!(
             !bounded.updates_lost,
             "presentation trimming is not capture loss"

@@ -437,11 +437,13 @@ mod tests {
             narrow_spawn(&parent, Some(&wide)),
             (vec!["fixture".to_owned()], vec!["shell".to_owned()])
         );
-        assert!(
-            narrow_spawn(&parent, Some(&parse_spawn("none")))
-                .0
-                .is_empty()
+        assert_eq!(
+            narrow_spawn(&parent, Some(&parse_spawn("none"))).0,
+            [] as [std::string::String; 0]
         );
-        assert!(narrow_spawn(&[], Some(&wide)).0.is_empty());
+        assert_eq!(
+            narrow_spawn(&[], Some(&wide)).0,
+            [] as [std::string::String; 0]
+        );
     }
 }

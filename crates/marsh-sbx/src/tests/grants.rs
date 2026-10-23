@@ -516,7 +516,10 @@ fn session_close_waits_for_an_inflight_pin_and_rejects_late_lazy_preparation() {
 
     preparing.join().unwrap().unwrap();
     close_receive.recv_timeout(WAIT_LIMIT).unwrap().unwrap();
-    assert!(adapter.pinned_session_vms("session-racing").is_empty());
+    assert_eq!(
+        adapter.pinned_session_vms("session-racing"),
+        [] as [std::string::String; 0]
+    );
     assert!(matches!(
         adapter.prepare_session_grants(&vm, "session-racing", &[rw(&source, "/Users/alice/project")]),
         Err(SbxError::ClosedSession(session)) if session == "session-racing"
@@ -548,7 +551,10 @@ fn busy_shell_session_close_fails_fast_without_closing_the_session() {
     // The refused close did not end the session: its pin completed.
     assert_eq!(adapter.pinned_session_vms("session-busy"), [KIT]);
     adapter.close_shell_session_grants("session-busy").unwrap();
-    assert!(adapter.pinned_session_vms("session-busy").is_empty());
+    assert_eq!(
+        adapter.pinned_session_vms("session-busy"),
+        [] as [std::string::String; 0]
+    );
 }
 
 #[test]

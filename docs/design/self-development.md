@@ -61,7 +61,7 @@ no separate dev image.
 `marsh --dev` attaches to one warm dev shell VM per daemon (`vm_name(Shell, "dev")`, kept
 apart from the ordinary shell VM because it holds the broker grant) made from the one shell
 template (`libexec/marsh/shell-image`, built from `packaging/shell`): the DHI Debian base
-with gcc/make/git/python3/node/npm and Docker Engine installed, plus Rust 1.95 with the aarch64 gnu and musl
+with gcc/make/git/python3/node/npm and Docker Engine installed, plus Rust 1.99 with the aarch64 gnu and musl
 targets, plus `pi-dev` (see [Pi in the dev shell](#pi-in-the-dev-shell)). Ordinary shells have
 the same tools. Its VM-local cargo target survives sessions. Kit jobs (ACP
 agents included) still get no daemon socket or relay. Grants exist only on a dev install's

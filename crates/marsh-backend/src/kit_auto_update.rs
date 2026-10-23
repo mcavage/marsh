@@ -174,7 +174,10 @@ mod tests {
             record.take_notices(Some("claude")),
             ["marsh: claude updated (2.1.305 → 2.1.307)"]
         );
-        assert!(record.take_notices(Some("claude")).is_empty());
+        assert_eq!(
+            record.take_notices(Some("claude")),
+            [] as [std::string::String; 0]
+        );
         assert!(!record.has_notices(Some("claude")));
         assert_eq!(
             record.take_notices(None),
@@ -184,7 +187,7 @@ mod tests {
                 "2".repeat(12)
             )]
         );
-        assert!(record.take_notices(None).is_empty());
+        assert_eq!(record.take_notices(None), [] as [std::string::String; 0]);
         assert!(!record.has_notices(None));
     }
 

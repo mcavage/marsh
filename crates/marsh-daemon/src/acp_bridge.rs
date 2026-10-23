@@ -232,7 +232,7 @@ mod tests {
         // The bridge closes the ACP stream only after recording the terminal.
         let mut rest = Vec::new();
         io.read_to_end(&mut rest).unwrap();
-        assert!(rest.is_empty());
+        assert!(rest.is_empty(), "{rest:?}");
         assert_eq!(bridge.status().job_id.as_deref(), Some("job-1"));
         assert_eq!(bridge.status().stderr, b"diagnostic");
         assert_eq!(bridge.status().terminal, Some(Ok(0)));

@@ -151,7 +151,7 @@ fn raise_descriptor_limit() {
 
 fn acquire_daemon_connection(active: &Arc<AtomicUsize>) -> Option<DaemonConnectionPermit> {
     active
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
             (count < MAX_DAEMON_CONNECTIONS).then_some(count + 1)
         })
         .ok()?;
