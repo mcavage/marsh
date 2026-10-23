@@ -107,13 +107,6 @@ pub trait DaemonClient: Send + Sync + 'static {
     fn install_kit(&self, _command: &str, _reference: &str) -> Result<String, ClientError> {
         Err(ClientError("Kit installation is unavailable".into()))
     }
-    fn upgrade_kits(
-        &self,
-        _commands: &[String],
-        _check: bool,
-    ) -> Result<Vec<marsh_daemon::KitUpgrade>, ClientError> {
-        Err(ClientError("Kit upgrade is unavailable".into()))
-    }
     fn uninstall_kit(&self, _command: &str) -> Result<String, ClientError> {
         Err(ClientError("Kit uninstall is unavailable".into()))
     }
@@ -1478,16 +1471,6 @@ impl DaemonClient for LocalDaemonClient {
     fn install_kit(&self, command: &str, reference: &str) -> Result<String, ClientError> {
         self.0
             .install_kit(command, reference)
-            .map_err(map_daemon_error)
-    }
-
-    fn upgrade_kits(
-        &self,
-        commands: &[String],
-        check: bool,
-    ) -> Result<Vec<marsh_daemon::KitUpgrade>, ClientError> {
-        self.0
-            .upgrade_kits(commands, check)
             .map_err(map_daemon_error)
     }
 

@@ -105,9 +105,7 @@ pub fn prepare(
         session.session_id = Some(session_id.clone());
     }
     match parsed.command {
-        command @ (ProductCommand::KitInstall { .. }
-        | ProductCommand::KitUpgrade { .. }
-        | ProductCommand::KitUninstall { .. }) => {
+        command @ (ProductCommand::KitInstall { .. } | ProductCommand::KitUninstall { .. }) => {
             return run_kit_command(command, client.as_ref(), &mut stdout, &mut stderr);
         }
         ProductCommand::Status { json } => {
@@ -566,7 +564,7 @@ fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
     Ok(())
 }
 
-/// The daily automatic Kit update check and its recent switches.
+/// The automatic Kit update check and its recent switches.
 fn write_kit_updates(
     writer: &mut impl Write,
     updates: Option<&marsh_daemon::KitUpdateStatus>,
@@ -583,8 +581,8 @@ fn write_kit_updates(
     let ago = |unix_ms: u64| crate::job::ago(now - i64::try_from(unix_ms).unwrap_or(i64::MAX));
     let check = match (&updates.last_check, updates.enabled) {
         (_, false) => "off (MARSH_AUTO_UPDATE=0 or `marsh config auto-update off`)".to_owned(),
-        (None, true) => "daily; not checked yet".to_owned(),
-        (Some(check), true) => format!("daily; checked {} ({})", ago(check.unix_ms), check.result),
+        (None, true) => "on; not checked yet".to_owned(),
+        (Some(check), true) => format!("on; checked {} ({})", ago(check.unix_ms), check.result),
     };
     writeln!(writer, "  Kit updates:  {check}")?;
     if let Some(check) = &updates.last_check {
@@ -902,30 +900,11 @@ fn run_kit_command(
             } else {
                 writeln!(
                     &mut stdout,
-                    "installed {command} from {reference} ({}); `marsh kit upgrade {command}` follows it",
+                    "installed {command} from {reference} ({}); it updates itself from that tag",
                     short_digest(&installed)
                 )?;
             }
             Ok(ProductOutcome::Complete(0))
-        }
-        ProductCommand::KitUpgrade { commands, check } => {
-            let kits = client.upgrade_kits(&commands, check)?;
-            if kits.is_empty() {
-                writeln!(
-                    &mut stdout,
-                    "no Kits to upgrade: install one from a tag with `marsh kit install NAME REPOSITORY:TAG`"
-                )?;
-            }
-            for kit in &kits {
-                writeln!(&mut stdout, "{}", describe_upgrade(kit))?;
-            }
-            let failed = kits.iter().any(|kit| {
-                matches!(
-                    kit.state,
-                    marsh_daemon::KitUpgradeState::Refused | marsh_daemon::KitUpgradeState::Failed
-                )
-            });
-            Ok(ProductOutcome::Complete(i32::from(failed)))
         }
         ProductCommand::KitUninstall { command } => {
             let detail = client.uninstall_kit(&command)?;
@@ -942,31 +921,6 @@ fn short_digest(reference: &str) -> String {
         || reference.to_owned(),
         |(_, digest)| format!("sha256:{}", &digest[..digest.len().min(12)]),
     )
-}
-
-fn describe_upgrade(kit: &marsh_daemon::KitUpgrade) -> String {
-    use marsh_daemon::KitUpgradeState as State;
-    let from = short_digest(&kit.current);
-    let to = kit
-        .resolved
-        .as_deref()
-        .map(short_digest)
-        .unwrap_or_default();
-    let detail = kit.detail.as_deref().unwrap_or("");
-    let name = &kit.command;
-    match kit.state {
-        State::UpToDate => format!(
-            "{name}: up to date ({})",
-            kit.source.as_deref().unwrap_or(&from)
-        ),
-        State::Available => {
-            format!("{name}: {from} -> {to} available; run `marsh kit upgrade {name}`")
-        }
-        State::Upgraded => format!("{name}: upgraded {from} -> {to}"),
-        State::Skipped => format!("{name}: skipped: {detail}"),
-        State::Refused => format!("{name}: not upgraded: {detail}"),
-        State::Failed => format!("{name}: failed: {detail}"),
-    }
 }
 
 #[cfg(test)]
@@ -1006,7 +960,7 @@ mod tests {
         write_kit_updates(&mut text, Some(&updates)).unwrap();
         assert_eq!(
             String::from_utf8(text).unwrap(),
-            "  Kit updates:  daily; checked 3h ago (error)\n    problem:    pix: registry unreachable\n    waiting:    codex (switches when its jobs finish)\n    2h ago: claude updated (2.1.305 → 2.1.307)\n"
+            "  Kit updates:  on; checked 3h ago (error)\n    problem:    pix: registry unreachable\n    waiting:    codex (switches when its jobs finish)\n    2h ago: claude updated (2.1.305 → 2.1.307)\n"
         );
         let mut off = Vec::new();
         let disabled = marsh_daemon::KitUpdateStatus::default();

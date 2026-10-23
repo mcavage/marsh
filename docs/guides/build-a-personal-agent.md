@@ -194,8 +194,10 @@ anyone else would:
 
 ```sh
 marsh kit install myagent registry.example.com/you/myagent:stable
-marsh kit upgrade myagent    # later: move to whatever stable names now
 ```
+
+marsh then moves `myagent` to whatever `stable` names, each time the daemon
+starts and once a day.
 
 ## 7. Let others add their own skills
 

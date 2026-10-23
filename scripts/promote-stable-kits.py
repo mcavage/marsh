@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Move the stable channel tag (:latest) of packaged Kit images to a main build.
 
-Stable marsh follows each packaged Kit's :latest tag (`marsh kit upgrade` and
-the daily automatic update). Release CI runs this after every main build whose
+Stable marsh follows each packaged Kit's :latest tag (its automatic updates,
+at each daemon start and daily). Release CI runs this after every main build whose
 CI passed, so an agent bump reaches stable users without a marsh release.
 
 A Kit image moves only when both hold:

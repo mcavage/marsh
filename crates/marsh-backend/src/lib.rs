@@ -22,10 +22,9 @@ use marsh_contracts::{
 use marsh_daemon::{
     AttachmentFrame, CLEANUP_UNCERTAIN_EXIT_CODE, CleanupState, DaemonBackend, DaemonError,
     DaemonStore, EndpointPaths, ExecuteSpec, ExitStatus, KitUpdateRecord, KitUpdateStatus,
-    KitUpgrade, KitUpgradeState, LoadSelection, NewJob, PreparationProgress, PreparationResult,
-    PublicMount, ScopeCleanupComponent, ScopeCleanupState, ScopeLifecycleAction,
-    ScopeLifecycleReport, ServerAttachment, SessionSpec, ShellSpec, TimingReport, WorkerHealth,
-    WorkerStatus,
+    LoadSelection, NewJob, PreparationProgress, PreparationResult, PublicMount,
+    ScopeCleanupComponent, ScopeCleanupState, ScopeLifecycleAction, ScopeLifecycleReport,
+    ServerAttachment, SessionSpec, ShellSpec, TimingReport, WorkerHealth, WorkerStatus,
 };
 use marsh_sbx::{
     AdmittedHostGrant, KitVmSpec, NativeKitRef, PreparedGrants, ReadyKitVm, SessionGrantPins,
@@ -102,7 +101,7 @@ pub struct StockDaemonBackend {
     agents: AgentRegistry,
     acp_pins: BTreeMap<String, String>,
     /// Commands whose ACP declarations pin the packaged digest: they follow
-    /// the command through `marsh kit upgrade` instead of pinning it.
+    /// the command through its automatic updates instead of pinning it.
     acp_follows: BTreeSet<String>,
     config: BackendConfig,
     registered_workers: Mutex<BTreeSet<String>>,
@@ -120,7 +119,7 @@ pub struct StockDaemonBackend {
     dev: Option<Arc<marsh_daemon::DevBroker>>,
     /// Session-origin cloud placement (`docs/design/cloud-placement.md`).
     cloud: cloud::CloudPlacement,
-    /// Daily automatic Kit updates; off unless [`Self::with_auto_update`].
+    /// Automatic Kit updates; off unless [`Self::with_auto_update`].
     auto_update: Option<AutoUpdate>,
     /// Serializes `kit-updates.json` read-modify-write.
     kit_updates: Mutex<()>,
@@ -134,6 +133,8 @@ struct AutoUpdate {
     scope_root: PathBuf,
     /// An update was recorded whose notice was not shown yet.
     notices_pending: std::sync::atomic::AtomicBool,
+    /// This daemon ran its start-up check.
+    checked: std::sync::atomic::AtomicBool,
 }
 
 /// What one automatic update did for one Kit.
@@ -384,7 +385,9 @@ impl StockDaemonBackend {
         }
     }
 
-    /// Turn on daily automatic Kit updates for this scope. `environment` is
+    /// Turn on automatic Kit updates for this scope: a check when the daemon
+    /// starts and then daily, which on a release build also adds the known
+    /// Kits (`builtin_kits`). `environment` is
     /// `MARSH_AUTO_UPDATE` at launch; it or `scope_root/config.json` can turn
     /// them off again.
     #[must_use]
@@ -394,6 +397,7 @@ impl StockDaemonBackend {
             environment,
             scope_root,
             notices_pending: std::sync::atomic::AtomicBool::new(pending),
+            checked: std::sync::atomic::AtomicBool::new(false),
         });
         self
     }
@@ -992,104 +996,9 @@ impl DaemonBackend for StockDaemonBackend {
         reference: String,
         store: DaemonStore,
     ) -> Result<String, DaemonError> {
-        CommandName::parse(command.clone()).map_err(backend_error)?;
-        // Serialize only installs through preparation and persistence. Ordinary
-        // command lookup must stay available during a slow cold preparation.
-        let _install = self
-            .registry_install
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let current_names = self.command_names();
-        if current_names.contains(&command) {
-            return Err(DaemonError::InvalidState(format!(
-                "Kit command {command} is already registered"
-            )));
-        }
-        // A tag is resolved once, here; the registry records only the digest.
-        let mut sources = kit_lifecycle::read_sources(&self.config.control_home)?;
-        let source = KitTag::parse(&reference).ok();
-        let reference = match &source {
-            Some(tag) => {
-                let image = self.sbx.resolve_kit_tag(tag).map_err(backend_error)?;
-                let contract = self.sbx.kit_contract(&image).map_err(backend_error)?;
-                check_contract(contract, false).map_err(DaemonError::InvalidState)?;
-                image.as_str().to_owned()
-            }
-            None => reference,
-        };
-        let path = self.config.control_home.join("commands.json");
-        let previous = command_registry::read_declaration(&path).map_err(backend_error)?;
-        let updated = previous
-            .with_added(&command, &reference)
-            .map_err(backend_error)?;
-        let prospective_names = current_names
-            .iter()
-            .map(String::as_str)
-            .chain(updated.iter().map(|(name, _)| name))
-            .collect::<BTreeSet<_>>();
-        validate_count(prospective_names.len()).map_err(backend_error)?;
-        command_registry::validate_references(&path, &updated).map_err(backend_error)?;
-        let workload = NativeKitRef::immutable_oci(reference.clone()).map_err(backend_error)?;
-        let environment = self.environment(&command);
-        for name in &current_names {
-            if self.registered_kit(name)?.workload.identity() == workload.identity()
-                && self.environment(name).fingerprint() != environment.fingerprint()
-            {
-                return Err(DaemonError::InvalidState("aliases of the same Kit must have identical environments; restart after adding the matching sbxenvs file".into()));
-            }
-        }
-        let spec = self.kit_spec_for_environment(workload.clone(), &environment)?;
-        let vm = self.prepare_one_with_progress(&spec, &store, |_| Ok(()))?;
-        self.register_worker(&store, &vm)?;
-        self.persist_installed_command(&previous, &updated)?;
-        if let Some(tag) = source {
-            sources.insert(command.clone(), tag);
-            kit_lifecycle::write_sources(&self.config.control_home, &sources)?;
-        }
-        self.removed_commands
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&command);
-        self.installed_commands
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(command, RegisteredKit { workload });
-        Ok(reference)
-    }
-
-    fn upgrade_kits(
-        &self,
-        commands: &[String],
-        check_only: bool,
-        store: DaemonStore,
-    ) -> Result<Vec<KitUpgrade>, DaemonError> {
-        let _install = self
-            .registry_install
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let sources = kit_lifecycle::read_sources(&self.config.control_home)?;
-        let names = self.command_names();
-        let mut selected = if commands.is_empty() {
-            names
-                .iter()
-                .filter(|name| {
-                    sources.contains_key(*name)
-                        || (self.packaged_channel.is_some() && self.packaged.contains_key(*name))
-                })
-                .cloned()
-                .collect::<Vec<_>>()
-        } else {
-            if let Some(unknown) = commands.iter().find(|name| !names.contains(name)) {
-                return Err(DaemonError::NotFound(unknown.clone()));
-            }
-            commands.to_vec()
-        };
-        selected.sort();
-        selected.dedup();
-        Ok(selected
-            .iter()
-            .map(|command| self.upgrade_one(command, sources.get(command), check_only, &store))
-            .collect())
+        let installed = self.install_command(command.clone(), reference, Some(&store))?;
+        self.update_kit_record(|record| record.declined.remove(&command));
+        Ok(installed)
     }
 
     fn auto_update_kits(&self, store: &DaemonStore) {
@@ -1165,6 +1074,9 @@ impl DaemonBackend for StockDaemonBackend {
         }
         sources.remove(&command);
         kit_lifecycle::write_sources(&self.config.control_home, &sources)?;
+        if marsh_contracts::builtin_kits::reference(&command).is_some() {
+            self.update_kit_record(|record| record.declined.insert(command.clone()));
+        }
         let message = if let Some(kit) = replacement {
             self.installed_commands
                 .lock()
@@ -3465,9 +3377,21 @@ fn completed_flight_outcome(
     }
 }
 
-/// Why an upgrade did not switch: the Kit has running jobs, or anything else.
+/// See [`StockDaemonBackend::check_upgrade`].
+#[derive(Debug, Eq, PartialEq)]
+enum UpgradeCheck {
+    Current,
+    /// The check failed, or the new image may not run here.
+    Problem(String),
+    Available {
+        current: String,
+        image: OciImage,
+    },
+}
+
+/// Why a switch did not happen: the Kit has running jobs, or anything else.
 enum UpgradeFailure {
-    Busy(DaemonError),
+    Busy,
     Failed(DaemonError),
 }
 
@@ -3520,6 +3444,82 @@ impl StockDaemonBackend {
             .clone())
     }
 
+    /// `marsh kit install`: resolve a tag once, record only its digest (and
+    /// the tag in `kit-sources.json`), and register the name. With a store,
+    /// the Kit VM is prepared first; without one, the first call starts it.
+    fn install_command(
+        &self,
+        command: String,
+        reference: String,
+        store: Option<&DaemonStore>,
+    ) -> Result<String, DaemonError> {
+        CommandName::parse(command.clone()).map_err(backend_error)?;
+        // Serialize only installs through preparation and persistence. Ordinary
+        // command lookup must stay available during a slow cold preparation.
+        let _install = self
+            .registry_install
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let current_names = self.command_names();
+        if current_names.contains(&command) {
+            return Err(DaemonError::InvalidState(format!(
+                "Kit command {command} is already registered"
+            )));
+        }
+        // A tag is resolved once, here; the registry records only the digest.
+        let mut sources = kit_lifecycle::read_sources(&self.config.control_home)?;
+        let source = KitTag::parse(&reference).ok();
+        let reference = match &source {
+            Some(tag) => {
+                let image = self.sbx.resolve_kit_tag(tag).map_err(backend_error)?;
+                let contract = self.sbx.kit_contract(&image).map_err(backend_error)?;
+                check_contract(contract, false).map_err(DaemonError::InvalidState)?;
+                image.as_str().to_owned()
+            }
+            None => reference,
+        };
+        let path = self.config.control_home.join("commands.json");
+        let previous = command_registry::read_declaration(&path).map_err(backend_error)?;
+        let updated = previous
+            .with_added(&command, &reference)
+            .map_err(backend_error)?;
+        let prospective_names = current_names
+            .iter()
+            .map(String::as_str)
+            .chain(updated.iter().map(|(name, _)| name))
+            .collect::<BTreeSet<_>>();
+        validate_count(prospective_names.len()).map_err(backend_error)?;
+        command_registry::validate_references(&path, &updated).map_err(backend_error)?;
+        let workload = NativeKitRef::immutable_oci(reference.clone()).map_err(backend_error)?;
+        let environment = self.environment(&command);
+        for name in &current_names {
+            if self.registered_kit(name)?.workload.identity() == workload.identity()
+                && self.environment(name).fingerprint() != environment.fingerprint()
+            {
+                return Err(DaemonError::InvalidState("aliases of the same Kit must have identical environments; restart after adding the matching sbxenvs file".into()));
+            }
+        }
+        if let Some(store) = store {
+            let spec = self.kit_spec_for_environment(workload.clone(), &environment)?;
+            let vm = self.prepare_one_with_progress(&spec, store, |_| Ok(()))?;
+            self.register_worker(store, &vm)?;
+        }
+        self.persist_installed_command(&previous, &updated)?;
+        if let Some(tag) = source {
+            sources.insert(command.clone(), tag);
+            kit_lifecycle::write_sources(&self.config.control_home, &sources)?;
+        }
+        self.removed_commands
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&command);
+        self.installed_commands
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(command, RegisteredKit { workload });
+        Ok(reference)
+    }
+
     /// Read, change and write `kit-updates.json` under its lock. A write
     /// failure is logged: the record is advisory and never authority.
     fn update_kit_record<T>(&self, change: impl FnOnce(&mut kit_auto_update::Record) -> T) -> T {
@@ -3538,14 +3538,11 @@ impl StockDaemonBackend {
         result
     }
 
-    /// Commands the daily check follows: those installed from a tag, and on a
-    /// release build the packaged ones still at their shipped digest or at
-    /// the digest marsh last moved them to. A digest pinned by hand never moves.
-    fn auto_update_names(
-        &self,
-        sources: &BTreeMap<String, KitTag>,
-        record: &kit_auto_update::Record,
-    ) -> Vec<String> {
+    /// Commands the check follows: those installed from a tag (including the
+    /// known Kits marsh added), and on a release build the packaged ones at
+    /// any digest of their own repository. A different image or a local Kit
+    /// folder in `commands.json` never moves.
+    fn auto_update_names(&self, sources: &BTreeMap<String, KitTag>) -> Vec<String> {
         self.command_names()
             .into_iter()
             .filter(|name| {
@@ -3557,16 +3554,45 @@ impl StockDaemonBackend {
                     return false;
                 };
                 self.registered_kit(name).is_ok_and(|current| {
-                    let current = current.workload.identity();
-                    current == packaged.workload.identity()
-                        || record.followed.get(name).map(String::as_str) == Some(current)
+                    same_repository(current.workload.identity(), packaged.workload.identity())
                 })
             })
             .collect()
     }
 
-    /// One pass of the automatic updater at `now_ms`: the daily check when it
-    /// is due, else a retry of Kits that were waiting for their jobs.
+    /// On a release build, register each known Kit (`builtin_kits`) that is
+    /// not a command yet and that the user has not uninstalled, as if by
+    /// `marsh kit install NAME`, without preparing its VM. A name the user
+    /// declared in `commands.json` is theirs. Returns the problems.
+    fn add_builtin_kits(&self, record: &kit_auto_update::Record) -> Vec<String> {
+        if self.packaged_channel.is_none() {
+            return Vec::new();
+        }
+        let overlay =
+            command_registry::read_declaration(&self.config.control_home.join("commands.json"))
+                .ok();
+        let mut problems = Vec::new();
+        for (name, reference) in marsh_contracts::builtin_kits::BUILTIN_KITS {
+            if record.declined.contains(*name)
+                || self.command_names().iter().any(|known| known == name)
+                || overlay
+                    .as_ref()
+                    .is_none_or(|overlay| overlay.contains(name))
+            {
+                continue;
+            }
+            if let Err(error) =
+                self.install_command((*name).to_owned(), (*reference).to_owned(), None)
+            {
+                problems.push(format!("{name}: not added: {error}"));
+            }
+        }
+        problems
+    }
+
+    /// One pass of the automatic updater at `now_ms`: a check when this daemon
+    /// has not run one yet or a day has passed, else a retry of Kits that were
+    /// waiting for their jobs.
     fn auto_update_pass(&self, store: &DaemonStore, now_ms: u64) {
         let Some(auto) = &self.auto_update else {
             return;
@@ -3577,23 +3603,33 @@ impl StockDaemonBackend {
             return;
         }
         let record = kit_auto_update::read(&self.config.control_home);
-        let due = record.check_due(now_ms);
+        let due =
+            !auto.checked.load(std::sync::atomic::Ordering::Acquire) || record.check_due(now_ms);
+        if due {
+            auto.checked
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        let mut problems = Vec::new();
+        if due {
+            problems.extend(self.add_builtin_kits(&record));
+        }
         let sources = match kit_lifecycle::read_sources(&self.config.control_home) {
             Ok(sources) => sources,
             Err(error) => {
                 if due {
+                    problems.push(error.to_string());
                     self.update_kit_record(|record| {
                         record.last_check = Some(marsh_daemon::KitUpdateCheck {
                             unix_ms: now_ms,
                             result: "error".into(),
-                            problems: vec![error.to_string()],
+                            problems,
                         });
                     });
                 }
                 return;
             }
         };
-        let following = self.auto_update_names(&sources, &record);
+        let following = self.auto_update_names(&sources);
         let targets = if due {
             following
         } else {
@@ -3605,7 +3641,6 @@ impl StockDaemonBackend {
         if targets.is_empty() && !due {
             return;
         }
-        let mut problems = Vec::new();
         let mut waiting = BTreeSet::new();
         let mut updates = Vec::new();
         for command in &targets {
@@ -3647,7 +3682,7 @@ impl StockDaemonBackend {
         });
     }
 
-    /// `marsh kit upgrade` for one Kit, from the background: a busy Kit waits
+    /// One automatic update of one Kit: a busy Kit waits
     /// without any network or VM work; the new image is prepared before the
     /// old Kit is locked, so its jobs keep starting meanwhile; then the switch
     /// is the upgrade's own, under an ordinary request admission.
@@ -3664,22 +3699,10 @@ impl StockDaemonBackend {
         if busy() {
             return AutoOutcome::Waiting;
         }
-        let report = self.upgrade_one(command, recorded, true, store);
-        match report.state {
-            KitUpgradeState::Available => {}
-            KitUpgradeState::Refused | KitUpgradeState::Failed => {
-                return AutoOutcome::Problem(report.detail.unwrap_or_default());
-            }
-            KitUpgradeState::UpToDate | KitUpgradeState::Skipped | KitUpgradeState::Upgraded => {
-                return AutoOutcome::Nothing;
-            }
-        }
-        let Some(image) = report
-            .resolved
-            .as_deref()
-            .and_then(|resolved| OciImage::parse(resolved).ok())
-        else {
-            return AutoOutcome::Nothing;
+        let (current_identity, image) = match self.check_upgrade(command, recorded) {
+            UpgradeCheck::Available { current, image } => (current, image),
+            UpgradeCheck::Problem(problem) => return AutoOutcome::Problem(problem),
+            UpgradeCheck::Current => return AutoOutcome::Nothing,
         };
         let prepared = (|| {
             let workload = NativeKitRef::immutable_oci(image.as_str()).map_err(backend_error)?;
@@ -3695,7 +3718,7 @@ impl StockDaemonBackend {
                 .ok()
                 .and_then(|image| self.sbx.kit_version(&image).ok().flatten())
         };
-        let from_version = version(&report.current);
+        let from_version = version(&current_identity);
         let to_version = version(image.as_str());
         let Ok(_admission) = store.begin_background_request() else {
             return AutoOutcome::Waiting;
@@ -3705,7 +3728,7 @@ impl StockDaemonBackend {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let current = match self.registered_kit(command) {
-            Ok(current) if current.workload.identity() == report.current => current,
+            Ok(current) if current.workload.identity() == current_identity => current,
             // Changed (or removed) while the new image was prepared.
             Ok(_) | Err(_) => return AutoOutcome::Nothing,
         };
@@ -3713,17 +3736,22 @@ impl StockDaemonBackend {
             return AutoOutcome::Waiting;
         }
         match self.apply_upgrade(command, &current, &image, store) {
-            Ok(()) => AutoOutcome::Updated(KitUpdateRecord {
-                command: command.to_owned(),
-                from: report.current,
-                to: image.as_str().to_owned(),
-                // A rebuild that names the same version is not worth a notice.
-                notified: from_version.is_some() && from_version == to_version,
-                from_version,
-                to_version,
-                unix_ms: unix_millis(SystemTime::now()),
-            }),
-            Err(UpgradeFailure::Busy(_)) => AutoOutcome::Waiting,
+            Ok(()) => {
+                // As after a worker reset: the retired VM no longer holds
+                // slots for its cleanup-uncertain jobs.
+                store.release_process_slots(&[command.to_owned()]);
+                AutoOutcome::Updated(KitUpdateRecord {
+                    command: command.to_owned(),
+                    from: current_identity,
+                    to: image.as_str().to_owned(),
+                    // A rebuild that names the same version is not worth a notice.
+                    notified: from_version.is_some() && from_version == to_version,
+                    from_version,
+                    to_version,
+                    unix_ms: unix_millis(SystemTime::now()),
+                })
+            }
+            Err(UpgradeFailure::Busy) => AutoOutcome::Waiting,
             Err(UpgradeFailure::Failed(error)) => AutoOutcome::Problem(error.to_string()),
         }
     }
@@ -3754,87 +3782,47 @@ impl StockDaemonBackend {
         }
     }
 
-    /// One Kit's `marsh kit upgrade` outcome; failures are reported, not raised.
-    fn upgrade_one(
-        &self,
-        command: &str,
-        recorded: Option<&KitTag>,
-        check_only: bool,
-        store: &DaemonStore,
-    ) -> KitUpgrade {
-        let mut report = KitUpgrade {
-            command: command.to_owned(),
-            source: None,
-            current: String::new(),
-            resolved: None,
-            state: KitUpgradeState::Skipped,
-            detail: None,
-        };
-        let finish = |mut report: KitUpgrade, state, detail: String| {
-            report.state = state;
-            report.detail = Some(detail);
-            report
-        };
+    /// Whether a Kit's tag names a newer image this marsh may switch to. A Kit
+    /// with nothing to follow (installed by digest, a local source, a
+    /// packaged command on a build without a channel) is current.
+    fn check_upgrade(&self, command: &str, recorded: Option<&KitTag>) -> UpgradeCheck {
         let current = match self.registered_kit(command) {
             Ok(kit) => kit,
-            Err(error) => return finish(report, KitUpgradeState::Failed, error.to_string()),
+            Err(error) => return UpgradeCheck::Problem(error.to_string()),
         };
-        current.workload.identity().clone_into(&mut report.current);
         if current.workload.source_dir().is_some() && recorded.is_none() {
-            return finish(
-                report,
-                KitUpgradeState::Skipped,
-                "runs from a local Kit source".into(),
-            );
+            return UpgradeCheck::Current;
         }
         let packaged = self.packaged.get(command);
-        let source = match kit_lifecycle::upgrade_source(
+        let Ok(source) = kit_lifecycle::upgrade_source(
             recorded,
             packaged.and_then(|kit| kit.workload.workload_image()),
             self.packaged_channel.as_deref(),
-        ) {
-            Ok(source) => source,
-            Err(reason) => return finish(report, KitUpgradeState::Skipped, reason.into()),
+        ) else {
+            return UpgradeCheck::Current;
         };
-        report.source = Some(source.to_string());
         let image = match self.sbx.resolve_kit_tag(&source) {
             Ok(image) => image,
-            Err(error) => return finish(report, KitUpgradeState::Failed, error.to_string()),
+            Err(error) => return UpgradeCheck::Problem(error.to_string()),
         };
-        report.resolved = Some(image.as_str().to_owned());
-        if image.as_str() == report.current {
-            report.state = KitUpgradeState::UpToDate;
-            return report;
+        if image.as_str() == current.workload.identity() {
+            return UpgradeCheck::Current;
         }
         let contract = match self.sbx.kit_contract(&image) {
             Ok(contract) => contract,
-            Err(error) => return finish(report, KitUpgradeState::Failed, error.to_string()),
+            Err(error) => return UpgradeCheck::Problem(error.to_string()),
         };
         if let Err(reason) = check_contract(contract, packaged.is_some()) {
-            return finish(report, KitUpgradeState::Refused, reason);
+            return UpgradeCheck::Problem(reason);
         }
         if self.acp_pins.contains_key(command) && !self.acp_follows.contains(command) {
-            return finish(
-                report,
-                KitUpgradeState::Refused,
+            return UpgradeCheck::Problem(
                 "an ACP agent in agents.json pins this Kit's digest; update its workload_digest instead".into(),
             );
         }
-        if check_only {
-            report.state = KitUpgradeState::Available;
-            return report;
-        }
-        match self.apply_upgrade(command, &current, &image, store) {
-            Ok(()) => {
-                report.state = KitUpgradeState::Upgraded;
-                report
-            }
-            Err(UpgradeFailure::Busy(error)) => {
-                finish(report, KitUpgradeState::Refused, error.to_string())
-            }
-            Err(UpgradeFailure::Failed(error)) => {
-                finish(report, KitUpgradeState::Failed, error.to_string())
-            }
+        UpgradeCheck::Available {
+            current: current.workload.identity().to_owned(),
+            image,
         }
     }
 
@@ -3872,7 +3860,7 @@ impl StockDaemonBackend {
         } else {
             Some(
                 Self::claim_retirement(store, vec![old_spec.name.clone()])
-                    .map_err(UpgradeFailure::Busy)?,
+                    .map_err(|_| UpgradeFailure::Busy)?,
             )
         };
         let release = |claim: &Option<RetirementClaim>| {
@@ -3900,13 +3888,6 @@ impl StockDaemonBackend {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(command.to_owned(), RegisteredKit { workload });
-        if self.packaged.contains_key(command) {
-            self.update_kit_record(|record| {
-                record
-                    .followed
-                    .insert(command.to_owned(), image.as_str().to_owned());
-            });
-        }
         if let Some(claim) = claim {
             self.retire_claimed(
                 store,
@@ -5994,6 +5975,7 @@ mod kit_lifecycle_callers {
     const NEW: &str = "docker.io/example/pix@sha256:2222222222222222222222222222222222222222222222222222222222222222";
     const SHIPPED: &str = "docker.io/example/pi@sha256:3333333333333333333333333333333333333333333333333333333333333333";
     const PI_NEW: &str = "docker.io/example/pi@sha256:4444444444444444444444444444444444444444444444444444444444444444";
+    const OTHER_PI: &str = "docker.io/someone/pi@sha256:5555555555555555555555555555555555555555555555555555555555555555";
 
     /// Stock SBX and Docker as seen by `marsh kit`: `sbx kit inspect` resolves
     /// every tag to `resolved`, `docker buildx imagetools` reports `contract`,
@@ -6002,6 +5984,8 @@ mod kit_lifecycle_callers {
         resolved: Mutex<String>,
         contract: Mutex<Option<u32>>,
         runs: Mutex<Vec<Vec<String>>>,
+        /// Per-tag answers, before `resolved`; `None` fails like no network.
+        tags: Mutex<BTreeMap<String, Option<String>>>,
     }
 
     impl Registry {
@@ -6010,6 +5994,7 @@ mod kit_lifecycle_callers {
                 resolved: Mutex::new(resolved.into()),
                 contract: Mutex::new(contract),
                 runs: Mutex::new(Vec::new()),
+                tags: Mutex::new(BTreeMap::new()),
             })
         }
         fn calls(&self, needle: &str) -> usize {
@@ -6043,6 +6028,19 @@ mod kit_lifecycle_callers {
                 })
             };
             if argv[1..3] == ["kit", "inspect"] {
+                match self.tags.lock().unwrap().get(&argv[3]) {
+                    Some(Some(image)) => {
+                        return ok(format!(r#"{{"sandbox":{{"image":"{image}"}}}}"#));
+                    }
+                    Some(None) => {
+                        return Ok(marsh_runtime::CommandOutput {
+                            exit_code: Some(1),
+                            stdout: Vec::new(),
+                            stderr: b"dial tcp: lookup registry-1.docker.io: no such host".to_vec(),
+                        });
+                    }
+                    None => {}
+                }
                 return ok(format!(
                     r#"{{"sandbox":{{"image":"{}"}}}}"#,
                     self.resolved.lock().unwrap()
@@ -6129,56 +6127,36 @@ mod kit_lifecycle_callers {
         fs::read_to_string(backend.config.control_home.join("commands.json")).unwrap()
     }
 
-    fn only(reports: Vec<KitUpgrade>) -> KitUpgrade {
-        assert_eq!(reports.len(), 1, "{reports:?}");
-        reports.into_iter().next().unwrap()
+    fn pix_tag() -> KitTag {
+        KitTag::parse("example/pix:stable").unwrap()
     }
 
     #[test]
-    fn upgrades_report_each_outcome_and_change_nothing_unless_the_switch_succeeds() {
+    fn a_check_reports_current_newer_and_incompatible_images() {
         let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(OLD, Some(1));
         let backend = daemon(home.path(), &registry, None, None);
-        let store = DaemonStore::new(home.path());
-        let before = overlay(&backend);
-        let upgrade = |check| {
-            only(
-                backend
-                    .upgrade_kits(&["pix".into()], check, store.clone())
-                    .unwrap(),
-            )
-        };
+        let check = || backend.check_upgrade("pix", Some(&pix_tag()));
 
-        let current = upgrade(false);
-        assert_eq!(current.state, KitUpgradeState::UpToDate);
-        assert_eq!(
-            current.source.as_deref(),
-            Some("docker.io/example/pix:stable")
-        );
+        assert_eq!(check(), UpgradeCheck::Current);
         assert_eq!(
             registry.calls("docker"),
             0,
             "an unchanged digest needs no label read"
         );
-
         *registry.resolved.lock().unwrap() = NEW.into();
         *registry.contract.lock().unwrap() = Some(SUPPORTED_CONTRACT_PLUS_ONE);
-        let newer = upgrade(false);
-        assert_eq!(newer.state, KitUpgradeState::Refused);
-        assert!(newer.detail.unwrap().contains("upgrade marsh first"));
-
+        let UpgradeCheck::Problem(newer) = check() else {
+            panic!("an image that needs a newer marsh is refused");
+        };
+        assert!(newer.contains("upgrade marsh first"), "{newer}");
         *registry.contract.lock().unwrap() = Some(1);
-        let available = upgrade(true);
-        assert_eq!(available.state, KitUpgradeState::Available);
-        assert_eq!(available.resolved.as_deref(), Some(NEW));
-
-        // Preparing the new VM fails: the old digest stays registered.
-        let failed = upgrade(false);
-        assert_eq!(failed.state, KitUpgradeState::Failed, "{failed:?}");
-        assert_eq!(overlay(&backend), before);
         assert_eq!(
-            backend.registered_kit("pix").unwrap().workload.identity(),
-            OLD
+            check(),
+            UpgradeCheck::Available {
+                current: OLD.into(),
+                image: OciImage::parse(NEW).unwrap(),
+            }
         );
     }
 
@@ -6189,71 +6167,50 @@ mod kit_lifecycle_callers {
     fn packaged_kits_need_a_channel_and_a_declared_contract() {
         let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(PI_NEW, None);
-        let store = DaemonStore::new(home.path());
 
         let local = daemon(home.path(), &registry, None, None);
-        let skipped = only(
-            local
-                .upgrade_kits(&["pi".into()], false, store.clone())
-                .unwrap(),
-        );
-        assert_eq!(skipped.state, KitUpgradeState::Skipped);
+        assert_eq!(local.check_upgrade("pi", None), UpgradeCheck::Current);
         assert_eq!(registry.calls("inspect"), 0);
-        // Without a channel, "all" covers only Kits that follow a tag.
-        let all = local.upgrade_kits(&[], true, store.clone()).unwrap();
-        assert_eq!(
-            all.iter()
-                .map(|kit| kit.command.as_str())
-                .collect::<Vec<_>>(),
-            ["pix"]
-        );
 
         let home = tempfile::tempdir().unwrap();
         let release = daemon(home.path(), &registry, None, Some("latest"));
-        let unlabelled = only(
-            release
-                .upgrade_kits(&["pi".into()], false, store.clone())
-                .unwrap(),
-        );
-        assert_eq!(
-            unlabelled.source.as_deref(),
-            Some("docker.io/example/pi:latest")
-        );
-        assert_eq!(unlabelled.state, KitUpgradeState::Refused);
+        let UpgradeCheck::Problem(unlabelled) = release.check_upgrade("pi", None) else {
+            panic!("an unlabelled packaged image is refused");
+        };
         assert!(
-            unlabelled
-                .detail
+            unlabelled.contains("org.marsh.kit.contract"),
+            "{unlabelled}"
+        );
+        assert!(
+            registry
+                .runs
+                .lock()
                 .unwrap()
-                .contains("org.marsh.kit.contract")
+                .iter()
+                .any(|argv| argv.iter().any(|a| a == "docker.io/example/pi:latest"))
         );
         *registry.contract.lock().unwrap() = Some(1);
-        let labelled = only(release.upgrade_kits(&["pi".into()], true, store).unwrap());
-        assert_eq!(labelled.state, KitUpgradeState::Available);
+        assert!(matches!(
+            release.check_upgrade("pi", None),
+            UpgradeCheck::Available { .. }
+        ));
     }
 
     #[test]
-    fn digest_installs_have_nothing_to_follow_and_unknown_names_are_refused() {
+    fn digest_installs_have_nothing_to_follow() {
         let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(NEW, Some(1));
         let backend = daemon(home.path(), &registry, None, None);
-        let store = DaemonStore::new(home.path());
-        kit_lifecycle::write_sources(&backend.config.control_home, &BTreeMap::new()).unwrap();
-        let pinned = only(
-            backend
-                .upgrade_kits(&["pix".into()], false, store.clone())
-                .unwrap(),
-        );
-        assert_eq!(pinned.state, KitUpgradeState::Skipped);
-        assert!(pinned.detail.unwrap().contains("installed by digest"));
+        assert_eq!(backend.check_upgrade("pix", None), UpgradeCheck::Current);
         assert!(matches!(
-            backend.upgrade_kits(&["nope".into()], false, store),
-            Err(DaemonError::NotFound(_))
+            backend.check_upgrade("nope", None),
+            UpgradeCheck::Problem(_)
         ));
         assert_eq!(registry.calls("inspect"), 0);
     }
 
     #[test]
-    fn a_kit_with_running_jobs_is_neither_upgraded_nor_uninstalled() {
+    fn a_kit_with_running_jobs_is_neither_switched_nor_uninstalled() {
         let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(NEW, Some(1));
         let backend = daemon(home.path(), &registry, None, None);
@@ -6295,13 +6252,10 @@ mod kit_lifecycle_callers {
             .unwrap();
         store.reserve_worker(&job, &worker, &worker).unwrap();
         let before = overlay(&backend);
-        let busy = only(
-            backend
-                .upgrade_kits(&["pix".into()], false, store.clone())
-                .unwrap(),
-        );
-        assert_eq!(busy.state, KitUpgradeState::Refused, "{busy:?}");
-        assert!(busy.detail.unwrap().contains("active jobs"));
+        let current = backend.registered_kit("pix").unwrap();
+        let switched =
+            backend.apply_upgrade("pix", &current, &OciImage::parse(NEW).unwrap(), &store);
+        assert!(matches!(switched, Err(UpgradeFailure::Busy)));
         assert!(
             backend
                 .uninstall_kit("pix".into(), store)
@@ -6423,7 +6377,7 @@ mod kit_lifecycle_callers {
     }
 
     #[test]
-    fn the_automatic_check_runs_at_most_once_a_day() {
+    fn one_daemon_checks_at_most_once_a_day() {
         let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(OLD, Some(1));
         let backend = automatic(
@@ -6510,33 +6464,201 @@ mod kit_lifecycle_callers {
     }
 
     #[test]
-    fn digest_pins_are_never_followed_automatically() {
+    fn packaged_commands_follow_their_repository_and_other_pins_stay() {
         let registry = Registry::new(NEW, Some(1));
+        let sources = BTreeMap::new();
+        // pi moved to a newer digest of its own repository (e.g. by an older
+        // `marsh kit upgrade`, since removed): still follows on a release build.
         let home = tempfile::tempdir().unwrap();
-        // pix installed by digest; pi pinned by hand over its packaged digest.
+        let moved = daemon(home.path(), &registry, Some(PI_NEW), Some("latest"));
+        assert_eq!(moved.auto_update_names(&sources), ["pi"]);
+        // pi replaced by a different image: pinned by hand, never moves.
+        let home = tempfile::tempdir().unwrap();
         let pinned = automatic(
-            daemon(home.path(), &registry, Some(PI_NEW), Some("latest")),
+            daemon(home.path(), &registry, Some(OTHER_PI), Some("latest")),
             home.path(),
             None,
         );
         kit_lifecycle::write_sources(&pinned.config.control_home, &BTreeMap::new()).unwrap();
-        let record = kit_auto_update::Record::default();
-        let sources = BTreeMap::new();
-        assert!(pinned.auto_update_names(&sources, &record).is_empty());
+        decline_builtins(&pinned);
+        assert!(pinned.auto_update_names(&sources).is_empty());
         pinned.auto_update_pass(&DaemonStore::new(home.path()), DAY);
         assert_eq!(registry.calls("kit"), 0);
         assert_eq!(status(&pinned).last_check.unwrap().result, "ok");
-
-        // The same override, when marsh itself moved pi there, follows.
-        let mut moved = kit_auto_update::Record::default();
-        moved.followed.insert("pi".into(), PI_NEW.into());
-        assert_eq!(pinned.auto_update_names(&sources, &moved), ["pi"]);
-        // A packaged command at its shipped digest follows on a release build.
+        // At its shipped digest it follows on a release build, not a local one.
         let home = tempfile::tempdir().unwrap();
         let shipped = daemon(home.path(), &registry, None, Some("latest"));
-        assert_eq!(shipped.auto_update_names(&sources, &record), ["pi"]);
+        assert_eq!(shipped.auto_update_names(&sources), ["pi"]);
         let local = daemon(home.path(), &registry, None, None);
-        assert!(local.auto_update_names(&sources, &record).is_empty());
+        assert!(local.auto_update_names(&sources).is_empty());
+    }
+
+    const HERMES: &str = "docker.io/mcavage/marsh-hermes@sha256:6666666666666666666666666666666666666666666666666666666666666666";
+
+    /// The known Kits stay out of tests about other commands.
+    fn decline_builtins(backend: &StockDaemonBackend) {
+        let mut record = kit_auto_update::read(&backend.config.control_home);
+        record.declined = marsh_contracts::builtin_kits::BUILTIN_KITS
+            .iter()
+            .map(|(name, _)| (*name).to_owned())
+            .collect();
+        kit_auto_update::write(&backend.config.control_home, &record).unwrap();
+    }
+
+    fn hermes_answers(registry: &Registry, image: Option<&str>) {
+        registry.tags.lock().unwrap().insert(
+            "docker.io/mcavage/marsh-hermes:stable".into(),
+            image.map(str::to_owned),
+        );
+    }
+
+    #[test]
+    fn every_daemon_start_checks_once_then_daily() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(OLD, Some(1));
+        let first = automatic(
+            daemon(home.path(), &registry, None, None),
+            home.path(),
+            None,
+        );
+        first.auto_update_pass(&DaemonStore::new(home.path()), 10 * DAY);
+        assert_eq!(registry.calls("kit"), 1);
+        // A restart an hour later checks again; that daemon then waits a day.
+        let restarted = automatic(
+            daemon(home.path(), &registry, None, None),
+            home.path(),
+            None,
+        );
+        let store = DaemonStore::new(home.path());
+        restarted.auto_update_pass(&store, 10 * DAY + DAY / 24);
+        assert_eq!(registry.calls("kit"), 2);
+        restarted.auto_update_pass(&store, 10 * DAY + DAY / 12);
+        assert_eq!(registry.calls("kit"), 2);
+        restarted.auto_update_pass(&store, 11 * DAY + DAY / 24);
+        assert_eq!(registry.calls("kit"), 3);
+    }
+
+    #[test]
+    fn a_release_build_adds_known_kits_on_its_first_pass_and_leaves_user_names_alone() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(OLD, Some(1));
+        hermes_answers(&registry, Some(HERMES));
+        // The fixture's own `pix` (example/pix, following its tag) is the
+        // user's: the known `pix` must not replace it.
+        let backend = automatic(
+            daemon(home.path(), &registry, None, Some("latest")),
+            home.path(),
+            None,
+        );
+        assert!(!backend.command_names().contains(&"hermes".to_owned()));
+        backend.auto_update_pass(&DaemonStore::new(home.path()), DAY);
+
+        assert!(backend.command_names().contains(&"hermes".to_owned()));
+        assert_eq!(
+            backend
+                .registered_kit("hermes")
+                .unwrap()
+                .workload
+                .identity(),
+            HERMES
+        );
+        assert!(overlay(&backend).contains(HERMES));
+        let sources = kit_lifecycle::read_sources(&backend.config.control_home).unwrap();
+        assert_eq!(
+            sources["hermes"].to_string(),
+            "docker.io/mcavage/marsh-hermes:stable"
+        );
+        assert_eq!(sources["pix"].to_string(), "docker.io/example/pix:stable");
+        assert_eq!(
+            backend.registered_kit("pix").unwrap().workload.identity(),
+            OLD
+        );
+        assert_eq!(
+            registry.calls("docker.io/mcavage/marsh-pix:stable"),
+            0,
+            "a user's own name is never looked up as the known Kit"
+        );
+        // No VM is prepared for an added Kit: the first call starts one.
+        assert_eq!(registry.calls("create"), 0);
+    }
+
+    #[test]
+    fn an_offline_first_pass_adds_nothing_and_reports_it() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(OLD, Some(1));
+        hermes_answers(&registry, None);
+        let backend = automatic(
+            daemon(home.path(), &registry, None, Some("latest")),
+            home.path(),
+            None,
+        );
+        backend.auto_update_pass(&DaemonStore::new(home.path()), DAY);
+        assert!(!backend.command_names().contains(&"hermes".to_owned()));
+        let check = status(&backend).last_check.unwrap();
+        assert_eq!(check.result, "error");
+        assert!(
+            check
+                .problems
+                .iter()
+                .any(|problem| problem.starts_with("hermes: not added")),
+            "{check:?}"
+        );
+        assert!(!overlay(&backend).contains("hermes"));
+    }
+
+    #[test]
+    fn an_uninstalled_known_kit_is_not_added_again() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(OLD, Some(1));
+        hermes_answers(&registry, Some(HERMES));
+        let backend = automatic(
+            daemon(home.path(), &registry, None, Some("latest")),
+            home.path(),
+            None,
+        );
+        let store = DaemonStore::new(home.path());
+        backend.auto_update_pass(&store, DAY);
+        backend.uninstall_kit("hermes".into(), store).unwrap();
+        assert!(!backend.command_names().contains(&"hermes".to_owned()));
+        assert!(
+            kit_auto_update::read(&backend.config.control_home)
+                .declined
+                .contains("hermes")
+        );
+        // Neither the next check nor a restart brings it back.
+        backend.auto_update_pass(&DaemonStore::new(home.path()), 3 * DAY);
+        let restarted = automatic(
+            daemon(home.path(), &registry, None, Some("latest")),
+            home.path(),
+            None,
+        );
+        restarted.auto_update_pass(&DaemonStore::new(home.path()), 3 * DAY + 1);
+        assert!(!backend.command_names().contains(&"hermes".to_owned()));
+        assert!(!restarted.command_names().contains(&"hermes".to_owned()));
+        assert!(!overlay(&restarted).contains("hermes"));
+    }
+
+    #[test]
+    fn known_kits_are_not_added_when_updates_are_off_or_on_a_local_build() {
+        let registry = Registry::new(OLD, Some(1));
+        hermes_answers(&registry, Some(HERMES));
+        let home = tempfile::tempdir().unwrap();
+        let off = automatic(
+            daemon(home.path(), &registry, None, Some("latest")),
+            home.path(),
+            Some("0"),
+        );
+        off.auto_update_pass(&DaemonStore::new(home.path()), DAY);
+        assert!(!off.command_names().contains(&"hermes".to_owned()));
+        let home = tempfile::tempdir().unwrap();
+        let local = automatic(
+            daemon(home.path(), &registry, None, None),
+            home.path(),
+            None,
+        );
+        local.auto_update_pass(&DaemonStore::new(home.path()), DAY);
+        assert!(!local.command_names().contains(&"hermes".to_owned()));
+        assert_eq!(registry.calls("docker.io/mcavage/marsh-hermes:stable"), 0);
     }
 
     #[test]

@@ -16,8 +16,8 @@ name: Release
 #            from the selected ref.
 #
 # Kit images move to stable without a marsh release. Stable marsh follows each
-# packaged Kit's :latest tag (`marsh kit upgrade`, and the daily automatic
-# update). After every nightly from a main CI run that passed, the images job
+# packaged Kit's :latest tag (automatic updates at each daemon start and
+# daily). After every nightly from a main CI run that passed, the images job
 # also moves :latest of each packaged Kit image (claude, codex, pi, shell) to
 # this build, when and only when:
 #   * the image's org.marsh.kit.contract label is in the range that the newest

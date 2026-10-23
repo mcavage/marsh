@@ -166,24 +166,19 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 
 **config auto-update** [**on**|**off**]
 : Set, or with no value print, whether Kits that follow a tag update
-  themselves once a day in this **MARSH_HOME**. The default is **on**.
+  themselves in this **MARSH_HOME** (when the daemon starts, then daily), and
+  whether a release build adds **pix** and **hermes** by itself. The default
+  is **on**. To update now, run **marsh stop** when idle, then marsh again.
 
 **kit install** *NAME* [*REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*]
 : Register a published Kit under *NAME* in this scope. A tag is resolved to its
   digest now; only that digest runs. Without a reference, *NAME* must be a Kit
   marsh knows by name: **hermes** or **pix**.
 
-**kit upgrade** [**--check**] [*NAME*...]
-: Move each *NAME* (default: every Kit installed from a tag, and the packaged
-  commands on a release build) to the image its tag names now, preparing it
-  before switching. Packaged commands follow the release channel's tag and move
-  only to an image declaring a supported **org.marsh.kit.contract**. **--check**
-  only reports. Exits nonzero if a Kit was refused or failed. The daemon also
-  does this once a day in the background; see **MARSH_AUTO_UPDATE**.
-
 **kit uninstall** *NAME*
-: Remove a Kit added with **kit install**, or return an upgraded packaged
-  command to the version this marsh shipped.
+: Remove a Kit added with **kit install** (a removed **pix** or **hermes**
+  is not added again until installed), or return an updated packaged command
+  to the version this marsh shipped.
 
 **workers reset** *KIT*[,*KIT*...]|**all**
 : Remove idle Kit VMs, including quarantined ones. The next use creates a new
@@ -368,8 +363,9 @@ See https://runmar.sh/docs/acp.html.
 : Placement for registered commands. Only **local** is accepted.
 
 **MARSH_AUTO_UPDATE**
-: **0** (or **off**) when the daemon starts turns off the daily automatic
-  Kit update, as **marsh config auto-update off** does.
+: **0** (or **off**) when the daemon starts turns off automatic Kit
+  updates and the adding of **pix** and **hermes**, as
+  **marsh config auto-update off** does.
 
 # FILES
 

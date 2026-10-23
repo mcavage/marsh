@@ -210,8 +210,8 @@ substituting its slot number. This deletes the slot's data.
   is running, including when the upgrade removed the old `sbx`. Rerun
   `marsh mcp install ...` for any MCP registrations.
 - Upgrading marsh: a running daemon keeps the old binaries. Run `marsh stop`
-  when idle; commands then update themselves, or run `marsh kit upgrade` to
-  move them now ([Upgrade](install.md#upgrade)).
+  when nothing is running; the next launch uses the new marsh and checks for
+  newer Kits ([Upgrade](install.md#upgrade)).
 
 ## Reporting a bug
 

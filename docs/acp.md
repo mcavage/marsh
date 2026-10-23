@@ -169,8 +169,8 @@ empty for a Kit run from a source directory):
  "arguments":["--acp"],"workload_digest":"registry.example.com/me/mytool@sha256:…"}
 ```
 
-Copied packaged entries keep working when you upgrade marsh or a command is
-updated (automatically or with `marsh kit upgrade`): an entry for a packaged
+Copied packaged entries keep working when you upgrade marsh or a command
+updates itself: an entry for a packaged
 command follows that command. So
 does an entry for a command installed from a tag.
 

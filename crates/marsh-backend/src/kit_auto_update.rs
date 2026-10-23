@@ -1,11 +1,10 @@
-//! Daily automatic Kit updates (`docs/kits.md`): the host record
-//! `kit-updates.json`, the once-a-day gate, the opt-out, and the one-line
-//! notices. The switch itself is `marsh kit upgrade`'s.
+//! Automatic Kit updates (`docs/kits.md`): the host record
+//! `kit-updates.json`, the daily gate, the opt-out, and the one-line notices.
 
 use marsh_daemon::{DaemonError, KitUpdateCheck, KitUpdateRecord};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::BTreeSet,
     ffi::OsStr,
     fs,
     io::{Read, Write},
@@ -29,14 +28,15 @@ pub(crate) struct Record {
     pub waiting: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub recent: Vec<KitUpdateRecord>,
-    /// The digest marsh itself last moved each packaged command to. A packaged
-    /// command whose override is anything else was pinned by hand.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub followed: BTreeMap<String, String>,
+    /// Known Kits (`builtin_kits`) the user uninstalled: never added again
+    /// until `marsh kit install NAME`.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub declined: BTreeSet<String>,
 }
 
 impl Record {
-    /// At most one check a day. A clock that moved backwards counts as due.
+    /// A day since the last check. A clock that moved backwards counts as due.
+    /// (Each daemon start also checks once; the backend tracks that.)
     pub fn check_due(&self, now_ms: u64) -> bool {
         self.last_check.as_ref().is_none_or(|check| {
             now_ms < check.unix_ms || now_ms - check.unix_ms >= CHECK_INTERVAL_MS

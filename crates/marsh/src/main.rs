@@ -59,9 +59,9 @@ Usage:
   marsh fanout [-n] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]... | marsh collect [--json] [--timing]
                                        Run branches at once on the same files
   marsh kit install NAME [REPOSITORY:TAG|REPOSITORY@sha256:DIGEST]
-  marsh kit upgrade [--check] [NAME...] | marsh kit uninstall NAME
+  marsh kit uninstall NAME
   marsh config shell [marsh|bash|zsh]  Show or set this home's default shell
-  marsh config auto-update [on|off]    Show or set daily automatic Kit updates
+  marsh config auto-update [on|off]    Show or set automatic Kit updates
   marsh stop [--json]                  Remove this home's VMs and stop its daemon
   marsh reset [--json]                 Remove this home's VMs; keep the daemon
   marsh recover-home SLOT --discard
@@ -218,24 +218,22 @@ const JOBS_HELP: &str = "Usage: marsh jobs [--all] [--json]\n       marsh jobs -
 const RESULTS_HELP: &str = "Usage: marsh results [--json]\n       marsh results show CURSOR|JOB [--json]\n\nList durable Kit results or inspect one result.\n";
 const WORKERS_HELP: &str = "Usage: marsh workers reset KIT[,KIT...]|all\n\nStop and recreate selected Kit workers on their next use.\n";
 const KIT_HELP: &str = "Usage: marsh kit install NAME [REPOSITORY:TAG|REPOSITORY@sha256:DIGEST]
-       marsh kit upgrade [--check] [NAME...]
        marsh kit uninstall NAME
 
 install  Install and prepare a published Kit as NAME in this daemon scope. A tag
          is resolved to its digest now; marsh runs only that digest and
-         follows the tag later. Without a reference, NAME must be a Kit marsh
-         knows: hermes or pix.
-upgrade  Re-resolve each NAME's tag (default: every Kit installed from a tag,
-         and the packaged commands on a release build, which follow the
-         release's :latest or :nightly tag) and switch to a newer digest,
-         preparing it first. A packaged Kit moves only to an image declaring a
-         Kit contract this marsh supports. --check reports without switching.
-         Run from a host terminal; a Kit with running jobs is not changed.
-         marsh also does this by itself once a day; `marsh config
-         auto-update off` or MARSH_AUTO_UPDATE=0 turns that off.
+         updates it from the tag later. Without a reference, NAME must be a
+         Kit marsh knows: hermes or pix (on a release build those appear by
+         themselves).
 uninstall
-         Remove a Kit added with `marsh kit install`, or return an upgraded
-         packaged command to the version this marsh shipped.
+         Remove a Kit added with `marsh kit install` (a known Kit stays removed
+         until you install it again), or return an updated packaged command to
+         the version this marsh shipped.
+
+Commands that follow a tag update themselves when the daemon starts and once
+a day; `marsh status` lists updates. To update now, run `marsh stop` when
+nothing is running, then use marsh again. `marsh config auto-update off` or
+MARSH_AUTO_UPDATE=0 turns updates off.
 ";
 const STOP_HELP: &str = "Usage: marsh stop [--json]\n\nRemove the shell and Kit VMs owned by the selected MARSH_HOME, then stop its daemon.\nRefuses while shells or jobs are active. Home and results are kept.\nPrints what was removed on stderr; --json also writes the daemon report on stdout.\nExits nonzero if any cleanup could not be verified. Run a script named `stop` as `marsh ./stop`.\n";
 const RESET_HELP: &str = "Usage: marsh reset [--json]\n\nRemove the shell and Kit VMs owned by the selected MARSH_HOME; the daemon keeps running.\nRefuses while shells or jobs are active. Home and results are kept.\nPrints what was removed on stderr; --json also writes the daemon report on stdout.\nExits nonzero if any cleanup could not be verified. Run a script named `reset` as `marsh ./reset`.\n";
@@ -644,7 +642,6 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
         }
     }
     let kit_names = match &parsed.command {
-        cli::ProductCommand::KitUpgrade { commands, .. } => commands.clone(),
         cli::ProductCommand::KitUninstall { command } => vec![command.clone()],
         _ => Vec::new(),
     };

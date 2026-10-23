@@ -40,7 +40,7 @@ For skills, dotfiles, MCP connections, and extra directories, see
 | `MARSH_CLOUD_CPUS` | Default `--cpus` for [`cloud`](cloud.md#sandbox-size-lifetime-and-image) calls from this shell: 1, 2, 4, 8, or 16 (2 GiB of memory per CPU). Default 2. |
 | `MARSH_CLOUD_TTL` | Default `--ttl` for `cloud` calls: 1m to 24h, such as `30m` or `2h`. Default `4h`. |
 | `MARSH_CLOUD_IMAGE` | Default `--image` for `cloud` calls: an image pinned by digest. Read by the daemon too, as its own default. |
-| `MARSH_AUTO_UPDATE` | `0` (or `off`) turns off [automatic Kit updates](kits.md#automatic-updates) for the daemon it starts, as `marsh config auto-update off` does. Read when the daemon starts. |
+| `MARSH_AUTO_UPDATE` | `0` (or `off`) turns off [automatic Kit updates](kits.md#updates), and the automatic adding of `pix` and `hermes`, for the daemon it starts, as `marsh config auto-update off` does. Read when the daemon starts. |
 
 ### Job limits
 
@@ -116,7 +116,7 @@ When unset, control directories are in
 | `$MARSH_HOME/sbxenvs/NAME.yaml` | Additional servers and directories for registered command `NAME`; `shell.yaml` also configures the shell VM. |
 | `CONTROL/HASH/` | Host-only control directory for a scope. `marsh status` prints it. Never mounted into a VM. |
 | `CONTROL/HASH/commands.json` | Your command registry. Overrides packaged entries by name. See [Commands and Kits](kits.md#adding-a-command). |
-| `CONTROL/HASH/kit-updates.json` | When [automatic Kit updates](kits.md#automatic-updates) last checked, and what they changed. |
+| `CONTROL/HASH/kit-updates.json` | When [automatic Kit updates](kits.md#updates) last checked, and what they changed. |
 | `CONTROL/HASH/agents.json` | Your ACP agent list. Replaces the packaged list; `[]` disables ACP. See [ACP](acp.md#adding-agents). |
 | `CONTROL/HASH/state/results.journal` | Structural job receipts, for `marsh results`. |
 | `PREFIX/libexec/marsh/` | Packaged `commands.json`, `agents.json`, `shell-image`, and the Linux binaries. |

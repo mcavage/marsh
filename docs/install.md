@@ -119,33 +119,25 @@ Agent calls need a provider credential as well as `sbx login`. Follow the
 
 ## Upgrade
 
-Two things update separately:
-
-| What | Command | Changes |
-|---|---|---|
-| marsh | `brew upgrade mcavage/tap/marsh` | The `marsh` CLI, its daemon and shell VM, and the agent versions this release ships |
-| Commands | Automatic, once a day; `marsh kit upgrade` for right now | Each command to the newest image its tag names: `claude`, `codex`, `pi` and `shell` follow their release channel, and Kits you installed from a tag follow that tag |
-
-Commands update themselves. Once a day the daemon checks for newer images in
-the background and switches each command when it has no running jobs. The
-next time you use an updated command, marsh prints one line such as
-`marsh: claude updated (2.1.305 → 2.1.307)`; `marsh status` lists recent
-updates. To get a new version right now instead of waiting for the daily
-check, run `marsh kit upgrade`. To turn automatic updates off, run
-`marsh config auto-update off`. See
-[Automatic updates](kits.md#automatic-updates).
-
-To upgrade marsh itself:
+Upgrade marsh with Homebrew; Kits update themselves.
 
 ```sh
 brew upgrade mcavage/tap/marsh
-marsh stop                   # when idle; the next launch uses the new marsh
-marsh kit upgrade            # optional: move commands now
+marsh stop                   # when nothing is running; the next launch uses the new marsh
 ```
+
+The commands (`claude`, `codex`, `pi`, `shell`, `pix`, `hermes`, and Kits you
+installed from a tag) move to newer images by themselves: marsh checks each
+time its daemon starts and once a day, and switches a command when it has no
+running jobs. The next time you use an updated command, marsh prints one line
+such as `marsh: claude updated (2.1.305 → 2.1.307)`. `marsh status` lists
+recent updates. To update right now, run `marsh stop` when nothing is running,
+then use marsh again. To turn updates off, run `marsh config auto-update off`.
+See [Updates](kits.md#updates).
 
 A command that was updated keeps its newer image when marsh itself is
 upgraded. `marsh kit uninstall NAME` returns a packaged command to the version
-your marsh shipped. See [Upgrading commands](kits.md#upgrading-commands).
+your marsh shipped.
 
 For a script install, run the installer again instead of `brew upgrade`. For a
 tarball install, repeat the extraction and copy steps with the new release.

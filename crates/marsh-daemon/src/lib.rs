@@ -518,34 +518,6 @@ struct Envelope<T> {
     body: T,
 }
 
-/// One Kit's outcome from `marsh kit upgrade`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct KitUpgrade {
-    pub command: String,
-    /// The tag it follows, if any.
-    pub source: Option<String>,
-    /// The digest it ran before.
-    pub current: String,
-    /// The digest the tag names now, when it was resolved.
-    pub resolved: Option<String>,
-    pub state: KitUpgradeState,
-    pub detail: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum KitUpgradeState {
-    UpToDate,
-    /// `--check`: a newer digest is available and compatible.
-    Available,
-    Upgraded,
-    /// Nothing to follow (installed by digest, or a local build).
-    Skipped,
-    /// The new image is not compatible with this marsh, or the Kit is busy.
-    Refused,
-    Failed,
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PublicRequest {
@@ -708,11 +680,6 @@ pub enum PublicRequest {
         command: String,
         reference: String,
     },
-    /// `marsh kit upgrade`: empty `commands` means every Kit that follows a tag.
-    UpgradeKits {
-        commands: Vec<String>,
-        check_only: bool,
-    },
     /// `marsh kit uninstall`.
     UninstallKit {
         command: String,
@@ -823,9 +790,6 @@ pub enum PublicReply {
     InstalledKit {
         command: String,
         reference: String,
-    },
-    KitsUpgraded {
-        kits: Vec<KitUpgrade>,
     },
     UninstalledKit {
         command: String,
@@ -1149,17 +1113,6 @@ pub trait DaemonBackend: Send + Sync + 'static {
         _reference: String,
         _store: DaemonStore,
     ) -> Result<String, DaemonError> {
-        Err(DaemonError::BackendUnavailable)
-    }
-    /// Re-resolves each selected Kit's tag and, unless `check_only`, moves it
-    /// to the digest the tag names now. Per-Kit outcomes are reported, not
-    /// raised, so one refused Kit does not hide the others.
-    fn upgrade_kits(
-        &self,
-        _commands: &[String],
-        _check_only: bool,
-        _store: DaemonStore,
-    ) -> Result<Vec<KitUpgrade>, DaemonError> {
         Err(DaemonError::BackendUnavailable)
     }
     /// Removes a Kit added with `marsh kit install`, or returns an upgraded
@@ -1693,7 +1646,6 @@ impl PublicRequest {
             | Self::AttachEphemeralShell { .. }
             | Self::Shutdown
             | Self::ResetWorkers { .. }
-            | Self::UpgradeKits { .. }
             | Self::UninstallKit { .. }
             | Self::ResetScope
             | Self::StopScope => RequestAuthority::HostLifecycle,
@@ -3547,9 +3499,9 @@ impl Server {
     }
 
     /// The automatic Kit updater: a background thread that never delays a
-    /// request. It waits a little after startup so the first shell and Kit
-    /// start do not compete with it, then asks the backend once a minute; the
-    /// backend decides whether a daily check or a waiting switch is due.
+    /// request. It asks the backend right after startup (the start-up check)
+    /// and then once a minute; the backend decides whether a check or a
+    /// waiting switch is due.
     fn spawn_kit_updater(&self, stop: Arc<AtomicBool>) {
         // Weak, so a stopped server's store (and its journal lock) and
         // backend are released even while this thread sleeps.
@@ -3604,7 +3556,7 @@ impl Server {
     }
 }
 
-const KIT_UPDATER_START_DELAY: Duration = Duration::from_secs(20);
+const KIT_UPDATER_START_DELAY: Duration = Duration::from_secs(1);
 const KIT_UPDATER_INTERVAL: Duration = Duration::from_mins(1);
 
 struct StopOnDrop(Arc<AtomicBool>);
@@ -4858,7 +4810,7 @@ impl ConnectionHandler {
                 }
                 write_frame(&mut stream, &reply)
             }
-            body @ (PublicRequest::UpgradeKits { .. } | PublicRequest::UninstallKit { .. }) => {
+            body @ PublicRequest::UninstallKit { .. } => {
                 let reply = dispatch_request(
                     &self.store,
                     self.backend.as_ref(),
@@ -4867,17 +4819,9 @@ impl ConnectionHandler {
                 );
                 // As for a worker reset: a Kit whose VM was retired no longer
                 // holds slots for its cleanup-uncertain jobs.
-                let retired = match &reply {
-                    PublicReply::KitsUpgraded { kits } => kits
-                        .iter()
-                        .filter(|kit| kit.state == KitUpgradeState::Upgraded)
-                        .map(|kit| kit.command.clone())
-                        .collect(),
-                    PublicReply::UninstalledKit { command, .. } => vec![command.clone()],
-                    _ => Vec::new(),
-                };
-                if !retired.is_empty() {
-                    self.store.release_process_slots(&retired);
+                if let PublicReply::UninstalledKit { command, .. } = &reply {
+                    self.store
+                        .release_process_slots(std::slice::from_ref(command));
                 }
                 write_frame(&mut stream, &reply)
             }
@@ -4935,7 +4879,6 @@ fn authorize_request_session(
         | PublicRequest::RegisteredCommands
         | PublicRequest::RegisteredKits
         | PublicRequest::ResetWorkers { .. }
-        | PublicRequest::UpgradeKits { .. }
         | PublicRequest::UninstallKit { .. }
         | PublicRequest::ResetScope
         | PublicRequest::StopScope
@@ -4995,13 +4938,6 @@ fn dispatch_request(
                 Err(error) => public_error(&error),
             }
         }
-        PublicRequest::UpgradeKits {
-            commands,
-            check_only,
-        } => match backend.upgrade_kits(&commands, check_only, store.clone()) {
-            Ok(kits) => PublicReply::KitsUpgraded { kits },
-            Err(error) => public_error(&error),
-        },
         PublicRequest::UninstallKit { command } => {
             match backend.uninstall_kit(command.clone(), store.clone()) {
                 Ok(detail) => PublicReply::UninstalledKit { command, detail },
@@ -5399,24 +5335,6 @@ impl Client {
             Duration::from_mins(8),
         )? {
             PublicReply::InstalledKit { reference, .. } => Ok(reference),
-            reply => Err(unexpected_reply(reply)),
-        }
-    }
-
-    pub fn upgrade_kits(
-        &self,
-        commands: &[String],
-        check_only: bool,
-    ) -> Result<Vec<KitUpgrade>, DaemonError> {
-        // Preparing an upgraded Kit VM can take as long as an install.
-        match self.request_with_timeout(
-            PublicRequest::UpgradeKits {
-                commands: commands.to_vec(),
-                check_only,
-            },
-            Duration::from_mins(30),
-        )? {
-            PublicReply::KitsUpgraded { kits } => Ok(kits),
             reply => Err(unexpected_reply(reply)),
         }
     }
