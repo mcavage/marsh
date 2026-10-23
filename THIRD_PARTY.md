@@ -6,11 +6,11 @@ following.
 ## Brush (vendored, MIT)
 
 marsh compiles the shell from source vendored under `vendor/brush/`, pinned to
-commit `1389a8e8af6bec56fdfb9ab60a8c898bc14aa961` of
+commit `cc73400c5a3bd13c48bdfc9d89e1b9dfe694fbf6` of
 <https://github.com/reubeno/brush> (`vendor/brush/UPSTREAM_REVISION`).
 Brush is MIT-licensed; its license is `vendor/brush/LICENSE`. marsh's local
 changes are a patch queue in `docs/upstream/brush/` (see its README for the
-order and purpose of each patch). marsh does not run Bash to implement the
+scope of each patch). marsh does not run Bash to implement the
 shell.
 
 ## Rust crates

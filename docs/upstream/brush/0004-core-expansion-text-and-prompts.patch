@@ -1,0 +1,2507 @@
+diff --git a/brush-core/src/arithmetic.rs b/brush-core/src/arithmetic.rs
+index cca76f66..894e1187 100644
+--- a/brush-core/src/arithmetic.rs
++++ b/brush-core/src/arithmetic.rs
+@@ -200,7 +200,7 @@ fn deref_lvalue(
+     let value_str: Cow<'_, str> = match lvalue {
+         ast::ArithmeticTarget::Variable(name) => get_var_value(shell, name.as_str())?,
+         ast::ArithmeticTarget::ArrayElement(name, index_expr) => {
+-            let index_str = eval_expr_impl(index_expr, shell, depth)?.to_string();
++            let index_str = element_subscript(shell, name, index_expr, depth)?;
+ 
+             shell
+                 .env()
+@@ -361,6 +361,24 @@ fn apply_unary_assignment_op(
+     }
+ }
+ 
++/// Returns an array element's subscript: an associative array's key is the
++/// subscript text (already expanded), an indexed array's is its arithmetic value.
++fn element_subscript(
++    shell: &mut Shell<impl extensions::ShellExtensions>,
++    name: &str,
++    index_expr: &ast::ArithmeticExpr,
++    depth: u32,
++) -> Result<String, EvalError> {
++    if shell
++        .env()
++        .get(name)
++        .is_some_and(|(_, var)| var.value().is_associative_array())
++    {
++        return Ok(index_expr.to_string());
++    }
++    Ok(eval_expr_impl(index_expr, shell, depth)?.to_string())
++}
++
+ fn assign(
+     shell: &mut Shell<impl extensions::ShellExtensions>,
+     lvalue: &ast::ArithmeticTarget,
+@@ -381,7 +399,7 @@ fn assign(
+                 .map_err(|_err| EvalError::FailedToUpdateEnvironment)?;
+         }
+         ast::ArithmeticTarget::ArrayElement(name, index_expr) => {
+-            let index_str = eval_expr_impl(index_expr, shell, depth)?.to_string();
++            let index_str = element_subscript(shell, name, index_expr, depth)?;
+ 
+             shell
+                 .env_mut()
+diff --git a/brush-core/src/bytes.rs b/brush-core/src/bytes.rs
+new file mode 100644
+index 00000000..c026bec3
+--- /dev/null
++++ b/brush-core/src/bytes.rs
+@@ -0,0 +1,205 @@
++//! Lossless text for byte strings.
++//!
++//! Shell words, values and input are arbitrary bytes, but the shell holds
++//! them as Rust strings. At every boundary where bytes enter the shell
++//! (arguments, scripts, input, command output, the environment, file names)
++//! they are decoded with [`decode`]: valid UTF-8 stays as it is, and each
++//! byte that is not part of valid UTF-8 becomes one character from the end
++//! of Unicode's last private-use plane, `U+10FF80` (byte `0x80`) to
++//! `U+10FFFF` (byte `0xFF`). Where text leaves the shell as bytes (command
++//! arguments and environment, file names, output) [`encode`] turns those
++//! characters back into their bytes. Valid input that already contains one
++//! of those characters is decoded byte by byte, so `encode(decode(b)) == b`
++//! for every byte string `b`.
++//!
++//! Inside the shell a raw byte is one character: it matches `?`, counts one
++//! in `${#v}`, and is left alone by case conversion, as in Bash.
++
++use std::borrow::Cow;
++use std::ffi::{OsStr, OsString};
++use std::path::{Path, PathBuf};
++
++const RAW_FIRST: u32 = 0x10_FF80;
++
++/// The character standing for `byte` (0x80 through 0xFF) in decoded text.
++pub fn raw_char(byte: u8) -> char {
++    char::from_u32(RAW_FIRST - 0x80 + u32::from(byte)).unwrap_or(char::REPLACEMENT_CHARACTER)
++}
++
++/// The byte a decoded character stands for, if it is one.
++pub fn raw_byte(c: char) -> Option<u8> {
++    let code = u32::from(c);
++    (code >= RAW_FIRST)
++        .then(|| u8::try_from(code - RAW_FIRST + 0x80).ok())
++        .flatten()
++}
++
++/// Whether `bytes` is valid UTF-8 holding no character from the raw range.
++fn is_plain(bytes: &[u8]) -> bool {
++    // The raw characters are U+10FF80..=U+10FFFF: F4 8F BE/BF xx in UTF-8.
++    std::str::from_utf8(bytes).is_ok()
++        && !bytes
++            .windows(3)
++            .any(|w| w[0] == 0xF4 && w[1] == 0x8F && w[2] >= 0xBE)
++}
++
++/// Decodes bytes as shell text (see the module documentation).
++pub fn decode(bytes: &[u8]) -> Cow<'_, str> {
++    if is_plain(bytes) {
++        // SAFETY-free: is_plain checked UTF-8 validity.
++        return Cow::Borrowed(std::str::from_utf8(bytes).unwrap_or_default());
++    }
++    let mut text = String::with_capacity(bytes.len() + 8);
++    let mut rest = bytes;
++    while !rest.is_empty() {
++        let (valid, invalid) = match std::str::from_utf8(rest) {
++            Ok(valid) => (valid, &[][..]),
++            Err(error) => {
++                let (valid, after) = rest.split_at(error.valid_up_to());
++                let bad = error.error_len().unwrap_or(after.len());
++                (
++                    std::str::from_utf8(valid).unwrap_or_default(),
++                    &after[..bad],
++                )
++            }
++        };
++        for c in valid.chars() {
++            if raw_byte(c).is_some() {
++                let mut buffer = [0; 4];
++                text.extend(c.encode_utf8(&mut buffer).bytes().map(raw_char));
++            } else {
++                text.push(c);
++            }
++        }
++        text.extend(invalid.iter().copied().map(raw_char));
++        rest = &rest[valid.len() + invalid.len()..];
++    }
++    Cow::Owned(text)
++}
++
++/// Decodes owned bytes as shell text.
++pub fn decode_vec(bytes: Vec<u8>) -> String {
++    match decode(&bytes) {
++        Cow::Borrowed(_) => String::from_utf8(bytes).unwrap_or_default(),
++        Cow::Owned(text) => text,
++    }
++}
++
++/// Encodes shell text as the bytes it stands for.
++pub fn encode(text: &str) -> Cow<'_, [u8]> {
++    if !text.chars().any(|c| raw_byte(c).is_some()) {
++        return Cow::Borrowed(text.as_bytes());
++    }
++    let mut bytes = Vec::with_capacity(text.len());
++    for c in text.chars() {
++        match raw_byte(c) {
++            Some(byte) => bytes.push(byte),
++            None => bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
++        }
++    }
++    Cow::Owned(bytes)
++}
++
++/// Shell text as an OS string (an argument, environment entry or path).
++pub fn to_os_string(text: &str) -> OsString {
++    #[cfg(unix)]
++    {
++        use std::os::unix::ffi::OsStringExt as _;
++        OsString::from_vec(encode(text).into_owned())
++    }
++    #[cfg(not(unix))]
++    {
++        OsString::from(text)
++    }
++}
++
++/// An OS string as shell text.
++pub fn from_os_str(os: &OsStr) -> Cow<'_, str> {
++    #[cfg(unix)]
++    {
++        use std::os::unix::ffi::OsStrExt as _;
++        decode(os.as_bytes())
++    }
++    #[cfg(not(unix))]
++    {
++        os.to_string_lossy()
++    }
++}
++
++/// Shell text as a path.
++pub fn to_path(text: &str) -> PathBuf {
++    PathBuf::from(to_os_string(text))
++}
++
++/// A path as shell text.
++pub fn from_path(path: &Path) -> Cow<'_, str> {
++    from_os_str(path.as_os_str())
++}
++
++/// A path the shell built from text: one holding raw characters names the
++/// bytes they stand for.
++pub fn shell_path(path: &Path) -> Cow<'_, Path> {
++    match path.to_str() {
++        Some(text) if text.chars().any(|c| raw_byte(c).is_some()) => Cow::Owned(to_path(text)),
++        _ => Cow::Borrowed(path),
++    }
++}
++
++/// Paths and OS strings as shell text (in place of `to_string_lossy`).
++pub trait ToShellText {
++    /// Decodes the bytes as shell text, losslessly.
++    fn to_shell_text(&self) -> Cow<'_, str>;
++}
++
++impl ToShellText for OsStr {
++    fn to_shell_text(&self) -> Cow<'_, str> {
++        from_os_str(self)
++    }
++}
++
++impl ToShellText for Path {
++    fn to_shell_text(&self) -> Cow<'_, str> {
++        from_os_str(self.as_os_str())
++    }
++}
++
++/// The number of bytes `text` stands for.
++pub fn byte_len(text: &str) -> usize {
++    if !text.as_bytes().contains(&0xF4) {
++        return text.len();
++    }
++    text.chars()
++        .map(|c| {
++            if raw_byte(c).is_some() {
++                1
++            } else {
++                c.len_utf8()
++            }
++        })
++        .sum()
++}
++
++/// Translates written shell text to the bytes it stands for: each UTF-8
++/// encoded raw character in `buf` becomes its byte.
++pub fn encode_output(buf: &[u8]) -> Cow<'_, [u8]> {
++    if !buf.contains(&0xF4) {
++        return Cow::Borrowed(buf);
++    }
++    let mut out = Vec::with_capacity(buf.len());
++    let mut index = 0;
++    while index < buf.len() {
++        if buf[index] == 0xF4
++            && let Some(&[_, second, third, fourth]) = buf.get(index..index + 4)
++            && second == 0x8F
++            && third >= 0xBE
++            && (0x80..0xC0).contains(&fourth)
++        {
++            out.push(((third & 0x01) << 6) | (fourth & 0x3F) | 0x80);
++            index += 4;
++        } else {
++            out.push(buf[index]);
++            index += 1;
++        }
++    }
++    Cow::Owned(out)
++}
+diff --git a/brush-core/src/completion.rs b/brush-core/src/completion.rs
+index 361bbc90..c9899e82 100644
+--- a/brush-core/src/completion.rs
++++ b/brush-core/src/completion.rs
+@@ -19,6 +19,7 @@
+ //!    `compopt` can change its options. With no spec, basic completion completes
+ //!    variables, file names, and commands.
+ 
++use crate::bytes::ToShellText as _;
+ use itertools::Itertools;
+ use std::{
+     borrow::Cow,
+@@ -389,6 +390,9 @@ struct Context<'a> {
+     /// The word to generate candidates for. When completing a line, this is the word being
+     /// completed; for [`Spec::generate`], it's the word given, dequoted.
+     word: &'a str,
++    /// For [`Spec::generate`], the word as given (with its quoting), which `compgen`'s file
++    /// and directory completion works from.
++    raw_word: Option<&'a str>,
+     /// The line a completion function or command is told about: the one being completed,
+     /// or for [`Spec::generate`], like bash, an empty one being completed for `compgen`.
+     line: LineContext<'a>,
+@@ -501,9 +505,10 @@ impl Spec {
+         shell: &mut Shell<impl extensions::ShellExtensions>,
+         word: &str,
+     ) -> Result<Vec<String>, crate::error::Error> {
+-        let word = unquote_str(word);
++        let unquoted_word = unquote_str(word);
+         let context = Context {
+-            word: &word,
++            word: &unquoted_word,
++            raw_word: Some(word),
+             line: LineContext {
+                 input: "",
+                 cursor: 0,
+@@ -779,7 +784,10 @@ impl Spec {
+                 }
+                 CompleteAction::Command => c.extend(command_completions(shell, prefix)),
+                 CompleteAction::Directory => {
+-                    let dirs = get_file_completions(shell, context.word, true).await;
++                    let dirs = match context.raw_word {
++                        Some(raw_word) => get_compgen_file_completions(shell, raw_word, true).await,
++                        None => get_file_completions(shell, context.word, true).await,
++                    };
+                     file_names |= !dirs.is_empty();
+                     c.extend(dirs);
+                 }
+@@ -812,7 +820,12 @@ impl Spec {
+                 ),
+                 CompleteAction::File => {
+                     file_names = true;
+-                    c.extend(get_file_completions(shell, context.word, false).await);
++                    c.extend(match context.raw_word {
++                        Some(raw_word) => {
++                            get_compgen_file_completions(shell, raw_word, false).await
++                        }
++                        None => get_file_completions(shell, context.word, false).await,
++                    });
+                 }
+                 CompleteAction::Function => extend_matching(
+                     c,
+@@ -825,7 +838,7 @@ impl Spec {
+                     c,
+                     sys::network::get_hostname()
+                         .ok()
+-                        .map(|name| name.to_string_lossy().into_owned()),
++                        .map(|name| name.to_shell_text().into_owned()),
+                     prefix,
+                 ),
+                 CompleteAction::Job => extend_matching(
+@@ -1195,7 +1208,7 @@ impl Config {
+             .or_else(|| {
+                 let file_name = Path::new(command_name).file_name()?;
+                 self.commands
+-                    .get_key_value(file_name.to_string_lossy().as_ref())
++                    .get_key_value(file_name.to_shell_text().as_ref())
+             })
+             .map(|(name, spec)| (spec, SpecName::Command(name)))
+             .or_else(|| {
+@@ -1224,6 +1237,7 @@ pub(crate) async fn complete(
+     let line_words = find_line_words(input, &word_breaks, cursor);
+     let context = Context {
+         word: &word.text,
++        raw_word: None,
+         line: LineContext::new(input, cursor, &line_words),
+     };
+ 
+@@ -1347,6 +1361,73 @@ async fn get_file_completions(
+     completions
+ }
+ 
++/// `compgen -f`/`-d` as Bash does: names in the word's directory (its part up
++/// to the last `/`) that start with the rest of the word as written, each
++/// shown after the directory part as written. A directory of that literal
++/// name is used as it is; otherwise the part is dequoted, tilde- and
++/// parameter-expanded (never a command substitution, which matches nothing),
++/// though `~` always expands.
++async fn get_compgen_file_completions(
++    shell: &Shell<impl extensions::ShellExtensions>,
++    word: &str,
++    must_be_dir: bool,
++) -> Vec<String> {
++    let (dir_text, base) = match word.rfind('/') {
++        Some(slash) => (&word[..=slash], &word[slash + 1..]),
++        None => ("", word),
++    };
++    let dir = if dir_text.is_empty() {
++        shell.working_dir().to_path_buf()
++    } else if dir_text.contains("$(") || dir_text.contains('`') {
++        return vec![];
++    } else {
++        let literal = shell.absolute_path(Path::new(dir_text));
++        if !dir_text.starts_with('~') && literal.is_dir() {
++            literal
++        } else {
++            let mut throwaway_shell = shell.clone();
++            let params = throwaway_shell.default_exec_params();
++            let options = expansion::ExpanderOptions {
++                execute_command_substitutions: false,
++                ..Default::default()
++            };
++            let Ok(expanded) = expansion::basic_expand_word_with_options(
++                &mut throwaway_shell,
++                &params,
++                dir_text,
++                &options,
++            )
++            .await
++            else {
++                return vec![];
++            };
++            shell.absolute_path(Path::new(&expanded))
++        }
++    };
++    let Ok(entries) = std::fs::read_dir(&dir) else {
++        return vec![];
++    };
++    let mut completions: Vec<String> = entries
++        .filter_map(Result::ok)
++        .filter_map(|entry| {
++            let name = entry.file_name().to_shell_text().into_owned();
++            let wanted = name.starts_with(base)
++                && (!name.starts_with('.') || base.starts_with('.'))
++                && (!must_be_dir || dir.join(&name).is_dir());
++            wanted.then(|| std::format!("{dir_text}{name}"))
++        })
++        .collect();
++    if base == "." || base == ".." {
++        completions.push(std::format!("{dir_text}.."));
++        if base == "." {
++            completions.push(std::format!("{dir_text}."));
++        }
++    }
++    completions.sort();
++    completions.dedup();
++    completions
++}
++
+ /// Attempts to complete a variable name from the given token.
+ /// Returns the candidates and how to process them if the token looks like a variable reference being typed,
+ /// or `None` if file/command completion should be used instead.
+@@ -1432,7 +1513,8 @@ fn command_completions(
+                 prefix,
+                 shell.options().case_insensitive_pathname_expansion,
+             )
+-            .filter_map(|path| Some(path.file_name()?.to_string_lossy().into_owned())),
++            .filter(|path| !path.is_dir())
++            .filter_map(|path| Some(path.file_name()?.to_shell_text().into_owned())),
+     );
+ 
+     names
+diff --git a/brush-core/src/env.rs b/brush-core/src/env.rs
+index 9a2ea540..970e769c 100644
+--- a/brush-core/src/env.rs
++++ b/brush-core/src/env.rs
+@@ -190,6 +190,13 @@ impl ShellEnvironment {
+     ///
+     /// * `name` - The name of the variable to retrieve.
+     pub fn get<S: AsRef<str>>(&self, name: S) -> Option<(EnvironmentScope, &ShellVariable)> {
++        let name = self.resolve_nameref(name.as_ref());
++        self.get_raw(name.as_ref())
++    }
++
++    /// Like [`Self::get`], but returns a name reference (`declare -n`) itself
++    /// rather than the variable it names.
++    pub fn get_raw<S: AsRef<str>>(&self, name: S) -> Option<(EnvironmentScope, &ShellVariable)> {
+         // Look through scopes, from the top of the stack on down.
+         for (scope_type, map) in self.scopes.iter().rev() {
+             if let Some(var) = map.get(name.as_ref()) {
+@@ -200,6 +207,53 @@ impl ShellEnvironment {
+         None
+     }
+ 
++    /// Follows name references (`declare -n`) from `name` to the variable name
++    /// they finally refer to. A name that is not a reference resolves to itself;
++    /// an empty or circular reference stops at the last name reached.
++    pub fn resolve_nameref<'a>(&self, name: &'a str) -> Cow<'a, str> {
++        let mut resolved = Cow::Borrowed(name);
++        // Bash also bounds the chain; a longer chain is treated as circular.
++        for _ in 0..8 {
++            let Some((_, var)) = self.get_raw(resolved.as_ref()) else {
++                break;
++            };
++            match Self::nameref_target(var) {
++                Some(target) if target != resolved.as_ref() => {
++                    resolved = Cow::Owned(target.to_owned());
++                }
++                _ => break,
++            }
++        }
++        resolved
++    }
++
++    /// Where `name`'s name references finally lead, when that is an array
++    /// element (`declare -n r='a[2]'`): the array's name and the subscript as
++    /// written, which the caller expands.
++    pub fn nameref_element(&self, name: &str) -> Option<(String, String)> {
++        let resolved = self.resolve_nameref(name);
++        let (_, var) = self.get_raw(resolved.as_ref())?;
++        if !var.is_treated_as_nameref() {
++            return None;
++        }
++        let ShellValue::String(target) = var.value() else {
++            return None;
++        };
++        let (array, rest) = target.split_once('[')?;
++        let index = rest.strip_suffix(']')?;
++        valid_variable_name(array).then(|| (array.to_owned(), index.to_owned()))
++    }
++
++    fn nameref_target(var: &ShellVariable) -> Option<&str> {
++        if !var.is_treated_as_nameref() {
++            return None;
++        }
++        match var.value() {
++            ShellValue::String(target) if valid_variable_name(target) => Some(target.as_str()),
++            _ => None,
++        }
++    }
++
+     /// Tries to retrieve a mutable reference to the variable with the given name
+     /// in the environment.
+     ///
+@@ -210,9 +264,10 @@ impl ShellEnvironment {
+         &mut self,
+         name: S,
+     ) -> Option<(EnvironmentScope, &mut ShellVariable)> {
++        let name = self.resolve_nameref(name.as_ref()).into_owned();
+         // Look through scopes, from the top of the stack on down.
+         for (scope_type, map) in self.scopes.iter_mut().rev() {
+-            if let Some(var) = map.get_mut(name.as_ref()) {
++            if let Some(var) = map.get_mut(name.as_str()) {
+                 return Some((*scope_type, var));
+             }
+         }
+@@ -260,6 +315,12 @@ impl ShellEnvironment {
+     ///
+     /// * `name` - The name of the variable to unset.
+     pub fn unset(&mut self, name: &str) -> Result<Option<ShellVariable>, error::Error> {
++        let name = self.resolve_nameref(name).into_owned();
++        self.unset_raw(name.as_str())
++    }
++
++    /// Like [`Self::unset`], but unsets a name reference itself (`unset -n`).
++    pub fn unset_raw(&mut self, name: &str) -> Result<Option<ShellVariable>, error::Error> {
+         let mut local_count = 0;
+         for (scope_type, map) in self.scopes.iter_mut().rev() {
+             if matches!(scope_type, EnvironmentScope::Local) {
+@@ -325,6 +386,19 @@ impl ShellEnvironment {
+         &self,
+         name: N,
+         lookup_policy: EnvironmentLookup,
++    ) -> Option<&ShellVariable> {
++        let var = self.get_raw_using_policy(name, lookup_policy)?;
++        match Self::nameref_target(var) {
++            Some(target) => self.get(target).map(|(_, var)| var),
++            None => Some(var),
++        }
++    }
++
++    /// Like [`Self::get_using_policy`], but returns a name reference itself.
++    pub fn get_raw_using_policy<N: AsRef<str>>(
++        &self,
++        name: N,
++        lookup_policy: EnvironmentLookup,
+     ) -> Option<&ShellVariable> {
+         let mut looks_in = lookup_policy.scope_filter();
+         self.scopes
+@@ -345,6 +419,22 @@ impl ShellEnvironment {
+         &mut self,
+         name: N,
+         lookup_policy: EnvironmentLookup,
++    ) -> Option<&mut ShellVariable> {
++        let target = self
++            .get_raw_using_policy(name.as_ref(), lookup_policy)
++            .and_then(Self::nameref_target)
++            .map(|target| self.resolve_nameref(target).into_owned());
++        match target {
++            Some(target) => self.get_mut(target).map(|(_, var)| var),
++            None => self.get_mut_raw_using_policy(name, lookup_policy),
++        }
++    }
++
++    /// Like [`Self::get_mut_using_policy`], but returns a name reference itself.
++    pub fn get_mut_raw_using_policy<N: AsRef<str>>(
++        &mut self,
++        name: N,
++        lookup_policy: EnvironmentLookup,
+     ) -> Option<&mut ShellVariable> {
+         let mut looks_in = lookup_policy.scope_filter();
+         self.scopes
+@@ -371,7 +461,29 @@ impl ShellEnvironment {
+         lookup_policy: EnvironmentLookup,
+         scope_if_creating: EnvironmentScope,
+     ) -> Result<(), error::Error> {
+-        let name = name.into();
++        let mut name = name.into();
++        // A reference to an element assigns the element (its subscript as
++        // written: callers that can expand it do so first).
++        if let variables::ShellValueLiteral::Scalar(value) = &value
++            && let Some((array, index)) = self.nameref_element(&name)
++        {
++            return self.update_or_add_array_element(
++                array,
++                index,
++                value.clone(),
++                |_| Ok(()),
++                EnvironmentLookup::Anywhere,
++                scope_if_creating,
++            );
++        }
++        let mut lookup_policy = lookup_policy;
++        if let Some(target) = self
++            .get_raw_using_policy(&name, lookup_policy)
++            .and_then(Self::nameref_target)
++        {
++            name = self.resolve_nameref(target).into_owned();
++            lookup_policy = EnvironmentLookup::Anywhere;
++        }
+ 
+         let auto_export = self.export_variables_on_modification;
+         if let Some(var) = self.get_mut_using_policy(&name, lookup_policy) {
+@@ -411,7 +523,15 @@ impl ShellEnvironment {
+         lookup_policy: EnvironmentLookup,
+         scope_if_creating: EnvironmentScope,
+     ) -> Result<(), error::Error> {
+-        let name = name.into();
++        let mut name = name.into();
++        let mut lookup_policy = lookup_policy;
++        if let Some(target) = self
++            .get_raw_using_policy(&name, lookup_policy)
++            .and_then(Self::nameref_target)
++        {
++            name = self.resolve_nameref(target).into_owned();
++            lookup_policy = EnvironmentLookup::Anywhere;
++        }
+ 
+         if let Some(var) = self.get_mut_using_policy(&name, lookup_policy) {
+             var.assign_at_index(index, value, false)?;
+diff --git a/brush-core/src/escape.rs b/brush-core/src/escape.rs
+index 01ff08d2..40de9a8d 100644
+--- a/brush-core/src/escape.rs
++++ b/brush-core/src/escape.rs
+@@ -31,7 +31,7 @@ pub fn expand_backslash_escapes(
+     while let Some(c) = it.next() {
+         if c != '\\' {
+             // Not a backslash, add and move on.
+-            result.append(c.to_string().into_bytes().as_mut());
++            push_char(&mut result, c);
+             continue;
+         }
+ 
+@@ -250,7 +250,7 @@ pub fn expand_backslash_escapes(
+             unknown => {
+                 // Not a valid escape sequence.
+                 result.push(b'\\');
+-                result.append(unknown.to_string().into_bytes().as_mut());
++                push_char(&mut result, unknown);
+             }
+         }
+     }
+@@ -265,6 +265,14 @@ pub fn expand_backslash_escapes(
+     Ok((result, true))
+ }
+ 
++/// Appends the bytes a character of shell text stands for.
++fn push_char(result: &mut Vec<u8>, c: char) {
++    match crate::bytes::raw_byte(c) {
++        Some(byte) => result.push(byte),
++        None => result.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
++    }
++}
++
+ /// Quoting mode to use for escaping.
+ #[derive(Clone, Copy, Debug, Default)]
+ pub enum QuoteMode {
+@@ -460,7 +468,8 @@ fn ansi_c_quote(s: &str) -> String {
+             '\\' => result.push_str("\\\\"),
+             '\'' => result.push_str("\\'"),
+             c if needs_ansi_c_quoting(c) => {
+-                result.push_str(std::format!("\\{:03o}", c as u8).as_str());
++                let byte = crate::bytes::raw_byte(c).unwrap_or(c as u8);
++                result.push_str(std::format!("\\{byte:03o}").as_str());
+             }
+             _ => result.push(c),
+         }
+@@ -523,8 +532,10 @@ const fn needs_escaping(c: char) -> bool {
+     )
+ }
+ 
+-const fn needs_ansi_c_quoting(c: char) -> bool {
+-    c.is_ascii_control()
++/// Control characters, and bytes that are not part of valid UTF-8 (which Bash
++/// writes as `\NNN`).
++fn needs_ansi_c_quoting(c: char) -> bool {
++    c.is_ascii_control() || crate::bytes::raw_byte(c).is_some()
+ }
+ 
+ #[cfg(test)]
+diff --git a/brush-core/src/expansion.rs b/brush-core/src/expansion.rs
+index 451de7fd..5cc56c03 100644
+--- a/brush-core/src/expansion.rs
++++ b/brush-core/src/expansion.rs
+@@ -1,5 +1,6 @@
+ //! Word expansion utilities.
+ 
++use crate::bytes::ToShellText as _;
+ use std::borrow::Cow;
+ use std::cmp::min;
+ use std::io::Write as _;
+@@ -440,8 +441,9 @@ impl ExpansionPiece {
+         }
+     }
+ 
+-    const fn len(&self) -> usize {
+-        self.as_str().len()
++    /// The number of bytes the piece stands for.
++    fn len(&self) -> usize {
++        crate::bytes::byte_len(self.as_str())
+     }
+ 
+     fn make_unsplittable(self) -> Self {
+@@ -519,7 +521,7 @@ pub(crate) async fn basic_expand_regex(
+ /// * `shell` - The shell in which to perform expansion.
+ /// * `params` - The execution parameters to use during expansion.
+ /// * `word_str` - The word to expand, as a string.
+-pub(crate) async fn basic_expand_word(
++pub async fn basic_expand_word(
+     shell: &mut Shell<impl extensions::ShellExtensions>,
+     params: &ExecutionParameters,
+     word_str: impl AsRef<str>,
+@@ -553,6 +555,22 @@ pub(crate) async fn basic_expand_heredoc_word(
+     expander.basic_expand_to_str(word_str.as_ref()).await
+ }
+ 
++/// Expands a prompt string after its escapes are decoded, as Bash does: like a
++/// here-document (quotes are literal; no brace, tilde or pathname expansion),
++/// with a backslash consumed only before a character it escapes in double
++/// quotes.
++pub(crate) async fn basic_expand_prompt_word(
++    shell: &mut Shell<impl extensions::ShellExtensions>,
++    params: &ExecutionParameters,
++    word_str: impl AsRef<str>,
++) -> Result<String, error::Error> {
++    let mut expander = WordExpander::new(shell, params);
++    expander.heredoc_mode = true;
++    expander.disable_brace_expansion = true;
++    expander.unquoted_backslash_handling = UnquotedBackslashHandling::DoubleQuoted;
++    expander.basic_expand_to_str(word_str.as_ref()).await
++}
++
+ /// Applies all basic expansion to the given word (represented as a string),
+ /// with custom expander options.
+ ///
+@@ -984,8 +1002,16 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+             .set_extended_globbing(self.parser_options.enable_extended_globbing)
+             .set_case_insensitive(self.shell.options().case_insensitive_pathname_expansion);
+ 
++        // Like Bash, a non-empty GLOBIGNORE implies dotglob.
++        let ignore = self
++            .shell
++            .env_str("GLOBIGNORE")
++            .filter(|ignore| !ignore.is_empty())
++            .map(|ignore| ignore.into_owned());
+         let options = patterns::FilenameExpansionOptions {
+-            require_dot_in_pattern_to_match_dot_files: !self.shell.options().glob_matches_dotfiles,
++            require_dot_in_pattern_to_match_dot_files: !self.shell.options().glob_matches_dotfiles
++                && ignore.is_none(),
++            globstar: self.shell.options().enable_star_star_glob,
+         };
+ 
+         // On error (e.g. malformed pattern), default to NoGlob so the field
+@@ -997,6 +1023,15 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                 &options,
+             )
+             .unwrap_or_default();
++        let expansion = match (ignore, expansion) {
++            (Some(ignore), patterns::PatternExpansionResult::Expanded(mut paths))
++                if pattern.has_glob() =>
++            {
++                paths.retain(|path| !self.globignore_rejects(&ignore, path));
++                patterns::PatternExpansionResult::Expanded(paths)
++            }
++            (_, expansion) => expansion,
++        };
+ 
+         if expansion.is_unmatched_glob()
+             && self.shell.options().fail_expansion_on_globs_without_match
+@@ -1017,6 +1052,29 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+         }
+     }
+ 
++    /// Whether GLOBIGNORE removes `path` from a glob's results, as in Bash:
++    /// a `.` or `..` name, or a whole-path match for one of its `:`-separated
++    /// patterns, where `*` and `?` do not match `/`.
++    fn globignore_rejects(&self, ignore: &str, path: &str) -> bool {
++        if matches!(path.rsplit('/').next(), Some("." | "..")) {
++            return true;
++        }
++        let names: Vec<&str> = path.split('/').collect();
++        ignore
++            .split(':')
++            .filter(|pattern| !pattern.is_empty())
++            .any(|pattern| {
++                let parts: Vec<&str> = pattern.split('/').collect();
++                parts.len() == names.len()
++                    && parts.iter().zip(&names).all(|(part, name)| {
++                        patterns::Pattern::from(*part)
++                            .set_extended_globbing(self.parser_options.enable_extended_globbing)
++                            .exactly_matches(name)
++                            .unwrap_or(false)
++                    })
++            })
++    }
++
+     #[allow(clippy::double_must_use)]
+     #[async_recursion::async_recursion]
+     async fn expand_word_piece(
+@@ -1035,9 +1093,9 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                     s.as_str(),
+                     escape::EscapeExpansionMode::AnsiCQuotes,
+                 )?;
+-                Expansion::from(ExpansionPiece::Unsplittable(
+-                    String::from_utf8_lossy(expanded.as_slice()).into_owned(),
+-                ))
++                Expansion::from(ExpansionPiece::Unsplittable(crate::bytes::decode_vec(
++                    expanded,
++                )))
+             }
+             brush_parser::word::WordPiece::DoubleQuotedSequence(pieces)
+             | brush_parser::word::WordPiece::GettextDoubleQuotedSequence(pieces) => {
+@@ -1091,7 +1149,8 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                 if cmd_output.contains('\0') {
+                     writeln!(
+                         self.params.stderr(self.shell),
+-                        "warning: command substitution: ignored null byte in input",
++                        "{}warning: command substitution: ignored null byte in input",
++                        self.shell.diagnostic_prefix()
+                     )?;
+                     cmd_output.retain(|c| c != '\0');
+                 }
+@@ -1102,6 +1161,26 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+ 
+                 Expansion::from(ExpansionPiece::Splittable(cmd_output))
+             }
++            brush_parser::word::WordPiece::FunctionSubstitution { command, reply } => {
++                let mut value = if self.disable_command_substitutions {
++                    String::new()
++                } else {
++                    commands::invoke_function_substitution(self.shell, self.params, command, reply)
++                        .await?
++                };
++                if !reply {
++                    if value.contains('\0') {
++                        writeln!(
++                            self.params.stderr(self.shell),
++                            "{}warning: command substitution: ignored null byte in input",
++                            self.shell.diagnostic_prefix()
++                        )?;
++                        value.retain(|c| c != '\0');
++                    }
++                    value.truncate(value.trim_end_matches('\n').len());
++                }
++                Expansion::from(ExpansionPiece::Splittable(value))
++            }
+             brush_parser::word::WordPiece::EscapeSequence(s) => {
+                 let Some(escaped) = s.strip_prefix('\\') else {
+                     // We don't ever expect this case, as it breaks our invariant--but
+@@ -1125,7 +1204,7 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                     }
+                     UnquotedBackslashHandling::Preserve => {
+                         // Preserve `\X` verbatim (e.g., for pattern syntax).
+-                        Expansion::from(ExpansionPiece::Splittable(s))
++                        Expansion::from(ExpansionPiece::UnquotedLiteral(s))
+                     }
+                     UnquotedBackslashHandling::DoubleQuoted => {
+                         // `\<newline>` is a line continuation: both characters
+@@ -1157,7 +1236,7 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+         match tilde_expr {
+             brush_parser::word::TildeExpr::Home => {
+                 if let Some(home_dir) = self.shell.home_dir() {
+-                    Ok(Cow::Owned(home_dir.to_string_lossy().to_string()))
++                    Ok(Cow::Owned(home_dir.to_shell_text().to_string()))
+                 } else {
+                     Err(error::ErrorKind::TildeWithoutValidHome.into())
+                 }
+@@ -1165,11 +1244,11 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+             brush_parser::word::TildeExpr::UserHome(username) => {
+                 Ok(sys::users::get_user_home_dir(username).map_or_else(
+                     || Cow::Owned(std::format!("~{username}")),
+-                    |p| Cow::Owned(p.to_string_lossy().to_string()),
++                    |p| Cow::Owned(p.to_shell_text().to_string()),
+                 ))
+             }
+             brush_parser::word::TildeExpr::WorkingDir => {
+-                Ok(self.shell.working_dir().to_string_lossy())
++                Ok(self.shell.working_dir().to_shell_text())
+             }
+             brush_parser::word::TildeExpr::OldWorkingDir => {
+                 if let Some(old_pwd) = self.shell.env_str("OLDPWD") {
+@@ -1182,23 +1261,23 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                 let dir_stack_count = self.shell.directory_stack().len();
+ 
+                 if let Some(dir) = self.shell.directory_stack().get(*n) {
+-                    Ok(dir.to_string_lossy())
++                    Ok(dir.to_shell_text())
+                 } else if *n == dir_stack_count {
+-                    Ok(self.shell.working_dir().to_string_lossy())
++                    Ok(self.shell.working_dir().to_shell_text())
+                 } else {
+                     Ok(Cow::Owned(std::format!("~-{n}")))
+                 }
+             }
+             brush_parser::word::TildeExpr::NthDirFromTopOfDirStack { n, plus_used } => {
+                 if *n == 0 {
+-                    return Ok(self.shell.working_dir().to_string_lossy());
++                    return Ok(self.shell.working_dir().to_shell_text());
+                 }
+ 
+                 let dir_stack_count = self.shell.directory_stack().len();
+                 if dir_stack_count >= *n
+                     && let Some(dir) = self.shell.directory_stack().get(dir_stack_count - *n)
+                 {
+-                    return Ok(dir.to_string_lossy());
++                    return Ok(dir.to_shell_text());
+                 }
+ 
+                 let plus_or_nothing = if *plus_used { "+" } else { "" };
+@@ -1339,14 +1418,30 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                     .await?;
+                 let error_message = error_message.as_ref().map_or("", |v| v.as_str());
+ 
+-                match (test_type, expanded_parameter.classify()) {
++                match (&test_type, expanded_parameter.classify()) {
+                     (_, ParameterState::NonZeroLength)
+                     | (
+                         brush_parser::word::ParameterTestType::Unset,
+                         ParameterState::DefinedEmptyString,
+                     ) => Ok(expanded_parameter),
+                     _ => {
+-                        let result = self.basic_expand_to_str(error_message).await?;
++                        // Like Bash: `NAME: MESSAGE`, with a default message.
++                        let mut result = self.basic_expand_to_str(error_message).await?;
++                        if result.is_empty() {
++                            result = String::from(match test_type {
++                                brush_parser::word::ParameterTestType::Unset => "parameter not set",
++                                brush_parser::word::ParameterTestType::UnsetOrNull => {
++                                    "parameter null or not set"
++                                }
++                            });
++                        }
++                        let shown = parameter.to_string();
++                        let shown = shown
++                            .strip_prefix("${")
++                            .and_then(|name| name.strip_suffix('}'))
++                            .or_else(|| shown.strip_prefix('$'))
++                            .unwrap_or(&shown);
++                        let result = std::format!("{shown}: {result}");
+                         let err: error::Error =
+                             error::ErrorKind::CheckedExpansionError(result).into();
+ 
+@@ -1611,6 +1706,45 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                 indirect,
+                 op,
+             } => {
++                // Like Bash 5.3, `${a[@]@K}` on an array is its subscripts and
++                // quoted values, and `${a[@]@k}` the same as separate words.
++                if let (
++                    ParameterTransformOp::PossiblyQuoteWithArraysExpanded { separate_words },
++                    brush_parser::word::Parameter::NamedWithAllIndices { name, concatenate },
++                    false,
++                ) = (&op, &parameter, indirect)
++                    && let Some((pairs, associative)) = self.array_subscripts_and_values(name)
++                {
++                    let fields = if *separate_words {
++                        pairs
++                            .into_iter()
++                            .flat_map(|(key, value)| [key, value])
++                            .map(|word| WordField::from(word))
++                            .collect()
++                    } else {
++                        let mut listed = pairs
++                            .iter()
++                            .map(|(key, value)| {
++                                std::format!(
++                                    "{} {}",
++                                    escape::quote_if_needed(key, escape::QuoteMode::DoubleQuote),
++                                    escape::force_quote(value, escape::QuoteMode::DoubleQuote)
++                                )
++                            })
++                            .join(" ");
++                        if associative && !listed.is_empty() {
++                            listed.push(' ');
++                        }
++                        vec![WordField::from(listed)]
++                    };
++                    return Ok(Expansion {
++                        fields,
++                        concatenate: *concatenate,
++                        kind: ExpansionKind::ElementList,
++                        undefined: false,
++                    });
++                }
++
+                 let expanded_parameter = self.expand_parameter(&parameter, indirect).await?;
+                 let came_from_undefined = expanded_parameter.undefined;
+ 
+@@ -1707,20 +1841,21 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+ 
+                 // If no replacement was provided, then we replace with an empty string.
+                 let replacement = replacement.unwrap_or(String::new());
+-                let expanded_replacement = self.basic_expand_to_str(&replacement).await?;
++                let expanded_replacement = self.basic_expand(&replacement).await?;
++                let replacement = if self.shell.options().patsub_replacement
++                    && expanded_replacement.fields.len() == 1
++                {
++                    Replacement::with_matches(&expanded_replacement.fields[0])
++                } else {
++                    Replacement(vec![ReplacementPart::Text(
++                        self.fields_to_string(expanded_replacement),
++                    )])
++                };
+ 
+-                let regex = expanded_pattern.to_regex(
+-                    matches!(match_kind, brush_parser::word::SubstringMatchKind::Prefix),
+-                    matches!(match_kind, brush_parser::word::SubstringMatchKind::Suffix),
+-                )?;
++                let matcher = SubstitutionMatcher::new(&expanded_pattern, &match_kind)?;
+ 
+                 transform_expansion(expanded_parameter, async |s| {
+-                    Ok(Self::replace_substring(
+-                        s.as_str(),
+-                        &regex,
+-                        expanded_replacement.as_str(),
+-                        &match_kind,
+-                    ))
++                    matcher.substitute(s.as_str(), &replacement)
+                 })
+                 .await
+             }
+@@ -1784,6 +1919,12 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+         value: T,
+     ) -> Result<(), error::Error> {
+         let (variable_name, index) = match parameter {
++            brush_parser::word::Parameter::Named(name)
++                if self.shell.env().nameref_element(name).is_some() =>
++            {
++                let element = self.element_parameter(name)?;
++                return Box::pin(self.assign_to_parameter(&element, value)).await;
++            }
+             brush_parser::word::Parameter::Named(name) => (name, None),
+             brush_parser::word::Parameter::NamedWithIndex { name, index } => {
+                 let is_set_assoc_array = if let Some((_, var)) = self.shell.env().get(name) {
+@@ -1873,6 +2014,34 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+         (name, index, var)
+     }
+ 
++    /// The element `name` refers to (`declare -n r='a[2]'`), as a parameter.
++    fn element_parameter(&self, name: &str) -> Result<brush_parser::word::Parameter, error::Error> {
++        let (array, index) = self.shell.env().nameref_element(name).unwrap_or_default();
++        Ok(brush_parser::word::Parameter::NamedWithIndex { name: array, index })
++    }
++
++    /// An array's subscripts and values, in order, and whether it is associative.
++    fn array_subscripts_and_values(&self, name: &str) -> Option<(Vec<(String, String)>, bool)> {
++        let (_, var) = self.shell.env().get(name)?;
++        match var.value() {
++            ShellValue::IndexedArray(values) => Some((
++                values
++                    .iter()
++                    .map(|(key, value)| (key.to_string(), value.clone()))
++                    .collect(),
++                false,
++            )),
++            ShellValue::AssociativeArray(values) => Some((
++                values
++                    .iter()
++                    .map(|(key, value)| (key.clone(), value.clone()))
++                    .collect(),
++                true,
++            )),
++            _ => None,
++        }
++    }
++
+     fn undefined_expansion(
+         &self,
+         parameter: &brush_parser::word::Parameter,
+@@ -1931,6 +2100,14 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+         parameter: &brush_parser::word::Parameter,
+         allow_unset_vars: bool,
+     ) -> Result<Expansion, error::Error> {
++        // A reference to an array element expands that element.
++        if let brush_parser::word::Parameter::Named(name) = parameter
++            && self.shell.env().nameref_element(name).is_some()
++        {
++            let element = self.element_parameter(name)?;
++            return Box::pin(self.expand_parameter_without_indirect(&element, allow_unset_vars))
++                .await;
++        }
+         match parameter {
+             brush_parser::word::Parameter::Positional(p) => {
+                 if *p == 0 {
+@@ -1944,6 +2121,12 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                     self.undefined_expansion(parameter, allow_unset_vars)
+                 }
+             }
++            // Like Bash, `$!` is unset until a job starts in the background.
++            brush_parser::word::Parameter::Special(
++                brush_parser::word::SpecialParameter::LastBackgroundProcessId,
++            ) if self.shell.jobs().last_background_pid().is_none() => {
++                self.undefined_expansion(parameter, allow_unset_vars)
++            }
+             brush_parser::word::Parameter::Special(s) => Ok(self.expand_special_parameter(s)),
+             brush_parser::word::Parameter::Named(n) => {
+                 if !env::valid_variable_name(n.as_str()) {
+@@ -2074,12 +2257,10 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+                 Expansion::from(self.shell.options().option_flags())
+             }
+             brush_parser::word::SpecialParameter::ProcessId => {
+-                Expansion::from(std::process::id().to_string())
++                Expansion::from(crate::subshell::shell_pid().to_string())
+             }
+             brush_parser::word::SpecialParameter::LastBackgroundProcessId => {
+-                if let Some(job) = self.shell.jobs().current_job()
+-                    && let Some(pid) = job.representative_pid()
+-                {
++                if let Some(pid) = self.shell.jobs().last_background_pid() {
+                     return Expansion::from(pid.to_string());
+                 }
+                 Expansion::from(String::new())
+@@ -2152,30 +2333,6 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+         }
+     }
+ 
+-    fn replace_substring(
+-        s: &str,
+-        regex: &fancy_regex::Regex,
+-        replacement: &str,
+-        match_kind: &SubstringMatchKind,
+-    ) -> String {
+-        // The replacement is already fully expanded; it must be inserted verbatim. A bare
+-        // `&str` replacer would instead read `$1`, `$0` and `${name}` as references to the
+-        // regex's capture groups.
+-        let replacement = fancy_regex::NoExpand(replacement);
+-
+-        match match_kind {
+-            brush_parser::word::SubstringMatchKind::Prefix
+-            | brush_parser::word::SubstringMatchKind::Suffix
+-            | brush_parser::word::SubstringMatchKind::FirstOccurrence => {
+-                regex.replace(s, replacement).into_owned()
+-            }
+-
+-            brush_parser::word::SubstringMatchKind::Anywhere => {
+-                regex.replace_all(s, replacement).into_owned()
+-            }
+-        }
+-    }
+-
+     async fn apply_transform_to(
+         &mut self,
+         op: &ParameterTransformOp,
+@@ -2192,7 +2349,7 @@ impl<'a, SE: extensions::ShellExtensions> WordExpander<'a, SE> {
+             brush_parser::word::ParameterTransformOp::ExpandEscapeSequences => {
+                 let (result, _) =
+                     escape::expand_backslash_escapes(s, escape::EscapeExpansionMode::AnsiCQuotes)?;
+-                Ok(String::from_utf8_lossy(result.as_slice()).into_owned())
++                Ok(crate::bytes::decode_vec(result))
+             }
+             brush_parser::word::ParameterTransformOp::PossiblyQuoteWithArraysExpanded {
+                 separate_words: _separate_words,
+@@ -2425,19 +2582,17 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn test_replace_substring_inserts_replacement_verbatim() -> Result<()> {
+-        // A capture group, as an extglob pattern like `@(b)` produces.
+-        let regex = fancy_regex::Regex::new("(b)")?;
+-        let replace = |r: &str, kind: SubstringMatchKind| {
+-            WordExpander::<crate::extensions::DefaultShellExtensions>::replace_substring(
+-                "abcb", &regex, r, &kind,
+-            )
++    fn test_substitution_inserts_replacement_verbatim() -> Result<()> {
++        let pattern = patterns::Pattern::from("b");
++        let replace = |r: &str, kind: SubstringMatchKind| -> Result<String> {
++            let replacement = Replacement(vec![ReplacementPart::Text(r.to_owned())]);
++            Ok(SubstitutionMatcher::new(&pattern, &kind)?.substitute("abcb", &replacement)?)
+         };
+ 
+-        assert_eq!(replace("$1", SubstringMatchKind::FirstOccurrence), "a$1cb");
+-        assert_eq!(replace("$0", SubstringMatchKind::Anywhere), "a$0c$0");
++        assert_eq!(replace("$1", SubstringMatchKind::FirstOccurrence)?, "a$1cb");
++        assert_eq!(replace("$0", SubstringMatchKind::Anywhere)?, "a$0c$0");
+         assert_eq!(
+-            replace("${y}$$", SubstringMatchKind::Anywhere),
++            replace("${y}$$", SubstringMatchKind::Anywhere)?,
+             "a${y}$$c${y}$$"
+         );
+ 
+@@ -2451,3 +2606,176 @@ mod tests {
+         assert_eq!(to_initial_capitals(""), String::new());
+     }
+ }
++
++/// Finds the matches of `${v/pattern/string}` (and `//`, `/#`, `/%`) as
++/// Bash's `pat_subst` does: each match is the leftmost one and, at that
++/// position, the longest; after an empty match one character is kept and
++/// the search goes on; no match is sought at the very end.
++struct SubstitutionMatcher {
++    kind: SubstringMatchKind,
++    empty: bool,
++    /// Bash tries only a pattern starting with `*` against empty text,
++    /// except at the end for `/%`.
++    matches_empty_text: bool,
++    /// The whole pattern, anchored at both ends.
++    full: fancy_regex::Regex,
++    /// For a pattern without extended globs, the regex whose leftmost
++    /// (greedy) match is Bash's match; extended globs (`!(a)`, `?(a)`) need
++    /// the exact leftmost-longest search instead.
++    search: Option<fancy_regex::Regex>,
++}
++
++impl SubstitutionMatcher {
++    fn new(pattern: &patterns::Pattern, kind: &SubstringMatchKind) -> Result<Self, error::Error> {
++        let search = (!pattern.has_extended_glob())
++            .then(|| {
++                pattern.to_regex(
++                    matches!(kind, SubstringMatchKind::Prefix),
++                    matches!(kind, SubstringMatchKind::Suffix),
++                )
++            })
++            .transpose()?;
++        Ok(Self {
++            kind: kind.clone(),
++            empty: pattern.is_empty(),
++            // Bash's end-anchored search tries empty text too.
++            matches_empty_text: pattern.starts_with_star()
++                || matches!(kind, SubstringMatchKind::Suffix),
++            full: pattern.to_regex(true, true)?,
++            search,
++        })
++    }
++
++    fn is_full_match(&self, text: &str) -> Result<bool, error::Error> {
++        Ok(self.full.is_match(text)?)
++    }
++
++    /// The first match at or after byte offset `from`, as `(start, end)`.
++    fn find(&self, s: &str, from: usize) -> Result<Option<(usize, usize)>, error::Error> {
++        if let Some(search) = &self.search {
++            if matches!(self.kind, SubstringMatchKind::Prefix) && from > 0 {
++                return Ok(None);
++            }
++            return Ok(search
++                .find_from_pos(s, from)?
++                .map(|m| (m.start(), m.end()))
++                .filter(|(start, _)| *start < s.len() || self.matches_empty_text));
++        }
++        let boundaries: Vec<usize> = s[from..]
++            .char_indices()
++            .map(|(index, _)| from + index)
++            .chain(std::iter::once(s.len()))
++            .collect();
++        let starts = match self.kind {
++            SubstringMatchKind::Prefix => &boundaries[..1],
++            _ => &boundaries[..],
++        };
++        for (index, start) in starts.iter().enumerate() {
++            if *start == s.len() && !self.matches_empty_text {
++                break;
++            }
++            if matches!(self.kind, SubstringMatchKind::Suffix) {
++                if self.is_full_match(&s[*start..])? {
++                    return Ok(Some((*start, s.len())));
++                }
++                continue;
++            }
++            for end in boundaries[index..].iter().rev() {
++                if self.is_full_match(&s[*start..*end])? {
++                    return Ok(Some((*start, *end)));
++                }
++            }
++        }
++        Ok(None)
++    }
++
++    fn substitute(&self, s: &str, replacement: &Replacement) -> Result<String, error::Error> {
++        if self.empty {
++            let replacement = replacement.render("");
++            return Ok(match self.kind {
++                SubstringMatchKind::Prefix => std::format!("{replacement}{s}"),
++                SubstringMatchKind::Suffix => std::format!("{s}{replacement}"),
++                _ => s.to_owned(),
++            });
++        }
++        if s.is_empty() {
++            return Ok(if self.matches_empty_text && self.is_full_match("")? {
++                replacement.render("")
++            } else {
++                String::new()
++            });
++        }
++        let global = matches!(self.kind, SubstringMatchKind::Anywhere);
++        let mut result = String::with_capacity(s.len());
++        let mut position = 0;
++        while position < s.len() {
++            let Some((start, end)) = self.find(s, position)? else {
++                break;
++            };
++            result.push_str(&s[position..start]);
++            result.push_str(&replacement.render(&s[start..end]));
++            position = end;
++            if !global {
++                break;
++            }
++            if start == end {
++                if let Some(c) = s[position..].chars().next() {
++                    result.push(c);
++                    position += c.len_utf8();
++                }
++            }
++        }
++        result.push_str(&s[position..]);
++        Ok(result)
++    }
++}
++
++/// The replacement of `${v/pattern/string}`. With `patsub_replacement`, each
++/// unquoted `&` stands for the matched text and `\&` is a literal `&`.
++struct Replacement(Vec<ReplacementPart>);
++
++enum ReplacementPart {
++    Text(String),
++    Match,
++}
++
++impl Replacement {
++    fn with_matches(field: &WordField) -> Self {
++        let mut parts = vec![];
++        let mut text = String::new();
++        for piece in &field.0 {
++            match piece {
++                ExpansionPiece::Unsplittable(s) => text.push_str(s),
++                ExpansionPiece::Splittable(s) | ExpansionPiece::UnquotedLiteral(s) => {
++                    let mut chars = s.chars().peekable();
++                    while let Some(c) = chars.next() {
++                        match c {
++                            '\\' if chars.peek() == Some(&'&') => {
++                                text.push('&');
++                                chars.next();
++                            }
++                            '&' => {
++                                parts.push(ReplacementPart::Text(std::mem::take(&mut text)));
++                                parts.push(ReplacementPart::Match);
++                            }
++                            c => text.push(c),
++                        }
++                    }
++                }
++                ExpansionPiece::EmptyListElement { .. } => {}
++            }
++        }
++        parts.push(ReplacementPart::Text(text));
++        Self(parts)
++    }
++
++    fn render(&self, matched: &str) -> String {
++        self.0
++            .iter()
++            .map(|part| match part {
++                ReplacementPart::Text(text) => text.as_str(),
++                ReplacementPart::Match => matched,
++            })
++            .collect()
++    }
++}
+diff --git a/brush-core/src/extendedtests.rs b/brush-core/src/extendedtests.rs
+index 60a3c49b..07dae0ad 100644
+--- a/brush-core/src/extendedtests.rs
++++ b/brush-core/src/extendedtests.rs
+@@ -11,34 +11,44 @@ use crate::{
+     variables::{self, ArrayLiteral},
+ };
+ 
++/// Evaluates `[[ ... ]]` to its status: 0 or 1, or 2 for an invalid regular
++/// expression, which `&&` and `||` pass on as Bash's `execute_cond_node` does.
+ #[allow(clippy::double_must_use)]
+ #[async_recursion::async_recursion]
+ pub(crate) async fn eval_extended_test_expr(
+     expr: &ast::ExtendedTestExpr,
+     shell: &mut Shell<impl extensions::ShellExtensions>,
+     params: &ExecutionParameters,
+-) -> Result<bool, error::Error> {
++) -> Result<u8, error::Error> {
++    let status = |result: bool| if result { 0 } else { 1 };
+     match expr {
+-        ast::ExtendedTestExpr::UnaryTest(op, operand) => {
+-            apply_unary_predicate(op, operand, shell, params).await
+-        }
+-        ast::ExtendedTestExpr::BinaryTest(op, left, right) => {
+-            apply_binary_predicate(op, left, right, shell, params).await
+-        }
++        ast::ExtendedTestExpr::UnaryTest(op, operand) => Ok(status(
++            apply_unary_predicate(op, operand, shell, params).await?,
++        )),
++        ast::ExtendedTestExpr::BinaryTest(
++            ast::BinaryPredicate::StringMatchesRegex
++            | ast::BinaryPredicate::StringContainsSubstring,
++            left,
++            right,
++        ) => match_regex(left, right, shell, params).await,
++        ast::ExtendedTestExpr::BinaryTest(op, left, right) => Ok(status(
++            apply_binary_predicate(op, left, right, shell, params).await?,
++        )),
+         ast::ExtendedTestExpr::And(left, right) => {
+-            let result = eval_extended_test_expr(left, shell, params).await?
+-                && eval_extended_test_expr(right, shell, params).await?;
+-            Ok(result)
++            match eval_extended_test_expr(left, shell, params).await? {
++                0 => eval_extended_test_expr(right, shell, params).await,
++                failed => Ok(failed),
++            }
+         }
+         ast::ExtendedTestExpr::Or(left, right) => {
+-            let result = eval_extended_test_expr(left, shell, params).await?
+-                || eval_extended_test_expr(right, shell, params).await?;
+-            Ok(result)
+-        }
+-        ast::ExtendedTestExpr::Not(expr) => {
+-            let result = !eval_extended_test_expr(expr, shell, params).await?;
+-            Ok(result)
++            match eval_extended_test_expr(left, shell, params).await? {
++                0 => Ok(0),
++                _ => eval_extended_test_expr(right, shell, params).await,
++            }
+         }
++        ast::ExtendedTestExpr::Not(expr) => Ok(status(
++            eval_extended_test_expr(expr, shell, params).await? != 0,
++        )),
+         ast::ExtendedTestExpr::Parenthesized(expr) => {
+             eval_extended_test_expr(expr, shell, params).await
+         }
+@@ -195,13 +205,82 @@ pub(crate) fn apply_unary_predicate_to_str(
+             }
+         }
+         ast::UnaryPredicate::ShellVariableIsSetAndAssigned => Ok(shell.env().is_set(operand)),
+-        ast::UnaryPredicate::ShellVariableIsSetAndNameRef => match shell.env().get(operand) {
++        ast::UnaryPredicate::ShellVariableIsSetAndNameRef => match shell.env().get_raw(operand) {
+             Some((_, reffed)) => Ok(reffed.value().is_set() && reffed.is_treated_as_nameref()),
+             None => Ok(false),
+         },
+     }
+ }
+ 
++/// `[[ left =~ right ]]`: 0 for a match, 1 for none, 2 for an invalid regular
++/// expression. (The parser gives a pattern that starts with a quote its own
++/// predicate, but it is a regex whose quoted parts match literally.) A match
++/// sets `BASH_REMATCH`, no match empties it, and an invalid one leaves it.
++async fn match_regex(
++    left: &ast::Word,
++    right: &ast::Word,
++    shell: &mut Shell<impl extensions::ShellExtensions>,
++    params: &ExecutionParameters,
++) -> Result<u8, error::Error> {
++    let s = expansion::basic_expand_word(shell, params, left).await?;
++    let regex = expansion::basic_expand_regex(shell, params, right)
++        .await?
++        .set_multiline(true)
++        .set_case_insensitive(shell.options().case_insensitive_conditionals);
++    let pattern = regex.bash_pattern();
++
++    if shell.options().print_commands_and_arguments {
++        shell
++            .trace_command(params, std::format!("[[ {s} =~ {pattern} ]]"))
++            .await;
++    }
++
++    #[cfg(unix)]
++    let captures = match regex.posix_matches(
++        &s,
++        &shell.locale_category("LC_CTYPE"),
++        &shell.locale_category("LC_COLLATE"),
++    ) {
++        crate::regex::PosixMatch::Matched(captures) => captures,
++        crate::regex::PosixMatch::NoMatch => vec![],
++        crate::regex::PosixMatch::Invalid(reason) => {
++            let message = std::format!(
++                "{}[[: invalid regular expression `{pattern}': {reason}\n",
++                shell.diagnostic_prefix()
++            );
++            let _ = std::io::Write::write_all(
++                &mut params.stderr(shell),
++                &crate::bytes::encode(&message),
++            );
++            return Ok(2);
++        }
++    };
++    #[cfg(not(unix))]
++    let captures = match regex.matches(s.as_str()) {
++        Ok(captures) => captures.unwrap_or_default(),
++        Err(e) => {
++            tracing::warn!("error using regex: {}", e);
++            return Ok(2);
++        }
++    };
++
++    let matched = !captures.is_empty();
++    let captures_value = variables::ShellValueLiteral::Array(ArrayLiteral(
++        captures
++            .into_iter()
++            .map(|c| (None, c.unwrap_or_default()))
++            .collect(),
++    ));
++    shell.env_mut().update_or_add(
++        "BASH_REMATCH",
++        captures_value,
++        |_| Ok(()),
++        env::EnvironmentLookup::Anywhere,
++        env::EnvironmentScope::Global,
++    )?;
++    Ok(if matched { 0 } else { 1 })
++}
++
+ #[expect(clippy::too_many_lines)]
+ async fn apply_binary_predicate(
+     op: &ast::BinaryPredicate,
+@@ -211,46 +290,9 @@ async fn apply_binary_predicate(
+     params: &ExecutionParameters,
+ ) -> Result<bool, error::Error> {
+     match op {
+-        ast::BinaryPredicate::StringMatchesRegex => {
+-            let s = expansion::basic_expand_word(shell, params, left).await?;
+-            let regex = expansion::basic_expand_regex(shell, params, right)
+-                .await?
+-                .set_multiline(true);
+-
+-            if shell.options().print_commands_and_arguments {
+-                shell
+-                    .trace_command(params, std::format!("[[ {s} {op} {right} ]]"))
+-                    .await;
+-            }
+-
+-            let (matches, captures) = match regex.matches(s.as_str()) {
+-                Ok(Some(captures)) => (true, captures),
+-                Ok(None) => (false, vec![]),
+-                // If we can't compile the regex, don't abort the whole operation but make sure to
+-                // report it.
+-                // TODO(test): Docs indicate we should yield 2 on an invalid regex (not 1).
+-                Err(e) => {
+-                    tracing::warn!("error using regex: {}", e);
+-                    (false, vec![])
+-                }
+-            };
+-
+-            let captures_value = variables::ShellValueLiteral::Array(ArrayLiteral(
+-                captures
+-                    .into_iter()
+-                    .map(|c| (None, c.unwrap_or_default()))
+-                    .collect(),
+-            ));
+-
+-            shell.env_mut().update_or_add(
+-                "BASH_REMATCH",
+-                captures_value,
+-                |_| Ok(()),
+-                env::EnvironmentLookup::Anywhere,
+-                env::EnvironmentScope::Global,
+-            )?;
+-
+-            Ok(matches)
++        ast::BinaryPredicate::StringMatchesRegex
++        | ast::BinaryPredicate::StringContainsSubstring => {
++            Ok(match_regex(left, right, shell, params).await? == 0)
+         }
+         ast::BinaryPredicate::StringExactlyMatchesString => {
+             let left = expansion::basic_expand_word(shell, params, left).await?;
+@@ -276,18 +318,6 @@ async fn apply_binary_predicate(
+ 
+             Ok(left != right)
+         }
+-        ast::BinaryPredicate::StringContainsSubstring => {
+-            let s = expansion::basic_expand_word(shell, params, left).await?;
+-            let substring = expansion::basic_expand_word(shell, params, right).await?;
+-
+-            if shell.options().print_commands_and_arguments {
+-                shell
+-                    .trace_command(params, std::format!("[[ {s} {op} {substring} ]]"))
+-                    .await;
+-            }
+-
+-            Ok(s.contains(substring.as_str()))
+-        }
+         ast::BinaryPredicate::FilesReferToSameDeviceAndInodeNumbers => {
+             let left = expansion::basic_expand_word(shell, params, left).await?;
+             let right = expansion::basic_expand_word(shell, params, right).await?;
+@@ -439,11 +469,13 @@ async fn apply_binary_predicate(
+         // operand (treated as a shell pattern).
+         // TODO(test): implement case-insensitive matching if relevant via shopt options
+         // (nocasematch).
++        // As in Bash, `[[ == ]]` and `[[ != ]]` patterns are extended globs
++        // whether or not `extglob` is set.
+         ast::BinaryPredicate::StringExactlyMatchesPattern => {
+             let s = expansion::basic_expand_word(shell, params, left).await?;
+             let pattern = expansion::basic_expand_pattern(shell, params, right)
+                 .await?
+-                .set_extended_globbing(shell.options().extended_globbing)
++                .set_extended_globbing(true)
+                 .set_case_insensitive(shell.options().case_insensitive_conditionals);
+ 
+             if shell.options().print_commands_and_arguments {
+@@ -468,7 +500,7 @@ async fn apply_binary_predicate(
+             let s = expansion::basic_expand_word(shell, params, left).await?;
+             let pattern = expansion::basic_expand_pattern(shell, params, right)
+                 .await?
+-                .set_extended_globbing(shell.options().extended_globbing)
++                .set_extended_globbing(true)
+                 .set_case_insensitive(shell.options().case_insensitive_conditionals);
+ 
+             if shell.options().print_commands_and_arguments {
+diff --git a/brush-core/src/history.rs b/brush-core/src/history.rs
+index 76cd18fe..5d470232 100644
+--- a/brush-core/src/history.rs
++++ b/brush-core/src/history.rs
+@@ -81,6 +81,44 @@ impl History {
+         Ok(history)
+     }
+ 
++    /// Appends the lines of `reader` (`history -r`), as readline reads a history
++    /// file: a `#` and a digit starts a timestamp line if `timestamps` is set
++    /// (Bash's comment character is `#`) or the file starts with one; every
++    /// other line, a `#comment` too, is an entry. Lines keep every byte.
++    pub fn append_lines(
++        &mut self,
++        mut reader: impl Read,
++        timestamps: bool,
++    ) -> Result<(), error::Error> {
++        let mut text = vec![];
++        reader.read_to_end(&mut text)?;
++        let stamp = |line: &[u8]| {
++            line.first() == Some(&b'#') && line.get(1).is_some_and(u8::is_ascii_digit)
++        };
++        let mut lines: Vec<&[u8]> = text.split(|byte| *byte == b'\n').collect();
++        if text.ends_with(b"\n") {
++            lines.pop();
++        }
++        let timestamps = timestamps || lines.first().is_some_and(|line| stamp(line));
++        let mut next_timestamp = None;
++        for line in lines {
++            if timestamps && stamp(line) {
++                next_timestamp = std::str::from_utf8(&line[1..])
++                    .ok()
++                    .and_then(|seconds| seconds.trim().parse().ok())
++                    .and_then(|seconds| ItemTimestamp::from_timestamp(seconds, 0));
++                continue;
++            }
++            self.add(Item {
++                id: self.next_id,
++                command_line: crate::bytes::decode(line).into_owned(),
++                timestamp: next_timestamp.take(),
++                dirty: false,
++            })?;
++        }
++        Ok(())
++    }
++
+     /// Tries to retrieve a history item by its unique identifier. Returns `None` if no item is
+     /// found.
+     ///
+@@ -226,7 +264,8 @@ impl History {
+                 writeln!(file, "#{}", timestamp.timestamp())?;
+             }
+ 
+-            writeln!(file, "{}", item.command_line)?;
++            file.write_all(&crate::bytes::encode(&item.command_line))?;
++            file.write_all(b"\n")?;
+ 
+             if unsaved_items_only {
+                 written.push(index);
+diff --git a/brush-core/src/patterns.rs b/brush-core/src/patterns.rs
+index 2564c6d4..c168e7c2 100644
+--- a/brush-core/src/patterns.rs
++++ b/brush-core/src/patterns.rs
+@@ -1,5 +1,6 @@
+ //! Shell patterns
+ 
++use crate::bytes::ToShellText as _;
+ use crate::{error, regex, sys, trace_categories};
+ use std::{collections::VecDeque, path::Path};
+ 
+@@ -27,6 +28,36 @@ type PatternWord = Vec<PatternPiece>;
+ #[derive(Clone, Debug, Default)]
+ pub(crate) struct FilenameExpansionOptions {
+     pub require_dot_in_pattern_to_match_dot_files: bool,
++    /// `globstar`: a `**` path component matches any number of directories.
++    pub globstar: bool,
++}
++
++/// Appends `dir`'s descendants (directories only, or every entry) in sorted
++/// pre-order, skipping dot entries unless allowed. Like Bash, `**` does not
++/// descend through symbolic links to directories.
++fn push_descendants(
++    dir: &Path,
++    directories_only: bool,
++    allow_dot_files: bool,
++    out: &mut Vec<std::path::PathBuf>,
++) {
++    let Ok(entries) = dir.read_dir() else {
++        return;
++    };
++    let mut entries: Vec<_> = entries
++        .filter_map(Result::ok)
++        .filter(|entry| allow_dot_files || !entry.file_name().to_shell_text().starts_with('.'))
++        .collect();
++    entries.sort_by_key(std::fs::DirEntry::file_name);
++    for entry in entries {
++        let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
++        if is_dir || !directories_only {
++            out.push(entry.path());
++        }
++        if is_dir {
++            push_descendants(&entry.path(), directories_only, allow_dot_files, out);
++        }
++    }
+ }
+ 
+ /// Result of a pattern expansion, distinguishing "no glob metacharacters" from
+@@ -145,11 +176,40 @@ impl Pattern {
+         self
+     }
+ 
++    /// Returns whether the pattern uses an extended glob operator (`?( )`,
++    /// `*( )`, `+( )`, `@( )`, `!( )`).
++    pub fn has_extended_glob(&self) -> bool {
++        self.enable_extended_globbing
++            && self.pieces.iter().any(|piece| {
++                matches!(piece, PatternPiece::Pattern(_))
++                    && ["?(", "*(", "+(", "@(", "!("]
++                        .iter()
++                        .any(|op| piece.as_str().contains(op))
++            })
++    }
++
++    /// Returns whether the pattern starts with an unquoted `*`, the only
++    /// patterns Bash's matcher tries against empty text.
++    pub fn starts_with_star(&self) -> bool {
++        self.pieces
++            .iter()
++            .find(|piece| !piece.as_str().is_empty())
++            .is_some_and(|piece| matches!(piece, PatternPiece::Pattern(s) if s.starts_with('*')))
++    }
++
+     /// Returns whether or not the pattern is empty.
+     pub fn is_empty(&self) -> bool {
+         self.pieces.iter().all(|p| p.as_str().is_empty())
+     }
+ 
++    /// Whether the pattern has glob characters to expand.
++    pub(crate) fn has_glob(&self) -> bool {
++        self.pieces.iter().any(|piece| {
++            matches!(piece, PatternPiece::Pattern(_))
++                && requires_expansion(piece.as_str(), self.enable_extended_globbing)
++        })
++    }
++
+     /// Placeholder function that always returns true.
+     pub(crate) const fn accept_all_expand_filter(_path: &Path) -> bool {
+         true
+@@ -245,7 +305,7 @@ impl Pattern {
+             // also uses `/` on Windows (to avoid `PathBuf::push` drive-letter
+             // semantics) — if we left `\` here, the strip_prefix below would
+             // miss on Windows and leave results as absolute paths.
+-            let working_dir_str = working_dir.to_string_lossy();
++            let working_dir_str = working_dir.to_shell_text();
+             let mut working_dir_str =
+                 sys::fs::normalize_path_separators(&working_dir_str).into_owned();
+             if !working_dir_str.ends_with('/') {
+@@ -256,7 +316,40 @@ impl Pattern {
+             vec![working_dir.to_path_buf()]
+         };
+ 
+-        for component in components {
++        let component_count = components.len();
++        let trailing_slash = components
++            .last()
++            .is_some_and(|c| c.iter().all(|p| p.as_str().is_empty()));
++        let mut used_globstar = false;
++        for (component_index, component) in components.into_iter().enumerate() {
++            if options.globstar
++                && matches!(component.as_slice(), [PatternPiece::Pattern(p)] if p == "**")
++            {
++                used_globstar = true;
++                let last = component_index + 1 == component_count;
++                let allow_dot_files = !options.require_dot_in_pattern_to_match_dot_files;
++                let current_paths = std::mem::take(&mut paths_so_far);
++                for current_path in current_paths {
++                    if last {
++                        // A final `**` names the directory itself (as `dir/`) unless it is
++                        // the implicit working directory, and everything below it.
++                        if component_index > 0 {
++                            paths_so_far.push(current_path.join(""));
++                        }
++                        push_descendants(&current_path, false, allow_dot_files, &mut paths_so_far);
++                    } else {
++                        // `**/` alone lists directories below, not the working directory.
++                        let only_dirs_follow =
++                            trailing_slash && component_index + 2 == component_count;
++                        if component_index > 0 || !only_dirs_follow {
++                            paths_so_far.push(current_path.clone());
++                        }
++                        push_descendants(&current_path, true, allow_dot_files, &mut paths_so_far);
++                    }
++                }
++                continue;
++            }
++
+             if !component.iter().any(|piece| {
+                 matches!(piece, PatternPiece::Pattern(_))
+                     && requires_expansion(piece.as_str(), self.enable_extended_globbing)
+@@ -267,6 +360,9 @@ impl Pattern {
+                     .collect::<String>();
+                 paths_so_far.retain_mut(|p| {
+                     sys::fs::push_path_for_pattern(p, &flattened);
++                    if let std::borrow::Cow::Owned(path) = crate::bytes::shell_path(p) {
++                        *p = path;
++                    }
+ 
+                     // Drop candidates that don't name an existing directory entry.
+                     // We use `symlink_metadata` (lstat) rather than `exists` (stat) so
+@@ -295,13 +391,13 @@ impl Pattern {
+                     || subpattern_starts_with_dot;
+ 
+                 let matches_dotfile_policy = |dir_entry: &std::fs::DirEntry| {
+-                    !dir_entry.file_name().to_string_lossy().starts_with('.') || allow_dot_files
++                    !dir_entry.file_name().to_shell_text().starts_with('.') || allow_dot_files
+                 };
+ 
+                 let regex = subpattern.to_regex(true, true)?;
+                 let matches_regex = |dir_entry: &std::fs::DirEntry| {
+                     regex
+-                        .is_match(dir_entry.file_name().to_string_lossy().as_ref())
++                        .is_match(dir_entry.file_name().to_shell_text().as_ref())
+                         .unwrap_or(false)
+                 };
+ 
+@@ -321,7 +417,7 @@ impl Pattern {
+             }
+         }
+ 
+-        let results: Vec<_> = paths_so_far
++        let mut results: Vec<_> = paths_so_far
+             .into_iter()
+             .filter_map(|path| {
+                 if let Some(filter) = path_filter
+@@ -334,7 +430,7 @@ impl Pattern {
+                 // prefix so that `prefix_to_remove` (already normalized to
+                 // use `/`) matches paths that may contain a mix of `\` and
+                 // `/` on Windows.
+-                let path_str = path.to_string_lossy();
++                let path_str = path.to_shell_text();
+                 let normalized = sys::fs::normalize_path_separators(&path_str);
+                 let mut path_ref: &str = normalized.as_ref();
+ 
+@@ -348,6 +444,11 @@ impl Pattern {
+             })
+             .collect();
+ 
++        if used_globstar {
++            results.sort();
++            results.dedup();
++        }
++
+         tracing::debug!(target: trace_categories::PATTERN, "  => results: {results:?}");
+ 
+         Ok(PatternExpansionResult::Expanded(results))
+@@ -494,6 +595,10 @@ pub(crate) fn remove_smallest_matching_prefix<'a>(
+ ) -> Result<&'a str, error::Error> {
+     if let Some(pattern) = pattern {
+         let re = pattern.to_regex(true, true)?;
++        // The smallest prefix may be empty (`${v#*}` removes nothing).
++        if re.is_match("")? {
++            return Ok(s);
++        }
+         let mut indices = s.char_indices();
+ 
+         #[allow(
+@@ -549,6 +654,10 @@ pub(crate) fn remove_smallest_matching_suffix<'a>(
+ ) -> Result<&'a str, error::Error> {
+     if let Some(pattern) = pattern {
+         let re = pattern.to_regex(true, true)?;
++        // The smallest suffix may be empty (`${v%*}` removes nothing).
++        if re.is_match("")? {
++            return Ok(s);
++        }
+         #[allow(
+             clippy::string_slice,
+             reason = "because we get the indices from char_indices()"
+diff --git a/brush-core/src/prompt.rs b/brush-core/src/prompt.rs
+index 96755e42..2670e486 100644
+--- a/brush-core/src/prompt.rs
++++ b/brush-core/src/prompt.rs
+@@ -1,3 +1,4 @@
++use crate::bytes::ToShellText as _;
+ use crate::{
+     ExecutionParameters, error, expansion, extensions,
+     shell::Shell,
+@@ -25,8 +26,38 @@ pub(crate) async fn expand_prompt(
+         // prepend a `\` so pass 2 consumes it and leaves the char alone.
+         let semantically_literal =
+             matches!(piece, brush_parser::prompt::PromptPiece::DollarOrPound);
++        // What an escape stands for is data: as in Bash, pass 2 must not expand
++        // a `$(...)` in a directory name or a `$x` a `\D{}` format shows.
++        // (An unknown escape, `\\` and `\NNN` are passed on as written: `\\$x`
++        // shows `$x`, `\044x` expands `$x`. Pass 2 takes `\"` as double quotes
++        // do, but quotes are otherwise literal in it, so that one is resolved
++        // here.)
++        let quoted_data = !matches!(
++            piece,
++            brush_parser::prompt::PromptPiece::Literal(_)
++                | brush_parser::prompt::PromptPiece::DollarOrPound
++                | brush_parser::prompt::PromptPiece::EscapedSequence(_)
++                | brush_parser::prompt::PromptPiece::Backslash
++                | brush_parser::prompt::PromptPiece::AsciiCharacter(_)
++        );
++        if shell.options().expand_prompt_strings
++            && matches!(&piece, brush_parser::prompt::PromptPiece::EscapedSequence(s) if s == "\\\"")
++        {
++            formatted_prompt.push('"');
++            continue;
++        }
+ 
+-        let formatted_piece = format_prompt_piece(shell, piece)?;
++        let mut formatted_piece = format_prompt_piece(shell, piece)?;
++        if shell.options().expand_prompt_strings && quoted_data {
++            formatted_piece = formatted_piece
++                .chars()
++                .flat_map(|c| {
++                    // What pass 2 would take as an expansion or an escape.
++                    let escape = matches!(c, '$' | '`' | '\\');
++                    escape.then_some('\\').into_iter().chain(std::iter::once(c))
++                })
++                .collect();
++        }
+ 
+         // Only useful when pass 2 actually consumes a `\` for that leading
+         // byte; otherwise the `\` would leak through.
+@@ -41,19 +72,11 @@ pub(crate) async fn expand_prompt(
+     }
+ 
+     if shell.options().expand_prompt_strings {
+-        // Now expand any remaining escape sequences, but without tilde-expansion.
+-        // Use double-quote escape rules so that backslashes emitted in the
+-        // previous step survive intact unless they precede a character that
+-        // would also be escapable inside a double-quoted string.
+-        let options = expansion::ExpanderOptions {
+-            tilde_expand: false,
+-            brace_expand: false,
+-            unquoted_backslash_handling: expansion::UnquotedBackslashHandling::DoubleQuoted,
+-            ..Default::default()
+-        };
++        // Then parameters, commands and arithmetic expand, as in a here-document:
++        // as in Bash, quotes are literal, and nothing is brace-, tilde- or
++        // pathname-expanded.
+         formatted_prompt =
+-            expansion::basic_expand_word_with_options(shell, params, &formatted_prompt, &options)
+-                .await?;
++            expansion::basic_expand_prompt_word(shell, params, &formatted_prompt).await?;
+     }
+ 
+     Ok(formatted_prompt)
+@@ -73,9 +96,14 @@ fn format_prompt_piece(
+     let formatted = match piece {
+         brush_parser::prompt::PromptPiece::EscapedSequence(s) => s,
+         brush_parser::prompt::PromptPiece::Literal(l) => l,
+-        brush_parser::prompt::PromptPiece::AsciiCharacter(c) => {
+-            char::from_u32(c).map_or_else(String::new, |c| c.to_string())
+-        }
++        // `\NNN` (exactly three digits, as in Bash) is a byte; NUL ends nothing
++        // and shows nothing.
++        #[allow(clippy::cast_possible_truncation)]
++        brush_parser::prompt::PromptPiece::AsciiCharacter(c) => match (c & 0xff) as u8 {
++            0 => String::new(),
++            byte if byte >= 0x80 => crate::bytes::raw_char(byte).to_string(),
++            byte => char::from(byte).to_string(),
++        },
+         brush_parser::prompt::PromptPiece::Backslash => "\\".to_owned(),
+         brush_parser::prompt::PromptPiece::BellCharacter => "\x07".to_owned(),
+         brush_parser::prompt::PromptPiece::CarriageReturn => "\r".to_owned(),
+@@ -118,7 +146,7 @@ fn format_prompt_piece(
+         } => {
+             let hn = sys::network::get_hostname()
+                 .unwrap_or_default()
+-                .to_string_lossy()
++                .to_shell_text()
+                 .to_string();
+             if only_up_to_first_dot && let Some((first, _)) = hn.split_once('.') {
+                 return Ok(first.to_owned());
+@@ -133,7 +161,7 @@ fn format_prompt_piece(
+             if let Some(shell_name) = shell.current_shell_name() {
+                 Path::new(shell_name.as_ref())
+                     .file_name()
+-                    .map(|name| name.to_string_lossy().to_string())
++                    .map(|name| name.to_shell_text().to_string())
+                     .unwrap_or_default()
+             } else {
+                 String::new()
+@@ -155,7 +183,7 @@ fn format_prompt_piece(
+         }
+         brush_parser::prompt::PromptPiece::TerminalDeviceBaseName => {
+             sys::terminal::try_get_terminal_device_path()
+-                .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
++                .and_then(|p| p.file_name().map(|s| s.to_shell_text().to_string()))
+                 .unwrap_or_default()
+         }
+         brush_parser::prompt::PromptPiece::Time(time_fmt) => {
+@@ -171,14 +199,17 @@ fn format_current_working_directory(
+     tilde_replaced: bool,
+     basename: bool,
+ ) -> String {
+-    let mut working_dir_str = shell.working_dir().to_string_lossy().to_string();
++    let mut working_dir_str = shell.working_dir().to_shell_text().to_string();
+ 
+     if tilde_replaced {
+         working_dir_str = shell.tilde_shorten(working_dir_str);
+     }
+ 
+-    if basename && let Some(filename) = Path::new(&working_dir_str).file_name() {
+-        working_dir_str = filename.to_string_lossy().to_string();
++    if basename
++        && working_dir_str != "/"
++        && let Some(filename) = working_dir_str.trim_end_matches('/').rsplit('/').next()
++    {
++        working_dir_str = filename.to_owned();
+     }
+ 
+     // ast-grep-ignore: platform-cfg-outside-sys
+@@ -186,7 +217,30 @@ fn format_current_working_directory(
+         working_dir_str = working_dir_str.replace('\\', "/");
+     }
+ 
+-    working_dir_str
++    visible(&working_dir_str, shell.is_utf8_locale())
++}
++
++/// Bash's `sh_strvis` for `\w` and `\W`: a control character is `^X` (`^?`
++/// for DEL), and in a locale that is not UTF-8 a byte above 0x7f that is not
++/// part of valid UTF-8 is `M-` and the byte without its top bit; tabs and
++/// text stay as they are.
++fn visible(text: &str, utf8_locale: bool) -> String {
++    let mut shown = String::with_capacity(text.len());
++    for c in text.chars() {
++        match (c, crate::bytes::raw_byte(c)) {
++            (_, Some(byte)) if !utf8_locale => {
++                shown.push_str("M-");
++                shown.push(char::from(byte & 0x7f));
++            }
++            ('\x7f', None) => shown.push_str("^?"),
++            (c, None) if c.is_ascii_control() && c != '\t' => {
++                shown.push('^');
++                shown.push(char::from(c as u8 + 0x40));
++            }
++            (c, _) => shown.push(c),
++        }
++    }
++    shown
+ }
+ 
+ fn format_time<Tz: chrono::TimeZone>(
+@@ -217,11 +271,80 @@ where
+         brush_parser::prompt::PromptDateFormat::WeekdayMonthDate => {
+             datetime.format("%a %b %d").to_string()
+         }
++        #[cfg(unix)]
+         brush_parser::prompt::PromptDateFormat::Custom(fmt) => {
+-            let fmt_items = chrono::format::StrftimeItems::new(fmt);
+-            datetime.format_with_items(fmt_items).to_string()
++            libc_strftime(fmt).unwrap_or_else(|| format_strftime(datetime, fmt))
++        }
++        #[cfg(not(unix))]
++        brush_parser::prompt::PromptDateFormat::Custom(fmt) => format_strftime(datetime, fmt),
++    }
++}
++
++/// `\D{fmt}` as Bash formats it: the C library's `strftime` of the local
++/// time (an empty format is `%X`), which shows a conversion it does not know
++/// as written.
++#[cfg(unix)]
++fn libc_strftime(fmt: &str) -> Option<String> {
++    let fmt = if fmt.is_empty() { "%X" } else { fmt };
++    let c_fmt = std::ffi::CString::new(crate::bytes::encode(fmt).into_owned()).ok()?;
++    // SAFETY: `time` and `localtime_r` fill the provided values; `strftime`
++    // writes at most `buffer.len()` bytes and the format is NUL-terminated.
++    unsafe {
++        let now = libc::time(std::ptr::null_mut());
++        let mut tm: libc::tm = std::mem::zeroed();
++        if libc::localtime_r(&raw const now, &raw mut tm).is_null() {
++            return None;
++        }
++        let mut size = 256;
++        while size <= 65536 {
++            let mut buffer = vec![0u8; size];
++            let written = libc::strftime(
++                buffer.as_mut_ptr().cast(),
++                buffer.len(),
++                c_fmt.as_ptr(),
++                &raw const tm,
++            );
++            if written > 0 || size >= 65536 {
++                return Some(crate::bytes::decode(&buffer[..written]).into_owned());
++            }
++            size *= 4;
++        }
++        None
++    }
++}
++
++/// Formats `fmt` one conversion at a time: one the formatter does not know is
++/// shown as written (as `strftime` does), instead of failing the whole prompt.
++fn format_strftime<Tz: chrono::TimeZone>(datetime: &chrono::DateTime<Tz>, fmt: &str) -> String
++where
++    Tz::Offset: std::fmt::Display,
++{
++    use std::fmt::Write as _;
++    let mut out = String::new();
++    let mut rest = fmt;
++    while let Some(start) = rest.find('%') {
++        out.push_str(&rest[..start]);
++        let spec = &rest[start..];
++        // `%`, an optional padding flag, and the conversion character.
++        let mut end = spec.len();
++        for (index, c) in spec.char_indices().skip(1) {
++            if !matches!(c, '-' | '_' | '0') || index > 1 {
++                end = index + c.len_utf8();
++                break;
++            }
++        }
++        let piece = &spec[..end];
++        let mut formatted = String::new();
++        let items = chrono::format::StrftimeItems::new(piece);
++        if write!(formatted, "{}", datetime.format_with_items(items)).is_ok() {
++            out.push_str(&formatted);
++        } else {
++            out.push_str(piece);
+         }
++        rest = &spec[end..];
+     }
++    out.push_str(rest);
++    out
+ }
+ 
+ #[cfg(test)]
+diff --git a/brush-core/src/regex.rs b/brush-core/src/regex.rs
+index d19685b3..01e607e1 100644
+--- a/brush-core/src/regex.rs
++++ b/brush-core/src/regex.rs
+@@ -26,6 +26,7 @@ pub(crate) enum RegexPiece {
+     Literal(String),
+ }
+ 
++#[cfg(not(unix))]
+ impl RegexPiece {
+     fn to_regex_str(&self) -> Cow<'_, str> {
+         match self {
+@@ -83,6 +84,7 @@ impl Regex {
+     /// # Arguments
+     ///
+     /// * `value` - The string to check for a match.
++    #[cfg(not(unix))]
+     pub fn matches(&self, value: &str) -> Result<Option<Vec<Option<String>>>, error::Error> {
+         let regex_pattern: String = self
+             .pieces
+@@ -101,6 +103,199 @@ impl Regex {
+     }
+ }
+ 
++/// The outcome of matching with the C library's regular expressions.
++#[cfg(unix)]
++pub(crate) enum PosixMatch {
++    /// The match and each group (`None` for a group that took no part).
++    Matched(Vec<Option<String>>),
++    NoMatch,
++    /// `regcomp` refused the pattern; the C library's reason.
++    Invalid(String),
++}
++
++impl Regex {
++    /// The pattern as Bash hands it to `regcomp`: quoted parts keep only their
++    /// ERE special characters backslash-escaped (Bash's `ere_char`). Traces of
++    /// `[[ =~ ]]` show it.
++    pub(crate) fn bash_pattern(&self) -> String {
++        let mut pattern = String::new();
++        for piece in &self.pieces {
++            match piece {
++                RegexPiece::Pattern(s) => pattern.push_str(s),
++                RegexPiece::Literal(s) => {
++                    for c in s.chars() {
++                        if matches!(
++                            c,
++                            '.' | '[' | '\\' | '(' | ')' | '*' | '+' | '?' | '{' | '|' | '^' | '$'
++                        ) {
++                            pattern.push('\\');
++                        }
++                        pattern.push(c);
++                    }
++                }
++            }
++        }
++        pattern
++    }
++
++    /// Matches `value` with the C library's POSIX extended regular expressions,
++    /// as Bash's `[[ =~ ]]` does (leftmost-longest, the libc's classes and
++    /// messages), with the character type and collation of the named locales.
++    #[cfg(unix)]
++    pub(crate) fn posix_matches(&self, value: &str, ctype: &str, collate: &str) -> PosixMatch {
++        let pattern = self.bash_pattern();
++        let (Ok(c_pattern), Ok(c_value)) = (
++            std::ffi::CString::new(crate::bytes::encode(&pattern).into_owned()),
++            std::ffi::CString::new(crate::bytes::encode(value).into_owned()),
++        ) else {
++            return PosixMatch::NoMatch;
++        };
++        let _locale = posix::ThreadLocale::new(ctype, collate);
++        let mut flags = libc::REG_EXTENDED;
++        if self.case_insensitive {
++            flags |= libc::REG_ICASE;
++        }
++        // SAFETY: `regex` is initialized by a successful `regcomp`, used, and
++        // freed once; the strings are NUL-terminated and outlive the calls.
++        unsafe {
++            let mut regex: libc::regex_t = std::mem::zeroed();
++            let error = libc::regcomp(&raw mut regex, c_pattern.as_ptr(), flags);
++            if error != 0 {
++                let mut reason = [0u8; 256];
++                libc::regerror(
++                    error,
++                    &raw const regex,
++                    reason.as_mut_ptr().cast(),
++                    reason.len(),
++                );
++                let reason = std::ffi::CStr::from_bytes_until_nul(&reason)
++                    .map(|reason| reason.to_string_lossy().into_owned())
++                    .unwrap_or_default();
++                return PosixMatch::Invalid(reason);
++            }
++            let mut groups = vec![
++                libc::regmatch_t {
++                    rm_so: -1,
++                    rm_eo: -1
++                };
++                posix::group_count(&pattern) + 1
++            ];
++            let found = libc::regexec(
++                &raw const regex,
++                c_value.as_ptr(),
++                groups.len(),
++                groups.as_mut_ptr(),
++                0,
++            ) == 0;
++            libc::regfree(&raw mut regex);
++            if !found {
++                return PosixMatch::NoMatch;
++            }
++            let bytes = c_value.as_bytes();
++            PosixMatch::Matched(
++                groups
++                    .iter()
++                    .map(|group| {
++                        let start = usize::try_from(group.rm_so).ok()?;
++                        let end = usize::try_from(group.rm_eo).ok()?;
++                        Some(crate::bytes::decode(bytes.get(start..end)?).into_owned())
++                    })
++                    .collect(),
++            )
++        }
++    }
++}
++
++#[cfg(unix)]
++mod posix {
++    /// A locale in effect on this thread while it lives (`uselocale`).
++    pub(super) struct ThreadLocale {
++        locale: libc::locale_t,
++        previous: libc::locale_t,
++    }
++
++    impl ThreadLocale {
++        /// The named character type and collation (each falling back to `C`
++        /// where the system has no such locale, as `setlocale` leaves Bash).
++        pub(super) fn new(ctype: &str, collate: &str) -> Option<Self> {
++            let named = |name: &str| std::ffi::CString::new(name).ok();
++            // SAFETY: `newlocale` takes NUL-terminated names and a base it
++            // consumes on success; `uselocale` installs a valid locale.
++            unsafe {
++                let mut locale = std::ptr::null_mut();
++                for (mask, name) in [
++                    (libc::LC_CTYPE_MASK, ctype),
++                    (libc::LC_COLLATE_MASK, collate),
++                ] {
++                    let name = named(name)?;
++                    let updated = libc::newlocale(mask, name.as_ptr(), locale);
++                    let updated = if updated.is_null() {
++                        libc::newlocale(mask, c"C".as_ptr(), locale)
++                    } else {
++                        updated
++                    };
++                    if updated.is_null() {
++                        if !locale.is_null() {
++                            libc::freelocale(locale);
++                        }
++                        return None;
++                    }
++                    locale = updated;
++                }
++                let previous = libc::uselocale(locale);
++                Some(Self { locale, previous })
++            }
++        }
++    }
++
++    impl Drop for ThreadLocale {
++        fn drop(&mut self) {
++            // SAFETY: restores the thread's previous locale, then frees ours.
++            unsafe {
++                libc::uselocale(self.previous);
++                libc::freelocale(self.locale);
++            }
++        }
++    }
++
++    /// How many groups (`(`) an extended regular expression has, as
++    /// `regcomp`'s `re_nsub` counts them (outside bracket expressions).
++    pub(super) fn group_count(pattern: &str) -> usize {
++        let mut count = 0;
++        let mut chars = pattern.chars().peekable();
++        while let Some(c) = chars.next() {
++            match c {
++                '\\' => {
++                    chars.next();
++                }
++                '(' => count += 1,
++                '[' => {
++                    let _ = chars.next_if_eq(&'^');
++                    let _ = chars.next_if_eq(&']');
++                    while let Some(c) = chars.next() {
++                        match c {
++                            ']' => break,
++                            '[' if chars.peek().is_some_and(|c| matches!(c, ':' | '.' | '=')) => {
++                                let close = chars.next().unwrap_or_default();
++                                let mut previous = '\0';
++                                for c in chars.by_ref() {
++                                    if c == ']' && previous == close {
++                                        break;
++                                    }
++                                    previous = c;
++                                }
++                            }
++                            _ => (),
++                        }
++                    }
++                }
++                _ => (),
++            }
++        }
++        count
++    }
++}
++
+ pub(crate) fn compile_regex(
+     regex_str: String,
+     case_insensitive: bool,
+@@ -209,6 +404,7 @@ fn add_missing_escape_chars_to_regex(s: &str) -> Cow<'_, str> {
+     updated.into()
+ }
+ 
++#[cfg(not(unix))]
+ fn escape_literal_regex_piece(s: &str) -> Cow<'_, str> {
+     let mut result = String::new();
+ 
+diff --git a/brush-core/src/shell/prompts.rs b/brush-core/src/shell/prompts.rs
+index 2fc2a7fc..141c2d30 100644
+--- a/brush-core/src/shell/prompts.rs
++++ b/brush-core/src/shell/prompts.rs
+@@ -64,9 +64,12 @@ impl<SE: extensions::ShellExtensions> Shell<SE> {
+         self.restore_command_status(saved_status);
+ 
+         // Strip out special characters that readline would typically drop:
+-        // \001 and \002 (start and end of non-printing sequences).
++        // \001 and \002 (start and end of non-printing sequences). Other prompts
++        // (PS0, PS4) are written as they are, as Bash writes them.
+         let mut expanded = result?;
+-        expanded.retain(|c| c != '\x01' && c != '\x02');
++        if matches!(var_name, "PS1" | "PS2" | "BRUSH_PS_ALT") {
++            expanded.retain(|c| c != '\x01' && c != '\x02');
++        }
+ 
+         Ok(expanded)
+     }
+diff --git a/brush-core/src/variables.rs b/brush-core/src/variables.rs
+index bd43594c..ca8fb094 100644
+--- a/brush-core/src/variables.rs
++++ b/brush-core/src/variables.rs
+@@ -1,5 +1,6 @@
+ //! Implements variables for a shell environment.
+ 
++use crate::bytes::ToShellText as _;
+ use std::borrow::Cow;
+ use std::collections::BTreeMap;
+ use std::ffi::OsString;
+@@ -28,8 +29,14 @@ pub struct ShellVariable {
+     treat_as_integer: bool,
+     /// Whether or not the variable should be treated as a name reference.
+     treat_as_nameref: bool,
++    /// Distinct for every assignment (see [`ShellVariable::assignment_stamp`]).
++    #[cfg_attr(feature = "serde", serde(default))]
++    stamp: u64,
+ }
+ 
++/// Source of [`ShellVariable::assignment_stamp`] values.
++static ASSIGNMENTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
++
+ /// Kind of transformation to apply to a variable's value when it is updated.
+ #[derive(Clone, Copy, Debug)]
+ #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+@@ -55,6 +62,7 @@ impl Default for ShellVariable {
+             trace: false,
+             treat_as_integer: false,
+             treat_as_nameref: false,
++            stamp: 0,
+         }
+     }
+ }
+@@ -72,6 +80,12 @@ impl ShellVariable {
+         }
+     }
+ 
++    /// A value that changes with every assignment to the variable, even of
++    /// the value it already has (`getopts` notices `OPTIND=1` this way).
++    pub const fn assignment_stamp(&self) -> u64 {
++        self.stamp
++    }
++
+     /// Returns the value associated with the variable.
+     pub const fn value(&self) -> &ShellValue {
+         &self.value
+@@ -236,6 +250,7 @@ impl ShellVariable {
+         if self.is_readonly() {
+             return Err(error::ErrorKind::ReadonlyVariable.into());
+         }
++        self.stamp = ASSIGNMENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+ 
+         let value = self.convert_value_literal_for_assignment(value);
+ 
+@@ -1099,7 +1114,7 @@ impl From<String> for ShellValue {
+ 
+ impl From<OsString> for ShellValue {
+     fn from(value: OsString) -> Self {
+-        Self::String(value.to_string_lossy().into_owned())
++        Self::String(value.to_shell_text().into_owned())
+     }
+ }
+ 
+diff --git a/brush-core/src/wellknownvars.rs b/brush-core/src/wellknownvars.rs
+index fd9e70c6..ec4efe25 100644
+--- a/brush-core/src/wellknownvars.rs
++++ b/brush-core/src/wellknownvars.rs
+@@ -1,3 +1,4 @@
++use crate::bytes::ToShellText as _;
+ use std::collections::BTreeMap;
+ use std::path::PathBuf;
+ 
+@@ -85,8 +86,11 @@ pub(crate) fn init_well_known_vars(
+     // BASHPID
+     #[cfg(not(target_family = "wasm"))] // ast-grep-ignore: platform-cfg-outside-sys
+     {
+-        let mut bashpid_var =
+-            ShellVariable::new(ShellValue::String(std::process::id().to_string()));
++        let _ = crate::subshell::shell_pid();
++        let mut bashpid_var = ShellVariable::new(ShellValue::Dynamic {
++            getter: |_| std::process::id().to_string().into(),
++            setter: |_| (),
++        });
+         bashpid_var.treat_as_integer();
+         shell.env_mut().set_global("BASHPID", bashpid_var)?;
+     }
+@@ -231,7 +235,7 @@ pub(crate) fn init_well_known_vars(
+                 shell
+                     .directory_stack()
+                     .iter()
+-                    .map(|p| p.to_string_lossy().to_string())
++                    .map(|p| p.to_shell_text().to_string())
+                     .collect::<Vec<_>>()
+                     .into()
+             },
+@@ -328,7 +332,7 @@ pub(crate) fn init_well_known_vars(
+         let histfile = home_dir.join(".brush_history");
+         shell.env_mut().set_global(
+             "HISTFILE",
+-            ShellVariable::new(ShellValue::String(histfile.to_string_lossy().to_string())),
++            ShellVariable::new(ShellValue::String(histfile.to_shell_text().to_string())),
+         )?;
+     }
+ 
+@@ -338,7 +342,7 @@ pub(crate) fn init_well_known_vars(
+         ShellVariable::new(
+             sys::network::get_hostname()
+                 .unwrap_or_default()
+-                .to_string_lossy()
++                .to_shell_text()
+                 .to_string(),
+         ),
+     )?;
+@@ -470,7 +474,7 @@ pub(crate) fn init_well_known_vars(
+         if let Some(default_shell) = sys::users::get_current_user_default_shell() {
+             shell.env_mut().set_global(
+                 "SHELL",
+-                ShellVariable::new(default_shell.to_string_lossy().to_string()),
++                ShellVariable::new(default_shell.to_shell_text().to_string()),
+             )?;
+         }
+     }
+@@ -527,7 +531,7 @@ pub(crate) fn init_well_known_vars(
+     // we inherited an out-of-sync version of the variable. Future updates
+     // will be handled by set_working_dir().
+     //
+-    let pwd = shell.working_dir().to_string_lossy().to_string();
++    let pwd = shell.working_dir().to_shell_text().to_string();
+     let mut pwd_var = ShellVariable::new(pwd);
+     pwd_var.export();
+     shell.env_mut().set_global("PWD", pwd_var)?;

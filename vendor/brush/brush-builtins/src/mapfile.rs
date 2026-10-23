@@ -44,11 +44,13 @@ pub(crate) struct MapFileCommand {
     array_var_name: String,
 }
 
-impl builtins::Command for MapFileCommand {
+brush_clap_adapter::impl_parse_args!(MapFileCommand);
+
+impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for MapFileCommand {
     type Error = brush_core::Error;
 
-    async fn execute<SE: brush_core::ShellExtensions>(
-        &self,
+    async fn execute(
+        self,
         context: brush_core::ExecutionContext<'_, SE>,
     ) -> Result<brush_core::ExecutionResult, Self::Error> {
         if let Some(origin) = self.origin {
@@ -82,7 +84,7 @@ impl builtins::Command for MapFileCommand {
         if self.origin.is_none() {
             context.shell.env_mut().update_or_add(
                 &self.array_var_name,
-                variables::ShellValueLiteral::Array(variables::ArrayLiteral(vec![])),
+                variables::ShellValueLiteral::Array(variables::ArrayLiteral::new(vec![])),
                 |_| Ok(()),
                 env::EnvironmentLookup::Anywhere,
                 env::EnvironmentScope::Global,
@@ -132,7 +134,7 @@ impl builtins::Command for MapFileCommand {
                     )
                 );
                 let source_info = context.shell.call_stack().current_pos_as_source_info();
-                context
+                let _ = context
                     .shell
                     .run_string(command, &source_info, &context.params)
                     .await?;

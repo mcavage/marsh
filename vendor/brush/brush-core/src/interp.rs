@@ -19,8 +19,8 @@ use crate::variables::{
     ArrayLiteral, ShellValue, ShellValueLiteral, ShellValueUnsetType, ShellVariable,
 };
 use crate::{
-    ShellFd, error, expansion, extendedtests, extensions, ioutils, jobs, openfiles, processes, sys,
-    timing,
+    ShellFd, builtins, error, expansion, extendedtests, extensions, ioutils, jobs, openfiles,
+    processes, sys, timing,
 };
 
 /// Encapsulates the context of execution in a command pipeline.
@@ -318,7 +318,7 @@ async fn spawn_async_ao_list<'a, SE: extensions::ShellExtensions>(
             ExecutionSpawnResult::StartedProcess(process) => jobs::JobTask::External(process),
             ExecutionSpawnResult::StartedTask(task) => jobs::JobTask::Internal(task),
             ExecutionSpawnResult::Completed(result) => {
-                jobs::JobTask::Internal(tokio::spawn(async move { Ok(result) }))
+                jobs::JobTask::Internal(sys::tasks::spawn(async move { Ok(result) }))
             }
         });
         return Ok(shell.jobs_mut().add_as_background(jobs::Job::new(
@@ -379,10 +379,12 @@ async fn spawn_async_ao_list<'a, SE: extensions::ShellExtensions>(
         }
     }
 
-    let join_handle = tokio::spawn(async move {
-        cloned_ao_list
+    // The job runs in a shell of its own, so only its status leaves it.
+    let join_handle = sys::tasks::spawn(async move {
+        let result = cloned_ao_list
             .execute(&mut cloned_shell, &cloned_params)
-            .await
+            .await;
+        Ok(cloned_shell.end_subshell(result, || cloned_params.try_stderr(&cloned_shell)))
     });
 
     Ok(shell.jobs_mut().add_as_background(jobs::Job::new(
@@ -840,12 +842,27 @@ impl Execute for ast::Pipeline {
         // Fire the ERR trap if the pipeline failed in a non-conditional context.
         // We reuse `suppress_errexit` here because bash suppresses the ERR trap in
         // exactly the same contexts it suppresses errexit (conditionals, `!`-prefixed
-        // pipelines, etc.).
-        if !result.is_success() && !params.suppress_errexit && !self.bang {
+        // pipelines, etc.). A pipeline that leaves this shell through `exit` or `return`
+        // hasn't failed; its status is the one it leaves with. Only a stage run in this
+        // shell can leave it: a stage in a shell of its own ended as a subshell, so
+        // `: | exit 3` comes back here as a plain failed status.
+        if !result.is_success() && result.is_normal_flow() && !params.suppress_errexit && !self.bang
+        {
             if shell.traps().handles(crate::traps::TrapSignal::Err) {
-                shell
+                let trap_result = shell
                     .invoke_trap_handler(crate::traps::TrapSignal::Err, &params)
                     .await?;
+
+                // An `exit` or `return` in the handler takes effect here, with its own status.
+                //
+                // TODO(traps): so should a `break` or `continue`, keeping the failed pipeline's
+                // status, but the ERR trap also fires for the compound command around the
+                // pipeline, where it would break again. Tracked by the compat case "trap ERR -
+                // break in the handler ends the loop".
+                if trap_result.is_return_or_exit() {
+                    result = trap_result;
+                    shell.set_last_exit_status(result.exit_code.into());
+                }
             }
         }
 
@@ -1037,7 +1054,7 @@ pub(crate) fn capture_bounded(
         }
         let requested = u64::try_from(read).unwrap_or(u64::MAX);
         let granted = remaining
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |available| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |available| {
                 Some(available.saturating_sub(requested))
             })
             .unwrap_or(0)
@@ -1658,7 +1675,7 @@ async fn spawn_pipeline_processes<SE: extensions::ShellExtensions>(
         pipe_writers.reserve_exact(pipeline_len - 1);
 
         for _ in 0..(pipeline_len - 1) {
-            let (reader, writer) = std::io::pipe()?;
+            let (reader, writer) = sys::pipes::pipe()?;
             pipe_readers.push(Some(reader.into()));
             pipe_writers.push(Some(writer.into()));
         }
@@ -1691,6 +1708,14 @@ async fn spawn_pipeline_processes<SE: extensions::ShellExtensions>(
         if let Some(Some(writer)) = pipe_writers.pop() {
             cmd_params.open_files.set_fd(OpenFiles::STDOUT_FD, writer);
         }
+
+        // A stage in a shell of its own is a subshell: an error ends the stage
+        // alone, reported on the stage's standard error.
+        let stage_stderr = if run_in_current_shell {
+            None
+        } else {
+            cmd_params.try_stderr(shell)
+        };
 
         // Like Bash, run each stage of a multi-command (or background) pipeline in its own
         // process. The stage keeps its parent's `$BASH_SUBSHELL`.
@@ -1757,9 +1782,20 @@ async fn spawn_pipeline_processes<SE: extensions::ShellExtensions>(
             }
         };
 
-        let spawn_result = command
+        let spawn_result = match command
             .execute_in_pipeline(pipeline_context, cmd_params)
-            .await?;
+            .await
+        {
+            // A stage in a shell of its own that's done already ends here.
+            Ok(ExecutionSpawnResult::Completed(result)) if !run_in_current_shell => {
+                shell.end_subshell(Ok(result), || stage_stderr).into()
+            }
+            Ok(spawn_result) => spawn_result,
+            Err(error) if !run_in_current_shell => {
+                shell.end_subshell(Err(error), || stage_stderr).into()
+            }
+            Err(error) => return Err(error),
+        };
 
         // Update the process group ID if something was spawned.
         if let ExecutionSpawnResult::StartedProcess(child) = &spawn_result {
@@ -1983,10 +2019,23 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::Command {
                     return Ok(ExecutionSpawnResult::StartedProcess(child));
                 }
 
-                Ok(compound
-                    .execute(&mut pipeline_context.shell, &params)
-                    .await?
-                    .into())
+                match pipeline_context.shell {
+                    // An owned shell is a discarded clone, so this stage can run asynchronously.
+                    // That lets the pipeline start readers before writers fill the pipe.
+                    commands::ShellForCommand::OwnedShell { target, .. } => {
+                        let (mut shell, compound) = (*target, compound.clone());
+                        Ok(ExecutionSpawnResult::StartedTask(
+                            sys::tasks::spawn_blocking(async move {
+                                let result = compound.execute(&mut shell, &params).await;
+                                Ok(shell.end_subshell(result, || params.try_stderr(&shell)))
+                            })
+                            .await,
+                        ))
+                    }
+                    commands::ShellForCommand::ParentShell(shell) => {
+                        Ok(compound.execute(shell, &params).await?.into())
+                    }
+                }
             }
             Self::Function(func) => Ok(func
                 .execute(&mut pipeline_context.shell, &params)
@@ -2017,9 +2066,7 @@ impl Execute for ast::CompoundCommand {
                 #[cfg(unix)]
                 if let Some(mut child) = fork_subshell_list(shell, params, list, None)? {
                     let result = match child.wait().await? {
-                        processes::ProcessWaitResult::Completed { output, .. } => {
-                            ExecutionResult::from(output)
-                        }
+                        processes::ProcessWaitResult::Completed { result, .. } => result,
                         processes::ProcessWaitResult::Stopped => ExecutionResult::stopped(),
                     };
                     if shell.options().interactive {
@@ -2035,21 +2082,8 @@ impl Execute for ast::CompoundCommand {
 
                 // Handle errors within the subshell context to prevent fatal errors
                 // from propagating to the parent shell.
-                let subshell_result = match list.execute(&mut subshell, params).await {
-                    Ok(result) => result,
-                    Err(error) => {
-                        // Display the error to stderr, but prevent fatal error propagation
-                        let mut stderr = params.stderr(shell);
-                        let _ = shell.display_error(&mut stderr, &error);
-
-                        // Convert error to result in subshell context
-                        error.into_result(&subshell)
-                    }
-                };
-
-                // Preserve the subshell's exit code, but don't honor any of its requests to exit
-                // the shell, break out of loops, etc.
-                Ok(ExecutionResult::from(subshell_result.exit_code))
+                let result = list.execute(&mut subshell, params).await;
+                Ok(shell.end_subshell(result, || Some(params.stderr(shell))))
             }
             Self::ForClause(f) => f.execute(shell, params).await,
             Self::CaseClause(c) => c.execute(shell, params).await,
@@ -2092,8 +2126,8 @@ impl Execute for ast::CoprocessCommand {
         }
 
         // Set up the pipes that we'll use to communicate with the coprocess.
-        let (stdin_reader, stdin_writer) = std::io::pipe()?;
-        let (stdout_reader, stdout_writer) = std::io::pipe()?;
+        let (stdin_reader, stdin_writer) = sys::pipes::pipe()?;
+        let (stdout_reader, stdout_writer) = sys::pipes::pipe()?;
         let (stdin_reader, stdout_writer): (OpenFile, OpenFile) =
             (stdin_reader.into(), stdout_writer.into());
 
@@ -2167,7 +2201,7 @@ impl Execute for ast::CoprocessCommand {
             .set_fd(OpenFiles::STDOUT_FD, stdout_writer);
 
         let body = self.body.clone();
-        let join_handle = tokio::spawn(async move {
+        let join_handle = sys::tasks::spawn(async move {
             let pipeline_context = PipelineExecutionContext {
                 shell: commands::ShellForCommand::ParentShell(&mut child_shell),
                 process_group_id: None,
@@ -2526,7 +2560,7 @@ impl Execute for ast::FunctionDefinition {
             && shell
                 .builtins()
                 .get(&func_name)
-                .is_some_and(|r| r.special_builtin)
+                .is_some_and(|r| r.is_special())
         {
             return Err(
                 error::Error::from(error::ErrorKind::FunctionNameShadowsSpecialBuiltin {
@@ -2580,7 +2614,7 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
                 EnvironmentLookup::Anywhere,
                 EnvironmentScope::Global,
             )?;
-            context
+            let _ = context
                 .shell
                 .invoke_trap_handler(crate::traps::TrapSignal::Debug, &params)
                 .await?;
@@ -2669,7 +2703,10 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
                             .shell
                             .builtins()
                             .get(first_arg.as_str())
-                            .is_some_and(|r| !r.disabled && r.declaration_builtin)
+                            .is_some_and(|r| {
+                                r.is_enabled()
+                                    && r.declaration_role() == builtins::DeclarationRole::Utility
+                            })
                     {
                         command_takes_assignments = true;
                     }
@@ -2723,12 +2760,14 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
 
         // If we have a command, then execute it.
         if let Some(CommandArg::String(cmd_name)) = args.first() {
+            let cmd_name = cmd_name.clone();
             let mut stderr = params.stderr(&context.shell);
 
             let (owned_shell, parent_shell) = match context.shell {
                 commands::ShellForCommand::ParentShell(shell) => (None, shell),
                 commands::ShellForCommand::OwnedShell { target, parent } => (Some(target), parent),
             };
+            let in_owned_shell = owned_shell.is_some();
 
             let shell = if let Some(owned_shell) = owned_shell {
                 commands::ShellForCommand::OwnedShell {
@@ -2749,13 +2788,18 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
                 params,
                 cmd_name,
                 &assignments,
-                &args,
+                args,
                 exec_in_place,
                 self.to_string(),
             )
             .await
             {
                 Ok(result) => Ok(result),
+                // In a shell of its own, as an expansion error in a prefix
+                // assignment is, an error ends the stage alone.
+                Err(err) if in_owned_shell => {
+                    Ok(parent_shell.end_subshell(Err(err), || Some(stderr)).into())
+                }
                 Err(err) => {
                     let _ = parent_shell.display_error(&mut stderr, &err);
 
@@ -2800,29 +2844,37 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
     }
 }
 
-async fn execute_command<T: Into<String>>(
-    mut context: PipelineExecutionContext<'_, impl extensions::ShellExtensions>,
+async fn execute_command(
+    context: PipelineExecutionContext<'_, impl extensions::ShellExtensions>,
     params: ExecutionParameters,
-    cmd_name: T,
+    cmd_name: String,
     assignments: &[&ast::Assignment],
-    args: &[CommandArg],
+    args: Vec<CommandArg>,
     exec_in_place: bool,
     source_text: String,
 ) -> Result<ExecutionSpawnResult, error::Error> {
-    // Push a new ephemeral environment scope for the duration of the command. We'll
-    // set command-scoped variable assignments after doing so, and revert them before
-    // returning.
-    let mut guard = crate::env::ScopeGuard::new(&mut context.shell, EnvironmentScope::Command);
+    // Run the command in a new ephemeral environment scope, for its variable assignments.
+    let mut scoped;
+    let mut shell = match context.shell {
+        commands::ShellForCommand::ParentShell(shell) => {
+            // The scope is left however the command ends, even if it's cancelled.
+            scoped = shell.enter_scope(EnvironmentScope::Command);
+            commands::ShellForCommand::ParentShell(&mut scoped)
+        }
+        commands::ShellForCommand::OwnedShell { mut target, parent } => {
+            // The command's shell is discarded after it runs, scope and all.
+            target.env_mut().push_scope(EnvironmentScope::Command);
+            commands::ShellForCommand::OwnedShell { target, parent }
+        }
+    };
 
     // In posix mode, assignments before a special builtin outlive it (still
     // exported), as in Bash.
-    let cmd_name = cmd_name.into();
-    let persist = guard.shell().options().posix_mode
-        && guard
-            .shell()
+    let persist = shell.options().posix_mode
+        && shell
             .builtins()
-            .get(&cmd_name)
-            .is_some_and(|builtin| !builtin.disabled && builtin.special_builtin);
+            .get(cmd_name.as_str())
+            .is_some_and(|builtin| builtin.is_enabled() && builtin.is_special());
     for assignment in assignments {
         // Ensure it's tagged as exported and created in the command scope.
         let (required_scope, creation_scope) = if persist {
@@ -2832,7 +2884,7 @@ async fn execute_command<T: Into<String>>(
         };
         apply_assignment(
             assignment,
-            guard.shell(),
+            &mut shell,
             &params,
             true,
             required_scope,
@@ -2841,9 +2893,8 @@ async fn execute_command<T: Into<String>>(
         .await?;
     }
 
-    if guard.shell().options().print_commands_and_arguments {
-        guard
-            .shell()
+    if shell.options().print_commands_and_arguments {
+        shell
             .trace_command(
                 &params,
                 args.iter().map(|arg| arg.quote_for_tracing()).join(" "),
@@ -2851,18 +2902,11 @@ async fn execute_command<T: Into<String>>(
             .await;
     }
 
-    guard.detach();
-    drop(guard);
-
     // Construct the command struct.
-    let mut cmd =
-        commands::SimpleCommand::new(context.shell, params, cmd_name, args.iter().cloned());
+    let mut cmd = commands::SimpleCommand::new(shell, params, cmd_name, args);
     cmd.process_group_id = context.process_group_id;
     cmd.exec_in_place = exec_in_place;
     cmd.source_text = Some(source_text);
-
-    // Arrange to pop off that ephemeral environment scope.
-    cmd.post_execute = Some(|shell| shell.env_mut().pop_scope(EnvironmentScope::Command));
 
     // Run through any pre-execution hooks as best effort.
     let _ = commands::on_preexecute(&mut cmd).await;
@@ -2988,8 +3032,8 @@ fn runs_as_process(shell: &Shell<impl extensions::ShellExtensions>, args: &[Comm
     shell
         .builtins()
         .get(name)
-        .filter(|builtin| !builtin.disabled)
-        .is_none_or(|builtin| builtin.process_shim.is_some())
+        .filter(|builtin| builtin.is_enabled())
+        .is_none_or(|builtin| builtin.process_shim().is_some())
 }
 
 /// Whether setting up `redirect` may change shell state: its words expand
@@ -3198,38 +3242,56 @@ async fn apply_assignment(
         .resolve_nameref(variable_name.as_str())
         .into_owned();
 
-    // See if we can find an existing value associated with the variable.
-    if let Some((existing_value_scope, existing_value)) =
-        shell.env_mut().get_mut(variable_name.as_str())
+    // Like bash, a variable for one command can't override a readonly one: report that and
+    // skip this assignment. The command still runs.
+    if required_scope.is_some()
+        && shell
+            .env()
+            .get(variable_name.as_str())
+            .is_some_and(|(_, var)| var.is_readonly())
     {
-        if required_scope.is_none() || Some(existing_value_scope) == required_scope {
-            if let Some(array_index) = array_index {
-                match new_value {
-                    ShellValueLiteral::Scalar(s) => {
-                        existing_value.assign_at_index(array_index, s, assignment.append)?;
-                    }
-                    ShellValueLiteral::Array(_) => {
-                        return error::unimp("replacing an array item with an array");
-                    }
-                }
-            } else {
-                if !export
-                    && export_variables_on_modification
-                    && !matches!(new_value, ShellValueLiteral::Array(_))
-                {
-                    export = true;
-                }
+        let err = error::Error::from(error::ErrorKind::ReadonlyVariable);
+        let _ = shell.display_error(&mut params.stderr(shell), &err);
+        return Ok(());
+    }
 
-                existing_value.assign(new_value, assignment.append)?;
+    // See if we can find an existing value associated with the variable. A variable for one
+    // command (e.g. `FOO=1 cmd`) can only be one already set for that same command, in its
+    // own scope -- not one set for a command it was called from.
+    let lookup = required_scope.map_or(
+        EnvironmentLookup::Anywhere,
+        EnvironmentLookup::OnlyInCurrent,
+    );
+    let existing_value = shell
+        .env_mut()
+        .get_mut_using_policy(variable_name.as_str(), lookup);
+    if let Some(existing_value) = existing_value {
+        if let Some(array_index) = array_index {
+            match new_value {
+                ShellValueLiteral::Scalar(s) => {
+                    existing_value.assign_at_index(array_index, s, assignment.append)?;
+                }
+                ShellValueLiteral::Array(_) => {
+                    return error::unimp("replacing an array item with an array");
+                }
+            }
+        } else {
+            if !export
+                && export_variables_on_modification
+                && !matches!(new_value, ShellValueLiteral::Array(_))
+            {
+                export = true;
             }
 
-            if export {
-                existing_value.export();
-            }
-
-            // That's it!
-            return Ok(());
+            existing_value.assign(new_value, assignment.append)?;
         }
+
+        if export {
+            existing_value.export();
+        }
+
+        // That's it!
+        return Ok(());
     }
 
     // If we fell down here, then we need to add it.
@@ -3246,6 +3308,18 @@ async fn apply_assignment(
         match new_value {
             ShellValueLiteral::Scalar(s) => {
                 export = export || shell.options().export_variables_on_modification;
+
+                // A new variable for a command (e.g. `FOO+=x cmd`) appends to the value the
+                // variable has where it's visible, as that variable would (e.g. adding, for
+                // an integer); the result is a plain string.
+                let s = match shell.env().get(variable_name.as_str()) {
+                    Some((_, visible)) if assignment.append => {
+                        let mut appended = visible.clone();
+                        appended.assign(ShellValueLiteral::Scalar(s), true)?;
+                        appended.value().to_cow_str(shell).into_owned()
+                    }
+                    _ => s,
+                };
                 ShellValue::String(s)
             }
             ShellValueLiteral::Array(values) => ShellValue::indexed_array_from_literals(values),
@@ -3597,7 +3671,7 @@ fn setup_process_substitution(
     child_params.process_group_policy = ProcessGroupPolicy::SameProcessGroup;
 
     // Set up pipe so we can connect to the command.
-    let (reader, writer) = std::io::pipe()?;
+    let (reader, writer) = sys::pipes::pipe()?;
     let (reader, writer) = (reader.into(), writer.into());
 
     let target_file = match kind {
@@ -3644,7 +3718,7 @@ fn setup_process_substitution(
     // Asynchronously spawn off the subshell; we intentionally don't block on its
     // completion.
     let subshell_cmd = subshell_cmd.to_owned();
-    tokio::spawn(async move {
+    sys::tasks::spawn(async move {
         // Intentionally ignore the result of the subshell command.
         let _ = subshell_cmd
             .list
@@ -3668,11 +3742,12 @@ fn free_substitution_fd(params: &ExecutionParameters) -> Result<ShellFd, error::
 }
 
 fn setup_open_file_with_contents(contents: &str) -> Result<OpenFile, error::Error> {
-    let (reader, mut writer) = std::io::pipe()?;
+    let (reader, mut writer) = sys::pipes::pipe()?;
 
     let bytes = crate::bytes::encode(contents);
     let bytes = bytes.as_ref();
 
+    // ast-grep-ignore: platform-cfg-outside-sys
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         use std::os::fd::AsFd as _;

@@ -1,8 +1,10 @@
-use brush_core::bytes::ToShellText as _;
 use clap::Parser;
-use std::{borrow::Cow, io::Write as _, os::unix::process::CommandExt};
+use std::{borrow::Cow, io::Write as _};
 
-use brush_core::{ExecutionControlFlow, ExecutionExitCode, ExecutionResult, builtins, commands};
+use brush_core::{
+    ExecutionControlFlow, ExecutionExitCode, ExecutionResult, builtins, commands,
+    extensions::ProcessLauncher as _,
+};
 
 /// Exec the provided command.
 #[derive(Parser)]
@@ -24,11 +26,13 @@ pub(crate) struct ExecCommand {
     args: Vec<String>,
 }
 
-impl builtins::Command for ExecCommand {
+brush_clap_adapter::impl_parse_args!(ExecCommand);
+
+impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ExecCommand {
     type Error = brush_core::Error;
 
-    async fn execute<SE: brush_core::ShellExtensions>(
-        &self,
+    async fn execute(
+        self,
         context: brush_core::ExecutionContext<'_, SE>,
     ) -> Result<ExecutionResult, Self::Error> {
         if self.args.is_empty() {
@@ -65,72 +69,50 @@ impl builtins::Command for ExecCommand {
             argv0 = Cow::Owned(std::format!("-{argv0}"));
         }
 
-        // Resolve PATH here so the shell (not the platform launcher) decides
-        // how a found file is run, including ENOEXEC files.
+        // Resolve the program as running it as a command would.
         let name = &self.args[0];
-        let path = if name.contains('/') {
-            Some(brush_core::bytes::to_path(name))
-        } else {
-            context.shell.find_first_executable_in_path(name)
-        };
-
-        let error = if let Some(path) = path {
-            let path = path.to_shell_text().into_owned();
-            let mut cmd = commands::compose_std_command(
-                &context,
-                &path,
-                argv0.as_str(),
-                &self.args[1..],
-                self.empty_environment,
-            )?;
-            // Unlike other commands, Bash's `exec` does not set `_` for the
-            // program: it gets the shell's `_` only if that is exported.
-            cmd.env_remove("_");
-            if !self.empty_environment
-                && let Some((_, underscore)) = context.shell.env().get("_")
-                && underscore.is_exported()
-            {
-                let value = underscore.value().to_cow_str(context.shell);
-                cmd.env("_", brush_core::bytes::to_os_string(value.as_ref()));
-            }
-            // Bash execs the file by its full path (`full_pathname`), which is also
-            // what an ENOEXEC script sees as `$0` and what diagnostics name.
-            #[cfg(unix)]
-            let full_path = if path.starts_with('/') {
-                path.clone()
+        let (message, missing) = if let Some(program) = context.shell.resolve_external_command(name)
+        {
+            // Bash execs the file by its full path, which is also what an ENOEXEC
+            // script sees as `$0` and what diagnostics name.
+            let program = brush_core::bytes::shell_path(&program).into_owned();
+            let full_path = if program.is_absolute() {
+                program.clone()
             } else {
-                let relative = path.strip_prefix("./").unwrap_or(&path);
                 context
                     .shell
                     .working_dir()
-                    .join(relative)
-                    .to_shell_text()
-                    .into_owned()
+                    .join(program.strip_prefix("./").unwrap_or(&program))
             };
-            #[cfg(unix)]
-            brush_core::sys::commands::exec_with_script_fallback(
-                &mut cmd,
-                &brush_core::bytes::to_os_string(argv0.as_ref()),
-                &brush_core::bytes::to_os_string(&full_path),
-                context.iter_fds().map(|(fd, _)| fd),
-                &std::format!("{}{full_path}: ", context.shell.diagnostic_prefix()),
-            )?;
+            let request = commands::compose_launch_request(
+                &context,
+                &full_path,
+                argv0.as_str(),
+                &self.args[1..],
+                if self.empty_environment {
+                    commands::ProgramEnvironment::Empty
+                } else {
+                    commands::ProgramEnvironment::Exported
+                },
+            );
 
             // A failed exec must leave the shell's own descriptors in place.
+            #[cfg(unix)]
             let backup = brush_core::sys::commands::DescriptorBackup::save(
                 context.iter_fds().map(|(fd, _)| fd),
             )?;
             brush_core::traps::ignore_trap_ignored_signals_for_exec();
-            let error = cmd.exec();
+            let error = context.shell.process_launcher().exec(request);
+            #[cfg(unix)]
             backup.restore();
+
             let missing = error.kind() == std::io::ErrorKind::NotFound
-                && !context.shell.absolute_path(&path).exists();
+                && !context.shell.absolute_path(&program).exists();
             (error.to_string(), missing)
         } else {
             ("not found".to_owned(), true)
         };
 
-        let (message, missing) = error;
         let _ = writeln!(context.stderr(), "exec: {name}: {message}");
         let mut result: ExecutionResult = if missing {
             ExecutionExitCode::NotFound.into()

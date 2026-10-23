@@ -11,10 +11,10 @@ use crate::error;
 use crate::processes;
 use crate::results::ExecutionExitCode;
 use crate::sys;
+use crate::tasks;
 use crate::trace_categories;
 use crate::traps;
 
-pub(crate) type JobJoinHandle = tokio::task::JoinHandle<Result<ExecutionResult, error::Error>>;
 pub(crate) type JobResult = (Job, Result<ExecutionResult, error::Error>);
 
 /// Linux `PID_MAX_LIMIT`; synthetic in-process job identities start here.
@@ -47,7 +47,7 @@ pub enum JobTask {
     /// An external process.
     External(processes::ChildProcess),
     /// An internal asynchronous task.
-    Internal(JobJoinHandle),
+    Internal(tasks::TaskHandle<Result<ExecutionResult, error::Error>>),
 }
 
 /// Represents the result of waiting on a job task.
@@ -70,8 +70,8 @@ impl JobTask {
             Self::External(process) => {
                 let wait_result = process.wait().await?;
                 match wait_result {
-                    processes::ProcessWaitResult::Completed { output, .. } => {
-                        Ok(JobTaskWaitResult::Completed(output.into()))
+                    processes::ProcessWaitResult::Completed { result, .. } => {
+                        Ok(JobTaskWaitResult::Completed(result))
                     }
                     processes::ProcessWaitResult::Stopped => Ok(JobTaskWaitResult::Stopped),
                 }
@@ -86,10 +86,7 @@ impl JobTask {
     /// it will return `None`.
     fn poll(&mut self) -> Option<Result<ExecutionResult, error::Error>> {
         match self {
-            Self::External(process) => {
-                let check_result = process.poll();
-                check_result.map(|polled_result| polled_result.map(|output| output.into()))
-            }
+            Self::External(process) => process.poll(),
             Self::Internal(handle) => {
                 let checkable_handle = handle;
                 checkable_handle.now_or_never().and_then(|r| r.ok())
@@ -365,21 +362,18 @@ impl JobManager {
         }
     }
 
-    /// Sends SIGHUP (and SIGCONT to a stopped job) to every job not marked
+    /// Sends SIGHUP (and so SIGCONT to a stopped job) to every job not marked
     /// by `disown -h`, as Bash does when an interactive login shell with
     /// `huponexit` exits.
-    pub fn hangup_all(&self) {
+    pub fn hangup_all(&mut self) {
         for job in self
             .jobs
-            .iter()
+            .iter_mut()
             .filter(|job| !job.nohup && !job.tasks.is_empty())
         {
             #[cfg(unix)]
             {
                 let _ = job.kill(traps::TrapSignal::Signal(sys::signal::Signal::SIGHUP));
-                if matches!(job.state, JobState::Stopped) {
-                    let _ = job.kill(traps::TrapSignal::Signal(sys::signal::Signal::SIGCONT));
-                }
             }
         }
     }
@@ -414,11 +408,13 @@ impl JobManager {
                 matches!(job.poll_done(), Ok(Some(_))).then_some(job.id)
             });
         for job in &mut self.jobs {
-            if terminate_only {
-                job.wait_for_termination().await?;
+            // The caller wants the jobs, not their statuses: `wait` with no operands returns 0
+            // whatever they were.
+            let _ = if terminate_only {
+                job.wait_for_termination().await?
             } else {
-                job.wait().await?;
-            }
+                job.wait().await?
+            };
         }
 
         self.completed.clear();
@@ -718,13 +714,12 @@ pub struct Job {
     /// The original process ID used by `$!` and `wait`, even after polling
     /// removes a completed stage from a pipeline.
     representative_pid: Option<sys::process::ProcessId>,
+    /// The process group ID the job was launched with, or its first process.
+    pgid: Option<sys::process::ProcessId>,
     /// The selected pipeline stage and status, retained across polls and canceled waits.
     wait_result: Option<(usize, ExecutionResult)>,
     /// Whether to select the rightmost failing stage, captured at pipeline launch.
     pipefail: bool,
-
-    /// If available, the process group ID of the job's processes.
-    pgid: Option<sys::process::ProcessId>,
 
     /// The annotation of the job (e.g., current, previous).
     annotation: JobAnnotation,
@@ -1012,59 +1007,141 @@ impl Job {
 
     /// Moves the job to execute in the background.
     pub fn move_to_background(&mut self) -> Result<(), error::Error> {
-        if matches!(self.state, JobState::Stopped) {
-            if let Some(pgid) = self.process_group_id() {
-                sys::signal::continue_process(pgid)?;
-                self.state = JobState::Running;
-                Ok(())
-            } else {
-                Err(error::ErrorKind::FailedToSendSignal.into())
-            }
-        } else {
-            error::unimp("move job to background")
-        }
+        self.continue_job()
     }
 
     /// Moves the job to execute in the foreground.
     pub fn move_to_foreground(&mut self) -> Result<(), error::Error> {
-        if matches!(self.state, JobState::Stopped) {
-            if let Some(pgid) = self.process_group_id() {
-                sys::signal::continue_process(pgid)?;
-                self.state = JobState::Running;
-            } else {
-                return Err(error::ErrorKind::FailedToSendSignal.into());
-            }
+        // The job gets the terminal before it's continued, so that it doesn't find itself in the
+        // background and stop again on reading from the terminal. (Without a terminal, as in a
+        // script that enables job control, there's none to give it, and it's continued anyway.)
+        if let Some(pgid) = self.own_process_group()
+            && let Err(err) = sys::terminal::move_to_foreground(pgid)
+        {
+            tracing::debug!(target: trace_categories::JOBS, "not giving job {} the terminal: {err}", self.id);
         }
 
-        if let Some(pgid) = self.process_group_id() {
-            sys::terminal::move_to_foreground(pgid)?;
+        self.continue_job()
+    }
+
+    /// Continues the job, and records it running.
+    fn continue_job(&mut self) -> Result<(), error::Error> {
+        if matches!(self.state, JobState::Stopped) {
+            self.continue_processes()?;
+            self.state = JobState::Running;
+        } else {
+            // As bash does for `fg`, continue it anyway: it may have been stopped without the
+            // shell noticing yet (e.g., by reading from the terminal in the background).
+            let _ = self.continue_processes();
         }
 
         Ok(())
     }
 
-    /// Kills the job.
+    /// Continues the job's stopped processes: all of its process group, if it has one.
+    fn continue_processes(&self) -> Result<(), error::Error> {
+        if let Some(pgid) = self.own_process_group() {
+            return sys::signal::continue_process_group(pgid);
+        }
+        let mut pids = self.task_pids();
+        if pids.is_empty() {
+            pids.extend(self.process_group_id());
+        }
+        if pids.is_empty() {
+            return Err(error::ErrorKind::FailedToSendSignal.into());
+        }
+        let mut result = Ok(());
+        for pid in pids {
+            if let Err(error) = sys::signal::continue_process(pid) {
+                result = Err(error);
+            }
+        }
+        result
+    }
+
+    /// Checks whether the job can be signaled.
+    pub fn check_signalable(&self) -> Result<(), error::Error> {
+        if let Some(pgid) = self.own_process_group() {
+            return sys::signal::check_process_group_signalable(pgid);
+        }
+        let mut pids = self.task_pids();
+        if pids.is_empty() {
+            pids.extend(self.process_group_id());
+        }
+        if pids.is_empty() {
+            return Err(error::ErrorKind::FailedToSendSignal.into());
+        }
+        let mut result = Ok(());
+        for pid in pids {
+            if let Err(error) = sys::signal::check_signalable(pid) {
+                result = Err(error);
+            }
+        }
+        result
+    }
+
+    /// Kills the job: sends the signal to all of its process group, if it has one. A job sent
+    /// SIGTERM or SIGHUP is also continued, so that it acts on it if it's stopped.
     ///
     /// # Arguments
     ///
     /// * `signal` - The signal to send to the job.
-    pub fn kill(&self, signal: traps::TrapSignal) -> Result<(), error::Error> {
-        let pgid = self.process_group_id();
-        // A job in its own process group is signaled as a group. Otherwise (no
-        // job control), Bash signals each of the job's processes.
-        if let Some(pgid) = pgid.filter(|pgid| sys::signal::leads_separate_process_group(*pgid)) {
-            return sys::signal::kill_process(-pgid, signal);
+    pub fn kill(&mut self, signal: traps::TrapSignal) -> Result<(), error::Error> {
+        if let Some(pgid) = self.own_process_group() {
+            sys::signal::kill_process_group(pgid, signal)?;
+        } else {
+            self.kill_each_process(signal)?;
         }
-        let pids = self
-            .tasks
+
+        // As bash does, continue a stopped job sent SIGTERM or SIGHUP, so that it acts on it;
+        // and one not known to be stopped, which may have stopped without the shell's noticing.
+        if sys::signal::continue_stopped_on(signal) {
+            self.continue_job()?;
+        }
+
+        Ok(())
+    }
+
+    /// Tries to retrieve a "representative" pid for the job.
+    pub fn representative_pid(&self) -> Option<sys::process::ProcessId> {
+        self.representative_pid
+    }
+
+    /// Tries to retrieve the process group ID (PGID) of the job: that of its own process group,
+    /// if it has one, or else its representative pid.
+    pub fn process_group_id(&self) -> Option<sys::process::ProcessId> {
+        // TODO(jobs): Don't assume that the first PID is the PGID.
+        self.pgid.or_else(|| {
+            self.representative_pid()
+                .filter(|pid| *pid < SYNTHETIC_PID_BASE)
+        })
+    }
+
+    /// Returns the job's own process group, if it has one: a group other than the shell's,
+    /// led by the first of the job's processes. Without job control, a job's processes
+    /// are in the shell's group, and are signaled one by one.
+    fn own_process_group(&self) -> Option<sys::process::ProcessId> {
+        self.pgid
+            .filter(|pgid| sys::signal::leads_separate_process_group(*pgid))
+    }
+
+    /// The process IDs of the job's processes that are still tasks of the job.
+    fn task_pids(&self) -> Vec<sys::process::ProcessId> {
+        self.tasks
             .iter()
             .filter_map(|(_, task)| match task {
                 JobTask::External(process) => process.pid(),
                 JobTask::Internal(_) => None,
             })
-            .collect::<Vec<_>>();
+            .collect()
+    }
+
+    /// Sends a signal to each of the job's processes; as Bash does for a job without a process
+    /// group of its own, that includes every stage of a pipeline.
+    fn kill_each_process(&self, signal: traps::TrapSignal) -> Result<(), error::Error> {
+        let pids = self.task_pids();
         if pids.is_empty() {
-            return pgid.map_or_else(
+            return self.process_group_id().map_or_else(
                 || Err(error::ErrorKind::FailedToSendSignal.into()),
                 |pid| sys::signal::kill_process(pid, signal),
             );
@@ -1076,20 +1153,6 @@ impl Job {
             }
         }
         result
-    }
-
-    /// Tries to retrieve a "representative" pid for the job.
-    pub fn representative_pid(&self) -> Option<sys::process::ProcessId> {
-        self.representative_pid
-    }
-
-    /// Tries to retrieve the process group ID (PGID) of the job.
-    pub fn process_group_id(&self) -> Option<sys::process::ProcessId> {
-        // TODO(jobs): Don't assume that the first PID is the PGID.
-        self.pgid.or_else(|| {
-            self.representative_pid()
-                .filter(|pid| *pid < SYNTHETIC_PID_BASE)
-        })
     }
 }
 
