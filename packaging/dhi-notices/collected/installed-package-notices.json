@@ -79,12 +79,12 @@
     },
     {
       "package": "gh",
-      "version": "2.102.0-3",
+      "version": "2.103.0-0",
       "notices": [],
       "archive_notices": [],
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/cli/cli/fc4b137cdef0a6bd28fd461b7cf9c84a5812a8cd/LICENSE",
+          "url": "https://raw.githubusercontent.com/cli/cli/7948e8056e45ac3c729b829e0eafe2d0797a95c6/LICENSE",
           "sha256": "6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f",
           "file": "texts/6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f.txt"
         }
