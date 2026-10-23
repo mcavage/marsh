@@ -25,6 +25,13 @@ bundled skills stay in `~/.hermes/skills`, visible only to Hermes.
 A team can add skills with a mixin in a kit set; they appear in
 `/opt/hermes/kit-skills`, which Hermes also reads.
 
+## Other agents and models
+
+Hermes uses marsh for multi-agent work: it starts `codex exec`, `claude -p`,
+`pix -p` and other registered commands as child jobs (`fanout`, `split`), each
+in its own sandbox with its own key. Its in-process subagents (the `delegation`
+toolset) are off by default.
+
 ## Tools
 
 Hermes uses the work tools in your marsh home's MCP connections (for example

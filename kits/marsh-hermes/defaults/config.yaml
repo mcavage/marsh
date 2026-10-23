@@ -5,6 +5,11 @@ skills:
   external_dirs: [~/.agents/skills, /opt/hermes/kit-skills]
   create_dir: ~/.agents/skills
 
+# Other agents and models run through marsh (fanout, split, claude -p, codex exec),
+# each in its own sandbox, instead of Hermes's in-process subagents.
+agent:
+  disabled_toolsets: [delegation]
+
 # Your prompts and data go only to your model provider. Telemetry to Nous
 # Research stays off; the model list and update checks are Hermes's defaults.
 telemetry:

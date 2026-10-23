@@ -32,7 +32,8 @@ if [ "${MCP_GATEWAY_URL:-}" = http://mcp-gateway.docker.internal/mcp ] &&
     echo 'hermes kit: could not add the MCP gateway to config.yaml' >&2
 fi
 # Per-run instructions: marsh's job context, and the shared-skills rule.
-rule='Skills you create go to the shared folder that every agent in this marsh home reads. Create them flat, with no category.'
+rule='Skills you create go to the shared folder that every agent in this marsh home reads. Create them flat, with no category.
+To use other agents or models (a second opinion, parallel work, a different vendor), start them as marsh child jobs as described above, e.g. codex exec, claude -p, pix -p, with fanout or split; do not simulate them yourself.'
 if [ -r /run/marsh/context.md ]; then
   HERMES_EPHEMERAL_SYSTEM_PROMPT="$(cat /run/marsh/context.md)
 
