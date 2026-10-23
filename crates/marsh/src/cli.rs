@@ -327,6 +327,21 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
                 reference: reference.clone(),
             }
         }
+        // A Kit marsh knows by name installs from its listed tag.
+        [kit, install, command]
+            if kit == "kit" && install == "install" && !command.starts_with('-') =>
+        {
+            let reference = marsh_contracts::builtin_kits::reference(command).ok_or_else(|| {
+                CliError(format!(
+                    "{command} is not a Kit marsh knows by name (known: {}); use marsh kit install {command} REPOSITORY:TAG",
+                    marsh_contracts::builtin_kits::names()
+                ))
+            })?;
+            ProductCommand::KitInstall {
+                command: command.clone(),
+                reference: reference.to_owned(),
+            }
+        }
         [kit, upgrade, rest @ ..] if kit == "kit" && upgrade == "upgrade" => {
             let check = rest.iter().any(|argument| argument == "--check");
             let commands = rest
@@ -431,7 +446,7 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         }
         [name, ..] if name == "kit" => {
             return Err(CliError(
-                "usage: marsh kit install NAME REF | marsh kit upgrade [--check] [NAME...] | marsh kit uninstall NAME".into(),
+                "usage: marsh kit install NAME [REF] | marsh kit upgrade [--check] [NAME...] | marsh kit uninstall NAME".into(),
             ));
         }
         _ => return Ok(None),
@@ -777,6 +792,23 @@ mod tests {
             .is_err()
         );
         assert!(parse(strings(&["marsh", "kit", "install", "pix", "--from"])).is_err());
+    }
+
+    #[test]
+    fn known_kits_install_by_name_alone() {
+        assert_eq!(
+            parse(strings(&["marsh", "kit", "install", "hermes"]))
+                .unwrap()
+                .command,
+            ProductCommand::KitInstall {
+                command: "hermes".into(),
+                reference: "docker.io/mcavage/marsh-hermes:stable".into(),
+            }
+        );
+        let unknown = parse(strings(&["marsh", "kit", "install", "nope"]))
+            .unwrap_err()
+            .to_string();
+        assert!(unknown.contains("known: hermes, pix"), "{unknown}");
     }
 
     #[test]
