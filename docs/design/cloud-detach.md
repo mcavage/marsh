@@ -150,14 +150,40 @@ and they say how many they kept.
   Docker Cloud identity, and must not receive the user's sign-in, which would
   let the workload create, read or delete any of the user's sandboxes.
 
-  The way to lift this is for the supervisor (§3) to take over the laptop's
-  coordinator role, using a **sandbox-scoped capability** from Docker Cloud,
-  injected at the proxy like any other credential: this sandbox may create
-  child sandboxes only from named Kits, within a budget and a time limit, and
-  they're deleted with it. Until the platform offers that, v1 refuses nested
-  calls in a detached block at start. A one-command block that runs directly
-  in a registered Kit (`cloud -d { claude -p … }`, the existing `--direct`
-  form) works, because it has no nested call.
+  **v1: an access token you supply (opt-in).** The supervisor (§3) takes
+  over the laptop's coordinator role using a Docker personal access token with
+  **Allow Cloud Sandboxes access** (the `sandbox:use` scope), stored on the
+  laptop. Per Docker's [authentication docs](https://docs.docker.com/ai/sandboxes-api/authentication/)
+  and [token reference](https://docs.docker.com/security/access-tokens/reference/):
+
+  - `sandbox:use` is all-or-nothing: it can't be limited to creating
+    sandboxes, or to particular Kits. Organization access tokens have no
+    sandbox scope. Treat the token as full control of the account's cloud
+    sandboxes and quota.
+  - The token must be exchanged for a short-lived access token with a JSON
+    body (`POST hub.docker.com/v2/auth/token`), and renewed. Cloud secrets are
+    header-only and static, so the proxy can't hold it: the token has to be in
+    the sandbox.
+
+  So marsh uploads the token at start into a root-only file in the remote state
+  directory. The supervisor, running as root, signs `sbx` in with it and serves
+  nested calls; the workload runs as `marsh-run` with no `sudo` and can't read
+  it. The supervisor enforces marsh's guardrails: only Kits the user allows, a
+  cap on child sandboxes per run, children inherit the parent's time limit,
+  all children are deleted with the parent. The workload can make the
+  supervisor start allowed Kits, not use the token directly. Remaining exposure:
+  the sandbox's disk (never saved as a template or moved) and the supervisor
+  itself.
+
+  This is off unless the user turns it on (`marsh config cloud-delegate on`,
+  plus storing the token), and marsh says so on each run that uses it.
+  Without it, a detached block refuses nested calls at start; a one-command
+  block that runs directly in a registered Kit (`cloud -d { claude -p … }`)
+  works either way.
+
+  **Later: a scoped capability** from Docker Cloud (§9, question 6) replaces
+  the token: injected at the proxy, limited to named Kits, a budget and a time
+  limit. Then the same feature can be on by default.
 - **No terminal and no stdin.** Use the interactive cloud shell for those.
 - **No job-origin detach** (a job inside a Kit sandbox starting a detached run)
   until session-origin detach has shipped and been proven.
@@ -207,7 +233,7 @@ result reported), and with retention expiring.
 4. **`sbx attach` vs `sbx start`** for a stopped sandbox in a script
    (non-interactive start).
 5. **Network policy for long agent runs**: same as attached runs, confirm.
-6. **Scoped child-sandbox capability:** can a cloud sandbox get a credential,
+6. **Scoped child-sandbox capability** (to replace the v1 token): can a cloud sandbox get a credential,
    injected at its proxy, that lets it create child sandboxes only from named
    Kits, within a budget and time limit, deleted with it? This decides whether
    detached blocks can call more agents (§6), and it's the same capability
