@@ -15,6 +15,22 @@ name: Release
 #            (nothing announced); without a version it publishes a nightly
 #            from the selected ref.
 #
+# Kit images move to stable without a marsh release. Stable marsh follows each
+# packaged Kit's :latest tag (`marsh kit upgrade`, and the daily automatic
+# update). After every nightly from a main CI run that passed, the images job
+# also moves :latest of each packaged Kit image (claude, codex, pi, shell) to
+# this build, when and only when:
+#   * the image's org.marsh.kit.contract label is in the range that the newest
+#     stable marsh release supports (SUPPORTED_KIT_CONTRACTS in that tag's
+#     crates/marsh-contracts/src/kit_source.rs), so a stable user is never
+#     offered an image that needs a newer marsh (marsh checks the label again
+#     before it switches); and
+#   * its Kit descriptor, which names the agent, adapter and package versions
+#     it provides, differs from the one :latest has, so a rebuild with nothing
+#     new does not hand every user a new digest.
+# scripts/promote-stable-kits.py makes that decision. A stable tag still moves
+# :latest to the release's own images. :nightly behaves as before.
+#
 # Stages: version, guest (Linux arm64 binaries), images (shell template and Kit
 # images to docker.io/mcavage/marsh-*, digests recorded), host (macOS binaries;
 # digests pinned into commands.json and shell-image; tarball + checksum),
@@ -67,6 +83,8 @@ jobs:
       formula: ${{ steps.v.outputs.formula }}
       image_tag: ${{ steps.v.outputs.image_tag }}
       extra_tags: ${{ steps.v.outputs.extra_tags }}
+      promote_kits: ${{ steps.v.outputs.promote_kits }}
+      stable_contracts: ${{ steps.v.outputs.stable_contracts }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,6 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           sha=$(git rev-parse HEAD)
+          promote_kits=false; stable_contracts=
           case $GITHUB_EVENT_NAME in
             push) channel=stable; version=${GITHUB_REF_NAME#v}; draft=false ;;
             workflow_dispatch)
@@ -98,10 +117,18 @@ jobs:
             stamp=$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S "$sha")
             version="$major.$minor.$((patch + 1))-nightly.$stamp.g$(git rev-parse --short=7 "$sha")"
             formula=marsh-nightly; image_tag=nightly; extra_tags="$version"
+            # Only a main build whose CI passed moves the stable Kit tag.
+            if [ "$GITHUB_EVENT_NAME" = workflow_run ] && [ -n "$last" ]; then
+              promote_kits=true
+              if git show "$last:crates/marsh-contracts/src/kit_source.rs" > "$RUNNER_TEMP/stable-kit-source.rs" 2>/dev/null; then
+                stable_contracts=$(python3 scripts/promote-stable-kits.py supported "$RUNNER_TEMP/stable-kit-source.rs")
+              fi
+            fi
           fi
           {
             echo "channel=$channel"; echo "version=$version"; echo "draft=$draft"; echo "sha=$sha"
             echo "formula=$formula"; echo "image_tag=$image_tag"; echo "extra_tags=$extra_tags"
+            echo "promote_kits=$promote_kits"; echo "stable_contracts=$stable_contracts"
           } >> "$GITHUB_OUTPUT"
           echo "### $channel $version (${sha:0:7})" >> "$GITHUB_STEP_SUMMARY"
 
@@ -185,6 +212,21 @@ jobs:
               docker buildx imagetools create --tag "${ref%@*}:$tag" "$ref"
             done
           done
+      # The rule is at the top of this file. A failure here never blocks the
+      # nightly: stable users keep the :latest they have.
+      - name: Move the stable Kit tag (:latest) when the newest stable marsh supports it
+        if: needs.version.outputs.promote_kits == 'true'
+        continue-on-error: true
+        env:
+          STABLE_CONTRACTS: ${{ needs.version.outputs.stable_contracts }}
+        run: |
+          {
+            echo '### Stable Kit tag'
+            echo '```'
+            python3 scripts/promote-stable-kits.py promote --apply \
+              --commands "$RUNNER_TEMP/out/commands.json" --supported "$STABLE_CONTRACTS"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Record digests
         run: |
           cat "$RUNNER_TEMP/out/shell-image" "$RUNNER_TEMP/out/commands.json" "$RUNNER_TEMP/out/fixture-ref.txt"
