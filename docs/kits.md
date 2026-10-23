@@ -54,10 +54,11 @@ The Pi Kit declares an Anthropic API key only. `shell` has no credentials.
 
 ### Updating agent versions
 
-Each Kit image pins its agent's version. `marsh kit upgrade` moves the
-packaged commands to the newest images of your release channel, so you get a
-new Claude Code, Codex or Pi without waiting for a marsh release; upgrading
-marsh itself also brings the versions it ships. See
+Each Kit image pins its agent's version. marsh moves the packaged commands to
+the newest images of your release channel by itself, once a day, so you get a
+new Claude Code, Codex or Pi without waiting for a marsh release. See
+[Automatic updates](#automatic-updates). `marsh kit upgrade` does the same
+right away, and upgrading marsh itself also brings the versions it ships. See
 [Upgrade](install.md#upgrade) for how the two fit together.
 
 Inside marsh, `claude --version`, `codex --version`, and `pi --version` show the
@@ -124,16 +125,30 @@ agent as a child job. See [Agents running agents](agents.md).
 ```sh
 marsh kit install pix docker.io/mcavage/marsh-pix:stable
 marsh kit upgrade --check      # what would change
-marsh kit upgrade              # move to newer images
+marsh kit upgrade              # move to newer images now
 marsh kit uninstall pix
 ```
 
 `marsh kit install NAME REPOSITORY:TAG` asks `sbx` which image the tag
 names now, prepares that image, and registers NAME. marsh records the digest,
-never the tag, so the command keeps running exactly that image until you
-upgrade. You can also install a digest (`REPOSITORY@sha256:DIGEST`); such a
-command never changes. Open shells see the name immediately. An existing name,
+never the tag, so the command runs exactly that image until marsh moves it to
+a newer one ([automatically](#automatic-updates) or with `marsh kit upgrade`).
+You can also install a digest (`REPOSITORY@sha256:DIGEST`); such a command
+never changes. Open shells see the name immediately. An existing name,
 including a packaged one, is refused.
+
+A few Kits can be installed by name alone:
+
+| Name | Installs from |
+|---|---|
+| `hermes` | `docker.io/mcavage/marsh-hermes:stable` |
+| `pix` | `docker.io/mcavage/marsh-pix:stable` |
+
+`marsh kit install pix` is the same as the first line above, and the command
+follows that tag like any other. A reference you give wins:
+`marsh kit install pix REPOSITORY:TAG` installs that instead. Any other name
+without a reference is an error that lists the known names. The list is in
+`crates/marsh-contracts/src/builtin_kits.rs`.
 
 ### Upgrading commands
 
@@ -152,13 +167,42 @@ names a version it supports; an image that needs a newer marsh is refused with
 that message. ACP agents for a packaged command, or for a command installed
 from a tag, follow its upgrades.
 
+### Automatic updates
+
+Once a day, the daemon does the same as `marsh kit upgrade` in the
+background, for the same commands. It never delays what you are doing: the
+check starts shortly after the daemon does, and an offline or failing check
+is reported only in `marsh status`. A command whose Kit is running jobs waits
+and switches when they finish. The other rules are the ones above: the new
+image is prepared first, a failure keeps the old one, and an image that needs
+a newer marsh is refused.
+
+After a switch, the next time you run that command at a terminal, or open a
+marsh shell, marsh prints one line on stderr, once:
+
+```text
+marsh: claude updated (2.1.305 → 2.1.307)
+```
+
+An image whose version did not change (a rebuild) switches without a notice.
+
+`marsh status` shows when the last check ran, any problem it hit, commands
+waiting for their jobs to finish, and recent updates (`kit_updates` in
+`marsh status --json`).
+
+A command you installed by digest never changes, and neither does a packaged
+command you pinned to a digest by editing `commands.json`. To turn automatic
+updates off for a `MARSH_HOME`, run `marsh config auto-update off`, or start
+the daemon with `MARSH_AUTO_UPDATE=0`. `marsh kit upgrade` still works.
+
 ### Removing a command
 
 `marsh kit uninstall NAME` removes a command you installed. For a packaged
 command you upgraded, it returns to the version your marsh shipped.
 
 The tags installed commands follow are recorded in `kit-sources.json` next to
-`commands.json`.
+`commands.json`. Automatic updates keep their record in `kit-updates.json`
+in the same directory.
 
 ### Changing or replacing a command
 

@@ -164,16 +164,22 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 **config shell** [**bash**|**zsh**|**marsh**]
 : Set, or with no name print, the default shell for this **MARSH_HOME**.
 
-**kit install** *NAME* *REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*
+**config auto-update** [**on**|**off**]
+: Set, or with no value print, whether Kits that follow a tag update
+  themselves once a day in this **MARSH_HOME**. The default is **on**.
+
+**kit install** *NAME* [*REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*]
 : Register a published Kit under *NAME* in this scope. A tag is resolved to its
-  digest now; only that digest runs.
+  digest now; only that digest runs. Without a reference, *NAME* must be a Kit
+  marsh knows by name: **hermes** or **pix**.
 
 **kit upgrade** [**--check**] [*NAME*...]
 : Move each *NAME* (default: every Kit installed from a tag, and the packaged
   commands on a release build) to the image its tag names now, preparing it
   before switching. Packaged commands follow the release channel's tag and move
   only to an image declaring a supported **org.marsh.kit.contract**. **--check**
-  only reports. Exits nonzero if a Kit was refused or failed.
+  only reports. Exits nonzero if a Kit was refused or failed. The daemon also
+  does this once a day in the background; see **MARSH_AUTO_UPDATE**.
 
 **kit uninstall** *NAME*
 : Remove a Kit added with **kit install**, or return an upgraded packaged
@@ -361,13 +367,18 @@ See https://runmar.sh/docs/acp.html.
 **MARSH_PLACE**
 : Placement for registered commands. Only **local** is accepted.
 
+**MARSH_AUTO_UPDATE**
+: **0** (or **off**) when the daemon starts turns off the daily automatic
+  Kit update, as **marsh config auto-update off** does.
+
 # FILES
 
 *$MARSH_HOME/home* (default *~/.marsh/home*)
 : Backing store for the guest home.
 
 *$MARSH_HOME/config.json* (default *~/.marsh/config.json*)
-: The default shell set by **marsh config shell**.
+: The default shell set by **marsh config shell**, and the
+  **marsh config auto-update** setting.
 
 *$MARSH_HOME/sbxenv.yaml*, *$MARSH_HOME/sbxenvs/NAME.yaml*
 : Optional shared and per-command MCP servers and extra directories. Read at
