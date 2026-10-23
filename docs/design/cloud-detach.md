@@ -1,6 +1,10 @@
 # Detached cloud work: close the lid, collect later
 
-Status: **proposed.** Nothing here is implemented. It extends
+Status: **implemented (v1, no nested calls).** Steps 1-4 and 6 of
+[the order of work](#10-order-of-work) are built; the opt-in token for nested
+agent calls (§6) is not, so a detached block that would make one is refused.
+[Implementation notes](#11-implementation-notes-v1) list where v1 differs
+from the text above. It extends
 [cloud placement](cloud-placement.md) and changes some of its decisions, listed
 in [What changes in existing decisions](#7-what-changes-in-existing-decisions).
 
@@ -74,23 +78,38 @@ New read-only helper steps over a fresh `sbx --cloud exec` each:
 `failed`, exit status, sizes), and `fetch` (stream `result.delta`). `signal`
 works as today.
 
-## 4. Sandbox lifetime: results wait in a stopped sandbox
+## 4. Sandbox lifetime: the time limit pauses, it doesn't kill
 
-Detached runs are created with `--on-timeout stop`. A stopped cloud sandbox
-keeps its disk, can be started again (`sbx attach` starts a stopped sandbox),
-and costs no compute while stopped.
+Detached runs are created with `--on-timeout stop`. Measured with sbx 0.49.2
+on 2026-10-23 (a throwaway shell-image sandbox):
 
-- `--ttl` (default `8h`) is the limit on running time. When it lapses, the
-  sandbox stops in place. If the workload was still running, it is killed by
-  the stop; `state` then reports `failed (time limit)` with whatever output
-  and partial delta exist. The user can choose to collect that partial result.
-- When the laptop sees `done`, it fetches the output and delta, then stops
-  the sandbox (`sbx stop`). After a verified collect it deletes it.
-- **Retention.** A finished, uncollected sandbox is kept for a retention
-  period (default 7 days). marsh deletes it after a verified collect, after
-  retention, or on `marsh cloud discard JOB`. Retention is measured on the
-  laptop. If the laptop never returns, the platform's own retention of stopped
-  sandboxes applies (to be confirmed, §9).
+- A process started with `setsid nohup` keeps running after the `sbx --cloud
+  exec` that started it ends.
+- When `--ttl` lapses, the sandbox is **suspended in place, memory and disk
+  included**. On the next `sbx --cloud exec` (which starts a stopped sandbox
+  by itself, no interactive step), the process **resumes where it was**: a
+  counter at 276 continued at 277, 278, 279, and the guest's uptime counted
+  only running time.
+- Resuming restarts the time limit with the original `--ttl`.
+- The sandbox can't stop itself: the shell image has no `poweroff`, and
+  `/proc/sysrq-trigger` isn't exposed. After its work is done it stays
+  running (and billed) until the time limit suspends it.
+- A stopped sandbox from a month earlier was still listed, so stopped
+  sandboxes are kept at least that long.
+
+So:
+
+- `--ttl` (default `2h` for detached runs) is how long the run may use
+  compute without the laptop. When it lapses mid-run, the run is **paused, not
+  lost**: the next collect resumes it, and it continues for another `--ttl`.
+  `state` reports `paused (time limit)` meanwhile. A longer `--ttl` lets
+  more run unattended; a shorter one bounds idle billing after the work ends.
+- When the laptop sees `done`, it fetches the output and delta, verifies
+  them, and deletes the sandbox. If the laptop is away, a finished sandbox
+  idles until the time limit suspends it, then waits stopped.
+- **Retention.** A finished or paused, uncollected sandbox is kept for a
+  retention period (default 14 days), measured on the laptop; then marsh
+  deletes it, or on `marsh cloud discard JOB`.
 
 ## 5. Laptop side: durable records and safe write-back
 
@@ -181,7 +200,7 @@ and they say how many they kept.
   block that runs directly in a registered Kit (`cloud -d { claude -p … }`)
   works either way.
 
-  **Later: a scoped capability** from Docker Cloud (§9, question 6) replaces
+  **Later: a scoped capability** from Docker Cloud (§9, question 3) replaces
   the token: injected at the proxy, limited to named Kits, a budget and a time
   limit. Then the same feature can be on by default.
 - **No terminal and no stdin.** Use the interactive cloud shell for those.
@@ -219,32 +238,68 @@ Acceptance (live, in a separate scope): start a detached run that prints for
 10 minutes and edits files; kill the local daemon and the network mid-run;
 restart; `attach` replays from the start and follows; the result collects and
 applies by itself. Then the same with a conflicting local edit (kept as a
-patch, `diff`/`apply`/`discard` work), with the time limit lapsing (partial
-result reported), and with retention expiring.
+patch, `diff`/`apply`/`discard` work), with the time limit lapsing mid-run
+(paused, then resumed by the next collect, output continuous), and with
+retention expiring.
 
-## 9. Open questions to confirm with the platform
+## 9. Open questions
 
-1. **Stopped-sandbox retention:** how long does Docker Cloud keep a stopped
-   sandbox, and is its disk billed?
-2. **Self-stop:** can the supervisor stop its own sandbox when `done` (to stop
-   compute billing while the laptop is away), or does it run until its time
-   limit? If not, a short default limit matters more.
-3. **Billing while stopped**, for the docs.
-4. **`sbx attach` vs `sbx start`** for a stopped sandbox in a script
-   (non-interactive start).
-5. **Network policy for long agent runs**: same as attached runs, confirm.
-6. **Scoped child-sandbox capability** (to replace the v1 token): can a cloud sandbox get a credential,
-   injected at its proxy, that lets it create child sandboxes only from named
-   Kits, within a budget and time limit, deleted with it? This decides whether
-   detached blocks can call more agents (§6), and it's the same capability
-   cloud-hosted agent teams need.
+Answered by measurement (§4): a stopped sandbox keeps memory and disk and
+resumes processes; `sbx --cloud exec` starts a stopped sandbox; a sandbox can't
+stop itself; stopped sandboxes are kept at least a month.
+
+Still open, with the platform team:
+
+1. Is a stopped sandbox's disk or memory snapshot billed, and is there a
+   retention limit?
+2. A way for a sandbox to suspend itself when its work is done, to end idle
+   billing before the time limit.
+3. **Scoped child-sandbox capability** (to replace the v1 token): a
+   credential the cloud proxy injects as a header, accepted directly by the
+   Sandboxes API, limited to named Kits, a budget and a time limit, children
+   deleted with the parent. (Reported to the Cloud team on 2026-10-23.)
 
 ## 10. Order of work
 
-1. Confirm §9 with the platform team.
-2. Models (§8).
-3. Remote supervisor, spool and `state`/`tail`/`fetch`, with VM-free tests.
-4. Durable detached records, base manifest, collect and safe write-back.
-5. CLI: `-d`, `attach`, `collect`, `diff`, `apply`, `discard`, `stop`;
+1. Models (§8).
+2. Remote supervisor, spool and `state`/`tail`/`fetch`, with VM-free tests.
+3. Durable detached records, base manifest, collect and safe write-back.
+4. CLI: `-d`, `attach`, `collect`, `diff`, `apply`, `discard`, `stop`;
    `marsh jobs` and `marsh status` show detached jobs; the notice on finish.
+5. Nested agent calls with the opt-in token (§6).
 6. Live acceptance (§8), then docs (`docs/cloud.md`).
+
+## 11. Implementation notes (v1)
+
+Where the built version differs from, or adds to, the sections above:
+
+- **Supervisor start.** `run --detached` claims `started`, then re-executes
+  the helper as `--internal-cloud supervise` with no terminal and stdin,
+  stdout and stderr not shared with the exec session; the supervisor calls
+  `setsid` itself and is reparented when `run` exits. Its first output line
+  (`started` or the failure) is the start report; the host trusts only that.
+- **Spool.** Each stream is kept in two segments of half the cap (default
+  256 MiB per stream); offsets are absolute, so `tail` returns where it
+  actually started and the job records `output truncated` when the oldest
+  part was dropped.
+- **Base manifest.** The record holds the SHA-256 of a sidecar file,
+  `control_home/cloud/detached/JOB.base`: the helper's hashed baseline
+  (path, type, mode, SHA-256 of every uploaded entry), fetched before the
+  run starts. A path counts as unchanged when its local entry equals the
+  uploaded one, or already equals the result (so a write-back interrupted
+  by a restart is checked and finished, not kept as a conflict). A
+  directory's mode alone is never a conflict.
+- **Ownership.** A sandbox is marked detached (its own cap of 8) before the
+  run starts and becomes `Detached` once the start is confirmed or the
+  start step ended; after a restart a marked sandbox is recovered as
+  `Detached`, never quarantined. Detached sandboxes accept only `state`,
+  `tail`, `fetch`, `signal`, and removal.
+- **Nested calls.** The refusal at start checks the block's words in command
+  positions against registered Kits with a cloud form. It is best effort:
+  the command links in the sandbox refuse such a call too.
+- **Notices.** Shown once on the next `marsh` command that talks to the
+  daemon from a terminal (`marsh` shell start, `jobs`, `status`, `results`,
+  `cloud`), not by the shell prompt.
+- **Collection timing.** At daemon start and every 2 minutes while a run is
+  outstanding. `MARSH_CLOUD_DETACHED_RETENTION` (daemon environment)
+  overrides the 14-day retention, for testing.

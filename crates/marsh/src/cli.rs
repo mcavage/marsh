@@ -52,6 +52,30 @@ pub enum ProductCommand {
 /// `marsh --dev`: attach this shell with a development grant.
 pub static DEV_SESSION: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// `--detached` on `marsh stop`, `marsh reset`, or `marsh workers reset`:
+/// discard detached cloud runs too (`docs/design/cloud-detach.md` s5).
+pub static DISCARD_DETACHED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Take `--detached` out of a `stop`, `reset`, or `workers reset` command
+/// line, setting [`DISCARD_DETACHED`].
+pub fn take_detached_flag(arguments: &mut Vec<std::ffi::OsString>) {
+    if !matches!(
+        arguments.get(1).and_then(|word| word.to_str()),
+        Some("stop" | "reset" | "workers")
+    ) {
+        return;
+    }
+    if let Some(index) = arguments
+        .iter()
+        .skip(2)
+        .position(|word| word == "--detached")
+    {
+        arguments.remove(index + 2);
+        DISCARD_DETACHED.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParsedCli {
     pub command: ProductCommand,

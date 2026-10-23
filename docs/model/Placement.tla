@@ -10,21 +10,29 @@
 (* File bytes, manifests, source inode admission and stream credit are     *)
 (* abstracted, not proven. Ownership of each sandbox is assumed here;      *)
 (* account/ID/create-intent reconciliation needs the Ownership extension.  *)
+(*                                                                       *)
+(* Detached runs (docs/design/cloud-detach.md): a session-origin crossing *)
+(* whose start is confirmed may detach. It leaves the shared pool for its *)
+(* own cap, makes no further crossings, and is not made uncertain by loss *)
+(* or restart; Collect rebinds it to the current generation. Its return  *)
+(* is applied only when every touched path still has its base contents  *)
+(* locally (BaseCheck); otherwise it is kept as a patch.                 *)
 EXTENDS Integers, FiniteSets
 
-CONSTANTS Jobs, Files, Values, CAP, MaxRestarts, Bug
+CONSTANTS Jobs, Files, Values, CAP, DCAP, MaxRestarts, Bug
 ASSUME Jobs \subseteq (Nat \ {0}) /\ 0 \in Values
 ASSUME \A j \in Jobs : j <= Cardinality(Jobs)
 ASSUME Bug \in {"none", "ancestorReturn", "hostSnapshot", "widen",
                "captureLive", "copySnapshot", "lateReturn", "replay",
-               "ackIsAbsent", "earlyComplete", "noCap", "pendingReturn"}
+               "ackIsAbsent", "earlyComplete", "noCap", "pendingReturn",
+               "noBaseCheck", "restartDetached", "noDetachCap"}
 
 User == 0
 Fork == Cardinality(Jobs) + 1
 Roots == {User, Fork}
 Locs == Roots \cup Jobs
 Data == Values \cup {-1}  \* -1 abstracts an absent file
-Phases == {"none", "staged", "running", "stopped", "applying", "done", "uncertain"}
+Phases == {"none", "staged", "running", "stopped", "applying", "done", "uncertain", "kept"}
 Pending == {"staged", "running", "stopped", "applying"}
 Places == {"local", "cloud"}
 EmptyTree == [f \in Files |-> 0]
@@ -32,12 +40,15 @@ EmptyTree == [f \in Files |-> 0]
 VARIABLES phase, parent, place, scope, rights, dest, source, baseline,
           final, fs, alive, captured, applied, held, runs, cap, epoch,
           generation, present, deleteAck, absentObserved, wrote, edited,
-          lost, badCapture, badEpoch, badComplete
+          lost, badCapture, badEpoch, badComplete,
+          detached, dheld, checked, badStale
 
 vars == <<phase, parent, place, scope, rights, dest, source, baseline,
           final, fs, alive, captured, applied, held, runs, cap, epoch,
           generation, present, deleteAck, absentObserved, wrote, edited,
-          lost, badCapture, badEpoch, badComplete>>
+          lost, badCapture, badEpoch, badComplete,
+          detached, dheld, checked, badStale>>
+dvars == <<detached, dheld, checked, badStale>>
 
 Init ==
   /\ phase = [j \in Jobs |-> "none"]
@@ -65,6 +76,8 @@ Init ==
   /\ edited = {}
   /\ lost = {}
   /\ badCapture = FALSE /\ badEpoch = FALSE /\ badComplete = FALSE
+  /\ detached = [j \in Jobs |-> FALSE] /\ dheld = [j \in Jobs |-> FALSE]
+  /\ checked = [j \in Jobs |-> FALSE] /\ badStale = FALSE
 
 RECURSIVE Anc(_, _)
 Anc(j, n) == IF n = 0 \/ parent[j] = 0 THEN {}
@@ -75,6 +88,9 @@ Delta(j) == {f \in Files : final[j][f] # baseline[j][f]}
 Quiescent(j) == ~alive[j] /\ \A k \in Desc(j) : ~alive[k]
 ReturnsSettled(j) == \A k \in Desc(j) : phase[k] = "done"
 Slots == Cardinality({j \in Jobs : held[j]})
+DSlots == Cardinality({j \in Jobs : dheld[j]})
+\* Every path the return touches still has its base contents at the destination.
+BaseUnchanged(j) == \A f \in Delta(j) : fs[dest[j]][f] = baseline[j][f]
 
 (* Persist transfer binding + admission before provisioning or execution. *)
 Stage(j, p, root, loc) ==
@@ -105,6 +121,7 @@ Stage(j, p, root, loc) ==
   /\ present' = [present EXCEPT ![j] = TRUE]
   /\ UNCHANGED <<final, alive, captured, applied, runs, generation, deleteAck,
                   absentObserved, wrote, edited, lost, badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
 
 Start(j) ==
   /\ phase[j] = "staged" \/ (Bug = "replay" /\ phase[j] = "uncertain" /\ runs[j] = 1)
@@ -116,6 +133,7 @@ Start(j) ==
   /\ UNCHANGED <<parent, place, scope, rights, dest, source, baseline, final, fs,
                   captured, applied, held, cap, epoch, generation, present, deleteAck,
                   absentObserved, wrote, edited, lost, badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
 
 (* One bounded program edit per path/crossing. Child returns add more edits. *)
 Write(j, f, v) ==
@@ -127,6 +145,7 @@ Write(j, f, v) ==
                   alive, captured, applied, held, runs, cap, epoch, generation,
                   present, deleteAck, absentObserved, edited, lost,
                   badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
 
 CallerEdit(root, f, v) ==
   /\ <<root, f>> \notin edited
@@ -137,6 +156,7 @@ CallerEdit(root, f, v) ==
                   alive, captured, applied, held, runs, cap, epoch, generation,
                   present, deleteAck, absentObserved, wrote, lost,
                   badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
 
 (* Abstract verified stop of this scope and settled child returns. *)
 Stop(j) ==
@@ -148,6 +168,7 @@ Stop(j) ==
   /\ UNCHANGED <<parent, place, scope, rights, dest, source, baseline, final, fs,
                   captured, applied, held, runs, epoch, generation, present, deleteAck,
                   absentObserved, wrote, edited, lost, badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
 
 Capture(j) ==
   /\ phase[j] = "stopped" \/ (Bug = "captureLive" /\ phase[j] = "running")
@@ -160,26 +181,33 @@ Capture(j) ==
   /\ UNCHANGED <<parent, place, scope, rights, dest, source, baseline, fs,
                   alive, applied, held, runs, cap, epoch, generation, present, deleteAck,
                   absentObserved, wrote, edited, lost, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
 
 Apply(j, f) ==
   /\ captured[j]
   /\ phase[j] = "applying" \/ (Bug = "lateReturn" /\ phase[j] = "uncertain")
   /\ epoch[j] = generation \/ Bug = "lateReturn"
   /\ f \in (IF Bug = "copySnapshot" THEN Files ELSE Delta(j)) \ applied[j]
+  \* A detached return writes only after its base check passed. Bug
+  \* noBaseCheck: it is applied as an attached return is.
+  /\ ~detached[j] \/ checked[j] \/ Bug = "noBaseCheck"
   /\ fs' = [fs EXCEPT ![dest[j]][f] = final[j][f]]
   /\ applied' = [applied EXCEPT ![j] = @ \cup {f}]
   /\ badEpoch' = (badEpoch \/ epoch[j] # generation \/ phase[j] = "uncertain")
+  /\ badStale' = (badStale \/ (detached[j] /\ ~checked[j] /\ ~BaseUnchanged(j)))
   /\ UNCHANGED <<phase, parent, place, scope, rights, dest, source, baseline, final,
                   alive, captured, held, runs, cap, epoch, generation, present, deleteAck,
-                  absentObserved, wrote, edited, lost, badCapture, badComplete>>
+                  absentObserved, wrote, edited, lost, badCapture, badComplete,
+                  detached, dheld, checked>>
 
 DeleteRequest(j) ==
-  /\ phase[j] \in {"applying", "uncertain"} /\ ~deleteAck[j]
+  /\ phase[j] \in {"applying", "uncertain", "kept"} /\ ~deleteAck[j] /\ ~absentObserved[j]
   /\ deleteAck' = [deleteAck EXCEPT ![j] = TRUE]
   /\ absentObserved' = [absentObserved EXCEPT ![j] = (Bug = "ackIsAbsent")]
   /\ UNCHANGED <<phase, parent, place, scope, rights, dest, source, baseline, final, fs,
                   alive, captured, applied, held, runs, cap, epoch, generation, present,
                   wrote, edited, lost, badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
 
 (* Environment: deletion finishes later, and can destroy all writers. *)
 DeleteLands(j) ==
@@ -189,6 +217,7 @@ DeleteLands(j) ==
   /\ UNCHANGED <<phase, parent, place, scope, rights, dest, source, baseline, final, fs,
                   captured, applied, held, runs, cap, epoch, generation, deleteAck,
                   absentObserved, wrote, edited, lost, badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
 
 ObserveAbsent(j) ==
   /\ phase[j] # "none" /\ ~present[j] /\ ~absentObserved[j]
@@ -196,21 +225,25 @@ ObserveAbsent(j) ==
   /\ UNCHANGED <<phase, parent, place, scope, rights, dest, source, baseline, final, fs,
                   alive, captured, applied, held, runs, cap, epoch, generation, present,
                   deleteAck, wrote, edited, lost, badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
 
 Complete(j) ==
   /\ phase[j] = "applying" /\ absentObserved[j]
   /\ Delta(j) \subseteq applied[j] \/ Bug = "earlyComplete"
+  /\ ~detached[j] \/ checked[j]
   /\ phase' = [phase EXCEPT ![j] = "done"]
   /\ held' = [held EXCEPT ![j] = FALSE]
+  /\ dheld' = [dheld EXCEPT ![j] = FALSE]
   /\ cap' = [cap EXCEPT ![j] = FALSE]
   /\ badComplete' = (badComplete \/ ~(Delta(j) \subseteq applied[j]))
   /\ UNCHANGED <<parent, place, scope, rights, dest, source, baseline, final, fs,
                   alive, captured, applied, runs, epoch, generation, present, deleteAck,
-                  absentObserved, wrote, edited, lost, badCapture, badEpoch>>
+                  absentObserved, wrote, edited, lost, badCapture, badEpoch,
+                  detached, checked, badStale>>
 
 (* Loss revokes the whole subtree, retains slots/payload, never imports. *)
 Lose(j) ==
-  /\ phase[j] \in Pending
+  /\ phase[j] \in Pending /\ ~detached[j]
   /\ LET victims == {j} \cup Desc(j)
          active == {k \in victims : phase[k] \in Pending}
      IN /\ phase' = [k \in Jobs |-> IF k \in active THEN "uncertain" ELSE phase[k]]
@@ -219,31 +252,110 @@ Lose(j) ==
   /\ UNCHANGED <<parent, place, scope, rights, dest, source, baseline, final, fs,
                   alive, captured, applied, held, runs, epoch, generation, present,
                   deleteAck, absentObserved, wrote, edited, badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
+
+(* A detached job survives restart; Bug restartDetached makes it uncertain. *)
+Survives(j) == detached[j] /\ Bug # "restartDetached"
 
 Restart ==
   /\ generation < MaxRestarts
   /\ generation' = generation + 1
-  /\ phase' = [j \in Jobs |-> IF phase[j] \in Pending THEN "uncertain" ELSE phase[j]]
+  /\ phase' = [j \in Jobs |->
+       IF phase[j] \in Pending /\ ~Survives(j) THEN "uncertain" ELSE phase[j]]
   /\ cap' = [j \in Jobs |-> FALSE]
-  /\ lost' = lost \cup {j \in Jobs : phase[j] \in Pending}
+  /\ lost' = lost \cup {j \in Jobs : phase[j] \in Pending /\ ~Survives(j)}
   /\ UNCHANGED <<parent, place, scope, rights, dest, source, baseline, final, fs,
                   alive, captured, applied, held, runs, epoch, present, deleteAck,
                   absentObserved, wrote, edited, badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
 
 RetireUncertain(j) ==
-  /\ phase[j] = "uncertain" /\ held[j] /\ absentObserved[j]
+  /\ phase[j] = "uncertain" /\ (held[j] \/ dheld[j]) /\ absentObserved[j]
   /\ \A k \in Desc(j) : ~held[k]
   /\ held' = [held EXCEPT ![j] = FALSE]
+  /\ dheld' = [dheld EXCEPT ![j] = FALSE]
   /\ UNCHANGED <<phase, parent, place, scope, rights, dest, source, baseline, final, fs,
                   alive, captured, applied, runs, cap, epoch, generation, present,
                   deleteAck, absentObserved, wrote, edited, lost,
-                  badCapture, badEpoch, badComplete>>
+                  badCapture, badEpoch, badComplete, detached, checked, badStale>>
+
+(* A root crossing whose start is confirmed leaves the shared pool for the *)
+(* detached cap; it starts no further crossings (cap revoked).             *)
+Detach(j) ==
+  /\ phase[j] = "running" /\ parent[j] = 0 /\ ~detached[j]
+  /\ Children(j) = {} /\ cap[j] /\ epoch[j] = generation
+  /\ DSlots < DCAP \/ Bug = "noDetachCap"
+  /\ detached' = [detached EXCEPT ![j] = TRUE]
+  /\ held' = [held EXCEPT ![j] = FALSE]
+  /\ dheld' = [dheld EXCEPT ![j] = TRUE]
+  /\ cap' = [cap EXCEPT ![j] = FALSE]
+  /\ UNCHANGED <<phase, parent, place, scope, rights, dest, source, baseline, final, fs,
+                  alive, captured, applied, runs, epoch, generation, present, deleteAck,
+                  absentObserved, wrote, edited, lost, badCapture, badEpoch, badComplete,
+                  checked, badStale>>
+
+(* Collect after a restart: read-only state rebinds the job to this daemon *)
+(* generation for Capture/Apply. It never starts the workload again.       *)
+Collect(j) ==
+  /\ detached[j] /\ phase[j] \in {"running", "stopped", "applying"}
+  /\ epoch[j] # generation
+  /\ epoch' = [epoch EXCEPT ![j] = generation]
+  /\ UNCHANGED <<phase, parent, place, scope, rights, dest, source, baseline, final, fs,
+                  alive, captured, applied, held, runs, cap, generation, present, deleteAck,
+                  absentObserved, wrote, edited, lost, badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
+
+(* Before writing back, compare every touched path with its base; a change *)
+(* here since the start keeps the whole return as a patch.                 *)
+BaseCheck(j) ==
+  /\ detached[j] /\ phase[j] = "applying" /\ captured[j] /\ ~checked[j]
+  /\ applied[j] = {} /\ epoch[j] = generation
+  /\ IF BaseUnchanged(j)
+     THEN /\ checked' = [checked EXCEPT ![j] = TRUE]
+          /\ UNCHANGED phase
+     ELSE /\ phase' = [phase EXCEPT ![j] = "kept"]
+          /\ UNCHANGED checked
+  /\ UNCHANGED <<parent, place, scope, rights, dest, source, baseline, final, fs,
+                  alive, captured, applied, held, runs, cap, epoch, generation, present,
+                  deleteAck, absentObserved, wrote, edited, lost, badCapture, badEpoch,
+                  badComplete, detached, dheld, badStale>>
+
+(* A kept patch frees its detached slot once the sandbox is gone. *)
+SettleKept(j) ==
+  /\ phase[j] = "kept" /\ dheld[j] /\ absentObserved[j]
+  /\ dheld' = [dheld EXCEPT ![j] = FALSE]
+  /\ UNCHANGED <<phase, parent, place, scope, rights, dest, source, baseline, final, fs,
+                  alive, captured, applied, held, runs, cap, epoch, generation, present,
+                  deleteAck, absentObserved, wrote, edited, lost, badCapture, badEpoch,
+                  badComplete, detached, checked, badStale>>
+
+(* Environment: a detached sandbox can disappear (deleted elsewhere). *)
+Vanish(j) ==
+  /\ detached[j] /\ present[j] /\ phase[j] \in {"running", "stopped"}
+  /\ present' = [present EXCEPT ![j] = FALSE]
+  /\ alive' = [alive EXCEPT ![j] = FALSE]
+  /\ UNCHANGED <<phase, parent, place, scope, rights, dest, source, baseline, final, fs,
+                  captured, applied, held, runs, cap, epoch, generation, deleteAck,
+                  absentObserved, wrote, edited, lost, badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
+
+(* Its observed absence makes it lost: uncertain, never re-run. *)
+DetachedLost(j) ==
+  /\ detached[j] /\ phase[j] \in {"running", "stopped"} /\ absentObserved[j]
+  /\ phase' = [phase EXCEPT ![j] = "uncertain"]
+  /\ lost' = lost \cup {j}
+  /\ UNCHANGED <<parent, place, scope, rights, dest, source, baseline, final, fs,
+                  alive, captured, applied, held, runs, cap, epoch, generation, present,
+                  deleteAck, absentObserved, wrote, edited, badCapture, badEpoch, badComplete>>
+  /\ UNCHANGED dvars
 
 Next ==
   \/ \E j \in Jobs, p \in Jobs \cup {0}, r \in Roots, l \in Places : Stage(j, p, r, l)
   \/ \E j \in Jobs : Start(j) \/ Stop(j) \/ Capture(j) \/ DeleteRequest(j)
                       \/ DeleteLands(j) \/ ObserveAbsent(j) \/ Complete(j)
                       \/ Lose(j) \/ RetireUncertain(j)
+                      \/ Detach(j) \/ Collect(j) \/ BaseCheck(j) \/ SettleKept(j)
+                      \/ Vanish(j) \/ DetachedLost(j)
   \/ \E j \in Jobs, f \in Files, v \in Data : Write(j, f, v)
   \/ \E r \in Roots, f \in Files, v \in Data : CallerEdit(r, f, v)
   \/ \E j \in Jobs, f \in Files : Apply(j, f)
@@ -266,6 +378,8 @@ TypeOK ==
   /\ epoch \in [Jobs -> 0..MaxRestarts] /\ generation \in 0..MaxRestarts
   /\ wrote \subseteq (Jobs \X Files) /\ edited \subseteq (Roots \X Files) /\ lost \subseteq Jobs
   /\ badCapture \in BOOLEAN /\ badEpoch \in BOOLEAN /\ badComplete \in BOOLEAN
+  /\ detached \in [Jobs -> BOOLEAN] /\ dheld \in [Jobs -> BOOLEAN]
+  /\ checked \in [Jobs -> BOOLEAN] /\ badStale \in BOOLEAN
 
 ParentBound == \A j \in Jobs : phase[j] # "none" =>
   /\ parent[j] = 0 \/ parent[j] < j
@@ -282,7 +396,15 @@ VerifiedAbsence == \A j \in Jobs : absentObserved[j] => ~present[j]
 ReturnBeforeComplete == ~badComplete
 SharedBudget == Slots <= CAP
 NoEarlyRelease == \A j \in Jobs :
-  phase[j] # "none" /\ ~held[j] => absentObserved[j] /\ phase[j] \in {"done", "uncertain"}
+  phase[j] # "none" /\ ~held[j] /\ ~dheld[j] =>
+    absentObserved[j] /\ phase[j] \in {"done", "uncertain", "kept"}
+DetachedBudget == DSlots <= DCAP
+\* A detached return is written only when no touched path changed here.
+NoStaleApply == ~badStale
+\* A detached job is given up only once its sandbox is observed gone.
+DetachedSurvives == \A j \in Jobs :
+  detached[j] /\ phase[j] = "uncertain" => ~present[j]
+DetachedApart == \A j \in Jobs : detached[j] => ~held[j] /\ parent[j] = 0 /\ Children(j) = {}
 LossIsUncertain == \A j \in lost : phase[j] = "uncertain" /\ ~cap[j]
 ParentCaptureSettled == \A j \in Jobs : captured[j] => ReturnsSettled(j)
 ReturnLease == \A j \in Jobs : phase[j] \in Pending /\ parent[j] # 0 =>

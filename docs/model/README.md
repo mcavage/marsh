@@ -121,7 +121,11 @@ Process controls, one per invariant, each in a real action: `noDepth` (LineageWF
 child: NoEntryRecursion), `linkIgnoresPpid` (the link resolves the own name locally whenever the
 marker is set, which an ELF entrypoint leaves in place: EntryOnce), `noSameKit` (SameKitBound),
 `spawnWiden` (child spawn set reset to every registered Kit: SpawnSetAttenuates), `noKitCap` (a
-child brings one more distinct Kit VM into a full tree: KitVMBound). Wall time is not modeled:
+child brings one more distinct Kit VM into a full tree: KitVMBound), `noDetachCap` (DetachedBound),
+`detachHolds` (a detached cloud run keeps its pool slot: DetachedOutOfPool), `restartDetached` (a
+restart makes a detached run uncertain: DetachedSurvives). `Detach` takes a started root job with
+no children out of the pool (`marsh-daemon` `detach_cloud_job`, `JobState::Detached`, not `live`);
+`Collect` ends it without a second start. Wall time is not modeled:
 a deadline is the environment's `Cancel(j, Session)`, and a child's inherited deadline is an
 admission-time value checked by `process_tests.rs` and P35, not by TLC. Positive Process configs:
 `Process.cfg` (one script Kit, 3 jobs, depth 3, one restart, every invariant; ~40 s),
@@ -252,6 +256,21 @@ assert that overlapping caller edits survive. Absence is the abstract value -1.
 | `ReturnBeforeComplete` | `earlyComplete` | Report completion with entries unapplied |
 | `SharedBudget` | `noCap` | Provision beyond the shared local/cloud pool |
 | `ParentCaptureSettled` | `pendingReturn` | Capture a parent view while any descendant return is pending, including before child capture |
+| `NoStaleApply` | `noBaseCheck` | Apply a detached return over a path changed here since the run started |
+| `DetachedSurvives` | `restartDetached` | Make a detached run uncertain at restart while its sandbox still exists |
+| `DetachedBudget` | `noDetachCap` | Detach beyond the separate detached cap |
+
+Detached runs ([design](../design/cloud-detach.md)): `Detach` moves a started
+root crossing with no children out of the shared slot pool into the detached
+cap (`DCAP`) and revokes its crossing capability. `Lose` and `Restart` leave it
+in place; `Collect` rebinds it to the current generation (read-only, never a
+second `Start`); `BaseCheck` lets `Apply` proceed only if every touched path
+still has its base contents at the destination, else the return is `kept`
+(a patch) and `SettleKept` frees the slot once the sandbox is gone.
+`Vanish`/`DetachedLost` model a sandbox removed elsewhere: lost only after
+its absence is observed. `DetachedApart` (positive configs) checks a detached
+job holds no shared slot, is a root, and has no children.
+`Placement_detach_pass.cfg` covers two crossings, one restart, and detach.
 
 Positive configs also check `TypeOK`, `NoEarlyRelease`, `LossIsUncertain`, and
 `ReturnLease` (destination remains present/uncaptured for every pending child
@@ -297,6 +316,10 @@ Assumptions/gaps, not checked platform guarantees:
 | `Lose` / `Restart` / `RetireUncertain` | Unconfirmed end: quarantine, retire, `ExecutionOutcome::Unknown`, no capture (`LossIsUncertain`, `NoReplay`). Restart: `DaemonStore::with_master_token` marks running cloud jobs unknown/uncertain; `marsh workers reset cloud` retires owned sandboxes |
 | `DeleteRequest` / `DeleteLands` / `ObserveAbsent` | `CloudSbx::retire` (observed absence, `VerifiedAbsence`), mapped in the cloud ownership extension below |
 | `Complete` (return + verified cleanup) | `Settlement::finish` after capture, retire, and apply (`ReturnBeforeComplete`); the client's exit follows that frame |
+| `Detach` | `cloud/detach.rs` `start_detached`: durable record and base manifest, `CloudSbx::mark_detached` (detached cap), the at-most-once `run --detached`, `CloudSbx::detach`, `DaemonStore::detach_cloud_job` (`Detached` receipt, out of the pool) |
+| `Collect` / `Capture` | `cloud/detach.rs` `collect_job` (`state`, `tail`, `fetch`; the supervisor in `cloud_helper/detached.rs` writes the status and the delta before `done`), retire before write-back (`retire_settled`) |
+| `BaseCheck` / `Apply` / `SettleKept` | `cloud/detach.rs` `write_back` (`conflicts` against `JOB.base`; `apply_delta` only when none; otherwise `kept-as-patch`) |
+| `Vanish` / `DetachedLost` | `collect_job`: absent from a complete inventory, then `lost` |
 
 Before changing the Rust lifecycle, extend the existing six modules and their
 code-location/negative-control tables as specified in design section 9.
@@ -343,6 +366,9 @@ they were accurate; ID-addressed effects spare a foreign VM that reuses a name.
 | `NoCreateReplay` | `replayCreate` | Reconciliation never repeats an uncertain create |
 | `CapacityBound` | `noCap` | Unresolved resources count toward capacity |
 | `NoUnsafeSubmission` | `stalePoison` | Recheck persistence poisoning under the admission lock, not before waiting |
+| `DetachedSurvives` | `restartDetached` | A detached sandbox keeps its state across restart (only removal leaves it) |
+| `NoDetachedUse` | `useDetached` | A detached sandbox takes no new submission, only `Control` |
+| `DetachedBound` | `noDetachCap` | Detached sandboxes are bounded by their own cap `DCAP` |
 
 Positive configs also check `TypeOK` and `OwnedAreOurs`. Retirement has separate
 per-resource query state and a prior-sighting snapshot: another observer can
@@ -366,6 +392,7 @@ restart. Names abstract fresh requests and are not reused in these bounds.
 | Restart | `open` validates/locks the map and makes loaded Ready entries Quarantined |
 | BeginRemove / DeleteRequest / DeleteLands | `retire` persists Removing and requests removal by ID; actual deletion is provider state |
 | Forget | `retire`: successful complete inventory absence plus prior positive observation, then durable record removal |
+| Detach / Control | `mark_detached` (persisted `detached` flag, cap `MAX_DETACHED`), `detach` (`Detached` phase), `open` (Ready + detached -> Detached on restart), `control_detached` (identity re-observed, admitted under the map lock only in `Detached`) |
 
 Assumptions/gaps: managed pending names are random/exclusive; other actors may
 reuse a known name after removing its old ID. Stock inventory is complete and

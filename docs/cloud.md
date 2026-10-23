@@ -253,6 +253,57 @@ the sandbox and is deleted with it, so copy anything you want out of it
 within the block. Host `marsh splits` and `marsh jobs --tree` show only the
 cloud job, not the split inside it.
 
+## Close the lid: detached runs
+
+Add `-d` to start work that keeps running after you close the laptop:
+
+```sh
+cloud -d { make long-benchmark > bench.txt; }
+marsh cloud -d -- make long-benchmark
+```
+
+marsh uploads the project as usual, starts the command, prints its job
+number, and returns at once. The run has no terminal and reads no input.
+
+```sh
+marsh jobs                  # running, paused, finished, collected, kept-as-patch, lost
+marsh cloud attach 42       # output so far, then live; Ctrl-C stops following, not the run
+marsh cloud collect 42      # check on it now
+```
+
+- **Collection happens by itself.** marsh checks detached runs when its
+  daemon starts and every two minutes while one is outstanding. When a run
+  has finished, marsh downloads its output and file changes, deletes the
+  sandbox, and tells you once, on your next `marsh` command:
+  `marsh: cloud job 42 finished (exit 0); changes applied`.
+- **Conflicts wait as a patch.** marsh remembers every file it uploaded. If
+  any file the run changed was also changed here since it started, nothing is
+  written back: `marsh cloud diff 42` shows the patch, `marsh cloud apply 42`
+  applies it anyway, and `marsh cloud discard 42` drops it. A split fork that
+  is gone, or a project directory that was replaced, also keeps the patch.
+- **The time limit pauses, it doesn't kill.** A detached run's `--ttl`
+  defaults to 2 hours of running without your laptop. When it runs out, the
+  sandbox is suspended with the run inside it; the next check resumes it
+  where it was, for another `--ttl`. While your laptop is on, marsh's checks
+  keep it going.
+- **Costs.** A sandbox is billed while it runs. If your laptop is away when
+  the work finishes, the sandbox idles until its time limit suspends it, so a
+  shorter `--ttl` bounds that idle time. A run nobody collects is deleted
+  after 14 days.
+- `marsh cloud stop 42` interrupts a run (`INT`, then `KILL` after 10
+  seconds); its changes so far come back as usual.
+- `marsh stop`, `marsh reset`, and `marsh workers reset cloud` keep
+  detached runs and say how many they kept; add `--detached` to discard them.
+- Up to 8 detached runs at a time. They don't count toward the 8 jobs that
+  run at once.
+
+A detached block can't call registered commands that run in their own Kit
+(they need your laptop to start them): marsh refuses such a block before it
+starts. A block that is exactly one such call runs in that command's Kit, so
+`cloud -d { claude -p "refactor the parser" </dev/null; }` works. Detached
+runs start from your marsh session or a host terminal, not from inside a
+job. Design: [detached cloud work](design/cloud-detach.md).
+
 ## Jobs, Ctrl-C, and cleanup
 
 Each cloud call is a job: `marsh jobs` shows `cloud -c ...` with placement
@@ -273,7 +324,8 @@ the exit status, and the cleanup result. Cloud calls count toward the
 - `marsh workers reset` (all) and `marsh workers reset cloud` delete every
   cloud sandbox this daemon owns, including those of calls still running;
   such calls end as lost and write nothing back. `marsh stop` and
-  `marsh reset` delete owned cloud sandboxes too.
+  `marsh reset` delete owned cloud sandboxes too. Detached runs are kept
+  unless you add `--detached`.
 - If marsh loses the connection or the daemon stops before it can confirm the
   remote command ended, nothing is written back and nothing is re-run. The job
   shows `cleanup uncertain` and holds its slot. Run

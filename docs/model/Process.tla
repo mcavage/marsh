@@ -38,18 +38,24 @@
 (* its live jobs at once; a child of a Kit already live in it is free.  *)
 (* Wall time is not modeled: a deadline is the environment's Cancel.     *)
 (*                                                                       *)
+(* Detached cloud runs (docs/design/cloud-detach.md): a top-level job    *)
+(* with no children whose start is confirmed may detach. It gives up its *)
+(* capability and its pool slot, counts toward its own cap MaxDetached,  *)
+(* survives a restart, and is collected (never re-run) later.            *)
+(*                                                                       *)
 (* Environment: the user (or a deadline) cancels any job; transport loss *)
 (* on any job's VM; leftover processes die; a daemon crash between any   *)
 (* two daemon steps; jobs exit whenever they like.                       *)
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Jobs, Kits, ScriptKits, MaxDepth, MaxConc, MaxFan, MaxTotal,
-          MaxSame, MaxKitVMs, MaxRestarts, Bug
+          MaxSame, MaxKitVMs, MaxDetached, MaxRestarts, Bug
 
 Bugs == {"none", "noDepth", "widen", "freeOnRevoke", "noFan", "noTotal",
          "orphanChildren", "revokeOnly", "noPropagate", "restartKeepsCap",
          "keepRunning", "replay", "linkIgnoresMarker", "linkIgnoresPpid",
-         "noSameKit", "spawnWiden", "noKitCap"}
+         "noSameKit", "spawnWiden", "noKitCap", "noDetachCap",
+         "restartDetached", "detachHolds"}
 ASSUME Bug \in Bugs
 ASSUME Jobs \subseteq (Nat \ {0}) /\ ScriptKits \subseteq Kits
 
@@ -81,11 +87,12 @@ VARIABLES
   entry,     \* [Jobs -> "pending" | "done"] the entrypoint's own-name step
   marker,    \* [Jobs -> BOOLEAN] MARSH_ENTRY in the main process's environment
   selfLocal, \* [Jobs -> Nat] own-name calls resolved to the image binary
-  viaEntry   \* [Jobs -> BOOLEAN] ghost: created by its parent's entry step
+  viaEntry,  \* [Jobs -> BOOLEAN] ghost: created by its parent's entry step
+  det        \* [Jobs -> BOOLEAN] ghost: the job detached (sticky)
 
 vars == <<st, par, kit, rights, cap, cgen, alive, launches, runs, cancelled, restarts,
-          entry, marker, selfLocal, viaEntry>>
-sv == <<entry, marker, selfLocal, viaEntry>>
+          entry, marker, selfLocal, viaEntry, det>>
+sv == <<entry, marker, selfLocal, viaEntry, det>>
 
 Init ==
   /\ st = [j \in Jobs |-> "none"]
@@ -103,6 +110,7 @@ Init ==
   /\ marker = [j \in Jobs |-> FALSE]
   /\ selfLocal = [j \in Jobs |-> 0]
   /\ viaEntry = [j \in Jobs |-> FALSE]
+  /\ det = [j \in Jobs |-> FALSE]
 
 ---------------------------------------------------------------------------
 (* Helpers *)
@@ -125,8 +133,11 @@ TreeKits(r) == {kit[d] : d \in {x \in Tree(r) : st[x] \in Active}}
 
 \* A pool slot is held until the job's end is confirmed. Bug freeOnRevoke:
 \* the daemon stops counting a job once its capability is revoked.
-InPool(j) == st[j] \in Holding /\ (Bug # "freeOnRevoke" \/ cap[j] = "live")
+\* Bug detachHolds: a detached job keeps counting.
+InPool(j) == \/ st[j] \in Holding /\ (Bug # "freeOnRevoke" \/ cap[j] = "live")
+             \/ st[j] = "detached" /\ Bug = "detachHolds"
 PoolUse == Cardinality({j \in Jobs : InPool(j)})
+Detached == {j \in Jobs : st[j] = "detached"}
 
 \* Revoke and signal a set of jobs: launched or running jobs move to
 \* cancelling (INT, 10 s, KILL). Jobs already ending or cancelling stay.
@@ -192,7 +203,7 @@ SpawnFrom(j, p, fromEntry) ==
   /\ marker' = [marker EXCEPT ![j] = TRUE]                    \* every entrypoint
   /\ viaEntry' = [viaEntry EXCEPT ![j] = fromEntry]
   /\ entry' = IF fromEntry THEN [entry EXCEPT ![p] = "done"] ELSE entry
-  /\ UNCHANGED <<alive, runs, cancelled, restarts, selfLocal>>
+  /\ UNCHANGED <<alive, runs, cancelled, restarts, selfLocal, det>>
 
 Spawn(j, p) == SpawnFrom(j, p, FALSE)
 
@@ -215,7 +226,7 @@ EntryLocal(j) ==
   /\ selfLocal' = [selfLocal EXCEPT ![j] = @ + 1]
   /\ marker' = [marker EXCEPT ![j] = IF kit[j] \in ScriptKits THEN FALSE ELSE @]
   /\ UNCHANGED <<st, par, kit, rights, cap, cgen, alive, launches, runs, cancelled,
-                 restarts, viaEntry>>
+                 restarts, viaEntry, det>>
 
 \* Otherwise the link dispatches the script entrypoint's own name as a
 \* child job of the same Kit (whose entrypoint does the same).
@@ -232,7 +243,7 @@ AgentSelfLocal(j) ==
   /\ LinkLocal(j, FALSE)
   /\ selfLocal' = [selfLocal EXCEPT ![j] = @ + 1]
   /\ UNCHANGED <<st, par, kit, rights, cap, cgen, alive, launches, runs, cancelled,
-                 restarts, entry, marker, viaEntry>>
+                 restarts, entry, marker, viaEntry, det>>
 
 \* The worker starts the container (possibly after a cancel was sent).
 Start(j) ==
@@ -296,13 +307,36 @@ Restart ==
   /\ restarts' = restarts + 1
   /\ cap' = [j \in Jobs |-> IF cap[j] = "live" /\ Bug # "restartKeepsCap" THEN "revoked" ELSE cap[j]]
   /\ st' = [j \in Jobs |->
-              IF st[j] \notin Active THEN st[j]
+              IF st[j] = "detached" /\ Bug = "restartDetached" THEN "uncertain"
+              ELSE IF st[j] \notin Active THEN st[j]
               ELSE IF Bug = "keepRunning" THEN st[j]
               ELSE IF Bug = "replay" /\ st[j] \in {"launched", "running"} THEN "launched"
               ELSE "uncertain"]
   /\ launches' = [j \in Jobs |-> IF Bug = "replay" /\ st[j] \in {"launched", "running"}
                                    THEN launches[j] + 1 ELSE launches[j]]
   /\ UNCHANGED <<sv, par, kit, rights, cgen, alive, runs, cancelled>>
+
+\* A detached cloud run: a top-level job with no children, started (its
+\* start confirmed), gives up its capability and pool slot for the
+\* detached cap. Bug noDetachCap: the cap is not checked.
+Detach(j) ==
+  /\ st[j] = "running" /\ alive[j] /\ par[j] = Session /\ cap[j] = "live"
+  /\ Children(j) = {}
+  /\ Cardinality(Detached) < MaxDetached \/ Bug = "noDetachCap"
+  /\ st' = [st EXCEPT ![j] = "detached"]
+  /\ cap' = [cap EXCEPT ![j] = "revoked"]
+  /\ det' = [det EXCEPT ![j] = TRUE]
+  /\ UNCHANGED <<entry, marker, selfLocal, viaEntry, par, kit, rights, cgen, alive,
+                  launches, runs, cancelled, restarts>>
+
+\* Collection (in any daemon generation): the run's recorded end, its
+\* output and changes are fetched and its sandbox deleted. Read-only; the
+\* job is never started again. A sandbox found gone is collected as lost.
+Collect(j) ==
+  /\ st[j] = "detached"
+  /\ st' = [st EXCEPT ![j] = "done"]
+  /\ alive' = [alive EXCEPT ![j] = FALSE]
+  /\ UNCHANGED <<sv, par, kit, rights, cap, cgen, launches, runs, cancelled, restarts>>
 
 ---------------------------------------------------------------------------
 (* Environment *)
@@ -319,6 +353,7 @@ Next ==
        \/ \E p \in {Session} \cup Jobs : Spawn(j, p)
        \/ Start(j) \/ Exit(j) \/ Cleanup(j) \/ Reap(j) \/ GraceExpire(j)
        \/ Lose(j) \/ ProcDie(j) \/ EntryLocal(j) \/ AgentSelfLocal(j)
+       \/ Detach(j) \/ Collect(j)
        \/ \E c \in Jobs : EntryDispatch(c, j)
        \/ \E a \in {Session} \cup Jobs : Cancel(j, a)
 
@@ -326,6 +361,7 @@ Fairness ==
   \A j \in Jobs : /\ WF_vars(Start(j)) /\ WF_vars(Exit(j)) /\ WF_vars(Cleanup(j))
                   /\ WF_vars(EntryLocal(j) \/ \E c \in Jobs : EntryDispatch(c, j))
                   /\ WF_vars(Reap(j) \/ GraceExpire(j))
+                  /\ WF_vars(Collect(j))
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -333,7 +369,7 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 (* Invariants. Each negative control removes one guard in a real action. *)
 
 TypeOK ==
-  /\ st \in [Jobs -> {"none", "done", "unreaped", "uncertain"} \cup Active]
+  /\ st \in [Jobs -> {"none", "done", "unreaped", "uncertain", "detached"} \cup Active]
   /\ par \in [Jobs -> {Session} \cup Jobs]
   /\ kit \in [Jobs -> Kits \cup {"none"}]
   /\ entry \in [Jobs -> {"pending", "done"}]
@@ -355,8 +391,14 @@ Attenuation == \A j \in Jobs : st[j] # "none" /\ par[j] # Session =>
 SpawnSetAttenuates == \A j \in Jobs : st[j] # "none" /\ par[j] # Session =>
   rights[j] \cap Kits \subseteq rights[par[j]] \cap Kits
 
-\* Containers that may exist stay within the session pool.
-BudgetBound == Cardinality({j \in Jobs : alive[j]}) <= MaxConc
+\* Containers that may exist stay within the session pool; detached cloud
+\* runs are bounded by their own cap.
+BudgetBound == Cardinality({j \in Jobs : alive[j] /\ st[j] # "detached"}) <= MaxConc
+DetachedBound == Cardinality(Detached) <= MaxDetached
+\* A detached run leaves the pool: it never holds a local slot.
+DetachedOutOfPool == \A j \in Detached : ~InPool(j)
+\* A detached run survives a restart; it ends only by collection.
+DetachedSurvives == \A j \in Jobs : det[j] => st[j] \in {"detached", "done"}
 
 FanOutBound == \A p \in Jobs : Cardinality({c \in Children(p) : st[c] \in Holding}) <= MaxFan
 
@@ -397,6 +439,7 @@ SameKitBound == \A j \in Jobs : st[j] # "none" => SameChain(j) <= MaxSame
 KitVMBound == \A r \in Jobs : st[r] # "none" /\ par[r] = Session =>
   Cardinality(TreeKits(r)) <= MaxKitVMs
 
-(* Liveness: every job eventually ends (done) or is reported (unreaped, uncertain). *)
+(* Liveness: every job eventually ends (done) or is reported (unreaped, uncertain); *)
+(* a detached run is eventually collected.                                         *)
 EventuallySettled == <>[](\A j \in Jobs : st[j] \in {"none", "done", "unreaped", "uncertain"})
 =============================================================================

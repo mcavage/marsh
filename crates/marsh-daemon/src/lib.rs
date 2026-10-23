@@ -49,6 +49,7 @@ pub use daemon_startup::{
     DEFAULT_JOB_RESOURCES, JobDefaults, StartupFailure, adopt_startup_lock,
     finish_startup_diagnostics,
 };
+pub mod cloud_detached;
 pub mod cloud_fs;
 pub mod open_url;
 pub mod process;
@@ -705,6 +706,10 @@ pub enum PublicRequest {
     ProcessRun(ExecuteSpec),
     /// The forest (host), or the caller job's own subtree (`cap.sock`).
     ProcessShow,
+    /// A detached cloud run (`docs/design/cloud-detach.md`).
+    CloudDetached {
+        request: cloud_detached::CloudDetachedRequest,
+    },
     /// `xdg-open URL` from a shell (relay) or a job (`cap.sock`); the session
     /// comes from the transport (`open_url`).
     OpenUrl {
@@ -758,6 +763,7 @@ pub enum PublicReply {
     ProcessTree {
         document: serde_json::Value,
     },
+    CloudDetached(cloud_detached::CloudDetachedReply),
     ProcessView(ProcessViewDocument),
     Jobs(JobsDocument),
     Job(Box<JobReceipt>),
@@ -1136,6 +1142,17 @@ pub trait DaemonBackend: Send + Sync + 'static {
     fn uninstall_kit(&self, _command: String, _store: DaemonStore) -> Result<String, DaemonError> {
         Err(DaemonError::BackendUnavailable)
     }
+    /// A detached cloud run's control (`marsh cloud attach|collect|...`).
+    fn cloud_detached(
+        &self,
+        _request: cloud_detached::CloudDetachedRequest,
+        _store: DaemonStore,
+    ) -> Result<cloud_detached::CloudDetachedReply, DaemonError> {
+        Err(DaemonError::BackendUnavailable)
+    }
+    /// One pass of the detached-run collector, from the server's background
+    /// thread: a no-op unless a collection is due.
+    fn collect_detached(&self, _store: &DaemonStore) {}
     /// One pass of the automatic Kit updater, called from the server's
     /// background thread: a no-op unless a check or a waiting switch is due.
     fn auto_update_kits(&self, _store: &DaemonStore) {}
@@ -1447,6 +1464,8 @@ pub struct JobSummary {
     /// `lineage.parent` (`session:<id>`, `job:<id>`, or `split:<id>/<label>`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detached: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1454,6 +1473,9 @@ pub struct JobSummary {
 pub enum JobState {
     Queued,
     Running,
+    /// A detached cloud run (`docs/design/cloud-detach.md`): started, out of
+    /// the local pool, settled later by collection.
+    Detached,
     Finished,
     Failed,
     Cancelled,
@@ -1530,6 +1552,10 @@ pub struct JobReceipt {
     /// Child job ids (`jobs show`), filled when shown; never journaled.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<String>,
+    /// A detached cloud run's own state (`running`, `paused`, `finished`,
+    /// `collected`, `kept-as-patch`, `lost`, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detached: Option<String>,
     /// `scheme://host` of each link this job opened on the Mac (`xdg-open`),
     /// at most `open_url::MAX_RECORDED`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1710,7 +1736,8 @@ impl PublicRequest {
             | Self::SplitCancel { .. }
             | Self::SplitRemove { .. }
             | Self::ProcessRun(_)
-            | Self::ProcessShow => RequestAuthority::Shared,
+            | Self::ProcessShow
+            | Self::CloudDetached { .. } => RequestAuthority::Shared,
             Self::OpenUrl { .. } => RequestAuthority::GuestOpen,
         }
     }
@@ -2574,6 +2601,7 @@ impl DaemonStore {
             workload_image: job.workload_image,
             lineage: Some(lineage.clone()),
             children: Vec::new(),
+            detached: None,
             opened: Vec::new(),
             mounts: job.mounts,
             worker_id: None,
@@ -2724,6 +2752,103 @@ impl DaemonStore {
         state.journal.append(&updated, false)?;
         state.jobs.insert(job_id.into(), updated);
         Ok(())
+    }
+
+    /// A running cloud node's start was confirmed and it detached: it
+    /// leaves the local pool (`Detached`) and is settled later by
+    /// collection, which never starts it again.
+    ///
+    /// # Errors
+    /// Refuses a job that is not a running cloud node.
+    pub fn detach_cloud_job(&self, job_id: &str, timing: TimingReport) -> Result<(), DaemonError> {
+        let mut state = self.lock();
+        state.process.controls.remove(job_id);
+        let receipt = state
+            .jobs
+            .get(job_id)
+            .ok_or_else(|| DaemonError::NotFound(job_id.into()))?;
+        if receipt.state != JobState::Running || receipt.placement != Placement::Cloud {
+            return Err(DaemonError::InvalidState(
+                "only a running cloud job may detach".into(),
+            ));
+        }
+        let mut updated = receipt.clone();
+        updated.state = JobState::Detached;
+        updated.detached = Some("running".into());
+        updated.timing = timing;
+        state.journal.append(&updated, true)?;
+        state.jobs.insert(job_id.into(), updated);
+        Ok(())
+    }
+
+    /// A detached job's own state label, journaled when it changes.
+    pub fn set_detached_state(&self, job_id: &str, label: &str) {
+        let mut state = self.lock();
+        let Some(receipt) = state.jobs.get(job_id) else {
+            return;
+        };
+        if receipt.detached.as_deref() == Some(label) {
+            return;
+        }
+        let mut updated = receipt.clone();
+        updated.detached = Some(label.into());
+        if state.journal.append(&updated, true).is_ok() {
+            state.jobs.insert(job_id.into(), updated);
+        }
+    }
+
+    /// Detached runs not yet settled.
+    #[must_use]
+    pub fn detached_jobs(&self) -> Vec<JobReceipt> {
+        self.lock()
+            .jobs
+            .values()
+            .filter(|job| job.state == JobState::Detached)
+            .cloned()
+            .collect()
+    }
+
+    /// Settle a detached run after collection, with its own final label.
+    ///
+    /// # Errors
+    /// As [`Self::finish_job_with_execution`].
+    #[allow(clippy::too_many_arguments)] // The terminal transition plus its detached label.
+    pub fn finish_detached_job(
+        &self,
+        job_id: &str,
+        execution: ExecutionOutcome,
+        exit: ExitStatus,
+        output_complete: bool,
+        cleanup: CleanupState,
+        timing: TimingReport,
+        label: &str,
+        final_state: Option<JobState>,
+    ) -> Result<(), DaemonError> {
+        if let Some(receipt) = self.lock().jobs.get_mut(job_id) {
+            receipt.detached = Some(label.into());
+        }
+        self.finish_job_as(
+            job_id,
+            exit,
+            output_complete,
+            cleanup,
+            timing,
+            final_state,
+            Some(execution),
+        )
+    }
+
+    /// After a settled detached job's kept patch was applied or discarded.
+    pub fn relabel_settled_detached(&self, job_id: &str, label: &str) {
+        let mut state = self.lock();
+        let Some(receipt) = state.jobs.get(job_id) else {
+            return;
+        };
+        let mut updated = receipt.clone();
+        updated.detached = Some(label.into());
+        if state.journal.append(&updated, true).is_ok() {
+            state.jobs.insert(job_id.into(), updated);
+        }
     }
 
     pub fn mark_running(
@@ -2951,7 +3076,10 @@ impl DaemonStore {
             .jobs
             .get(job_id)
             .ok_or_else(|| DaemonError::NotFound(job_id.into()))?;
-        if !matches!(receipt.state, JobState::Queued | JobState::Running) {
+        if !matches!(
+            receipt.state,
+            JobState::Queued | JobState::Running | JobState::Detached
+        ) {
             return Err(DaemonError::InvalidState("job is already terminal".into()));
         }
         let worker_id = receipt.worker_id.clone();
@@ -3236,6 +3364,7 @@ impl DaemonStore {
                 exit_code: job.exit.as_ref().and_then(|exit| exit.code),
                 wall_ms: job.timing.wall_ms,
                 parent: job.lineage.as_ref().map(|lineage| lineage.parent.clone()),
+                detached: job.detached.clone(),
             })
             .collect();
         jobs.sort_by_key(|job| std::cmp::Reverse(job.cursor));
@@ -3510,6 +3639,7 @@ impl Server {
         let active_connections = Arc::new(AtomicUsize::new(0));
         let updater_stop = Arc::new(AtomicBool::new(false));
         self.spawn_kit_updater(Arc::clone(&updater_stop));
+        self.spawn_cloud_collector(Arc::clone(&updater_stop));
         let _stop_updater = StopOnDrop(updater_stop);
         while !stop() && !self.shutdown_requested.load(Ordering::Acquire) {
             match marsh_runtime::accept_unix(&self.lifecycle.listener) {
@@ -3575,6 +3705,44 @@ impl Server {
         }
     }
 
+    /// The detached-run collector: a background thread that asks the
+    /// backend soon after startup and then every half minute; the backend
+    /// decides whether a collection is due (`docs/design/cloud-detach.md` s5).
+    fn spawn_cloud_collector(&self, stop: Arc<AtomicBool>) {
+        let backend = Arc::downgrade(&self.backend);
+        let store = Arc::downgrade(&self.store.0);
+        let pause = move |duration: Duration| {
+            let until = Instant::now() + duration;
+            while Instant::now() < until {
+                if stop.load(Ordering::Acquire) {
+                    return false;
+                }
+                thread::sleep(Duration::from_millis(250));
+            }
+            !stop.load(Ordering::Acquire)
+        };
+        let spawned = thread::Builder::new()
+            .name("marsh-cloud-collector".into())
+            .spawn(move || {
+                if !pause(CLOUD_COLLECTOR_START_DELAY) {
+                    return;
+                }
+                loop {
+                    let (Some(backend), Some(store)) = (backend.upgrade(), store.upgrade()) else {
+                        return;
+                    };
+                    backend.collect_detached(&DaemonStore(store));
+                    drop(backend);
+                    if !pause(CLOUD_COLLECTOR_INTERVAL) {
+                        return;
+                    }
+                }
+            });
+        if let Err(error) = spawned {
+            eprintln!("marshd: cannot start the cloud collector: {error}");
+        }
+    }
+
     fn handler(&self) -> ConnectionHandler {
         ConnectionHandler {
             store: self.store.clone(),
@@ -3594,6 +3762,8 @@ impl Server {
 }
 
 const KIT_UPDATER_START_DELAY: Duration = Duration::from_secs(1);
+const CLOUD_COLLECTOR_START_DELAY: Duration = Duration::from_secs(2);
+const CLOUD_COLLECTOR_INTERVAL: Duration = Duration::from_secs(30);
 const KIT_UPDATER_INTERVAL: Duration = Duration::from_mins(1);
 
 struct StopOnDrop(Arc<AtomicBool>);
@@ -4953,6 +5123,7 @@ fn authorize_request_session(
         | PublicRequest::SplitCancel { .. }
         | PublicRequest::SplitRemove { .. }
         | PublicRequest::ProcessShow
+        | PublicRequest::CloudDetached { .. }
         | PublicRequest::OpenUrl { .. }
         | PublicRequest::DevSbx { .. } => return Ok(()),
     };
@@ -5044,6 +5215,12 @@ fn dispatch_request(
         PublicRequest::ProcessShow => PublicReply::ProcessTree {
             document: store.process_tree(None),
         },
+        PublicRequest::CloudDetached { request } => {
+            match backend.cloud_detached(request, store.clone()) {
+                Ok(reply) => PublicReply::CloudDetached(reply),
+                Err(error) => public_error(&error),
+            }
+        }
         PublicRequest::AcpStart { .. }
         | PublicRequest::AcpReserve { .. }
         | PublicRequest::AcpPrompt { .. }
@@ -6154,6 +6331,27 @@ impl Client {
     pub fn process_view(&self, session: SessionSpec) -> Result<ProcessViewDocument, DaemonError> {
         match self.request(PublicRequest::ProcessView { session })? {
             PublicReply::ProcessView(view) => Ok(view),
+            reply => Err(unexpected_reply(reply)),
+        }
+    }
+
+    /// A detached cloud run's control (`docs/design/cloud-detach.md`).
+    /// Collection can resume a paused sandbox and download its changes, so
+    /// those requests may take minutes.
+    ///
+    /// # Errors
+    /// Returns the daemon's refusal or transport errors.
+    pub fn cloud_detached(
+        &self,
+        request: cloud_detached::CloudDetachedRequest,
+    ) -> Result<cloud_detached::CloudDetachedReply, DaemonError> {
+        use cloud_detached::CloudDetachedRequest as Request;
+        let timeout = match request {
+            Request::Notices | Request::Outstanding => Duration::from_secs(10),
+            _ => Duration::from_mins(20),
+        };
+        match self.request_with_timeout(PublicRequest::CloudDetached { request }, timeout)? {
+            PublicReply::CloudDetached(reply) => Ok(reply),
             reply => Err(unexpected_reply(reply)),
         }
     }
