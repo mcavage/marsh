@@ -3201,7 +3201,7 @@
       },
       {
         "package": "nodejs-24",
-        "version": "24.22.0-0",
+        "version": "24.22.1-0",
         "families": [
           "Apache-2.0",
           "Artistic",
@@ -5193,7 +5193,7 @@
       },
       {
         "package": "nodejs-24",
-        "version": "24.22.0-0",
+        "version": "24.22.1-0",
         "families": [
           "Apache-2.0",
           "Artistic",
@@ -7185,7 +7185,7 @@
       },
       {
         "package": "nodejs-24",
-        "version": "24.22.0-0",
+        "version": "24.22.1-0",
         "families": [
           "Apache-2.0",
           "Artistic",
