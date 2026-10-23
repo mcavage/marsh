@@ -2,7 +2,7 @@
 
 Status: **proposed.** Nothing here is implemented. It extends
 [cloud placement](cloud-placement.md) and changes some of its decisions, listed
-in [What changes in existing decisions](#what-changes-in-existing-decisions).
+in [What changes in existing decisions](#7-what-changes-in-existing-decisions).
 
 ## 1. The promise
 
