@@ -109,7 +109,33 @@ pub fn resolve(
     Ok(configured(scope_root)?.unwrap_or_default())
 }
 
-pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n\nShow or set this home's default interactive shell. `marsh` (the default) is\nmarsh's Brush; `bash` and `zsh` are the shell VM's own, started with your\n~/.bashrc or ~/.zshrc from the selected home. One launch may override it with\n--shell NAME or MARSH_SHELL=NAME. Stored in $MARSH_HOME/config.json.\nRun a script named `config` as `marsh ./config`.\n";
+pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n       marsh config auto-update [on|off]\n\nshell        Show or set this home's default interactive shell. `marsh` (the\n             default) is marsh's Brush; `bash` and `zsh` are the shell VM's own,\n             started with your ~/.bashrc or ~/.zshrc from the selected home. One\n             launch may override it with --shell NAME or MARSH_SHELL=NAME.\nauto-update  Show or set whether Kits that follow a tag update themselves, and\n             whether hermes and pix appear by themselves (default on).\n             MARSH_AUTO_UPDATE=0 at daemon start also turns it off.\n\nStored in $MARSH_HOME/config.json. Run a script named `config` as\n`marsh ./config`.\n";
+
+/// `auto_update` in `config.json`; read by the daemon (`docs/kits.md`).
+pub const AUTO_UPDATE_KEY: &str = "auto_update";
+
+/// Whether this home's Kits update themselves (default on).
+///
+/// # Errors
+/// Reports an unreadable or malformed config file.
+pub fn auto_update(scope_root: &Path) -> Result<bool, String> {
+    let path = scope_root.join(CONFIG_FILE);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
+    let value: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid {}: {error}", path.display()))?;
+    match value.get(AUTO_UPDATE_KEY) {
+        None | Some(serde_json::Value::Null) => Ok(true),
+        Some(serde_json::Value::Bool(on)) => Ok(*on),
+        Some(_) => Err(format!(
+            "invalid {}: {AUTO_UPDATE_KEY} must be true or false",
+            path.display()
+        )),
+    }
+}
 
 /// `marsh config ...` on the host.
 ///
@@ -131,10 +157,30 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
             println!("{}", choice.unwrap_or_default());
             Ok(0)
         }
+        ["auto-update"] => {
+            let on = auto_update(scope_root).map_err(|message| (message, 1))?;
+            println!("{}", if on { "on" } else { "off" });
+            Ok(0)
+        }
+        ["auto-update", value @ ("on" | "off")] => {
+            write_config(scope_root, AUTO_UPDATE_KEY, (*value == "on").into()).map_err(
+                |error| {
+                    (
+                        format!(
+                            "cannot write {}: {error}",
+                            scope_root.join(CONFIG_FILE).display()
+                        ),
+                        1,
+                    )
+                },
+            )?;
+            println!("{value}");
+            Ok(0)
+        }
         ["shell", name] => {
             let choice =
                 ShellChoice::parse(name).ok_or_else(|| (invalid("marsh config shell", name), 2))?;
-            write_config(scope_root, choice).map_err(|error| {
+            write_config(scope_root, "shell", choice.name().into()).map_err(|error| {
                 (
                     format!(
                         "cannot write {}: {error}",
@@ -146,11 +192,15 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
             println!("{choice}");
             Ok(0)
         }
-        _ => Err(("usage: marsh config shell [marsh|bash|zsh]".to_owned(), 2)),
+        _ => Err((
+            "usage: marsh config shell [marsh|bash|zsh] | marsh config auto-update [on|off]"
+                .to_owned(),
+            2,
+        )),
     }
 }
 
-fn write_config(scope_root: &Path, choice: ShellChoice) -> io::Result<()> {
+fn write_config(scope_root: &Path, key: &str, value: serde_json::Value) -> io::Result<()> {
     if !scope_root.exists() {
         std::fs::create_dir_all(scope_root)?;
         std::fs::set_permissions(scope_root, std::fs::Permissions::from_mode(0o700))?;
@@ -162,7 +212,7 @@ fn write_config(scope_root: &Path, choice: ShellChoice) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => serde_json::Map::new(),
         Err(error) => return Err(error),
     };
-    document.insert("shell".into(), choice.name().into());
+    document.insert(key.into(), value);
     let mut encoded = serde_json::to_vec_pretty(&document)?;
     encoded.push(b'\n');
     let temporary = scope_root.join(format!(".{CONFIG_FILE}.{}", std::process::id()));
@@ -399,6 +449,34 @@ mod tests {
         );
         std::fs::write(root.join(CONFIG_FILE), b"{\"shell\":3}").unwrap();
         assert!(resolve(None, None, &root).is_err());
+    }
+
+    #[test]
+    fn auto_update_is_on_by_default_and_kept_beside_the_shell() {
+        let scope = tempfile::tempdir().unwrap();
+        let root = scope.path().join("scope");
+        assert_eq!(auto_update(&root), Ok(true));
+        assert_eq!(
+            config_command(&["shell".into(), "zsh".into()], &root),
+            Ok(0)
+        );
+        assert_eq!(
+            config_command(&["auto-update".into(), "off".into()], &root),
+            Ok(0)
+        );
+        assert_eq!(auto_update(&root), Ok(false));
+        assert_eq!(resolve(None, None, &root), Ok(ShellChoice::Zsh));
+        assert_eq!(
+            config_command(&["auto-update".into(), "maybe".into()], &root)
+                .unwrap_err()
+                .1,
+            2
+        );
+        assert_eq!(
+            config_command(&["auto-update".into(), "on".into()], &root),
+            Ok(0)
+        );
+        assert_eq!(auto_update(&root), Ok(true));
     }
 
     fn parses(shell: &str, flags: &[&str], contents: &str) -> bool {

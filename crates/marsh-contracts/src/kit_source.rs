@@ -1,4 +1,4 @@
-//! Moving Kit tags that `marsh kit install` and `marsh kit upgrade` follow.
+//! Moving Kit tags that installed and packaged Kits follow (automatic updates).
 //!
 //! A tag is never run. It names what to follow; the command registry always
 //! holds the digest the tag resolved to when it was installed or upgraded.
@@ -131,7 +131,7 @@ pub fn check_contract(contract: Option<u32>, packaged: bool) -> Result<(), Strin
             SUPPORTED_KIT_CONTRACTS.end()
         )),
         None if packaged => Err(format!(
-            "the image does not declare a marsh Kit contract ({KIT_CONTRACT_LABEL}); it predates this marsh's upgrade support"
+            "the image does not declare a marsh Kit contract ({KIT_CONTRACT_LABEL}); it predates this marsh's update support"
         )),
         None => Ok(()),
     }

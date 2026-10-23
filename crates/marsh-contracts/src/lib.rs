@@ -4,6 +4,7 @@
 //! Cloud scheduling contracts remain outside this bounded crate.
 
 #[cfg(unix)]
+pub mod builtin_kits;
 pub mod byte_path;
 pub mod cloud;
 pub mod command_registry;

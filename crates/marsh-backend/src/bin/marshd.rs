@@ -89,8 +89,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         &guest_artifacts.join("agents.json"),
         &control_home.join("agents.json"),
     )?;
-    // The Kits this marsh shipped, before host overrides: `marsh kit upgrade`
-    // follows their release channel and `uninstall` reverts to them.
+    // The Kits this marsh shipped, before host overrides: automatic updates
+    // follow their release channel and `uninstall` reverts to them.
     let packaged = load_commands(
         &guest_artifacts.join("commands.json"),
         &guest_artifacts.join(".packaged-only-no-user-registry"),
@@ -205,7 +205,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             guest_artifacts.join("agents.json").display(),
         )
     })?;
-    let backend = backend.with_sbxenvs()?;
+    let backend = backend
+        .with_sbxenvs()?
+        .with_auto_update(env::var_os("MARSH_AUTO_UPDATE"), home.clone());
     let protected_guest_roots = backend.protected_guest_roots().to_vec();
     // All registry/configuration validation precedes even the stock version probe.
     stock.validate_supported_version().map_err(|_| {
@@ -596,7 +598,7 @@ fn backend_with_agents(
     .with_agents(agents)
 }
 
-/// The image tag packaged Kits follow on `marsh kit upgrade`: releases push
+/// The image tag packaged Kits follow on automatic updates: releases push
 /// `:latest`, nightlies `:nightly`. A local or dev build follows none.
 fn release_channel(version: &str, local: bool) -> Option<String> {
     if local {
@@ -811,7 +813,7 @@ mod tests {
             .is_err()
         );
 
-        // `marsh kit upgrade` moved agent-kit from its packaged digest (c…) to
+        // An automatic update moved agent-kit from its packaged digest (c…) to
         // a…: the packaged declaration follows the command instead of failing.
         let shipped = BTreeMap::from([(
             "agent-kit".into(),
@@ -915,7 +917,7 @@ mod tests {
             )
             .is_err()
         );
-        // Installed from a tag: the declaration follows `marsh kit upgrade`.
+        // Installed from a tag: the declaration follows its updates.
         fs::write(
             control.join("kit-sources.json"),
             r#"{"pix":"docker.io/example/pix:stable"}"#,

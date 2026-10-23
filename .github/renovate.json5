@@ -3,9 +3,10 @@
 // CLIs the Kits install (Claude Code, Codex, Pi). Self-hosted: see
 // .github/workflows/renovate.yml and .github/renovate-global.js.
 //
-// Nothing here merges itself. The builds take pinned inputs on purpose
-// (docs/design/supply-chain.md), so a bump is a reviewed change. Renovate only
-// edits the pins: .github/workflows/renovate-refresh.yml then runs `make
+// Only agent CLI and ACP adapter releases merge themselves, once CI passes
+// (see their packageRules); everything else is a reviewed change because the
+// builds take pinned inputs on purpose (docs/design/supply-chain.md). Renovate
+// only edits the pins: .github/workflows/renovate-refresh.yml then runs `make
 // refresh-pins` on the branch, commits the regenerated records (checksums,
 // notices, inventories) as refresh-pins@users.noreply.github.com, and posts the
 // license delta. CI builds the images on the completed head; the "License
@@ -148,7 +149,14 @@
       // records on the branch.
       description: "Agent CLI releases",
       matchPackageNames: ["@anthropic-ai/claude-code", "openai/codex"],
-      minimumReleaseAge: "1 day",
+      // Fast follow: agent CLIs release several times a day, and a merged bump
+      // reaches stable users' Kits through :latest within the day (release.yml).
+      // The main risk is a release pulled soon after publication; 6 hours
+      // covers most of that window. GitHub merges the PR only when the
+      // required checks pass (platformAutomerge).
+      minimumReleaseAge: "6 hours",
+      automerge: true,
+      platformAutomerge: true,
       schedule: ["at any time"],
     },
     {
@@ -159,7 +167,10 @@
         "@earendil-works/pi-coding-agent",
         "pi-acp",
       ],
-      minimumReleaseAge: "1 day",
+      // The same fast follow as the agent CLIs above.
+      minimumReleaseAge: "6 hours",
+      automerge: true,
+      platformAutomerge: true,
       schedule: ["at any time"],
     },
     {

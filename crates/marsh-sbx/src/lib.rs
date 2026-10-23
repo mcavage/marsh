@@ -1507,8 +1507,30 @@ impl StockSbx {
     /// # Errors
     /// Fails when Docker cannot read the manifests or the descriptor is invalid.
     pub fn kit_assets(&self, image: &OciImage) -> Result<KitAssets, SbxError> {
+        match self.arm64_manifest(image)? {
+            Some(manifest) => manifest_kit_assets(&manifest).map_err(SbxError::KitResolution),
+            None => Ok(KitAssets::default()),
+        }
+    }
+
+    /// The version a published Kit image names for display: its
+    /// `org.opencontainers.image.version` annotation, else the version of the
+    /// first non-package entry its descriptor `provides` (`claude@2.1.307`).
+    /// `None` when it names neither, or for a local source Kit.
+    ///
+    /// # Errors
+    /// Fails when Docker cannot read the manifests.
+    pub fn kit_version(&self, image: &OciImage) -> Result<Option<String>, SbxError> {
+        Ok(self
+            .arm64_manifest(image)?
+            .and_then(|manifest| manifest_version(&manifest)))
+    }
+
+    /// The linux/arm64 manifest of a published image; `None` for a bare image
+    /// ID (a local source Kit), which has no registry copy.
+    fn arm64_manifest(&self, image: &OciImage) -> Result<Option<Vec<u8>>, SbxError> {
         let Some((repository, _)) = image.as_str().rsplit_once('@') else {
-            return Ok(KitAssets::default());
+            return Ok(None);
         };
         let read = |reference: &str| {
             let output = self.run_program_bounded_os(
@@ -1521,11 +1543,12 @@ impl StockSbx {
             Ok::<_, SbxError>(output.stdout)
         };
         let top = read(image.as_str())?;
-        let manifest = match arm64_manifest_digest(&top).map_err(SbxError::KitResolution)? {
-            Some(digest) => read(&format!("{repository}@{digest}"))?,
-            None => top,
-        };
-        manifest_kit_assets(&manifest).map_err(SbxError::KitResolution)
+        Ok(Some(
+            match arm64_manifest_digest(&top).map_err(SbxError::KitResolution)? {
+                Some(digest) => read(&format!("{repository}@{digest}"))?,
+                None => top,
+            },
+        ))
     }
 
     #[cfg(test)]
@@ -6941,6 +6964,41 @@ fn manifest_kit_assets(raw: &[u8]) -> Result<KitAssets, String> {
     }
 }
 
+/// See [`StockSbx::kit_version`]. Anything unreadable names no version.
+fn manifest_version(raw: &[u8]) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_slice(raw).ok()?;
+    let annotations = value.get("annotations")?;
+    let plain = |version: &str| {
+        let version = version.trim();
+        (!version.is_empty()
+            && version.len() <= 64
+            && version
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b".-+_".contains(&byte)))
+        .then(|| version.to_owned())
+    };
+    if let Some(version) = annotations
+        .get("org.opencontainers.image.version")
+        .and_then(serde_json::Value::as_str)
+    {
+        return plain(version);
+    }
+    let descriptor: serde_json::Value = serde_json::from_str(
+        annotations
+            .get(DESCRIPTOR_ANNOTATION)
+            .and_then(serde_json::Value::as_str)?,
+    )
+    .ok()?;
+    descriptor
+        .get("provides")?
+        .as_array()?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .find(|entry| !entry.contains('/'))
+        .and_then(|entry| entry.rsplit_once('@'))
+        .and_then(|(_, version)| plain(version))
+}
+
 #[derive(Debug, Error)]
 pub enum SbxError {
     #[error("stock SBX I/O failed: {0}")]
@@ -7212,5 +7270,36 @@ mod kit_resolution_tests {
         let (sbx, runner) = stock(String::new());
         assert!(sbx.kit_assets(&local).unwrap().is_empty());
         assert!(runner.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_kit_version_is_its_version_annotation_or_first_provide() {
+        let descriptor = |provides: &str| {
+            serde_json::to_string(&format!(r#"{{"provides":{provides}}}"#)).unwrap()
+        };
+        let manifest = |annotations: String| format!(r#"{{"annotations":{{{annotations}}}}}"#);
+        let image = OciImage::parse(format!("docker.io/mcavage/pix@{DIGEST}")).unwrap();
+        let version = |raw: String| stock(raw).0.kit_version(&image).unwrap();
+        assert_eq!(
+            version(manifest(format!(
+                r#""org.opencontainers.image.version":"0.22.5","{DESCRIPTOR_ANNOTATION}":{}"#,
+                descriptor(r#"["hermes@0.1.0"]"#)
+            ))),
+            Some("0.22.5".into())
+        );
+        assert_eq!(
+            version(manifest(format!(
+                r#""{DESCRIPTOR_ANNOTATION}":{}"#,
+                descriptor(r#"["deb/bash@5.2","claude@2.1.307","claude-acp@0.94.0"]"#)
+            ))),
+            Some("2.1.307".into())
+        );
+        assert_eq!(version(r#"{"layers":[]}"#.into()), None);
+        assert_eq!(
+            version(manifest(
+                r#""org.opencontainers.image.version":"1 2; rm""#.into()
+            )),
+            None
+        );
     }
 }

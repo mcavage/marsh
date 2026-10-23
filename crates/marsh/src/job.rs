@@ -907,7 +907,7 @@ fn short(id: &str) -> &str {
 }
 
 /// `12s ago`, `4m ago`, `3h ago`, `2d ago`.
-fn ago(ms: i64) -> String {
+pub(crate) fn ago(ms: i64) -> String {
     let seconds = ms.max(0) / 1000;
     match seconds {
         0..60 => format!("{seconds}s ago"),

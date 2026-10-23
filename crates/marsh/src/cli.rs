@@ -21,11 +21,6 @@ pub enum ProductCommand {
         command: String,
         reference: String,
     },
-    /// Empty `commands` means every Kit that follows a tag.
-    KitUpgrade {
-        commands: Vec<String>,
-        check: bool,
-    },
     KitUninstall {
         command: String,
     },
@@ -327,19 +322,20 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
                 reference: reference.clone(),
             }
         }
-        [kit, upgrade, rest @ ..] if kit == "kit" && upgrade == "upgrade" => {
-            let check = rest.iter().any(|argument| argument == "--check");
-            let commands = rest
-                .iter()
-                .filter(|argument| *argument != "--check")
-                .cloned()
-                .collect::<Vec<_>>();
-            if let Some(option) = commands.iter().find(|argument| argument.starts_with('-')) {
-                return Err(CliError(format!(
-                    "unknown option {option}; usage: marsh kit upgrade [--check] [NAME...]"
-                )));
+        // A Kit marsh knows by name installs from its listed tag.
+        [kit, install, command]
+            if kit == "kit" && install == "install" && !command.starts_with('-') =>
+        {
+            let reference = marsh_contracts::builtin_kits::reference(command).ok_or_else(|| {
+                CliError(format!(
+                    "{command} is not a Kit marsh knows by name (known: {}); use marsh kit install {command} REPOSITORY:TAG",
+                    marsh_contracts::builtin_kits::names()
+                ))
+            })?;
+            ProductCommand::KitInstall {
+                command: command.clone(),
+                reference: reference.to_owned(),
             }
-            ProductCommand::KitUpgrade { commands, check }
         }
         [kit, uninstall, command] if kit == "kit" && uninstall == "uninstall" => {
             ProductCommand::KitUninstall {
@@ -431,7 +427,7 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         }
         [name, ..] if name == "kit" => {
             return Err(CliError(
-                "usage: marsh kit install NAME REF | marsh kit upgrade [--check] [NAME...] | marsh kit uninstall NAME".into(),
+                "usage: marsh kit install NAME [REF] | marsh kit uninstall NAME".into(),
             ));
         }
         _ => return Ok(None),
@@ -780,28 +776,33 @@ mod tests {
     }
 
     #[test]
-    fn kit_upgrade_and_uninstall_parse() {
+    fn known_kits_install_by_name_alone() {
         assert_eq!(
-            parse(strings(&["marsh", "kit", "upgrade"]))
+            parse(strings(&["marsh", "kit", "install", "hermes"]))
                 .unwrap()
                 .command,
-            ProductCommand::KitUpgrade {
-                commands: Vec::new(),
-                check: false
+            ProductCommand::KitInstall {
+                command: "hermes".into(),
+                reference: "docker.io/mcavage/marsh-hermes:stable".into(),
             }
         );
-        assert_eq!(
-            parse(strings(&[
-                "marsh", "kit", "upgrade", "pix", "--check", "pi"
-            ]))
-            .unwrap()
-            .command,
-            ProductCommand::KitUpgrade {
-                commands: vec!["pix".into(), "pi".into()],
-                check: true
-            }
-        );
-        assert!(parse(strings(&["marsh", "kit", "upgrade", "--all"])).is_err());
+        let unknown = parse(strings(&["marsh", "kit", "install", "nope"]))
+            .unwrap_err()
+            .to_string();
+        assert!(unknown.contains("known: hermes, pix"), "{unknown}");
+    }
+
+    #[test]
+    fn kit_uninstall_parses_and_upgrade_is_not_a_command() {
+        for removed in [
+            &["marsh", "kit", "upgrade"][..],
+            &["marsh", "kit", "upgrade", "--check"],
+            &["marsh", "kit", "upgrade", "pix"],
+        ] {
+            let error = parse(strings(removed)).unwrap_err().to_string();
+            assert!(error.starts_with("usage: marsh kit install"), "{error}");
+            assert!(!error.contains("upgrade"), "{error}");
+        }
         assert_eq!(
             parse(strings(&["marsh", "kit", "uninstall", "pix"]))
                 .unwrap()

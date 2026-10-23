@@ -107,20 +107,24 @@ overwritten.
 `marsh kit install NAME repository:TAG` resolves the tag once through
 `sbx kit inspect`, accepting only a digest of the same repository, and installs
 that digest; the tag is recorded in the control directory's `kit-sources.json`.
-`marsh kit upgrade` re-resolves recorded tags, and on a release build the
-packaged commands' channel tags (`:latest` or `:nightly` of their pinned
-repository). A new digest must carry an `org.marsh.kit.contract` image label in
+The daemon's automatic update (at each start, then daily; `docs/kits.md`)
+re-resolves recorded tags, and on a release build the packaged commands'
+channel tags (`:latest` or `:nightly` of their pinned repository). On a release
+build it also installs the known Kits (`marsh_contracts::builtin_kits`) that
+are not registered and were not uninstalled, without preparing a VM. A new digest must carry an `org.marsh.kit.contract` image label in
 `marsh_contracts::kit_source::SUPPORTED_KIT_CONTRACTS` (required for packaged
 commands, checked when present otherwise), read with `docker buildx imagetools`.
-The upgrade claims the old worker first (refusing one with running jobs),
-prepares the new VM, persists the override to `commands.json`, switches the
-live registry and retires the old VM unless another name still uses it. A
-failure before the switch releases the claim and changes nothing. ACP declarations
+A Kit with running jobs waits. Otherwise the new VM is prepared first, then
+the switch claims the old worker (refusing one with running jobs), persists the
+override to `commands.json`, switches the live registry and retires the old VM
+unless another name still uses it. A failure before the switch releases the
+claim and changes nothing. ACP declarations
 follow an upgraded command when they pin its packaged digest or the command was
 installed from a tag (it is in `kit-sources.json`); a declaration pinned to any
-other digest blocks the upgrade. `marsh kit
-uninstall` drops an installed command, or an upgraded packaged command's
-override, and retires its VM.
+other digest blocks the update. `marsh kit
+uninstall` drops an installed command, or an updated packaged command's
+override, and retires its VM; for a known Kit it is recorded in
+`kit-updates.json` so the Kit is not added again until installed.
 
 After changing a registry entry, local Kit source, or stock-SBX service secret,
 the host can discard idle cached workers with

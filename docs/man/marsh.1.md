@@ -164,20 +164,21 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 **config shell** [**bash**|**zsh**|**marsh**]
 : Set, or with no name print, the default shell for this **MARSH_HOME**.
 
-**kit install** *NAME* *REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*
-: Register a published Kit under *NAME* in this scope. A tag is resolved to its
-  digest now; only that digest runs.
+**config auto-update** [**on**|**off**]
+: Set, or with no value print, whether Kits that follow a tag update
+  themselves in this **MARSH_HOME** (when the daemon starts, then daily), and
+  whether a release build adds **pix** and **hermes** by itself. The default
+  is **on**. To update now, run **marsh stop** when idle, then marsh again.
 
-**kit upgrade** [**--check**] [*NAME*...]
-: Move each *NAME* (default: every Kit installed from a tag, and the packaged
-  commands on a release build) to the image its tag names now, preparing it
-  before switching. Packaged commands follow the release channel's tag and move
-  only to an image declaring a supported **org.marsh.kit.contract**. **--check**
-  only reports. Exits nonzero if a Kit was refused or failed.
+**kit install** *NAME* [*REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*]
+: Register a published Kit under *NAME* in this scope. A tag is resolved to its
+  digest now; only that digest runs. Without a reference, *NAME* must be a Kit
+  marsh knows by name: **hermes** or **pix**.
 
 **kit uninstall** *NAME*
-: Remove a Kit added with **kit install**, or return an upgraded packaged
-  command to the version this marsh shipped.
+: Remove a Kit added with **kit install** (a removed **pix** or **hermes**
+  is not added again until installed), or return an updated packaged command
+  to the version this marsh shipped.
 
 **workers reset** *KIT*[,*KIT*...]|**all**
 : Remove idle Kit VMs, including quarantined ones. The next use creates a new
@@ -361,13 +362,19 @@ See https://runmar.sh/docs/acp.html.
 **MARSH_PLACE**
 : Placement for registered commands. Only **local** is accepted.
 
+**MARSH_AUTO_UPDATE**
+: **0** (or **off**) when the daemon starts turns off automatic Kit
+  updates and the adding of **pix** and **hermes**, as
+  **marsh config auto-update off** does.
+
 # FILES
 
 *$MARSH_HOME/home* (default *~/.marsh/home*)
 : Backing store for the guest home.
 
 *$MARSH_HOME/config.json* (default *~/.marsh/config.json*)
-: The default shell set by **marsh config shell**.
+: The default shell set by **marsh config shell**, and the
+  **marsh config auto-update** setting.
 
 *$MARSH_HOME/sbxenv.yaml*, *$MARSH_HOME/sbxenvs/NAME.yaml*
 : Optional shared and per-command MCP servers and extra directories. Read at
