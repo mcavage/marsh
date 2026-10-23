@@ -143,6 +143,10 @@ pub(super) fn wait_ready(
                 writeln!(error, "{}", crate::cold_boot_notice(&kit, download))?;
                 error.flush()?;
             }
+            AttachmentFrame::Notice { message } => {
+                writeln!(error, "{message}")?;
+                error.flush()?;
+            }
             AttachmentFrame::Failed { message } => return Err(DaemonError::Remote(message)),
             frame => {
                 return Err(DaemonError::InvalidState(format!(

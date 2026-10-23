@@ -7,6 +7,7 @@ pub mod command_registry;
 use marsh_acp::{AgentAdapterDeclaration, AgentRegistry};
 pub mod config;
 mod ephemeral;
+mod kit_auto_update;
 mod kit_lifecycle;
 mod sbxenv;
 mod shell_attachment;
@@ -20,10 +21,11 @@ use marsh_contracts::{
 };
 use marsh_daemon::{
     AttachmentFrame, CLEANUP_UNCERTAIN_EXIT_CODE, CleanupState, DaemonBackend, DaemonError,
-    DaemonStore, EndpointPaths, ExecuteSpec, ExitStatus, KitUpgrade, KitUpgradeState,
-    LoadSelection, NewJob, PreparationProgress, PreparationResult, PublicMount,
-    ScopeCleanupComponent, ScopeCleanupState, ScopeLifecycleAction, ScopeLifecycleReport,
-    ServerAttachment, SessionSpec, ShellSpec, TimingReport, WorkerHealth, WorkerStatus,
+    DaemonStore, EndpointPaths, ExecuteSpec, ExitStatus, KitUpdateRecord, KitUpdateStatus,
+    KitUpgrade, KitUpgradeState, LoadSelection, NewJob, PreparationProgress, PreparationResult,
+    PublicMount, ScopeCleanupComponent, ScopeCleanupState, ScopeLifecycleAction,
+    ScopeLifecycleReport, ServerAttachment, SessionSpec, ShellSpec, TimingReport, WorkerHealth,
+    WorkerStatus,
 };
 use marsh_sbx::{
     AdmittedHostGrant, KitVmSpec, NativeKitRef, PreparedGrants, ReadyKitVm, SessionGrantPins,
@@ -118,6 +120,30 @@ pub struct StockDaemonBackend {
     dev: Option<Arc<marsh_daemon::DevBroker>>,
     /// Session-origin cloud placement (`docs/design/cloud-placement.md`).
     cloud: cloud::CloudPlacement,
+    /// Daily automatic Kit updates; off unless [`Self::with_auto_update`].
+    auto_update: Option<AutoUpdate>,
+    /// Serializes `kit-updates.json` read-modify-write.
+    kit_updates: Mutex<()>,
+}
+
+/// See [`StockDaemonBackend::with_auto_update`].
+struct AutoUpdate {
+    /// `MARSH_AUTO_UPDATE` as the daemon was launched.
+    environment: Option<OsString>,
+    /// `$MARSH_HOME`, whose `config.json` may turn updates off.
+    scope_root: PathBuf,
+    /// An update was recorded whose notice was not shown yet.
+    notices_pending: std::sync::atomic::AtomicBool,
+}
+
+/// What one automatic update did for one Kit.
+#[derive(Debug, Eq, PartialEq)]
+enum AutoOutcome {
+    Nothing,
+    /// Newer and compatible, but the Kit has running jobs.
+    Waiting,
+    Updated(KitUpdateRecord),
+    Problem(String),
 }
 
 impl StockDaemonBackend {
@@ -353,7 +379,23 @@ impl StockDaemonBackend {
             configured_mcp_vms: Mutex::new(BTreeSet::new()),
             dev: None,
             cloud: cloud::CloudPlacement::default(),
+            auto_update: None,
+            kit_updates: Mutex::new(()),
         }
+    }
+
+    /// Turn on daily automatic Kit updates for this scope. `environment` is
+    /// `MARSH_AUTO_UPDATE` at launch; it or `scope_root/config.json` can turn
+    /// them off again.
+    #[must_use]
+    pub fn with_auto_update(mut self, environment: Option<OsString>, scope_root: PathBuf) -> Self {
+        let pending = kit_auto_update::read(&self.config.control_home).has_notices(None);
+        self.auto_update = Some(AutoUpdate {
+            environment,
+            scope_root,
+            notices_pending: std::sync::atomic::AtomicBool::new(pending),
+        });
+        self
     }
 
     /// Serve `marsh --dev` sessions: grants come from `broker`; the dev shell
@@ -1050,6 +1092,21 @@ impl DaemonBackend for StockDaemonBackend {
             .collect())
     }
 
+    fn auto_update_kits(&self, store: &DaemonStore) {
+        self.auto_update_pass(store, unix_millis(SystemTime::now()));
+    }
+
+    fn kit_update_status(&self) -> Option<KitUpdateStatus> {
+        let auto = self.auto_update.as_ref()?;
+        let record = kit_auto_update::read(&self.config.control_home);
+        Some(KitUpdateStatus {
+            enabled: kit_auto_update::enabled(auto.environment.as_deref(), &auto.scope_root),
+            last_check: record.last_check,
+            waiting: record.waiting.into_iter().collect(),
+            recent: record.recent,
+        })
+    }
+
     fn uninstall_kit(&self, command: String, store: DaemonStore) -> Result<String, DaemonError> {
         let _install = self
             .registry_install
@@ -1488,6 +1545,11 @@ impl DaemonBackend for StockDaemonBackend {
             )));
         }
         let link = request.process.clone().unwrap_or_default();
+        // Only a call typed at a terminal shows an update notice, never a
+        // child job, a split branch, ACP or MCP.
+        if request.session.terminal && link.parent_job.is_none() && !link.branch {
+            self.send_update_notices(Some(&request.command), &attachment);
+        }
         // The Kit identity is known before VM work, so the same-Kit chain is
         // checked here too, not only at record time.
         let kit_identity = self
@@ -2185,6 +2247,9 @@ impl DaemonBackend for StockDaemonBackend {
                 }
             }
             shell_attachment::require_controller(&attachment)?;
+            if request.session.terminal {
+                self.send_update_notices(None, &attachment);
+            }
             self.finish_shell_warmup();
             // Announce a template download before it starts, not after.
             let announced = self.sbx.shell_image_download_needed(&shell);
@@ -3455,6 +3520,240 @@ impl StockDaemonBackend {
             .clone())
     }
 
+    /// Read, change and write `kit-updates.json` under its lock. A write
+    /// failure is logged: the record is advisory and never authority.
+    fn update_kit_record<T>(&self, change: impl FnOnce(&mut kit_auto_update::Record) -> T) -> T {
+        let _guard = self
+            .kit_updates
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut record = kit_auto_update::read(&self.config.control_home);
+        let before = record.clone();
+        let result = change(&mut record);
+        if record != before
+            && let Err(error) = kit_auto_update::write(&self.config.control_home, &record)
+        {
+            eprintln!("marshd: cannot record Kit updates: {error}");
+        }
+        result
+    }
+
+    /// Commands the daily check follows: those installed from a tag, and on a
+    /// release build the packaged ones still at their shipped digest or at
+    /// the digest marsh last moved them to. A digest pinned by hand never moves.
+    fn auto_update_names(
+        &self,
+        sources: &BTreeMap<String, KitTag>,
+        record: &kit_auto_update::Record,
+    ) -> Vec<String> {
+        self.command_names()
+            .into_iter()
+            .filter(|name| {
+                if sources.contains_key(name) {
+                    return true;
+                }
+                let (Some(_), Some(packaged)) = (&self.packaged_channel, self.packaged.get(name))
+                else {
+                    return false;
+                };
+                self.registered_kit(name).is_ok_and(|current| {
+                    let current = current.workload.identity();
+                    current == packaged.workload.identity()
+                        || record.followed.get(name).map(String::as_str) == Some(current)
+                })
+            })
+            .collect()
+    }
+
+    /// One pass of the automatic updater at `now_ms`: the daily check when it
+    /// is due, else a retry of Kits that were waiting for their jobs.
+    fn auto_update_pass(&self, store: &DaemonStore, now_ms: u64) {
+        let Some(auto) = &self.auto_update else {
+            return;
+        };
+        if !kit_auto_update::enabled(auto.environment.as_deref(), &auto.scope_root)
+            || store.lifecycle_active()
+        {
+            return;
+        }
+        let record = kit_auto_update::read(&self.config.control_home);
+        let due = record.check_due(now_ms);
+        let sources = match kit_lifecycle::read_sources(&self.config.control_home) {
+            Ok(sources) => sources,
+            Err(error) => {
+                if due {
+                    self.update_kit_record(|record| {
+                        record.last_check = Some(marsh_daemon::KitUpdateCheck {
+                            unix_ms: now_ms,
+                            result: "error".into(),
+                            problems: vec![error.to_string()],
+                        });
+                    });
+                }
+                return;
+            }
+        };
+        let following = self.auto_update_names(&sources, &record);
+        let targets = if due {
+            following
+        } else {
+            following
+                .into_iter()
+                .filter(|name| record.waiting.contains(name))
+                .collect()
+        };
+        if targets.is_empty() && !due {
+            return;
+        }
+        let mut problems = Vec::new();
+        let mut waiting = BTreeSet::new();
+        let mut updates = Vec::new();
+        for command in &targets {
+            match self.auto_update_one(command, sources.get(command), store) {
+                AutoOutcome::Nothing => {}
+                AutoOutcome::Waiting => {
+                    waiting.insert(command.clone());
+                }
+                AutoOutcome::Updated(update) => updates.push(update),
+                AutoOutcome::Problem(problem) => problems.push(format!("{command}: {problem}")),
+            }
+        }
+        let switched = !updates.is_empty();
+        self.update_kit_record(|record| {
+            if switched {
+                auto.notices_pending
+                    .store(true, std::sync::atomic::Ordering::Release);
+            }
+            if due {
+                record.last_check = Some(marsh_daemon::KitUpdateCheck {
+                    unix_ms: now_ms,
+                    result: if problems.is_empty() { "ok" } else { "error" }.into(),
+                    problems,
+                });
+                record.waiting = waiting;
+            } else {
+                record.waiting.retain(|name| !targets.contains(name));
+                record.waiting.extend(waiting);
+                if let Some(check) = record.last_check.as_mut()
+                    && !problems.is_empty()
+                {
+                    check.result = "error".into();
+                    check.problems.extend(problems);
+                }
+            }
+            for update in updates {
+                record.record_update(update);
+            }
+        });
+    }
+
+    /// `marsh kit upgrade` for one Kit, from the background: a busy Kit waits
+    /// without any network or VM work; the new image is prepared before the
+    /// old Kit is locked, so its jobs keep starting meanwhile; then the switch
+    /// is the upgrade's own, under an ordinary request admission.
+    fn auto_update_one(
+        &self,
+        command: &str,
+        recorded: Option<&KitTag>,
+        store: &DaemonStore,
+    ) -> AutoOutcome {
+        let busy = || {
+            self.kit_spec(command)
+                .is_ok_and(|spec| store.worker_busy(&spec.name))
+        };
+        if busy() {
+            return AutoOutcome::Waiting;
+        }
+        let report = self.upgrade_one(command, recorded, true, store);
+        match report.state {
+            KitUpgradeState::Available => {}
+            KitUpgradeState::Refused | KitUpgradeState::Failed => {
+                return AutoOutcome::Problem(report.detail.unwrap_or_default());
+            }
+            KitUpgradeState::UpToDate | KitUpgradeState::Skipped | KitUpgradeState::Upgraded => {
+                return AutoOutcome::Nothing;
+            }
+        }
+        let Some(image) = report
+            .resolved
+            .as_deref()
+            .and_then(|resolved| OciImage::parse(resolved).ok())
+        else {
+            return AutoOutcome::Nothing;
+        };
+        let prepared = (|| {
+            let workload = NativeKitRef::immutable_oci(image.as_str()).map_err(backend_error)?;
+            let spec = self.kit_spec_for_environment(workload, &self.environment(command))?;
+            let vm = self.prepare_one_with_progress(&spec, store, |_| Ok(()))?;
+            self.register_worker(store, &vm)
+        })();
+        if let Err(error) = prepared {
+            return AutoOutcome::Problem(error.to_string());
+        }
+        let version = |reference: &str| {
+            OciImage::parse(reference)
+                .ok()
+                .and_then(|image| self.sbx.kit_version(&image).ok().flatten())
+        };
+        let from_version = version(&report.current);
+        let to_version = version(image.as_str());
+        let Ok(_admission) = store.begin_background_request() else {
+            return AutoOutcome::Waiting;
+        };
+        let _install = self
+            .registry_install
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let current = match self.registered_kit(command) {
+            Ok(current) if current.workload.identity() == report.current => current,
+            // Changed (or removed) while the new image was prepared.
+            Ok(_) | Err(_) => return AutoOutcome::Nothing,
+        };
+        if busy() {
+            return AutoOutcome::Waiting;
+        }
+        match self.apply_upgrade(command, &current, &image, store) {
+            Ok(()) => AutoOutcome::Updated(KitUpdateRecord {
+                command: command.to_owned(),
+                from: report.current,
+                to: image.as_str().to_owned(),
+                // A rebuild that names the same version is not worth a notice.
+                notified: from_version.is_some() && from_version == to_version,
+                from_version,
+                to_version,
+                unix_ms: unix_millis(SystemTime::now()),
+            }),
+            Err(UpgradeFailure::Busy(_)) => AutoOutcome::Waiting,
+            Err(UpgradeFailure::Failed(error)) => AutoOutcome::Problem(error.to_string()),
+        }
+    }
+
+    /// Show each automatic update's one-line notice once: on the next
+    /// interactive top-level call of that command, or when a shell opens
+    /// (`command` is `None`).
+    fn send_update_notices(&self, command: Option<&str>, attachment: &ServerAttachment) {
+        let Some(auto) = &self.auto_update else {
+            return;
+        };
+        if !auto
+            .notices_pending
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return;
+        }
+        let notices = self.update_kit_record(|record| {
+            let notices = record.take_notices(command);
+            auto.notices_pending.store(
+                record.has_notices(None),
+                std::sync::atomic::Ordering::Release,
+            );
+            notices
+        });
+        for message in notices {
+            let _ = attachment.send(&AttachmentFrame::Notice { message });
+        }
+    }
+
     /// One Kit's `marsh kit upgrade` outcome; failures are reported, not raised.
     fn upgrade_one(
         &self,
@@ -3601,6 +3900,13 @@ impl StockDaemonBackend {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(command.to_owned(), RegisteredKit { workload });
+        if self.packaged.contains_key(command) {
+            self.update_kit_record(|record| {
+                record
+                    .followed
+                    .insert(command.to_owned(), image.as_str().to_owned());
+            });
+        }
         if let Some(claim) = claim {
             self.retire_claimed(
                 store,
@@ -6058,5 +6364,213 @@ mod kit_lifecycle_callers {
         // Nothing left to revert.
         assert!(backend.uninstall_kit("pi".into(), store.clone()).is_err());
         assert!(backend.uninstall_kit("nope".into(), store).is_err());
+    }
+
+    const DAY: u64 = 24 * 60 * 60 * 1000;
+
+    fn automatic(
+        backend: StockDaemonBackend,
+        scope: &Path,
+        env: Option<&str>,
+    ) -> StockDaemonBackend {
+        backend.with_auto_update(env.map(OsString::from), scope.to_path_buf())
+    }
+
+    fn status(backend: &StockDaemonBackend) -> KitUpdateStatus {
+        backend.kit_update_status().unwrap()
+    }
+
+    /// A store in which `pix` has a reserved job on its Kit VM.
+    fn busy_store(home: &Path, backend: &StockDaemonBackend) -> DaemonStore {
+        let store = DaemonStore::new(home);
+        let worker = backend.kit_spec("pix").unwrap().name;
+        let session = store.attach_shell(
+            1,
+            marsh_daemon::SessionAuthority {
+                username: "alice".into(),
+                uid: 501,
+                gid: 20,
+                launch_directory: home.into(),
+                guest_home: "/Users/alice".into(),
+                home_backing: home.into(),
+                ephemeral_home: false,
+            },
+        );
+        store
+            .register_worker(WorkerStatus {
+                worker_id: worker.clone(),
+                vm_id: worker.clone(),
+                scope_id: store.status(None).scope_id,
+                kit_ref: OLD.into(),
+                kits: vec!["pix".into()],
+                warm: true,
+                health: WorkerHealth::Ready,
+                container_capacity: 4,
+                active_container_ids: Vec::new(),
+            })
+            .unwrap();
+        let (job, _) = store
+            .begin_job(NewJob {
+                session_id: session,
+                command: "pix".into(),
+                kit_ref: OLD.into(),
+                workload_image: OLD.into(),
+                mounts: Vec::new(),
+            })
+            .unwrap();
+        store.reserve_worker(&job, &worker, &worker).unwrap();
+        store
+    }
+
+    #[test]
+    fn the_automatic_check_runs_at_most_once_a_day() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(OLD, Some(1));
+        let backend = automatic(
+            daemon(home.path(), &registry, None, None),
+            home.path(),
+            None,
+        );
+        let store = DaemonStore::new(home.path());
+        assert_eq!(status(&backend).last_check, None);
+
+        backend.auto_update_pass(&store, 10 * DAY);
+        assert_eq!(registry.calls("kit"), 1, "pix follows a tag");
+        let check = status(&backend).last_check.unwrap();
+        assert_eq!((check.unix_ms, check.result.as_str()), (10 * DAY, "ok"));
+
+        backend.auto_update_pass(&store, 10 * DAY + DAY / 2);
+        assert_eq!(registry.calls("kit"), 1, "not again the same day");
+        backend.auto_update_pass(&store, 11 * DAY);
+        assert_eq!(registry.calls("kit"), 2);
+        assert!(status(&backend).recent.is_empty());
+    }
+
+    #[test]
+    fn a_busy_kit_waits_and_a_failed_switch_keeps_the_old_image() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(NEW, Some(1));
+        let backend = automatic(
+            daemon(home.path(), &registry, None, None),
+            home.path(),
+            None,
+        );
+        let before = overlay(&backend);
+
+        // Running jobs: no network, no preparation, retried later.
+        backend.auto_update_pass(&busy_store(home.path(), &backend), DAY);
+        assert_eq!(registry.calls("kit"), 0);
+        assert_eq!(status(&backend).waiting, ["pix"]);
+
+        // Idle within the same day: the waiting Kit is retried. Preparing the
+        // new VM fails here, so the old digest stays registered.
+        let idle = DaemonStore::new(home.path());
+        assert!(!idle.worker_busy(&backend.kit_spec("pix").unwrap().name));
+        backend.auto_update_pass(&idle, DAY + 60_000);
+        assert_eq!(registry.calls("kit"), 1);
+        let after = status(&backend);
+        assert!(after.waiting.is_empty());
+        let check = after.last_check.unwrap();
+        assert_eq!(check.result, "error");
+        assert!(check.problems[0].starts_with("pix: "), "{check:?}");
+        assert!(after.recent.is_empty());
+        assert_eq!(overlay(&backend), before);
+        assert_eq!(
+            backend.registered_kit("pix").unwrap().workload.identity(),
+            OLD
+        );
+        // Nothing waits, so later passes that day do nothing.
+        backend.auto_update_pass(&idle, DAY + 120_000);
+        assert_eq!(registry.calls("kit"), 1);
+    }
+
+    #[test]
+    fn automatic_updates_can_be_turned_off() {
+        let registry = Registry::new(NEW, Some(1));
+        let home = tempfile::tempdir().unwrap();
+        let off = automatic(
+            daemon(home.path(), &registry, None, None),
+            home.path(),
+            Some("0"),
+        );
+        off.auto_update_pass(&DaemonStore::new(home.path()), DAY);
+        assert!(!status(&off).enabled);
+
+        let home = tempfile::tempdir().unwrap();
+        fs::write(home.path().join("config.json"), r#"{"auto_update":false}"#).unwrap();
+        let off = automatic(
+            daemon(home.path(), &registry, None, None),
+            home.path(),
+            None,
+        );
+        off.auto_update_pass(&DaemonStore::new(home.path()), DAY);
+        assert!(!status(&off).enabled);
+        assert_eq!(status(&off).last_check, None);
+        assert_eq!(registry.calls("kit"), 0);
+    }
+
+    #[test]
+    fn digest_pins_are_never_followed_automatically() {
+        let registry = Registry::new(NEW, Some(1));
+        let home = tempfile::tempdir().unwrap();
+        // pix installed by digest; pi pinned by hand over its packaged digest.
+        let pinned = automatic(
+            daemon(home.path(), &registry, Some(PI_NEW), Some("latest")),
+            home.path(),
+            None,
+        );
+        kit_lifecycle::write_sources(&pinned.config.control_home, &BTreeMap::new()).unwrap();
+        let record = kit_auto_update::Record::default();
+        let sources = BTreeMap::new();
+        assert!(pinned.auto_update_names(&sources, &record).is_empty());
+        pinned.auto_update_pass(&DaemonStore::new(home.path()), DAY);
+        assert_eq!(registry.calls("kit"), 0);
+        assert_eq!(status(&pinned).last_check.unwrap().result, "ok");
+
+        // The same override, when marsh itself moved pi there, follows.
+        let mut moved = kit_auto_update::Record::default();
+        moved.followed.insert("pi".into(), PI_NEW.into());
+        assert_eq!(pinned.auto_update_names(&sources, &moved), ["pi"]);
+        // A packaged command at its shipped digest follows on a release build.
+        let home = tempfile::tempdir().unwrap();
+        let shipped = daemon(home.path(), &registry, None, Some("latest"));
+        assert_eq!(shipped.auto_update_names(&sources, &record), ["pi"]);
+        let local = daemon(home.path(), &registry, None, None);
+        assert!(local.auto_update_names(&sources, &record).is_empty());
+    }
+
+    #[test]
+    fn each_update_notice_is_sent_exactly_once() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(OLD, Some(1));
+        let plain = daemon(home.path(), &registry, None, None);
+        let mut record = kit_auto_update::Record::default();
+        record.record_update(KitUpdateRecord {
+            command: "pix".into(),
+            from: OLD.into(),
+            to: NEW.into(),
+            from_version: Some("1.0.0".into()),
+            to_version: Some("1.1.0".into()),
+            unix_ms: 1,
+            notified: false,
+        });
+        kit_auto_update::write(&plain.config.control_home, &record).unwrap();
+        let backend = automatic(plain, home.path(), None);
+        let (attachment, client) = ServerAttachment::pair().unwrap();
+        let sentinel = AttachmentFrame::Exited { code: 0 };
+
+        backend.send_update_notices(Some("pi"), &attachment);
+        backend.send_update_notices(Some("pix"), &attachment);
+        backend.send_update_notices(Some("pix"), &attachment);
+        backend.send_update_notices(None, &attachment);
+        attachment.send(&sentinel).unwrap();
+        assert_eq!(
+            client.receive().unwrap(),
+            AttachmentFrame::Notice {
+                message: "marsh: pix updated (1.0.0 → 1.1.0)".into()
+            }
+        );
+        assert_eq!(client.receive().unwrap(), sentinel);
+        assert!(status(&backend).recent[0].notified);
     }
 }

@@ -561,7 +561,47 @@ fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
             crate::client::serde_label(&worker.health)
         )?;
     }
+    write_kit_updates(writer, status.kit_updates.as_deref())?;
     write_job_defaults(writer, job_defaults.as_ref())?;
+    Ok(())
+}
+
+/// The daily automatic Kit update check and its recent switches.
+fn write_kit_updates(
+    writer: &mut impl Write,
+    updates: Option<&marsh_daemon::KitUpdateStatus>,
+) -> Result<(), ProductError> {
+    let Some(updates) = updates else {
+        return Ok(());
+    };
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis()),
+    )
+    .unwrap_or(i64::MAX);
+    let ago = |unix_ms: u64| crate::job::ago(now - i64::try_from(unix_ms).unwrap_or(i64::MAX));
+    let check = match (&updates.last_check, updates.enabled) {
+        (_, false) => "off (MARSH_AUTO_UPDATE=0 or `marsh config auto-update off`)".to_owned(),
+        (None, true) => "daily; not checked yet".to_owned(),
+        (Some(check), true) => format!("daily; checked {} ({})", ago(check.unix_ms), check.result),
+    };
+    writeln!(writer, "  Kit updates:  {check}")?;
+    if let Some(check) = &updates.last_check {
+        for problem in &check.problems {
+            writeln!(writer, "    problem:    {problem}")?;
+        }
+    }
+    if !updates.waiting.is_empty() {
+        writeln!(
+            writer,
+            "    waiting:    {} (switches when its jobs finish)",
+            updates.waiting.join(", ")
+        )?;
+    }
+    for update in updates.recent.iter().rev().take(5) {
+        writeln!(writer, "    {}: {}", ago(update.unix_ms), update.describe())?;
+    }
     Ok(())
 }
 
@@ -934,6 +974,49 @@ mod tests {
     use super::*;
     use crate::{cli::LoadSelection, client::ExecuteRequest};
     use serde_json::json;
+
+    #[test]
+    fn status_lists_the_kit_update_check_and_recent_switches() {
+        let now = u64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .unwrap();
+        let updates = marsh_daemon::KitUpdateStatus {
+            enabled: true,
+            last_check: Some(marsh_daemon::KitUpdateCheck {
+                unix_ms: now - 3 * 60 * 60 * 1000,
+                result: "error".into(),
+                problems: vec!["pix: registry unreachable".into()],
+            }),
+            waiting: vec!["codex".into()],
+            recent: vec![marsh_daemon::KitUpdateRecord {
+                command: "claude".into(),
+                from: "docker.io/mcavage/marsh-claude@sha256:1".into(),
+                to: "docker.io/mcavage/marsh-claude@sha256:2".into(),
+                from_version: Some("2.1.305".into()),
+                to_version: Some("2.1.307".into()),
+                unix_ms: now - 2 * 60 * 60 * 1000,
+                notified: true,
+            }],
+        };
+        let mut text = Vec::new();
+        write_kit_updates(&mut text, Some(&updates)).unwrap();
+        assert_eq!(
+            String::from_utf8(text).unwrap(),
+            "  Kit updates:  daily; checked 3h ago (error)\n    problem:    pix: registry unreachable\n    waiting:    codex (switches when its jobs finish)\n    2h ago: claude updated (2.1.305 → 2.1.307)\n"
+        );
+        let mut off = Vec::new();
+        let disabled = marsh_daemon::KitUpdateStatus::default();
+        write_kit_updates(&mut off, Some(&disabled)).unwrap();
+        assert!(
+            String::from_utf8(off)
+                .unwrap()
+                .contains("off (MARSH_AUTO_UPDATE=0")
+        );
+    }
     use std::{
         path::PathBuf,
         sync::{

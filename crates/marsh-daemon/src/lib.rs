@@ -1046,6 +1046,11 @@ pub enum AttachmentFrame {
     Refresh {
         directories: Vec<String>,
     },
+    /// One line for the user's terminal from the daemon itself, such as an
+    /// automatic Kit update; never part of the job's own output.
+    Notice {
+        message: String,
+    },
 }
 
 /// Make a VM file share re-read each directory's listing: create and remove
@@ -1161,6 +1166,13 @@ pub trait DaemonBackend: Send + Sync + 'static {
     /// packaged Kit to the version this marsh shipped.
     fn uninstall_kit(&self, _command: String, _store: DaemonStore) -> Result<String, DaemonError> {
         Err(DaemonError::BackendUnavailable)
+    }
+    /// One pass of the automatic Kit updater, called from the server's
+    /// background thread: a no-op unless a check or a waiting switch is due.
+    fn auto_update_kits(&self, _store: &DaemonStore) {}
+    /// What `marsh status` reports about automatic Kit updates.
+    fn kit_update_status(&self) -> Option<KitUpdateStatus> {
+        None
     }
     fn resolve_acp_agent(&self, _name: &str) -> Result<AgentAdapterDeclaration, DaemonError> {
         Err(DaemonError::BackendUnavailable)
@@ -1340,6 +1352,68 @@ pub struct StatusDocument {
     /// (`docs/design/processes.md` s9).
     #[serde(default)]
     pub processes: process::ProcessCounts,
+    /// The daily automatic Kit update check (`docs/kits.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kit_updates: Option<Box<KitUpdateStatus>>,
+}
+
+/// `marsh status` `kit_updates`: the daily background check of Kits that
+/// follow a tag, and the switches it made.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct KitUpdateStatus {
+    /// False when `MARSH_AUTO_UPDATE=0` or `marsh config auto-update off`.
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_check: Option<KitUpdateCheck>,
+    /// Kits with a newer image that wait for their running jobs to finish.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waiting: Vec<String>,
+    /// Recent automatic switches, oldest first.
+    #[serde(default)]
+    pub recent: Vec<KitUpdateRecord>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct KitUpdateCheck {
+    pub unix_ms: u64,
+    /// `ok`, or `error` when at least one Kit could not be checked or moved.
+    pub result: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub problems: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct KitUpdateRecord {
+    pub command: String,
+    pub from: String,
+    pub to: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_version: Option<String>,
+    pub unix_ms: u64,
+    /// The one-line notice was shown.
+    #[serde(default)]
+    pub notified: bool,
+}
+
+impl KitUpdateRecord {
+    /// `claude updated (2.1.305 → 2.1.307)`; short digests when the image
+    /// versions are unknown or equal.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        let short = |reference: &str| {
+            reference.rsplit_once("@sha256:").map_or_else(
+                || reference.to_owned(),
+                |(_, digest)| format!("sha256:{}", &digest[..digest.len().min(12)]),
+            )
+        };
+        let (from, to) = match (&self.from_version, &self.to_version) {
+            (Some(from), Some(to)) if from != to => (from.clone(), to.clone()),
+            _ => (short(&self.from), short(&self.to)),
+        };
+        format!("{} updated ({from} → {to})", self.command)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1722,6 +1796,10 @@ struct RequestAdmission {
     store: DaemonStore,
     lifecycle: bool,
 }
+
+/// Held by daemon-initiated work for its duration; see
+/// [`DaemonStore::begin_background_request`].
+pub struct BackgroundAdmission(#[allow(dead_code)] RequestAdmission);
 
 impl Drop for RequestAdmission {
     fn drop(&mut self) {
@@ -2990,7 +3068,38 @@ impl DaemonStore {
             workers: state.workers.values().cloned().collect(),
             splits: split::SplitCounts::default(),
             processes: process::ProcessCounts::default(),
+            kit_updates: None,
         }
+    }
+
+    /// Whether a worker has a reserved or running job, as
+    /// [`Self::begin_workers_reset`] would refuse it. Unknown workers are idle.
+    #[must_use]
+    pub fn worker_busy(&self, worker_id: &str) -> bool {
+        let state = self.lock();
+        let reserved = state
+            .reservations
+            .values()
+            .any(|reserved_worker| reserved_worker == worker_id);
+        reserved
+            || state.workers.get(worker_id).is_some_and(|worker| {
+                worker.health != WorkerHealth::Quarantined
+                    && !worker.active_container_ids.is_empty()
+            })
+    }
+
+    /// Admits daemon-initiated work as an ordinary request, so a scope
+    /// lifecycle transition (`marsh stop`, `reset`) cannot start under it.
+    ///
+    /// # Errors
+    /// Refuses while a lifecycle transition is active.
+    pub fn begin_background_request(&self) -> Result<BackgroundAdmission, DaemonError> {
+        self.begin_ordinary_request().map(BackgroundAdmission)
+    }
+
+    #[must_use]
+    pub fn lifecycle_active(&self) -> bool {
+        self.lock().lifecycle_active
     }
 
     /// Make VM preparation visible before a Kit job receives its runtime identity.
@@ -3410,6 +3519,9 @@ impl Server {
     {
         self.lifecycle.listener.set_nonblocking(true)?;
         let active_connections = Arc::new(AtomicUsize::new(0));
+        let updater_stop = Arc::new(AtomicBool::new(false));
+        self.spawn_kit_updater(Arc::clone(&updater_stop));
+        let _stop_updater = StopOnDrop(updater_stop);
         while !stop() && !self.shutdown_requested.load(Ordering::Acquire) {
             match marsh_runtime::accept_unix(&self.lifecycle.listener) {
                 Ok(stream) => {
@@ -3434,6 +3546,46 @@ impl Server {
         Ok(())
     }
 
+    /// The automatic Kit updater: a background thread that never delays a
+    /// request. It waits a little after startup so the first shell and Kit
+    /// start do not compete with it, then asks the backend once a minute; the
+    /// backend decides whether a daily check or a waiting switch is due.
+    fn spawn_kit_updater(&self, stop: Arc<AtomicBool>) {
+        // Weak, so a stopped server's store (and its journal lock) and
+        // backend are released even while this thread sleeps.
+        let backend = Arc::downgrade(&self.backend);
+        let store = Arc::downgrade(&self.store.0);
+        let pause = move |duration: Duration| {
+            let until = Instant::now() + duration;
+            while Instant::now() < until {
+                if stop.load(Ordering::Acquire) {
+                    return false;
+                }
+                thread::sleep(Duration::from_millis(250));
+            }
+            !stop.load(Ordering::Acquire)
+        };
+        let spawned = thread::Builder::new()
+            .name("marsh-kit-updater".into())
+            .spawn(move || {
+                if !pause(KIT_UPDATER_START_DELAY) {
+                    return;
+                }
+                loop {
+                    let (Some(backend), Some(store)) = (backend.upgrade(), store.upgrade()) else {
+                        return;
+                    };
+                    backend.auto_update_kits(&DaemonStore(store));
+                    if !pause(KIT_UPDATER_INTERVAL) {
+                        return;
+                    }
+                }
+            });
+        if let Err(error) = spawned {
+            eprintln!("marshd: cannot start the Kit updater: {error}");
+        }
+    }
+
     fn handler(&self) -> ConnectionHandler {
         ConnectionHandler {
             store: self.store.clone(),
@@ -3449,6 +3601,17 @@ impl Server {
             dev_broker: self.dev_broker.clone(),
             splits: Arc::clone(&self.splits),
         }
+    }
+}
+
+const KIT_UPDATER_START_DELAY: Duration = Duration::from_secs(20);
+const KIT_UPDATER_INTERVAL: Duration = Duration::from_mins(1);
+
+struct StopOnDrop(Arc<AtomicBool>);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
     }
 }
 
@@ -4673,6 +4836,7 @@ impl ConnectionHandler {
                 let mut status = self.store.status(session_id);
                 status.splits = self.splits.counts();
                 status.processes = self.store.process_counts();
+                status.kit_updates = self.backend.kit_update_status().map(Box::new);
                 write_frame(&mut stream, &PublicReply::Status(status))
             }
             PublicRequest::ResetWorkers { selection } => {
@@ -6333,13 +6497,22 @@ fn relay_attachment<R: Read + Send + 'static, O: Write, E: Write>(
             }
             // A background job (not the terminal's foreground process group)
             // stays quiet: its notice would land over the prompt.
-            AttachmentFrame::ColdBoot { .. } if background_of_terminal() => {}
+            AttachmentFrame::ColdBoot { .. } | AttachmentFrame::Notice { .. }
+                if background_of_terminal() => {}
             AttachmentFrame::ColdBoot { kit, download } => {
                 let notice = cold_boot_notice(&kit, download);
                 if terminal {
                     write!(error, "{notice}\r\n")?;
                 } else {
                     writeln!(error, "{notice}")?;
+                }
+                error.flush()?;
+            }
+            AttachmentFrame::Notice { message } => {
+                if terminal {
+                    write!(error, "{message}\r\n")?;
+                } else {
+                    writeln!(error, "{message}")?;
                 }
                 error.flush()?;
             }

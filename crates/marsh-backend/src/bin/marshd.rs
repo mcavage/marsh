@@ -205,7 +205,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             guest_artifacts.join("agents.json").display(),
         )
     })?;
-    let backend = backend.with_sbxenvs()?;
+    let backend = backend
+        .with_sbxenvs()?
+        .with_auto_update(env::var_os("MARSH_AUTO_UPDATE"), home.clone());
     let protected_guest_roots = backend.protected_guest_roots().to_vec();
     // All registry/configuration validation precedes even the stock version probe.
     stock.validate_supported_version().map_err(|_| {
