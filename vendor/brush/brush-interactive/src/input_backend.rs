@@ -12,20 +12,7 @@ pub trait InputBackend: Send {
         &mut self,
         shell: &crate::ShellRef<impl brush_core::ShellExtensions>,
         prompt: InteractivePrompt,
-    ) -> Result<ReadResult, ShellError>;
-
-    /// Reads input without blocking signal delivery when the backend supports it.
-    #[allow(
-        async_fn_in_trait,
-        reason = "input backends are used through static dispatch"
-    )]
-    async fn read_line_async(
-        &mut self,
-        shell: &crate::ShellRef<impl brush_core::ShellExtensions>,
-        prompt: InteractivePrompt,
-    ) -> Result<ReadResult, ShellError> {
-        self.read_line(shell, prompt)
-    }
+    ) -> impl Future<Output = Result<ReadResult, ShellError>>;
 
     /// Returns the current contents of the read buffer and the current cursor
     /// position within the buffer; None is returned if the read buffer is

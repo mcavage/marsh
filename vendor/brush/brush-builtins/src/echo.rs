@@ -1,6 +1,7 @@
 use clap::Parser;
 use std::io::Write;
 
+use brush_core::builtins::{Invocation, UsageError};
 use brush_core::{ExecutionResult, builtins, escape};
 
 /// Echo text to standard output.
@@ -28,22 +29,23 @@ pub(crate) struct EchoCommand {
     option_words: usize,
 }
 
-impl builtins::Command for EchoCommand {
-    type Error = brush_core::Error;
+brush_clap_adapter::impl_parse_args!(EchoCommand, parse = EchoCommand::from_invocation);
 
+impl EchoCommand {
     /// Parses options as Bash's `echo` does: leading words made only of
     /// `-n`, `-e` and `-E` letters, in order (the last of `-e`/`-E` wins);
     /// anything else, `--` included, starts the text. With `xpg_echo` in
     /// posix mode there are no options.
-    fn new<I>(args: I) -> Result<Self, clap::Error>
-    where
-        I: IntoIterator<Item = String>,
-    {
+    fn from_invocation(invocation: Invocation<'_>) -> Result<Self, UsageError> {
         let mut this = Self {
             no_trailing_newline: false,
             interpret_backslash_escapes: false,
             no_interpret_backslash_escapes: false,
-            args: args.into_iter().skip(1).collect(),
+            args: invocation
+                .into_args()
+                .into_iter()
+                .map(String::from)
+                .collect(),
             option_words: 0,
         };
         let mut words = this.args.iter().peekable();
@@ -69,9 +71,13 @@ impl builtins::Command for EchoCommand {
         }
         Ok(this)
     }
+}
 
-    async fn execute<SE: brush_core::ShellExtensions>(
-        &self,
+impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for EchoCommand {
+    type Error = brush_core::Error;
+
+    async fn execute(
+        self,
         context: brush_core::ExecutionContext<'_, SE>,
     ) -> Result<brush_core::ExecutionResult, Self::Error> {
         let xpg_echo = context

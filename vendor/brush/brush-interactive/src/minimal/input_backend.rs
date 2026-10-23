@@ -1,5 +1,5 @@
-use std::io::{BufRead, IsTerminal, Write};
-use tokio::io::AsyncBufReadExt;
+use std::io::{IsTerminal, Write};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 
 use crate::{
     InputBackend, ShellError,
@@ -10,27 +10,19 @@ use crate::{
 #[derive(Default)]
 pub struct MinimalInputBackend {
     async_stdin: Option<tokio::io::BufReader<tokio::io::Stdin>>,
-    pending_line: Vec<u8>,
-    pending_program: String,
+    pending: PendingInput,
+}
+
+/// Input consumed from the reader but not yet returned: a partial line, and the
+/// complete lines of a program that isn't complete yet.
+#[derive(Default)]
+struct PendingInput {
+    line: Vec<u8>,
+    program: String,
 }
 
 impl InputBackend for MinimalInputBackend {
-    fn read_line(
-        &mut self,
-        shell_ref: &crate::ShellRef<impl brush_core::ShellExtensions>,
-        prompt: InteractivePrompt,
-    ) -> Result<ReadResult, ShellError> {
-        let stdin = std::io::stdin();
-        // An interactive shell prompts even when its input is not a terminal.
-        let interactive = shell_ref
-            .try_lock()
-            .is_ok_and(|shell| shell.options().interactive);
-        let prompt = (stdin.is_terminal() || interactive).then_some(&prompt);
-
-        Self::read_program_from(shell_ref, prompt, &mut stdin.lock(), &mut std::io::stderr())
-    }
-
-    async fn read_line_async(
+    async fn read_line(
         &mut self,
         shell_ref: &crate::ShellRef<impl brush_core::ShellExtensions>,
         prompt: InteractivePrompt,
@@ -41,57 +33,24 @@ impl InputBackend for MinimalInputBackend {
         let reader = self
             .async_stdin
             .get_or_insert_with(|| tokio::io::BufReader::new(tokio::io::stdin()));
-        loop {
-            if display_prompt && self.pending_line.is_empty() {
-                let to_display = if self.pending_program.is_empty() {
-                    &prompt.prompt
-                } else {
-                    &prompt.continuation_prompt
-                };
-                std::io::stderr().write_all(&brush_core::bytes::encode(to_display))?;
-                std::io::stderr().flush()?;
-            }
-            // `read_line` is not cancellation safe: a TERM trap could discard
-            // bytes already consumed into its local String. Keep each partial
-            // line in the backend before consuming stdin instead.
-            let available = reader.fill_buf().await?;
-            if available.is_empty() {
-                break;
-            }
-            let count = available
-                .iter()
-                .position(|byte| *byte == b'\n')
-                .map_or(available.len(), |index| index + 1);
-            let line_complete = available[count - 1] == b'\n';
-            // Bash ignores NUL bytes in its input.
-            self.pending_line
-                .extend(available[..count].iter().filter(|byte| **byte != 0));
-            reader.consume(count);
-            if !line_complete {
-                continue;
-            }
-            let line = brush_core::bytes::decode_vec(std::mem::take(&mut self.pending_line));
-            self.pending_program.push_str(&line);
-            if !crate::completeness::needs_more_input(shell_ref, &self.pending_program) {
-                break;
-            }
-        }
-        if !self.pending_line.is_empty() {
-            let line = brush_core::bytes::decode_vec(std::mem::take(&mut self.pending_line));
-            self.pending_program.push_str(&line);
-        }
-        if self.pending_program.is_empty() {
-            Ok(ReadResult::Eof)
-        } else {
-            Ok(ReadResult::Input(std::mem::take(&mut self.pending_program)))
-        }
+
+        Self::read_program_from(
+            shell_ref,
+            display_prompt.then_some(&prompt),
+            reader,
+            &mut std::io::stderr(),
+            &mut self.pending,
+        )
+        .await
     }
 }
 
 impl MinimalInputBackend {
     /// Reads lines from the given reader until they form a complete shell program.
     /// Compound commands, here documents, and backslash continuations all span lines,
-    /// so a single line is often not a program on its own.
+    /// so a single line is often not a program on its own. Input consumed is kept in
+    /// `pending` until it's returned, so cancelling the read (as when a `TERM` trap
+    /// must run while input is idle) loses none of it.
     ///
     /// # Arguments
     ///
@@ -99,17 +58,19 @@ impl MinimalInputBackend {
     /// * `prompt` - The prompt to display, or `None` to display nothing.
     /// * `reader` - The source to read lines from.
     /// * `writer` - Where prompts are written.
-    fn read_program_from<R: BufRead, W: Write>(
+    /// * `pending` - Input already consumed from `reader`.
+    async fn read_program_from<R: AsyncBufRead + Unpin, W: Write>(
         shell_ref: &crate::ShellRef<impl brush_core::ShellExtensions>,
         prompt: Option<&InteractivePrompt>,
         reader: &mut R,
         writer: &mut W,
+        pending: &mut PendingInput,
     ) -> Result<ReadResult, ShellError> {
-        let mut result = String::new();
-
         loop {
-            if let Some(prompt) = prompt {
-                let to_display = if result.is_empty() {
+            if let Some(prompt) = prompt
+                && pending.line.is_empty()
+            {
+                let to_display = if pending.program.is_empty() {
                     &prompt.prompt
                 } else {
                     &prompt.continuation_prompt
@@ -119,36 +80,46 @@ impl MinimalInputBackend {
                 writer.flush()?;
             }
 
+            // `read_line` is not cancellation safe: a TERM trap could discard
+            // bytes already consumed into its local String. Keep each partial
+            // line in `pending` before consuming the reader instead.
+            let available = reader.fill_buf().await.map_err(ShellError::InputError)?;
             // Nothing more is coming; run what we have and let the parser complain if
             // it's still incomplete.
-            let Some(line) = Self::read_input_line(reader)? else {
+            if available.is_empty() {
                 break;
-            };
+            }
+            let count = available
+                .iter()
+                .position(|byte| *byte == b'\n')
+                .map_or(available.len(), |index| index + 1);
+            let line_complete = available[count - 1] == b'\n';
+            // Bash ignores NUL bytes in its input.
+            pending
+                .line
+                .extend(available[..count].iter().filter(|byte| **byte != 0));
+            reader.consume(count);
+            if !line_complete {
+                continue;
+            }
 
-            result.push_str(line.as_str());
-
-            if !crate::completeness::needs_more_input(shell_ref, result.as_str()) {
+            let line = brush_core::bytes::decode_vec(std::mem::take(&mut pending.line));
+            pending.program.push_str(&line);
+            if !crate::completeness::needs_more_input(shell_ref, &pending.program) {
                 break;
             }
         }
 
-        if result.is_empty() {
+        if !pending.line.is_empty() {
+            let line = brush_core::bytes::decode_vec(std::mem::take(&mut pending.line));
+            pending.program.push_str(&line);
+        }
+
+        if pending.program.is_empty() {
             Ok(ReadResult::Eof)
         } else {
-            Ok(ReadResult::Input(result))
+            Ok(ReadResult::Input(std::mem::take(&mut pending.program)))
         }
-    }
-
-    /// Reads a single line, returning `None` at end of input.
-    fn read_input_line<R: BufRead>(reader: &mut R) -> Result<Option<String>, ShellError> {
-        let mut input = Vec::new();
-        let bytes_read = reader
-            .read_until(b'\n', &mut input)
-            .map_err(ShellError::InputError)?;
-        // Bash ignores NUL bytes in its input.
-        input.retain(|byte| *byte != 0);
-
-        Ok((bytes_read > 0).then(|| brush_core::bytes::decode_vec(input)))
     }
 }
 
@@ -176,8 +147,15 @@ mod tests {
         let shell_ref = test_shell_ref().await;
         let mut reader = Cursor::new(input.as_bytes());
 
-        MinimalInputBackend::read_program_from(&shell_ref, None, &mut reader, &mut Vec::new())
-            .unwrap()
+        MinimalInputBackend::read_program_from(
+            &shell_ref,
+            None,
+            &mut reader,
+            &mut Vec::new(),
+            &mut PendingInput::default(),
+        )
+        .await
+        .unwrap()
     }
 
     async fn assert_reads(input: &str, expected: &str) {
@@ -234,7 +212,9 @@ mod tests {
             Some(&prompt),
             &mut Cursor::new(b"if true\nthen\necho hi\nfi\n".as_slice()),
             &mut prompts,
+            &mut PendingInput::default(),
         )
+        .await
         .unwrap();
 
         assert_eq!(String::from_utf8(prompts).unwrap(), "$ > > > ");
@@ -250,9 +230,11 @@ mod tests {
             None,
             &mut Cursor::new(b"if true\nthen\necho hi\nfi\n".as_slice()),
             &mut prompts,
+            &mut PendingInput::default(),
         )
+        .await
         .unwrap();
 
-        assert!(prompts.is_empty());
+        assert_eq!(prompts, Vec::<u8>::new());
     }
 }

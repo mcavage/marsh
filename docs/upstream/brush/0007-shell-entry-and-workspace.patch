@@ -1,0 +1,893 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index d9ae8190..2cc85feb 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,7 +1,6 @@
+ [workspace]
+ resolver = "3"
+ members = [
+-    "brush",
+     "brush-shell",
+     "brush-parser",
+     "brush-core",
+@@ -10,10 +9,6 @@ members = [
+     "brush-coreutils-builtins",
+     "brush-experimental-builtins",
+     "brush-interactive",
+-    "brush-test-harness",
+-    "brush-bundled-tests",
+-    "fuzz",
+-    "xtask",
+ ]
+ default-members = ["brush-shell"]
+ 
+diff --git a/brush-shell/Cargo.toml b/brush-shell/Cargo.toml
+index d92bddb1..2b3fa41b 100644
+--- a/brush-shell/Cargo.toml
++++ b/brush-shell/Cargo.toml
+@@ -11,6 +11,10 @@ readme.workspace = true
+ repository.workspace = true
+ # Application tier; see docs/reference/msrv-policy.md.
+ rust-version = "1.95.0"
++autobins = false
++autoexamples = false
++autobenches = false
++autotests = false
+ 
+ [package.metadata.binstall]
+ pkg-url = "{ repo }/releases/download/{ name }-v{ version }/brush-{ target }{ archive-suffix }"
+@@ -18,53 +22,6 @@ pkg-url = "{ repo }/releases/download/{ name }-v{ version }/brush-{ target }{ ar
+ [lib]
+ bench = false
+ 
+-[[bin]]
+-name = "brush"
+-path = "src/main.rs"
+-bench = false
+-
+-[[test]]
+-name = "brush-compat-tests"
+-path = "tests/compat_tests.rs"
+-harness = false
+-
+-[[test]]
+-name = "brush-integration-tests"
+-path = "tests/integration_tests.rs"
+-harness = false
+-
+-[[test]]
+-name = "brush-version-tests"
+-path = "tests/version_tests.rs"
+-
+-[[test]]
+-name = "brush-interactive-tests"
+-path = "tests/interactive_tests.rs"
+-
+-[[test]]
+-name = "brush-completion-tests"
+-path = "tests/completion_tests.rs"
+-
+-# N.B. tests/pty_startup_tests.rs, tests/reedline_interactive_tests.rs, and
+-# tests/vt_interactive_tests.rs are deliberately left auto-discovered (no
+-# `brush-*-tests` name): the CI `brush_*_tests-*` artifact glob would otherwise
+-# ship them to the os-tests
+-# jobs, which run prebuilt test binaries outside a cargo target dir and so
+-# can't run pty-based tests (see the interactive/version test skips there).
+-
+-# Generates man pages, markdown help, completion scripts, and the config
+-# schema. Lives here so that xtask doesn't have to depend on brush-shell;
+-# `cargo xtask gen` shells out to it.
+-[[example]]
+-name = "gen"
+-path = "examples/gen.rs"
+-required-features = ["schema"]
+-
+-[[bench]]
+-name = "shell"
+-path = "benches/shell.rs"
+-harness = false
+-
+ [features]
+ # Input backends. Each can be enabled for any target, and is offered where it
+ # works (see `build.rs`), so the defaults suit every target.
+@@ -86,6 +43,7 @@ experimental-bundled-coreutils = [
+ ]
+ experimental-load = ["dep:serde_json", "brush-core/serde"]
+ experimental-parser = [
++    "dep:brush-parser",
+     "brush-core/experimental-parser",
+     "brush-parser/winnow-parser",
+ ]
+@@ -101,6 +59,7 @@ brush-builtins = { version = "^0.2.0", path = "../brush-builtins" }
+ brush-interactive = { version = "^0.4.0", path = "../brush-interactive" }
+ brush-coreutils-builtins = { version = "^0.1.0", path = "../brush-coreutils-builtins", optional = true }
+ brush-experimental-builtins = { version = "^0.1.0", path = "../brush-experimental-builtins", optional = true }
++brush-parser = { version = "^0.4.0", path = "../brush-parser", optional = true }
+ clap = { version = "4.6.0", features = ["derive", "env"] }
+ color-print = "0.3.7"
+ etcetera = "0.11.0"
+@@ -124,49 +83,4 @@ tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "sync"] }
+ 
+ [target.wasm32-unknown-unknown.dependencies]
+ getrandom = { version = "0.4.2", features = ["wasm_js"] }
+-uuid = { version = "1", features = ["js"] }
+-
+-[dev-dependencies]
+-anyhow = "1.0.102"
+-tempfile = "3.27.0"
+-# Used by the `gen` example.
+-clap-markdown = "0.1.5"
+-clap_complete = "4.6.4"
+-clap_mangen = "0.3.0"
+-# Also a regular optional dependency, enabled by `experimental-load`. The `gen`
+-# example needs it without that feature, so it's listed here too.
+-serde_json = "1.0.149"
+-brush-parser = { version = "^0.4.0", path = "../brush-parser" }
+-brush-test-harness = { path = "../brush-test-harness", features = ["insta"] }
+-assert_cmd = "2.2.0"
+-assert_fs = "1.1.3"
+-colored = "3.1.1"
+-criterion = { version = "0.8.2", features = ["async_tokio", "html_reports"] }
+-descape = "3.0.0"
+-diff = "0.1.13"
+-glob = "0.3.3"
+-indent = "0.1.1"
+-indexmap = "2.13.0"
+-junit-report = "0.9.0"
+-os-release = "0.1.0"
+-predicates = "3.1.4"
+-pretty_assertions = { version = "1.4.1", features = ["unstable"] }
+-regex = "1.12.3"
+-serde = { version = "1.0.228", features = ["derive"] }
+-yaml_serde = "0.10.7"
+-strip-ansi-escapes = "0.2.1"
+-test-with = { version = "0.17.0", default-features = false, features = [
+-    "executable",
+-] }
+-tokio = { version = "1.52.3", features = ["time"] }
+-version-compare = "0.2.1"
+-walkdir = "2.5.0"
+-which = "8.0.2"
+-
+-[target.'cfg(unix)'.dev-dependencies]
+-nix = { version = "0.31.2" }
+-
+-# expectrl's pty support (via ptyprocess) is limited to these platforms;
+-# the interactive tests that rely on it are gated accordingly.
+-[target.'cfg(any(target_os = "linux", target_os = "android", target_os = "macos", target_os = "freebsd"))'.dev-dependencies]
+-expectrl = "0.9.0"
++uuid = { version = "1.23.1", features = ["js"] }
+diff --git a/brush-shell/src/args.rs b/brush-shell/src/args.rs
+index cc9845da..db981de8 100644
+--- a/brush-shell/src/args.rs
++++ b/brush-shell/src/args.rs
+@@ -113,6 +113,10 @@ pub struct CommandLineArgs {
+     #[clap(long = "inherit-fd", value_name = "FD", help_heading = HEADING_STANDARD_OPTIONS)]
+     pub inherited_fds: Vec<i32>,
+ 
++    /// Standard descriptors (0-2) the parent process had closed.
++    #[clap(long = "closed-fd", value_name = "FD", hide = true)]
++    pub closed_fds: Vec<i32>,
++
+     /// Make shell act as if it had been invoked as a login shell.
+     #[clap(short = 'l', long = "login", help_heading = HEADING_STANDARD_OPTIONS)]
+     pub login: bool,
+diff --git a/brush-shell/src/bundled.rs b/brush-shell/src/bundled.rs
+index de6324f5..c17a6346 100644
+--- a/brush-shell/src/bundled.rs
++++ b/brush-shell/src/bundled.rs
+@@ -30,11 +30,51 @@ use std::collections::HashMap;
+ use std::ffi::OsString;
+ use std::io::Write;
+ use std::path::PathBuf;
++use std::sync::Arc;
+ use std::sync::OnceLock;
+ 
++/// Install the host shell's synchronous history privacy callback.
++pub fn install_history_disable_hook(hook: Arc<dyn Fn() -> Result<(), String> + Send + Sync>) {
++    brush_builtins::install_history_disable_hook(hook);
++}
++
++/// Install an observer for the expanded simple command before execution.
++pub fn install_preexecute_hook(hook: Arc<dyn Fn(&str) + Send + Sync>) {
++    brush_core::commands::install_preexecute_hook(hook);
++}
++
++/// Install an embedding hook that runs before a background command is spawned.
++pub fn install_background_prelaunch_hook(
++    hook: Arc<dyn Fn(&str) -> Result<Vec<(String, String)>, String> + Send + Sync>,
++) {
++    brush_core::commands::install_background_prelaunch_hook(hook);
++}
++
++/// Types for the `split { ... } | join` workspace hook.
++pub use brush_core::split;
++
++/// Install the embedding's private workspace provider for `split { ... } | join`.
++pub fn install_split_workspace_hook(hook: Arc<dyn brush_core::split::SplitWorkspace>) {
++    brush_core::split::install_split_workspace_hook(hook);
++}
++
++static INITIALIZED_HOOK: OnceLock<Arc<dyn Fn() + Send + Sync>> = OnceLock::new();
++
++/// Notify embedders when profile and rc loading has finished.
++pub fn install_initialized_hook(hook: Arc<dyn Fn() + Send + Sync>) {
++    let _ = INITIALIZED_HOOK.set(hook);
++}
++
++pub(crate) fn notify_initialized() {
++    if let Some(hook) = INITIALIZED_HOOK.get() {
++        hook();
++    }
++}
++
+ use brush_core::ExecutionExitCode;
+ use brush_core::builtins::{
+-    Builtin, ContentOptions, ContentType, Invocation, ParseArgs, Registration, UsageError,
++    Builtin, ContentOptions, ContentType, Invocation, ParseArgs, ProcessShim, Registration,
++    UsageError,
+ };
+ use brush_core::commands::{self, CommandArg, ExecutionContext};
+ use brush_core::extensions::ShellExtensions;
+@@ -57,6 +97,14 @@ static REGISTRY: OnceLock<HashMap<String, BundledFn>> = OnceLock::new();
+ /// shim invocation; left as `Err`-equivalent if `current_exe()` fails.
+ static SELF_EXE: OnceLock<Option<PathBuf>> = OnceLock::new();
+ 
++/// Arguments appended to every process-backed bundled dispatch.
++static PROCESS_SHIM_ARGS: OnceLock<Vec<String>> = OnceLock::new();
++
++/// Installs embedding arguments inherited by each process-backed shim.
++pub fn install_process_shim_args(args: Vec<String>) {
++    let _ = PROCESS_SHIM_ARGS.set(args);
++}
++
+ /// Installs the bundled-command registry. Idempotent: only the first call
+ /// takes effect.
+ #[allow(
+@@ -105,7 +153,15 @@ pub fn registry() -> Option<&'static HashMap<String, BundledFn>> {
+ /// are not affected.
+ #[must_use]
+ pub fn maybe_dispatch() -> Option<i32> {
+-    let mut raw = std::env::args_os();
++    maybe_dispatch_from(std::env::args_os())
++}
++
++/// Runs the bundled-command fast path against an explicit argument vector.
++#[must_use]
++pub fn maybe_dispatch_from(
++    arguments: impl IntoIterator<Item = impl Into<OsString>>,
++) -> Option<i32> {
++    let mut raw = arguments.into_iter().map(Into::into);
+     let _argv0 = raw.next();
+     let first = raw.next()?;
+     if first != DISPATCH_FLAG {
+@@ -272,6 +328,20 @@ impl<SE: ShellExtensions> Builtin<SE> for BundledCommand {
+     }
+ }
+ 
++/// Constructs a [`Registration`] for the bundled-shim builtin. Each bundled
++/// name gets its own, so that its process-backed form launches that name.
++fn shim_registration<SE: ShellExtensions>(name: &str, executable: PathBuf) -> Registration<SE> {
++    let mut prefix_args = vec![DISPATCH_FLAG.into(), name.into()];
++    if let Some(arguments) = PROCESS_SHIM_ARGS.get() {
++        prefix_args.extend(arguments.iter().cloned());
++    }
++    Registration::of::<BundledCommand>().with_process_shim(ProcessShim {
++        executable,
++        prefix_args,
++        argv0: Some(name.into()),
++    })
++}
++
+ /// Registers a shim builtin for every name in the installed bundled-command
+ /// registry.
+ ///
+@@ -281,9 +351,13 @@ pub fn register_shims<SE: ShellExtensions>(shell: &mut brush_core::Shell<SE>) {
+     let Some(registry) = REGISTRY.get() else {
+         return;
+     };
++    let Some(executable) = self_exe().cloned() else {
++        return;
++    };
+     for name in registry.keys() {
+-        shell
+-            .builtins_mut()
+-            .register_if_absent(name.clone(), Registration::of::<BundledCommand>());
++        shell.builtins_mut().register_if_absent(
++            name.clone(),
++            shim_registration::<SE>(name, executable.clone()),
++        );
+     }
+ }
+diff --git a/brush-shell/src/entry.rs b/brush-shell/src/entry.rs
+index 59002a33..9e834546 100644
+--- a/brush-shell/src/entry.rs
++++ b/brush-shell/src/entry.rs
+@@ -4,6 +4,31 @@ use crate::args::CommandLineArgs;
+ use crate::args::InputBackendType;
+ use crate::brushctl::ShellBuilderBrushBuiltinExt as _;
+ use crate::bundled;
++
++static MARSH_EXTENSIONS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++/// Whether to run on a single-threaded runtime (see [`use_current_thread_runtime`]).
++static CURRENT_THREAD_RUNTIME: std::sync::atomic::AtomicBool =
++    std::sync::atomic::AtomicBool::new(false);
++static MARSH_EXTERNAL_COMMANDS: std::sync::OnceLock<(String, String)> = std::sync::OnceLock::new();
++
++/// Enables the marsh parser and evaluator additions for subsequently created shells.
++/// Embedders must opt in explicitly; ordinary Brush behavior is unchanged.
++pub fn enable_marsh_extensions() {
++    MARSH_EXTENSIONS.store(true, std::sync::atomic::Ordering::Release);
++}
++
++/// Runs the shell on a single-threaded Tokio runtime, whose I/O and signal
++/// drivers then only run when the shell waits. Tests use it to make the
++/// runtime's dispatch of a signal come at a known point.
++pub fn use_current_thread_runtime() {
++    CURRENT_THREAD_RUNTIME.store(true, std::sync::atomic::Ordering::Release);
++}
++
++/// Export a session's command directory and authority context to descendants.
++/// The directory is also restored after startup files have run.
++pub fn install_marsh_external_commands(path: String, session: String) {
++    let _ = MARSH_EXTERNAL_COMMANDS.set((path, session));
++}
+ use crate::config;
+ use crate::error_formatter;
+ use crate::events;
+@@ -25,6 +50,170 @@ type BrushShell = brush_core::Shell<BrushShellExtensions>;
+ 
+ // WARN: this implementation shadows `clap::Parser::parse_from` one so it must be defined
+ // after the `use clap::Parser`
++/// Applies Bash's startup option order to the `set` and `shopt` options: like
++/// `set`, `-x`/`+x` letters, `-o`/`+o NAME` and `-O`/`+O NAME` (also inside a
++/// cluster, as in `-oe errexit`) take effect left to right, so each option gets
++/// its final state, which this passes on as `-o NAME`/`--+o NAME` (and `-O`/
++/// `--+O`) for clap. Other letters (`c`, `s`, `i`, `l`, ...) stay, whichever
++/// sign they had, and a repeated `c` is the same flag. A lone `-` ends the
++/// options (as `--`); a lone `+` does nothing. The scan stops at the first
++/// operand or `--`, leaving command strings and script arguments untouched.
++/// An unknown `-o` or `-O` name, or a `-c` with no command, is Bash's error
++/// (returned for the caller to print; the shell then exits with status 2).
++fn bash_startup_options(args: &mut Vec<String>) -> Result<(), String> {
++    const LONG_VALUE_OPTIONS: &[&str] = &[
++        "--config",
++        "--inherit-fd",
++        "--closed-fd",
++        "--rcfile",
++        "--init-file",
++        "--xtrace-file",
++        "--input-backend",
++        "--load",
++        "--debug",
++        "--log-enable",
++        "--disable-event",
++        "--log-disable",
++    ];
++    // `set`'s option letters, by the `set -o` names Brush knows them as.
++    const LETTERS: &[(char, &str)] = &[
++        ('a', "allexport"),
++        ('b', "notify"),
++        ('e', "errexit"),
++        ('f', "noglob"),
++        ('h', "hashall"),
++        ('k', "keyword"),
++        ('m', "monitor"),
++        ('n', "noexec"),
++        ('p', "privileged"),
++        ('t', "onecmd"),
++        ('u', "nounset"),
++        ('v', "verbose"),
++        ('x', "xtrace"),
++        ('B', "braceexpand"),
++        ('C', "noclobber"),
++        ('E', "errtrace"),
++        ('H', "histexpand"),
++        ('P', "physical"),
++        ('T', "functrace"),
++    ];
++
++    let mut kept: Vec<String> = vec![args[0].clone()];
++    let mut set_o: Vec<(String, bool)> = vec![];
++    let mut shopt: Vec<(String, bool)> = vec![];
++    let mut seen_c = false;
++    // `-i`/`+i`: the last one wins.
++    let mut interactive = None;
++    let mut index = 1;
++    while let Some(arg) = args.get(index).cloned() {
++        index += 1;
++        if arg == "--" || !(arg.starts_with('-') || arg.starts_with('+')) {
++            index -= 1;
++            break;
++        }
++        if arg == "-" {
++            kept.push("--".to_owned());
++            break;
++        }
++        if arg == "+" {
++            continue;
++        }
++        if arg.starts_with("--") {
++            let takes_value = LONG_VALUE_OPTIONS.contains(&arg.as_str());
++            kept.push(arg);
++            if takes_value && let Some(value) = args.get(index) {
++                kept.push(value.clone());
++                index += 1;
++            }
++            continue;
++        }
++        let on = arg.starts_with('-');
++        let mut rest = String::from("-");
++        for letter in arg.chars().skip(1) {
++            if let Some((_, name)) = LETTERS.iter().find(|(l, _)| *l == letter) {
++                set_o.push(((*name).to_owned(), on));
++            } else if letter == 'o' || letter == 'O' {
++                let Some(name) = args.get(index).cloned() else {
++                    rest.push(letter);
++                    continue;
++                };
++                index += 1;
++                if letter == 'o' {
++                    set_o.push((name, on));
++                } else {
++                    shopt.push((name, on));
++                }
++            } else if letter == 'c' {
++                if !std::mem::replace(&mut seen_c, true) {
++                    rest.push(letter);
++                }
++            } else if letter == 'i' {
++                interactive = Some(on);
++            } else {
++                rest.push(letter);
++            }
++        }
++        if rest.len() > 1 {
++            kept.push(rest);
++        }
++    }
++
++    let name = args[0].as_str();
++    let set_o_names =
++        brush_core::namedoptions::options(brush_core::namedoptions::ShellOptionKind::SetO);
++    if let Some((bad, _)) = set_o
++        .iter()
++        .find(|(option, _)| set_o_names.get(option).is_none())
++    {
++        return Err(std::format!(
++            "{name}: line 0: {name}: {bad}: invalid option name"
++        ));
++    }
++    let shopt_names =
++        brush_core::namedoptions::options(brush_core::namedoptions::ShellOptionKind::Shopt);
++    if let Some((bad, _)) = shopt
++        .iter()
++        .find(|(option, _)| shopt_names.get(option).is_none())
++    {
++        return Err(std::format!(
++            "{name}: line 0: {bad}: invalid shell option name"
++        ));
++    }
++    let command_follows = match args.get(index).map(String::as_str) {
++        Some("--") => args.len() > index + 1,
++        operand => operand.is_some(),
++    };
++    if seen_c && !command_follows {
++        return Err(std::format!("{name}: -c: option requires an argument"));
++    }
++    if interactive == Some(true) {
++        kept.push("-i".to_owned());
++    }
++
++    // Each option's final state, in the order the options first appear.
++    let finals = |ops: Vec<(String, bool)>| {
++        let mut finals: Vec<(String, bool)> = vec![];
++        for (name, on) in ops {
++            match finals.iter_mut().find(|(seen, _)| *seen == name) {
++                Some(entry) => entry.1 = on,
++                None => finals.push((name, on)),
++            }
++        }
++        finals
++    };
++    for (name, on) in finals(set_o) {
++        kept.push(if on { "-o" } else { "--+o" }.to_owned());
++        kept.push(name);
++    }
++    for (name, on) in finals(shopt) {
++        kept.push(if on { "-O" } else { "--+O" }.to_owned());
++        kept.push(name);
++    }
++    kept.extend(args.drain(index.min(args.len())..));
++    *args = kept;
++    Ok(())
++}
++
+ impl CommandLineArgs {
+     // This function takes precedence over [`clap::Parser::parse_from`]
+     pub(crate) fn try_parse_from(
+@@ -63,8 +252,34 @@ impl CommandLineArgs {
+     }
+ }
+ 
++/// Selects the executable (with leading arguments) for ENOEXEC files.
++///
++/// [`run`] selects the running executable; embedders whose executable does
++/// not accept Brush arguments directly install their own.
++pub fn install_script_interpreter(path: &Path, prefix_args: &[std::ffi::OsString]) {
++    #[cfg(unix)]
++    let _ = brush_core::sys::commands::set_script_interpreter(path, prefix_args);
++    #[cfg(not(unix))]
++    let _ = (path, prefix_args);
++}
++
+ /// Main entry point for the `brush` shell.
+ pub fn run() {
++    if let Ok(path) = std::env::current_exe() {
++        install_script_interpreter(&path, &[]);
++    }
++    std::process::exit(run_from(
++        std::env::args_os()
++            .map(|arg| brush_core::bytes::from_os_str(&arg).into_owned())
++            .collect(),
++    ));
++}
++
++/// Main entry point with an explicitly supplied argument vector.
++///
++/// Embedders use this after consuming their own leading options. The first
++/// element remains the shell's `argv[0]`.
++pub fn run_from(mut args: Vec<String>) -> i32 {
+     //
+     // Install the bundled-command registry so it's available both for
+     // bundled dispatch (handled next) and for builtin shim registration
+@@ -78,8 +293,8 @@ pub fn run() {
+     // bundled command and exit before doing any shell setup. This is the
+     // hot path for in-binary coreutils invocations.
+     //
+-    if let Some(code) = bundled::maybe_dispatch() {
+-        std::process::exit(code);
++    if let Some(code) = bundled::maybe_dispatch_from(args.iter().cloned()) {
++        return code;
+     }
+ 
+     //
+@@ -90,13 +305,10 @@ pub fn run() {
+     //
+     // Parse args.
+     //
+-    let mut args: Vec<_> = std::env::args().collect();
+-
+-    // Work around clap's limitations handling +O options.
+-    for arg in &mut args {
+-        if arg.starts_with("+O") {
+-            arg.insert_str(0, "--");
+-        }
++    // Bash's startup option order (and `+` options, which clap lacks).
++    if let Err(message) = bash_startup_options(&mut args) {
++        eprintln!("{message}");
++        return 2;
+     }
+ 
+     let parsed_args = match CommandLineArgs::try_parse_from(args.iter().cloned()) {
+@@ -112,7 +324,7 @@ pub fn run() {
+                 _ => 2,
+             };
+ 
+-            std::process::exit(exit_code);
++            return exit_code;
+         }
+     };
+ 
+@@ -120,16 +332,27 @@ pub fn run() {
+     // Run.
+     //
+     #[cfg(any(unix, windows))]
+-    let mut builder = tokio::runtime::Builder::new_multi_thread();
++    let mut builder = if CURRENT_THREAD_RUNTIME.load(std::sync::atomic::Ordering::Acquire) {
++        tokio::runtime::Builder::new_current_thread()
++    } else {
++        tokio::runtime::Builder::new_multi_thread()
++    };
+     #[cfg(not(any(unix, windows)))]
+     let mut builder = tokio::runtime::Builder::new_current_thread();
+ 
++    // Real-process subshells need to know which descriptors the runtime opens.
++    brush_core::subshell::note_descriptors_before_runtime();
+     let Ok(runtime) = builder.enable_all().build() else {
+         tracing::error!("error: failed to create Tokio runtime");
+-        std::process::exit(1);
++        return 1;
+     };
++    brush_core::subshell::note_descriptors_after_runtime();
+ 
+     let result = runtime.block_on(run_async(&args, parsed_args));
++    // A canceled asynchronous stdin read may still have a blocking read in
++    // Tokio's stdin worker. The shell has finished; do not wait for another
++    // input line during runtime shutdown (notably after an idle TERM trap).
++    runtime.shutdown_background();
+ 
+     let exit_code = match result {
+         Ok(code) => code,
+@@ -139,7 +362,7 @@ pub fn run() {
+         }
+     };
+ 
+-    std::process::exit(i32::from(exit_code));
++    i32::from(exit_code)
+ }
+ 
+ /// Installs panic handlers to report our panic and cleanly exit on panic.
+@@ -210,7 +433,13 @@ async fn run_async(
+     // Run with the selected input backend. Each branch instantiates the concrete
+     // backend type and calls `run_in_shell`, preserving static dispatch.
+     let default_backend = get_default_input_backend_type(&args);
+-    let selected_backend = args.input_backend.unwrap_or(default_backend);
++    // Reedline needs a terminal; without one, read as the minimal backend does.
++    let selected_backend = match args.input_backend {
++        Some(InputBackendType::Reedline) if !std::io::stdin().is_terminal() => {
++            InputBackendType::Minimal
++        }
++        selected => selected.unwrap_or(default_backend),
++    };
+ 
+     // Build UI options by merging config file with CLI args.
+     #[allow(unused_variables, reason = "not used when no backend features enabled")]
+@@ -239,7 +468,7 @@ async fn run_async(
+ 
+         #[cfg(minimal_backend)]
+         InputBackendType::Minimal => {
+-            let mut input_backend = brush_interactive::MinimalInputBackend;
++            let mut input_backend = brush_interactive::MinimalInputBackend::default();
+             run_in_shell(&shell, args, &mut input_backend, &ui_options).await
+         }
+         #[cfg(not(minimal_backend))]
+@@ -305,8 +534,48 @@ async fn run_in_shell(
+         )?;
+     }
+ 
++    // Like Bash, an interactive shell without a terminal (standard error is not
++    // one and there is no controlling terminal) says so and runs without job
++    // control.
++    #[cfg(unix)]
++    {
++        let mut shell = shell_ref.lock().await;
++        if shell.options().interactive
++            && !std::io::stderr().is_terminal()
++            && std::fs::OpenOptions::new()
++                .read(true)
++                .write(true)
++                .open("/dev/tty")
++                .is_err()
++        {
++            shell.options_mut().enable_job_control = false;
++            let name = shell.current_shell_name().unwrap_or_default().into_owned();
++            let name = name.rsplit('/').next().unwrap_or_default();
++            let _ = std::io::Write::write_fmt(
++                &mut shell.stderr(),
++                format_args!(
++                    "{name}: cannot set terminal process group (-1): Inappropriate ioctl for device\n\
++                 {name}: no job control in this shell\n"
++                ),
++            );
++        }
++    }
++
+     // Load profile and rc files as appropriate.
+     initialize_shell(shell_ref, &args).await?;
++    bundled::notify_initialized();
++
++    // An interactive shell running `-c` or a script operand still uses job
++    // control, so it must own the terminal before starting foreground process
++    // groups. (The stdin-reading path acquires it in `InteractiveShell`.)
++    let _terminal_control = if !read_commands_from_stdin
++        && shell_ref.lock().await.options().interactive
++        && std::io::stdin().is_terminal()
++    {
++        Some(brush_core::terminal::TerminalControl::acquire()?)
++    } else {
++        None
++    };
+ 
+     // If a command was specified via -c, then run that command and then exit. Its result
+     // is also the shell's last exit status, which is what's returned below for every mode.
+@@ -326,7 +595,7 @@ async fn run_in_shell(
+             .lock()
+             .await
+             .run_script(
+-                Path::new(&args.script_args[0]),
++                brush_core::bytes::to_path(&args.script_args[0]),
+                 args.script_args.iter().skip(1),
+             )
+             .await?;
+@@ -365,6 +634,14 @@ async fn initialize_shell(
+     };
+ 
+     shell_ref.lock().await.load_config(&profile, &rc).await?;
++    if let Some((path, _)) = MARSH_EXTERNAL_COMMANDS.get() {
++        let mut shell = shell_ref.lock().await;
++        let current = shell.env_str("PATH").map(|value| value.into_owned());
++        let value = prepend_external_path(path, current.as_deref());
++        let mut variable = brush_core::ShellVariable::new(value);
++        variable.export();
++        shell.set_env_global("PATH", variable)?;
++    }
+ 
+     Ok(())
+ }
+@@ -471,6 +748,11 @@ async fn instantiate_shell_from_args(
+         brush_builtins::BuiltinSet::BashMode
+     };
+ 
++    // Standard descriptors the parent closed stay closed.
++    for fd in &args.closed_fds {
++        brush_core::subshell::mark_standard_descriptor_closed(*fd);
++    }
++
+     // Identify the file descriptors to inherit.
+     let fds = args
+         .inherited_fds
+@@ -493,6 +775,7 @@ async fn instantiate_shell_from_args(
+     // NOTE: We skip loading profile and rc files here; that will be handled later after we've
+     // fully instantiated everything we want set before running any code.
+     let shell = brush_core::Shell::builder_with_extensions::<BrushShellExtensions>()
++        .marsh_extensions(MARSH_EXTENSIONS.load(std::sync::atomic::Ordering::Acquire))
+         .disable_options(args.disabled_options.clone())
+         .disable_shopt_options(args.disabled_shopt_options.clone())
+         .disallow_overwriting_regular_files_via_output_redirection(
+@@ -535,6 +818,21 @@ async fn instantiate_shell_from_args(
+     // Build the shell.
+     let mut shell = shell.build().await?;
+ 
++    // Like Bash, the shell ignores SIGQUIT.
++    #[cfg(unix)]
++    brush_core::traps::ignore_quit();
++
++    if let Some((path, session)) = MARSH_EXTERNAL_COMMANDS.get() {
++        let current = shell.env_str("PATH").map(|value| value.into_owned());
++        let value = prepend_external_path(path, current.as_deref());
++        let mut variable = brush_core::ShellVariable::new(value);
++        variable.export();
++        shell.set_env_global("PATH", variable)?;
++        let mut variable = brush_core::ShellVariable::new(session.clone());
++        variable.export();
++        shell.set_env_global("MARSH_EXTERNAL_SESSION", variable)?;
++    }
++
+     // Make adjustments.
+     if let Some(xtrace_file_path) = &args.xtrace_file_path {
+         enable_xtrace_to_file(&mut shell, xtrace_file_path)?;
+@@ -543,6 +841,14 @@ async fn instantiate_shell_from_args(
+     Ok(shell)
+ }
+ 
++fn prepend_external_path(directory: &str, current: Option<&str>) -> String {
++    let mut entries = vec![directory];
++    if let Some(current) = current {
++        entries.extend(current.split(':').filter(|entry| *entry != directory));
++    }
++    entries.join(":")
++}
++
+ fn enable_xtrace_to_file(
+     shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
+     file_path: &Path,
+@@ -960,6 +1266,48 @@ mod tests {
+         Ok(())
+     }
+ 
++    #[test]
++    fn parse_c_in_bash_option_order() -> Result<()> {
++        // Bash: `-c` is a flag; the command is the first operand after all options.
++        for argv in [
++            &["brush", "-c", "-l", "echo x", "a0", "a1"][..],
++            &["brush", "-cl", "echo x", "a0", "a1"],
++            &["brush", "-lc", "echo x", "a0", "a1"],
++            &["brush", "--login", "-c", "echo x", "a0", "a1"],
++            &["brush", "-c", "--login", "echo x", "a0", "a1"],
++        ] {
++            let parsed = CommandLineArgs::try_parse_from(args(argv))?;
++            assert_eq!(parsed.command.as_deref(), Some("echo x"), "{argv:?}");
++            assert!(parsed.login, "{argv:?}");
++            assert_eq!(parsed.script_args, ["a0", "a1"], "{argv:?}");
++        }
++        let parsed = CommandLineArgs::try_parse_from(args(&["brush", "-ce", "echo x"]))?;
++        assert_eq!(parsed.command.as_deref(), Some("echo x"));
++        assert!(parsed.exit_on_nonzero_command_exit);
++        let parsed = CommandLineArgs::try_parse_from(args(&["brush", "-c", "-e", "echo x"]))?;
++        assert_eq!(parsed.command.as_deref(), Some("echo x"));
++        assert!(parsed.exit_on_nonzero_command_exit);
++        for argv in [
++            &["brush", "-c", "-o", "pipefail", "echo x"][..],
++            &["brush", "-o", "pipefail", "-c", "echo x"],
++            &["brush", "-co", "pipefail", "echo x"],
++        ] {
++            let parsed = CommandLineArgs::try_parse_from(args(argv))?;
++            assert_eq!(parsed.command.as_deref(), Some("echo x"), "{argv:?}");
++            assert_eq!(parsed.enabled_options, ["pipefail"], "{argv:?}");
++        }
++        let parsed = CommandLineArgs::try_parse_from(args(&["brush", "-c", "-l", "--", "-x"]))?;
++        assert_eq!(parsed.command.as_deref(), Some("-x"));
++        assert!(parsed.login);
++        // A command's own arguments are never options.
++        let parsed = CommandLineArgs::try_parse_from(args(&["brush", "-c", "echo", "-l"]))?;
++        assert_eq!(parsed.command.as_deref(), Some("echo"));
++        assert!(!parsed.login);
++        assert_eq!(parsed.script_args, ["-l"]);
++        assert!(CommandLineArgs::try_parse_from(args(&["brush", "-c", "-l"])).is_err());
++        Ok(())
++    }
++
+     #[test]
+     fn defaults_to_an_available_input_backend() {
+         for at_terminal in [true, false] {
+diff --git a/brush-shell/src/error_formatter.rs b/brush-shell/src/error_formatter.rs
+index 7142fe6b..1a863ebc 100644
+--- a/brush-shell/src/error_formatter.rs
++++ b/brush-shell/src/error_formatter.rs
+@@ -7,8 +7,11 @@ impl brush_core::extensions::ErrorFormatter for Formatter {
+     fn format_error(
+         &self,
+         err: &brush_core::error::Error,
+-        _shell: &brush_core::Shell<impl brush_core::ShellExtensions>,
++        shell: &brush_core::Shell<impl brush_core::ShellExtensions>,
+     ) -> String {
++        if let Some(message) = err.bash_message() {
++            return std::format!("{}{message}\n", shell.diagnostic_prefix());
++        }
+         let prefix = if self.use_color {
+             color_print::cstr!("<red>error:</red> ")
+         } else {
+diff --git a/brush-shell/src/main.rs b/brush-shell/src/main.rs
+deleted file mode 100644
+index 97abd677..00000000
+--- a/brush-shell/src/main.rs
++++ /dev/null
+@@ -1,5 +0,0 @@
+-//! Main entry for the `brush` shell.
+-
+-fn main() {
+-    brush_shell::entry::run();
+-}
+diff --git a/brush-shell/tests/cases/compat/background_jobs.yaml b/brush-shell/tests/cases/compat/background_jobs.yaml
+index 82736cb4..b12016f6 100644
+--- a/brush-shell/tests/cases/compat/background_jobs.yaml
++++ b/brush-shell/tests/cases/compat/background_jobs.yaml
+@@ -81,6 +81,37 @@ cases:
+         echo 2 &
+         wait
+ 
++  - name: "Last background PID is a child and waitable"
++    args:
++      - "-c"
++      - |
++        sh -c 'sleep 0.05; exit 23' &
++        pid=$!
++        test -n "$pid" || exit 90
++        wait "$pid"
++        test "$?" -eq 23
++
++  - name: "jobs -p reports the last background PID"
++    args:
++      - "-c"
++      - |
++        sleep 0.1 &
++        pid=$!
++        test "$(jobs -p)" = "$pid"
++        wait "$pid"
++
++  - name: "jobs -l includes PID and command"
++    args:
++      - "-c"
++      - |
++        sleep 0.1 &
++        pid=$!
++        jobs -l >jobs.txt
++        grep -F "$pid" jobs.txt >/dev/null
++        grep -F 'sleep 0.1' jobs.txt >/dev/null
++        rm jobs.txt
++        wait "$pid"
++
+   - name: "Two sequential background jobs with explicit wait via stdin"
+     stdin: |
+       echo 1 &

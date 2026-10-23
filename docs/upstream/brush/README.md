@@ -1,22 +1,73 @@
 # Brush deltas for marsh
 
-These patches target pinned Brush revision
-`1389a8e8af6bec56fdfb9ab60a8c898bc14aa961`. The source under
-`vendor/brush/` is that revision with the runtime patches applied in filename order,
-and the marsh build compiles it directly. `vendor/brush/UPSTREAM_REVISION` and
-`vendor/brush/MARSH-VENDORING.md` record how to reproduce the vendored tree.
+`vendor/brush/` is upstream Brush at commit
+`cc73400c5a3bd13c48bdfc9d89e1b9dfe694fbf6` (`vendor/brush/UPSTREAM_REVISION`)
+plus the seven patches in this directory. Apply them to a checkout of that
+revision with `git apply`; they touch disjoint files, so the order does not
+matter. Copy the crates the way `vendor/brush/MARSH-VENDORING.md` describes to
+reproduce the vendored tree. The marsh build compiles that tree directly.
 
-The `.patch` files are the queue inventory, applied in filename order. IDs
-include suffixes and the intentionally unused `0011`; count the files with:
+| Patch | Area |
+| --- | --- |
+| `0001-brush-parser` | Tokenizer and word parser: function substitutions, lexical aliases, `( (`, here-documents, line numbers, split/fanout/cloud grammar |
+| `0002-core-processes-jobs-signals` | Child processes, job table, `wait`/`kill`/`disown` plumbing, trapped signals, `sys/` |
+| `0003-core-execution-subshells` | Interpreter: real-process subshells, pipelines, background lists, redirections, read units, startup, `split`/`fanout`/`cloud` |
+| `0004-core-expansion-text-and-prompts` | Expansion, namerefs, patterns and regex, lossless bytes, prompts, completion, history |
+| `0005-builtins` | Builtins ported to upstream's registry API (`read`, `printf`, `kill`, `wait`, `exec`, `getopts`, `disown`, ...) |
+| `0006-interactive-input` | Input backends: idle `TERM`/`HUP` delivery, no-terminal prompts, terminal output flags |
+| `0007-shell-entry-and-workspace` | Entry point (`run`/`run_from`), startup options, process shims, workspace manifest |
 
-```sh
-find docs/upstream/brush -maxdepth 1 -name '*.patch' -type f | wc -l
-```
+Some of this is marsh product wiring and not a Bash fix: registered-command
+process shims, `split`/`join`, `fanout`/`collect`, and `cloud`. Everything else is
+a Bash-compatibility change that could go upstream separately.
 
-Each entry below describes what that patch changed when introduced. Later
-patches can supersede it: `0035` replaces shell-owned splits, `0073` replaces
-`0055`'s byte handling, and `0090` extends `0025`'s name references. Current
-qualification and known gaps are in
+## History of this queue
+
+Until the move to this pin the queue was 101 per-fix patches (`0001`-`0097`,
+with suffixes) against Brush `1389a8e8af6bec56fdfb9ab60a8c898bc14aa961`. Tests,
+code comments and the bash-compatibility document still cite those ids; the
+inventory below describes them, and the patch files are in git history at
+`02ca4a2`. They were replaced by the area patches above when the tree moved to
+`cc73400c`, 137 upstream commits later. Upstream had since reworked builtins
+(a registry and the `brush-clap-adapter` crate instead of clap types in the core
+API), process launching, pipeline and subshell execution, prefix-assignment
+scopes, completion state, the tokenizer, and the input backends. Most fixes
+interleave with those changes and no longer exist as separable diffs.
+
+What the move did:
+
+- Took upstream's behavior where it now matches (no marsh change kept): negative
+  array subscripts, the `IFS` joiner for `"$*"`, brace expansion and field
+  splitting of expansion results, `-c` option order and `--`, `compgen` listing
+  order of aliases, keywords, functions and builtins, whole-group signalling
+  and continuing on `TERM`/`HUP`, and `wait` taking only a job's status.
+  `kill` keeps marsh's default `TERM` and operand handling and adds upstream's
+  signal-zero probe.
+- Ported onto upstream's new code: every builtin patch (registry API), process
+  launching through `LaunchRequest` (descriptor sources, closed standard
+  streams, fork-safe signals, ENOEXEC scripts), the real-process subshell,
+  pipeline and background paths, `huponexit` on every exit path, and idle
+  `TERM`/`HUP` delivery on the `minimal` and `vt` backends. `basic` is now the
+  `vt` editor in a backspace-only style.
+- Not ported: the plain line reader that took over when a terminal never
+  answered reedline's cursor-position query (old `0037` and `0069`). reedline
+  0.52 no longer reports that failure, so there is nothing to fall back from.
+  A shell on such a terminal still starts, runs commands and exits (the
+  `interactive_shell_survives_a_terminal_that_never_reports_the_cursor` smoke
+  test passes), but each prompt waits on crossterm's cursor-query timeout.
+  `--input-backend vt` never sends the query.
+- Classified divergences that upstream fixed (ten `READLINE-COMPLETION` `fullquote`
+  cases) were removed from `tests/acceptance/bash_divergences.json`.
+
+In `tests/acceptance/bash_suites.py` (GNU Bash 5.3.0, Linux arm64, divergence
+list emptied, 4,610 cases), stock upstream at `b562e058` matched Bash in 1,207
+cases and the previous vendored tree in 3,689. The rebased tree matches in
+3,699; no case that matched before fails now, and ten that failed now match.
+
+## Retired per-fix inventory
+
+Each entry describes what that patch changed when introduced, against the old
+pin. Current qualification and known gaps are in
 [Bash compatibility](../../design/bash-compatibility.md).
 
 - `0001` turns bundled registrations into process-backed builtin shims. Command

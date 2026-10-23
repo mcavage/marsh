@@ -39,6 +39,7 @@ pub mod split;
 mod split_interp;
 pub mod subshell;
 pub mod sys;
+pub mod tasks;
 pub mod terminal;
 pub mod tests;
 pub mod timing;

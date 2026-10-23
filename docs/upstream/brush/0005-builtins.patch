@@ -1,0 +1,3851 @@
+diff --git a/brush-builtins/Cargo.toml b/brush-builtins/Cargo.toml
+index 6ec9cf77..0b757b3a 100644
+--- a/brush-builtins/Cargo.toml
++++ b/brush-builtins/Cargo.toml
+@@ -175,7 +175,3 @@ rlimit = "0.11.0"
+ 
+ [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+ procfs = "0.18.0"
+-
+-[dev-dependencies]
+-anyhow = "1.0.102"
+-pretty_assertions = { version = "1.4.1", features = ["unstable"] }
+diff --git a/brush-builtins/src/command.rs b/brush-builtins/src/command.rs
+index 0feb3e40..bac7e5d6 100644
+--- a/brush-builtins/src/command.rs
++++ b/brush-builtins/src/command.rs
+@@ -1,3 +1,4 @@
++use brush_core::bytes::ToShellText as _;
+ use clap::Parser;
+ use std::io::Write;
+ use std::path::PathBuf;
+@@ -75,7 +76,7 @@ impl CommandCommand {
+                         writeln!(context.stdout(), "{name}")?;
+                     }
+                     Resolved::File { path, .. } => {
+-                        writeln!(context.stdout(), "{}", path.to_string_lossy())?;
++                        writeln!(context.stdout(), "{}", path.to_shell_text())?;
+                     }
+                 }
+             } else {
+diff --git a/brush-builtins/src/declare.rs b/brush-builtins/src/declare.rs
+index 5161175b..7bf9c292 100644
+--- a/brush-builtins/src/declare.rs
++++ b/brush-builtins/src/declare.rs
+@@ -126,7 +126,11 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for DeclareCommand {
+         };
+ 
+         if matches!(verb, DeclareVerb::Local) && !context.shell.in_function() {
+-            writeln!(context.stderr(), "can only be used in a function")?;
++            writeln!(
++                context.stderr(),
++                "{}local: can only be used in a function",
++                context.shell.diagnostic_prefix()
++            )?;
+             return Ok(ExecutionResult::general_error());
+         }
+ 
+@@ -171,7 +175,11 @@ impl DeclareCommand {
+         let name = match declaration {
+             brush_core::CommandArg::String(s) => s,
+             brush_core::CommandArg::Assignment(_) => {
+-                writeln!(context.stderr(), "declare: {declaration}: not found")?;
++                writeln!(
++                    context.stderr(),
++                    "{}declare: {declaration}: not found",
++                    context.shell.diagnostic_prefix()
++                )?;
+                 return Ok(false);
+             }
+         };
+@@ -198,7 +206,7 @@ impl DeclareCommand {
+                 // For some reason, bash does not print an error message in this case.
+                 Ok(false)
+             }
+-        } else if let Some(variable) = context.shell.env().get_using_policy(name, lookup) {
++        } else if let Some(variable) = context.shell.env().get_raw_using_policy(name, lookup) {
+             let mut cs = variable.attribute_flags(context.shell);
+             if cs.is_empty() {
+                 cs.push('-');
+@@ -219,7 +227,11 @@ impl DeclareCommand {
+ 
+             Ok(true)
+         } else {
+-            writeln!(context.stderr(), "declare: {name}: not found")?;
++            writeln!(
++                context.stderr(),
++                "{}declare: {name}: not found",
++                context.shell.diagnostic_prefix()
++            )?;
+             Ok(false)
+         }
+     }
+@@ -278,17 +290,34 @@ impl DeclareCommand {
+ 
+         // Special-case: `local -`
+         if name == "-" && matches!(verb, DeclareVerb::Local) {
+-            // TODO(local): `local -` allows shadowing the current `set` options (i.e., $-), with
+-            // subsequent updates getting discarded when the current local scope is popped.
+-            tracing::warn!("not yet implemented: local -");
++            context.shell.save_set_options_until_return()?;
+             return Ok(true);
+         }
+ 
+-        // Make sure it's a valid name.
+-        if !env::valid_variable_name(name.as_str()) {
++        // Make sure it's a valid name (and, as in Bash, not an empty subscript).
++        if !env::valid_variable_name(name.as_str()) || assigned_index.as_deref() == Some("") {
++            writeln!(
++                context.stderr(),
++                "{}{}: `{declaration}': not a valid identifier",
++                context.shell.diagnostic_prefix(),
++                context.command_name
++            )?;
++            return Ok(false);
++        }
++
++        // Like Bash, `+a` and `+A` cannot turn an array back into a scalar.
++        if (self.make_indexed_array.to_bool() == Some(false)
++            || self.make_associative_array.to_bool() == Some(false))
++            && context
++                .shell
++                .env()
++                .get(&name)
++                .is_some_and(|(_, variable)| variable.value().is_array())
++        {
+             writeln!(
+                 context.stderr(),
+-                "{}: `{name}': not a valid identifier",
++                "{}{}: {name}: cannot destroy array variables in this way",
++                context.shell.diagnostic_prefix(),
+                 context.command_name
+             )?;
+             return Ok(false);
+@@ -301,6 +330,24 @@ impl DeclareCommand {
+             EnvironmentLookup::Anywhere
+         };
+ 
++        // Without `-n`/`+n`, a declaration of an existing name reference acts on
++        // the variable it names.
++        let name = if self.make_nameref.to_bool().is_none()
++            && context
++                .shell
++                .env()
++                .get_raw_using_policy(name.as_str(), lookup)
++                .is_some_and(|var| var.is_treated_as_nameref())
++        {
++            context
++                .shell
++                .env()
++                .resolve_nameref(name.as_str())
++                .into_owned()
++        } else {
++            name
++        };
++
+         // `local -I x[=v]` / `declare -I` (bash 5.0+): the new local inherits
+         // value and attributes from the nearest same-name variable in an
+         // enclosing scope instead of starting unset; `+=` appends to the
+@@ -336,12 +383,20 @@ impl DeclareCommand {
+             }
+         }
+ 
+-        // Look up the variable.
+-        if let Some(var) = context
+-            .shell
+-            .env_mut()
+-            .get_mut_using_policy(name.as_str(), lookup)
+-        {
++        // Look up the variable. `-n`/`+n` act on a name reference itself; other
++        // declarations act on the variable it refers to.
++        let existing = if self.make_nameref.to_bool().is_some() {
++            context
++                .shell
++                .env_mut()
++                .get_mut_raw_using_policy(name.as_str(), lookup)
++        } else {
++            context
++                .shell
++                .env_mut()
++                .get_mut_using_policy(name.as_str(), lookup)
++        };
++        if let Some(var) = existing {
+             if self.make_associative_array.is_some() {
+                 var.convert_to_associative_array()?;
+             }
+diff --git a/brush-builtins/src/dirs.rs b/brush-builtins/src/dirs.rs
+index 9c772ce0..a5b9b265 100644
+--- a/brush-builtins/src/dirs.rs
++++ b/brush-builtins/src/dirs.rs
+@@ -1,3 +1,4 @@
++use brush_core::bytes::ToShellText as _;
+ use clap::Parser;
+ use std::io::Write;
+ 
+@@ -82,7 +83,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for DirsCommand {
+                     write!(context.stdout(), "{i:2}  ")?;
+                 }
+ 
+-                let mut dir_str = dir.to_string_lossy().to_string();
++                let mut dir_str = dir.to_shell_text().to_string();
+ 
+                 if !self.tilde_long {
+                     dir_str = context.shell.tilde_shorten(dir_str);
+diff --git a/brush-builtins/src/disown.rs b/brush-builtins/src/disown.rs
+new file mode 100644
+index 00000000..84228351
+--- /dev/null
++++ b/brush-builtins/src/disown.rs
+@@ -0,0 +1,158 @@
++use clap::Parser;
++use std::io::Write;
++
++use brush_core::{
++    ExecutionExitCode, ExecutionResult,
++    builtins::{self, Invocation},
++    jobs::{self, JobSpecMatch},
++};
++
++const USAGE: &str = "disown [-h] [-ar] [jobspec ... | pid ...]";
++
++const HELP: &str = concat!(
++    "    Remove jobs from current shell.\n",
++    "    \n",
++    "    Removes each JOBSPEC argument from the table of active jobs.  Without\n",
++    "    any JOBSPECs, the shell uses its notion of the current job.\n",
++    "    \n",
++    "    Options:\n",
++    "      -a\tremove all jobs if JOBSPEC is not supplied\n",
++    "      -h\tmark each JOBSPEC so that SIGHUP is not sent to the job if the\n",
++    "    \t\tshell receives a SIGHUP\n",
++    "      -r\tremove only running jobs\n",
++    "    \n",
++    "    Exit Status:\n",
++    "    Returns success unless an invalid option or JOBSPEC is given.\n",
++);
++
++/// Remove jobs from current shell.
++#[derive(Parser)]
++#[clap(disable_help_flag = true)]
++pub(crate) struct DisownCommand {
++    /// Options (-a, -h, -r) and job specs or process IDs, parsed as Bash does.
++    #[clap(allow_hyphen_values = true)]
++    args: Vec<String>,
++}
++
++// Takes the words as given: Bash parses `disown` options itself, and clap
++// would drop a `--`.
++brush_clap_adapter::impl_parse_args!(
++    DisownCommand,
++    parse = |invocation: Invocation<'_>| {
++        Ok(Self {
++            args: invocation
++                .into_args()
++                .into_iter()
++                .map(String::from)
++                .collect(),
++        })
++    }
++);
++
++impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for DisownCommand {
++    type Error = brush_core::Error;
++
++    async fn execute(
++        self,
++        context: brush_core::ExecutionContext<'_, SE>,
++    ) -> Result<ExecutionResult, Self::Error> {
++        let prefix = std::format!(
++            "{}{}: ",
++            context.shell.diagnostic_prefix(),
++            context.command_name
++        );
++        let (mut all, mut nohup, mut running) = (false, false, false);
++        let mut operands = self.args.as_slice();
++        // Bash's internal_getopt: options end at `--` or the first word that
++        // is not `-x...`.
++        while let Some(word) = operands.first() {
++            if word == "--help" {
++                write!(
++                    context.stdout(),
++                    "{}: {USAGE}\n{HELP}",
++                    context.command_name
++                )?;
++                return Ok(ExecutionExitCode::InvalidUsage.into());
++            }
++            if word == "--" {
++                operands = &operands[1..];
++                break;
++            }
++            let Some(letters) = word.strip_prefix('-').filter(|l| !l.is_empty()) else {
++                break;
++            };
++            for letter in letters.chars() {
++                match letter {
++                    'a' => all = true,
++                    'h' => nohup = true,
++                    'r' => running = true,
++                    other => {
++                        writeln!(context.stderr(), "{prefix}-{other}: invalid option")?;
++                        writeln!(context.stderr(), "{}: usage: {USAGE}", context.command_name)?;
++                        return Ok(ExecutionExitCode::InvalidUsage.into());
++                    }
++                }
++            }
++            operands = &operands[1..];
++        }
++
++        let jobs = context.shell.jobs_mut();
++        if operands.is_empty() && (all || running) {
++            if nohup {
++                jobs.set_nohup_all(running);
++            } else {
++                jobs.disown_all(running);
++            }
++            return Ok(ExecutionResult::success());
++        }
++
++        let mut result = ExecutionResult::success();
++        let operands = if operands.is_empty() {
++            vec![None]
++        } else {
++            operands.iter().map(|o| Some(o.as_str())).collect()
++        };
++        for operand in operands {
++            if let Some(word) = operand {
++                if !word.is_empty() && !word.starts_with('%') && jobs::parse_pid(word).is_none() {
++                    writeln!(
++                        context.stderr(),
++                        "{prefix}warning: {word}: job specification requires leading `%'"
++                    )?;
++                }
++            }
++            let name = operand.unwrap_or("current");
++            match context.shell.jobs().find_for_disown(operand) {
++                JobSpecMatch::Found(key) if nohup => context.shell.jobs_mut().set_nohup(key),
++                JobSpecMatch::Found(key) => {
++                    if let Some(job) = context.shell.jobs().get(key) {
++                        if matches!(job.state, jobs::JobState::Stopped)
++                            && context.shell.depth() == 0
++                        {
++                            writeln!(
++                                context.stderr(),
++                                "{}warning: deleting stopped job {} with process group {}",
++                                context.shell.diagnostic_prefix(),
++                                job.id,
++                                job.process_group_id().unwrap_or_default()
++                            )?;
++                        }
++                    }
++                    context.shell.jobs_mut().disown(key);
++                }
++                JobSpecMatch::Ambiguous => {
++                    let spec = name.strip_prefix('%').unwrap_or(name);
++                    let spec = spec.strip_prefix('?').unwrap_or(spec);
++                    writeln!(context.stderr(), "{prefix}{spec}: ambiguous job spec")?;
++                    writeln!(context.stderr(), "{prefix}{name}: no such job")?;
++                    result = ExecutionResult::general_error();
++                }
++                JobSpecMatch::NoSuchJob => {
++                    writeln!(context.stderr(), "{prefix}{name}: no such job")?;
++                    result = ExecutionResult::general_error();
++                }
++            }
++        }
++        Ok(result)
++    }
++}
+diff --git a/brush-builtins/src/dot.rs b/brush-builtins/src/dot.rs
+index 5695877a..ebe7b677 100644
+--- a/brush-builtins/src/dot.rs
++++ b/brush-builtins/src/dot.rs
+@@ -1,3 +1,4 @@
++use std::io::Write as _;
+ use std::path::Path;
+ 
+ use brush_core::builtins;
+@@ -24,13 +25,26 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for DotCommand {
+         context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+         // TODO(dot): Handle trap inheritance.
+-        context
++        let result = context
+             .shell
+             .source_script(
+                 Path::new(&self.script_path),
+                 self.script_args.iter(),
+                 &context.params,
+             )
+-            .await
++            .await;
++        match result {
++            Err(error) if matches!(error.kind(), brush_core::ErrorKind::BinaryFile(_)) => {
++                writeln!(
++                    context.stderr(),
++                    "{}{}: {}: cannot execute binary file",
++                    context.shell.diagnostic_prefix(),
++                    context.command_name,
++                    self.script_path
++                )?;
++                Ok(brush_core::ExecutionExitCode::CannotExecute.into())
++            }
++            result => result,
++        }
+     }
+ }
+diff --git a/brush-builtins/src/echo.rs b/brush-builtins/src/echo.rs
+index 324607db..7dbd4f58 100644
+--- a/brush-builtins/src/echo.rs
++++ b/brush-builtins/src/echo.rs
+@@ -1,6 +1,7 @@
+ use clap::Parser;
+ use std::io::Write;
+ 
++use brush_core::builtins::{Invocation, UsageError};
+ use brush_core::{ExecutionResult, builtins, escape};
+ 
+ /// Echo text to standard output.
+@@ -19,12 +20,58 @@ pub(crate) struct EchoCommand {
+     #[arg(short = 'E')]
+     no_interpret_backslash_escapes: bool,
+ 
+-    /// Tokens to echo to standard output.
++    /// Tokens to echo to standard output, options included.
+     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+     args: Vec<String>,
++
++    /// How many of `args` are options.
++    #[clap(skip)]
++    option_words: usize,
+ }
+ 
+-brush_clap_adapter::impl_parse_args!(EchoCommand, keep_double_dash = args);
++brush_clap_adapter::impl_parse_args!(EchoCommand, parse = EchoCommand::from_invocation);
++
++impl EchoCommand {
++    /// Parses options as Bash's `echo` does: leading words made only of
++    /// `-n`, `-e` and `-E` letters, in order (the last of `-e`/`-E` wins);
++    /// anything else, `--` included, starts the text. With `xpg_echo` in
++    /// posix mode there are no options.
++    fn from_invocation(invocation: Invocation<'_>) -> Result<Self, UsageError> {
++        let mut this = Self {
++            no_trailing_newline: false,
++            interpret_backslash_escapes: false,
++            no_interpret_backslash_escapes: false,
++            args: invocation
++                .into_args()
++                .into_iter()
++                .map(String::from)
++                .collect(),
++            option_words: 0,
++        };
++        let mut words = this.args.iter().peekable();
++        while let Some(word) = words.next_if(|word| {
++            word.len() > 1
++                && word.starts_with('-')
++                && word[1..].chars().all(|c| matches!(c, 'n' | 'e' | 'E'))
++        }) {
++            for letter in word[1..].chars() {
++                match letter {
++                    'n' => this.no_trailing_newline = true,
++                    'e' => {
++                        this.interpret_backslash_escapes = true;
++                        this.no_interpret_backslash_escapes = false;
++                    }
++                    _ => {
++                        this.interpret_backslash_escapes = false;
++                        this.no_interpret_backslash_escapes = true;
++                    }
++                }
++            }
++            this.option_words += 1;
++        }
++        Ok(this)
++    }
++}
+ 
+ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for EchoCommand {
+     type Error = brush_core::Error;
+@@ -33,11 +80,25 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for EchoCommand {
+         self,
+         context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+-        let mut trailing_newline = !self.no_trailing_newline;
++        let xpg_echo = context
++            .shell
++            .options()
++            .echo_builtin_expands_escape_sequences;
++        let (text, mut trailing_newline, escapes) =
++            if xpg_echo && context.shell.options().posix_mode {
++                (self.args.as_slice(), true, true)
++            } else {
++                (
++                    &self.args[self.option_words..],
++                    !self.no_trailing_newline,
++                    self.interpret_backslash_escapes
++                        || (xpg_echo && !self.no_interpret_backslash_escapes),
++                )
++            };
+         let mut s;
+-        if self.interpret_backslash_escapes {
++        if escapes {
+             s = String::new();
+-            for (i, arg) in self.args.iter().enumerate() {
++            for (i, arg) in text.iter().enumerate() {
+                 if i > 0 {
+                     s.push(' ');
+                 }
+@@ -46,7 +107,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for EchoCommand {
+                     arg.as_str(),
+                     escape::EscapeExpansionMode::EchoBuiltin,
+                 )?;
+-                s.push_str(&String::from_utf8_lossy(expanded_arg.as_slice()));
++                s.push_str(&brush_core::bytes::decode(expanded_arg.as_slice()));
+ 
+                 if !keep_going {
+                     trailing_newline = false;
+@@ -54,7 +115,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for EchoCommand {
+                 }
+             }
+         } else {
+-            s = self.args.join(" ");
++            s = text.join(" ");
+         }
+ 
+         if trailing_newline {
+diff --git a/brush-builtins/src/exec.rs b/brush-builtins/src/exec.rs
+index 9bfca6c2..55accbfb 100644
+--- a/brush-builtins/src/exec.rs
++++ b/brush-builtins/src/exec.rs
+@@ -1,8 +1,8 @@
+ use clap::Parser;
+-use std::borrow::Cow;
++use std::{borrow::Cow, io::Write as _};
+ 
+ use brush_core::{
+-    ErrorKind, ExecutionExitCode, ExecutionResult, builtins, commands,
++    ExecutionControlFlow, ExecutionExitCode, ExecutionResult, builtins, commands,
+     extensions::ProcessLauncher as _,
+ };
+ 
+@@ -50,7 +50,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ExecCommand {
+         // unsafe, since it would also replace the *parent* shell instance. We instead
+         // delegate to the `command` builtin to perform the execution, with an expectation
+         // of returning.
+-        if context.shell.is_subshell() {
++        if context.shell.is_subshell() && !context.shell.owns_process() {
+             if self.empty_environment || self.exec_as_login || self.name_for_argv0.is_some() {
+                 return brush_core::error::unimp("exec with options in subshell not yet supported");
+             }
+@@ -70,28 +70,59 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ExecCommand {
+         }
+ 
+         // Resolve the program as running it as a command would.
+-        let Some(program) = context.shell.resolve_external_command(&self.args[0]) else {
+-            return Ok(ExecutionExitCode::NotFound.into());
+-        };
+-
+-        let request = commands::compose_launch_request(
+-            &context,
+-            &program,
+-            argv0.as_str(),
+-            &self.args[1..],
+-            if self.empty_environment {
+-                commands::ProgramEnvironment::Empty
++        let name = &self.args[0];
++        let (message, missing) = if let Some(program) = context.shell.resolve_external_command(name)
++        {
++            // Bash execs the file by its full path, which is also what an ENOEXEC
++            // script sees as `$0` and what diagnostics name.
++            let program = brush_core::bytes::shell_path(&program).into_owned();
++            let full_path = if program.is_absolute() {
++                program.clone()
+             } else {
+-                commands::ProgramEnvironment::Exported
+-            },
+-        );
+-
+-        let exec_error = context.shell.process_launcher().exec(request);
++                context
++                    .shell
++                    .working_dir()
++                    .join(program.strip_prefix("./").unwrap_or(&program))
++            };
++            let request = commands::compose_launch_request(
++                &context,
++                &full_path,
++                argv0.as_str(),
++                &self.args[1..],
++                if self.empty_environment {
++                    commands::ProgramEnvironment::Empty
++                } else {
++                    commands::ProgramEnvironment::Exported
++                },
++            );
++
++            // A failed exec must leave the shell's own descriptors in place.
++            #[cfg(unix)]
++            let backup = brush_core::sys::commands::DescriptorBackup::save(
++                context.iter_fds().map(|(fd, _)| fd),
++            )?;
++            brush_core::traps::ignore_trap_ignored_signals_for_exec();
++            let error = context.shell.process_launcher().exec(request);
++            #[cfg(unix)]
++            backup.restore();
++
++            let missing = error.kind() == std::io::ErrorKind::NotFound
++                && !context.shell.absolute_path(&program).exists();
++            (error.to_string(), missing)
++        } else {
++            ("not found".to_owned(), true)
++        };
+ 
+-        if exec_error.kind() == std::io::ErrorKind::NotFound {
+-            Ok(ExecutionExitCode::NotFound.into())
++        let _ = writeln!(context.stderr(), "exec: {name}: {message}");
++        let mut result: ExecutionResult = if missing {
++            ExecutionExitCode::NotFound.into()
+         } else {
+-            Err(ErrorKind::from(exec_error).into())
++            ExecutionExitCode::CannotExecute.into()
++        };
++        // Like Bash, a noninteractive shell exits unless `execfail` is set.
++        if !context.shell.options().exit_on_exec_fail && !context.shell.options().interactive {
++            result.next_control_flow = ExecutionControlFlow::ExitShell;
+         }
++        Ok(result)
+     }
+ }
+diff --git a/brush-builtins/src/export.rs b/brush-builtins/src/export.rs
+index 7924af71..c481185e 100644
+--- a/brush-builtins/src/export.rs
++++ b/brush-builtins/src/export.rs
+@@ -3,7 +3,7 @@ use itertools::Itertools;
+ use std::io::Write;
+ 
+ use brush_core::{
+-    ExecutionExitCode, ExecutionResult, builtins,
++    ExecutionResult, builtins,
+     env::{EnvironmentLookup, EnvironmentScope},
+     parser::ast,
+     variables,
+@@ -65,6 +65,28 @@ impl ExportCommand {
+         decl: &brush_core::CommandArg,
+     ) -> Result<ExecutionResult, brush_core::Error> {
+         match decl {
++            // A word that only became `name=value` when expanded (`export "$1"`)
++            // is still an assignment, as in Bash.
++            brush_core::CommandArg::String(s) if !self.names_are_functions && s.contains('=') => {
++                let (name, value) = s.split_once('=').unwrap_or_default();
++                let (name, append) = match name.strip_suffix('+') {
++                    Some(name) => (name, true),
++                    None => (name, false),
++                };
++                if !brush_core::env::valid_variable_name(name) {
++                    // Bash names a subscripted reference without its value.
++                    let element = name.split_once('[').is_some_and(|(array, rest)| {
++                        brush_core::env::valid_variable_name(array) && rest.ends_with(']')
++                    });
++                    return self.invalid_identifier(context, if element { name } else { s });
++                }
++                self.assign(
++                    context,
++                    name,
++                    variables::ShellValueLiteral::Scalar(value.to_owned()),
++                    append,
++                )
++            }
+             brush_core::CommandArg::String(s) => {
+                 // See if this is supposed to be a function name.
+                 if self.names_are_functions {
+@@ -77,9 +99,16 @@ impl ExportCommand {
+                             func.export();
+                         }
+                     } else {
+-                        writeln!(context.stderr(), "{s}: not a function")?;
+-                        return Ok(ExecutionExitCode::InvalidUsage.into());
++                        writeln!(
++                            context.stderr(),
++                            "{}{}: {s}: not a function",
++                            context.shell.diagnostic_prefix(),
++                            context.command_name
++                        )?;
++                        return Ok(ExecutionResult::general_error());
+                     }
++                } else if !brush_core::env::valid_variable_name(s) {
++                    return self.invalid_identifier(context, s);
+                 }
+                 // Try to find the variable already present; if we find it, then mark it
+                 // exported.
+@@ -90,13 +119,13 @@ impl ExportCommand {
+                         variable.export();
+                     }
+                 }
++                Ok(ExecutionResult::success())
+             }
+             brush_core::CommandArg::Assignment(assignment) => {
+                 let name = match &assignment.name {
+                     ast::AssignmentName::VariableName(name) => name,
+-                    ast::AssignmentName::ArrayElementName(_, _) => {
+-                        writeln!(context.stderr(), "not a valid variable name")?;
+-                        return Ok(ExecutionExitCode::InvalidUsage.into());
++                    ast::AssignmentName::ArrayElementName(name, index) => {
++                        return self.invalid_identifier(context, &std::format!("{name}[{index}]"));
+                     }
+                 };
+ 
+@@ -112,41 +141,94 @@ impl ExportCommand {
+                         ))
+                     }
+                 };
++                self.assign(context, name, value, assignment.append)
++            }
++        }
++    }
+ 
+-                // `export name+=value` appends to the existing value, exactly like a
+-                // bare `name+=value`. update_or_add always replaces, so when the
+-                // variable already exists honor the append here. A missing variable
+-                // falls through: appending to nothing is a plain assignment.
+-                if assignment.append
+-                    && let Some((_, variable)) = context.shell.env_mut().get_mut(name)
+-                {
+-                    variable.assign(value, true)?;
+-                    if self.unexport {
+-                        variable.unexport();
+-                    } else {
+-                        variable.export();
+-                    }
+-                    return Ok(ExecutionResult::success());
+-                }
++    /// Bash's message for a word that names no variable; `export` goes on.
++    fn invalid_identifier(
++        &self,
++        context: &brush_core::ExecutionContext<'_, impl brush_core::ShellExtensions>,
++        word: &str,
++    ) -> Result<ExecutionResult, brush_core::Error> {
++        writeln!(
++            context.stderr(),
++            "{}{}: `{word}': not a valid identifier",
++            context.shell.diagnostic_prefix(),
++            context.command_name
++        )?;
++        Ok(ExecutionResult::general_error())
++    }
+ 
+-                // Update the variable with the provided value and then mark it exported.
+-                context.shell.env_mut().update_or_add(
+-                    name,
+-                    value,
+-                    |var| {
+-                        if self.unexport {
+-                            var.unexport();
+-                        } else {
+-                            var.export();
+-                        }
+-                        Ok(())
+-                    },
+-                    EnvironmentLookup::Anywhere,
+-                    EnvironmentScope::Global,
+-                )?;
++    fn assign(
++        &self,
++        context: &mut brush_core::ExecutionContext<'_, impl brush_core::ShellExtensions>,
++        name: &str,
++        value: variables::ShellValueLiteral,
++        append: bool,
++    ) -> Result<ExecutionResult, brush_core::Error> {
++        // Like Bash, a reference to an array element assigns the element, which
++        // cannot be exported.
++        if let Some((array, index)) = context.shell.env().nameref_element(name) {
++            context.shell.env_mut().update_or_add(
++                name,
++                value,
++                |_| Ok(()),
++                EnvironmentLookup::Anywhere,
++                EnvironmentScope::Global,
++            )?;
++            writeln!(
++                context.stderr(),
++                "{}{}: `{array}[{index}]': not a valid identifier",
++                context.shell.diagnostic_prefix(),
++                context.command_name
++            )?;
++            return Ok(ExecutionResult::success());
++        }
++        if context
++            .shell
++            .env()
++            .get(name)
++            .is_some_and(|(_, variable)| variable.is_readonly())
++        {
++            writeln!(
++                context.stderr(),
++                "{}{name}: readonly variable",
++                context.shell.diagnostic_prefix()
++            )?;
++            return Ok(ExecutionResult::general_error());
++        }
++
++        // `export name+=value` appends to the existing value, exactly like a
++        // bare `name+=value`. update_or_add always replaces, so when the
++        // variable already exists honor the append here. A missing variable
++        // falls through: appending to nothing is a plain assignment.
++        if append && let Some((_, variable)) = context.shell.env_mut().get_mut(name) {
++            variable.assign(value, true)?;
++            if self.unexport {
++                variable.unexport();
++            } else {
++                variable.export();
+             }
++            return Ok(ExecutionResult::success());
+         }
+ 
++        // Update the variable with the provided value and then mark it exported.
++        context.shell.env_mut().update_or_add(
++            name,
++            value,
++            |var| {
++                if self.unexport {
++                    var.unexport();
++                } else {
++                    var.export();
++                }
++                Ok(())
++            },
++            EnvironmentLookup::Anywhere,
++            EnvironmentScope::Global,
++        )?;
+         Ok(ExecutionResult::success())
+     }
+ }
+diff --git a/brush-builtins/src/factory.rs b/brush-builtins/src/factory.rs
+index c915db99..affc40ff 100644
+--- a/brush-builtins/src/factory.rs
++++ b/brush-builtins/src/factory.rs
+@@ -335,10 +335,10 @@ pub fn default_builtins<SE: brush_core::ShellExtensions>(
+             builtins::Registration::of::<caller::CallerCommand>(),
+         );
+ 
+-        // TODO(disown): implement disown builtin
++        #[cfg(feature = "builtin.jobs")]
+         m.insert(
+             "disown".into(),
+-            builtins::Registration::of::<unimp::UnimplementedCommand>(),
++            builtins::Registration::of::<disown::DisownCommand>(),
+         );
+ 
+         // TODO(logout): implement logout builtin
+diff --git a/brush-builtins/src/getopts.rs b/brush-builtins/src/getopts.rs
+index c852cccc..dc17dfcf 100644
+--- a/brush-builtins/src/getopts.rs
++++ b/brush-builtins/src/getopts.rs
+@@ -22,10 +22,11 @@ pub(crate) struct GetOptsCommand {
+ /// shell, so it follows subshell rules as `OPTIND` does.
+ #[derive(Clone, Debug, Default)]
+ struct GetOptsState {
+-    /// How far into the current argument's bundled options it is, if partway.
+-    next_char_index: Option<usize>,
+-    /// The `OPTIND` it last set, to notice the script resetting it.
+-    last_optind: Option<i32>,
++    /// The argument (1-based) and character index it is partway through, if in the
++    /// middle of bundled options.
++    position: Option<(usize, usize)>,
++    /// The `OPTIND` (see [`optind_record`]) it last set, to notice any assignment to it.
++    last_optind: Option<String>,
+ }
+ const DEFAULT_NEXT_CHAR_INDEX: usize = 1;
+ 
+@@ -114,12 +115,15 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for GetOptsCommand {
+             .and_then(|s| brush_core::int_utils::parse::<i32>(s.as_ref(), 10).ok())
+             .unwrap_or(1);
+ 
+-        // Detect external OPTIND modifications (e.g., `OPTIND=1` to restart
+-        // parsing). If the current OPTIND differs from what we last set, clear
+-        // the internal char index so we don't resume mid-arg.
++        // As in Bash, any assignment to OPTIND since the last call (even of the
++        // value it had, `OPTIND=1`) restarts parsing at that argument: clear
++        // the internal char index so we don't resume mid-cluster.
++        let record = optind_record(&context);
+         let state = context.state_mut::<GetOptsState>();
+-        if state.last_optind != Some(next_index_signed) {
+-            state.next_char_index = None;
++        // Only OPTIND=1 (or less) restarts parsing: another value takes effect
++        // once the cluster being parsed (`-xyz`) is done, as in Bash.
++        if state.last_optind.as_ref() != Some(&record) && next_index_signed <= 1 {
++            state.position = None;
+         }
+ 
+         #[allow(clippy::cast_sign_loss)] // .max(1) guarantees positive
+@@ -139,7 +143,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for GetOptsCommand {
+ 
+         let result = parse_next_option(&mut context, &spec, args_to_parse, next_index)?;
+ 
+-        update_variables(&mut context, &self.variable_name, result)
++        update_variables(&mut context, &self.variable_name, result).await
+     }
+ }
+ 
+@@ -165,7 +169,21 @@ fn parse_next_option<SE: brush_core::ShellExtensions>(
+         });
+     }
+ 
+-    let arg = args_to_parse[next_index - 1].as_str();
++    // Inside a cluster, the argument is the cluster's, even if OPTIND changed.
++    let position = context.state_mut::<GetOptsState>().position;
++    let arg_index = position.map_or(next_index, |(arg, _)| arg);
++    let Some(arg) = args_to_parse
++        .get(arg_index.wrapping_sub(1))
++        .map(String::as_str)
++    else {
++        context.state_mut::<GetOptsState>().position = None;
++        return Ok(GetOptsResult {
++            variable_value: String::from("?"),
++            optarg: None,
++            optind: args_to_parse.len() + 1,
++            exit_code: ExecutionResult::general_error(),
++        });
++    };
+ 
+     // See if this is an option.
+     if !arg.starts_with('-') || arg == "--" || arg == "-" {
+@@ -183,10 +201,7 @@ fn parse_next_option<SE: brush_core::ShellExtensions>(
+     }
+ 
+     // Figure out how far into this option we are.
+-    let mut next_char_index = context
+-        .state_mut::<GetOptsState>()
+-        .next_char_index
+-        .unwrap_or(DEFAULT_NEXT_CHAR_INDEX);
++    let mut next_char_index = position.map_or(DEFAULT_NEXT_CHAR_INDEX, |(_, char)| char);
+ 
+     // Find the char. If the index is stale (exceeds this arg's length),
+     // reset to the default index, mirroring bash behavior.
+@@ -236,12 +251,12 @@ fn parse_next_option<SE: brush_core::ShellExtensions>(
+     let optind = if is_last_char_in_option {
+         // We're done with this argument: forget our place in it, and move
+         // OPTIND on.
+-        context.state_mut::<GetOptsState>().next_char_index = None;
++        context.state_mut::<GetOptsState>().position = None;
+         next_index + 1
+     } else {
+         // We have more to go in this argument: remember our place, and leave
+         // OPTIND where it is.
+-        context.state_mut::<GetOptsState>().next_char_index = Some(next_char_index + 1);
++        context.state_mut::<GetOptsState>().position = Some((arg_index, next_char_index + 1));
+         next_index
+     };
+ 
+@@ -319,19 +334,30 @@ fn report_unknown_option<SE: brush_core::ShellExtensions>(
+ 
+ /// Writes the parsing result back into shell variables (the target variable,
+ /// OPTARG, OPTIND) and remembers the OPTIND set.
+-fn update_variables<SE: brush_core::ShellExtensions>(
++async fn update_variables<SE: brush_core::ShellExtensions>(
+     context: &mut brush_core::ExecutionContext<'_, SE>,
+     variable_name: &str,
+     result: GetOptsResult,
+ ) -> Result<ExecutionResult, brush_core::Error> {
+-    // Update variable value.
+-    context.shell.env_mut().update_or_add(
+-        variable_name,
+-        variables::ShellValueLiteral::Scalar(result.variable_value),
+-        |_| Ok(()),
+-        brush_core::env::EnvironmentLookup::Anywhere,
+-        brush_core::env::EnvironmentScope::Global,
+-    )?;
++    // Update variable value (through a reference to an array element, with its
++    // subscript expanded).
++    if context.shell.env().nameref_element(variable_name).is_some() {
++        brush_core::expansion::assign_to_named_parameter(
++            context.shell,
++            &context.params,
++            variable_name,
++            result.variable_value,
++        )
++        .await?;
++    } else {
++        context.shell.env_mut().update_or_add(
++            variable_name,
++            variables::ShellValueLiteral::Scalar(result.variable_value),
++            |_| Ok(()),
++            brush_core::env::EnvironmentLookup::Anywhere,
++            brush_core::env::EnvironmentScope::Global,
++        )?;
++    }
+ 
+     // Update OPTARG
+     if let Some(optarg) = result.optarg {
+@@ -355,7 +381,8 @@ fn update_variables<SE: brush_core::ShellExtensions>(
+         brush_core::env::EnvironmentLookup::Anywhere,
+         brush_core::env::EnvironmentScope::Global,
+     )?;
+-    context.state_mut::<GetOptsState>().last_optind = i32::try_from(result.optind).ok();
++    let record = optind_record(context);
++    context.state_mut::<GetOptsState>().last_optind = Some(record);
+ 
+     Ok(result.exit_code)
+ }
+@@ -370,3 +397,20 @@ fn is_opterr_enabled<SE: brush_core::ShellExtensions>(
+         .env_str("OPTERR")
+         .is_none_or(|s| s.parse::<i64>().unwrap_or(1) != 0)
+ }
++
++/// OPTIND's value and assignment stamp, which change when anything assigns it.
++fn optind_record<SE: brush_core::ShellExtensions>(
++    context: &brush_core::ExecutionContext<'_, SE>,
++) -> String {
++    context
++        .shell
++        .env()
++        .get("OPTIND")
++        .map_or_else(String::new, |(_, var)| {
++            std::format!(
++                "{}:{}",
++                var.value().to_cow_str(context.shell),
++                var.assignment_stamp()
++            )
++        })
++}
+diff --git a/brush-builtins/src/hash.rs b/brush-builtins/src/hash.rs
+index 9273f5b3..e099d0d9 100644
+--- a/brush-builtins/src/hash.rs
++++ b/brush-builtins/src/hash.rs
+@@ -1,3 +1,4 @@
++use brush_core::bytes::ToShellText as _;
+ use clap::Parser;
+ use std::{io::Write, path::PathBuf};
+ 
+@@ -57,7 +58,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for HashCommand {
+                         writeln!(
+                             context.stdout(),
+                             "builtin hash -p {} {name}",
+-                            path.to_string_lossy()
++                            path.to_shell_text()
+                         )?;
+                     } else {
+                         let mut prefix = String::new();
+@@ -70,7 +71,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for HashCommand {
+                         writeln!(
+                             context.stdout(),
+                             "{prefix}{}",
+-                            path.to_string_lossy().as_ref()
++                            path.to_shell_text().as_ref()
+                         )?;
+                     }
+                 } else {
+diff --git a/brush-builtins/src/help.rs b/brush-builtins/src/help.rs
+index 45eded40..cef8ba6a 100644
+--- a/brush-builtins/src/help.rs
++++ b/brush-builtins/src/help.rs
+@@ -47,6 +47,14 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for HelpCommand {
+         if any_matched {
+             Ok(ExecutionResult::success())
+         } else {
++            // Like Bash, only a help that matches nothing reports it, naming
++            // the last topic.
++            let topic = self.topic_patterns.last().map_or("", String::as_str);
++            writeln!(
++                context.stderr(),
++                "{}help: no help topics match `{topic}'.  Try `help help' or `man -k {topic}' or `info {topic}'.",
++                context.shell.diagnostic_prefix()
++            )?;
+             Ok(ExecutionResult::general_error())
+         }
+     }
+@@ -103,10 +111,6 @@ impl HelpCommand {
+             }
+         }
+ 
+-        if !matched {
+-            writeln!(context.stderr(), "No help topics match '{topic_pattern}'")?;
+-        }
+-
+         Ok(matched)
+     }
+ 
+diff --git a/brush-builtins/src/history.rs b/brush-builtins/src/history.rs
+index a615c345..cf4c5040 100644
+--- a/brush-builtins/src/history.rs
++++ b/brush-builtins/src/history.rs
+@@ -51,6 +51,8 @@ pub(crate) struct HistoryCommand {
+ struct HistoryConfig {
+     default_history_file_path: Option<PathBuf>,
+     time_format: Option<String>,
++    /// Whether the shell is interactive (Bash's comment character is then set).
++    interactive: bool,
+ }
+ 
+ brush_clap_adapter::impl_parse_args!(HistoryCommand);
+@@ -66,16 +68,14 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for HistoryCommand {
+         let config = HistoryConfig {
+             default_history_file_path: context.shell.history_file_path(),
+             time_format: context.shell.history_time_format(),
++            interactive: context.shell.options().interactive,
+         };
+ 
+         let stdout = context.stdout();
+         let stderr = context.stderr();
+ 
+-        if let Some(history) = context.shell.history_mut() {
+-            self.execute_with_history(history, &config, stdout, stderr)
+-        } else {
+-            Err(brush_core::ErrorKind::HistoryNotEnabled.into())
+-        }
++        let history = context.shell.history_list_mut();
++        self.execute_with_history(history, &config, stdout, stderr)
+     }
+ }
+ 
+@@ -141,8 +141,16 @@ impl HistoryCommand {
+             return error::unimp("history -n is not yet implemented");
+         }
+ 
+-        if self.append_file_to_session.is_some() {
+-            return error::unimp("history -r is not yet implemented");
++        if let Some(read_option) = &self.append_file_to_session {
++            if let Some(file_path) = get_effective_history_file_path(
++                config.default_history_file_path.as_deref(),
++                read_option.as_deref(),
++            ) {
++                let file = std::fs::File::open(file_path)?;
++                history.append_lines(file, config.interactive)?;
++            }
++
++            return Ok(ExecutionResult::success());
+         }
+ 
+         if let Some(write_option) = &self.write_session_to_file {
+diff --git a/brush-builtins/src/jobs.rs b/brush-builtins/src/jobs.rs
+index 2a237719..b1d72aac 100644
+--- a/brush-builtins/src/jobs.rs
++++ b/brush-builtins/src/jobs.rs
+@@ -14,7 +14,7 @@ pub(crate) struct JobsCommand {
+     #[arg(short = 'n')]
+     list_changed_only: bool,
+ 
+-    /// Show only process IDs.
++    /// Show only process group IDs.
+     #[arg(short = 'p')]
+     show_pids_only: bool,
+ 
+@@ -40,17 +40,19 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for JobsCommand {
+         self,
+         context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+-        if self.also_show_pids {
+-            return error::unimp("jobs -l");
+-        }
+         if self.list_changed_only {
+             return error::unimp("jobs -n");
+         }
+ 
++        context.shell.jobs_mut().cleanup_dead_jobs();
+         if self.job_specs.is_empty() {
+-            for job in &context.shell.jobs().jobs {
+-                self.display_job(&context, job)?;
++            let mut reported = vec![];
++            for job in context.shell.jobs().listed_jobs() {
++                if self.display_job(&context, job)? && matches!(job.state, jobs::JobState::Done) {
++                    reported.push(job.id);
++                }
+             }
++            context.shell.jobs_mut().forget_reported(&reported);
+         } else {
+             return error::unimp("jobs with job specs");
+         }
+@@ -64,22 +66,24 @@ impl JobsCommand {
+         &self,
+         context: &brush_core::ExecutionContext<'_, impl brush_core::ShellExtensions>,
+         job: &jobs::Job,
+-    ) -> Result<(), brush_core::Error> {
++    ) -> Result<bool, brush_core::Error> {
+         if self.running_jobs_only && !matches!(job.state, jobs::JobState::Running) {
+-            return Ok(());
++            return Ok(false);
+         }
+         if self.stopped_jobs_only && !matches!(job.state, jobs::JobState::Stopped) {
+-            return Ok(());
++            return Ok(false);
+         }
+ 
+         if self.show_pids_only {
+-            if let Some(pid) = job.representative_pid() {
++            if let Some(pid) = job.process_group_id().or_else(|| job.representative_pid()) {
+                 writeln!(context.stdout(), "{pid}")?;
+             }
++        } else if self.also_show_pids {
++            writeln!(context.stdout(), "{}", job.to_long_string())?;
+         } else {
+             writeln!(context.stdout(), "{job}")?;
+         }
+ 
+-        Ok(())
++        Ok(true)
+     }
+ }
+diff --git a/brush-builtins/src/kill.rs b/brush-builtins/src/kill.rs
+index 10d869f5..f2b1b1df 100644
+--- a/brush-builtins/src/kill.rs
++++ b/brush-builtins/src/kill.rs
+@@ -26,7 +26,9 @@ pub(crate) struct KillCommand {
+     args: Vec<String>,
+ }
+ 
+-brush_clap_adapter::impl_parse_args!(KillCommand);
++// Keeps `--` among the operands, where it ends the options as in Bash
++// (`kill -- -PGID` signals a process group with the default `TERM`).
++brush_clap_adapter::impl_parse_args!(KillCommand, keep_double_dash = args);
+ 
+ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for KillCommand {
+     type Error = brush_core::Error;
+@@ -37,8 +39,8 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for KillCommand {
+     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+         let mut signal_zero = false;
+ 
+-        // Default signal is SIGKILL.
+-        let mut trap_signal = TrapSignal::Signal(nix::sys::signal::Signal::SIGKILL);
++        // Default signal is SIGTERM, as in Bash.
++        let mut trap_signal = TrapSignal::Signal(nix::sys::signal::Signal::SIGTERM);
+ 
+         // Try parsing the signal name (if specified).
+         if let Some(signal_name) = &self.signal_name {
+@@ -76,12 +78,15 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for KillCommand {
+             }
+         }
+ 
+-        // Look through the remaining args for a pid/job spec or a -sigspec style option.
+-        let mut pid_or_job_spec = None;
+-        for arg in &self.args {
+-            // See if this is -sigspec syntax. The sigspec may be a signal name
+-            // (e.g., -TERM) or a signal number (e.g., -9, including -0).
+-            if let Some(possible_sigspec) = arg.strip_prefix("-") {
++        // A leading -sigspec (or `--`) may precede the operands; every later
++        // argument is a pid, negative process group, or job spec.
++        let mut operands = self.args.as_slice();
++        if let Some(first) = operands.first() {
++            if first == "--" {
++                operands = &operands[1..];
++            } else if let Some(possible_sigspec) = first.strip_prefix('-') {
++                // See if this is -sigspec syntax. The sigspec may be a signal name
++                // (e.g., -TERM) or a signal number (e.g., -9, including -0).
+                 if Ok(0) == possible_sigspec.parse::<i32>() {
+                     signal_zero = true;
+                 } else if let Ok(parsed_trap_signal) = possible_sigspec.parse::<TrapSignal>() {
+@@ -96,33 +101,30 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for KillCommand {
+                     )?;
+                     return Ok(ExecutionResult::general_error());
+                 }
+-            } else if pid_or_job_spec.is_none() {
+-                pid_or_job_spec = Some(arg);
+-            } else {
+-                writeln!(
+-                    context.stderr(),
+-                    "{}: too many jobs or processes specified",
+-                    context.command_name
+-                )?;
+-                return Ok(ExecutionExitCode::InvalidUsage.into());
++                operands = &operands[1..];
++                if operands.first().is_some_and(|arg| arg == "--") {
++                    operands = &operands[1..];
++                }
+             }
+         }
+ 
+         if self.list_signals {
+             return print_signals(&context, self.args.as_ref());
+-        } else {
+-            let Some(pid_or_job_spec) = pid_or_job_spec else {
+-                writeln!(context.stderr(), "{}: invalid usage", context.command_name)?;
+-                return Ok(ExecutionExitCode::InvalidUsage.into());
+-            };
++        }
++        if operands.is_empty() {
++            writeln!(context.stderr(), "{}: invalid usage", context.command_name)?;
++            return Ok(ExecutionExitCode::InvalidUsage.into());
++        }
+ 
+-            if pid_or_job_spec.starts_with('%') {
++        let mut result = ExecutionResult::success();
++        for pid_or_job_spec in operands {
++            let sent = if pid_or_job_spec.starts_with('%') {
+                 // It's a job spec.
+                 if let Some(job) = context.shell.jobs_mut().resolve_job_spec(pid_or_job_spec) {
+                     if signal_zero {
+-                        job.check_signalable()?;
++                        job.check_signalable()
+                     } else {
+-                        job.kill(trap_signal)?;
++                        job.kill(trap_signal)
+                     }
+                 } else {
+                     writeln!(
+@@ -131,20 +133,28 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for KillCommand {
+                         context.command_name,
+                         pid_or_job_spec
+                     )?;
+-                    return Ok(ExecutionResult::general_error());
++                    result = ExecutionResult::general_error();
++                    continue;
+                 }
+             } else {
+-                let pid = brush_core::int_utils::parse(pid_or_job_spec.as_str(), 10)?;
+-
+-                // It's a pid.
+-                if signal_zero {
+-                    sys::signal::check_signalable(pid)?;
+-                } else {
+-                    sys::signal::kill_process(pid, trap_signal)?;
+-                }
++                brush_core::int_utils::parse(pid_or_job_spec.as_str(), 10).and_then(|pid| {
++                    if signal_zero {
++                        sys::signal::check_signalable(pid)
++                    } else {
++                        sys::signal::kill_process(pid, trap_signal)
++                    }
++                })
++            };
++            if let Err(error) = sent {
++                writeln!(
++                    context.stderr(),
++                    "{}: {pid_or_job_spec}: {error}",
++                    context.command_name
++                )?;
++                result = ExecutionResult::general_error();
+             }
+         }
+-        Ok(ExecutionResult::success())
++        Ok(result)
+     }
+ }
+ 
+diff --git a/brush-builtins/src/lib.rs b/brush-builtins/src/lib.rs
+index 1b0829f6..12485f06 100644
+--- a/brush-builtins/src/lib.rs
++++ b/brush-builtins/src/lib.rs
+@@ -39,6 +39,8 @@ mod continue_;
+ mod declare;
+ #[cfg(feature = "builtin.dirs")]
+ mod dirs;
++#[cfg(feature = "builtin.jobs")]
++mod disown;
+ #[cfg(feature = "builtin.dot")]
+ mod dot;
+ #[cfg(feature = "builtin.echo")]
+@@ -89,6 +91,8 @@ mod read;
+ mod return_;
+ #[cfg(feature = "builtin.set")]
+ mod set;
++#[cfg(feature = "builtin.set")]
++pub use set::install_history_disable_hook;
+ #[cfg(feature = "builtin.shift")]
+ mod shift;
+ #[cfg(feature = "builtin.shopt")]
+diff --git a/brush-builtins/src/lookup.rs b/brush-builtins/src/lookup.rs
+index ae826749..f80b8174 100644
+--- a/brush-builtins/src/lookup.rs
++++ b/brush-builtins/src/lookup.rs
+@@ -1,5 +1,6 @@
+ //! Shared command-name resolution, used by the `type` and `command` builtins.
+ 
++use brush_core::bytes::ToShellText as _;
+ use std::io::Write;
+ use std::path::{Path, PathBuf};
+ 
+@@ -70,16 +71,42 @@ pub(crate) fn resolve<'a, SE: ShellExtensions>(
+             resolved.push(Resolved::Function(registration.definition()));
+         }
+ 
+-        // Check for builtins.
+-        if shell.builtins().get(name).is_some_and(|b| b.is_enabled()) {
+-            resolved.push(Resolved::Builtin);
++        // Check for builtins. A process-backed registration (an marsh
++        // registered command) runs as a separate process, so it is described
++        // as the file on PATH that reaches it, when there is one.
++        if let Some(builtin) = shell.builtins().get(name).filter(|b| b.is_enabled()) {
++            match builtin
++                .process_shim()
++                .and_then(|shim| shim_path(shell, name, &shim.executable))
++            {
++                Some(path) => resolved.push(Resolved::File {
++                    path,
++                    hashed: false,
++                }),
++                None => resolved.push(Resolved::Builtin),
++            }
+         }
+     }
+ 
+     // Searching the filesystem *does* cost something, so only do it if the results so far
+     // don't already answer the question.
+     if options.all_locations || resolved.is_empty() {
++        let found = resolved.len();
+         resolve_in_filesystem(shell, name, options, &mut resolved);
++        // A registered command's PATH link was already reported above.
++        let earlier: Vec<PathBuf> = resolved[..found]
++            .iter()
++            .filter_map(|resolved| match resolved {
++                Resolved::File { path, .. } => Some(path.clone()),
++                _ => None,
++            })
++            .collect();
++        let mut index = 0;
++        resolved.retain(|resolved| {
++            index += 1;
++            index <= found
++                || !matches!(resolved, Resolved::File { path, .. } if earlier.contains(path))
++        });
+     }
+ 
+     if !options.all_locations {
+@@ -89,6 +116,23 @@ pub(crate) fn resolve<'a, SE: ShellExtensions>(
+     resolved
+ }
+ 
++/// Returns the first executable named `name` on `PATH` that is a link to a
++/// process-backed registration's `executable`, as the marsh session command
++/// directory provides for every registered command.
++fn shim_path<SE: ShellExtensions>(
++    shell: &Shell<SE>,
++    name: &str,
++    executable: &Path,
++) -> Option<PathBuf> {
++    let target = executable.canonicalize().ok()?;
++    shell.find_executables_in_path(name).find(|candidate| {
++        shell
++            .absolute_path(candidate)
++            .canonicalize()
++            .is_ok_and(|resolved| resolved == target)
++    })
++}
++
+ /// Appends the files the given name resolves to.
+ fn resolve_in_filesystem<SE: ShellExtensions>(
+     shell: &Shell<SE>,
+@@ -145,7 +189,7 @@ pub(crate) fn describe(
+         Resolved::Function(def) => writeln!(writer, "{name} is a function\n{def}"),
+         Resolved::Builtin => writeln!(writer, "{name} is a shell builtin"),
+         Resolved::File { path, hashed } => {
+-            let path = path.to_string_lossy();
++            let path = path.to_shell_text();
+             if *hashed {
+                 writeln!(writer, "{name} is hashed ({path})")
+             } else {
+diff --git a/brush-builtins/src/mapfile.rs b/brush-builtins/src/mapfile.rs
+index 12ee1668..0b633f71 100644
+--- a/brush-builtins/src/mapfile.rs
++++ b/brush-builtins/src/mapfile.rs
+@@ -2,7 +2,7 @@ use std::io::{Read, Write};
+ 
+ use clap::Parser;
+ 
+-use brush_core::{ErrorKind, ExecutionExitCode, ExecutionResult, builtins, env, error, variables};
++use brush_core::{ErrorKind, ExecutionExitCode, ExecutionResult, builtins, env, variables};
+ 
+ /// Read lines from standard input into an indexed array variable.
+ #[derive(Parser)]
+@@ -53,10 +53,6 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for MapFileCommand {
+         self,
+         context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+-        if self.callback_group_size != 5000 || self.callback.is_some() {
+-            return error::unimp("mapfile -C/-c is not yet implemented");
+-        }
+-
+         if let Some(origin) = self.origin {
+             if origin < 0 {
+                 writeln!(
+@@ -80,102 +76,103 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for MapFileCommand {
+             }
+         }
+ 
+-        let input_file = context
++        let mut input_file = context
+             .try_fd(self.fd)
+             .ok_or_else(|| ErrorKind::BadFileDescriptor(self.fd))?;
+ 
+-        // Read!
+-        let lines = self.read_lines(input_file)?;
+-
+-        if let Some(origin) = self.origin {
+-            // -O: preserve existing array, assign at offset.
+-            for (elem_idx, value) in lines.into_iter().enumerate() {
+-                // If the user is getting to wraparounds in *bash*, they got bigger problems.
+-                #[allow(clippy::cast_possible_wrap)]
+-                let elem_idx = elem_idx as i64;
+-                context.shell.env_mut().update_or_add_array_element(
+-                    &self.array_var_name,
+-                    (elem_idx + origin).to_string(),
+-                    value,
+-                    |_| Ok(()),
+-                    env::EnvironmentLookup::Anywhere,
+-                    env::EnvironmentScope::Global,
+-                )?;
+-            }
+-        } else {
+-            // No -O: replace the entire variable (clears existing).
++        // Without -O the array starts empty.
++        if self.origin.is_none() {
+             context.shell.env_mut().update_or_add(
+                 &self.array_var_name,
+-                variables::ShellValueLiteral::from(lines),
++                variables::ShellValueLiteral::Array(variables::ArrayLiteral::new(vec![])),
+                 |_| Ok(()),
+                 env::EnvironmentLookup::Anywhere,
+                 env::EnvironmentScope::Global,
+             )?;
+         }
+ 
+-        Ok(ExecutionResult::success())
+-    }
+-}
+-
+-impl MapFileCommand {
+-    fn read_lines(
+-        &self,
+-        mut input_file: brush_core::openfiles::OpenFile,
+-    ) -> Result<Vec<String>, brush_core::Error> {
+         let _term_mode = setup_terminal_settings(&input_file)?;
+-
+-        let mut entries = vec![];
+-        let mut read_count = 0;
+-        let max_count = self.max_count.try_into()?;
+         let delimiter = match &self.delimiter {
+             Some(d) if d.is_empty() => b'\0',
+             Some(d) => d.as_bytes().first().copied().unwrap_or(b'\n'),
+             None => b'\n',
+         };
+-
+-        let mut buf = [0u8; 1];
+-
+-        while max_count == 0 || entries.len() < max_count {
+-            let mut line = vec![];
+-            let mut saw_delimiter = false;
+-
+-            loop {
+-                match input_file.read(&mut buf) {
+-                    Ok(0) => break,                                         // End of input
+-                    Ok(1) if buf[0] == b'\x03' => break,                    // Ctrl+C
+-                    Ok(1) if buf[0] == b'\x04' && line.is_empty() => break, // Ctrl+D
+-                    Ok(1) => {
+-                        let byte = buf[0];
+-                        line.push(byte);
+-                        if byte == delimiter {
+-                            saw_delimiter = true;
+-                            break;
+-                        }
+-                    }
+-                    Ok(_) => unreachable!("input can only be 0, 1, or error"),
+-                    Err(e) => return Err(e.into()),
+-                }
+-            }
+-
+-            if line.is_empty() && !saw_delimiter {
++        let max_count: usize = self.max_count.try_into()?;
++        for _ in 0..self.skip_count {
++            if read_line(&mut input_file, delimiter)?.is_none() {
+                 break;
+             }
++        }
+ 
+-            if read_count < self.skip_count {
+-                read_count += 1;
+-                continue;
+-            }
+-
++        let mut index = self.origin.unwrap_or(0);
++        let mut count = 0;
++        while max_count == 0 || count < max_count {
++            let Some(mut line) = read_line(&mut input_file, delimiter)? else {
++                break;
++            };
++            count += 1;
+             if self.remove_delimiter && line.ends_with(&[delimiter]) {
+                 line.pop();
+             }
++            // A shell value ends at its first NUL, as in Bash.
++            if let Some(end) = line.iter().position(|byte| *byte == 0) {
++                line.truncate(end);
++            }
++            let line = brush_core::bytes::decode_vec(line);
++
++            // As in Bash, every `-c` lines the callback runs with the index and
++            // the line about to be stored; its status is ignored. The input is
++            // read a byte at a time, so the callback may read from it too.
++            if let Some(callback) = &self.callback
++                && i64::try_from(count).is_ok_and(|count| count % self.callback_group_size == 0)
++            {
++                let command = std::format!(
++                    "{callback} {index} {}",
++                    brush_core::escape::force_quote(
++                        &line,
++                        brush_core::escape::QuoteMode::SingleQuote
++                    )
++                );
++                let source_info = context.shell.call_stack().current_pos_as_source_info();
++                let _ = context
++                    .shell
++                    .run_string(command, &source_info, &context.params)
++                    .await?;
++            }
+ 
+-            let line_str = String::from_utf8_lossy(&line).to_string();
+-
+-            entries.push(line_str);
++            context.shell.env_mut().update_or_add_array_element(
++                &self.array_var_name,
++                index.to_string(),
++                line,
++                |_| Ok(()),
++                env::EnvironmentLookup::Anywhere,
++                env::EnvironmentScope::Global,
++            )?;
++            index += 1;
+         }
+ 
+-        Ok(entries)
++        Ok(ExecutionResult::success())
++    }
++}
++
++/// Reads one line, delimiter included; `None` at the end of the input.
++fn read_line(
++    input_file: &mut brush_core::openfiles::OpenFile,
++    delimiter: u8,
++) -> Result<Option<Vec<u8>>, brush_core::Error> {
++    let mut line = vec![];
++    let mut buf = [0u8; 1];
++    loop {
++        match input_file.read(&mut buf)? {
++            0 if line.is_empty() => return Ok(None),
++            0 => return Ok(Some(line)),
++            _ => {
++                line.push(buf[0]);
++                if buf[0] == delimiter {
++                    return Ok(Some(line));
++                }
++            }
++        }
+     }
+ }
+ 
+diff --git a/brush-builtins/src/printf.rs b/brush-builtins/src/printf.rs
+index 5e482b2d..ae232711 100644
+--- a/brush-builtins/src/printf.rs
++++ b/brush-builtins/src/printf.rs
+@@ -1,7 +1,8 @@
+ use clap::Parser;
+-use std::{ffi::OsString, io::Write, ops::ControlFlow};
++use std::{io::Write, ops::ControlFlow};
+ use uucore::format;
+ 
++use brush_core::bytes;
+ use brush_core::{Error, ErrorKind, ExecutionResult, builtins, escape, expansion};
+ 
+ /// Format a string.
+@@ -31,15 +32,19 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for PrintfCommand {
+         self,
+         context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<ExecutionResult, Self::Error> {
++        let diagnostics;
+         if let Some(variable_name) = &self.output_variable {
+             // Format to a u8 vector.
+             let mut result: Vec<u8> = vec![];
+-            format(self.format_and_args.as_slice(), &mut result)?;
++            diagnostics = format(self.format_and_args.as_slice(), &mut result)?;
++            write_diagnostics(&context, &diagnostics.messages)?;
++            // A shell value ends at its first NUL, as in Bash.
++            if let Some(end) = result.iter().position(|byte| *byte == 0) {
++                result.truncate(end);
++            }
+ 
+             // Convert to a string.
+-            let result_str = String::from_utf8(result).map_err(|_| {
+-                brush_core::ErrorKind::PrintfInvalidUsage("invalid UTF-8 output".into())
+-            })?;
++            let result_str = bytes::decode(&bytes::encode_output(&result)).into_owned();
+ 
+             // Assign to the selected variable.
+             expansion::assign_to_named_parameter(
+@@ -50,39 +55,167 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for PrintfCommand {
+             )
+             .await?;
+         } else {
+-            format(self.format_and_args.as_slice(), context.stdout())?;
++            // Formatted whole, so raw bytes in the format survive (uucore writes
++            // literal text a byte at a time).
++            let mut result: Vec<u8> = vec![];
++            let formatted = format(self.format_and_args.as_slice(), &mut result);
++            let mut written = 0;
++            if let Ok(diagnostics) = &formatted {
++                for (index, (output_before, _)) in diagnostics.messages.iter().enumerate() {
++                    let output = &result[written..*output_before];
++                    context.stdout().write_all(&bytes::encode_output(output))?;
++                    context.stdout().flush()?;
++                    written = *output_before;
++                    write_diagnostics(&context, &diagnostics.messages[index..=index])?;
++                }
++            }
++            context
++                .stdout()
++                .write_all(&bytes::encode_output(&result[written..]))?;
+             context.stdout().flush()?;
++            diagnostics = formatted?;
+         }
+ 
++        if diagnostics.failed {
++            return Ok(ExecutionResult::general_error());
++        }
+         Ok(ExecutionResult::success())
+     }
+ }
+ 
+-fn format(format_and_args: &[String], writer: impl Write) -> Result<(), brush_core::Error> {
++fn write_diagnostics(
++    context: &brush_core::ExecutionContext<'_, impl brush_core::ShellExtensions>,
++    messages: &[(usize, String)],
++) -> Result<(), brush_core::Error> {
++    for (_, message) in messages {
++        let message = std::format!(
++            "{}{}: {message}\n",
++            context.shell.diagnostic_prefix(),
++            context.command_name
++        );
++        context.stderr().write_all(&bytes::encode(&message))?;
++    }
++    Ok(())
++}
++
++fn format(
++    format_and_args: &[String],
++    writer: &mut Vec<u8>,
++) -> Result<Diagnostics, brush_core::Error> {
+     match format_and_args {
+-        // Handle format string with arguments using uucore
+-        [fmt, args @ ..] => format_via_uucore(fmt, args.iter(), writer),
++        // `%(fmt)T` conversions are rendered here; uucore formats the rest.
++        [fmt, args @ ..] if fmt.contains(")T") => {
++            let (fmt, args) = render_time_conversions(fmt, args);
++            format_via_uucore(&fmt, &args, writer)
++        }
++        // Handle format string with arguments using uucore.
++        [fmt, args @ ..] => format_via_uucore(fmt, args, writer),
+         // Handle case with no format string (we shouldn't be able to get here since clap will
+         // fail parsing when the format string is missing)
+         [] => Err(ErrorKind::PrintfInvalidUsage("missing operand".into()).into()),
+     }
+ }
+ 
+-fn format_via_uucore(
+-    format_string: &str,
+-    args: impl Iterator<Item = impl Into<OsString>>,
+-    mut writer: impl Write,
+-) -> Result<(), brush_core::Error> {
+-    // Convert string arguments to FormatArgument::Unparsed
+-    let format_args: Vec<_> = args
+-        .map(|s| format::FormatArgument::Unparsed(s.into()))
+-        .collect();
++/// Rewrites each Bash `%[flags][width][.precision](strftime)T` conversion as a
++/// `%s` conversion and replaces its argument (an epoch time; empty, missing or
++/// `-1` is now, `-2` is shell start, approximated as now) with the formatted
++/// local time, keeping argument reuse across format cycles.
++fn render_time_conversions(format: &str, args: &[String]) -> (String, Vec<String>) {
++    // Each conversion consumes some arguments; `Some(strftime)` marks the time
++    // argument of a `%(...)T` conversion.
++    let mut consumed: Vec<Option<String>> = Vec::new();
++    let mut rewritten = String::with_capacity(format.len());
++    let mut rest = format;
++    while let Some(percent) = rest.find('%') {
++        rewritten.push_str(&rest[..percent]);
++        let spec = &rest[percent + 1..];
++        if let Some(after) = spec.strip_prefix('%') {
++            rewritten.push_str("%%");
++            rest = after;
++            continue;
++        }
++        let modifiers = spec
++            .find(|c: char| {
++                !matches!(c, '-' | '+' | ' ' | '#' | '0' | '\'' | '.' | '*') && !c.is_ascii_digit()
++            })
++            .unwrap_or(spec.len());
++        let (flags, tail) = spec.split_at(modifiers);
++        for _ in flags.matches('*') {
++            consumed.push(None);
++        }
++        if let Some(time) = tail.strip_prefix('(')
++            && let Some(close) = time.find(")T")
++        {
++            consumed.push(Some(time[..close].to_owned()));
++            rewritten.push('%');
++            rewritten.push_str(flags);
++            rewritten.push('s');
++            rest = &time[close + 2..];
++        } else {
++            let conversion = tail.chars().next().map_or(0, char::len_utf8);
++            if conversion > 0 {
++                consumed.push(None);
++            }
++            rewritten.push('%');
++            rewritten.push_str(&spec[..modifiers + conversion]);
++            rest = &tail[conversion..];
++        }
++    }
++    rewritten.push_str(rest);
++
++    let per_cycle = consumed.len().max(1);
++    let mut args = args.to_vec();
++    // A missing time argument means "now", so complete the last cycle up to its
++    // final time conversion.
++    let partial = args.len() % per_cycle;
++    if args.is_empty() || partial != 0 {
++        let start = args.len() - partial;
++        if let Some(last_time) = consumed.iter().rposition(Option::is_some)
++            && start + last_time >= args.len()
++        {
++            args.resize(start + last_time + 1, String::new());
++        }
++    }
++    for (index, arg) in args.iter_mut().enumerate() {
++        if let Some(Some(strftime)) = consumed.get(index % per_cycle) {
++            *arg = format_time(strftime, arg);
++        }
++    }
++    (rewritten, args)
++}
+ 
+-    // Parse format string once.
+-    let format_items = parse_format_string(format_string)?;
++fn format_time(strftime: &str, arg: &str) -> String {
++    use chrono::TimeZone as _;
++    use std::fmt::Write as _;
++    let seconds = match arg.trim() {
++        "" | "-1" | "-2" => chrono::Local::now().timestamp(),
++        value => value.parse().unwrap_or(0),
++    };
++    let strftime = if strftime.is_empty() { "%X" } else { strftime };
++    let Some(time) = chrono::Local.timestamp_opt(seconds, 0).single() else {
++        return String::new();
++    };
++    let mut out = String::new();
++    if write!(out, "{}", time.format(strftime)).is_err() {
++        return strftime.to_owned();
++    }
++    // The rendered time is passed through `%s`; keep it literal.
++    out
++}
+ 
+-    // Wrap the format arguments.
+-    let mut format_args_wrapper = format::FormatArguments::new(&format_args);
++fn format_via_uucore(
++    format_string: &str,
++    args: &[String],
++    writer: &mut Vec<u8>,
++) -> Result<Diagnostics, brush_core::Error> {
++    let (format_items, invalid) = parse_format_string(format_string)?;
++    let mut printf = Printf {
++        args,
++        next: 0,
++        highest: None,
++        offset: 0,
++        diagnostics: Diagnostics::default(),
++    };
+ 
+     // Determine whether the format string contains any specifiers that consume arguments. If it
+     // doesn't, then we must only run through it once -- even when extra arguments are provided --
+@@ -90,55 +223,493 @@ fn format_via_uucore(
+     // matches the behavior of other shells, which print such a format string exactly once.
+     let format_consumes_args = format_items
+         .iter()
+-        .any(|(item, _)| matches!(item, format::FormatItem::Spec(_)));
++        .any(|(item, ..)| matches!(item, format::FormatItem::Spec(_)));
+ 
+     // Keep going until we've exhausted all format arguments. Also make sure to run at least once
+     // even if there's no format arguments.
+-    while format_args.is_empty() || !format_args_wrapper.is_exhausted() {
+-        // Process all format items, in order. We'll bail when we're told to stop.
+-        for (item, backslash_quote) in &format_items {
+-            if let (format::FormatItem::Spec(format::Spec::QuotedString { position }), true) =
+-                (item, *backslash_quote)
+-            {
+-                let arg = format_args_wrapper.next_string(*position).to_string_lossy();
+-                let quoted = quote_printf_q(&arg);
+-                write!(writer, "{quoted}")?;
+-                continue;
+-            }
+-
+-            let control_flow = item
+-                .write(&mut writer, &mut format_args_wrapper)
+-                .map_err(|e| match e {
+-                    // Propagate I/O errors directly so they can be handled appropriately
+-                    format::FormatError::IoError(io_err) => Error::from(io_err),
+-                    // Wrap other format errors
+-                    other => Error::from(ErrorKind::PrintfInvalidUsage(std::format!(
+-                        "printf formatting error: {other}"
+-                    ))),
+-                })?;
+-
+-            if control_flow == ControlFlow::Break(()) {
+-                break;
++    loop {
++        for item in &format_items {
++            printf.diagnostics.flushed(writer);
++            if printf.write_item(item, &mut *writer)?.is_break() {
++                // `\c` in a `%b` argument ends all output.
++                return Ok(printf.diagnostics);
+             }
+         }
++        if let Some(conversion) = &invalid {
++            printf.diagnostics.flushed(writer);
++            printf
++                .diagnostics
++                .error(std::format!("`{conversion}': invalid format character"));
++            return Ok(printf.diagnostics);
++        }
+ 
+         // If the format string doesn't consume any arguments, stop now; otherwise we'd reprocess
+         // it forever since no arguments will ever be consumed.
+-        if !format_consumes_args {
++        if !format_consumes_args || args.is_empty() {
+             break;
+         }
++        printf.next_batch();
++        if printf.offset >= args.len() {
++            break;
++        }
++    }
++
++    Ok(printf.diagnostics)
++}
++
++/// Messages from a `printf`, each with how much output comes before it, and
++/// whether one of them makes its status 1.
++#[derive(Default)]
++struct Diagnostics {
++    messages: Vec<(usize, String)>,
++    output_before: usize,
++    failed: bool,
++}
++
++impl Diagnostics {
++    /// Bash's standard output is line-buffered: a diagnostic comes after the
++    /// output's complete lines so far.
++    fn flushed(&mut self, output: &[u8]) {
++        self.output_before = output
++            .iter()
++            .rposition(|byte| *byte == b'\n')
++            .map_or(0, |at| at + 1);
++    }
++
++    fn warn(&mut self, message: String) {
++        self.messages.push((self.output_before, message));
++    }
+ 
+-        // Start next batch if not exhausted
+-        if !format_args_wrapper.is_exhausted() {
+-            format_args_wrapper.start_next_batch();
++    fn error(&mut self, message: String) {
++        self.warn(message);
++        self.failed = true;
++    }
++}
++
++/// What a conversion reads its argument as.
++#[derive(Clone, Copy)]
++enum ArgKind {
++    Text,
++    Signed,
++    Unsigned,
++    Float,
++}
++
++/// Bash's `printf`: the arguments each conversion takes (in uucore's order,
++/// so its formatting can be used), converted as Bash converts them.
++struct Printf<'a> {
++    args: &'a [String],
++    next: usize,
++    highest: Option<usize>,
++    offset: usize,
++    diagnostics: Diagnostics,
++}
++
++impl<'a> Printf<'a> {
++    /// The argument at `position` (`N$`, from 1), or else the next one.
++    fn take(&mut self, position: Option<usize>) -> Option<&'a str> {
++        let index = match position {
++            None => {
++                self.next += 1;
++                self.next - 1
++            }
++            Some(position) => {
++                let index = (position - 1).saturating_add(self.offset);
++                self.highest = Some(self.highest.map_or(index, |highest| highest.max(index)));
++                index
++            }
++        };
++        self.args.get(index).map(String::as_str)
++    }
++
++    fn next_batch(&mut self) {
++        self.offset = self
++            .next
++            .max(self.highest.map_or(0, |highest| highest.saturating_add(1)));
++        self.next = self.offset;
++    }
++
++    fn write_item(
++        &mut self,
++        (item, quoting, taken): &ParsedFormatItem,
++        mut writer: impl Write,
++    ) -> Result<ControlFlow<()>, brush_core::Error> {
++        let quoting = *quoting;
++        let spec = match item {
++            // Bash's format strings have no `\c`.
++            format::FormatItem::Char(format::EscapedChar::End) => {
++                writer.write_all(b"\\c")?;
++                return Ok(ControlFlow::Continue(()));
++            }
++            format::FormatItem::Char(_) => {
++                // Only `\c` (handled above) stops.
++                let _ = item
++                    .write(&mut writer, &mut format::FormatArguments::new(&[]))
++                    .map_err(format_error)?;
++                return Ok(ControlFlow::Continue(()));
++            }
++            format::FormatItem::Spec(spec) => spec,
++        };
++        let value_position = taken.last().and_then(|(position, _)| *position);
++        match (spec, quoting) {
++            (format::Spec::QuotedString { .. }, Some(alternate)) => {
++                let arg = self.take(value_position).unwrap_or_default();
++                let quoted = if alternate {
++                    escape::quote_if_needed(arg, escape::QuoteMode::SingleQuote).into_owned()
++                } else {
++                    quote_printf_q(arg)
++                };
++                write!(writer, "{quoted}")?;
++            }
++            (format::Spec::EscapedString { .. }, _) => {
++                let arg = self.take(value_position).unwrap_or_default();
++                let (expanded, stop) = self.expand_b(arg);
++                writer.write_all(&expanded)?;
++                if stop {
++                    return Ok(ControlFlow::Break(()));
++                }
++            }
++            // The conversion gets its arguments, converted, where it looks
++            // for them in a fresh argument list: the next ones in order, and
++            // `N$` ones at N.
++            _ => {
++                let mut args = vec![];
++                let mut next = 0;
++                for (position, kind) in taken {
++                    let index = position.map_or_else(
++                        || {
++                            next += 1;
++                            next - 1
++                        },
++                        |position| position - 1,
++                    );
++                    if args.len() <= index {
++                        args.resize(index + 1, format::FormatArgument::Unparsed("".into()));
++                    }
++                    args[index] = self.argument(*position, *kind);
++                }
++                let _ = item
++                    .write(&mut writer, &mut format::FormatArguments::new(&args))
++                    .map_err(format_error)?;
++            }
+         }
++        Ok(ControlFlow::Continue(()))
++    }
+ 
+-        if format_args.is_empty() {
+-            break;
++    fn argument(&mut self, position: Option<usize>, kind: ArgKind) -> format::FormatArgument {
++        let arg = self.take(position);
++        match (kind, arg) {
++            (ArgKind::Text, arg) => {
++                format::FormatArgument::Unparsed(bytes::to_os_string(arg.unwrap_or_default()))
++            }
++            (ArgKind::Signed, None) => format::FormatArgument::SignedInt(0),
++            (ArgKind::Unsigned, None) => format::FormatArgument::UnsignedInt(0),
++            (ArgKind::Float, None) => format::FormatArgument::Unparsed("0".into()),
++            (kind, Some(arg)) => {
++                if let Some(code) = character_code(arg) {
++                    return match kind {
++                        ArgKind::Unsigned => format::FormatArgument::UnsignedInt(code.into()),
++                        ArgKind::Float => format::FormatArgument::Unparsed(code.to_string().into()),
++                        _ => format::FormatArgument::SignedInt(code.into()),
++                    };
++                }
++                let (value, end) = match kind {
++                    ArgKind::Float => {
++                        let end = float_prefix(arg);
++                        let number = arg[..end].trim_start();
++                        let number = if number.is_empty() { "0" } else { number };
++                        (format::FormatArgument::Unparsed(number.into()), end)
++                    }
++                    _ => {
++                        let (magnitude, negative, end) = integer_prefix(arg);
++                        let unsigned = matches!(kind, ArgKind::Unsigned);
++                        let limit: u128 = match (unsigned, negative) {
++                            (true, _) => u64::MAX.into(),
++                            (false, false) => i64::MAX.unsigned_abs().into(),
++                            (false, true) => i64::MIN.unsigned_abs().into(),
++                        };
++                        if magnitude > limit && end == arg.len() && end > 0 {
++                            self.diagnostics
++                                .warn(std::format!("{arg}: {}", range_error()));
++                        }
++                        let magnitude = magnitude.min(limit);
++                        let value = if unsigned {
++                            #[allow(clippy::cast_possible_truncation)]
++                            let value = magnitude as u64;
++                            format::FormatArgument::UnsignedInt(if negative {
++                                value.wrapping_neg()
++                            } else {
++                                value
++                            })
++                        } else {
++                            #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
++                            let value = if negative {
++                                (magnitude as i128).wrapping_neg() as i64
++                            } else {
++                                magnitude as i64
++                            };
++                            format::FormatArgument::SignedInt(value)
++                        };
++                        (value, end)
++                    }
++                };
++                if end == 0 || end != arg.len() {
++                    self.diagnostics
++                        .error(std::format!("{arg}: invalid number"));
++                }
++                value
++            }
+         }
+     }
+ 
+-    Ok(())
++    /// `%b`: Bash's `bexpand`. Returns the bytes, and whether a `\c` ended them.
++    fn expand_b(&mut self, arg: &str) -> (Vec<u8>, bool) {
++        let mut out = Vec::with_capacity(arg.len());
++        let mut chars = arg.chars().peekable();
++        let mut buffer = [0; 4];
++        while let Some(c) = chars.next() {
++            let Some(&escape) = chars.peek().filter(|_| c == '\\') else {
++                out.extend_from_slice(c.encode_utf8(&mut buffer).as_bytes());
++                continue;
++            };
++            let byte = match escape {
++                'a' => Some(0x07),
++                'b' => Some(0x08),
++                'e' | 'E' => Some(0x1b),
++                'f' => Some(0x0c),
++                'n' => Some(b'\n'),
++                'r' => Some(b'\r'),
++                't' => Some(b'\t'),
++                'v' => Some(0x0b),
++                '\\' => Some(b'\\'),
++                _ => None,
++            };
++            if let Some(byte) = byte {
++                chars.next();
++                out.push(byte);
++                continue;
++            }
++            match escape {
++                '0'..='7' => {
++                    chars.next();
++                    let mut value = escape.to_digit(8).unwrap_or_default();
++                    let more = if value == 0 { 3 } else { 2 };
++                    for _ in 0..more {
++                        let Some(digit) = chars.peek().and_then(|c| c.to_digit(8)) else {
++                            break;
++                        };
++                        chars.next();
++                        value = value * 8 + digit;
++                    }
++                    #[allow(clippy::cast_possible_truncation)]
++                    out.push((value & 0xff) as u8);
++                }
++                'x' | 'u' | 'U' => {
++                    chars.next();
++                    let most = match escape {
++                        'x' => 2,
++                        'u' => 4,
++                        _ => 8,
++                    };
++                    let mut value = 0;
++                    let mut digits = 0;
++                    while digits < most
++                        && let Some(digit) = chars.peek().and_then(|c| c.to_digit(16))
++                    {
++                        chars.next();
++                        value = value * 16 + digit;
++                        digits += 1;
++                    }
++                    if digits == 0 {
++                        let kind = if escape == 'x' { "hex" } else { "unicode" };
++                        self.diagnostics
++                            .warn(std::format!("missing {kind} digit for \\{escape}"));
++                        out.push(b'\\');
++                        out.extend_from_slice(escape.encode_utf8(&mut buffer).as_bytes());
++                    } else if escape == 'x' {
++                        #[allow(clippy::cast_possible_truncation)]
++                        out.push(value as u8);
++                    } else if let Some(c) = char::from_u32(value) {
++                        out.extend_from_slice(c.encode_utf8(&mut buffer).as_bytes());
++                    }
++                }
++                'c' => return (out, true),
++                // Anything else, `\"` included, keeps its backslash.
++                _ => out.push(b'\\'),
++            }
++        }
++        (out, false)
++    }
++}
++
++fn format_error(error: format::FormatError) -> Error {
++    match error {
++        // Propagate I/O errors directly so they can be handled appropriately
++        format::FormatError::IoError(io_err) => Error::from(io_err),
++        // Wrap other format errors
++        other => Error::from(ErrorKind::PrintfInvalidUsage(std::format!(
++            "printf formatting error: {other}"
++        ))),
++    }
++}
++
++/// The arguments `spec` (whose text, after `%`, is `text`) reads, in the order
++/// uucore reads them: `*` width, `*` precision, then the value; each with its
++/// `N$` position, if it has one.
++fn spec_arguments(text: &[u8], spec: &format::Spec) -> Vec<(Option<usize>, ArgKind)> {
++    // `N$` at the start of `text`, and the text after it.
++    fn position(text: &[u8]) -> (Option<usize>, &[u8]) {
++        let digits = text.iter().take_while(|byte| byte.is_ascii_digit()).count();
++        match text.get(digits) {
++            Some(b'$') if digits > 0 => (
++                std::str::from_utf8(&text[..digits])
++                    .ok()
++                    .and_then(|n| n.parse().ok()),
++                &text[digits + 1..],
++            ),
++            _ => (None, text),
++        }
++    }
++    let (value, mut rest) = position(text);
++    let flags = rest
++        .iter()
++        .take_while(|byte| matches!(byte, b'-' | b'+' | b' ' | b'#' | b'0' | b'\''))
++        .count();
++    rest = &rest[flags..];
++    let mut stars = vec![];
++    if let Some(after) = rest.strip_prefix(b"*") {
++        let (star, after) = position(after);
++        stars.push(star);
++        rest = after;
++    }
++    rest = &rest[rest.iter().take_while(|byte| byte.is_ascii_digit()).count()..];
++    if let Some(after) = rest.strip_prefix(b".*") {
++        stars.push(position(after).0);
++    }
++    let (kind, stars) = match spec {
++        format::Spec::Char { .. } => (ArgKind::Text, &stars[..stars.len().min(1)]),
++        format::Spec::String { .. } => (ArgKind::Text, &stars[..]),
++        format::Spec::EscapedString { .. } | format::Spec::QuotedString { .. } => {
++            (ArgKind::Text, &[][..])
++        }
++        format::Spec::SignedInt { .. } => (ArgKind::Signed, &stars[..]),
++        format::Spec::UnsignedInt { .. } => (ArgKind::Unsigned, &stars[..]),
++        format::Spec::Float { .. } => (ArgKind::Float, &stars[..]),
++    };
++    let mut arguments: Vec<_> = stars.iter().map(|star| (*star, ArgKind::Signed)).collect();
++    arguments.push((value, kind));
++    arguments
++}
++
++/// A `'c` or `"c` argument's character code (0 for a lone quote).
++fn character_code(arg: &str) -> Option<u32> {
++    let rest = arg.strip_prefix(['\'', '"'])?;
++    Some(rest.chars().next().map_or(0, |c| {
++        bytes::raw_byte(c).map_or_else(|| u32::from(c), u32::from)
++    }))
++}
++
++/// `strtoimax(arg, &end, 0)`: the magnitude (saturated), its sign, and where
++/// the number ends (0 when there is none).
++fn integer_prefix(arg: &str) -> (u128, bool, usize) {
++    let text = arg.as_bytes();
++    let mut at = text
++        .iter()
++        .position(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
++        .unwrap_or(text.len());
++    let negative = text.get(at) == Some(&b'-');
++    if matches!(text.get(at), Some(b'-' | b'+')) {
++        at += 1;
++    }
++    let (radix, start) = match (text.get(at), text.get(at + 1), text.get(at + 2)) {
++        (Some(b'0'), Some(b'x' | b'X'), Some(digit)) if digit.is_ascii_hexdigit() => (16, at + 2),
++        (Some(b'0'), _, _) => (8, at),
++        _ => (10, at),
++    };
++    let mut magnitude: u128 = 0;
++    let mut end = start;
++    while let Some(digit) = text
++        .get(end)
++        .and_then(|byte| char::from(*byte).to_digit(radix))
++    {
++        magnitude = magnitude
++            .saturating_mul(radix.into())
++            .saturating_add(digit.into())
++            .min(u128::from(u64::MAX) + 1);
++        end += 1;
++    }
++    if end == start {
++        return (0, false, 0);
++    }
++    (magnitude, negative, end)
++}
++
++/// Where `strtod(arg, &end)` stops (0 when there is no number).
++fn float_prefix(arg: &str) -> usize {
++    let text = arg.as_bytes();
++    let mut at = text
++        .iter()
++        .position(|byte| !matches!(byte, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'))
++        .unwrap_or(text.len());
++    if matches!(text.get(at), Some(b'-' | b'+')) {
++        at += 1;
++    }
++    let rest = arg[at..].to_ascii_lowercase();
++    for word in ["infinity", "inf", "nan"] {
++        if rest.starts_with(word) {
++            return at + word.len();
++        }
++    }
++    let hex = rest.starts_with("0x")
++        && rest[2..].starts_with(|c: char| c.is_ascii_hexdigit() || c == '.');
++    let (digits, exponent): (fn(&u8) -> bool, u8) = if hex {
++        at += 2;
++        (u8::is_ascii_hexdigit, b'p')
++    } else {
++        (u8::is_ascii_digit, b'e')
++    };
++    let mut end = at;
++    let mut seen = false;
++    while text.get(end).is_some_and(digits) {
++        end += 1;
++        seen = true;
++    }
++    if text.get(end) == Some(&b'.') {
++        end += 1;
++        while text.get(end).is_some_and(digits) {
++            end += 1;
++            seen = true;
++        }
++    }
++    if !seen {
++        return if hex { at - 1 } else { 0 };
++    }
++    if text.get(end).map(u8::to_ascii_lowercase) == Some(exponent) {
++        let mut exp = end + 1;
++        if matches!(text.get(exp), Some(b'-' | b'+')) {
++            exp += 1;
++        }
++        if text.get(exp).is_some_and(u8::is_ascii_digit) {
++            while text.get(exp).is_some_and(u8::is_ascii_digit) {
++                exp += 1;
++            }
++            end = exp;
++        }
++    }
++    end
++}
++
++/// The C library's message for `ERANGE`.
++fn range_error() -> String {
++    #[cfg(unix)]
++    let message = std::io::Error::from_raw_os_error(nix::errno::Errno::ERANGE as i32).to_string();
++    #[cfg(not(unix))]
++    let message = String::from("Result too large");
++    message
++        .split(" (os error")
++        .next()
++        .unwrap_or_default()
++        .to_owned()
+ }
+ 
+ fn quote_printf_q(s: &str) -> String {
+@@ -151,15 +722,52 @@ fn quote_printf_q(s: &str) -> String {
+     escape::quote(s, &options).into_owned()
+ }
+ 
+-type ParsedFormatItem = (format::FormatItem<format::EscapedChar>, bool);
+-
+-fn parse_format_string(format_string: &str) -> Result<Vec<ParsedFormatItem>, brush_core::Error> {
+-    let format_items: Result<Vec<_>, _> = format::parse_spec_and_escape(format_string.as_bytes())
+-        .map(|result| match result {
+-            Ok(item @ format::FormatItem::Spec(format::Spec::QuotedString { .. })) => {
+-                Ok((item, true))
++/// A format item; for a `%q` one whether it is `%#q` (quote with single
++/// quotes); and the arguments it reads (see [`spec_arguments`]).
++type ParsedFormatItem = (
++    format::FormatItem<format::EscapedChar>,
++    Option<bool>,
++    Vec<(Option<usize>, ArgKind)>,
++);
++
++/// The format's items up to the first invalid conversion, and that conversion's
++/// character (Bash prints what comes before it, then fails).
++fn parse_format_string(
++    format_string: &str,
++) -> Result<(Vec<ParsedFormatItem>, Option<String>), brush_core::Error> {
++    let parse_error = |e: format::FormatError| {
++        ErrorKind::PrintfInvalidUsage(format!("printf parsing error: {e}"))
++    };
++    // Each conversion's text, in order, as uucore's parser finds them: after
++    // `%` (not `%%`, and not `\%`, an escape), `Spec::parse` takes its text.
++    let mut texts = vec![];
++    let mut rest = format_string.as_bytes();
++    while let Some(at) = rest.iter().position(|byte| matches!(byte, b'%' | b'\\')) {
++        match &rest[at..] {
++            [b'\\', _, after @ ..] | [b'%', b'%', after @ ..] => rest = after,
++            [b'%', after @ ..] => {
++                let mut spec = after;
++                let length = match format::Spec::parse(&mut spec) {
++                    Ok(_) => after.len() - spec.len(),
++                    Err(error) => error.len(),
++                };
++                texts.push(&after[..length]);
++                rest = &after[length..];
+             }
+-            Ok(item) => Ok((item, false)),
++            _ => break,
++        }
++    }
++    let mut texts = texts.into_iter();
++
++    let mut items = vec![];
++    for result in format::parse_spec_and_escape(format_string.as_bytes()) {
++        match result {
++            Ok(format::FormatItem::Spec(spec)) => {
++                let arguments = spec_arguments(texts.next().unwrap_or_default(), &spec);
++                let quoting = matches!(spec, format::Spec::QuotedString { .. }).then_some(false);
++                items.push((format::FormatItem::Spec(spec), quoting, arguments));
++            }
++            Ok(item) => items.push((item, None, vec![])),
+             // Fixed q/Q modifiers are deliberately ignored; dynamic modifiers remain unsupported
+             // until uucore exposes quoted-string metadata.
+             Err(format::FormatError::SpecError(spec, span))
+@@ -167,21 +775,40 @@ fn parse_format_string(format_string: &str) -> Result<Vec<ParsedFormatItem>, bru
+                     && !spec.contains(&b'*')
+                     && !spec.contains(&b'$') =>
+             {
++                texts.next();
+                 let mut bare_q: &[u8] = b"q";
+                 let item = format::Spec::parse(&mut bare_q)
+                     .map(format::FormatItem::Spec)
+-                    .map_err(|spec| format::FormatError::SpecError(spec.to_vec(), span))?;
+-                Ok((item, !spec.contains(&b'#')))
++                    .map_err(|spec| {
++                        parse_error(format::FormatError::SpecError(spec.to_vec(), span))
++                    })?;
++                items.push((
++                    item,
++                    Some(spec.contains(&b'#')),
++                    vec![(None, ArgKind::Text)],
++                ));
+             }
+-            Err(error) => Err(error),
+-        })
+-        .collect();
+-
+-    // Observe any errors we encountered along the way.
+-    let format_items = format_items
+-        .map_err(|e| ErrorKind::PrintfInvalidUsage(format!("printf parsing error: {e}")))?;
++            Err(format::FormatError::SpecError(spec, _)) => {
++                return Ok((items, Some(invalid_conversion(format_string, &spec))));
++            }
++            Err(e) => return Err(parse_error(e).into()),
++        }
++    }
++    Ok((items, None))
++}
+ 
+-    Ok(format_items)
++/// The character that ends the invalid conversion `spec` in `format_string`.
++fn invalid_conversion(format_string: &str, spec: &[u8]) -> String {
++    let start = format_string
++        .as_bytes()
++        .windows(spec.len())
++        .position(|window| window == spec)
++        .map_or(format_string.len(), |at| at + spec.len().saturating_sub(1));
++    format_string
++        .get(start..)
++        .and_then(|rest| rest.chars().next())
++        .map(String::from)
++        .unwrap_or_default()
+ }
+ 
+ #[cfg(test)]
+@@ -190,12 +817,13 @@ mod tests {
+     use super::*;
+     use anyhow::Result;
+ 
+-    fn sprintf_via_uucore(
++    fn sprintf_via_uucore<'a>(
+         format_string: &str,
+-        args: impl Iterator<Item = impl Into<OsString>>,
++        args: impl Iterator<Item = &'a &'a str>,
+     ) -> Result<String> {
++        let args: Vec<String> = args.map(|arg| (*arg).to_owned()).collect();
+         let mut result = vec![];
+-        format_via_uucore(format_string, args, &mut result)?;
++        format_via_uucore(format_string, &args, &mut result)?;
+ 
+         Ok(String::from_utf8(result)?)
+     }
+diff --git a/brush-builtins/src/pwd.rs b/brush-builtins/src/pwd.rs
+index a102229d..9fe313ba 100644
+--- a/brush-builtins/src/pwd.rs
++++ b/brush-builtins/src/pwd.rs
+@@ -1,3 +1,4 @@
++use brush_core::bytes::ToShellText as _;
+ use brush_core::{ExecutionResult, builtins};
+ use clap::Parser;
+ use std::{borrow::Cow, io::Write, path::Path};
+@@ -35,7 +36,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for PwdCommand {
+             cwd = cwd.canonicalize()?.into();
+         }
+ 
+-        writeln!(context.stdout(), "{}", cwd.to_string_lossy())?;
++        writeln!(context.stdout(), "{}", cwd.to_shell_text())?;
+ 
+         Ok(ExecutionResult::success())
+     }
+diff --git a/brush-builtins/src/read.rs b/brush-builtins/src/read.rs
+index 644209c2..213d38d2 100644
+--- a/brush-builtins/src/read.rs
++++ b/brush-builtins/src/read.rs
+@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
+ use brush_core::{ErrorKind, builtins, env, error, variables};
+ 
+ use std::io::{Read, Write};
+-use utf8_chars::BufReadCharsExt;
+ 
+ /// Exit code returned when `read` times out.
+ /// This is 128 + SIGALRM (14) = 142, matching bash behavior.
+@@ -71,7 +70,7 @@ pub(crate) struct ReadCommand {
+ 
+     /// File descriptor to read from instead of stdin.
+     #[clap(short = 'u', name = "FD")]
+-    fd_num_to_read: Option<u8>,
++    fd_num_to_read: Option<brush_core::ShellFd>,
+ 
+     /// Optionally, names of variables to receive read input.
+     variable_names: Vec<String>,
+@@ -105,9 +104,17 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
+         );
+ 
+         // Retrieve the file.
+-        let input_stream = context
+-            .try_fd(fd_num)
+-            .ok_or_else(|| ErrorKind::BadFileDescriptor(fd_num))?;
++        let Some(input_stream) = context.try_fd(fd_num) else {
++            if self.fd_num_to_read.is_none() {
++                return Err(ErrorKind::BadFileDescriptor(fd_num).into());
++            }
++            writeln!(
++                context.stderr(),
++                "{}read: {fd_num}: invalid file descriptor: Bad file descriptor",
++                context.shell.diagnostic_prefix()
++            )?;
++            return Ok(brush_core::ExecutionResult::general_error());
++        };
+ 
+         // Retrieve effective value of IFS for splitting.
+         // We convert to owned String to release the borrow before the mutable borrow
+@@ -118,7 +125,15 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
+         let timeout = self.timeout_in_seconds.map(Duration::from_secs_f64);
+ 
+         // Perform the read operation (potentially with timeout).
+-        let read_result = self.read_line(input_stream, context.stderr(), timeout)?;
++        let mut escaped = vec![];
++        let read_result = self.read_line(input_stream, context.stderr(), timeout, &mut escaped)?;
++
++        // `-t 0` only reports whether input is ready; it assigns nothing.
++        match read_result {
++            ReadResult::InputReady => return Ok(brush_core::ExecutionResult::success()),
++            ReadResult::InputNotReady => return Ok(brush_core::ExecutionResult::general_error()),
++            _ => (),
++        }
+ 
+         // Determine whether to skip IFS splitting (for -N option).
+         let skip_ifs_splitting = self.return_after_n_chars_no_delimiter.is_some();
+@@ -130,25 +145,36 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
+                 Some(line.clone()),
+                 brush_core::ExecutionResult::general_error(),
+             ),
+-            ReadResult::Eof(None) | ReadResult::Interrupted | ReadResult::InputNotReady => {
+-                (None, brush_core::ExecutionResult::general_error())
+-            }
++            ReadResult::Eof(None)
++            | ReadResult::Interrupted
++            | ReadResult::InputNotReady
++            | ReadResult::InputReady => (None, brush_core::ExecutionResult::general_error()),
+             ReadResult::TimedOut(partial) => (
+                 partial.clone(),
+                 brush_core::ExecutionResult::new(TIMEOUT_EXIT_CODE),
+             ),
+-            ReadResult::InputReady => (None, brush_core::ExecutionResult::success()),
+         };
++        let input_line = input_line.map(|line| mark_escaped(&line, &escaped));
+ 
+         // Assign input to variables based on options.
+-        assign_input_to_variables(
++        let readonly = assign_input_to_variables(
+             context.shell,
++            &context.params,
+             input_line.as_deref(),
+             &ifs,
+             skip_ifs_splitting,
+             self.array_variable.as_deref(),
+             &self.variable_names,
+-        )?;
++        )
++        .await?;
++        if let Some(name) = readonly {
++            writeln!(
++                context.stderr(),
++                "{}{name}: readonly variable",
++                context.shell.diagnostic_prefix()
++            )?;
++            return Ok(brush_core::ExecutionResult::new(2));
++        }
+ 
+         Ok(result)
+     }
+@@ -160,35 +186,50 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ReadCommand {
+ /// - Array mode (`-a`): Split input by IFS and assign to array elements
+ /// - Named variables: Split input by IFS and assign to each variable, with remainder to last
+ /// - Default (`REPLY`): Assign entire input line to the `REPLY` variable
+-fn assign_input_to_variables(
++async fn assign_input_to_variables(
+     shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
+-    input_line: Option<&str>,
++    params: &brush_core::ExecutionParameters,
++    input_line: Option<&[(char, bool)]>,
+     ifs: &str,
+     skip_ifs_splitting: bool,
+     array_variable: Option<&str>,
+     variable_names: &[String],
+-) -> Result<(), brush_core::Error> {
++) -> Result<Option<String>, brush_core::Error> {
+     if let Some(array_variable) = array_variable {
+         let literal_fields = build_array_fields(input_line, ifs, skip_ifs_splitting);
+-        shell.env_mut().update_or_add(
++        if !assign(
++            shell,
++            params,
+             array_variable,
+             variables::ShellValueLiteral::Array(variables::ArrayLiteral::new(literal_fields)),
+-            |_| Ok(()),
+-            env::EnvironmentLookup::Anywhere,
+-            env::EnvironmentScope::Global,
+-        )?;
++        )
++        .await?
++        {
++            return Ok(Some(array_variable.to_string()));
++        }
+     } else if !variable_names.is_empty() {
+-        assign_to_named_variables(shell, input_line, ifs, skip_ifs_splitting, variable_names)?;
++        return assign_to_named_variables(
++            shell,
++            params,
++            input_line,
++            ifs,
++            skip_ifs_splitting,
++            variable_names,
++        )
++        .await;
+     } else {
+-        shell.env_mut().update_or_add(
++        if !assign(
++            shell,
++            params,
+             "REPLY",
+-            variables::ShellValueLiteral::Scalar(input_line.unwrap_or_default().to_owned()),
+-            |_| Ok(()),
+-            env::EnvironmentLookup::Anywhere,
+-            env::EnvironmentScope::Global,
+-        )?;
++            variables::ShellValueLiteral::Scalar(text(input_line.unwrap_or_default())),
++        )
++        .await?
++        {
++            return Ok(Some("REPLY".to_string()));
++        }
+     }
+-    Ok(())
++    Ok(None)
+ }
+ 
+ /// Assigns split fields to named variables.
+@@ -196,13 +237,14 @@ fn assign_input_to_variables(
+ /// Fields are assigned one per variable, with any remaining fields joined by space
+ /// and assigned to the last variable. If there are more variables than fields,
+ /// the extra variables are set to empty strings.
+-fn assign_to_named_variables(
++async fn assign_to_named_variables(
+     shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
+-    input_line: Option<&str>,
++    params: &brush_core::ExecutionParameters,
++    input_line: Option<&[(char, bool)]>,
+     ifs: &str,
+     skip_ifs_splitting: bool,
+     variable_names: &[String],
+-) -> Result<(), brush_core::Error> {
++) -> Result<Option<String>, brush_core::Error> {
+     let mut fields =
+         build_variable_fields(input_line, ifs, skip_ifs_splitting, variable_names.len());
+ 
+@@ -218,43 +260,77 @@ fn assign_to_named_variables(
+             fields.pop_front().unwrap_or_default()
+         };
+ 
+-        shell.env_mut().update_or_add(
++        if !assign(
++            shell,
++            params,
+             name,
+             variables::ShellValueLiteral::Scalar(value),
+-            |_| Ok(()),
+-            env::EnvironmentLookup::Anywhere,
+-            env::EnvironmentScope::Global,
+-        )?;
++        )
++        .await?
++        {
++            return Ok(Some(name.to_string()));
++        }
+ 
+         if is_last {
+             break;
+         }
+     }
+-    Ok(())
++    Ok(None)
++}
++
++/// Assigns `value` to `name`, unless it is readonly.
++async fn assign(
++    shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
++    params: &brush_core::ExecutionParameters,
++    name: &str,
++    value: variables::ShellValueLiteral,
++) -> Result<bool, brush_core::Error> {
++    // A reference to an array element assigns it, its subscript expanded.
++    if let variables::ShellValueLiteral::Scalar(text) = &value
++        && shell.env().nameref_element(name).is_some()
++    {
++        brush_core::expansion::assign_to_named_parameter(shell, params, name, text.clone()).await?;
++        return Ok(true);
++    }
++    if shell
++        .env()
++        .get(name)
++        .is_some_and(|(_, variable)| variable.is_readonly())
++    {
++        return Ok(false);
++    }
++    shell.env_mut().update_or_add(
++        name,
++        value,
++        |_| Ok(()),
++        env::EnvironmentLookup::Anywhere,
++        env::EnvironmentScope::Global,
++    )?;
++    Ok(true)
+ }
+ 
+ /// Builds array field values from input, optionally splitting by IFS.
+ fn build_array_fields(
+-    input_line: Option<&str>,
++    input_line: Option<&[(char, bool)]>,
+     ifs: &str,
+     skip_ifs_splitting: bool,
+ ) -> Vec<(Option<String>, String)> {
+     match input_line {
+         Some(line) if skip_ifs_splitting => {
+             // With -N, don't split - put entire input as single element.
+-            vec![(None, line.to_string())]
+-        }
+-        Some(line) => {
+-            let fields: VecDeque<_> = split_line_by_ifs(ifs, line, None /* max_fields */);
+-            fields.into_iter().map(|f| (None, f)).collect()
++            vec![(None, text(line))]
+         }
++        Some(line) => split_line(ifs, line, None)
++            .into_iter()
++            .map(|f| (None, f))
++            .collect(),
+         None => vec![],
+     }
+ }
+ 
+ /// Builds field values from input for assignment to named variables.
+ fn build_variable_fields(
+-    input_line: Option<&str>,
++    input_line: Option<&[(char, bool)]>,
+     ifs: &str,
+     skip_ifs_splitting: bool,
+     num_variables: usize,
+@@ -262,13 +338,88 @@ fn build_variable_fields(
+     match input_line {
+         Some(line) if skip_ifs_splitting => {
+             // With -N, don't split - put entire input in first variable.
+-            VecDeque::from([line.to_string()])
++            VecDeque::from([text(line)])
+         }
+-        Some(line) => split_line_by_ifs(ifs, line, Some(num_variables)),
++        Some(line) => split_line(ifs, line, Some(num_variables)),
+         None => VecDeque::new(),
+     }
+ }
+ 
++/// The characters of `line`, each marked if a backslash escaped it; `escaped`
++/// holds the offsets, in the line's bytes, of those characters.
++fn mark_escaped(line: &str, escaped: &[usize]) -> Vec<(char, bool)> {
++    let mut offset = 0;
++    line.chars()
++        .map(|c| {
++            let marked = escaped.binary_search(&offset).is_ok();
++            offset += encoded_len(c);
++            (c, marked)
++        })
++        .collect()
++}
++
++/// How many bytes `c` stands for.
++fn encoded_len(c: char) -> usize {
++    brush_core::bytes::raw_byte(c).map_or(c.len_utf8(), |_| 1)
++}
++
++fn text(line: &[(char, bool)]) -> String {
++    line.iter().map(|(c, _)| c).collect()
++}
++
++/// Splits `line` as Bash's `read` does: each field is one word and the
++/// delimiter after it (IFS whitespace around at most one other IFS character);
++/// a character a backslash escaped is never a delimiter. With `names`, the last
++/// of them takes the rest less its trailing IFS whitespace, or, when the rest is
++/// a single word, that word without the delimiter after it (`IFS=, read a b <<<
++/// 'a,b,'` sets `b` to `b`).
++fn split_line(ifs: &str, line: &[(char, bool)], names: Option<usize>) -> VecDeque<String> {
++    let delimiter = |at: usize| !line[at].1 && ifs.contains(line[at].0);
++    let whitespace = |at: usize| delimiter(at) && matches!(line[at].0, ' ' | '\t' | '\n');
++    let skip_whitespace = |mut at: usize| {
++        while at < line.len() && whitespace(at) {
++            at += 1;
++        }
++        at
++    };
++    // One word and the delimiter after it: (word, where the next one starts).
++    let next_word = |start: usize| {
++        let end = (start..line.len())
++            .find(|at| delimiter(*at))
++            .unwrap_or(line.len());
++        let mut next = skip_whitespace(end);
++        if next < line.len() && delimiter(next) && !whitespace(next) {
++            next = skip_whitespace(next + 1);
++        }
++        (text(&line[start..end]), next)
++    };
++
++    let mut fields = VecDeque::new();
++    let mut at = skip_whitespace(0);
++    while names.is_none_or(|names| fields.len() + 1 < names) && at < line.len() {
++        let (word, next) = next_word(at);
++        fields.push_back(word);
++        at = next;
++    }
++    if at < line.len() {
++        let (word, next) = next_word(at);
++        fields.push_back(if next == line.len() {
++            word
++        } else {
++            // Bash strips trailing IFS whitespace here even if escaped.
++            let mut end = line.len();
++            while end > at
++                && matches!(line[end - 1].0, ' ' | '\t' | '\n')
++                && ifs.contains(line[end - 1].0)
++            {
++                end -= 1;
++            }
++            text(&line[at..end])
++        });
++    }
++    fields
++}
++
+ /// Result of a `read` operation.
+ ///
+ /// This enum clearly represents all possible outcomes of `read_line()`,
+@@ -295,15 +446,11 @@ enum ReadResult {
+ struct InputReader {
+     /// The input source.
+     input: std::io::BufReader<PolledInput>,
+-    /// Bytes from a malformed UTF-8 sequence, still owed to the caller one at a time.
+-    pending: VecDeque<char>,
+-    /// Terminal mode guard - kept alive for RAII cleanup on drop.
+-    /// The guard restores original terminal settings when dropped, even though
+-    /// we don't access the field directly after construction.
+-    ///
+-    /// The leading underscore suppresses the "unused field" warning while making
+-    /// it explicit this field exists solely for its `Drop` implementation.
+-    _term_mode: Option<brush_core::terminal::AutoModeGuard>,
++    /// Terminal mode guard, restoring the terminal's settings when dropped. It is
++    /// present when reading from a terminal, where `^C` and `^D` are keys.
++    term_mode: Option<brush_core::terminal::AutoModeGuard>,
++    /// Whether `^D` from a terminal ends the input.
++    eof_key: bool,
+ }
+ 
+ /// Events that can occur when reading input.
+@@ -326,6 +473,7 @@ impl InputReader {
+         input: brush_core::openfiles::OpenFile,
+         timeout: Option<Duration>,
+         term_mode: Option<brush_core::terminal::AutoModeGuard>,
++        eof_key: bool,
+     ) -> Self {
+         Self {
+             input: std::io::BufReader::with_capacity(
+@@ -335,8 +483,8 @@ impl InputReader {
+                     deadline: timeout.map(|t| Instant::now() + t),
+                 },
+             ),
+-            pending: VecDeque::new(),
+-            _term_mode: term_mode,
++            term_mode,
++            eof_key,
+         }
+     }
+ 
+@@ -347,38 +495,28 @@ impl InputReader {
+             .unwrap_or(false)
+     }
+ 
+-    /// Reads the next input event, handling timeout and control characters.
++    /// Reads the next input event, handling timeout and control characters. Input is
++    /// read a byte at a time, as Bash does, so the bytes after the line stay unread;
++    /// a byte above 0x7f is its raw character until [`finish_line`] decodes the line.
+     fn read_event(&mut self) -> Result<InputEvent, brush_core::Error> {
++        let mut byte = [0_u8; 1];
+         let ch = loop {
+-            if let Some(ch) = self.pending.pop_front() {
+-                break ch;
+-            }
+-
+-            match self.input.read_char_raw() {
+-                Ok(Some(ch)) => break ch,
+-                Ok(None) => return Ok(InputEvent::Eof),
+-                Err(e) => {
+-                    // Hand back the bytes it consumed, one at a time; the byte that broke
+-                    // the sequence was left unconsumed, for the next call to re-read.
+-                    //
+-                    // TODO(utf-8): `line` is a `String`, so an invalid byte can't
+-                    // round-trip; bash preserves it verbatim, we re-encode it.
+-                    if e.as_bytes().is_empty() {
+-                        if e.as_io_error().kind() == std::io::ErrorKind::TimedOut {
+-                            return Ok(InputEvent::Timeout);
+-                        }
+-                        return Err(e.into_io_error().into());
+-                    }
+-                    self.pending
+-                        .extend(e.as_bytes().iter().copied().map(char::from));
++            match self.input.read(&mut byte) {
++                Ok(0) => return Ok(InputEvent::Eof),
++                Ok(_) if byte[0].is_ascii() => break char::from(byte[0]),
++                Ok(_) => break brush_core::bytes::raw_char(byte[0]),
++                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
++                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
++                    return Ok(InputEvent::Timeout);
+                 }
++                Err(e) => return Err(e.into()),
+             }
+         };
+ 
+-        // Map control characters to events.
++        // Map control characters to events; only a terminal sends them as keys.
+         Ok(match ch {
+-            CTRL_C => InputEvent::CtrlC,
+-            CTRL_D => InputEvent::CtrlD,
++            CTRL_C if self.term_mode.is_some() => InputEvent::CtrlC,
++            CTRL_D if self.term_mode.is_some() && self.eof_key => InputEvent::CtrlD,
+             _ => InputEvent::Char(ch),
+         })
+     }
+@@ -411,6 +549,11 @@ impl Read for PolledInput {
+     }
+ }
+ 
++/// Decodes a line read byte by byte (see [`InputReader::read_event`]) as shell text.
++fn finish_line(line: &str) -> String {
++    brush_core::bytes::decode(&brush_core::bytes::encode(line)).into_owned()
++}
++
+ /// Configuration for line reading behavior.
+ struct LineReaderConfig {
+     /// Character that terminates input (None for -N mode).
+@@ -433,13 +576,21 @@ struct LineReaderConfig {
+ fn read_line_with_reader(
+     reader: &mut InputReader,
+     config: &LineReaderConfig,
++    escaped: &mut Vec<usize>,
+ ) -> Result<ReadResult, brush_core::Error> {
+     let mut line = String::new();
++    // The line's length in bytes, where an escaped character's offset is noted.
++    let mut length = 0;
+     // Tracked alongside `line`, which is a `String`: the limit counts characters, and
+     // recounting a growing string on every one of them is quadratic.
+     let mut output_chars = 0usize;
+     let mut pending_backslash = false;
+ 
++    // `-n 0` and `-N 0` read nothing.
++    if config.char_limit == Some(0) {
++        return Ok(ReadResult::Line(line));
++    }
++
+     loop {
+         let event = reader.read_event()?;
+ 
+@@ -493,6 +644,8 @@ fn read_line_with_reader(
+                         }
+ 
+                         // For other chars, add char literally (backslash consumed).
++                        escaped.push(length);
++                        length += encoded_len(ch);
+                         line.push(ch);
+                         output_chars += 1;
+ 
+@@ -518,11 +671,12 @@ fn read_line_with_reader(
+                     return Ok(ReadResult::Line(line));
+                 }
+ 
+-                // Ignore non-whitespace control characters.
+-                if ch.is_ascii_control() && !ch.is_ascii_whitespace() {
++                // Bash drops NUL bytes; other control characters are data.
++                if ch == '\0' {
+                     continue;
+                 }
+ 
++                length += encoded_len(ch);
+                 line.push(ch);
+                 output_chars += 1;
+ 
+@@ -549,6 +703,7 @@ impl ReadCommand {
+         input_file: brush_core::openfiles::OpenFile,
+         mut stderr_file: impl std::io::Write,
+         timeout: Option<Duration>,
++        escaped: &mut Vec<usize>,
+     ) -> Result<ReadResult, brush_core::Error> {
+         let term_mode = self.setup_terminal_settings(&input_file)?;
+ 
+@@ -564,10 +719,11 @@ impl ReadCommand {
+         let delimiter = if self.return_after_n_chars_no_delimiter.is_some() {
+             None
+         } else if let Some(delimiter_str) = &self.delimiter {
+-            if delimiter_str.is_empty() {
+-                Some(NUL_DELIMITER)
+-            } else {
+-                delimiter_str.chars().next()
++            // Bash's delimiter is the first byte of the argument.
++            match brush_core::bytes::encode(delimiter_str).first() {
++                None => Some(NUL_DELIMITER),
++                Some(byte) if byte.is_ascii() => Some(char::from(*byte)),
++                Some(byte) => Some(brush_core::bytes::raw_char(*byte)),
+             }
+         } else {
+             Some(DEFAULT_DELIMITER)
+@@ -578,7 +734,10 @@ impl ReadCommand {
+             .or(self.return_after_n_chars);
+ 
+         // Create the input reader.
+-        let mut reader = InputReader::new(input_file, timeout, term_mode);
++        // With `-n` or `-N`, Bash reads a terminal character by character, so
++        // `^D` is data, not the end of the input.
++        let eof_key = char_limit.is_none();
++        let mut reader = InputReader::new(input_file, timeout, term_mode, eof_key);
+ 
+         // Handle -t 0 special case: just check if input is available without reading.
+         if timeout == Some(Duration::ZERO) {
+@@ -596,7 +755,16 @@ impl ReadCommand {
+             process_escapes: !self.raw_mode,
+         };
+ 
+-        read_line_with_reader(&mut reader, &config)
++        Ok(
++            match read_line_with_reader(&mut reader, &config, escaped)? {
++                ReadResult::Line(line) => ReadResult::Line(finish_line(&line)),
++                ReadResult::Eof(line) => ReadResult::Eof(line.as_deref().map(finish_line)),
++                ReadResult::TimedOut(line) => {
++                    ReadResult::TimedOut(line.as_deref().map(finish_line))
++                }
++                other => other,
++            },
++        )
+     }
+ 
+     fn setup_terminal_settings(
+@@ -641,87 +809,6 @@ impl ReadCommand {
+     }
+ }
+ 
+-/// Splits a line by IFS (Internal Field Separator) according to shell rules.
+-///
+-/// Shell IFS splitting has special rules:
+-/// - Whitespace IFS chars (space, tab, newline) are "IFS whitespace"
+-/// - Leading/trailing IFS whitespace is trimmed from the input
+-/// - Consecutive IFS whitespace chars act as a single delimiter
+-/// - Non-whitespace IFS chars each act as individual delimiters
+-/// - Trailing non-whitespace delimiter does NOT create an empty final field
+-///
+-/// # Arguments
+-/// * `ifs` - The IFS string (typically " \t\n")
+-/// * `line` - The input line to split
+-/// * `max_fields` - Optional limit on number of fields (for `read var1 var2`)
+-fn split_line_by_ifs(ifs: &str, line: &str, max_fields: Option<usize>) -> VecDeque<String> {
+-    let ifs_chars: Vec<char> = ifs.chars().collect();
+-
+-    // Helper to check if a char is IFS whitespace (space, tab, or newline AND in IFS).
+-    let is_ifs_whitespace =
+-        |c: char| -> bool { (c == ' ' || c == '\t' || c == '\n') && ifs_chars.contains(&c) };
+-
+-    // Trim leading/trailing IFS whitespace from the input.
+-    let trimmed_line = line.trim_matches(&is_ifs_whitespace);
+-    if trimmed_line.is_empty() {
+-        return VecDeque::new();
+-    }
+-
+-    let max_fields = max_fields.unwrap_or(usize::MAX);
+-
+-    // State machine for splitting:
+-    // - `consuming_whitespace_run`: Currently skipping consecutive IFS whitespace
+-    // - `prev_was_non_ws_delim`: Previous char was a non-whitespace delimiter
+-    // - `collecting_remainder`: We've hit max_fields, collect everything into last field
+-    let mut fields = VecDeque::new();
+-    let mut current_field = String::new();
+-    let mut consuming_whitespace_run = false;
+-    let mut prev_was_non_ws_delim = false;
+-    let mut collecting_remainder = false;
+-
+-    for c in trimmed_line.chars() {
+-        // Skip consecutive IFS whitespace (they act as single delimiter).
+-        if consuming_whitespace_run && is_ifs_whitespace(c) {
+-            continue;
+-        }
+-        consuming_whitespace_run = false;
+-
+-        let is_delimiter = ifs_chars.contains(&c);
+-        let at_field_limit = fields.len() + 1 >= max_fields;
+-
+-        if !at_field_limit && is_delimiter {
+-            // Normal case: delimiter ends current field, start new one.
+-            fields.push_back(std::mem::take(&mut current_field));
+-            consuming_whitespace_run = is_ifs_whitespace(c);
+-            prev_was_non_ws_delim = !consuming_whitespace_run;
+-        } else if at_field_limit && !collecting_remainder && is_delimiter {
+-            // At field limit but haven't started last field content yet.
+-            // Skip leading IFS whitespace for the final field.
+-            if is_ifs_whitespace(c) {
+-                consuming_whitespace_run = true;
+-            } else {
+-                // Non-whitespace delimiters at boundary: include in remainder.
+-                // e.g., "x::y" with IFS=":" and 2 vars gives ["x", ":y"]
+-                collecting_remainder = true;
+-                current_field.push(c);
+-            }
+-        } else {
+-            // Regular character: add to current field.
+-            collecting_remainder = at_field_limit;
+-            current_field.push(c);
+-            prev_was_non_ws_delim = false;
+-        }
+-    }
+-
+-    // Finalize: push last field unless it's empty AND we ended with non-ws delimiter.
+-    // e.g., "a,b,c," with IFS="," gives ["a", "b", "c"], not ["a", "b", "c", ""].
+-    if !current_field.is_empty() || !prev_was_non_ws_delim {
+-        fields.push_back(current_field);
+-    }
+-
+-    fields
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use itertools::assert_equal;
+@@ -742,7 +829,7 @@ mod tests {
+         let (rx, mut tx) = std::io::pipe().unwrap();
+         tx.write_all(b"\xc3").unwrap();
+ 
+-        let mut reader = InputReader::new(rx.into(), Some(Duration::from_millis(100)), None);
++        let mut reader = InputReader::new(rx.into(), Some(Duration::from_millis(100)), None, true);
+         let config = LineReaderConfig {
+             delimiter: Some(DEFAULT_DELIMITER),
+             char_limit: None,
+@@ -751,106 +838,19 @@ mod tests {
+ 
+         // Holding `tx` means the continuation byte never arrives, so the deadline has to
+         // be enforced on it and not just on the byte that started the sequence.
+-        let result = read_line_with_reader(&mut reader, &config).unwrap();
++        let result = read_line_with_reader(&mut reader, &config, &mut vec![]).unwrap();
+         drop(tx);
+ 
+-        assert!(matches!(result, ReadResult::TimedOut(Some(line)) if line == "\u{c3}"));
+-    }
+-
+-    // ==================== split_line_by_ifs tests ====================
+-
+-    #[test]
+-    fn test_split_line_by_ifs_basic() {
+-        let result = split_line_by_ifs(",", "a,b,c", None);
+-        assert_equal(result, VecDeque::from(vec!["a", "b", "c"]));
+-    }
+-
+-    #[test]
+-    fn test_split_line_by_ifs_leading_or_trailing_space() {
+-        let result = split_line_by_ifs(" ", "  a b c ", None);
+-        assert_equal(result, VecDeque::from(vec!["a", "b", "c"]));
+-    }
+-
+-    #[test]
+-    fn test_split_line_by_ifs_extra_interior_space() {
+-        let result = split_line_by_ifs(" ", "a  b c", None);
+-        assert_equal(result, VecDeque::from(vec!["a", "b", "c"]));
+-    }
+-
+-    #[test]
+-    fn test_split_line_by_ifs_leading_non_space_delimiter() {
+-        let result = split_line_by_ifs(",", ",a,b,c", None);
+-        assert_equal(result, VecDeque::from(vec!["", "a", "b", "c"]));
+-    }
+-
+-    #[test]
+-    fn test_split_line_by_ifs_trailing_non_space_delimiter() {
+-        // Bash does NOT include empty trailing field when input ends with non-ws delimiter.
+-        let result = split_line_by_ifs(",", "a,b,c,", None);
+-        assert_equal(result, VecDeque::from(vec!["a", "b", "c"]));
+-    }
+-
+-    #[test]
+-    fn test_split_line_by_ifs_max_fields() {
+-        // With max_fields=2, remainder goes into second field.
+-        let result = split_line_by_ifs(" ", "a b c d", Some(2));
+-        assert_equal(result, VecDeque::from(vec!["a", "b c d"]));
+-    }
+-
+-    #[test]
+-    fn test_split_line_by_ifs_max_fields_with_non_ws_delimiter() {
+-        // With max_fields and non-whitespace delimiter.
+-        let result = split_line_by_ifs(",", "a,b,c,d", Some(2));
+-        assert_equal(result, VecDeque::from(vec!["a", "b,c,d"]));
+-    }
+-
+-    #[test]
+-    fn test_split_line_by_ifs_consecutive_delimiters_at_boundary() {
+-        // Consecutive non-whitespace delimiters at field boundary should be preserved.
+-        // e.g., "x::y" with IFS=":" and 2 vars gives ["x", ":y"]
+-        let result = split_line_by_ifs(":", "x::y", Some(2));
+-        assert_equal(result, VecDeque::from(vec!["x", ":y"]));
+-
+-        // Triple delimiter at boundary.
+-        let result = split_line_by_ifs(":", "x:::y", Some(2));
+-        assert_equal(result, VecDeque::from(vec!["x", "::y"]));
+-
+-        // Delimiter in middle of remainder is also preserved.
+-        let result = split_line_by_ifs(":", "x:y:z:w", Some(2));
+-        assert_equal(result, VecDeque::from(vec!["x", "y:z:w"]));
+-    }
+-
+-    #[test]
+-    fn test_split_line_by_ifs_mixed_delimiters() {
+-        // Mixed whitespace and non-whitespace in IFS.
+-        let result = split_line_by_ifs(": ", "a:b  c:d", None);
+-        assert_equal(result, VecDeque::from(vec!["a", "b", "c", "d"]));
+-    }
+-
+-    #[test]
+-    fn test_split_line_by_ifs_empty_input() {
+-        let result = split_line_by_ifs(" ", "", None);
+-        assert_equal(result, VecDeque::<String>::new());
+-    }
+-
+-    #[test]
+-    fn test_split_line_by_ifs_whitespace_only() {
+-        let result = split_line_by_ifs(" ", "   ", None);
+-        assert_equal(result, VecDeque::<String>::new());
+-    }
+-
+-    #[test]
+-    fn test_split_line_by_ifs_consecutive_non_ws_delimiters() {
+-        // Consecutive non-whitespace delimiters create empty fields.
+-        let result = split_line_by_ifs(",", "a,,b", None);
+-        assert_equal(result, VecDeque::from(vec!["a", "", "b"]));
++        assert!(
++            matches!(result, ReadResult::TimedOut(Some(line)) if line == brush_core::bytes::raw_char(0xc3).to_string())
++        );
+     }
+ 
+     // ==================== build_array_fields tests ====================
+ 
+     #[test]
+     fn test_build_array_fields_basic() {
+-        let result = build_array_fields(Some("a b c"), " ", false);
++        let result = build_array_fields(Some(&mark_escaped("a b c", &[])), " ", false);
+         assert_eq!(
+             result,
+             vec![
+@@ -864,7 +864,7 @@ mod tests {
+     #[test]
+     fn test_build_array_fields_skip_splitting() {
+         // With -N option, entire input goes as single element.
+-        let result = build_array_fields(Some("a b c"), " ", true);
++        let result = build_array_fields(Some(&mark_escaped("a b c", &[])), " ", true);
+         assert_eq!(result, vec![(None, "a b c".to_string())]);
+     }
+ 
+@@ -878,21 +878,21 @@ mod tests {
+ 
+     #[test]
+     fn test_build_variable_fields_basic() {
+-        let result = build_variable_fields(Some("a b c"), " ", false, 3);
++        let result = build_variable_fields(Some(&mark_escaped("a b c", &[])), " ", false, 3);
+         assert_equal(result, VecDeque::from(vec!["a", "b", "c"]));
+     }
+ 
+     #[test]
+     fn test_build_variable_fields_fewer_vars_than_fields() {
+         // Last variable gets remainder.
+-        let result = build_variable_fields(Some("a b c d"), " ", false, 2);
++        let result = build_variable_fields(Some(&mark_escaped("a b c d", &[])), " ", false, 2);
+         assert_equal(result, VecDeque::from(vec!["a", "b c d"]));
+     }
+ 
+     #[test]
+     fn test_build_variable_fields_skip_splitting() {
+         // With -N option, entire input goes to first variable.
+-        let result = build_variable_fields(Some("a b c"), " ", true, 3);
++        let result = build_variable_fields(Some(&mark_escaped("a b c", &[])), " ", true, 3);
+         assert_equal(result, VecDeque::from(vec!["a b c"]));
+     }
+ 
+diff --git a/brush-builtins/src/set.rs b/brush-builtins/src/set.rs
+index d44dacb6..97576d24 100644
+--- a/brush-builtins/src/set.rs
++++ b/brush-builtins/src/set.rs
+@@ -1,11 +1,27 @@
+ use std::collections::HashMap;
+ use std::io::Write;
++use std::sync::{Arc, OnceLock};
+ 
+ use clap::Parser;
+ use itertools::Itertools;
+ 
+ use brush_core::{ExecutionExitCode, ExecutionResult, builtins, variables};
+ 
++type HistoryDisableHook = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
++static HISTORY_DISABLE_HOOK: OnceLock<HistoryDisableHook> = OnceLock::new();
++
++/// Install an embedding callback before `set +o history` takes effect.
++pub fn install_history_disable_hook(hook: HistoryDisableHook) {
++    let _ = HISTORY_DISABLE_HOOK.set(hook);
++}
++
++pub(crate) fn run_history_disable_hook() -> Result<(), String> {
++    if let Some(hook) = HISTORY_DISABLE_HOOK.get() {
++        hook()?;
++    }
++    Ok(())
++}
++
+ crate::minus_or_plus_flag_arg!(
+     ExportVariablesOnModification,
+     'a',
+@@ -367,6 +383,12 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for SetCommand {
+                 brush_core::namedoptions::options(brush_core::namedoptions::ShellOptionKind::SetO)
+                     .get(option_name.as_str())
+             {
++                if option_name == "history" && !value {
++                    if let Err(error) = run_history_disable_hook() {
++                        writeln!(context.stderr(), "set: cannot disable recording: {error}")?;
++                        return Ok(ExecutionExitCode::GeneralError.into());
++                    }
++                }
+                 option_def.set(context.shell.options_mut(), value);
+             } else {
+                 result = ExecutionExitCode::InvalidUsage.into();
+@@ -431,12 +453,12 @@ fn display_all(
+             continue;
+         }
+ 
+-        writeln!(
+-            context.stdout(),
+-            "{name}={}",
+-            var.value()
+-                .format(variables::FormatStyle::Basic, context.shell)?,
+-        )?;
++        // Bash leaves an empty value unquoted (`v=`).
++        let value = match var.value() {
++            variables::ShellValue::String(value) if value.is_empty() => Default::default(),
++            value => value.format(variables::FormatStyle::Basic, context.shell)?,
++        };
++        writeln!(context.stdout(), "{name}={value}")?;
+     }
+ 
+     // Display functions... unless we're in posix compliance mode.
+diff --git a/brush-builtins/src/shopt.rs b/brush-builtins/src/shopt.rs
+index 52fec202..2821d6a0 100644
+--- a/brush-builtins/src/shopt.rs
++++ b/brush-builtins/src/shopt.rs
+@@ -84,7 +84,13 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ShoptCommand {
+                     }
+                 } else {
+                     let option_value_str = if option_value { "on" } else { "off" };
+-                    writeln!(context.stdout(), "{:20}\t{option_value_str}", option.name)?;
++                    // Bash pads names to 15 columns listing every `-o` option, else 20.
++                    let width = if self.set_o_names_only { 15 } else { 20 };
++                    writeln!(
++                        context.stdout(),
++                        "{:width$}\t{option_value_str}",
++                        option.name
++                    )?;
+                 }
+             }
+ 
+@@ -110,6 +116,15 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for ShoptCommand {
+                     if self.set {
+                         option_definition.set(context.shell.options_mut(), true);
+                     } else if self.unset {
++                        if self.set_o_names_only && option_name == "history" {
++                            if let Err(error) = crate::set::run_history_disable_hook() {
++                                writeln!(
++                                    context.stderr(),
++                                    "shopt: cannot disable recording: {error}"
++                                )?;
++                                return Ok(ExecutionResult::general_error());
++                            }
++                        }
+                         option_definition.set(context.shell.options_mut(), false);
+                     } else {
+                         let option_value = option_definition.get(context.shell.options());
+diff --git a/brush-builtins/src/type_.rs b/brush-builtins/src/type_.rs
+index 0bb842dd..6469f81d 100644
+--- a/brush-builtins/src/type_.rs
++++ b/brush-builtins/src/type_.rs
+@@ -1,3 +1,4 @@
++use brush_core::bytes::ToShellText as _;
+ use std::io::Write;
+ 
+ use clap::Parser;
+@@ -82,7 +83,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for TypeCommand {
+                         }
+                         Resolved::File { path, .. } => {
+                             if self.show_path_only || self.force_path_search {
+-                                writeln!(context.stdout(), "{}", path.to_string_lossy())?;
++                                writeln!(context.stdout(), "{}", path.to_shell_text())?;
+                             } else {
+                                 writeln!(context.stdout(), "file")?;
+                             }
+@@ -96,7 +97,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for TypeCommand {
+                         Resolved::File { path, .. }
+                             if self.show_path_only || self.force_path_search =>
+                         {
+-                            writeln!(context.stdout(), "{}", path.to_string_lossy())?;
++                            writeln!(context.stdout(), "{}", path.to_shell_text())?;
+                         }
+                         _ => lookup::describe(context.stdout(), name, &resolved_type)?,
+                     }
+diff --git a/brush-builtins/src/unset.rs b/brush-builtins/src/unset.rs
+index 7b9a23f6..ad23a215 100644
+--- a/brush-builtins/src/unset.rs
++++ b/brush-builtins/src/unset.rs
+@@ -1,6 +1,7 @@
+ use std::borrow::Cow;
+ 
+ use clap::Parser;
++use std::io::Write;
+ 
+ use brush_core::{ExecutionResult, Shell, builtins};
+ 
+@@ -45,15 +46,17 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for UnsetCommand {
+         self,
+         context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+-        //
+-        // TODO(nameref): implement nameref
+-        //
++        // `unset -n` removes name references themselves.
+         if self.name_interpretation.name_references {
+-            return brush_core::error::unimp("unset: name references are not yet implemented");
++            for name in &self.names {
++                context.shell.env_mut().unset_raw(name.as_str())?;
++            }
++            return Ok(brush_core::ExecutionResult::success());
+         }
+ 
+         let unspecified = self.name_interpretation.unspecified();
+ 
++        let mut result = ExecutionResult::success();
+         #[expect(clippy::needless_continue)]
+         for name in &self.names {
+             if unspecified || self.name_interpretation.shell_variables {
+@@ -65,6 +68,41 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for UnsetCommand {
+                     let result = match parameter {
+                         brush_parser::word::Parameter::Positional(_) => continue,
+                         brush_parser::word::Parameter::Special(_) => continue,
++                        // A reference to an array element unsets the element.
++                        brush_parser::word::Parameter::Named(name)
++                            if context.shell.env().nameref_element(name.as_str()).is_some() =>
++                        {
++                            let (array, index) = context
++                                .shell
++                                .env()
++                                .nameref_element(name.as_str())
++                                .unwrap_or_default();
++                            let index = brush_core::expansion::basic_expand_word(
++                                context.shell,
++                                &context.params,
++                                index,
++                            )
++                            .await?;
++                            unset_array_index(context.shell, array.as_str(), index.as_str())?
++                        }
++                        // Like Bash, a readonly variable is reported and the
++                        // other names are still unset.
++                        brush_parser::word::Parameter::Named(name)
++                            if context
++                                .shell
++                                .env()
++                                .get(name.as_str())
++                                .is_some_and(|(_, var)| var.is_readonly()) =>
++                        {
++                            writeln!(
++                                context.stderr(),
++                                "{}{}: {name}: cannot unset: readonly variable",
++                                context.shell.diagnostic_prefix(),
++                                context.command_name
++                            )?;
++                            result = ExecutionResult::general_error();
++                            continue;
++                        }
+                         brush_parser::word::Parameter::Named(name) => {
+                             context.shell.env_mut().unset(name.as_str())?.is_some()
+                         }
+@@ -91,7 +129,7 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for UnsetCommand {
+             }
+         }
+ 
+-        Ok(ExecutionResult::success())
++        Ok(result)
+     }
+ }
+ 
+diff --git a/brush-builtins/src/wait.rs b/brush-builtins/src/wait.rs
+index 3adb11f2..45b3ac5e 100644
+--- a/brush-builtins/src/wait.rs
++++ b/brush-builtins/src/wait.rs
+@@ -1,7 +1,7 @@
+ use clap::Parser;
+ use std::io::Write;
+ 
+-use brush_core::{ExecutionExitCode, ExecutionResult, builtins, error};
++use brush_core::{ExecutionExitCode, ExecutionResult, builtins, env, traps::TrapSignal, variables};
+ 
+ /// Wait for jobs to terminate.
+ #[derive(Parser)]
+@@ -30,28 +30,129 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for WaitCommand {
+ 
+     async fn execute(
+         self,
+-        context: brush_core::ExecutionContext<'_, SE>,
++        mut context: brush_core::ExecutionContext<'_, SE>,
+     ) -> Result<ExecutionResult, Self::Error> {
+-        if self.wait_for_terminate {
+-            return error::unimp("wait -f");
++        if let Some(name) = &self.variable_to_receive_id {
++            if !env::valid_variable_name(name) {
++                writeln!(
++                    context.stderr(),
++                    "{}: `{name}`: not a valid identifier",
++                    context.command_name
++                )?;
++                return Ok(ExecutionResult::general_error());
++            }
++            context.shell.env_mut().unset(name)?;
+         }
++
+         if self.wait_for_first_or_next {
+-            return error::unimp("wait -n");
++            let eligible_ids = if self.ids.is_empty() {
++                context.shell.jobs_mut().waitable_ids()
++            } else {
++                let mut ids = Vec::new();
++                for id in &self.ids {
++                    let job = if id.starts_with('%') {
++                        context.shell.jobs_mut().resolve_job_spec(id)
++                    } else {
++                        id.parse()
++                            .ok()
++                            .and_then(|pid| context.shell.jobs_mut().job_for_pid_mut(pid))
++                    };
++                    if let Some(job) = job {
++                        ids.push(job.id);
++                    } else if let Ok(pid) = id.parse() {
++                        if let Some(job_id) = context.shell.jobs_mut().waitable_id_for_pid(pid) {
++                            ids.push(job_id);
++                        }
++                    }
++                }
++                ids
++            };
++            #[cfg(unix)]
++            let waited = {
++                let trapped = TrappedSignals::of(context.shell);
++                tokio::select! {
++                    result = context.shell.jobs_mut().wait_first(&eligible_ids, self.wait_for_terminate) => result?,
++                    signal = trapped.recv() => return run_trap(&mut context, signal?).await,
++                }
++            };
++            #[cfg(not(unix))]
++            let waited = context
++                .shell
++                .jobs_mut()
++                .wait_first(&eligible_ids, self.wait_for_terminate)
++                .await?;
++            let Some((job_id, pid, result)) = waited else {
++                return Ok(ExecutionResult::new(127));
++            };
++            if let Some(name) = &self.variable_to_receive_id {
++                let value = pid.map_or_else(|| format!("%{job_id}"), |pid| pid.to_string());
++                context.shell.env_mut().update_or_add(
++                    name,
++                    variables::ShellValueLiteral::Scalar(value),
++                    |_| Ok(()),
++                    env::EnvironmentLookup::Anywhere,
++                    env::EnvironmentScope::Global,
++                )?;
++            }
++            return Ok(result.exit_code.into());
+         }
+-        if self.variable_to_receive_id.is_some() {
+-            return error::unimp("wait -p");
++        #[cfg(unix)]
++        {
++            let trapped = TrappedSignals::of(context.shell);
++            let signal = tokio::select! {
++                result = self.wait_without_next(&mut context) => return result,
++                signal = trapped.recv() => signal?,
++            };
++            return run_trap(&mut context, signal).await;
+         }
+ 
++        #[cfg(not(unix))]
++        self.wait_without_next(&mut context).await
++    }
++}
++
++impl WaitCommand {
++    async fn wait_without_next<SE: brush_core::ShellExtensions>(
++        &self,
++        context: &mut brush_core::ExecutionContext<'_, SE>,
++    ) -> Result<ExecutionResult, brush_core::Error> {
+         let mut result = ExecutionResult::success();
++        let mut last_waited_id = None;
+ 
+         if !self.ids.is_empty() {
+             for id in &self.ids {
+                 if id.starts_with('%') {
+                     // It's a job spec.
+                     if let Some(job) = context.shell.jobs_mut().resolve_job_spec(id) {
++                        let pid = job.representative_pid();
++                        let job_id = job.id;
+                         // Take the job's status, but not its control flow: an `exit` in a
+                         // background job ends only that job.
+-                        result = job.wait().await?.exit_code.into();
++                        let waited = if self.wait_for_terminate {
++                            job.wait_for_termination().await?
++                        } else {
++                            job.wait().await?
++                        };
++                        result = waited.exit_code.into();
++                        last_waited_id =
++                            Some(pid.map_or_else(|| format!("%{job_id}"), |pid| pid.to_string()));
++                    } else if let Some(job_id) = id.strip_prefix('%').and_then(|id| id.parse().ok())
++                    {
++                        if let Some((pid, completed)) =
++                            context.shell.jobs_mut().take_completed_for_id(job_id)
++                        {
++                            result = completed;
++                            last_waited_id = Some(
++                                pid.map_or_else(|| format!("%{job_id}"), |pid| pid.to_string()),
++                            );
++                        } else {
++                            writeln!(
++                                context.stderr(),
++                                "{}: {id}: no such job",
++                                context.command_name
++                            )?;
++                            result = ExecutionResult::new(127);
++                        }
+                     } else {
+                         writeln!(
+                             context.stderr(),
+@@ -60,16 +161,57 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for WaitCommand {
+                             id
+                         )?;
+ 
+-                        result = ExecutionExitCode::GeneralError.into();
++                        result = ExecutionResult::new(127);
+                     }
+                 } else {
+                     // It's a process ID.
+-                    return error::unimp("wait with process IDs");
++                    let Ok(pid) = id.parse() else {
++                        writeln!(
++                            context.stderr(),
++                            "{}: `{id}`: not a pid or valid job spec",
++                            context.command_name
++                        )?;
++                        result = ExecutionExitCode::GeneralError.into();
++                        continue;
++                    };
++                    if let Some(job) = context.shell.jobs_mut().job_for_pid_mut(pid) {
++                        let waited = if self.wait_for_terminate {
++                            job.wait_for_termination().await?
++                        } else {
++                            job.wait().await?
++                        };
++                        result = waited.exit_code.into();
++                        last_waited_id = Some(pid.to_string());
++                        context.shell.jobs_mut().remember_reaped(pid, &result);
++                    } else if let Some(completed) =
++                        context.shell.jobs_mut().take_completed_for_pid(pid)
++                    {
++                        result = completed;
++                        last_waited_id = Some(pid.to_string());
++                        context.shell.jobs_mut().remember_reaped(pid, &result);
++                    } else if let Some(saved) = context.shell.jobs().reaped_status(pid) {
++                        // Bash keeps reaped background statuses for later `wait PID`.
++                        result = saved;
++                        last_waited_id = Some(pid.to_string());
++                    } else {
++                        writeln!(
++                            context.stderr(),
++                            "{}: pid {pid} is not a child of this shell",
++                            context.command_name
++                        )?;
++                        result = ExecutionResult::new(127);
++                    }
+                 }
+             }
++            context.shell.jobs_mut().finish_explicit_wait();
+         } else {
+             // Wait for all jobs.
+-            let jobs = context.shell.jobs_mut().wait_all().await?;
++            let interactive = context.shell.options().interactive;
++            let jobs = context
++                .shell
++                .jobs_mut()
++                .wait_all(self.wait_for_terminate, !interactive)
++                .await?;
+ 
+             if context.shell.options().enable_job_control {
+                 for job in jobs {
+@@ -78,6 +220,69 @@ impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for WaitCommand {
+             }
+         }
+ 
++        if let (Some(name), Some(value)) = (&self.variable_to_receive_id, last_waited_id) {
++            context.shell.env_mut().update_or_add(
++                name,
++                variables::ShellValueLiteral::Scalar(value),
++                |_| Ok(()),
++                env::EnvironmentLookup::Anywhere,
++                env::EnvironmentScope::Global,
++            )?;
++        }
++
+         Ok(result)
+     }
+ }
++
++/// Trapped signals that interrupt `wait`, as in Bash: the wait returns
++/// 128+signal and the trap runs, while the awaited children keep running.
++#[cfg(unix)]
++struct TrappedSignals {
++    term: Option<TrapSignal>,
++    int: Option<TrapSignal>,
++}
++
++#[cfg(unix)]
++impl TrappedSignals {
++    fn of<SE: brush_core::ShellExtensions>(shell: &brush_core::Shell<SE>) -> Self {
++        let trapped = |name: &str| {
++            name.parse()
++                .ok()
++                .filter(|signal| shell.traps().handles(*signal))
++        };
++        Self {
++            term: trapped("TERM"),
++            int: trapped("INT"),
++        }
++    }
++
++    /// Resolves with the trapped signal and its 128+N status.
++    async fn recv(&self) -> Result<(TrapSignal, u8), brush_core::Error> {
++        tokio::select! {
++            result = brush_core::traps::await_term(), if self.term.is_some() => {
++                result.map(|()| (self.term.unwrap_or(TrapSignal::Exit), 143))
++            }
++            result = brush_core::traps::await_int(), if self.int.is_some() => {
++                result.map(|()| (self.int.unwrap_or(TrapSignal::Exit), 130))
++            }
++            else => std::future::pending().await,
++        }
++    }
++}
++
++#[cfg(unix)]
++async fn run_trap<SE: brush_core::ShellExtensions>(
++    context: &mut brush_core::ExecutionContext<'_, SE>,
++    (signal, status): (TrapSignal, u8),
++) -> Result<ExecutionResult, brush_core::Error> {
++    context.shell.set_last_exit_status(status);
++    let trap_result = context
++        .shell
++        .invoke_trap_handler(signal, &context.params)
++        .await?;
++    Ok(if trap_result.is_normal_flow() {
++        ExecutionResult::new(status)
++    } else {
++        trap_result
++    })
++}
+diff --git a/brush-clap-adapter/Cargo.toml b/brush-clap-adapter/Cargo.toml
+index d866dfed..d7cc0600 100644
+--- a/brush-clap-adapter/Cargo.toml
++++ b/brush-clap-adapter/Cargo.toml
+@@ -19,8 +19,3 @@ workspace = true
+ [dependencies]
+ brush-core = { version = "^0.5.0", path = "../brush-core" }
+ clap = { version = "4.6.0", features = ["derive", "wrap_help"] }
+-
+-[dev-dependencies]
+-anyhow = "1.0.102"
+-thiserror = "2.0.18"
+-tokio = { version = "1.52.3", features = ["rt-multi-thread"] }

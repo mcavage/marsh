@@ -4,6 +4,7 @@ members = [
     "brush-shell",
     "brush-parser",
     "brush-core",
+    "brush-clap-adapter",
     "brush-builtins",
     "brush-coreutils-builtins",
     "brush-experimental-builtins",
@@ -105,6 +106,12 @@ extend-ignore-re = [
 # These are specific component names.
 "iterm" = "iterm"
 "jod" = "jod"
+
+# Partial words completed in completion tests, allowed only in the files with those tests.
+# (A type's globs match just file names, not paths.)
+[workspace.metadata.typos.type.completion-tests]
+extend-glob = ["compgen.yaml", "words.rs"]
+extend-words = { "fo" = "fo", "whil" = "whil" }
 
 [profile.release]
 strip = true

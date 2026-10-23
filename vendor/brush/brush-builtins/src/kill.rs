@@ -26,26 +26,19 @@ pub(crate) struct KillCommand {
     args: Vec<String>,
 }
 
-impl builtins::Command for KillCommand {
+// Keeps `--` among the operands, where it ends the options as in Bash
+// (`kill -- -PGID` signals a process group with the default `TERM`).
+brush_clap_adapter::impl_parse_args!(KillCommand, keep_double_dash = args);
+
+impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for KillCommand {
     type Error = brush_core::Error;
 
-    /// Keeps `--` among the operands, where it ends the options as in Bash
-    /// (`kill -- -PGID` signals a process group with the default `TERM`).
-    fn new<I>(args: I) -> Result<Self, clap::Error>
-    where
-        I: IntoIterator<Item = String>,
-    {
-        let (mut this, rest_args) = brush_core::builtins::try_parse_known::<Self>(args)?;
-        if let Some(args) = rest_args {
-            this.args.extend(args);
-        }
-        Ok(this)
-    }
-
-    async fn execute<SE: brush_core::ShellExtensions>(
-        &self,
+    async fn execute(
+        self,
         context: brush_core::ExecutionContext<'_, SE>,
     ) -> Result<brush_core::ExecutionResult, Self::Error> {
+        let mut signal_zero = false;
+
         // Default signal is SIGTERM, as in Bash.
         let mut trap_signal = TrapSignal::Signal(nix::sys::signal::Signal::SIGTERM);
 
@@ -66,18 +59,22 @@ impl builtins::Command for KillCommand {
 
         // Try parsing the signal number (if specified).
         if let Some(signal_number) = &self.signal_number {
-            #[expect(clippy::cast_possible_truncation)]
-            #[expect(clippy::cast_possible_wrap)]
-            if let Ok(parsed_trap_signal) = TrapSignal::try_from(*signal_number as i32) {
-                trap_signal = parsed_trap_signal;
+            if *signal_number == 0 {
+                signal_zero = true;
             } else {
-                writeln!(
-                    context.stderr(),
-                    "{}: invalid signal number: {}",
-                    context.command_name,
-                    signal_number
-                )?;
-                return Ok(ExecutionExitCode::InvalidUsage.into());
+                #[expect(clippy::cast_possible_truncation)]
+                #[expect(clippy::cast_possible_wrap)]
+                if let Ok(parsed_trap_signal) = TrapSignal::try_from(*signal_number as i32) {
+                    trap_signal = parsed_trap_signal;
+                } else {
+                    writeln!(
+                        context.stderr(),
+                        "{}: invalid signal number: {}",
+                        context.command_name,
+                        signal_number
+                    )?;
+                    return Ok(ExecutionExitCode::InvalidUsage.into());
+                }
             }
         }
 
@@ -89,8 +86,11 @@ impl builtins::Command for KillCommand {
                 operands = &operands[1..];
             } else if let Some(possible_sigspec) = first.strip_prefix('-') {
                 // See if this is -sigspec syntax. The sigspec may be a signal name
-                // (e.g., -TERM) or a signal number (e.g., -9).
-                if let Ok(parsed_trap_signal) = possible_sigspec.parse::<TrapSignal>() {
+                // (e.g., -TERM) or a signal number (e.g., -9, including -0).
+                if Ok(0) == possible_sigspec.parse::<i32>() {
+                    signal_zero = true;
+                } else if let Ok(parsed_trap_signal) = possible_sigspec.parse::<TrapSignal>() {
+                    signal_zero = false;
                     trap_signal = parsed_trap_signal;
                 } else {
                     writeln!(
@@ -121,7 +121,11 @@ impl builtins::Command for KillCommand {
             let sent = if pid_or_job_spec.starts_with('%') {
                 // It's a job spec.
                 if let Some(job) = context.shell.jobs_mut().resolve_job_spec(pid_or_job_spec) {
-                    job.kill(trap_signal)
+                    if signal_zero {
+                        job.check_signalable()
+                    } else {
+                        job.kill(trap_signal)
+                    }
                 } else {
                     writeln!(
                         context.stderr(),
@@ -133,8 +137,13 @@ impl builtins::Command for KillCommand {
                     continue;
                 }
             } else {
-                brush_core::int_utils::parse(pid_or_job_spec.as_str(), 10)
-                    .and_then(|pid| sys::signal::kill_process(pid, trap_signal))
+                brush_core::int_utils::parse(pid_or_job_spec.as_str(), 10).and_then(|pid| {
+                    if signal_zero {
+                        sys::signal::check_signalable(pid)
+                    } else {
+                        sys::signal::kill_process(pid, trap_signal)
+                    }
+                })
             };
             if let Err(error) = sent {
                 writeln!(

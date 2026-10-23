@@ -14,8 +14,9 @@ brush is distributed under the terms of the MIT license. If you encounter any is
 
 For more information, visit https://brush.sh.";
 
+// The second usage form is indented to line up under the first, past clap's "Usage: " prefix.
 const USAGE: &str = color_print::cstr!(
-    "<bold>brush</bold> <italics>[OPTIONS]</italics>... <italics>[SCRIPT_PATH [SCRIPT_ARGS]...]</italics>"
+    "<bold>brush</bold> <italics>[OPTIONS]</italics>... <italics>[SCRIPT_PATH [SCRIPT_ARGS]...]</italics>\n       <bold>brush</bold> <italics>[OPTIONS]</italics>... -c <italics>COMMAND_STRING [NAME [ARGS]...]</italics>"
 );
 
 const VERSION: &str = const_format::concatcp!(
@@ -34,14 +35,20 @@ const HEADING_UI_OPTIONS: &str = "User interface options";
 const HEADING_EXPERIMENTAL_OPTIONS: &str = "*Experimental* options (unstable)";
 
 /// Identifies the input backend to use for the shell.
-#[derive(Clone, Copy, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum InputBackendType {
-    /// Richest input backend, based on reedline.
+    /// Richest input backend, based on reedline. Not available on WASI or other
+    /// wasm targets.
     Reedline,
-    /// Basic input backend that provides minimal completion support for testing.
+    /// The `vt` backend's line editing, drawn with backspaces alone and listing
+    /// ambiguous completions straight away: output that test harnesses can follow.
+    /// Available only on Unix.
     Basic,
     /// Most minimal input backend.
     Minimal,
+    /// Line editing with completion and history, drawn with VT100-style escape
+    /// sequences; needs no terminal library. Available only on Unix.
+    Vt,
 }
 
 /// Parsed command-line arguments for the brush shell.
@@ -76,8 +83,18 @@ pub struct CommandLineArgs {
     #[arg(short = 'C', help_heading = HEADING_STANDARD_OPTIONS)]
     pub disallow_overwriting_regular_files_via_output_redirection: bool,
 
-    /// Execute the provided command and then exit.
-    #[arg(short = 'c', value_name = "COMMAND", help_heading = HEADING_STANDARD_OPTIONS)]
+    /// Execute the command given as the first operand and then exit.
+    ///
+    /// Only an input to parsing: `try_parse_from` moves the command string into `command`,
+    /// which is what everything else consults.
+    #[arg(short = 'c', help_heading = HEADING_STANDARD_OPTIONS)]
+    pub(crate) command_string_mode: bool,
+
+    /// The command string to run, taken from the first operand when `-c` is
+    /// given. Not a clap argument itself (hence `skip`): bash parses options
+    /// first and only then takes the command from the first operand, so options
+    /// may sit between the two, as in `bash -c -l 'echo hi'`.
+    #[arg(skip)]
     pub command: Option<String>,
 
     /// Enable error-on-exit behavior.
@@ -320,7 +337,7 @@ mod tests {
         assert!(!args.interactive);
         assert!(!args.login);
         assert!(args.command.is_none());
-        assert!(args.script_args.is_empty());
+        assert_eq!(args.script_args, Vec::<String>::new());
     }
 
     #[test]
@@ -334,6 +351,9 @@ mod tests {
             (vec!["-c", "echo hi", "name"], false),
             // `-i` forces an interactive shell, but `-c` still supplies the commands.
             (vec!["-i", "-c", "echo hi"], false),
+            // `-c` is a plain flag; the command string is the first non-option argument.
+            (vec!["-cl", "echo hi"], false),
+            (vec!["-c", "-l", "echo hi"], false),
             (vec!["script.sh"], false),
             (vec!["-i", "script.sh"], false),
             // `-s` claims the script slot, so trailing words are positional parameters.
@@ -341,7 +361,7 @@ mod tests {
             (vec!["-s", "myarg"], true),
             (vec!["-i", "-s", "myarg"], true),
             (vec!["-si", "myarg"], true),
-            // `--` ends the options.
+            // `--` in option position is consumed as the end-of-options marker.
             (vec!["--", "script.sh"], false),
             (vec!["-s", "--", "myarg"], true),
         ];

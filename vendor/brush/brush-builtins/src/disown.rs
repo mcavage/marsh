@@ -2,7 +2,8 @@ use clap::Parser;
 use std::io::Write;
 
 use brush_core::{
-    ExecutionExitCode, ExecutionResult, builtins,
+    ExecutionExitCode, ExecutionResult,
+    builtins::{self, Invocation},
     jobs::{self, JobSpecMatch},
 };
 
@@ -33,22 +34,26 @@ pub(crate) struct DisownCommand {
     args: Vec<String>,
 }
 
-impl builtins::Command for DisownCommand {
-    type Error = brush_core::Error;
-
-    /// Takes the words as given: Bash parses `disown` options itself, and
-    /// clap would drop a `--`.
-    fn new<I>(args: I) -> Result<Self, clap::Error>
-    where
-        I: IntoIterator<Item = String>,
-    {
+// Takes the words as given: Bash parses `disown` options itself, and clap
+// would drop a `--`.
+brush_clap_adapter::impl_parse_args!(
+    DisownCommand,
+    parse = |invocation: Invocation<'_>| {
         Ok(Self {
-            args: args.into_iter().skip(1).collect(),
+            args: invocation
+                .into_args()
+                .into_iter()
+                .map(String::from)
+                .collect(),
         })
     }
+);
 
-    async fn execute<SE: brush_core::ShellExtensions>(
-        &self,
+impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for DisownCommand {
+    type Error = brush_core::Error;
+
+    async fn execute(
+        self,
         context: brush_core::ExecutionContext<'_, SE>,
     ) -> Result<ExecutionResult, Self::Error> {
         let prefix = std::format!(

@@ -1,0 +1,1892 @@
+diff --git a/brush-parser/Cargo.toml b/brush-parser/Cargo.toml
+index c5671c31..0788bd39 100644
+--- a/brush-parser/Cargo.toml
++++ b/brush-parser/Cargo.toml
+@@ -42,25 +42,3 @@ winnow = { version = "1.0.0", optional = true }
+ [target.wasm32-unknown-unknown.dependencies]
+ getrandom = { version = "0.4.2", features = ["wasm_js"] }
+ uuid = { version = "1", features = ["js"] }
+-
+-[dev-dependencies]
+-anyhow = "1.0.102"
+-criterion = { version = "0.8.2", features = ["html_reports"] }
+-insta = { version = "1.47.1", features = ["glob", "ron", "yaml", "redactions"] }
+-miette = { version = "7.6.0", features = ["fancy"] }
+-pretty_assertions = { version = "1.4.1", features = ["unstable"] }
+-serde = { version = "1.0.228", features = ["derive", "rc"] }
+-serde_json = "1.0.149"
+-yaml_serde = "0.10.7"
+-
+-[[bench]]
+-name = "parser"
+-harness = false
+-
+-[[example]]
+-name = "miette"
+-required-features = ["diagnostics"]
+-
+-[[example]]
+-name = "serde"
+-required-features = ["serde"]
+diff --git a/brush-parser/src/ast.rs b/brush-parser/src/ast.rs
+index 043baf4c..30cac073 100644
+--- a/brush-parser/src/ast.rs
++++ b/brush-parser/src/ast.rs
+@@ -367,6 +367,14 @@ impl Display for Pipeline {
+     derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)
+ )]
+ pub enum Command {
++    /// An marsh concurrent branch group.
++    Fanout(FanoutCommand),
++    /// An marsh concurrent branch group, each branch in a private workspace.
++    Split(FanoutCommand),
++    /// An marsh fanout result renderer.
++    Collect(CollectCommand),
++    /// An marsh placement block (`cloud { LIST; }`).
++    Placement(PlacementCommand),
+     /// A simple command, directly invoking an external command, a built-in command,
+     /// a shell function, or similar.
+     Simple(SimpleCommand),
+@@ -378,9 +386,23 @@ pub enum Command {
+ 
+ impl Node for Command {}
+ 
++impl Command {
++    /// Whether this is the stage after `split` that marsh treats as `join`:
++    /// a simple command whose name is the literal unquoted word `join`, with no
++    /// assignment or redirection prefix.
++    pub fn is_split_join_stage(&self) -> bool {
++        matches!(self, Self::Simple(simple)
++            if simple.prefix.is_none()
++                && simple.word_or_name.as_ref().is_some_and(|word| word.value == "join"))
++    }
++}
++
+ impl SourceLocation for Command {
+     fn location(&self) -> Option<SourceSpan> {
+         match self {
++            Self::Fanout(command) | Self::Split(command) => command.location(),
++            Self::Collect(command) => command.location(),
++            Self::Placement(command) => command.location(),
+             Self::Simple(s) => s.location(),
+             Self::Compound(c, r) => {
+                 match (c.location(), r.as_ref().and_then(SourceLocation::location)) {
+@@ -396,6 +418,10 @@ impl SourceLocation for Command {
+ impl Display for Command {
+     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+         match self {
++            Self::Fanout(command) => command.fmt_with_keyword(f, "fanout"),
++            Self::Split(command) => command.fmt_with_keyword(f, "split"),
++            Self::Collect(command) => write!(f, "{command}"),
++            Self::Placement(command) => write!(f, "{command}"),
+             Self::Simple(simple_command) => write!(f, "{simple_command}"),
+             Self::Compound(compound_command, redirect_list) => {
+                 write!(f, "{compound_command}")?;
+@@ -409,6 +435,146 @@ impl Display for Command {
+     }
+ }
+ 
++#[derive(Clone, Debug)]
++#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
++#[cfg_attr(
++    any(test, feature = "serde"),
++    derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)
++)]
++/// A declaration-ordered group of concurrent shell branches.
++pub struct FanoutCommand {
++    /// Branches in source order.
++    pub branches: Vec<FanoutBranch>,
++    /// Source location of the complete form.
++    pub loc: SourceSpan,
++}
++
++impl Node for FanoutCommand {}
++impl SourceLocation for FanoutCommand {
++    fn location(&self) -> Option<SourceSpan> {
++        Some(self.loc.clone())
++    }
++}
++impl Display for FanoutCommand {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        self.fmt_with_keyword(f, "fanout")
++    }
++}
++impl FanoutCommand {
++    fn fmt_with_keyword(&self, f: &mut std::fmt::Formatter<'_>, keyword: &str) -> std::fmt::Result {
++        writeln!(f, "{keyword} {{")?;
++        // Each body in braces: a newline inside a multi-item body would
++        // otherwise end the branch when this text is parsed again (a block
++        // carried as source, e.g. to `cloud { ... }`).
++        for branch in &self.branches {
++            writeln!(
++                f,
++                "{}: {{ {} }}",
++                branch.label,
++                TerminatedCompoundList(&branch.body)
++            )?;
++        }
++        write!(f, "}}")
++    }
++}
++
++#[derive(Clone, Debug)]
++#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
++#[cfg_attr(
++    any(test, feature = "serde"),
++    derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)
++)]
++/// One named fanout branch with a real shell command-list body.
++pub struct FanoutBranch {
++    /// Stable display label.
++    pub label: String,
++    /// Shell body evaluated in a cloned context.
++    pub body: CompoundList,
++}
++
++#[derive(Clone, Debug)]
++#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
++#[cfg_attr(
++    any(test, feature = "serde"),
++    derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)
++)]
++/// Options and redirections for rendering fanout results.
++pub struct CollectCommand {
++    /// Unexpanded command arguments.
++    pub arguments: Vec<Word>,
++    /// Redirections owned by this stage.
++    pub redirects: Option<RedirectList>,
++    /// Source location of the complete form.
++    pub loc: SourceSpan,
++}
++
++impl Node for CollectCommand {}
++impl SourceLocation for CollectCommand {
++    fn location(&self) -> Option<SourceSpan> {
++        Some(self.loc.clone())
++    }
++}
++impl Display for CollectCommand {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        write!(f, "collect")?;
++        for argument in &self.arguments {
++            write!(f, " {argument}")?;
++        }
++        if let Some(redirects) = &self.redirects {
++            write!(f, "{redirects}")?;
++        }
++        Ok(())
++    }
++}
++
++#[derive(Clone, Debug)]
++#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
++#[cfg_attr(
++    any(test, feature = "serde"),
++    derive(PartialEq, Eq, serde::Serialize, serde::Deserialize)
++)]
++/// A command list evaluated by a fresh shell at another execution place.
++pub struct PlacementCommand {
++    /// The place keyword (`cloud`).
++    pub place: String,
++    /// Options before the block (`cloud --cpus 4 { ... }`), expanded by the
++    /// caller like ordinary arguments.
++    pub options: Vec<Word>,
++    /// The block's command list, evaluated by the remote shell.
++    pub body: CompoundList,
++    /// Redirections owned by the caller.
++    pub redirects: Option<RedirectList>,
++    /// Source location of the complete form.
++    pub loc: SourceSpan,
++}
++
++impl Node for PlacementCommand {}
++impl SourceLocation for PlacementCommand {
++    fn location(&self) -> Option<SourceSpan> {
++        Some(self.loc.clone())
++    }
++}
++impl Display for PlacementCommand {
++    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        write!(f, "{}", self.place)?;
++        for option in &self.options {
++            write!(f, " {option}")?;
++        }
++        writeln!(f, " {{ ")?;
++        write!(
++            indenter::indented(f).with_str(DISPLAY_INDENT),
++            "{}",
++            TerminatedCompoundList(&self.body)
++        )?;
++        writeln!(f)?;
++        write!(f, "}}")?;
++        if let Some(redirects) = &self.redirects {
++            write!(f, "{redirects}")?;
++        }
++        Ok(())
++    }
++}
++
+ /// Represents a compound command, potentially made up of multiple nested commands.
+ #[derive(Clone, Debug)]
+ #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+@@ -1545,6 +1711,10 @@ pub enum IoRedirect {
+     HereString(Option<IoFd>, Word),
+     /// Redirection of both standard output and standard error (with optional append).
+     OutputAndError(Word, bool),
++    /// A redirection whose descriptor is allocated by the shell and stored in the
++    /// named variable (`{name}>file`), or, for a close, read from it (`{name}>&-`).
++    /// The inner redirection has no descriptor number.
++    NamedFd(String, Box<IoRedirect>),
+ }
+ 
+ impl Node for IoRedirect {}
+@@ -1566,6 +1736,9 @@ impl Display for IoRedirect {
+ 
+                 write!(f, "{kind} {target}")?;
+             }
++            Self::NamedFd(name, redirect) => {
++                write!(f, "{{{name}}}{redirect}")?;
++            }
+             Self::OutputAndError(target, append) => {
+                 write!(f, "&>")?;
+                 if *append {
+diff --git a/brush-parser/src/error.rs b/brush-parser/src/error.rs
+index 111809b1..c213f115 100644
+--- a/brush-parser/src/error.rs
++++ b/brush-parser/src/error.rs
+@@ -3,13 +3,19 @@ use crate::tokenizer;
+ /// Represents an error that occurred while parsing tokens.
+ #[derive(thiserror::Error, Debug)]
+ pub enum ParseError {
+-    /// A parsing error occurred near the given position.
+-    #[error("syntax error at line {} col {}", .0.line, .0.column)]
+-    ParsingNear(crate::SourcePosition),
++    /// A parsing error occurred at the given token, reported as Bash does.
++    #[error("line {}: syntax error near unexpected token `{}' (col {})", .position.line, .token, .position.column)]
++    ParsingNear {
++        /// Where the unexpected token starts.
++        position: crate::SourcePosition,
++        /// The unexpected token's text.
++        token: String,
++    },
+ 
+-    /// A parsing error occurred at the end of the input.
+-    #[error("syntax error at end of input")]
+-    ParsingAtEndOfInput,
++    /// A parsing error occurred at the end of the input; the position, when
++    /// known, is where the input ended.
++    #[error("{}syntax error: unexpected end of file", .0.as_ref().map_or_else(String::new, |p| std::format!("line {}: ", p.line)))]
++    ParsingAtEndOfInput(Option<crate::SourcePosition>),
+ 
+     /// An error occurred while tokenizing the input stream.
+     #[error("{} (detected near {})", .inner, .position.as_ref().map_or_else(|| String::from("<unknown position>"), |p| std::format!("line {} col {}", p.line, p.column)))]
+@@ -33,13 +39,13 @@ pub mod miette {
+         pub fn to_pretty_error(self, input: impl Into<String>) -> PrettyError {
+             let input = input.into();
+             let location = match self {
+-                Self::ParsingNear(ref pos) => {
+-                    Some(SourceOffset::from_location(&input, pos.line, pos.column))
+-                }
++                Self::ParsingNear {
++                    position: ref pos, ..
++                } => Some(SourceOffset::from_location(&input, pos.line, pos.column)),
+                 Self::Tokenizing { ref position, .. } => position
+                     .as_ref()
+                     .map(|p| SourceOffset::from_location(&input, p.line, p.column)),
+-                Self::ParsingAtEndOfInput => {
++                Self::ParsingAtEndOfInput(_) => {
+                     Some(SourceOffset::from_location(&input, usize::MAX, usize::MAX))
+                 }
+             };
+@@ -125,8 +131,25 @@ pub(crate) fn convert_peg_parse_error(
+ 
+     if approx_token_index < tokens.len() {
+         let token = &tokens[approx_token_index];
+-        ParseError::ParsingNear((*token.location().start).clone())
++        // Bash names a newline token `newline'.
++        let text = match token.to_str() {
++            "\n" => "newline",
++            text => text,
++        };
++        ParseError::ParsingNear {
++            position: (*token.location().start).clone(),
++            token: text.to_owned(),
++        }
+     } else {
+-        ParseError::ParsingAtEndOfInput
++        // Like Bash, the end of file is on the line after the last one read;
++        // input without a final newline still ends with one.
++        ParseError::ParsingAtEndOfInput(tokens.last().map(|token| {
++            let mut end = (*token.location().end).clone();
++            if token.to_str() != "\n" {
++                end.line += 1;
++                end.column = 1;
++            }
++            end
++        }))
+     }
+ }
+diff --git a/brush-parser/src/parser/aliases.rs b/brush-parser/src/parser/aliases.rs
+new file mode 100644
+index 00000000..ec182a7b
+--- /dev/null
++++ b/brush-parser/src/parser/aliases.rs
+@@ -0,0 +1,270 @@
++//! Lexical alias expansion over a token stream, as Bash performs it while
++//! reading input: an unquoted word in command position whose text names an
++//! alias is replaced by the tokens of the alias value before parsing.
++
++use std::collections::HashMap;
++
++use crate::tokenizer::{Token, TokenizerOptions, tokenize_str_with_options};
++
++/// Expands aliases in `tokens`. A word is eligible when it is in command
++/// position (after a control operator, a reserved word that begins a command
++/// list, or assignment words), or follows an alias whose value ends in a
++/// blank. An alias is not expanded again within its own expansion.
++pub(super) fn expand_aliases(
++    tokens: Vec<Token>,
++    aliases: &HashMap<String, String>,
++    options: &TokenizerOptions,
++) -> Vec<Token> {
++    let mut expander = Expander {
++        aliases,
++        options,
++        output: Vec::with_capacity(tokens.len()),
++        active: Vec::new(),
++        state: CommandState {
++            command: true,
++            ..CommandState::default()
++        },
++    };
++    expander.process(tokens);
++    expander.output
++}
++
++#[derive(Default)]
++struct CommandState {
++    /// The next word is in command position.
++    command: bool,
++    /// The next word may expand because the previous alias value ended in a blank.
++    after_blank_alias: bool,
++    /// The next word is a redirection target.
++    redirect_target: bool,
++    /// Here-document tokens (tag, body, end tag) still to pass through.
++    here_doc_tokens: usize,
++    /// Parenthesis depth inside an arithmetic `(( ... ))` command.
++    arithmetic: usize,
++    /// Inside a `[[ ... ]]` conditional.
++    conditional: bool,
++    /// The next word names a function (`function NAME`).
++    function_name: bool,
++    /// Enclosing `case` commands.
++    cases: Vec<CaseState>,
++    /// The previous token was an opening parenthesis operator.
++    after_open_paren: bool,
++}
++
++#[derive(Clone, Copy, PartialEq, Eq)]
++enum CaseState {
++    /// Between `case` and `in`.
++    Subject,
++    /// Reading a pattern list.
++    Pattern,
++    /// Reading a clause body.
++    Body,
++}
++
++struct Expander<'a> {
++    aliases: &'a HashMap<String, String>,
++    options: &'a TokenizerOptions,
++    output: Vec<Token>,
++    active: Vec<String>,
++    state: CommandState,
++}
++
++impl Expander<'_> {
++    fn process(&mut self, tokens: Vec<Token>) {
++        let mut tokens = tokens.into_iter().peekable();
++        while let Some(token) = tokens.next() {
++            let next_is_open_paren =
++                matches!(tokens.peek(), Some(Token::Operator(op, _)) if op == "(");
++            match token {
++                Token::Operator(op, location) => {
++                    self.operator(&op, next_is_open_paren);
++                    self.output.push(Token::Operator(op, location));
++                }
++                Token::Word(word, location) => {
++                    if self.word_may_expand() {
++                        if let Some(value) = self.lookup(&word) {
++                            self.expand(&word, &value, &location);
++                            continue;
++                        }
++                    }
++                    self.word(&word);
++                    self.output.push(Token::Word(word, location));
++                }
++            }
++        }
++    }
++
++    fn word_may_expand(&mut self) -> bool {
++        let state = &mut self.state;
++        let eligible = std::mem::take(&mut state.after_blank_alias)
++            || (state.command
++                && !matches!(
++                    state.cases.last(),
++                    Some(CaseState::Subject | CaseState::Pattern)
++                ));
++        eligible
++            && state.here_doc_tokens == 0
++            && state.arithmetic == 0
++            && !state.conditional
++            && !state.redirect_target
++            && !state.function_name
++    }
++
++    fn lookup(&self, word: &str) -> Option<String> {
++        if self.active.iter().any(|active| active == word) {
++            return None;
++        }
++        // Quoted or escaped words never match: alias names cannot contain quotes.
++        self.aliases.get(word).cloned()
++    }
++
++    fn expand(&mut self, name: &str, value: &str, location: &crate::SourceSpan) {
++        let Ok(tokens) = tokenize_str_with_options(value, self.options) else {
++            // An alias value that cannot be tokenized stands as a single word.
++            self.word(value);
++            self.output
++                .push(Token::Word(value.to_owned(), location.clone()));
++            return;
++        };
++        let tokens = tokens
++            .into_iter()
++            .map(|token| match token {
++                Token::Operator(op, _) => Token::Operator(op, location.clone()),
++                Token::Word(word, _) => Token::Word(word, location.clone()),
++            })
++            .collect();
++        self.active.push(name.to_owned());
++        self.process(tokens);
++        self.active.pop();
++        if value.ends_with([' ', '\t']) {
++            self.state.after_blank_alias = true;
++        }
++    }
++
++    fn operator(&mut self, op: &str, next_is_open_paren: bool) {
++        let state = &mut self.state;
++        let after_open_paren = std::mem::take(&mut state.after_open_paren);
++        if state.here_doc_tokens > 0 {
++            return;
++        }
++        if state.arithmetic > 0 {
++            match op {
++                "(" => state.arithmetic += 1,
++                ")" => {
++                    state.arithmetic -= 1;
++                    state.command = false;
++                }
++                _ => {}
++            }
++            return;
++        }
++        if state.conditional {
++            return;
++        }
++        match op {
++            "<<" | "<<-" => state.here_doc_tokens = 3,
++            "<" | ">" | ">>" | ">|" | "<>" | "<&" | ">&" | "&>" | "&>>" | "<<<" => {
++                state.redirect_target = true;
++            }
++            "(" if state.command && next_is_open_paren => state.arithmetic = 1,
++            "(" => {
++                state.after_open_paren = true;
++                if !matches!(state.cases.last(), Some(CaseState::Pattern)) {
++                    state.command = true;
++                }
++            }
++            ")" if matches!(state.cases.last(), Some(CaseState::Pattern)) => {
++                set_case(state, CaseState::Body);
++                state.command = true;
++            }
++            // `NAME ()` is followed by a function body.
++            ")" => state.command = after_open_paren,
++            ";;" | ";&" | ";;&" => {
++                set_case(state, CaseState::Pattern);
++                state.command = false;
++            }
++            "\n" if matches!(state.cases.last(), Some(CaseState::Pattern)) => {}
++            "|" if matches!(state.cases.last(), Some(CaseState::Pattern)) => {}
++            "\n" | ";" | "&" | "&&" | "||" | "|" | "|&" => state.command = true,
++            _ => {}
++        }
++    }
++
++    fn word(&mut self, word: &str) {
++        let state = &mut self.state;
++        state.after_open_paren = false;
++        if state.here_doc_tokens > 0 {
++            state.here_doc_tokens -= 1;
++            return;
++        }
++        if std::mem::take(&mut state.redirect_target) || state.arithmetic > 0 {
++            return;
++        }
++        if state.conditional {
++            if word == "]]" {
++                state.conditional = false;
++                state.command = false;
++            }
++            return;
++        }
++        if std::mem::take(&mut state.function_name) {
++            state.command = true;
++            return;
++        }
++        match state.cases.last() {
++            Some(CaseState::Subject) => {
++                if word == "in" {
++                    set_case(state, CaseState::Pattern);
++                }
++                return;
++            }
++            Some(CaseState::Pattern) => {
++                if word == "esac" {
++                    state.cases.pop();
++                    state.command = false;
++                }
++                return;
++            }
++            Some(CaseState::Body) if state.command && word == "esac" => {
++                state.cases.pop();
++                state.command = false;
++                return;
++            }
++            _ => {}
++        }
++        if !state.command {
++            return;
++        }
++        match word {
++            "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "{" | "time"
++            | "coproc" => {}
++            "case" => {
++                state.cases.push(CaseState::Subject);
++                state.command = false;
++            }
++            "function" => {
++                state.function_name = true;
++                state.command = false;
++            }
++            "[[" => state.conditional = true,
++            _ if is_assignment(word) => {}
++            _ => state.command = false,
++        }
++    }
++}
++
++fn set_case(state: &mut CommandState, case: CaseState) {
++    if let Some(top) = state.cases.last_mut() {
++        *top = case;
++    }
++}
++
++fn is_assignment(word: &str) -> bool {
++    let Some((name, _)) = word.split_once('=') else {
++        return false;
++    };
++    let name = name.strip_suffix('+').unwrap_or(name);
++    let name = name.split_once('[').map_or(name, |(name, _)| name);
++    name.starts_with(|c: char| c == '_' || c.is_ascii_alphabetic())
++        && name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
++}
+diff --git a/brush-parser/src/parser/mod.rs b/brush-parser/src/parser/mod.rs
+index fc84324e..4ebc41af 100644
+--- a/brush-parser/src/parser/mod.rs
++++ b/brush-parser/src/parser/mod.rs
+@@ -5,6 +5,7 @@ use bon::bon;
+ use crate::ast;
+ use crate::tokenizer::{Token, TokenEndReason, Tokenizer, TokenizerOptions, Tokens};
+ 
++mod aliases;
+ pub mod peg;
+ #[cfg(feature = "winnow-parser")]
+ pub mod winnow_str;
+@@ -23,6 +24,8 @@ pub enum ParserImpl {
+ /// Options used to control the behavior of the parser.
+ #[derive(Clone, Eq, Hash, PartialEq)]
+ pub struct ParserOptions {
++    /// Whether marsh-only composition syntax is enabled.
++    pub marsh_extensions: bool,
+     /// Whether or not to enable extended globbing (a.k.a. `extglob`).
+     pub enable_extended_globbing: bool,
+     /// Whether or not to enable POSIX compliance mode.
+@@ -40,6 +43,7 @@ pub struct ParserOptions {
+ impl Default for ParserOptions {
+     fn default() -> Self {
+         Self {
++            marsh_extensions: false,
+             enable_extended_globbing: true,
+             posix_mode: false,
+             sh_mode: false,
+@@ -114,6 +118,9 @@ impl<R: std::io::BufRead> Parser<R> {
+         /// Whether or not to enable extended globbing (a.k.a. `extglob`).
+         enable_extended_globbing: bool,
+         #[builder(default = false)]
++        /// Whether marsh-only composition syntax is enabled.
++        marsh_extensions: bool,
++        #[builder(default = false)]
+         /// Whether or not to enable POSIX compliance mode.
+         posix_mode: bool,
+         #[builder(default = false)]
+@@ -130,6 +137,7 @@ impl<R: std::io::BufRead> Parser<R> {
+         parser_impl: ParserImpl,
+     ) -> Self {
+         let options = ParserOptions {
++            marsh_extensions,
+             enable_extended_globbing,
+             posix_mode,
+             sh_mode,
+@@ -151,7 +159,10 @@ impl<R: std::io::BufRead> Parser<R> {
+         //
+         match self.options.parser_impl {
+             ParserImpl::Peg => {
+-                let tokens = self.tokenize()?;
++                let mut tokens = self.tokenize()?;
++                if self.options.marsh_extensions {
++                    normalize_marsh_fanout_tokens(&mut tokens);
++                }
+                 parse_tokens(&tokens, &self.options)
+             }
+             #[cfg(feature = "winnow-parser")]
+@@ -169,12 +180,27 @@ impl<R: std::io::BufRead> Parser<R> {
+                     .map_err(|_e| {
+                         // Convert winnow error to ParseError
+                         // TODO: Extract position information from winnow error
+-                        crate::error::ParseError::ParsingAtEndOfInput
++                        crate::error::ParseError::ParsingAtEndOfInput(None)
+                     })
+             }
+         }
+     }
+ 
++    /// Parses the input like [`Self::parse_program`], first expanding `aliases`
++    /// lexically as Bash does while reading input (PEG parser only).
++    pub fn parse_program_with_aliases(
++        &mut self,
++        aliases: &std::collections::HashMap<String, String>,
++    ) -> Result<ast::Program, crate::error::ParseError> {
++        let tokens = self.tokenize()?;
++        let mut tokens =
++            aliases::expand_aliases(tokens, aliases, &self.options.tokenizer_options());
++        if self.options.marsh_extensions {
++            normalize_marsh_fanout_tokens(&mut tokens);
++        }
++        parse_tokens(&tokens, &self.options)
++    }
++
+     /// Parses a function definition body from the input. The body is expected to be
+     /// preceded by "()", but no function name.
+     pub fn parse_function_parens_and_body(
+@@ -221,6 +247,249 @@ impl<R: std::io::BufRead> Parser<R> {
+     }
+ }
+ 
++fn normalize_marsh_fanout_tokens(tokens: &mut Vec<Token>) {
++    let mut start = 0;
++    let mut command_start = true;
++    while start + 1 < tokens.len() {
++        // Carry command-position state forward once. Recomputing it from the
++        // complete prefix for every token made ordinary large scripts O(n²).
++        let fanout = command_start
++            && matches!((&tokens[start], &tokens[start + 1]),
++            (Token::Word(name, _), Token::Word(open, _))
++                if (name == "fanout" || name == "split") && open == "{");
++        if !fanout {
++            // `cloud [WORD...] {`: the block's first word is in command
++            // position, so a `split {` or `fanout {` there is normalized too.
++            if command_start
++                && matches!(&tokens[start], Token::Word(word, _) if word == "cloud")
++                && let Some(open) = tokens[start + 1..]
++                    .iter()
++                    .position(|token| !matches!(token, Token::Word(..)) || token.to_str() == "{")
++                    .map(|offset| start + 1 + offset)
++                    .filter(|open| matches!(&tokens[*open], Token::Word(word, _) if word == "{"))
++            {
++                start = open + 1;
++                continue;
++            }
++            update_fanout_command_start(&mut command_start, &tokens[start]);
++            start += 1;
++            continue;
++        }
++        let Some(end) = fanout_end(tokens, start + 2) else {
++            break;
++        };
++        let body = normalize_fanout_body(tokens[start + 2..end].to_vec());
++        tokens.splice(start + 2..end, body);
++        update_fanout_command_start(&mut command_start, &tokens[start]);
++        start += 1;
++    }
++}
++
++fn update_fanout_command_start(command_start: &mut bool, token: &Token) {
++    match token {
++        Token::Operator(operator, _)
++            if matches!(operator.as_str(), "\n" | ";" | "&" | "&&" | "||" | "|") =>
++        {
++            *command_start = true;
++        }
++        Token::Operator(operator, _)
++            if *command_start && matches!(operator.as_str(), "(" | "{") => {}
++        Token::Operator(_, _) => {}
++        Token::Word(word, _)
++            if *command_start
++                && matches!(
++                    word.as_str(),
++                    "if" | "then" | "do" | "else" | "elif" | "while" | "until" | "!" | "time" | "{"
++                ) => {}
++        Token::Word(_, _) => *command_start = false,
++    }
++}
++
++fn fanout_end(tokens: &[Token], start: usize) -> Option<usize> {
++    let mut depth = 0usize;
++    for (offset, token) in tokens[start..].iter().enumerate() {
++        match token {
++            Token::Word(word, _) if word == "{" => depth += 1,
++            Token::Word(word, _) if word == "}" => {
++                if depth == 0 {
++                    return Some(start + offset);
++                }
++                depth -= 1;
++            }
++            _ => {}
++        }
++    }
++    None
++}
++
++fn normalize_fanout_body(body: Vec<Token>) -> Vec<Token> {
++    let body = body
++        .into_iter()
++        .flat_map(|token| match token {
++            Token::Word(word, location) => split_fanout_word(&word)
++                .into_iter()
++                .enumerate()
++                .flat_map(|(index, part)| {
++                    let mut tokens = Vec::with_capacity(2);
++                    if index != 0 {
++                        tokens.push(Token::Word(",".into(), location.clone()));
++                    }
++                    if !part.is_empty() {
++                        tokens.push(Token::Word(part, location.clone()));
++                    }
++                    tokens
++                })
++                .collect::<Vec<_>>(),
++            token => vec![token],
++        })
++        .collect::<Vec<_>>();
++    let leading_linebreak = body
++        .first()
++        .cloned()
++        .filter(|token| matches!(token, Token::Operator(operator, _) if operator == "\n"));
++    // Label-led branches: a branch ends at a top-level newline or `,`, or at a
++    // top-level `;` whose next word is a `LABEL:`. Any other `;` (like `&&`,
++    // `||`, groups, and subshells) is ordinary sequencing within the branch.
++    let mut branches = Vec::<Vec<Token>>::new();
++    let mut current = Vec::new();
++    let mut nesting = 0usize;
++    let mut body = body.into_iter().peekable();
++    while let Some(token) = body.next() {
++        let boundary = nesting == 0
++            && match &token {
++                Token::Operator(operator, _) if operator == "\n" => true,
++                Token::Operator(operator, _) if operator == ";" => matches!(
++                    body.peek(),
++                    Some(Token::Word(word, _)) if valid_fanout_label(word)
++                ),
++                Token::Word(word, _) => word == ",",
++                Token::Operator(_, _) => false,
++            };
++        if boundary {
++            branches.push(std::mem::take(&mut current));
++            continue;
++        }
++        match &token {
++            Token::Word(word, _) | Token::Operator(word, _) if word == "{" || word == "(" => {
++                nesting += 1;
++            }
++            Token::Word(word, _) | Token::Operator(word, _)
++                if (word == "}" || word == ")") && nesting > 0 =>
++            {
++                nesting -= 1;
++            }
++            _ => {}
++        }
++        current.push(token);
++    }
++    branches.push(current);
++
++    let explicit = branches
++        .iter()
++        .filter_map(|branch| branch.first())
++        .filter_map(|token| match token {
++            Token::Word(word, _) if valid_fanout_label(word) => {
++                Some(word[..word.len() - 1].to_owned())
++            }
++            _ => None,
++        })
++        .collect::<std::collections::HashSet<_>>();
++    let mut used = explicit;
++    let mut output = Vec::new();
++    if let Some(linebreak) = leading_linebreak {
++        output.push(linebreak);
++    }
++    for mut branch in branches {
++        if branch.is_empty() {
++            continue;
++        }
++        let labeled =
++            matches!(branch.first(), Some(Token::Word(word, _)) if valid_fanout_label(word));
++        // A branch body is in command position after its label, so a nested
++        // `fanout {` or `split {` there (`review: fanout { a: x, b: y }`)
++        // is normalized too. Normalizing a normalized body is a no-op.
++        let mut rest = branch.split_off(usize::from(labeled));
++        normalize_marsh_fanout_tokens(&mut rest);
++        branch.append(&mut rest);
++        if !labeled {
++            let base = branch
++                .first()
++                .and_then(|token| match token {
++                    Token::Word(word, _) if valid_fanout_label(&format!("{word}:")) => {
++                        Some(word.as_str())
++                    }
++                    _ => None,
++                })
++                .unwrap_or("branch");
++            let label = unique_branch_label(base, &mut used);
++            let location = branch[0].location().clone();
++            branch.insert(0, Token::Word(format!("{label}:"), location));
++        }
++        output.append(&mut branch);
++        let location = output.last().expect("nonempty branch").location().clone();
++        output.push(Token::Operator("\n".into(), location));
++    }
++    output
++}
++
++fn split_fanout_word(word: &str) -> Vec<String> {
++    let mut parts = Vec::new();
++    let mut start = 0;
++    let mut quote = None;
++    let mut escaped = false;
++    let mut nesting = 0usize;
++    for (index, character) in word.char_indices() {
++        if escaped {
++            escaped = false;
++            continue;
++        }
++        if character == '\\' && quote != Some('\'') {
++            escaped = true;
++            continue;
++        }
++        if let Some(delimiter) = quote {
++            if character == delimiter {
++                quote = None;
++            }
++            continue;
++        }
++        if matches!(character, '\'' | '"') {
++            quote = Some(character);
++        } else if matches!(character, '(' | '{') {
++            nesting += 1;
++        } else if matches!(character, ')' | '}') {
++            nesting = nesting.saturating_sub(1);
++        } else if character == ',' && nesting == 0 {
++            parts.push(word[start..index].to_owned());
++            start = index + character.len_utf8();
++        }
++    }
++    parts.push(word[start..].to_owned());
++    parts
++}
++
++fn unique_branch_label(base: &str, used: &mut std::collections::HashSet<String>) -> String {
++    if used.insert(base.to_owned()) {
++        return base.to_owned();
++    }
++    for suffix in 2..=16 {
++        let candidate = format!("{base}-{suffix}");
++        if used.insert(candidate.clone()) {
++            return candidate;
++        }
++    }
++    format!("{base}-17")
++}
++
++fn valid_fanout_label(word: &str) -> bool {
++    let Some(label) = word.strip_suffix(':') else {
++        return false;
++    };
++    let mut chars = label.chars();
++    matches!(chars.next(), Some('a'..='z' | 'A'..='Z' | '_'))
++        && chars.all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
++}
++
+ /// Parses a sequence of tokens into the abstract syntax tree (AST) of a shell program.
+ ///
+ /// # Arguments
+diff --git a/brush-parser/src/parser/peg.rs b/brush-parser/src/parser/peg.rs
+index cd84719b..93944ad5 100644
+--- a/brush-parser/src/parser/peg.rs
++++ b/brush-parser/src/parser/peg.rs
+@@ -70,11 +70,12 @@ peg::parser! {
+             c:(c:command() r:&pipe_extension_redirection()? {? // check for `|&` without consuming the stream.
+                 let mut c = c;
+                 if r.is_some() {
+-                    add_pipe_extension_redirection(&mut c);
++                    add_pipe_extension_redirection(&mut c)?;
+                 }
+-                Ok(c)
+-            }) ** (pipe_operator() linebreak()) {
+-                c
++                Ok((c, r.is_some()))
++            }) ** (pipe_operator() linebreak()) {?
++                validate_split_sequence(&c)?;
++                Ok(c.into_iter().map(|(c, _)| c).collect())
+             }
+ 
+         rule pipe_operator() =
+@@ -87,10 +88,115 @@ peg::parser! {
+         // N.B. We needed to move the function definition branch up to avoid conflicts with array assignment syntax.
+         rule command() -> ast::Command =
+             f:function_definition() { ast::Command::Function(f) } /
+-            c:simple_command() { ast::Command::Simple(c) } /
++            marsh_extensions_enabled() command:fanout_command() { ast::Command::Fanout(command) } /
++            marsh_extensions_enabled() command:split_command() { ast::Command::Split(command) } /
++            marsh_extensions_enabled() command:collect_command() { ast::Command::Collect(command) } /
++            marsh_extensions_enabled() command:placement_command() { ast::Command::Placement(command) } /
++            !fanout_command_start() c:simple_command() { ast::Command::Simple(c) } /
+             c:compound_command() r:redirect_list()? { ast::Command::Compound(c, r) } /
+             expected!("command")
+ 
++        rule fanout_command_start() =
++            marsh_extensions_enabled() (specific_word("fanout") / specific_word("split")) specific_word("{") /
++            // A `cloud [WORD...] {` that is not a well-formed block is a
++            // syntax error, never an ordinary command that would run its
++            // pieces locally.
++            marsh_extensions_enabled() specific_word("cloud")
++                (!specific_word("{") !io_redirect() word())* specific_word("{")
++
++        rule split_command() -> ast::FanoutCommand =
++            start:specific_word("split") specific_word("{") linebreak()
++            branches:fanout_branch() ++ newline_list()
++            linebreak() end:specific_word("}") {?
++                let mut labels = std::collections::HashSet::new();
++                if branches.len() > 16 {
++                    Err("split has more than 16 branches")
++                } else if branches
++                    .iter()
++                    .any(|branch| !labels.insert(branch.label.to_ascii_lowercase()))
++                {
++                    Err("duplicate split branch label (case-insensitive)")
++                } else {
++                    Ok(ast::FanoutCommand {
++                        branches,
++                        loc: SourceSpan::within(start.location(), end.location()),
++                    })
++                }
++            }
++
++        rule fanout_command() -> ast::FanoutCommand =
++            start:specific_word("fanout") specific_word("{") linebreak()
++            branches:fanout_branch() ++ newline_list()
++            linebreak() end:specific_word("}") {?
++                let mut labels = std::collections::HashSet::new();
++                if branches.len() > 16 {
++                    Err("fanout has more than 16 branches")
++                } else if branches.iter().any(|branch| !labels.insert(branch.label.clone())) {
++                    Err("duplicate fanout branch label")
++                } else {
++                    Ok(ast::FanoutCommand {
++                        branches,
++                        loc: SourceSpan::within(start.location(), end.location()),
++                    })
++                }
++            }
++
++        rule fanout_branch() -> ast::FanoutBranch =
++            label:[Token::Word(label, _) if valid_fanout_label(label) && label.len() <= 65]
++            linebreak() body:fanout_branch_body() {
++                ast::FanoutBranch {
++                    label: label[..label.len() - 1].to_owned(),
++                    body,
++                }
++            }
++
++        rule fanout_branch_body() -> ast::CompoundList =
++            first:and_or() remainder:(s:separator_op() l:and_or() { (s, l) })* last_sep:separator_op()? {
++                let mut items = vec![ast::CompoundListItem(first, ast::SeparatorOperator::Sequence)];
++                for (separator, and_or) in remainder {
++                    let last = items.len() - 1;
++                    items[last].1 = separator;
++                    items.push(ast::CompoundListItem(and_or, ast::SeparatorOperator::Sequence));
++                }
++                if let Some(separator) = last_sep {
++                    let last = items.len() - 1;
++                    items[last].1 = separator;
++                }
++                ast::CompoundList(items)
++            }
++
++        rule placement_command() -> ast::PlacementCommand =
++            start:specific_word("cloud")
++            options:(!specific_word("{") !io_redirect() w:word() { ast::Word::from(w) })*
++            specific_word("{") body:compound_list() end:specific_word("}")
++            redirects:redirect_list()? {
++                let end = redirects
++                    .as_ref()
++                    .and_then(SourceLocation::location)
++                    .unwrap_or_else(|| end.location().clone());
++                ast::PlacementCommand {
++                    place: "cloud".into(),
++                    options,
++                    body,
++                    redirects,
++                    loc: SourceSpan::within(start.location(), &end),
++                }
++            }
++
++        rule collect_command() -> ast::CollectCommand =
++            start:specific_word("collect") arguments:(!io_redirect() w:word() { w })* redirects:redirect_list()? !word() !io_redirect() {
++                let end = redirects
++                    .as_ref()
++                    .and_then(SourceLocation::location)
++                    .or_else(|| arguments.last().map(|word| word.location().clone()))
++                    .unwrap_or_else(|| start.location().clone());
++                ast::CollectCommand {
++                    arguments: arguments.into_iter().map(ast::Word::from).collect(),
++                    redirects,
++                    loc: SourceSpan::within(start.location(), &end),
++                }
++            }
++
+         // N.B. The arithmetic command is a non-sh extension.
+         // N.B. The arithmetic for clause command is a non-sh extension.
+         // N.B. The extended test command is a non-sh extension.
+@@ -108,8 +214,19 @@ peg::parser! {
+             non_posix_extensions_enabled() c:extended_test_command() { ast::CompoundCommand::ExtendedTest(c) } /
+             expected!("compound command")
+ 
++        // Like Bash, only adjacent parentheses open an arithmetic command; `( (`
++        // is a nested subshell.
++        rule adjacent_open_parens() -> &'input Token =
++            first:specific_operator("(") second:specific_operator("(") {?
++                if first.location().end.index == second.location().start.index {
++                    Ok(first)
++                } else {
++                    Err("((")
++                }
++            }
++
+         pub(crate) rule arithmetic_command() -> ast::ArithmeticCommand =
+-            start:specific_operator("(") specific_operator("(") expr:arithmetic_expression() specific_operator(")") end:specific_operator(")") {
++            start:adjacent_open_parens() expr:arithmetic_expression() specific_operator(")") end:specific_operator(")") {
+                 let loc = SourceSpan::within(
+                     start.location(),
+                     end.location()
+@@ -537,6 +654,10 @@ peg::parser! {
+ 
+         // N.B. here strings are extensions to the POSIX standard.
+         rule io_redirect() -> ast::IoRedirect =
++            non_posix_extensions_enabled() name:io_variable() f:io_file() {
++                    let (kind, target) = f;
++                    ast::IoRedirect::NamedFd(name, Box::new(ast::IoRedirect::File(None, kind, target)))
++                } /
+             n:io_number()? f:io_file() {
+                     let (kind, target) = f;
+                     ast::IoRedirect::File(n, kind, target)
+@@ -720,6 +841,19 @@ peg::parser! {
+                 w.parse().map_err(|_| "io number out of range")
+             }
+ 
++        // N.B. `{name}` immediately followed by a redirection operator names a
++        // variable that receives (or supplies) the descriptor.
++        rule io_variable() -> String =
++            [Token::Word(w, name_loc) if w.len() > 2
++                && w.starts_with('{')
++                && w.ends_with('}')
++                && valid_io_variable(&w[1..w.len() - 1])]
++            &([Token::Operator(o, redir_loc) if
++                    o.starts_with(['<', '>']) &&
++                    locations_are_contiguous(name_loc, redir_loc)]) {
++                w[1..w.len() - 1].to_owned()
++            }
++
+         //
+         // Helpers
+         //
+@@ -731,11 +865,57 @@ peg::parser! {
+ 
+         rule non_posix_extensions_enabled() -> () =
+             &[_] {? if !parser_options.sh_mode { Ok(()) } else { Err("posix") } }
++
++        rule marsh_extensions_enabled() -> () =
++            &[_] {? if parser_options.marsh_extensions { Ok(()) } else { Err("marsh extensions disabled") } }
++    }
++}
++
++fn valid_io_variable(name: &str) -> bool {
++    let mut chars = name.chars();
++    chars
++        .next()
++        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
++        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
++}
++
++fn valid_fanout_label(word: &str) -> bool {
++    let Some(label) = word.strip_suffix(':') else {
++        return false;
++    };
++    let mut chars = label.chars();
++    matches!(chars.next(), Some('a'..='z' | 'A'..='Z' | '_'))
++        && chars
++            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
++}
++
++/// Rejects pipeline shapes that mix `split` with another composition stage.
++/// Pipelines without `split` keep their existing (runtime-checked) behavior.
++fn validate_split_sequence(stages: &[(ast::Command, bool)]) -> Result<(), &'static str> {
++    let Some(split) = stages
++        .iter()
++        .position(|(command, _)| matches!(command, ast::Command::Split(_)))
++    else {
++        return Ok(());
++    };
++    let compositions = stages
++        .iter()
++        .filter(|(command, _)| matches!(command, ast::Command::Fanout(_) | ast::Command::Split(_)))
++        .count();
++    if compositions > 1 {
++        return Err("a pipeline has at most one fanout or split stage");
++    }
++    match stages.get(split + 1) {
++        Some((ast::Command::Collect(_), _)) => Err("collect follows fanout; use join after split"),
++        Some((command, true)) if command.is_split_join_stage() => {
++            Err("|& is unsupported for marsh composition stages")
++        }
++        _ => Ok(()),
+     }
+ }
+ 
+ // add `2>&1` to the command if the pipeline is `|&`
+-fn add_pipe_extension_redirection(c: &mut ast::Command) {
++fn add_pipe_extension_redirection(c: &mut ast::Command) -> Result<(), &'static str> {
+     fn add_to_redirect_list(l: &mut Option<ast::RedirectList>, r: ast::IoRedirect) {
+         if let Some(l) = l {
+             l.0.push(r);
+@@ -752,6 +932,10 @@ fn add_pipe_extension_redirection(c: &mut ast::Command) {
+     );
+ 
+     match c {
++        ast::Command::Fanout(_) | ast::Command::Split(_) | ast::Command::Collect(_) => {
++            return Err("|& is unsupported for marsh composition stages");
++        }
++        ast::Command::Placement(c) => add_to_redirect_list(&mut c.redirects, r),
+         ast::Command::Simple(c) => {
+             let r = ast::CommandPrefixOrSuffixItem::IoRedirect(r);
+             if let Some(l) = &mut c.suffix {
+@@ -763,6 +947,7 @@ fn add_pipe_extension_redirection(c: &mut ast::Command) {
+         ast::Command::Compound(_, l) => add_to_redirect_list(l, r),
+         ast::Command::Function(f) => add_to_redirect_list(&mut f.body.1, r),
+     }
++    Ok(())
+ }
+ 
+ #[inline]
+diff --git a/brush-parser/src/parser/tests/composition.rs b/brush-parser/src/parser/tests/composition.rs
+new file mode 100644
+index 00000000..52838749
+--- /dev/null
++++ b/brush-parser/src/parser/tests/composition.rs
+@@ -0,0 +1,363 @@
++use std::io::Cursor;
++
++use crate::{Parser, ParserOptions, ast::Command};
++
++fn parse(input: &str, enabled: bool) -> Result<crate::ast::Program, crate::ParseError> {
++    let options = ParserOptions {
++        marsh_extensions: enabled,
++        ..ParserOptions::default()
++    };
++    Parser::new(Cursor::new(input), &options).parse_program()
++}
++
++#[test]
++fn extension_is_gated_and_parses_branch_pipelines() {
++    let ordinary = parse("fanout { claude, codex }\n", false).unwrap();
++    assert!(matches!(
++        ordinary.complete_commands[0].0[0].0.first.seq[0],
++        Command::Simple(_)
++    ));
++
++    let program = parse(
++        "fanout { first: printf one | sed s/one/1/; second: printf two } | collect --timing\n",
++        true,
++    )
++    .unwrap();
++    let pipeline = &program.complete_commands[0].0[0].0.first;
++    let Command::Fanout(fanout) = &pipeline.seq[0] else {
++        panic!("expected fanout")
++    };
++    assert_eq!(fanout.branches.len(), 2);
++    assert_eq!(fanout.branches[0].label, "first");
++    assert_eq!(fanout.branches[0].body.0[0].0.first.seq.len(), 2);
++    assert!(matches!(pipeline.seq[1], Command::Collect(_)));
++}
++
++#[test]
++fn shorthand_labels_are_stable_and_separators_work() {
++    let program = parse("fanout {\nclaude,\nclaude;\npi\n} | collect --json\n", true).unwrap();
++    let Command::Fanout(fanout) = &program.complete_commands[0].0[0].0.first.seq[0] else {
++        panic!("expected fanout")
++    };
++    assert_eq!(
++        fanout
++            .branches
++            .iter()
++            .map(|branch| branch.label.as_str())
++            .collect::<Vec<_>>(),
++        ["claude", "claude-2", "pi"]
++    );
++}
++
++#[test]
++fn malformed_blocks_fail_closed() {
++    for input in [
++        "fanout { }",
++        "fanout { a: }",
++        "fanout { a: true, a: false }",
++        "cloud { claude -p x; python3 t.py }",
++        "cloud --cpus 4 { make test }",
++        "cloud { make",
++    ] {
++        assert!(parse(input, true).is_err(), "accepted {input:?}");
++    }
++}
++
++#[test]
++fn cloud_blocks_parse_and_cloud_stays_a_word_elsewhere() {
++    for input in [
++        "cloud { claude -p x; python3 t.py; }\n",
++        "cloud --cpus 4 { make test; }\n",
++        "echo cloud {\n",
++    ] {
++        assert!(parse(input, true).is_ok(), "rejected {input:?}");
++    }
++    assert!(parse("cloud { a; b }\n", false).is_ok());
++}
++
++#[test]
++fn assignment_prefixed_fanout_remains_an_ordinary_command() {
++    let program = parse("MARKER=ordinary fanout { a,b }\n", true).unwrap();
++    assert!(matches!(
++        program.complete_commands[0].0[0].0.first.seq[0],
++        Command::Simple(_)
++    ));
++}
++
++#[test]
++fn ordinary_large_program_does_not_trigger_quadratic_fanout_scans() {
++    // This is deliberately large enough that rescanning the complete prefix at
++    // every ordinary token makes the regression conspicuous under `cargo test`,
++    // while the lexical fast path remains a routine linear parse.
++    let mut input = "printf x\n".repeat(16_384);
++    input.push_str("fanout { first: printf one; second: printf two } | collect\n");
++
++    let program = parse(&input, true).unwrap();
++    assert_eq!(program.complete_commands.len(), 16_385);
++    assert!(matches!(
++        program.complete_commands.last().unwrap().0[0].0.first.seq[0],
++        Command::Fanout(_)
++    ));
++}
++
++fn first_pipeline(program: &crate::ast::Program) -> &crate::ast::Pipeline {
++    &program.complete_commands[0].0[0].0.first
++}
++
++#[test]
++fn split_is_gated_and_parses_labels_shorthand_and_join() {
++    let ordinary = parse("split { a: true }\n", false).unwrap();
++    assert!(matches!(
++        first_pipeline(&ordinary).seq[0],
++        Command::Simple(_)
++    ));
++
++    let program = parse(
++        "printf in | split { fix: claude -p x, tests: codex exec y; pi } | join --json | claude -p z | cat\n",
++        true,
++    )
++    .unwrap();
++    let pipeline = first_pipeline(&program);
++    let Command::Split(split) = &pipeline.seq[1] else {
++        panic!("expected split")
++    };
++    assert_eq!(
++        split
++            .branches
++            .iter()
++            .map(|b| b.label.as_str())
++            .collect::<Vec<_>>(),
++        ["fix", "tests"]
++    );
++    // `; pi` has no label, so it is sequenced inside the `tests` branch.
++    assert_eq!(split.branches[1].body.0.len(), 2);
++    assert!(pipeline.seq[2].is_split_join_stage());
++    assert!(matches!(pipeline.seq[3], Command::Simple(_)));
++    assert!(matches!(pipeline.seq[4], Command::Simple(_)));
++}
++
++#[test]
++fn split_rejects_case_insensitive_duplicates_and_bad_shapes() {
++    for input in [
++        "split { }",
++        "split { a: }",
++        "split { a: true, A: false }",
++        "split { a: true } |& join",
++        "split { a: true } | join |& cat",
++        "split { a: true } | collect",
++        "fanout { a: true } | split { b: true }",
++        "split { a: true } | cat | split { b: true }",
++    ] {
++        assert!(parse(input, true).is_err(), "accepted {input:?}");
++    }
++    let many = (0..17)
++        .map(|i| format!("b{i}: true"))
++        .collect::<Vec<_>>()
++        .join("; ");
++    assert!(parse(&format!("split {{ {many} }}"), true).is_err());
++}
++
++#[test]
++fn coreutils_split_and_join_stay_ordinary_commands() {
++    for input in [
++        "split -l 1 f\n",
++        "command split { a\n",
++        "\\split { a\n",
++        "x | join a b\n",
++        "join a b\n",
++        "MARKER=1 split { a: true }\n",
++    ] {
++        let program = parse(input, true).unwrap();
++        assert!(
++            first_pipeline(&program)
++                .seq
++                .iter()
++                .all(|command| matches!(command, Command::Simple(_))),
++            "{input:?} parsed as a composition"
++        );
++    }
++    let program = parse("split { a: true } | command join a b\n", true).unwrap();
++    assert!(!first_pipeline(&program).seq[1].is_split_join_stage());
++    let program = parse("split { a: true } | \\join a b\n", true).unwrap();
++    assert!(!first_pipeline(&program).seq[1].is_split_join_stage());
++    let program = parse("split { a: true } | X=1 join a b\n", true).unwrap();
++    assert!(!first_pipeline(&program).seq[1].is_split_join_stage());
++}
++
++fn branches(input: &str) -> Vec<(String, String)> {
++    let program = parse(input, true).unwrap_or_else(|e| panic!("{input:?}: {e}"));
++    let (Command::Fanout(command) | Command::Split(command)) = &first_pipeline(&program).seq[0]
++    else {
++        panic!("{input:?} is not a fanout or split")
++    };
++    command
++        .branches
++        .iter()
++        .map(|branch| (branch.label.clone(), branch.body.to_string()))
++        .collect()
++}
++
++fn labels(input: &str) -> Vec<String> {
++    branches(input)
++        .into_iter()
++        .map(|(label, _)| label)
++        .collect()
++}
++
++#[test]
++fn a_semicolon_starts_a_branch_only_before_a_label() {
++    // Labeled `;` separation.
++    assert_eq!(
++        labels("fanout { ok: true; bad: false } | collect\n"),
++        ["ok", "bad"]
++    );
++    let split = branches("split { a: cd x; make; b: cd y; make } | join\n");
++    assert_eq!(
++        split
++            .iter()
++            .map(|(label, _)| label.as_str())
++            .collect::<Vec<_>>(),
++        ["a", "b"]
++    );
++    for (_, body) in &split {
++        assert!(body.contains("cd") && body.contains("make"), "{body:?}");
++    }
++    // Labels may use hyphens and underscores, and may start with `_`.
++    assert_eq!(
++        labels("split { fix-lint: true; run_tests: true; _x: true; A-1_b: true } | join\n"),
++        ["fix-lint", "run_tests", "_x", "A-1_b"]
++    );
++    // Newline and `,` still start branches without a label.
++    assert_eq!(
++        labels("fanout {\necho one; echo two\nprintf x, true\n}\n"),
++        ["echo", "printf", "true"]
++    );
++}
++
++#[test]
++fn an_unlabeled_semicolon_is_bash_sequencing() {
++    let one = branches("fanout { echo one; echo two } | collect\n");
++    assert_eq!(one.len(), 1, "{one:?}");
++    assert_eq!(one[0].0, "echo");
++    let program = parse("fanout { echo one; echo two } | collect\n", true).unwrap();
++    let Command::Fanout(fanout) = &first_pipeline(&program).seq[0] else {
++        panic!("expected fanout")
++    };
++    assert_eq!(fanout.branches[0].body.0.len(), 2);
++
++    // `a: cmd; cmd` keeps both commands in `a`.
++    assert_eq!(labels("split { a: true; false; true } | join\n"), ["a"]);
++}
++
++#[test]
++fn groups_subshells_and_lists_stay_inside_one_branch() {
++    for (input, expected) in [
++        ("fanout { a: { echo 1; echo 2; } } | collect\n", vec!["a"]),
++        (
++            "fanout { a: { echo 1; echo 2; }; b: true } | collect\n",
++            vec!["a", "b"],
++        ),
++        (
++            "fanout { a: (cd x; make); b: true } | collect\n",
++            vec!["a", "b"],
++        ),
++        (
++            "fanout { a: true && echo x; false || echo y; b: true } | collect\n",
++            vec!["a", "b"],
++        ),
++        (
++            "split { a: make && make test || echo failed } | join\n",
++            vec!["a"],
++        ),
++        (
++            "fanout { a: case $x in y) echo y;; *) echo z;; esac; echo after; b: true } | collect\n",
++            vec!["a", "b"],
++        ),
++    ] {
++        assert_eq!(labels(input), expected, "{input:?}");
++    }
++    let group = branches("fanout { a: { echo 1; echo 2; }; b: true } | collect\n");
++    assert!(
++        group[0].1.contains("echo 1") && group[0].1.contains("echo 2"),
++        "{group:?}"
++    );
++    let case = branches(
++        "fanout { a: case $x in y) echo y;; *) echo z;; esac; echo after; b: true } | collect\n",
++    );
++    assert!(
++        case[0].1.contains("esac") && case[0].1.contains("after"),
++        "{case:?}"
++    );
++}
++
++#[test]
++fn only_a_bare_label_word_right_after_a_semicolon_starts_a_branch() {
++    // `a:` mid-command is an argument, not a label.
++    let parsed = branches("fanout { x: echo a: b; echo c: d } | collect\n");
++    assert_eq!(parsed.len(), 1, "{parsed:?}");
++    assert!(
++        parsed[0].1.contains("a: b") && parsed[0].1.contains("c: d"),
++        "{parsed:?}"
++    );
++    // Quoted, expanded, or otherwise non-label words do not start a branch.
++    for input in [
++        "fanout { x: true; 'b:' true } | collect\n",
++        "fanout { x: true; \"b:\" true } | collect\n",
++        "fanout { x: true; $b: true } | collect\n",
++        "fanout { x: true; 1b: true } | collect\n",
++    ] {
++        assert_eq!(labels(input), ["x"], "{input:?}");
++    }
++    // `b-:` is a valid label (hyphens are allowed after the first character).
++    assert_eq!(
++        labels("fanout { x: true; b-: true } | collect\n"),
++        ["x", "b-"]
++    );
++    // The documented ambiguity: a command named `echo:` after `;` is a label.
++    assert_eq!(
++        labels("fanout { x: true; echo: hi } | collect\n"),
++        ["x", "echo"]
++    );
++}
++
++#[test]
++fn a_fanout_nested_in_a_branch_is_normalized_after_its_label() {
++    // Commas inside a nested `fanout { }` belong to it, in one-line,
++    // multi-line, and grouped forms: the outer block keeps two branches and
++    // the nested fanout keeps its own two.
++    for (input, outer, nested) in [
++        (
++            "split { fix: true, review: fanout { races: true, leaks: true } | collect } | join\n",
++            ["fix", "review"],
++            1,
++        ),
++        (
++            "split {\n  fix: true\n  review: fanout { races: true, leaks: true } | collect\n} | join\n",
++            ["fix", "review"],
++            1,
++        ),
++        (
++            "fanout { a: fanout { races: true, leaks: true } | collect, d: true } | collect\n",
++            ["a", "d"],
++            0,
++        ),
++    ] {
++        let parsed = branches(input);
++        assert_eq!(
++            parsed
++                .iter()
++                .map(|(label, _)| label.as_str())
++                .collect::<Vec<_>>(),
++            outer,
++            "{input:?}"
++        );
++        let body = format!("{}\n", parsed[nested].1.trim());
++        assert_eq!(labels(&body), ["races", "leaks"], "{input:?}: {body:?}");
++    }
++    let grouped = labels(
++        "split { fix: true, review: { fanout { races: true, leaks: true } | collect; } } | join\n",
++    );
++    assert_eq!(grouped, ["fix", "review"]);
++    // `{ fanout {` at the top level is in command position too.
++    assert!(parse("{ fanout { a: true, b: true } | collect; }\n", true).is_ok());
++}
+diff --git a/brush-parser/src/parser/tests/mod.rs b/brush-parser/src/parser/tests/mod.rs
+index 37ee4184..17c2d25d 100644
+--- a/brush-parser/src/parser/tests/mod.rs
++++ b/brush-parser/src/parser/tests/mod.rs
+@@ -6,6 +6,7 @@
+ mod and_or_lists;
+ mod assignments;
+ mod complex;
++mod composition;
+ mod compound_commands;
+ mod extended_test;
+ mod functions;
+diff --git a/brush-parser/src/prompt.rs b/brush-parser/src/prompt.rs
+index 53b2b821..c7b729cc 100644
+--- a/brush-parser/src/prompt.rs
++++ b/brush-parser/src/prompt.rs
+@@ -144,7 +144,7 @@ peg::parser! {
+             s:$([c if c != '}']*) { s.to_owned() }
+ 
+         rule octal_number() -> u32 =
+-            s:$(['0'..='7']*<1,3>) {? u32::from_str_radix(s, 8).or(Err("invalid octal number")) }
++            s:$(['0'..='7']*<3,3>) {? u32::from_str_radix(s, 8).or(Err("invalid octal number")) }
+     }
+ }
+ 
+diff --git a/brush-parser/src/tokenizer.rs b/brush-parser/src/tokenizer.rs
+index bea004e5..dac5afe8 100644
+--- a/brush-parser/src/tokenizer.rs
++++ b/brush-parser/src/tokenizer.rs
+@@ -261,6 +261,8 @@ enum NestedExpansion {
+     LegacyArithmeticExpansion,
+     /// `${...}`
+     ParameterExpansion,
++    /// Bash 5.3's `${ command; }` and `${| command; }`
++    FunctionSubstitution,
+ }
+ 
+ impl NestedExpansion {
+@@ -269,7 +271,7 @@ impl NestedExpansion {
+         match self {
+             Self::CommandSubstitution | Self::ArithmeticExpansion => ')',
+             Self::LegacyArithmeticExpansion => ']',
+-            Self::ParameterExpansion => '}',
++            Self::ParameterExpansion | Self::FunctionSubstitution => '}',
+         }
+     }
+ 
+@@ -287,7 +289,7 @@ impl NestedExpansion {
+         match self {
+             Self::CommandSubstitution | Self::ArithmeticExpansion => Some('('),
+             Self::LegacyArithmeticExpansion => Some('['),
+-            Self::ParameterExpansion => None,
++            Self::ParameterExpansion | Self::FunctionSubstitution => None,
+         }
+     }
+ 
+@@ -304,6 +306,7 @@ impl NestedExpansion {
+     const fn unterminated_error(self) -> TokenizerError {
+         match self {
+             Self::ParameterExpansion => TokenizerError::UnterminatedVariable,
++            Self::FunctionSubstitution => TokenizerError::UnterminatedCommandSubstitution,
+             _ => TokenizerError::UnterminatedExpansion,
+         }
+     }
+@@ -376,6 +379,88 @@ impl Default for TokenizerOptions {
+     }
+ }
+ 
++/// Tracks, within a function substitution, whether a reserved word could start next. As in
++/// Bash, the closing `}` is one in such a position: at the start of a command, after a
++/// group's `{ ...; }`. A `}` inside a word or among a command's arguments is text.
++#[derive(Debug)]
++struct CommandPosition {
++    /// How many `{ ...; }` groups are still open.
++    groups: usize,
++    /// Whether the next word would start a command.
++    at_command_start: bool,
++    /// Whether the last token was a word that the next char directly follows.
++    after_word: bool,
++}
++
++impl Default for CommandPosition {
++    fn default() -> Self {
++        Self {
++            groups: 0,
++            at_command_start: true,
++            after_word: false,
++        }
++    }
++}
++
++impl CommandPosition {
++    /// Notes the next token read from the contents.
++    fn note_token(&mut self, result: &TokenizeResult) {
++        if matches!(
++            result.reason,
++            TokenEndReason::HereDocumentBodyStart
++                | TokenEndReason::HereDocumentBodyEnd
++                | TokenEndReason::HereDocumentEndTag
++        ) {
++            return;
++        }
++
++        self.after_word = false;
++        match &result.token {
++            Some(Token::Operator(operator, _)) => {
++                self.at_command_start = !matches!(operator.as_str(), ")" | ">" | "<" | ">>");
++            }
++            Some(Token::Word(word, _)) => {
++                let word = word.trim_matches([' ', '\t']);
++                if !word.is_empty() {
++                    if self.at_command_start && word == "{" {
++                        self.groups += 1;
++                    }
++                    self.at_command_start = matches!(
++                        word,
++                        "{" | "then"
++                            | "do"
++                            | "else"
++                            | "elif"
++                            | "if"
++                            | "while"
++                            | "until"
++                            | "!"
++                            | "time"
++                    ) && self.at_command_start;
++                    self.after_word = matches!(result.reason, TokenEndReason::Other);
++                }
++            }
++            None => (),
++        }
++
++        if matches!(result.reason, TokenEndReason::UnescapedNewLine) {
++            self.at_command_start = true;
++        }
++    }
++
++    /// Returns whether a `}` next in the input ends the function substitution, as opposed to
++    /// closing one of its groups or being text.
++    fn closes_substitution(&mut self) -> bool {
++        let closes = self.at_command_start && !self.after_word && self.groups == 0;
++        if self.at_command_start && !self.after_word && self.groups > 0 {
++            self.groups -= 1;
++        }
++        self.at_command_start = false;
++        self.after_word = false;
++        closes
++    }
++}
++
+ /// Maximum depth of nested expansions (see [`NestedExpansion`]) the tokenizer will descend
+ /// into, so deeply nested input can't overflow the stack while it's tokenized. Real scripts
+ /// rarely nest more than a few levels: of ~2,900 surveyed (including bash-completion and
+@@ -774,6 +859,27 @@ fn expansion_body<'a>(
+     Ok(input.split_at(body_len).0)
+ }
+ 
++/// Returns the byte length of a function substitution's body and closing brace, given the text
++/// just after its `${`; `None` if the text does not start one or it is not closed.
++pub(crate) fn function_substitution_len(text: &str, options: &TokenizerOptions) -> Option<usize> {
++    if !text.starts_with([' ', '\t', '\n', '|']) {
++        return None;
++    }
++    let mut reader = text.as_bytes();
++    let mut tokenizer = Tokenizer::new(&mut reader, options);
++    tokenizer.read_bodies_left_pending = false;
++    let mut state = TokenParseState::new(&tokenizer.cross_state.cursor);
++    tokenizer
++        .consume_nested_expansion(&mut state, NestedExpansion::FunctionSubstitution)
++        .ok()?;
++    let chars = tokenizer.cross_state.cursor.index;
++    Some(
++        text.char_indices()
++            .nth(chars)
++            .map_or(text.len(), |(index, _)| index),
++    )
++}
++
+ impl<'a, R: ?Sized + std::io::BufRead> Tokenizer<'a, R> {
+     pub fn new(reader: &'a mut R, options: &TokenizerOptions) -> Self {
+         Tokenizer {
+@@ -949,6 +1055,8 @@ impl<'a, R: ?Sized + std::io::BufRead> Tokenizer<'a, R> {
+         expansion: NestedExpansion,
+     ) -> Result<(), TokenizerError> {
+         let mut bodies = String::new();
++        let mut command_position =
++            (expansion == NestedExpansion::FunctionSubstitution).then(CommandPosition::default);
+ 
+         loop {
+             let result = self.next_token()?;
+@@ -956,6 +1064,17 @@ impl<'a, R: ?Sized + std::io::BufRead> Tokenizer<'a, R> {
+             match result.reason {
+                 // The bodies set aside go after the rest of the line holding their tags.
+                 TokenEndReason::UnescapedNewLine => state.append_str(&std::mem::take(&mut bodies)),
++                TokenEndReason::ExpansionClosingChar
++                    if command_position
++                        .as_mut()
++                        .is_some_and(|position| !position.closes_substitution()) =>
++                {
++                    // A `}` that isn't where a reserved word could be is text.
++                    let text = self
++                        .next_char()?
++                        .ok_or_else(|| expansion.unterminated_error())?;
++                    state.append_char(text);
++                }
+                 TokenEndReason::ExpansionClosingChar => {
+                     // The closing char comes next; consume it too.
+                     let closing_char = self
+@@ -980,6 +1099,9 @@ impl<'a, R: ?Sized + std::io::BufRead> Tokenizer<'a, R> {
+                 _ => (),
+             }
+ 
++            if let Some(position) = &mut command_position {
++                position.note_token(&result);
++            }
+             append_expansion_token(state, &mut bodies, &result);
+         }
+     }
+@@ -1090,7 +1212,14 @@ impl<'a, R: ?Sized + std::io::BufRead> Tokenizer<'a, R> {
+                     // Consume the '{' and add it to the token.
+                     state.append_char(self.next_char()?.unwrap());
+ 
+-                    self.consume_nested_expansion(state, NestedExpansion::ParameterExpansion)?;
++                    // Bash 5.3 function substitution: `${ cmd; }`, `${| cmd; }`.
++                    let expansion = if matches!(self.peek_char()?, Some(' ' | '\t' | '\n' | '|')) {
++                        NestedExpansion::FunctionSubstitution
++                    } else {
++                        NestedExpansion::ParameterExpansion
++                    };
++
++                    self.consume_nested_expansion(state, expansion)?;
+                 }
+                 // `$$` is a parameter of its own; whatever follows it starts nothing.
+                 Some('$') => {
+diff --git a/brush-parser/src/word.rs b/brush-parser/src/word.rs
+index ae025ab1..eaedbbc5 100644
+--- a/brush-parser/src/word.rs
++++ b/brush-parser/src/word.rs
+@@ -57,6 +57,14 @@ pub enum WordPiece {
+     CommandSubstitution(String),
+     /// A backquoted command substitution.
+     BackquotedCommandSubstitution(String),
++    /// A Bash 5.3 function substitution: `${ command; }` (`reply` false), or
++    /// `${| command; }` (`reply` true), whose value is `REPLY`.
++    FunctionSubstitution {
++        /// The command text between the braces (without the `|`).
++        command: String,
++        /// Whether the value is `REPLY` rather than the command's output.
++        reply: bool,
++    },
+     /// An escape sequence.
+     EscapeSequence(String),
+     /// An arithmetic expression.
+@@ -879,12 +887,14 @@ peg::parser! {
+             arithmetic_expansion() /
+             legacy_arithmetic_expansion() /
+             command_substitution() /
++            function_substitution() /
+             parameter_expansion()
+ 
+         rule double_quoted_word_piece() -> WordPiece =
+             arithmetic_expansion() /
+             legacy_arithmetic_expansion() /
+             command_substitution() /
++            function_substitution() /
+             parameter_expansion() /
+             double_quoted_escape_sequence() /
+             double_quoted_text()
+@@ -955,6 +965,7 @@ peg::parser! {
+             arithmetic_expansion() /
+             legacy_arithmetic_expansion() /
+             command_substitution() /
++            function_substitution() /
+             parameter_expansion() /
+             heredoc_escape_sequence() /
+             heredoc_literal_text()
+@@ -1116,8 +1127,10 @@ peg::parser! {
+                 ParameterExpr::LowercaseFirstChar { parameter, indirect, pattern }
+             }
+ 
++        // `!` is indirection only before a parameter; otherwise it is the
++        // parameter `$!` itself (`${!:-none}`, `${!-none}`).
+         rule parameter_indirection() -> bool =
+-            non_posix_extensions_enabled() "!" { true } /
++            non_posix_extensions_enabled() "!" !("-" !"}") &parameter() { true } /
+             { false }
+ 
+         rule non_posix_parameter_transformation_op() -> ParameterTransformOp =
+@@ -1182,6 +1195,24 @@ peg::parser! {
+             }
+         }}
+ 
++        rule function_substitution() -> WordPiece =
++            non_posix_extensions_enabled() "${" body:function_substitution_body() {
++                match body.strip_prefix('|') {
++                    Some(command) => WordPiece::FunctionSubstitution { command: command.to_owned(), reply: true },
++                    None => WordPiece::FunctionSubstitution { command: body.to_owned(), reply: false },
++                }
++            }
++
++        // The text up to the closing brace, which the tokenizer locates; the
++        // brace itself is consumed but not returned.
++        rule function_substitution_body() -> &'input str = #{|input, pos| {
++            let rest = &input[pos..];
++            match crate::tokenizer::function_substitution_len(rest, &parser_options.tokenizer_options()) {
++                Some(len) => peg::RuleResult::Matched(pos + len, &rest[..len - 1]),
++                None => peg::RuleResult::Failed,
++            }
++        }}
++
+         rule backquoted_command() -> String =
+             chars:(backquoted_char()*) {
+                 let mut command: String = chars.into_iter().collect();

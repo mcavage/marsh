@@ -23,10 +23,13 @@ pkg-url = "{ repo }/releases/download/{ name }-v{ version }/brush-{ target }{ ar
 bench = false
 
 [features]
-default = ["basic", "reedline", "minimal"]
+# Input backends. Each can be enabled for any target, and is offered where it
+# works (see `build.rs`), so the defaults suit every target.
+default = ["basic", "reedline", "minimal", "vt"]
 basic = ["brush-interactive/basic"]
 minimal = ["brush-interactive/minimal"]
 reedline = ["brush-interactive/reedline"]
+vt = ["brush-interactive/vt"]
 experimental = [
     "experimental-builtins",
     "experimental-bundled-coreutils",
@@ -50,8 +53,10 @@ schema = ["dep:schemars"]
 workspace = true
 
 [dependencies]
+brush-clap-adapter = { version = "^0.1.0", path = "../brush-clap-adapter" }
 brush-core = { version = "^0.5.0", path = "../brush-core" }
 brush-builtins = { version = "^0.2.0", path = "../brush-builtins" }
+brush-interactive = { version = "^0.4.0", path = "../brush-interactive" }
 brush-coreutils-builtins = { version = "^0.1.0", path = "../brush-coreutils-builtins", optional = true }
 brush-experimental-builtins = { version = "^0.1.0", path = "../brush-experimental-builtins", optional = true }
 brush-parser = { version = "^0.4.0", path = "../brush-parser", optional = true }
@@ -70,16 +75,9 @@ tracing-subscriber = "0.3.23"
 human-panic = "2.0.6"
 
 [target.'cfg(not(any(unix, windows)))'.dependencies]
-brush-interactive = { version = "^0.4.0", path = "../brush-interactive", features = [
-    "minimal",
-] }
 tokio = { version = "1.52.3", features = ["rt", "sync"] }
 
 [target.'cfg(any(unix, windows))'.dependencies]
-brush-interactive = { version = "^0.4.0", path = "../brush-interactive", features = [
-    "basic",
-    "reedline",
-] }
 crossterm = "0.29.0"
 tokio = { version = "1.52.3", features = ["rt", "rt-multi-thread", "sync"] }
 

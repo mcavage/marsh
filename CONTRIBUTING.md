@@ -160,8 +160,8 @@ divergence from Bash is classified and tested.
 
 To fix a shell bug, reproduce it through the shipped `marsh-local` entrypoint
 and compare with Bash (see `crates/marsh/tests/bash_audit.rs`). Then fix it in
-Brush as a small patch: add it to `docs/upstream/brush/` in order, apply it
-under `vendor/brush/`, and describe it in the patch README. A general Bash fix
+Brush: change `vendor/brush/` and fold the change into the patch for its area in
+`docs/upstream/brush/` (see `vendor/brush/MARSH-VENDORING.md`). A general Bash fix
 should be one upstream Brush could take; marsh-specific behavior stays here.
 A suite mismatch you do not fix gets an entry in
 `tests/acceptance/bash_divergences.json` and `docs/design/bash-compatibility.md`.
