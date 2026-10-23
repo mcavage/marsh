@@ -1,0 +1,24 @@
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: workload
+displayName: bamboohr
+description: Read-only BambooHR directory lookups for agents
+sourceUrl: https://github.com/mcavage/marsh-tools
+licenses: [MIT]
+dockerfile: ./Dockerfile
+capabilities:
+  - type: com.docker.sandbox/sbx@1
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - api.bamboohr.com:443
+  - type: com.docker.sandbox/credential@1
+    description: BambooHR API key, stored as base64("KEY:x") (sbx secret set bamboohr)
+    config:
+      service: bamboohr
+      phase: runtime
+      apiKey:
+        name: BAMBOOHR_API_KEY
+        inject:
+          - {domain: api.bamboohr.com, header: Authorization, format: "Basic %s"}
