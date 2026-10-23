@@ -49,8 +49,8 @@ job in the scope. Values are positive integers.
 
 | Variable | Default |
 |---|---|
-| `MARSH_JOB_CPU_MILLIS` | 4000 (4 CPUs) |
-| `MARSH_JOB_MEMORY_BYTES` | 8589934592 (8 GiB) |
+| `MARSH_JOB_CPU_MILLIS` | 2000 (2 CPUs) |
+| `MARSH_JOB_MEMORY_BYTES` | 4294967296 (4 GiB) |
 | `MARSH_JOB_PIDS` | 4096 |
 | `MARSH_JOB_WRITABLE_BYTES` | 10737418240 (10 GiB). Counts the container's own files, not mounted directories. |
 | `MARSH_JOB_OUTPUT_BYTES` | 268435456 (256 MiB). stdout and stderr together. |
@@ -80,11 +80,11 @@ checks. Files in mounted directories do not count toward this limit.
 These cannot be changed. A call that exceeds one is refused with exit 125
 ([messages](agents.md#limits-and-messages)).
 
-- 8 jobs at once per daemon
+- 16 jobs at once per daemon
 - depth 4
-- 4 live children per job
+- 8 live children per job
 - the same Kit at most twice in a row
-- 64 launches per tree, including refused child calls
+- 128 launches per tree, including refused child calls
 
 Children also inherit their parent's wall-time deadline. With less than one
 second remaining, a new child is refused. Parallel composition has separate

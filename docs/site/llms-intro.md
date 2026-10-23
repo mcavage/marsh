@@ -124,8 +124,8 @@ network policy and credentials.
   its children. Ctrl-C cancels the foreground tree with INT, then KILL after
   10 seconds if needed.
 
-Fixed limits are 8 concurrent jobs per daemon, depth 4, 4 live children per job,
-and 64 launches per tree, including refused child calls. The same Kit may
+Fixed limits are 16 concurrent jobs per daemon, depth 4, 8 live children per job,
+and 128 launches per tree, including refused child calls. The same Kit may
 appear at most twice consecutively in a lineage. The per-tree Kit VM cap
 defaults to 4 and can be set with `MARSH_TREE_KIT_VMS`. Refusals exit 125;
 registered-name links return 126 for a spawn-set refusal, while `marsh run`

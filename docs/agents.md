@@ -120,11 +120,11 @@ link outside `MARSH_SPAWN` exits 126; other refusals, including those through
 
 | Limit | Message |
 |---|---|
-| 8 jobs at once per daemon, all depths | `capacity: 8 jobs` |
+| 16 jobs at once per daemon, all depths | `capacity: 16 jobs` |
 | Depth 4 (your command is depth 1) | `depth limit 4` |
 | The same Kit at most twice in a row | `claude → claude → claude refused: same-Kit chain limit 2` |
-| 4 live children per job | `fan-out limit 4` |
-| 64 launches per tree, counting refused child calls | `total limit 64` |
+| 8 live children per job | `fan-out limit 8` |
+| 128 launches per tree, counting refused child calls | `total limit 128` |
 | 4 distinct Kit VMs used by live jobs in one tree, by default | `tree already uses 4 Kit VMs (...) (MARSH_TREE_KIT_VMS)` |
 | At least one second must remain before the parent's deadline | `deadline: parent job ... has ... ms of wall time left` |
 | A name outside `MARSH_SPAWN` | `spawn refused: NAME not in this job's spawn set (MARSH_SPAWN)` |

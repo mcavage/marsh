@@ -1,6 +1,6 @@
 //! Admission boundaries of the process table (`docs/design/processes.md` s6),
 //! each mirroring a `Process.tla` negative control. Black-box acceptance
-//! cannot reach these cheaply (64 launches, a held slot across a restart,
+//! cannot reach these cheaply (128 launches, a held slot across a restart,
 //! a forged relay parent).
 
 use super::*;
@@ -108,12 +108,12 @@ fn pool_holds_uncertain_slots_across_restart_until_reset() {
     {
         let store = reopen(home.path()).unwrap();
         let session = session(&store, home.path());
-        let jobs = (0..8)
+        let jobs = (0..16)
             .map(|_| launch(&store, &session, None, "fixture", view(), false).unwrap())
             .collect::<Vec<_>>();
         assert!(
             refusal(launch(&store, &session, None, "fixture", view(), false))
-                .starts_with("capacity: 8 jobs")
+                .starts_with("capacity: 16 jobs")
         );
         end(&store, &jobs[0], CleanupState::Uncertain);
         let held = refusal(launch(&store, &session, None, "fixture", view(), false));
@@ -126,9 +126,9 @@ fn pool_holds_uncertain_slots_across_restart_until_reset() {
     }
     // Restart: every unfinished job is uncertain and holds a slot.
     let store = reopen(home.path()).unwrap();
-    assert_eq!(store.process_counts().held, 8);
+    assert_eq!(store.process_counts().held, 16);
     store.release_process_slots(&["shell".to_owned()]);
-    assert_eq!(store.process_counts().held, 8);
+    assert_eq!(store.process_counts().held, 16);
     store.release_process_slots(&["fixture".to_owned()]);
     assert_eq!(store.process_counts().held, 0);
     drop(store);
@@ -152,12 +152,12 @@ fn depth_fan_out_and_parent_liveness() {
     for job in chain.iter().rev() {
         end(&store, job, CleanupState::Verified);
     }
-    // noFan: four live children, the fifth is refused until one ends.
+    // noFan: eight live children, the ninth is refused until one ends.
     let root = launch(&store, &session, None, "claude", view(), false).unwrap();
-    let kids = (0..4)
+    let kids = (0..8)
         .map(|_| child(&store, &session, &root, "shell").unwrap())
         .collect::<Vec<_>>();
-    assert!(refusal(child(&store, &session, &root, "shell")).starts_with("fan-out limit 4"));
+    assert!(refusal(child(&store, &session, &root, "shell")).starts_with("fan-out limit 8"));
     end(&store, &kids[0], CleanupState::Verified);
     child(&store, &session, &root, "shell").unwrap();
     // Spawn is atomic with the parent's liveness: an ended parent starts nothing.
@@ -168,19 +168,19 @@ fn depth_fan_out_and_parent_liveness() {
 
 #[test]
 fn refused_launches_count_toward_the_tree_total() {
-    // noTotal: 64 launches per tree, refusals included.
+    // noTotal: 128 launches per tree, refusals included.
     let home = tempfile::tempdir().unwrap();
     let store = reopen(home.path()).unwrap();
     let session = session(&store, home.path());
     let root = launch(&store, &session, None, "claude", view(), false).unwrap();
-    for _ in 0..63 {
+    for _ in 0..127 {
         let refused = refusal(child(&store, &session, &root, "unregistered"));
         assert!(
             refused.starts_with("spawn refused: unregistered"),
             "{refused}"
         );
     }
-    assert!(refusal(child(&store, &session, &root, "shell")).starts_with("total limit 64"));
+    assert!(refusal(child(&store, &session, &root, "shell")).starts_with("total limit 128"));
     // Another tree is unaffected.
     let other = launch(&store, &session, None, "claude", view(), false).unwrap();
     child(&store, &session, &other, "shell").unwrap();

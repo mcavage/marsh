@@ -624,21 +624,31 @@ class Workspaces(ScenarioSuite):
         require(self.fixture_job_ids() == jobs, "refused splits started Kit jobs")
 
     def caps_and_pool(self) -> None:
-        """s4: 16-branch cap (setup 2) and the 8-process session pool (`failed: capacity`)."""
+        """s4: 16-branch cap (setup 2) and the 16-process session pool (`failed: capacity`)."""
         project, marker = self.project, self.root / "w16-ran"
         too_many = [a for i in range(17) for a in ("-b", f"b{i}=touch {marker}")]
         completed = self.cli(["split", "-n", *too_many], project, timeout=60)
         require(completed.returncode == 2 and not marker.exists(), f"17 branches: {completed.returncode}")
         dest = self.root / "w16"
         dest.mkdir()
-        nine = " ".join(f"-b p{i}='sleep 6'" for i in range(9))
-        result = self.bash(f"marsh split -n {nine} | marsh join -- sh -c 'cat > \"$1/r\"; "
-                           f"for d in \"$SPLIT_DIR\"/p*; do cat \"$d/status\"; echo; done > \"$1/s\"' _ {dest}; "
-                           "echo \"rc=$? ${PIPESTATUS[*]}\"", project, timeout=180)
-        statuses = sorted(line for line in (dest / "s").read_text().splitlines() if line) \
-            if (dest / "s").exists() else []
-        require(statuses.count("failed: capacity") == 1 and statuses.count("exited 0") == 8,
-                f"want 8 admitted + 1 `failed: capacity`: {statuses} {text(result.stderr)[-400:]!r}")
+        # One split fills the pool (16 branches is also the per-split cap); a second split then has
+        # no slot left. `split` waits for its branches, so the first one runs in the background until
+        # every branch has touched its marker. Branches see the project only: markers live in .git.
+        marks = project / ".git" / "marsh-w16"
+        marks.mkdir()
+        full = " ".join(f"-b p{i}='touch {marks}/p{i}; sleep 25'" for i in range(16))
+        result = self.bash(f"( marsh split -n {full} | marsh join > /dev/null ) & bg=$!; "
+                           f"n=0; while [ $(ls {marks} | wc -l) -lt 16 ] && [ $n -lt 300 ]; do "
+                           "sleep 0.2; n=$((n+1)); done; "
+                           "marsh split -n -b q=true | marsh join -- sh -c "
+                           "'cat > \"$1/r\"; cat \"$SPLIT_DIR/q/status\" > \"$1/s\"' _ "
+                           f"{dest}; echo \"rc=$? ${{PIPESTATUS[*]}}\"; wait $bg", project, timeout=180)
+        filled = len(list(marks.glob("p*")))
+        shutil.rmtree(marks, ignore_errors=True)
+        require(filled == 16, f"the pool was not filled by 16 branches: {filled} {text(result.stderr)[-400:]!r}")
+        status = (dest / "s").read_text().strip() if (dest / "s").exists() else ""
+        require(status == "failed: capacity",
+                f"want the 17th concurrent branch `failed: capacity`: {status!r} {text(result.stderr)[-400:]!r}")
         require("failed: capacity" in (dest / "r").read_text(), "capacity failure not visible in rendering")
         require(re.search(r"rc=0 [1-9]\d* 0", text(result.stdout)), f"join did not run: {text(result.stdout)!r}")
 

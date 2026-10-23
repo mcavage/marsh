@@ -33,8 +33,8 @@ status. A branch naming a registered command starts it as a child job.
 - `marsh jobs --tree` shows this job's subtree; `marsh jobs show ID` one job.
 - The user narrows what you may start with `MARSH_SPAWN=a,b` (or `none`);
   `marsh run --spawn a,b NAME` narrows one child. Nothing in a job widens it.
-- Limits: 8 jobs at once, depth 4, the same Kit at most twice in a row,
-  4 live children per job, 64 jobs per tree, 4 distinct Kit VMs per tree;
+- Limits: 16 jobs at once, depth 4, the same Kit at most twice in a row,
+  8 live children per job, 128 jobs per tree, 4 distinct Kit VMs per tree;
   a child's wall time ends with its parent's. A refusal starts nothing and
   exits 125 (126 for a name outside the spawn set).
 - Exported variables reach children; credential-shaped names never do.

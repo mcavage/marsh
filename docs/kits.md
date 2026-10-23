@@ -122,7 +122,7 @@ When you invoke a registered command:
    checked. The VM stays warm for the next call.
 
 Each call gets its own container, including concurrent and background calls.
-Up to 8 jobs run at once per daemon.
+Up to 16 jobs run at once per daemon.
 
 An agent can edit or delete the project files its container mounts. The
 packaged agent Kits disable their agents' own sandboxes and permission
@@ -143,8 +143,8 @@ in the Kit's descriptor
 
 | Limit | Default |
 |---|---|
-| CPUs | 4 |
-| Memory | 8 GiB |
+| CPUs | 2 |
+| Memory | 4 GiB |
 | Processes | 4,096 |
 | Writable layer | 10 GiB |
 | Output | 256 MiB |

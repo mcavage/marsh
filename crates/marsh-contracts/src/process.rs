@@ -15,11 +15,11 @@ pub const ARTIFACT: &str = "/run/marsh/marsh";
 pub const SOCKET: &str = "/run/marsh/cap.sock";
 pub const JOB_JSON: &str = "/run/marsh/job.json";
 
-pub const POOL_LIMIT: usize = 8;
+pub const POOL_LIMIT: usize = 16;
 pub const DEPTH_LIMIT: u32 = 4;
 pub const SAME_KIT_LIMIT: usize = 2;
-pub const FAN_OUT_LIMIT: usize = 4;
-pub const TOTAL_LIMIT: usize = 64;
+pub const FAN_OUT_LIMIT: usize = 8;
+pub const TOTAL_LIMIT: usize = 128;
 /// Distinct Kit VMs one job tree may use at once (`MARSH_TREE_KIT_VMS`
 /// lowers or raises it at daemon start).
 pub const TREE_KIT_VM_LIMIT: usize = 4;

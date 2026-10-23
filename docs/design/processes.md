@@ -91,7 +91,7 @@ then frame relay.
   (section 14). stdout and stderr use per-attempt credits.
 
 **Capability socket** (`capability.rs`): blocking accept, at most
-`MaxFan + 4` (8) open connections per attempt. An excess connection receives
+`MaxFan + 4` (12) open connections per attempt. An excess connection receives
 `marsh: too many concurrent daemon requests in this job` and closes.
 
 ## 4. The links and the in-job `marsh`
@@ -262,12 +262,12 @@ queued child would deadlock the pool.
 
 | Limit | Value | Refusal (exit 125 / `failed: …`) |
 |---|---|---|
-| Pool | 8 concurrent jobs per daemon (selected home): one pool across all sessions and host CLI calls, all depths; a slot frees only on verified deletion (`BudgetBound`, control `freeOnRevoke`) | `capacity: 8 jobs (2 held by uncertain jobs on Kit codex: run marsh workers reset codex)` |
+| Pool | 16 concurrent jobs per daemon (selected home): one pool across all sessions and host CLI calls, all depths; a slot frees only on verified deletion (`BudgetBound`, control `freeOnRevoke`) | `capacity: 16 jobs (2 held by uncertain jobs on Kit codex: run marsh workers reset codex)` |
 | Kit VMs | 4 distinct Kit VMs live at once per job tree (one warm VM per Kit identity: aliases of a live Kit, or a second call to it, cost nothing; `MARSH_TREE_KIT_VMS` at daemon start sets 1–64; `KitVMBound`, `noKitCap`) | `shell refused: tree already uses 4 Kit VMs (claude, codex, fixture, pi) (MARSH_TREE_KIT_VMS)` |
 | Depth | 4; a root job is depth 1 (`LineageWF`, `noDepth`) | `depth limit 4` |
 | Same-Kit chain | 2 consecutive parent→child steps with the same Kit identity (Kit source/image, not the registered name): claude → claude is allowed, a third claude is refused (`SameKitBound`, `noSameKit`) | `claude → claude → claude refused: same-Kit chain limit 2 (see /run/marsh/context.md)` |
-| Fan-out | 4 live children per job, including its splits' branches (`FanOutBound`, `noFan`) | `fan-out limit 4` |
-| Total | 64 launches per top-level tree (`TotalBound`, `noTotal`) | `total limit 64` |
+| Fan-out | 8 live children per job, including its splits' branches (`FanOutBound`, `noFan`) | `fan-out limit 8` |
+| Total | 128 launches per top-level tree (`TotalBound`, `noTotal`) | `total limit 128` |
 | Wall time | min(the Kit's own limit, `MARSH_JOB_WALL_SECONDS`, and the parent's remaining time); a child needs 1 s left at admission. The receipt's `lineage.deadline_unix_ms` is the effective deadline and `parent_deadline` says it is the parent's. The worker stops the child at it (`exit.cause` `limit:wall: parent deadline`); if the parent's own wall kill lands first, its end cancels the child with the same cause | `fixture refused: deadline: parent job 1a2b3c4d has 420 ms of wall time left (MARSH_JOB_WALL_SECONDS)` |
 
 **No TTY children in v1.** A job's child gets no PTY. A `ProcessRun` whose
