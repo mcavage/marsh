@@ -64,7 +64,7 @@ The Pi Kit declares an Anthropic API key only. `shell` has no credentials.
 ### Updates
 
 Each Kit image pins its agent's version. Each time the marsh daemon starts,
-and once a day while it runs, marsh checks in the background whether a
+and once an hour while it runs, marsh checks in the background whether a
 command's tag names a newer image, so you get a new Claude Code, Codex, Pi,
 Pix or Hermes without waiting for a marsh release. It never delays what you
 are doing, and an offline check is reported only in `marsh status`.
