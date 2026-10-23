@@ -1305,12 +1305,12 @@ pub struct StatusDocument {
     /// (`docs/design/processes.md` s9).
     #[serde(default)]
     pub processes: process::ProcessCounts,
-    /// The daily automatic Kit update check (`docs/kits.md`).
+    /// The hourly automatic Kit update check (`docs/kits.md`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kit_updates: Option<Box<KitUpdateStatus>>,
 }
 
-/// `marsh status` `kit_updates`: the daily background check of Kits that
+/// `marsh status` `kit_updates`: the hourly background check of Kits that
 /// follow a tag, and the switches it made.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct KitUpdateStatus {

@@ -231,7 +231,7 @@ uninstall
          the version this marsh shipped.
 
 Commands that follow a tag update themselves when the daemon starts and once
-a day; `marsh status` lists updates. To update now, run `marsh stop` when
+an hour; `marsh status` lists updates. To update now, run `marsh stop` when
 nothing is running, then use marsh again. `marsh config auto-update off` or
 MARSH_AUTO_UPDATE=0 turns updates off.
 ";

@@ -197,7 +197,7 @@ marsh kit install myagent registry.example.com/you/myagent:stable
 ```
 
 marsh then moves `myagent` to whatever `stable` names, each time the daemon
-starts and once a day.
+starts and once an hour.
 
 ## 7. Let others add their own skills
 

@@ -128,7 +128,7 @@ marsh stop                   # when nothing is running; the next launch uses the
 
 The commands (`claude`, `codex`, `pi`, `shell`, `pix`, `hermes`, and Kits you
 installed from a tag) move to newer images by themselves: marsh checks each
-time its daemon starts and once a day, and switches a command when it has no
+time its daemon starts and once an hour, and switches a command when it has no
 running jobs. The next time you use an updated command, marsh prints one line
 such as `marsh: claude updated (2.1.305 → 2.1.307)`. `marsh status` lists
 recent updates. To update right now, run `marsh stop` when nothing is running,

@@ -166,7 +166,7 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 
 **config auto-update** [**on**|**off**]
 : Set, or with no value print, whether Kits that follow a tag update
-  themselves in this **MARSH_HOME** (when the daemon starts, then daily), and
+  themselves in this **MARSH_HOME** (when the daemon starts, then hourly), and
   whether a release build adds **pix** and **hermes** by itself. The default
   is **on**. To update now, run **marsh stop** when idle, then marsh again.
 

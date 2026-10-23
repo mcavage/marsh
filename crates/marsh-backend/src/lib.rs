@@ -386,7 +386,7 @@ impl StockDaemonBackend {
     }
 
     /// Turn on automatic Kit updates for this scope: a check when the daemon
-    /// starts and then daily, which on a release build also adds the known
+    /// starts and then hourly, which on a release build also adds the known
     /// Kits (`builtin_kits`). `environment` is
     /// `MARSH_AUTO_UPDATE` at launch; it or `scope_root/config.json` can turn
     /// them off again.
@@ -3591,7 +3591,7 @@ impl StockDaemonBackend {
     }
 
     /// One pass of the automatic updater at `now_ms`: a check when this daemon
-    /// has not run one yet or a day has passed, else a retry of Kits that were
+    /// has not run one yet or an hour has passed, else a retry of Kits that were
     /// waiting for their jobs.
     fn auto_update_pass(&self, store: &DaemonStore, now_ms: u64) {
         let Some(auto) = &self.auto_update else {
@@ -6329,7 +6329,8 @@ mod kit_lifecycle_callers {
         assert!(backend.uninstall_kit("nope".into(), store).is_err());
     }
 
-    const DAY: u64 = 24 * 60 * 60 * 1000;
+    const HOUR: u64 = 60 * 60 * 1000;
+    const DAY: u64 = 24 * HOUR;
 
     fn automatic(
         backend: StockDaemonBackend,
@@ -6386,7 +6387,7 @@ mod kit_lifecycle_callers {
     }
 
     #[test]
-    fn one_daemon_checks_at_most_once_a_day() {
+    fn one_daemon_checks_at_most_once_an_hour() {
         let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(OLD, Some(1));
         let backend = automatic(
@@ -6402,9 +6403,9 @@ mod kit_lifecycle_callers {
         let check = status(&backend).last_check.unwrap();
         assert_eq!((check.unix_ms, check.result.as_str()), (10 * DAY, "ok"));
 
-        backend.auto_update_pass(&store, 10 * DAY + DAY / 2);
-        assert_eq!(registry.calls("kit"), 1, "not again the same day");
-        backend.auto_update_pass(&store, 11 * DAY);
+        backend.auto_update_pass(&store, 10 * DAY + HOUR / 2);
+        assert_eq!(registry.calls("kit"), 1, "not again within the hour");
+        backend.auto_update_pass(&store, 10 * DAY + HOUR);
         assert_eq!(registry.calls("kit"), 2);
         assert_eq!(
             status(&backend).recent,
@@ -6428,7 +6429,7 @@ mod kit_lifecycle_callers {
         assert_eq!(registry.calls("kit"), 0);
         assert_eq!(status(&backend).waiting, ["pix"]);
 
-        // Idle within the same day: the waiting Kit is retried. Preparing the
+        // Idle within the same hour: the waiting Kit is retried. Preparing the
         // new VM fails here, so the old digest stays registered.
         let idle = DaemonStore::new(home.path());
         assert!(!idle.worker_busy(&backend.kit_spec("pix").unwrap().name));
@@ -6445,7 +6446,7 @@ mod kit_lifecycle_callers {
             backend.registered_kit("pix").unwrap().workload.identity(),
             OLD
         );
-        // Nothing waits, so later passes that day do nothing.
+        // Nothing waits, so later passes that hour do nothing.
         backend.auto_update_pass(&idle, DAY + 120_000);
         assert_eq!(registry.calls("kit"), 1);
     }
@@ -6531,7 +6532,7 @@ mod kit_lifecycle_callers {
     }
 
     #[test]
-    fn every_daemon_start_checks_once_then_daily() {
+    fn every_daemon_start_checks_once_then_hourly() {
         let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(OLD, Some(1));
         let first = automatic(
@@ -6541,18 +6542,18 @@ mod kit_lifecycle_callers {
         );
         first.auto_update_pass(&DaemonStore::new(home.path()), 10 * DAY);
         assert_eq!(registry.calls("kit"), 1);
-        // A restart an hour later checks again; that daemon then waits a day.
+        // A restart half an hour later checks again; that daemon then waits an hour.
         let restarted = automatic(
             daemon(home.path(), &registry, None, None),
             home.path(),
             None,
         );
         let store = DaemonStore::new(home.path());
-        restarted.auto_update_pass(&store, 10 * DAY + DAY / 24);
+        restarted.auto_update_pass(&store, 10 * DAY + HOUR / 2);
         assert_eq!(registry.calls("kit"), 2);
-        restarted.auto_update_pass(&store, 10 * DAY + DAY / 12);
+        restarted.auto_update_pass(&store, 10 * DAY + HOUR);
         assert_eq!(registry.calls("kit"), 2);
-        restarted.auto_update_pass(&store, 11 * DAY + DAY / 24);
+        restarted.auto_update_pass(&store, 10 * DAY + HOUR / 2 + HOUR);
         assert_eq!(registry.calls("kit"), 3);
     }
 
