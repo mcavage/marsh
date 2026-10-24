@@ -485,6 +485,7 @@ fn host_control_home(
         if !path.is_absolute() {
             return Err("MARSH_CONTROL_HOME must name a real absolute directory".into());
         }
+        create_control_override(path)?;
         verify_host_directory(path, true, false)?;
         let path = path.canonicalize()?;
         verify_host_directory(&path, true, false)?;
@@ -501,6 +502,35 @@ fn host_control_home(
     let control_home = control_root.join(scope);
     verify_host_directory(&control_home, true, true)?;
     Ok(control_home)
+}
+
+/// A missing `MARSH_CONTROL_HOME` is created (0700) when its parent is a
+/// safe directory of this account; an existing one is only verified.
+fn create_control_override(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if fs::symlink_metadata(path).is_ok() {
+        return Ok(());
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or("MARSH_CONTROL_HOME must name a real absolute directory")?;
+    let parent = parent.canonicalize().map_err(|_| {
+        format!(
+            "unsafe or unavailable host control directory: {} (its parent does not exist)",
+            path.display()
+        )
+    })?;
+    verify_host_directory(&parent, false, false).map_err(|_| {
+        format!(
+            "unsafe or unavailable host control directory: {} (its parent {} is not a private directory of this account)",
+            path.display(),
+            parent.display()
+        )
+    })?;
+    let leaf = path
+        .file_name()
+        .ok_or("MARSH_CONTROL_HOME must name a real absolute directory")?;
+    verify_host_directory(&parent.join(leaf), true, true)
 }
 
 fn host_product_root(real_home: &Path) -> PathBuf {
@@ -704,6 +734,33 @@ mod tests {
         fs::set_permissions(&nested, fs::Permissions::from_mode(0o700)).unwrap();
         assert!(host_control_home(&real, &selected, Some(&nested)).is_err());
         assert!(host_control_home(&real, &selected, Some(&selected)).is_err());
+    }
+
+    #[test]
+    fn a_missing_control_override_is_created_only_under_a_safe_parent() {
+        let root = tempfile::tempdir().unwrap();
+        let real = root.path().join("real");
+        let selected = root.path().join("selected");
+        fs::create_dir(&real).unwrap();
+        fs::create_dir(&selected).unwrap();
+        let missing = root.path().join("control");
+        let control = host_control_home(&real, &selected, Some(&missing)).unwrap();
+        assert_eq!(
+            fs::metadata(&missing).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(control.parent().unwrap(), missing.canonicalize().unwrap());
+        // A parent others can write is not safe: nothing is created.
+        let shared = root.path().join("shared");
+        fs::create_dir(&shared).unwrap();
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
+        let unsafe_leaf = shared.join("control");
+        assert!(host_control_home(&real, &selected, Some(&unsafe_leaf)).is_err());
+        assert!(!unsafe_leaf.exists());
+        // A missing parent is refused too.
+        let orphan = root.path().join("absent").join("control");
+        assert!(host_control_home(&real, &selected, Some(&orphan)).is_err());
+        assert!(!orphan.exists());
     }
 
     #[test]

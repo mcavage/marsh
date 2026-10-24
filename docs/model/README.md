@@ -369,6 +369,9 @@ they were accurate; ID-addressed effects spare a foreign VM that reuses a name.
 | `DetachedSurvives` | `restartDetached` | A detached sandbox keeps its state across restart (only removal leaves it) |
 | `NoDetachedUse` | `useDetached` | A detached sandbox takes no new submission, only `Control` |
 | `DetachedBound` | `noDetachCap` | Detached sandboxes are bounded by their own cap `DCAP` |
+| `ChildBound` | `noChildCap` | A detached run's coordinator starts at most `KCAP` agent sandboxes |
+| `NoOrphanChild` | `orphanChild` | The laptop deletes a run's listed agent sandboxes before removing the run's sandbox |
+| `EndedWithoutChildren` | `doneWithChild` | The supervisor deletes every agent sandbox before writing `done` |
 
 Positive configs also check `TypeOK` and `OwnedAreOurs`. Retirement has separate
 per-resource query state and a prior-sighting snapshot: another observer can
@@ -392,6 +395,7 @@ restart. Names abstract fresh requests and are not reused in these bounds.
 | Restart | `open` validates/locks the map and makes loaded Ready entries Quarantined |
 | BeginRemove / DeleteRequest / DeleteLands | `retire` persists Removing and requests removal by ID; actual deletion is provider state |
 | Forget | `retire`: successful complete inventory absence plus prior positive observation, then durable record removal |
+| ChildCreate / ChildDelete / RunEnds | Coordinator (`marsh/src/cloud_helper/coordinator.rs`): `Guard::admit` (allowed Kits, cap `MARSH_CLOUD_CHILDREN`), `cloud_call::run_child` (its own `CloudSbx` record in the root-only remote state; retire when the call returns), `Coordinator::settle` before `done`; laptop `delete_children` (`CloudSbx::adopt` then retire) in collect and discard. An agent sandbox's own create is the same `CloudSbx::create`, so `NoCreateReplay` covers it |
 | Detach / Control | `mark_detached` (persisted `detached` flag, cap `MAX_DETACHED`), `detach` (`Detached` phase), `open` (Ready + detached -> Detached on restart), `control_detached` (identity re-observed, admitted under the map lock only in `Detached`) |
 
 Assumptions/gaps: managed pending names are random/exclusive; other actors may

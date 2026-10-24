@@ -1112,6 +1112,7 @@ mod git_tests {
             kits: Vec::new(),
             stdin_terminal: false,
             detached: false,
+            delegate: None,
         }
     }
 

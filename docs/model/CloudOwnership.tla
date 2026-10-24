@@ -15,26 +15,33 @@
 (* detached. That state survives restart and admits only read-only control *)
 (* and signals (Control) and removal, never a new submission (Use). It is  *)
 (* bounded by its own cap, DCAP, apart from the attached CAP.              *)
+(*                                                                         *)
+(* Agent sandboxes of a detached run (cloud-delegate): while its run is    *)
+(* live, the run's coordinator may create child sandboxes (one abstract    *)
+(* slot per parent here), at most KCAP in all. Each is owned through the   *)
+(* parent: the coordinator deletes it when its call returns and before the *)
+(* run's end (`done`), and the laptop deletes any it lists before removing *)
+(* the parent. A child never outlives its parent's record.                 *)
 EXTENDS Naturals, FiniteSets
-CONSTANTS Names, Managed, MaxId, CAP, DCAP, MaxRestarts, Bug
+CONSTANTS Names, Managed, MaxId, CAP, DCAP, KCAP, MaxRestarts, Bug
 ASSUME Managed \subseteq Names
 ASSUME Bug \in {"none", "dropMissing", "forgetUnseen", "ackIsGone", "byName",
                "restartReady", "useQuarantined", "replayCreate", "noCap",
                "staleSeen", "stalePoison", "restartDetached", "useDetached",
-               "noDetachCap"}
+               "noDetachCap", "noChildCap", "orphanChild", "doneWithChild"}
 
 Phases == {"none", "pending", "ready", "quarantined", "removing", "detached"}
 IDs == 1..MaxId
 VARIABLES phase, own, seen, flight, submitted, created, reserved, submits,
           stock, visible, maker, nextId, view, deleteTarget, ack, restarts,
           restarted, badEffect, badUse, queryState, querySeen, queryView,
-          poisoned, prepared, det, badDetached
+          poisoned, prepared, det, badDetached, kid, kids, ended
 
 vars == <<phase, own, seen, flight, submitted, created, reserved, submits,
           stock, visible, maker, nextId, view, deleteTarget, ack, restarts,
           restarted, badEffect, badUse, queryState, querySeen, queryView,
-          poisoned, prepared, det, badDetached>>
-detVars == <<det, badDetached>>
+          poisoned, prepared, det, badDetached, kid, kids, ended>>
+detVars == <<det, badDetached, kid, kids, ended>>
 recordVars == <<phase, own, seen, flight, submitted, created, reserved, submits>>
 serviceVars == <<stock, visible, maker, nextId, deleteTarget, ack>>
 queryVars == <<queryState, querySeen, queryView>>
@@ -58,6 +65,8 @@ Init ==
   /\ querySeen = [n \in Managed |-> FALSE] /\ queryView = [n \in Managed |-> 0]
   /\ poisoned = FALSE /\ prepared = [n \in Managed |-> FALSE]
   /\ det = [n \in Managed |-> FALSE] /\ badDetached = FALSE
+  /\ kid = [n \in Managed |-> FALSE] /\ kids = [n \in Managed |-> 0]
+  /\ ended = [n \in Managed |-> FALSE]
 
 Reserve(n) ==
   /\ ~poisoned
@@ -171,7 +180,8 @@ Use(n) ==
   /\ badUse' = (badUse \/ phase[n] # "ready" \/ poisoned)
   /\ badDetached' = (badDetached \/ phase[n] = "detached")
   /\ prepared' = [prepared EXCEPT ![n] = FALSE]
-  /\ UNCHANGED <<recordVars, serviceVars, view, restarts, restarted, queryVars, poisoned, det>>
+  /\ UNCHANGED <<recordVars, serviceVars, view, restarts, restarted, queryVars, poisoned, det,
+                  kid, kids, ended>>
 
 (* A ready sandbox whose run detached: durable, outside the attached cap. *)
 Detach(n) ==
@@ -180,7 +190,7 @@ Detach(n) ==
   /\ phase' = [phase EXCEPT ![n] = "detached"]
   /\ det' = [det EXCEPT ![n] = TRUE]
   /\ UNCHANGED <<own, seen, flight, submitted, created, reserved, submits, serviceVars,
-                  otherVars, badDetached>>
+                  otherVars, badDetached, kid, kids, ended>>
 
 (* Read-only control (state, tail, fetch) or a signal, by recorded ID, in *)
 (* any daemon generation. It starts no workload.                          *)
@@ -191,9 +201,33 @@ Control(n) ==
   /\ UNCHANGED <<recordVars, serviceVars, view, restarts, restarted, badUse, queryVars,
                   failureVars, detVars>>
 
+(* The run's coordinator starts an agent sandbox for one call: only while  *)
+(* the run is live, within the per-run cap.                                *)
+ChildCreate(n) ==
+  /\ phase[n] = "detached" /\ ~ended[n] /\ ~kid[n]
+  /\ kids[n] < KCAP \/ Bug = "noChildCap"
+  /\ kids[n] < KCAP + 1
+  /\ kid' = [kid EXCEPT ![n] = TRUE] /\ kids' = [kids EXCEPT ![n] = @ + 1]
+  /\ UNCHANGED <<recordVars, serviceVars, otherVars, det, badDetached, ended>>
+
+(* The call returned (or the run is ending, or the laptop adopted it for   *)
+(* cleanup): its sandbox is deleted.                                       *)
+ChildDelete(n) ==
+  /\ kid[n]
+  /\ kid' = [kid EXCEPT ![n] = FALSE]
+  /\ UNCHANGED <<recordVars, serviceVars, otherVars, det, badDetached, kids, ended>>
+
+(* The supervisor writes `done` only after deleting every agent sandbox.   *)
+RunEnds(n) ==
+  /\ phase[n] = "detached" /\ ~ended[n]
+  /\ ~kid[n] \/ Bug = "doneWithChild"
+  /\ ended' = [ended EXCEPT ![n] = TRUE]
+  /\ UNCHANGED <<recordVars, serviceVars, otherVars, det, badDetached, kid, kids>>
+
 BeginRemove(n) ==
   /\ ~poisoned
   /\ own[n] # 0 /\ phase[n] \in {"pending", "ready", "quarantined", "detached"}
+  /\ ~kid[n] \/ Bug = "orphanChild"
   /\ view[n] = 0 \/ view[n] = own[n]
   /\ phase' = [phase EXCEPT ![n] = "removing"]
   /\ UNCHANGED <<own, seen, flight, submitted, created, reserved, submits, serviceVars, otherVars>>
@@ -250,8 +284,9 @@ Forget(n) ==
      \/ (Bug = "ackIsGone" /\ ack[n])
   /\ phase' = [phase EXCEPT ![n] = "none"] /\ own' = [own EXCEPT ![n] = 0]
   /\ seen' = [seen EXCEPT ![n] = FALSE] /\ det' = [det EXCEPT ![n] = FALSE]
+  /\ ended' = [ended EXCEPT ![n] = FALSE]
   /\ UNCHANGED <<flight, submitted, created, reserved, submits, serviceVars, otherVars,
-                  badDetached>>
+                  badDetached, kid, kids>>
 
 DropMissing(n) ==
   /\ ~poisoned
@@ -291,7 +326,7 @@ Next ==
        \/ SeeOwned(n) \/ Ready(n) \/ LoseReply(n) \/ Adopt(n) \/ Quarantine(n)
        \/ PrepareUse(n) \/ Use(n) \/ BeginRemove(n) \/ DeleteRequest(n) \/ DeleteLands(n)
        \/ BeginQuery(n) \/ FinishQuery(n) \/ NextQuery(n) \/ Forget(n) \/ DropMissing(n)
-       \/ Detach(n) \/ Control(n)
+       \/ Detach(n) \/ Control(n) \/ ChildCreate(n) \/ ChildDelete(n) \/ RunEnds(n)
   \/ \E n \in Names : Expose(n) \/ EnvRemove(n) \/ EnvForeign(n)
   \/ Observe \/ Restart \/ FailPersistence
 Spec == Init /\ [][Next]_vars
@@ -310,6 +345,8 @@ TypeOK ==
   /\ querySeen \in [Managed -> BOOLEAN] /\ queryView \in [Managed -> 0..MaxId]
   /\ poisoned \in BOOLEAN /\ prepared \in [Managed -> BOOLEAN]
   /\ det \in [Managed -> BOOLEAN] /\ badDetached \in BOOLEAN
+  /\ kid \in [Managed -> BOOLEAN] /\ kids \in [Managed -> 0..(KCAP + 1)]
+  /\ ended \in [Managed -> BOOLEAN]
 NoForeignEffect == ~badEffect
 OwnedAreOurs == \A n \in Managed : own[n] # 0 => maker[own[n]] = "host"
 NoLeak == \A n \in Managed : created[n] \in AliveIDs =>
@@ -323,4 +360,9 @@ DetachedBound == Cardinality(DHolding) <= DCAP
 \* A detached sandbox leaves its state only for removal, across restarts.
 DetachedSurvives == \A n \in Managed : det[n] => phase[n] \in {"detached", "removing"}
 NoDetachedUse == ~badDetached
+\* An agent sandbox lives only under its live detached parent's record.
+NoOrphanChild == \A n \in Managed : kid[n] => phase[n] = "detached"
+\* The run's end is recorded only after its agent sandboxes are deleted.
+EndedWithoutChildren == \A n \in Managed : ended[n] => ~kid[n]
+ChildBound == \A n \in Managed : kids[n] <= KCAP
 =============================================================================
