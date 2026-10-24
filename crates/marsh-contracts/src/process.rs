@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 pub const CAPABILITY_DIR: &str = "/run/marsh";
 /// The per-name links (`#!/run/marsh/marsh --link=NAME`).
 pub const LINK_DIR: &str = "/run/marsh/bin";
+/// Links in [`LINK_DIR`] (and the shell VM's command directory) that run
+/// `marsh open`, unless a registered command has the name.
+pub const OPEN_LINKS: [&str; 2] = ["xdg-open", "open"];
 /// The static job artifact, bound read-only.
 pub const ARTIFACT: &str = "/run/marsh/marsh";
 pub const SOCKET: &str = "/run/marsh/cap.sock";

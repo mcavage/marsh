@@ -645,3 +645,102 @@ fn a_fanout_in_a_shell_branch_is_drawn_as_a_fanout_node_in_that_branch() {
     // No fanout id reaches a split branch from an enclosing fanout.
     assert!(!crate::split::forwardable("FANOUT_BRANCH"));
 }
+
+#[test]
+fn only_a_terminal_session_and_its_terminal_job_trees_open_links() {
+    use std::{fs, os::unix::fs::PermissionsExt as _};
+    let root = tempfile::tempdir().unwrap();
+    let server = Arc::new(Server::bind(root.path()).unwrap());
+    let store = &server.store;
+    let opened = root.path().join("opened");
+    let recorder = root.path().join("recorder");
+    fs::write(
+        &recorder,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$1\" >> '{}'\n",
+            opened.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&recorder, fs::Permissions::from_mode(0o755)).unwrap();
+    store.set_url_opener(Some(crate::open_url::Opener {
+        program: recorder,
+        disabled_by_environment: false,
+        config: root.path().join("config.json"),
+    }));
+    let session = session(store, root.path());
+    let foreground = launch(store, &session, None, "claude", view(), false).unwrap();
+    store.mark_terminal_job(&foreground);
+    let kid = child(store, &session, &foreground, "codex").unwrap();
+    let background = launch(store, &session, None, "claude", view(), false).unwrap();
+    let ask = |token: String, url: &str| {
+        let client = Client {
+            paths: server.lifecycle.paths.clone(),
+            token,
+        };
+        let task_server = Arc::clone(&server);
+        let task = thread::spawn(move || task_server.serve_one().unwrap());
+        let reply = client.request(PublicRequest::OpenUrl { url: url.into() });
+        task.join().unwrap();
+        reply.unwrap()
+    };
+    let job = |id: &str| store.issue_capability_token(id).unwrap();
+    let reason = |reply: PublicReply| match reply {
+        PublicReply::UrlOpen {
+            opened: false,
+            reason: Some(reason),
+        } => reason,
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+    let url = "https://example.com/marsh?state=private";
+    // No attached terminal yet: nothing opens.
+    assert!(reason(ask(job(&kid), url)).contains("not attached"));
+    store.set_terminal_shell(&session, true);
+    assert!(matches!(
+        ask(job(&kid), url),
+        PublicReply::UrlOpen { opened: true, .. }
+    ));
+    assert!(reason(ask(job(&background), url)).contains("not started on your terminal"));
+    assert!(reason(ask(job(&foreground), "file:///etc/passwd")).contains("http"));
+    let relay = store.issue_relay_token(&session).unwrap();
+    for _ in 0..2 {
+        assert!(matches!(
+            ask(relay.clone(), url),
+            PublicReply::UrlOpen { opened: true, .. }
+        ));
+    }
+    assert!(reason(ask(relay.clone(), url)).contains("more than 3 links"));
+    // The host owner has no terminal of its own to open into.
+    let master = fs::read_to_string(&server.lifecycle.paths.token).unwrap();
+    assert!(matches!(
+        ask(master.trim().to_owned(), url),
+        PublicReply::Error { .. }
+    ));
+    assert_eq!(
+        store.job(&kid).unwrap().opened,
+        vec!["https://example.com".to_owned()]
+    );
+    for _ in 0..100 {
+        if fs::read_to_string(&opened).is_ok_and(|text| text.lines().count() == 3) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        fs::read_to_string(&opened).unwrap(),
+        format!("{url}\n").repeat(3)
+    );
+    // Detached, the session's trees open nothing more.
+    store.set_terminal_shell(&session, false);
+    assert!(reason(ask(job(&kid), url)).contains("not attached"));
+}
+
+#[test]
+fn the_terminal_identity_reaches_child_jobs_and_branches() {
+    for name in marsh_contracts::terminal::IDENTITY_VARIABLES {
+        assert!(crate::split::forwardable(name), "{name}");
+    }
+    assert!(crate::split::forwardable("BROWSER"));
+    // Apple Terminal's per-window id names a Mac window, not the terminal.
+    assert!(!crate::split::forwardable("TERM_SESSION_ID"));
+}

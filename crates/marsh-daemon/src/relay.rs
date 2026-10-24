@@ -1740,6 +1740,7 @@ mod tests {
                         dev: false,
                         arguments: Vec::new(),
                         session: session(&session_id, home.path()),
+                        terminal_environment: std::collections::BTreeMap::new(),
                     },
                     std::fs::File::open("/dev/null").unwrap(),
                     &mut shell_output,

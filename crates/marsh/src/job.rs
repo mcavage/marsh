@@ -27,6 +27,7 @@ Usage:
                                                            This job's Kit in Docker Cloud
   marsh jobs [--json] | jobs --tree [--json] | jobs show JOB [--json]   This job's subtree
   marsh context                                            Print this job's context
+  marsh open URL                                           Open a web link on the Mac (also xdg-open, open)
 
 Registered names in /run/marsh/bin are links: calling one starts a child job.
 See /run/marsh/context.md.
@@ -56,6 +57,17 @@ pub fn main() -> i32 {
         let rest = arguments.get(3..).unwrap_or_default().to_vec();
         return match name {
             "marsh" => cli(&rest),
+            // A registered Kit of the same name keeps its link.
+            "xdg-open" | "open"
+                if !document().is_some_and(|document| {
+                    document
+                        .registered
+                        .iter()
+                        .any(|registered| registered == name)
+                }) =>
+            {
+                open(&rest)
+            }
             name => link(name, &rest),
         };
     }
@@ -71,6 +83,7 @@ pub fn main() -> i32 {
                 | "fanout"
                 | "collect"
                 | "cloud"
+                | "open"
         )
         && Path::new(JOB_JSON).exists()
     {
@@ -366,11 +379,23 @@ fn cli(arguments: &[OsString]) -> i32 {
         "jobs" => jobs(&marsh_daemon::Client::capability(Path::new(SOCKET)), rest),
         "fanout" => crate::fanout_cli::fanout(rest, crate::fanout_cli::Place::Job),
         "collect" => crate::fanout_cli::collect(rest),
+        "open" => open(rest),
         other => {
             eprintln!("marsh: `{other}` is not available inside a job; see `marsh --help`");
             2
         }
     }
+}
+
+/// `xdg-open URL`, `open URL`, `marsh open URL`: through this job's `cap.sock`.
+fn open(arguments: &[OsString]) -> i32 {
+    crate::open_link::run(arguments, crate::open_link::Place::Job, || {
+        if Path::new(SOCKET).exists() {
+            Ok(marsh_daemon::Client::capability(Path::new(SOCKET)))
+        } else {
+            Err("this job has no marsh capability".into())
+        }
+    })
 }
 
 /// `run [--spawn a,b | --no-spawn] NAME ARGS`; `None` for `--help`.

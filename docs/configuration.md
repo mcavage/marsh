@@ -41,6 +41,8 @@ For skills, dotfiles, MCP connections, and extra directories, see
 | `MARSH_CLOUD_TTL` | Default `--ttl` for `cloud` calls: 1m to 24h, such as `30m` or `2h`. Default `4h`. |
 | `MARSH_CLOUD_IMAGE` | Default `--image` for `cloud` calls: an image pinned by digest. Read by the daemon too, as its own default. |
 | `MARSH_AUTO_UPDATE` | `0` (or `off`) turns off [automatic Kit updates](kits.md#updates), and the automatic adding of `pix` and `hermes`, for the daemon it starts, as `marsh config auto-update off` does. Read when the daemon starts. |
+| `MARSH_OPEN_URLS` | `0` (or `off`) stops [`xdg-open` in a shell or job](agents.md#opening-links) from opening links on your Mac, as `marsh config open-urls off` does; links are printed instead. Read when the daemon starts. |
+| `MARSH_OPEN_COMMAND` | The program the daemon runs as `PROGRAM URL` to open a link. Default `/usr/bin/open`. Read when the daemon starts; tests point it at a recorder. |
 
 ### Job limits
 
@@ -110,7 +112,7 @@ When unset, control directories are in
 
 | Path | Contents |
 |---|---|
-| `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, and whether Kits update themselves, set by `marsh config auto-update on\|off`. Default path `~/.marsh/config.json`. |
+| `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, whether Kits update themselves, set by `marsh config auto-update on\|off`, and whether `xdg-open` opens links on your Mac, set by `marsh config open-urls on\|off`. Default path `~/.marsh/config.json`. |
 | `$MARSH_HOME/home/` | The guest home. Agent logins and settings (`.claude`, `.codex`) live here. Every job in the scope can read it. Default path `~/.marsh/home/`. |
 | `$MARSH_HOME/sbxenv.yaml` | Shared MCP servers and extra directories for every Kit and the shell. |
 | `$MARSH_HOME/sbxenvs/NAME.yaml` | Additional servers and directories for registered command `NAME`; `shell.yaml` also configures the shell VM. |

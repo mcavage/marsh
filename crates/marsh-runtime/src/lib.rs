@@ -2412,11 +2412,15 @@ fn job_environment(
         |path| String::from_utf8_lossy(path).into_owned(),
     );
     let path = format!("{}:{image_path}", process::LINK_DIR);
-    let added = [
+    let mut added = vec![
         ("PATH", path.clone()),
         ("MARSH_JOB", capability.job.clone()),
         ("MARSH_ENTRY", "1".to_owned()),
     ];
+    // Programs that open a link find `/run/marsh/bin/xdg-open` (`marsh open`).
+    if !start.contains_key("BROWSER") {
+        added.push(("BROWSER", "xdg-open".to_owned()));
+    }
     for (name, value) in &added {
         arguments.extend(["--env".into(), format!("{name}={value}").into()]);
         start.insert((*name).to_owned(), value.as_bytes().to_vec());

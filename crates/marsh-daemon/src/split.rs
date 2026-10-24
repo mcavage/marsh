@@ -398,7 +398,6 @@ pub fn forwardable(name: &str) -> bool {
                 | "SHLVL"
                 | "SHELL"
                 | "_"
-                | "TERM_PROGRAM"
                 | "TERM_SESSION_ID"
                 // A split branch is its own lineage scope: an enclosing
                 // fanout branch's id must not group the branch's jobs.
@@ -1359,6 +1358,7 @@ impl SplitEngine {
                 arguments,
                 session: session_spec(&session_id, &authority),
                 dev: false,
+                terminal_environment: std::collections::BTreeMap::new(),
             };
             let result = self
                 .client

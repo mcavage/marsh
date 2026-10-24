@@ -50,6 +50,7 @@ pub use daemon_startup::{
     finish_startup_diagnostics,
 };
 pub mod cloud_fs;
+pub mod open_url;
 pub mod process;
 mod shell_admission;
 mod shell_client;
@@ -704,6 +705,11 @@ pub enum PublicRequest {
     ProcessRun(ExecuteSpec),
     /// The forest (host), or the caller job's own subtree (`cap.sock`).
     ProcessShow,
+    /// `xdg-open URL` from a shell (relay) or a job (`cap.sock`); the session
+    /// comes from the transport (`open_url`).
+    OpenUrl {
+        url: String,
+    },
 }
 
 /// Host-approved identity and paths captured before entering the guest VM.
@@ -816,6 +822,12 @@ pub enum PublicReply {
     },
     Splits {
         document: serde_json::Value,
+    },
+    /// `OpenUrl`: whether the Mac opened it, or why not.
+    UrlOpen {
+        opened: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     Error {
         code: ErrorCode,
@@ -957,6 +969,10 @@ pub struct ShellSpec {
     /// `marsh --dev`: attach with a development grant (host checks policy).
     #[serde(default)]
     pub dev: bool,
+    /// The Mac terminal's identity variables for an interactive session
+    /// (`marsh_contracts::terminal::identity`); the backend filters again.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub terminal_environment: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1514,6 +1530,10 @@ pub struct JobReceipt {
     /// Child job ids (`jobs show`), filled when shown; never journaled.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<String>,
+    /// `scheme://host` of each link this job opened on the Mac (`xdg-open`),
+    /// at most `open_url::MAX_RECORDED`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub opened: Vec<String>,
 }
 
 /// Receipt lineage (`docs/design/processes.md` s9): `parent` is `session:<id>`,
@@ -1615,6 +1635,8 @@ struct State {
     /// Session of each running split shell branch -> (split, label): a Kit
     /// job it starts is that branch's child (`docs/design/processes.md` s9).
     branch_sessions: BTreeMap<String, (String, String)>,
+    /// Terminal sessions, their terminal job trees, and recent opens.
+    links: open_url::Links,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1636,6 +1658,8 @@ enum RequestAuthority {
     RelayDevelopment,
     RelayMcp,
     RelayAcp,
+    /// A shell's relay or a job's capability, never the host owner.
+    GuestOpen,
 }
 
 impl PublicRequest {
@@ -1687,6 +1711,7 @@ impl PublicRequest {
             | Self::SplitRemove { .. }
             | Self::ProcessRun(_)
             | Self::ProcessShow => RequestAuthority::Shared,
+            Self::OpenUrl { .. } => RequestAuthority::GuestOpen,
         }
     }
 }
@@ -1709,11 +1734,14 @@ impl RequestAuthority {
             (Self::RelayAcp, AuthenticationScope::Master) => {
                 Some("ACP publication requires an attached project-shell session token")
             }
+            (Self::GuestOpen, AuthenticationScope::Master) => {
+                Some("opening a link requires a shell session or a job")
+            }
             (_, AuthenticationScope::Capability(_))
             | (Self::Shared, AuthenticationScope::Master | AuthenticationScope::Relay(_))
             | (Self::HostLifecycle | Self::HostPublishedAcp, AuthenticationScope::Master)
             | (
-                Self::RelayDevelopment | Self::RelayMcp | Self::RelayAcp,
+                Self::RelayDevelopment | Self::RelayMcp | Self::RelayAcp | Self::GuestOpen,
                 AuthenticationScope::Relay(_),
             ) => None,
         }
@@ -1854,6 +1882,7 @@ impl DaemonStore {
             ordinary_requests: 0,
             lifecycle_active: false,
             branch_sessions: BTreeMap::new(),
+            links: open_url::Links::default(),
         }))))
     }
 
@@ -2545,6 +2574,7 @@ impl DaemonStore {
             workload_image: job.workload_image,
             lineage: Some(lineage.clone()),
             children: Vec::new(),
+            opened: Vec::new(),
             mounts: job.mounts,
             worker_id: None,
             vm_id: None,
@@ -3428,6 +3458,13 @@ impl Server {
         self
     }
 
+    /// How `xdg-open` in a shell or job opens links on the Mac (`open_url`).
+    #[must_use]
+    pub fn with_url_opener(self, opener: Option<open_url::Opener>) -> Self {
+        self.store.set_url_opener(opener);
+        self
+    }
+
     /// Advertise the same daemon-launch resource snapshot used by its backend.
     #[must_use]
     pub fn with_job_defaults(self, defaults: JobDefaults) -> Self {
@@ -4130,9 +4167,16 @@ impl ConnectionHandler {
                     }
                 };
                 owner.started();
+                let terminal = spec.session.terminal;
+                if terminal {
+                    self.store.set_terminal_shell(&session_id, true);
+                }
                 let outcome = self
                     .backend
                     .open_shell(spec, attachment.clone(), self.store.clone());
+                if terminal {
+                    self.store.set_terminal_shell(&session_id, false);
+                }
                 if matches!(outcome, Err(DaemonError::ShellCleanupUncertain(_))) {
                     self.store.mark_shell_cleanup_uncertain(&session_id);
                 }
@@ -4687,9 +4731,13 @@ impl ConnectionHandler {
                     };
                     write_frame(&mut stream, &reply)
                 }
+                PublicRequest::OpenUrl { url } => write_frame(
+                    &mut stream,
+                    &self.store.open_url(open_url::Caller::Job(&job), &url),
+                ),
                 _ => Self::reject_unauthorized(
                     &mut stream,
-                    "the job capability admits only ProcessRun, ProcessShow, jobs, SplitCreate, and SplitJoin",
+                    "the job capability admits only ProcessRun, ProcessShow, jobs, SplitCreate, SplitJoin, and OpenUrl",
                 ),
             };
         }
@@ -4743,6 +4791,12 @@ impl ConnectionHandler {
                 let _ = dev_broker::stream::reject(&stream, &error.to_string());
             }
             return result;
+        }
+        if let (PublicRequest::OpenUrl { url }, AuthenticationScope::Relay(session)) =
+            (&request.body, &authentication_scope)
+        {
+            let reply = self.store.open_url(open_url::Caller::Session(session), url);
+            return write_frame(&mut stream, &reply);
         }
         let caller = match &authentication_scope {
             AuthenticationScope::Master => split::Creator::Host,
@@ -4899,6 +4953,7 @@ fn authorize_request_session(
         | PublicRequest::SplitCancel { .. }
         | PublicRequest::SplitRemove { .. }
         | PublicRequest::ProcessShow
+        | PublicRequest::OpenUrl { .. }
         | PublicRequest::DevSbx { .. } => return Ok(()),
     };
     *session = store.authorize_session(token, session)?;
@@ -4961,6 +5016,10 @@ fn dispatch_request(
         PublicRequest::DevSbx { .. } => PublicReply::Error {
             code: ErrorCode::Internal,
             message: "development broker request was not handled by the host controller".into(),
+        },
+        PublicRequest::OpenUrl { .. } => PublicReply::Error {
+            code: ErrorCode::InvalidRequest,
+            message: "opening a link requires a shell session or a job".into(),
         },
         PublicRequest::Execute(_) => PublicReply::Error {
             code: ErrorCode::Internal,
@@ -5924,6 +5983,17 @@ impl Client {
 
     pub fn mcp_unpublish(&self, session: SessionSpec, name: String) -> Result<String, DaemonError> {
         self.mcp_publication_request(PublicRequest::McpUnpublish { session, name })
+    }
+
+    /// `OpenUrl`: `Ok(None)` when the Mac opened it, else why not.
+    pub fn open_url(&self, url: &str) -> Result<Option<String>, DaemonError> {
+        match self.request(PublicRequest::OpenUrl { url: url.into() })? {
+            PublicReply::UrlOpen { opened: true, .. } => Ok(None),
+            PublicReply::UrlOpen { reason, .. } => {
+                Ok(Some(reason.unwrap_or_else(|| "not opened".into())))
+            }
+            reply => Err(unexpected_reply(reply)),
+        }
     }
 
     pub fn registered_commands(&self) -> Result<Vec<String>, DaemonError> {

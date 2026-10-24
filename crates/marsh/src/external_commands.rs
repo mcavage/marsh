@@ -24,8 +24,15 @@ impl ExternalCommands {
             .prefix("marsh-commands-")
             .tempdir_in("/tmp")?;
         let executable = std::env::current_exe()?;
-        for name in names {
+        for name in &names {
             std::os::unix::fs::symlink(&executable, directory.path().join(name.as_str()))?;
+        }
+        // `xdg-open`/`open` reach `marsh open` (main dispatches a registered
+        // command of the same name to its Kit instead).
+        for helper in marsh_contracts::process::OPEN_LINKS {
+            if !names.iter().any(|name| name.as_str() == helper) {
+                std::os::unix::fs::symlink(&executable, directory.path().join(helper))?;
+            }
         }
         Ok(Self(directory))
     }
@@ -140,7 +147,16 @@ pub fn install_live_command(name: &str) -> io::Result<()> {
                 "active marsh command directory is missing",
             )
         })?;
-    std::os::unix::fs::symlink(std::env::current_exe()?, directory.join(name.as_str()))
+    match std::os::unix::fs::symlink(std::env::current_exe()?, directory.join(name.as_str())) {
+        // The same link already serves `marsh open`; main now finds the Kit.
+        Err(error)
+            if error.kind() == io::ErrorKind::AlreadyExists
+                && marsh_contracts::process::OPEN_LINKS.contains(&name.as_str()) =>
+        {
+            Ok(())
+        }
+        result => result,
+    }
 }
 
 #[cfg(test)]

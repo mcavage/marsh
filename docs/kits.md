@@ -239,8 +239,9 @@ nonroot user in the caller's directory, with these mounts and variables:
 
 - `HOME` set to the mounted guest home. The same path is in
   `MARSH_SELECTED_HOME`.
-- `/run/marsh/bin` first on `PATH`. It holds the registered commands and an
-  in-job `marsh`.
+- `/run/marsh/bin` first on `PATH`. It holds the registered commands, an
+  in-job `marsh`, and `xdg-open` and `open` ([opening links](agents.md#opening-links)).
+  `BROWSER=xdg-open` unless the job already has a `BROWSER`.
 - `/run/marsh/context.md`, a short text telling an agent what it may start,
   followed by the Kit's own instructions (`agent-context`).
 
