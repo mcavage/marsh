@@ -126,8 +126,8 @@ cancels and reaps every branch and its process group, with no collected
 output. Errors still appear on stderr. More than 16 branches fails with
 `fanout: at most 16 branches`.
 
-The daemon runs only 8 jobs at once, across all callers. If more than 8
+The daemon runs only 16 jobs at once, across all callers. If more than 16
 jobs would be live at once, extra calls are refused with
-`capacity: 8 jobs` ([Troubleshooting](troubleshooting.md#a-job-was-refused)).
+`capacity: 16 jobs` ([Troubleshooting](troubleshooting.md#a-job-was-refused)).
 
 Next: [Split and join](split.md), [Agents running agents](agents.md).

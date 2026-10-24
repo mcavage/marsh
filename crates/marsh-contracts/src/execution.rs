@@ -52,6 +52,8 @@ pub enum SetupStage {
 /// Maximum concurrent containers on one retained worker transport.
 ///
 /// Host admission and worker enforcement use the same bound. This is independent
-/// of the shell's fanout branch count. Eight also leaves descriptor headroom on
-/// hosts with a 256-descriptor soft limit for relay, worker and control pipes.
-pub const WORKER_CONTAINER_CAPACITY: u16 = 8;
+/// of the shell's fanout branch count. It equals the daemon's job pool
+/// (`process::POOL_LIMIT`), so a pool that is not full never meets a full VM.
+/// The daemon raises its descriptor soft limit above the macOS default of 256
+/// for the relay, worker and control pipes this many containers hold.
+pub const WORKER_CONTAINER_CAPACITY: u16 = 16;

@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 const MAX_BRANCHES: usize = 16;
 const MAX_DEPTH: u32 = 3;
-const POOL: usize = 8;
+const POOL: usize = 16;
 const SPOOL_LIMIT: usize = 64 << 20;
 const OUTPUT_LIMIT: usize = 16 << 20;
 const LEASE: Duration = Duration::from_mins(1);

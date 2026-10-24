@@ -30,8 +30,8 @@ const CAPTURE_ENV: &str = "MARSH_INTERNAL_STARTUP_STDERR";
 
 /// The defaults used by the real daemon, not a status-only copy.
 pub const DEFAULT_JOB_RESOURCES: JobResources = JobResources {
-    cpu_millis: 4_000,
-    memory_bytes: 8 * 1024 * 1024 * 1024,
+    cpu_millis: 2_000,
+    memory_bytes: 4 * 1024 * 1024 * 1024,
     pids: 4_096,
     writable_bytes: 10 * 1024 * 1024 * 1024,
     output_bytes: 256 * 1024 * 1024,

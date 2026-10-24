@@ -350,7 +350,7 @@ creator can still join it.
 Splits allow 16 branches, 64 MiB of input, and 16 MiB of combined branch
 output. They have a one-hour deadline and can nest three splits deep. Nested
 splits snapshot the calling branch's fork and accept only argv branches.
-Branches share an eight-slot session pool, while registered commands also
+Branches share a 16-slot session pool, while registered commands also
 count against the daemon's [job limits](agents.md#limits-and-messages).
 Only the creator may join a split, including one retained after lease expiry.
 

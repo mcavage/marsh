@@ -60,7 +60,7 @@ identities. Private command links come first on `PATH`, so child scripts,
 `make`, and agents take the same route. Brush function and builtin precedence
 and explicit paths keep their ordinary meaning.
 
-Each warm Kit VM has one retained worker transport that multiplexes up to eight
+Each warm Kit VM has one retained worker transport that multiplexes up to 16
 concurrent jobs. Losing it during active work never replays a job: the affected
 receipts become `cleanup_uncertain` and the VM is quarantined. A quarantined
 VM accepts no new jobs until `marsh workers reset KIT` retires it. A dead idle
@@ -74,8 +74,8 @@ on `PATH`; `bash`, `sh`, and the image's other tools stay the image's own
 name, `marsh run NAME`, or a split argv branch from inside a job becomes a
 child job with the parent's mounts, recorded under its parent
 (`lineage {parent, root, depth, spawn}`, `marsh jobs --tree`). One admission
-covers every job: 8 concurrent per daemon, depth 4, 4 live children per job,
-the same Kit at most twice in a row, 64 per tree, and the spawn set
+covers every job: 16 concurrent per daemon, depth 4, 8 live children per job,
+the same Kit at most twice in a row, 128 per tree, and the spawn set
 (`MARSH_SPAWN`, `marsh run --spawn/--no-spawn`) that only narrows. Refusals
 exit 125 (126 for a registered-name link outside its spawn set) and leave no
 receipt. A job's end cancels its children with
@@ -139,7 +139,7 @@ unlabeled `x; y` is one.
 Stdin is read once, up to 64 MiB, before any branch starts. Branches share one
 16 MiB stdout/stderr capture budget; crossing either limit cancels and reaps
 all branches (each branch's whole process group: every process it started)
-and renders nothing. The daemon's eight-job pool is independent of the
+and renders nothing. The daemon's 16-job pool is independent of the
 16-branch fanout limit, so branches that start Kit jobs can hit admission
 failures. `collect` emits
 declaration-ordered bytes, supports `--timing` and `--json`, and is nonzero if

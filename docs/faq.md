@@ -70,7 +70,7 @@ prompt, and `marsh join --timing` reports split overhead.
 
 ### How much CPU and memory does a job get?
 
-Each job defaults to four CPUs and 8 GiB of memory, with at most eight
+Each job defaults to two CPUs and 4 GiB of memory, with at most 16
 concurrent jobs per daemon. The VMs also need resources beyond those job
 limits. See [Job limits](configuration.md#job-limits).
 
