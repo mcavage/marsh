@@ -20,7 +20,7 @@ args:
     buildArg: CLAUDE_VERSION
 
 # ACP mode (`claude --acp`) ships the pinned official adapter (package.json).
-provides: ["claude@${{ kit.args.version }}", "claude-acp@0.94.0"]
+provides: ["claude@${{ kit.args.version }}", "claude-acp@0.95.0"]
 
 dockerfile: ./claude.dockerfile
 
