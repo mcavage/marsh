@@ -9,11 +9,13 @@ name: Renovate
 # merge for the owner. Renovate merges, not GitHub auto-merge, because "License
 # review" is a Renovate-only status (see renovate.json5).
 #
-# It runs hourly, and again when CI succeeds on a renovate/** branch, so a PR
-# merges soon after its last check goes green. CI on the commit Refresh pins
-# pushes is the last check to finish. Refresh pins itself is not a trigger: its
-# run on that commit is skipped and "completes" seconds after the push, while
-# CI is still running.
+# It runs hourly, and again when CI or Refresh pins succeeds on a renovate/**
+# branch, so a PR merges soon after its last check goes green. Which of the two
+# finishes last varies: CI, when Refresh pins pushes regenerated records and CI
+# restarts on that commit; Refresh pins (it posts "License review" at the end of
+# a longer run), when there is nothing to regenerate. A skipped Refresh pins run
+# (the one on the commit it pushed) does not succeed, so it does not trigger.
+# The hourly schedule is only a backstop: GitHub often delays or drops it.
 #
 # Secrets:
 #   RENOVATE_TOKEN          a token that can open PRs and update workflow files
@@ -34,7 +36,7 @@ on:
   schedule:
     - cron: '23 * * * *'
   workflow_run:
-    workflows: [CI]
+    workflows: [CI, Refresh pins]
     types: [completed]
     branches: ['renovate/**']
   workflow_dispatch:
@@ -51,7 +53,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   renovate:
-    # A failed CI run cannot lead to a merge.
+    # Only a run that succeeded can lead to a merge; this also drops the skipped
+    # Refresh pins run.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
