@@ -3,10 +3,15 @@
 // CLIs the Kits install (Claude Code, Codex, Pi). Self-hosted: see
 // .github/workflows/renovate.yml and .github/renovate-global.js.
 //
-// Only agent CLI and ACP adapter releases merge themselves, once CI passes
-// (see their packageRules); everything else is a reviewed change because the
-// builds take pinned inputs on purpose (docs/design/supply-chain.md). Renovate
-// only edits the pins: .github/workflows/renovate-refresh.yml then runs `make
+// Every update merges itself once all of its checks pass, including the
+// "License review" status below; nobody has to click merge. Renovate does the
+// merge (platformAutomerge off) rather than GitHub's auto-merge, because
+// "License review" is a Renovate-only status that can't be a required check
+// for every PR, and Renovate waits for every status on the PR. A red license
+// delta therefore still stops the merge for the owner. Merges land on the next
+// Renovate run after the checks pass (it runs every 6 hours). The builds still
+// take pinned inputs on purpose (docs/design/supply-chain.md). Renovate only
+// edits the pins: .github/workflows/renovate-refresh.yml then runs `make
 // refresh-pins` on the branch, commits the regenerated records (checksums,
 // notices, inventories) as refresh-pins@users.noreply.github.com, and posts the
 // license delta. CI builds the images on the completed head; the "License
@@ -17,6 +22,8 @@
   labels: ["dependencies"],
   dependencyDashboard: true,
   dependencyDashboardTitle: "Dependency updates",
+  automerge: true,
+  platformAutomerge: false,
   prConcurrentLimit: 6,
   prHourlyLimit: 3,
   // Avoid just-published releases (a compromised release is usually pulled
@@ -152,11 +159,8 @@
       // Fast follow: agent CLIs release several times a day, and a merged bump
       // reaches stable users' Kits through :latest within the day (release.yml).
       // The main risk is a release pulled soon after publication; 6 hours
-      // covers most of that window. GitHub merges the PR only when the
-      // required checks pass (platformAutomerge).
+      // covers most of that window.
       minimumReleaseAge: "6 hours",
-      automerge: true,
-      platformAutomerge: true,
       schedule: ["at any time"],
     },
     {
@@ -169,8 +173,6 @@
       ],
       // The same fast follow as the agent CLIs above.
       minimumReleaseAge: "6 hours",
-      automerge: true,
-      platformAutomerge: true,
       schedule: ["at any time"],
     },
     {
