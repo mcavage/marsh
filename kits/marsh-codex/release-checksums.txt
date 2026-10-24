@@ -1,5 +1,5 @@
-# Publisher metadata: https://api.github.com/repos/openai/codex/releases/tags/rust-v0.163.0
-a7261e65f4a96d8f4ca65a069c6cf2dc2c33defc341e48078acefda9461fffe4  0.163.0/codex-aarch64-unknown-linux-musl.tar.gz
-beb339e8ecd9ba057a6bb2dc81ad8ca474812edfbf0fc5056ca818797648dde4  0.163.0/codex-x86_64-unknown-linux-musl.tar.gz
-284356aefb197f00b76b912efdfdbae8ccf3ea1f89b976dde064b7ccb43214ef  0.163.0/codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz
-314263128ba6592e7e807c265deeaf928a692b72dcbfeb5e0b20c9423b703529  0.163.0/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz
+# Publisher metadata: https://api.github.com/repos/openai/codex/releases/tags/rust-v0.164.0
+29a507a2a3fd8f6cd94b96b762d281d299d15d7902dee6132d314b78cf9108eb  0.164.0/codex-aarch64-unknown-linux-musl.tar.gz
+90dd0b03b28afcb7fa733a4f73b413db2916a47347efd43fb669cc1c774ee8e4  0.164.0/codex-x86_64-unknown-linux-musl.tar.gz
+0e0bdde24d5b31b05519693635baa9c4f2dc4fe7eee31c67b92155f190dd32d2  0.164.0/codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz
+feade7026436baa4e82e898050c7ef82a8adbd98163dc504771275b5ef224f2f  0.164.0/codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz
