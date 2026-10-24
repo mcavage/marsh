@@ -43,6 +43,14 @@ class Tree:
         (self.bundle / notice["file"]).write_bytes(data)
         self.profiles["claude-kit"] = {version: {"arm64": {"required_notices": [notice], "files": []}}}
 
+    def sdk_notices(self, license_data, readme_data):
+        """The Claude SDK's legal files as the ACP adapter payload records them."""
+        def notice(member, data):
+            return {"sha256": hashlib.sha256(data).hexdigest(), "member": member}
+        self.adapters = {"claude-acp": {"architectures": {"arm64": {"packages": [{
+            "package": "@anthropic-ai/claude-agent-sdk",
+            "notices": [notice("package/LICENSE.md", license_data), notice("package/README.md", readme_data)]}]}}}}
+
     def write(self):
         def put(relative, value):
             path = self.root / relative
@@ -70,6 +78,7 @@ def base(tree):
     tree.npm("left-pad", "1.0.0", "MIT")
     tree.npm("@anthropic-ai/claude-agent-sdk", "0.3.1", "SEE LICENSE IN README.md")
     tree.claude("2.1.0", CLAUDE)
+    tree.sdk_notices(CLAUDE, b"# Claude Agent SDK\n\nSee the documentation.\n")
 
 
 class LicenseDelta(unittest.TestCase):
@@ -130,6 +139,24 @@ class LicenseDelta(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual([(r["name"], r["before"], r["after"]) for r in report["changed"]],
                          [("claude-code", "2.1.0", "2.2.0")])
+
+    def test_sdk_readme_prose_change_is_not_a_license_text_change(self):
+        self.after.npm("@anthropic-ai/claude-agent-sdk", "0.3.2", "SEE LICENSE IN README.md")
+        self.after.sdk_notices(CLAUDE, b"# Claude Agent SDK\n\nSee the new documentation.\n")
+        result, report = self.run_delta()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(report["reasons"], [])
+        self.assertEqual([(r["name"], r["license_text_changed"]) for r in report["changed"]],
+                         [("@anthropic-ai/claude-agent-sdk", False)])
+
+    def test_sdk_license_file_change_needs_owner(self):
+        self.after.npm("@anthropic-ai/claude-agent-sdk", "0.3.2", "SEE LICENSE IN README.md")
+        self.after.sdk_notices(CLAUDE.replace(b"Agreements", b"Terms"), b"# Claude Agent SDK\n\nSee the documentation.\n")
+        result, report = self.run_delta()
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(report["reasons"],
+                         ["proprietary license text changed: npm @anthropic-ai/claude-agent-sdk 0.3.1 -> 0.3.2"])
+        self.assertTrue(report["changed"][0]["license_text_changed"])
 
     def test_new_proprietary_component_needs_owner_even_in_a_present_family(self):
         self.after.npm("vendor-binary", "1.0.0", "UNLICENSED")

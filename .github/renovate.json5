@@ -9,7 +9,8 @@
 // "License review" is a Renovate-only status that can't be a required check
 // for every PR, and Renovate waits for every status on the PR. A red license
 // delta therefore still stops the merge for the owner. Merges land on the next
-// Renovate run after the checks pass (it runs every 6 hours). The builds still
+// Renovate run after the checks pass: it runs hourly and again whenever CI or
+// Refresh pins finishes on a renovate/** branch (renovate.yml). The builds still
 // take pinned inputs on purpose (docs/design/supply-chain.md). Renovate only
 // edits the pins: .github/workflows/renovate-refresh.yml then runs `make
 // refresh-pins` on the branch, commits the regenerated records (checksums,
@@ -26,6 +27,11 @@
   platformAutomerge: false,
   prConcurrentLimit: 6,
   prHourlyLimit: 3,
+  // Only rebase a branch that conflicts with main. The default ("auto") rebases
+  // every open automerge branch each time another one merges, which restarts CI
+  // and Refresh pins on all of them and pushes their merge to a later run. Main
+  // does not require branches to be up to date, and CI runs again on main.
+  rebaseWhen: "conflicted",
   // Avoid just-published releases (a compromised release is usually pulled
   // within days). Security updates ignore this.
   minimumReleaseAge: "3 days",
@@ -61,7 +67,10 @@
       description: "DHI-built apt packages pinned by version (Kit VM floor, shell template)",
       customType: "regex",
       managerFilePatterns: ["/^packaging/image-base/[^/]+\\.packages$/", "/^packaging/shell/Dockerfile$/"],
-      matchStrings: ["(?<depName>[a-z0-9][a-z0-9.+-]*)=(?<currentValue>[0-9][^\\s]*)"],
+      // The name must start the line or follow whitespace or a line
+      // continuation, so flags such as `--fuzz=0` and `--chmod=0644` are not
+      // taken for packages. (RE2: no lookbehind.)
+      matchStrings: ["(?:^|[\\s\\\\])(?<depName>[a-z0-9][a-z0-9.+-]*)=(?<currentValue>[0-9][^\\s]*)"],
       datasourceTemplate: "deb",
       versioningTemplate: "deb",
       registryUrlTemplate: "http://dhi.io/deb/debian/main?suite=trixie&components=main&binaryArch=arm64",

@@ -3,8 +3,14 @@ name: Renovate
 # Rust base image digests, the Kits' agent CLIs and ACP adapters, npm and Cargo
 # dependencies, and GitHub Actions. What it watches and how it groups updates is
 # .github/renovate.json5; credentials and the one command it may run are
-# .github/renovate-global.js. It opens PRs and never merges one: CI (including the
-# `images` job, which builds every image) and a person decide.
+# .github/renovate-global.js. It opens PRs and merges each one itself once every
+# check on it passes: CI (including the `images` job, which builds every image),
+# Refresh pins, and the "License review" status. A red license review stops the
+# merge for the owner. Renovate merges, not GitHub auto-merge, because "License
+# review" is a Renovate-only status (see renovate.json5).
+#
+# It runs hourly, and again when CI or Refresh pins finishes on a renovate/**
+# branch, so a PR merges soon after its last check goes green.
 #
 # Secrets:
 #   RENOVATE_TOKEN          a token that can open PRs and update workflow files
@@ -23,7 +29,11 @@ name: Renovate
 # the PRs it would open and opens none.
 on:
   schedule:
-    - cron: '23 */6 * * *'
+    - cron: '23 * * * *'
+  workflow_run:
+    workflows: [CI, Refresh pins]
+    types: [completed]
+    branches: ['renovate/**']
   workflow_dispatch:
     inputs:
       dry_run:
