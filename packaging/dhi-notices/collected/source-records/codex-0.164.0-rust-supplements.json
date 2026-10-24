@@ -1,6 +1,6 @@
 {
   "schema": "marsh.exact-crate-upstream-notices/v1",
-  "input_sha256": "3ed191de13ffe2728b3e9186b7ed58edaddd0c7a58bc10d1d861dd0e81d8facb",
+  "input_sha256": "273c29f4193b4e72bbe524d3746ddd6865afea68d1c2fa022732983d018be1ce",
   "supplements": [
     {
       "crate_url": "https://static.crates.io/crates/Inflector/Inflector-0.11.4.crate",
@@ -903,59 +903,265 @@
       "error": "exact upstream notice not acquired"
     },
     {
-      "crate_url": "https://static.crates.io/crates/deno_core_icudata/deno_core_icudata-0.77.0.crate",
+      "crate_url": "https://static.crates.io/crates/defmt-parser/defmt-parser-1.0.0.crate",
+      "packages": [
+        {
+          "name": "defmt-parser",
+          "version": "1.0.0",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e"
+        }
+      ],
+      "notices": [
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/LICENSE-MIT",
+          "sha256": "2710a622a896bba67356913d4d0492cab5465f61b2ecce6d880aeb483834fb50",
+          "size": 1053,
+          "integrity": null,
+          "signature_verified": false,
+          "file": "texts/2710a622a896bba67356913d4d0492cab5465f61b2ecce6d880aeb483834fb50.txt"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/LICENSE-APACHE",
+          "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+          "size": 10850,
+          "integrity": null,
+          "signature_verified": false,
+          "file": "texts/8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90.txt"
+        }
+      ],
+      "vcs": {
+        "git": {
+          "sha1": "4a8cdb44891ed57b8ff5a023b6bec7137c48708f"
+        },
+        "path_in_vcs": "parser"
+      },
+      "repository": "https://github.com/knurling-rs/defmt",
+      "crate_sha256": "10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e",
+      "attempts": [
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/parser/LICENSE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/parser/LICENSE-MIT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/parser/LICENSE-APACHE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/parser/LICENSE.md",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/parser/LICENSE.txt",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/parser/COPYING",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/parser/NOTICE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/parser/COPYRIGHT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/parser/UNLICENSE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/LICENSE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/LICENSE.md",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/LICENSE.txt",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/COPYING",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/NOTICE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/COPYRIGHT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/4a8cdb44891ed57b8ff5a023b6bec7137c48708f/UNLICENSE",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/defmt/defmt-0.3.100.crate",
+      "packages": [
+        {
+          "name": "defmt",
+          "version": "0.3.100",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "f0963443817029b2024136fc4dd07a5107eb8f977eaf18fcd1fdeb11306b64ad"
+        }
+      ],
+      "notices": [
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/LICENSE-MIT",
+          "sha256": "2710a622a896bba67356913d4d0492cab5465f61b2ecce6d880aeb483834fb50",
+          "size": 1053,
+          "integrity": null,
+          "signature_verified": false,
+          "file": "texts/2710a622a896bba67356913d4d0492cab5465f61b2ecce6d880aeb483834fb50.txt"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/LICENSE-APACHE",
+          "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+          "size": 10850,
+          "integrity": null,
+          "signature_verified": false,
+          "file": "texts/8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90.txt"
+        }
+      ],
+      "vcs": {
+        "git": {
+          "sha1": "f6decae6e09d1216aff052aa0733a6b5e632a100"
+        },
+        "path_in_vcs": "defmt-03"
+      },
+      "repository": "https://github.com/knurling-rs/defmt",
+      "crate_sha256": "f0963443817029b2024136fc4dd07a5107eb8f977eaf18fcd1fdeb11306b64ad",
+      "attempts": [
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/defmt-03/LICENSE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/defmt-03/LICENSE-MIT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/defmt-03/LICENSE-APACHE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/defmt-03/LICENSE.md",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/defmt-03/LICENSE.txt",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/defmt-03/COPYING",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/defmt-03/NOTICE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/defmt-03/COPYRIGHT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/defmt-03/UNLICENSE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/LICENSE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/LICENSE.md",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/LICENSE.txt",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/COPYING",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/NOTICE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/COPYRIGHT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/knurling-rs/defmt/f6decae6e09d1216aff052aa0733a6b5e632a100/UNLICENSE",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/deno_core_icudata/deno_core_icudata-0.78.0.crate",
       "packages": [
         {
           "name": "deno_core_icudata",
-          "version": "0.77.0",
+          "version": "0.78.0",
           "source": "registry+https://github.com/rust-lang/crates.io-index",
-          "checksum": "a9efff8990a82c1ae664292507e1a5c6749ddd2312898cdf9cd7cb1fd4bc64c6"
+          "checksum": "b963d2d79672b4c379e4511acccd27bb35b4c1b32a93f596d52ff14a064293bc"
         }
       ],
       "notices": [],
       "vcs": {
         "git": {
-          "sha1": "83537ba16a4bf1645fc8322e81f7aaf0149a8922"
+          "sha1": "9adfc1019ed4fce2e873c8bc7aebec09928010c8"
         },
         "path_in_vcs": ""
       },
       "repository": "https://github.com/denoland/deno_core_icudata",
-      "crate_sha256": "a9efff8990a82c1ae664292507e1a5c6749ddd2312898cdf9cd7cb1fd4bc64c6",
+      "crate_sha256": "b963d2d79672b4c379e4511acccd27bb35b4c1b32a93f596d52ff14a064293bc",
       "attempts": [
         {
-          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/83537ba16a4bf1645fc8322e81f7aaf0149a8922/LICENSE",
+          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/9adfc1019ed4fce2e873c8bc7aebec09928010c8/LICENSE",
           "error": "HTTP Error 404: Not Found"
         },
         {
-          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/83537ba16a4bf1645fc8322e81f7aaf0149a8922/LICENSE-MIT",
+          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/9adfc1019ed4fce2e873c8bc7aebec09928010c8/LICENSE-MIT",
           "error": "HTTP Error 404: Not Found"
         },
         {
-          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/83537ba16a4bf1645fc8322e81f7aaf0149a8922/LICENSE-APACHE",
+          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/9adfc1019ed4fce2e873c8bc7aebec09928010c8/LICENSE-APACHE",
           "error": "HTTP Error 404: Not Found"
         },
         {
-          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/83537ba16a4bf1645fc8322e81f7aaf0149a8922/LICENSE.md",
+          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/9adfc1019ed4fce2e873c8bc7aebec09928010c8/LICENSE.md",
           "error": "HTTP Error 404: Not Found"
         },
         {
-          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/83537ba16a4bf1645fc8322e81f7aaf0149a8922/LICENSE.txt",
+          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/9adfc1019ed4fce2e873c8bc7aebec09928010c8/LICENSE.txt",
           "error": "HTTP Error 404: Not Found"
         },
         {
-          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/83537ba16a4bf1645fc8322e81f7aaf0149a8922/COPYING",
+          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/9adfc1019ed4fce2e873c8bc7aebec09928010c8/COPYING",
           "error": "HTTP Error 404: Not Found"
         },
         {
-          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/83537ba16a4bf1645fc8322e81f7aaf0149a8922/NOTICE",
+          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/9adfc1019ed4fce2e873c8bc7aebec09928010c8/NOTICE",
           "error": "HTTP Error 404: Not Found"
         },
         {
-          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/83537ba16a4bf1645fc8322e81f7aaf0149a8922/COPYRIGHT",
+          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/9adfc1019ed4fce2e873c8bc7aebec09928010c8/COPYRIGHT",
           "error": "HTTP Error 404: Not Found"
         },
         {
-          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/83537ba16a4bf1645fc8322e81f7aaf0149a8922/UNLICENSE",
+          "url": "https://raw.githubusercontent.com/denoland/deno_core_icudata/9adfc1019ed4fce2e873c8bc7aebec09928010c8/UNLICENSE",
           "error": "HTTP Error 404: Not Found"
         }
       ],
@@ -4174,6 +4380,105 @@
         },
         {
           "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/framework-crates/objc2-quartz-core/UNLICENSE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE-MIT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE-APACHE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.txt",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/COPYING",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/NOTICE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/COPYRIGHT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/UNLICENSE",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ]
+    },
+    {
+      "crate_url": "https://static.crates.io/crates/objc2-security/objc2-security-0.3.2.crate",
+      "packages": [
+        {
+          "name": "objc2-security",
+          "version": "0.3.2",
+          "source": "registry+https://github.com/rust-lang/crates.io-index",
+          "checksum": "709fe137109bd1e8b5a99390f77a7d8b2961dafc1a1c5db8f2e60329ad6d895a"
+        }
+      ],
+      "notices": [
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/LICENSE.md",
+          "sha256": "7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54",
+          "size": 1339,
+          "integrity": null,
+          "signature_verified": false,
+          "file": "texts/7f976f7e9cb2d87df7230606feb932c3f21ac0e664045a775b600046ff850c54.txt"
+        }
+      ],
+      "vcs": {
+        "git": {
+          "sha1": "7b1abfd750a2cacaea71d6a56ecfb83cb7de560b"
+        },
+        "path_in_vcs": "framework-crates/objc2-security"
+      },
+      "repository": "https://github.com/madsmtm/objc2",
+      "crate_sha256": "709fe137109bd1e8b5a99390f77a7d8b2961dafc1a1c5db8f2e60329ad6d895a",
+      "attempts": [
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/framework-crates/objc2-security/LICENSE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/framework-crates/objc2-security/LICENSE-MIT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/framework-crates/objc2-security/LICENSE-APACHE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/framework-crates/objc2-security/LICENSE.md",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/framework-crates/objc2-security/LICENSE.txt",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/framework-crates/objc2-security/COPYING",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/framework-crates/objc2-security/NOTICE",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/framework-crates/objc2-security/COPYRIGHT",
+          "error": "HTTP Error 404: Not Found"
+        },
+        {
+          "url": "https://raw.githubusercontent.com/madsmtm/objc2/7b1abfd750a2cacaea71d6a56ecfb83cb7de560b/framework-crates/objc2-security/UNLICENSE",
           "error": "HTTP Error 404: Not Found"
         },
         {
@@ -11450,7 +11755,7 @@
     "https://static.crates.io/crates/cookie-factory/cookie-factory-0.3.3.crate",
     "https://static.crates.io/crates/crc32c/crc32c-0.6.8.crate",
     "https://static.crates.io/crates/debugserver-types/debugserver-types-0.5.0.crate",
-    "https://static.crates.io/crates/deno_core_icudata/deno_core_icudata-0.77.0.crate",
+    "https://static.crates.io/crates/deno_core_icudata/deno_core_icudata-0.78.0.crate",
     "https://static.crates.io/crates/difflib/difflib-0.4.0.crate",
     "https://static.crates.io/crates/display_container/display_container-0.9.0.crate",
     "https://static.crates.io/crates/eventsource-stream/eventsource-stream-0.2.3.crate",
