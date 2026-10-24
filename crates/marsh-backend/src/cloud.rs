@@ -33,6 +33,8 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod detach;
+
 /// The pinned cloud shell image (`docs/plan/cloud-feasibility.md`).
 pub const DEFAULT_CLOUD_IMAGE: &str = "docker.io/docker/sandbox-templates:shell-docker@sha256:b2c007bbb5dcdb60a29f3019c7160ebe0c50c968e08854fbba6093834f8f6a1b";
 /// The uploaded helper (sandbox user's private directory); `prepare` installs
@@ -51,6 +53,7 @@ const LOCAL_ONLY: [&str; 6] = ["SHLVL", "OLDPWD", "PWD", "TMPDIR", "SHELL", "_"]
 pub(crate) struct CloudPlacement {
     adapter: Mutex<Option<Arc<CloudSbx>>>,
     imports: Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>,
+    collector: detach::Collector,
 }
 
 /// The caller's `--image`, else the daemon's `MARSH_CLOUD_IMAGE`, else the
@@ -552,14 +555,18 @@ impl CloudPlacement {
         )
     }
 
-    /// `marsh workers reset cloud`: delete every owned cloud sandbox and
-    /// observe its absence.
-    /// Delete every owned cloud sandbox; the names deleted.
+    /// `marsh workers reset cloud`, `stop`, `reset`: delete every owned
+    /// cloud sandbox of an attached run (or an unresolved create) and
+    /// observe its absence; the names deleted. A detached run's sandbox is
+    /// kept (`--detached` discards those first, through collection).
     pub(crate) fn reset(&self, backend: &StockDaemonBackend) -> Result<Vec<String>, DaemonError> {
         let adapter = self.adapter(backend)?;
         let mut failures = Vec::new();
         let mut removed = Vec::new();
         for record in adapter.reconcile().map_err(backend_error)? {
+            if record.detached {
+                continue;
+            }
             match record.id {
                 Some(id) => match adapter.retire(&id) {
                     Ok(()) => removed.push(record.name),
@@ -601,6 +608,10 @@ fn caller_words(arguments: &[Vec<u8>]) -> Vec<Vec<u8>> {
                 kept.extend([flag.clone(), value.clone()]);
                 rest = tail;
             }
+            [flag, tail @ ..] if flag == b"--detach" => {
+                kept.push(flag.clone());
+                rest = tail;
+            }
             _ => break,
         }
     }
@@ -618,6 +629,9 @@ struct Options {
     stdin_terminal: bool,
     /// Internal (the client adds it): the block is exactly this one call.
     direct: Option<Vec<Vec<u8>>>,
+    /// `-d`/`--detach`: a detached run (`docs/design/cloud-detach.md`).
+    detach: bool,
+    ttl_given: bool,
 }
 
 /// A duration such as `90s`, `30m`, `2h`, or bare seconds.
@@ -645,6 +659,8 @@ fn parse(arguments: &[Vec<u8>]) -> Result<(Options, CloudMode, Vec<Vec<u8>>), Da
         image: None,
         stdin_terminal: false,
         direct: None,
+        detach: false,
+        ttl_given: false,
     };
     let mut rest = arguments;
     loop {
@@ -665,6 +681,11 @@ fn parse(arguments: &[Vec<u8>]) -> Result<(Options, CloudMode, Vec<Vec<u8>>), Da
                     .ok_or_else(|| {
                         refuse("--ttl must be between 1m and 24h (for example 30m or 2h)".into())
                     })?;
+                options.ttl_given = true;
+                rest = tail;
+            }
+            [flag, tail @ ..] if flag == b"--detach" => {
+                options.detach = true;
                 rest = tail;
             }
             [flag, count, tail @ ..] if flag == b"--direct" => {
@@ -699,7 +720,7 @@ fn parse(arguments: &[Vec<u8>]) -> Result<(Options, CloudMode, Vec<Vec<u8>>), Da
             }
             _ => {
                 return Err(refuse(
-                    "expected [--cpus N] [--ttl DURATION] [--image REF] -c SCRIPT, -- PROGRAM, or -i"
+                    "expected [--cpus N] [--ttl DURATION] [--image REF] [--detach] -c SCRIPT, -- PROGRAM, or -i"
                         .into(),
                 ));
             }
@@ -791,6 +812,27 @@ impl StockDaemonBackend {
         store: DaemonStore,
     ) -> Result<(), DaemonError> {
         let (mut options, mode, argv) = parse(&request.arguments)?;
+        if options.detach {
+            if mode == CloudMode::Shell && argv.is_empty() {
+                return Err(DaemonError::Refused(
+                    "cloud: a detached run has no terminal; give it a command (-c SCRIPT or -- PROGRAM)"
+                        .into(),
+                ));
+            }
+            if request
+                .process
+                .as_ref()
+                .is_some_and(|link| link.parent_job.is_some())
+            {
+                return Err(DaemonError::Refused(
+                    "cloud: a job cannot start a detached cloud run; start it from your shell or a host terminal"
+                        .into(),
+                ));
+            }
+            if !options.ttl_given {
+                options.ttl = detach::DEFAULT_TTL;
+            }
+        }
         let parent_job = request
             .process
             .as_ref()
@@ -848,6 +890,17 @@ impl StockDaemonBackend {
             }),
             _ => None,
         };
+        // A detached block has no laptop relay: refuse an agent call in it
+        // now (its command links also refuse, if one is reached otherwise).
+        if options.detach
+            && direct.is_none()
+            && let Some(name) = detach::nested_call(mode, &argv, &self.cloud_bindings())
+        {
+            return Err(DaemonError::Refused(format!(
+                "cloud: this detached block calls {name}, a registered Kit, and a detached run cannot call back to the laptop. \
+                 Run that call on its own as `cloud -d {{ {name} ...; }}`, or run the block without -d"
+            )));
+        }
         // The Kit this node runs in, if not the cloud shell: `(binding, name)`.
         let kit_form = origin
             .as_ref()
@@ -1006,7 +1059,7 @@ impl StockDaemonBackend {
             .filter(|(name, _)| lineage.spawn.contains(name) && direct.is_none())
             .collect::<BTreeMap<_, _>>();
         let mut cloud_request = CloudRequest {
-            terminal: request.session.terminal.then(|| {
+            terminal: (request.session.terminal && !options.detach).then(|| {
                 request
                     .session
                     .terminal_size
@@ -1018,7 +1071,8 @@ impl StockDaemonBackend {
             argv,
             env: environment,
             kits: bindings.keys().cloned().collect(),
-            stdin_terminal: options.stdin_terminal,
+            stdin_terminal: options.stdin_terminal && !options.detach,
+            detached: options.detach,
         };
 
         // Provision.
@@ -1037,6 +1091,19 @@ impl StockDaemonBackend {
             Ok(adapter) => adapter,
             Err(error) => return not_started(settle, error.to_string()),
         };
+        if options.detach
+            && adapter
+                .detached_count()
+                .is_ok_and(|count| count >= marsh_sbx::cloud::MAX_DETACHED)
+        {
+            return not_started(
+                settle,
+                format!(
+                    "{} detached cloud runs are outstanding; wait for one to be collected, or drop one with `marsh cloud discard JOB`",
+                    marsh_sbx::cloud::MAX_DETACHED
+                ),
+            );
+        }
         let spec = match &kit_form {
             Some((binding, _)) => match adapter
                 .kit_manifest(&binding.kit)
@@ -1071,7 +1138,12 @@ impl StockDaemonBackend {
                 cpus: options.cpus,
                 memory_mib: options.cpus * 2048,
                 ttl: options.ttl,
+                stop_on_timeout: options.detach,
             },
+        };
+        let spec = CloudImageSpec {
+            stop_on_timeout: options.detach,
+            ..spec
         };
         let record = match adapter.create(&spec) {
             Ok(record) => record,
@@ -1213,6 +1285,29 @@ impl StockDaemonBackend {
 
         if relay.cancelled() {
             return cancelled_setup(settle);
+        }
+        if options.detach {
+            let display = match &direct {
+                Some((_, _, words)) => words.clone(),
+                None => caller_words(&request.arguments),
+            }
+            .iter()
+            .map(|word| String::from_utf8_lossy(word).into_owned())
+            .collect();
+            return self.start_detached(
+                settle,
+                &store,
+                &adapter,
+                &id,
+                &record.name,
+                ctl,
+                display,
+                cwd,
+                root,
+                identity,
+                confinement.is_some(),
+                options.ttl,
+            );
         }
         // Execute with live streams.
         if let Err(error) = store.mark_cloud_running(&job_id, id.as_str()) {
@@ -2038,6 +2133,7 @@ impl StockDaemonBackend {
             cpus,
             memory_mib: cpus * 2048,
             ttl,
+            stop_on_timeout: false,
         })
     }
 }
@@ -2230,6 +2326,7 @@ impl AgentCalls {
             cpus: self.shape.0,
             memory_mib: self.shape.0 * 2048,
             ttl: self.shape.1,
+            stop_on_timeout: false,
         };
         reply.stderr(&format!("[starting a Docker Cloud sandbox: Kit {name}…]\n"));
         let record = match self.adapter.create(&spec) {
@@ -2313,6 +2410,7 @@ impl AgentCalls {
             terminal: None,
             kits: Vec::new(),
             stdin_terminal: false,
+            detached: false,
         };
         if let Err(message) = self.copy_view(&id, &child_request) {
             return setup_failed(format!("copying the block's files: {message}"));

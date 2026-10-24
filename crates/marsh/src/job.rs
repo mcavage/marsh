@@ -678,7 +678,12 @@ fn row_line(row: &Row<'_>, tree: bool, now: i64, id_width: usize) -> String {
                 labelled(text(job, "label"), &printable(text(job, "command"))),
             ),
         },
-        _ => (text(job, "state"), command_line(job)),
+        _ => match job.get("detached").and_then(serde_json::Value::as_str) {
+            // A detached cloud run: its own state (its ID column is the
+            // number `marsh cloud` commands and notices use).
+            Some(detached) => (detached, format!("{}  (detached)", command_line(job))),
+            None => (text(job, "state"), command_line(job)),
+        },
     };
     let row_node = row.merged.unwrap_or(job);
     let (exit, elapsed, started) = match row.merged {
@@ -732,6 +737,14 @@ fn row_id(row: &Row<'_>) -> String {
                 _ => "-".to_owned(),
             },
         },
+        // A detached cloud run: the number `marsh cloud attach N` takes.
+        _ if job
+            .get("detached")
+            .is_some_and(serde_json::Value::is_string) =>
+        {
+            number(job, "cursor")
+                .map_or_else(|| short(text(job, "job_id")).to_owned(), |n| n.to_string())
+        }
         _ => short(text(job, "job_id")).to_owned(),
     }
 }
@@ -919,7 +932,7 @@ fn number(node: &serde_json::Value, name: &str) -> Option<i64> {
 fn active(node: &serde_json::Value) -> bool {
     matches!(
         text(node, "state"),
-        "queued" | "running" | "run" | "pending"
+        "queued" | "running" | "run" | "pending" | "detached"
     ) || node
         .get("children")
         .and_then(serde_json::Value::as_array)
@@ -1014,6 +1027,36 @@ mod tests {
             "exit_code": finished.map(|_| 0), "created_unix_ms": NOW - ago_ms,
             "finished_unix_ms": finished, "children": children,
         })
+    }
+
+    #[test]
+    fn a_detached_cloud_run_shows_its_job_number_and_own_state() {
+        let mut cloud = node(
+            "ffffffff",
+            "s1",
+            "cloud",
+            &["--detach", "-c", "make"],
+            "detached",
+            5_000,
+            &[],
+        );
+        cloud["cursor"] = 42.into();
+        cloud["detached"] = "paused".into();
+        let document = serde_json::json!({"jobs": [
+            cloud,
+            node("aaaaaaaa", "s1", "claude", &[], "finished", 60_000, &[]),
+        ]});
+        let listing = render_jobs(&document, JobScope::Session("s1"), false, NOW);
+        let lines = listing.lines().collect::<Vec<_>>();
+        assert!(
+            lines[1].starts_with("42        5s ago    paused"),
+            "{listing}"
+        );
+        assert!(
+            lines[1].ends_with("cloud --detach -c make  (detached)"),
+            "{listing}"
+        );
+        assert!(lines[2].starts_with("aaaaaaaa"), "{listing}");
     }
 
     #[test]

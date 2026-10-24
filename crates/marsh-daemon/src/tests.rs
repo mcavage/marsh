@@ -1740,6 +1740,64 @@ fn receipts_survive_restart_and_active_work_becomes_unknown() {
 }
 
 #[test]
+fn a_detached_cloud_job_survives_restart_outside_the_pool_and_settles_once() {
+    let home = home();
+    let job = {
+        let store = reopen(home.path()).unwrap();
+        let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
+        let link = process::ProcessLink::default();
+        let (job, _, _) = store
+            .begin_cloud_job(
+                NewJob {
+                    session_id: session,
+                    command: "cloud".into(),
+                    kit_ref: "cloud-shell".into(),
+                    workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+                    mounts: Vec::new(),
+                },
+                &link,
+                &[],
+            )
+            .unwrap();
+        store.mark_cloud_running(&job, "sbx_abc123").unwrap();
+        assert_eq!(store.process_counts().running, 1);
+        store
+            .detach_cloud_job(&job, TimingReport::default())
+            .unwrap();
+        // Out of the local pool once detached.
+        assert_eq!(store.process_counts().running, 0);
+        job
+    };
+    // A restart does not make it uncertain: collection settles it later.
+    let reopened = reopen(home.path()).unwrap();
+    let receipt = reopened.job(&job).unwrap();
+    assert_eq!(receipt.state, JobState::Detached);
+    assert_eq!(receipt.detached.as_deref(), Some("running"));
+    reopened
+        .finish_detached_job(
+            &job,
+            ExecutionOutcome::Exited { code: 0 },
+            ExitStatus {
+                code: Some(0),
+                cause: "kept-as-patch".into(),
+            },
+            true,
+            CleanupState::Verified,
+            TimingReport::default(),
+            "kept-as-patch",
+            None,
+        )
+        .unwrap();
+    // Applying the kept patch later relabels it; the journal still replays.
+    reopened.relabel_settled_detached(&job, "collected");
+    drop(reopened);
+    let settled = reopen(home.path()).unwrap().job(&job).unwrap();
+    assert_eq!(settled.state, JobState::Finished);
+    assert_eq!(settled.detached.as_deref(), Some("collected"));
+    assert_eq!(settled.exit.unwrap().code, Some(0));
+}
+
+#[test]
 fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
     let home = home();
     let store = reopen(home.path()).unwrap();

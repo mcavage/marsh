@@ -1005,6 +1005,18 @@ impl DaemonBackend for StockDaemonBackend {
         self.auto_update_pass(store, unix_millis(SystemTime::now()));
     }
 
+    fn cloud_detached(
+        &self,
+        request: marsh_daemon::cloud_detached::CloudDetachedRequest,
+        store: DaemonStore,
+    ) -> Result<marsh_daemon::cloud_detached::CloudDetachedReply, DaemonError> {
+        self.cloud_detached_request(request, &store)
+    }
+
+    fn collect_detached(&self, store: &DaemonStore) {
+        self.collect_detached_pass(store);
+    }
+
     fn kit_update_status(&self) -> Option<KitUpdateStatus> {
         let auto = self.auto_update.as_ref()?;
         let record = kit_auto_update::read(&self.config.control_home);
