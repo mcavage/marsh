@@ -39,6 +39,10 @@ from license_families import declared_families, text_families  # noqa: E402
 LOCKS = ("kits/marsh-claude/package-lock.json", "kits/marsh-codex/package-lock.json",
          "kits/marsh-pi/package-lock.json", "packaging/shell/pi/package-lock.json")
 VERSION = re.compile(r'^args:\n  version:\n    default: "([^"]+)"', re.M)
+# collect-adapter-payloads.py keeps a README next to the legal files so the
+# record shows what the package says about itself. Its prose changes with
+# releases, so it is not a license text and must not trip the comparison.
+DOCUMENTATION = re.compile(r"^readme(\.|$)", re.I)
 
 
 class Tree:
@@ -93,7 +97,9 @@ def components(tree: Tree) -> dict:
         for selected in adapter["architectures"].values():
             for package in selected["packages"]:
                 name = package["package"]
-                adapter_texts.setdefault(name, set()).update(n["sha256"] for n in package["notices"])
+                adapter_texts.setdefault(name, set()).update(
+                    n["sha256"] for n in package["notices"]
+                    if not DOCUMENTATION.match(pathlib.PurePosixPath(n.get("member", "")).name))
     for lock_path in LOCKS:
         lock = tree.json(lock_path, {"packages": {}})
         for path, row in lock["packages"].items():
@@ -154,7 +160,7 @@ def compare(before: dict, after: dict, patterns) -> dict:
             reasons.append(f"proprietary license text changed: {key[0]} {key[1]} "
                            f"{before[key]['version']} -> {after[key]['version']}")
     text_changes = sorted(key for key in changed if after[key]["texts"] != before[key]["texts"]
-                          and before[key]["texts"] and not is_listed(key, patterns))
+                          and before[key]["texts"])
     return {"verdict": "NEEDS-OWNER" if reasons else "OK", "reasons": sorted(set(reasons)),
             "added": [dict(kind=k[0], name=k[1], **pick(after[k])) for k in added],
             "removed": [dict(kind=k[0], name=k[1], **pick(before[k])) for k in removed],
