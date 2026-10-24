@@ -166,7 +166,8 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   terminal, no input; **--ttl** defaults to 2h and pauses the run rather than
   ending it). marsh collects it by itself and writes its changes back only if
   none of the files it changed were edited here meanwhile; otherwise they are
-  kept as a patch. A detached block that calls a registered Kit is refused.
+  kept as a patch. A detached block that calls a registered Kit is refused
+  unless **config cloud-delegate** is on.
 
 **cloud attach**|**collect**|**diff**|**apply**|**discard**|**stop** *JOB*
 : Control a detached cloud run: **attach** shows its output from the start and
@@ -190,6 +191,15 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   **http**/**https** link in your Mac's browser. Off, links are only printed.
   The default is **on**. See
   https://runmar.sh/docs/agents.html#opening-links.
+
+**config cloud-delegate** [**on**|**off**]
+: Set, or with no value print, whether a detached cloud run may start agent
+  sandboxes itself, so a detached block can call registered Kits. The default
+  is **off**. On, marsh reads a Docker access token with Allow Cloud Sandboxes
+  access from the login Keychain (**security add-generic-password -s
+  marsh-cloud-delegate -a** *DOCKER_ID* **-w**) at each such run's start and
+  uploads it into a root-only file in its sandbox; the token can use every
+  cloud sandbox on the account. See https://runmar.sh/docs/cloud.html.
 
 **kit install** *NAME* [*REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*]
 : Register a published Kit under *NAME* in this scope. A tag is resolved to its
@@ -403,6 +413,11 @@ See https://runmar.sh/docs/acp.html.
 : **0** (or **off**) when the daemon starts stops **xdg-open** in a shell or
   job from opening links on the Mac, as **marsh config open-urls off** does.
 
+**MARSH_CLOUD_CHILDREN**
+: The most agent sandboxes one detached cloud run may start with
+  **config cloud-delegate** on (1 to 64, default 8), read when the daemon
+  starts.
+
 **MARSH_OPEN_COMMAND**
 : The program the daemon runs as *PROGRAM* *URL* to open a link, read when
   the daemon starts. Default */usr/bin/open*.
@@ -414,7 +429,8 @@ See https://runmar.sh/docs/acp.html.
 
 *$MARSH_HOME/config.json* (default *~/.marsh/config.json*)
 : The default shell set by **marsh config shell**, and the
-  **marsh config auto-update** and **marsh config open-urls** settings.
+  **marsh config auto-update**, **marsh config open-urls** and
+  **marsh config cloud-delegate** settings.
 
 *$MARSH_HOME/sbxenv.yaml*, *$MARSH_HOME/sbxenvs/NAME.yaml*
 : Optional shared and per-command MCP servers and extra directories. Read at

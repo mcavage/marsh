@@ -1,10 +1,10 @@
 # Detached cloud work: close the lid, collect later
 
-Status: **implemented (v1, no nested calls).** Steps 1-4 and 6 of
-[the order of work](#10-order-of-work) are built; the opt-in token for nested
-agent calls (§6) is not, so a detached block that would make one is refused.
-[Implementation notes](#11-implementation-notes-v1) list where v1 differs
-from the text above. It extends
+Status: **implemented (v1).** Every step of
+[the order of work](#10-order-of-work) is built, including nested agent
+calls with the opt-in token (§6): off by default, a detached block that would
+make one is refused. [Implementation notes](#11-implementation-notes-v1) list
+where v1 differs from the text above. It extends
 [cloud placement](cloud-placement.md) and changes some of its decisions, listed
 in [What changes in existing decisions](#7-what-changes-in-existing-decisions).
 
@@ -33,7 +33,8 @@ output is kept in the job's receipt, so `marsh results` shows it like any job's.
 
 The first version covers session-origin runs only: `cloud -d { }` and
 `marsh cloud -d` from your marsh shell or a host terminal. A detached run
-cannot call back to the laptop (see §6).
+cannot call back to the laptop; with an access token you opt in to, it
+starts agent sandboxes itself (see §6).
 
 ## 2. Today, and why it can't survive a closed lid
 
@@ -294,9 +295,51 @@ Where the built version differs from, or adds to, the sections above:
   start step ended; after a restart a marked sandbox is recovered as
   `Detached`, never quarantined. Detached sandboxes accept only `state`,
   `tail`, `fetch`, `signal`, and removal.
-- **Nested calls.** The refusal at start checks the block's words in command
-  positions against registered Kits with a cloud form. It is best effort:
-  the command links in the sandbox refuse such a call too.
+- **Nested calls, delegation off.** The refusal at start checks the block's
+  words in command positions against registered Kits with a cloud form. It is
+  best effort: the command links in the sandbox refuse such a call too
+  (exit 126). Both messages name `marsh config cloud-delegate on` and the
+  Keychain command.
+- **Nested calls, delegation on.** The token is a Keychain generic password
+  (service `marsh-cloud-delegate`, account = Docker ID), read with the stock
+  `security` tool at the start of every detached cloud-shell run that can
+  reach a registered Kit with a cloud form, not only one whose words name a
+  Kit (the word check is best effort). A missing token refuses the run with
+  the `security add-generic-password` command. It goes to the sandbox on the
+  stdin of one root step (`--internal-cloud delegate`) into
+  `/var/lib/marsh-cloud/delegate` (root, 0600); the request carries only a
+  plan (`DelegatePlan`: the allowed names and their pinned cloud Kits, the cap,
+  the time limit, the CPUs, the Docker ID). A direct Kit run (`cloud -d {
+  claude -p ...; }`) never gets it: a Kit sandbox has no root to keep it from
+  the workload.
+- **Coordinator mechanism.** The supervisor downloads a pinned Docker
+  Sandboxes CLI release (linux-arm64, checked by SHA-256) into the root-only
+  state directory, signs it in with `sbx login --username ID
+  --password-stdin` under a root-only `HOME`, checks `sbx --cloud ls`, and
+  only then starts the workload, so a bad token refuses the run. It then
+  serves the command links' socket with the laptop's own crossing code,
+  moved into `marsh_daemon::cloud_call` and shared by both (create from the
+  Kit with the workspace mixin, copy the run's current files in with
+  `archive`/`unpack`, relay, confirm, capture, delete, `apply` as
+  `marsh-run`). Calling the Sandboxes API directly from Rust was not chosen:
+  it would need an HTTP/TLS stack in the static helper and a second
+  implementation of Kit-based creation and exec that the stock CLI already
+  provides.
+- **Guardrails.** Enforced by the supervisor: names outside the plan exit
+  127; the cap (default 8, `MARSH_CLOUD_CHILDREN`) counts admitted calls, and
+  later ones exit 125; each agent sandbox gets what remains of the run's
+  `--ttl` (at least one minute) with `--on-timeout stop`. Agent sandboxes get
+  no command links, so they cannot call further agents (as in attached runs).
+  Each is recorded in the coordinator's own ownership record
+  (`/var/lib/marsh-cloud/children/cloud-ownership.json`) before it is
+  created and deleted when its call returns; when the workload's leader
+  exits, write-back is sealed, the workload stopped, running calls killed,
+  and leftovers deleted before `status` and `done`. `state` lists finished
+  calls and any agent sandbox still owned; the laptop keeps the last list,
+  records the calls in the job's receipt (`cloud_children`), and deletes
+  listed sandboxes (adopted into its own ownership, only by recorded name and
+  ID) before deleting the run's sandbox on collect, discard, loss, or
+  retention.
 - **Notices.** Shown once on the next `marsh` command that talks to the
   daemon from a terminal (`marsh` shell start, `jobs`, `status`, `results`,
   `cloud`), not by the shell prompt.

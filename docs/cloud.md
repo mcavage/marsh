@@ -297,12 +297,72 @@ marsh cloud collect 42      # check on it now
 - Up to 8 detached runs at a time. They don't count toward the 8 jobs that
   run at once.
 
-A detached block can't call registered commands that run in their own Kit
-(they need your laptop to start them): marsh refuses such a block before it
-starts. A block that is exactly one such call runs in that command's Kit, so
-`cloud -d { claude -p "refactor the parser" </dev/null; }` works. Detached
-runs start from your marsh session or a host terminal, not from inside a
-job. Design: [detached cloud work](design/cloud-detach.md).
+A block that is exactly one call to a registered command runs in that
+command's Kit, so `cloud -d { claude -p "refactor the parser" </dev/null; }`
+always works. Detached runs start from your marsh session or a host
+terminal, not from inside a job. Design:
+[detached cloud work](design/cloud-detach.md).
+
+### Agents calling agents with the lid closed
+
+In an attached block, your laptop starts a sandbox for each registered Kit
+the block calls (`codex exec ...` inside `cloud { }`). A detached run has no
+laptop to do that, so by default marsh refuses a detached block that calls
+one, and a call it misses at start fails in the sandbox (exit 126).
+
+To let detached runs start those sandboxes themselves, give marsh a Docker
+access token and turn on delegation:
+
+1. In Docker Hub, create a personal access token with **Allow Cloud
+   Sandboxes access**.
+2. Store it in your login Keychain, with your Docker ID as the account:
+
+   ```sh
+   security add-generic-password -s marsh-cloud-delegate -a YOUR_DOCKER_ID -w
+   ```
+
+3. `marsh config cloud-delegate on` (`off` turns it off again).
+
+Then a detached block can call any registered Kit that has a cloud form, as
+an attached block can:
+
+```sh
+marsh cloud -d -- sh -c 'codex exec "add a test for the parser" </dev/null; make test'
+```
+
+Each run that can do this says so when it starts:
+`marsh: this run can start agent sandboxes in Docker Cloud as YOUR_DOCKER_ID (cloud-delegate on)`.
+Each call starts its own sandbox from the Kit, with the run's current files;
+its output appears in the run's output (`marsh cloud attach`), and its file
+changes return to the run before the call returns. Model credentials come
+from your Docker Cloud secrets (`sbx --cloud secret`), as for attached
+calls. `marsh jobs show JOB` lists each call (`agent call: codex exec ...
+(exit 0); wrote back 1 change`).
+
+**What the token can do.** Docker's sandbox access is all or nothing: the
+token can create, use, and delete every cloud sandbox on your account and
+spend its quota. marsh uploads it into each such run's sandbox, into a file
+only root can read; the run's commands run as an unprivileged user without
+`sudo` and can't read it. They can only ask the run's supervisor to start a
+call. If you don't want a token in your sandboxes, leave delegation off.
+
+**marsh's limits on a run's calls**, enforced by the supervisor:
+
+- only the registered Kits this run could call (the same Kits and pinned
+  versions an attached block gets, narrowed by `MARSH_SPAWN`);
+- at most 8 agent sandboxes per run in all (`MARSH_CLOUD_CHILDREN` in the
+  daemon's environment, 1 to 64); the next call is refused;
+- each gets what remains of the run's `--ttl`, and pauses rather than ends
+  when it runs out;
+- each is deleted when its call returns, any left are deleted before the
+  run's end is recorded, and collecting, `marsh cloud discard`, or retention
+  deletes any the run could not;
+- the called agent can't call further agents (its sandbox has no command
+  links), as in an attached block.
+
+Delegation needs the marsh cloud shell (the default image, or an `--image`
+with `curl`, `tar` and `sudo`): the supervisor installs a pinned Docker
+Sandboxes CLI in the sandbox and signs in with the token.
 
 ## Jobs, Ctrl-C, and cleanup
 
