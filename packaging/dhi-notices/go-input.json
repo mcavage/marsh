@@ -11,27 +11,27 @@
   "binaries": [
     {
       "path": "/usr/bin/containerd",
-      "sha256": "0560503316bfb9c2f94823046b7e5bdef3b22456508c82daac3ad056e788284a"
+      "sha256": "4f87a1d9b516944019ff7048fa22b2bc4f452ab836886f3b1cb3f9fd8cc7e5cf"
     },
     {
       "path": "/usr/bin/containerd-shim-runc-v2",
-      "sha256": "bf028b208e6c514d448802c4e3d9fe6134aa93f4fbd7090d15a04f8e330be2f5"
+      "sha256": "e2109939dba7f19587f1b673d0f7a0bf2895fd64279a53baf0434350249c3963"
     },
     {
       "path": "/usr/bin/ctr",
-      "sha256": "df086010f79dbaba6e6189c5b61e461aac9871ae98dd5817b73c94f2376c244c"
+      "sha256": "e9c054aea9fa582ea07862e388f04ff1c8039b744fdfcf0dc5125c8be1ba2dfe"
     },
     {
       "path": "/usr/bin/docker",
-      "sha256": "093839a43bc1aeb8b740a06977fc141556c42a826af13fb6b0c88b2b54c85a63"
+      "sha256": "4f429e3882870902c90a53f09003658630ed3065374713ac4c9d3a008b241f35"
     },
     {
       "path": "/usr/bin/docker-proxy",
-      "sha256": "01723c5dfc1ef5a1b10bff07f463dfedf189dadf0e2604da07bc74bdbc74279a"
+      "sha256": "2a7ad186160f4ea090d9c3e6ccd35c41608dac77890091e883a8e25da7548e6c"
     },
     {
       "path": "/usr/bin/dockerd",
-      "sha256": "20bde2079ccfe3088e66a4ec9dc9b836829d028ab345bee77fea2107d6baf46b"
+      "sha256": "bd8c750cb6d91c2afc71176fc2c9a755c7d72778b06a925f121235310f5c4694"
     },
     {
       "path": "/usr/bin/gh",
@@ -39,11 +39,11 @@
     },
     {
       "path": "/usr/bin/runc",
-      "sha256": "607c96111a8b403142edd59238c9b60e12a384ca1de278eeb403e9fea702fe60"
+      "sha256": "0d5bebde16d512be0e13d493a27db360f55cf07e2f1a5934a59c6326a906aa86"
     },
     {
       "path": "/usr/libexec/docker/cli-plugins/docker-buildx",
-      "sha256": "93e5fc4ce3f3082878f21eb5cb0fc10e3ef0b384a854374177b068c50fcc9b69"
+      "sha256": "1648ada3c9bc1a7d58bcf23fff866be9e50f6524ff3151148b36b81ade04c94b"
     }
   ],
   "modules": [
@@ -3357,9 +3357,15 @@
       "path": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
       "version": "v0.71.0",
       "binaries": [
-        "/usr/bin/containerd",
         "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
+      ]
+    },
+    {
+      "path": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+      "version": "v0.72.0",
+      "binaries": [
+        "/usr/bin/containerd"
       ]
     },
     {
@@ -3374,11 +3380,17 @@
       "path": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
       "version": "v0.71.0",
       "binaries": [
-        "/usr/bin/containerd",
-        "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
+      ]
+    },
+    {
+      "path": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
+      "version": "v0.72.0",
+      "binaries": [
+        "/usr/bin/containerd",
+        "/usr/bin/ctr"
       ]
     },
     {
@@ -3644,7 +3656,6 @@
       "path": "golang.org/x/mod",
       "version": "v0.41.0",
       "binaries": [
-        "/usr/bin/containerd",
         "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ]
@@ -3653,6 +3664,7 @@
       "path": "golang.org/x/mod",
       "version": "v0.42.0",
       "binaries": [
+        "/usr/bin/containerd",
         "/usr/bin/dockerd"
       ]
     },
@@ -3808,7 +3820,7 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/api",
-      "version": "v0.0.0-20261012220534-4341edf3f941",
+      "version": "v0.0.0-20261019180522-ce908d29299b",
       "binaries": [
         "/usr/bin/containerd"
       ]
@@ -3831,7 +3843,7 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/rpc",
-      "version": "v0.0.0-20261012220534-4341edf3f941",
+      "version": "v0.0.0-20261019180522-ce908d29299b",
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",

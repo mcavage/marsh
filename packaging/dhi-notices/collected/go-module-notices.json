@@ -12,27 +12,27 @@
   "binaries": [
     {
       "path": "/usr/bin/containerd",
-      "sha256": "0560503316bfb9c2f94823046b7e5bdef3b22456508c82daac3ad056e788284a"
+      "sha256": "4f87a1d9b516944019ff7048fa22b2bc4f452ab836886f3b1cb3f9fd8cc7e5cf"
     },
     {
       "path": "/usr/bin/containerd-shim-runc-v2",
-      "sha256": "bf028b208e6c514d448802c4e3d9fe6134aa93f4fbd7090d15a04f8e330be2f5"
+      "sha256": "e2109939dba7f19587f1b673d0f7a0bf2895fd64279a53baf0434350249c3963"
     },
     {
       "path": "/usr/bin/ctr",
-      "sha256": "df086010f79dbaba6e6189c5b61e461aac9871ae98dd5817b73c94f2376c244c"
+      "sha256": "e9c054aea9fa582ea07862e388f04ff1c8039b744fdfcf0dc5125c8be1ba2dfe"
     },
     {
       "path": "/usr/bin/docker",
-      "sha256": "093839a43bc1aeb8b740a06977fc141556c42a826af13fb6b0c88b2b54c85a63"
+      "sha256": "4f429e3882870902c90a53f09003658630ed3065374713ac4c9d3a008b241f35"
     },
     {
       "path": "/usr/bin/docker-proxy",
-      "sha256": "01723c5dfc1ef5a1b10bff07f463dfedf189dadf0e2604da07bc74bdbc74279a"
+      "sha256": "2a7ad186160f4ea090d9c3e6ccd35c41608dac77890091e883a8e25da7548e6c"
     },
     {
       "path": "/usr/bin/dockerd",
-      "sha256": "20bde2079ccfe3088e66a4ec9dc9b836829d028ab345bee77fea2107d6baf46b"
+      "sha256": "bd8c750cb6d91c2afc71176fc2c9a755c7d72778b06a925f121235310f5c4694"
     },
     {
       "path": "/usr/bin/gh",
@@ -40,14 +40,14 @@
     },
     {
       "path": "/usr/bin/runc",
-      "sha256": "607c96111a8b403142edd59238c9b60e12a384ca1de278eeb403e9fea702fe60"
+      "sha256": "0d5bebde16d512be0e13d493a27db360f55cf07e2f1a5934a59c6326a906aa86"
     },
     {
       "path": "/usr/libexec/docker/cli-plugins/docker-buildx",
-      "sha256": "93e5fc4ce3f3082878f21eb5cb0fc10e3ef0b384a854374177b068c50fcc9b69"
+      "sha256": "1648ada3c9bc1a7d58bcf23fff866be9e50f6524ff3151148b36b81ade04c94b"
     }
   ],
-  "input_sha256": "a93c5d8fdc39feb99970936a4080ca44dfcdb8577c3a12326ce6b7c5953cd601",
+  "input_sha256": "03ef66ad5bdcd3c9cbccf19ab212f7cf8821e550b4b7c95a8201a93732e18195",
   "checksum_database": "sum.golang.org",
   "modules": [
     {
@@ -8360,7 +8360,6 @@
       "path": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
       "version": "v0.71.0",
       "binaries": [
-        "/usr/bin/containerd",
         "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
@@ -8370,6 +8369,23 @@
       "notices": [
         {
           "source_path": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@v0.71.0/LICENSE",
+          "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40",
+          "file": "texts/1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40.txt"
+        }
+      ]
+    },
+    {
+      "path": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc",
+      "version": "v0.72.0",
+      "binaries": [
+        "/usr/bin/containerd"
+      ],
+      "sum": "h1:Tq+E65HaNbZTeqcLw6QUhsV+/EIWdkfUH2CQzcrlE5M=",
+      "go_mod_sum": "h1:A+EVhDakAj1waJBPhmTszZaSr08ww8MRRKy1nB1rqck=",
+      "archive_sha256": "4a714fcf1be92ca6233ec6a719e2565f43ec6960fedbdb1195cb7cd112f1ca28",
+      "notices": [
+        {
+          "source_path": "go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc@v0.72.0/LICENSE",
           "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40",
           "file": "texts/1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40.txt"
         }
@@ -8397,8 +8413,6 @@
       "path": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
       "version": "v0.71.0",
       "binaries": [
-        "/usr/bin/containerd",
-        "/usr/bin/ctr",
         "/usr/bin/docker",
         "/usr/bin/dockerd",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
@@ -8409,6 +8423,24 @@
       "notices": [
         {
           "source_path": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@v0.71.0/LICENSE",
+          "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40",
+          "file": "texts/1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40.txt"
+        }
+      ]
+    },
+    {
+      "path": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp",
+      "version": "v0.72.0",
+      "binaries": [
+        "/usr/bin/containerd",
+        "/usr/bin/ctr"
+      ],
+      "sum": "h1:LxwW/9ctSCv+QkE/cLR7M91ZIkXNMqJtEMi1vCw9U8s=",
+      "go_mod_sum": "h1:tOsftB4SslBwwErVEPaenU2RpThXWPIU8DoJHEC4dyw=",
+      "archive_sha256": "e9e9f34bc563d5114bc6c2760cf2b3d15ae82b0bbd635cd534ae3ccce2ac3300",
+      "notices": [
+        {
+          "source_path": "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp@v0.72.0/LICENSE",
           "sha256": "1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40",
           "file": "texts/1ae07514be1d7bb33f0698f8d91fb51b8b9fe1463157ec1c72081a49b9bc6f40.txt"
         }
@@ -9027,7 +9059,6 @@
       "path": "golang.org/x/mod",
       "version": "v0.41.0",
       "binaries": [
-        "/usr/bin/containerd",
         "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
@@ -9051,6 +9082,7 @@
       "path": "golang.org/x/mod",
       "version": "v0.42.0",
       "binaries": [
+        "/usr/bin/containerd",
         "/usr/bin/dockerd"
       ],
       "sum": "h1:ICeL3t2L30ljSPHHxDnR4fqVcBt/zR2zJAb9juavmQg=",
@@ -9456,16 +9488,16 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/api",
-      "version": "v0.0.0-20261012220534-4341edf3f941",
+      "version": "v0.0.0-20261019180522-ce908d29299b",
       "binaries": [
         "/usr/bin/containerd"
       ],
-      "sum": "h1:DS/w3N8rsfrwxwgGSj6WhMsPo7aNQGmDx74J81zd0NQ=",
-      "go_mod_sum": "h1:AuGAdi9KnXss7xbLxIKhCvk+Ro/SxpET/iS45DNYN+M=",
-      "archive_sha256": "0167b14fa3bb74f04f9e477569082e3879c11dc193e3e9a62042d59ac996c3bc",
+      "sum": "h1:nB3spRIaSPtxJpxb0k41yljROvm2Jrwfs2pSNdKS5y8=",
+      "go_mod_sum": "h1:9N4vtjEwvgQKEdlFVQO0M44ErhecQ9DCSQfGoZ51M6w=",
+      "archive_sha256": "ac716652e2a4fd66309c4dc57e3ad21cd73c781c847494667c8268881d0c8ea7",
       "notices": [
         {
-          "source_path": "google.golang.org/genproto/googleapis/api@v0.0.0-20261012220534-4341edf3f941/LICENSE",
+          "source_path": "google.golang.org/genproto/googleapis/api@v0.0.0-20261019180522-ce908d29299b/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
@@ -9509,18 +9541,18 @@
     },
     {
       "path": "google.golang.org/genproto/googleapis/rpc",
-      "version": "v0.0.0-20261012220534-4341edf3f941",
+      "version": "v0.0.0-20261019180522-ce908d29299b",
       "binaries": [
         "/usr/bin/containerd",
         "/usr/bin/containerd-shim-runc-v2",
         "/usr/bin/ctr"
       ],
-      "sum": "h1:QG6hS4zFplRZvOQedzei4t2pT/zkQc3VR1u+S9/rcAw=",
+      "sum": "h1:6WNWHZk91dp4gZ25642OALkuG1UVNZbwENJD19DnB8k=",
       "go_mod_sum": "h1:OaIUM3+LpYcK2GXM4FTmhWoIq371Owdr+Cc7/BsYHHc=",
-      "archive_sha256": "4728954680ee41fdb6d90adddcb175edb179afd93d1a7237e60b1e969626162c",
+      "archive_sha256": "ebb3873bd63f34cf4d2af26f50bb671546c8ea2aff6ced0f4661c2d7e50c2719",
       "notices": [
         {
-          "source_path": "google.golang.org/genproto/googleapis/rpc@v0.0.0-20261012220534-4341edf3f941/LICENSE",
+          "source_path": "google.golang.org/genproto/googleapis/rpc@v0.0.0-20261019180522-ce908d29299b/LICENSE",
           "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
           "file": "texts/cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30.txt"
         }
