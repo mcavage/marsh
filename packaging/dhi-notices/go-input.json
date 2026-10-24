@@ -35,7 +35,7 @@
     },
     {
       "path": "/usr/bin/gh",
-      "sha256": "73761b092d7bce4a06f8d9cbf990c02109ab8c42a39d8c03a3d77224016fb55e"
+      "sha256": "a3f7e4e07863cf9fd16346d9ad42117b2db70e58e7539b9ca04a3ea688da840e"
     },
     {
       "path": "/usr/bin/runc",
@@ -994,8 +994,14 @@
       "version": "v0.0.0-20230818184609-3a137a874352",
       "binaries": [
         "/usr/bin/dockerd",
-        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
+      ]
+    },
+    {
+      "path": "github.com/digitorus/pkcs7",
+      "version": "v0.0.0-20260914070511-d678ea5ea03f",
+      "binaries": [
+        "/usr/bin/gh"
       ]
     },
     {

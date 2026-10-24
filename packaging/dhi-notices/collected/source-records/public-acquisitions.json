@@ -49,9 +49,9 @@
     "signature_verified": false
   },
   "claude-kit-manifest": {
-    "url": "https://downloads.claude.ai/claude-code-releases/2.1.309/manifest.json",
-    "sha256": "8504633c7837099cefd2a995a433502717c360c155287b1ba92e6ec4d230093b",
-    "size": 2067,
+    "url": "https://downloads.claude.ai/claude-code-releases/2.1.310/manifest.json",
+    "sha256": "895e85ce24c3df3fdb77ac1006bdb2b66f1c42dd557000e65ced1e4aad847e74",
+    "size": 2050,
     "integrity": null,
     "signature_verified": false
   },
@@ -516,11 +516,11 @@
       }
     ]
   },
-  "claude-2.1.309-legal-archive": {
-    "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.309.tgz",
-    "sha256": "507309e76aa5e13e5f95a8964dcbaad1ff447eb004f6d6ecd67e4c55e937e03e",
-    "size": 29083,
-    "integrity": "sha512-+lBYZRuXOJpiKJcRv/CK7gF+5UFNWyJE7hSxkgGUKDZOWgANl9MAabfTkrJk183Tp3B0Nv4xF/DU1t0BaKXOPw==",
+  "claude-2.1.310-legal-archive": {
+    "url": "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.310.tgz",
+    "sha256": "d696314076114df499ba88e117000a24a9d7ab4f502dcaefba52c83fd22acfbd",
+    "size": 29082,
+    "integrity": "sha512-EySpBwaocdU1nc9r7JH+GOlnMsbXc764d3HX7NL8fr7qqdxz2MiXI9hqf/rzeE/XgU23HHFltIqhb+Fq6G1CVw==",
     "signature_verified": false
   }
 }
