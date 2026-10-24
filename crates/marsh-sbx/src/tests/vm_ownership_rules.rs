@@ -118,6 +118,57 @@ fn source_overlap_is_rejected_within_batch_and_against_active_grants() {
 }
 
 #[test]
+fn admission_preflight_refuses_live_grants_but_not_idle_retained_ones() {
+    let root = scratch();
+    let project = root.path().join("project");
+    let nested = project.join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    let model = StockModel::new();
+    let adapter = model.adapter();
+    model.seed_owned(&adapter, "marsh-kit-fixture");
+    let vm = kit_vm("marsh-kit-fixture");
+    let rw = MountAccess::ReadWrite;
+
+    let live = adapter
+        .prepare_grants(
+            &vm,
+            "attempt-active",
+            &[grant(project.clone(), "/Users/alice/project", rw)],
+        )
+        .unwrap();
+    // A job holds the parent: the nested source is refused at admission too.
+    assert!(matches!(
+        adapter.preflight_host_grants_evicting_idle(&[grant(
+            nested.clone(),
+            "/Users/alice/nested",
+            rw
+        )]),
+        Err(SbxError::HostGrantFence(message)) if message.contains("overlaps active grant")
+    ));
+
+    // The job ends; the mount stays retained while the VM is warm, but idle.
+    adapter.revoke_grants(&live).unwrap();
+    let calls = model.calls().len();
+    adapter
+        .preflight_host_grants_evicting_idle(&[grant(nested.clone(), "/Users/alice/nested", rw)])
+        .unwrap();
+    assert_eq!(
+        model.calls().len(),
+        calls,
+        "admission runs no stock command"
+    );
+    // The mount step itself still evicts the idle parent before it re-checks.
+    adapter
+        .prepare_grants(
+            &vm,
+            "attempt-nested",
+            &[grant(nested, "/Users/alice/nested", rw)],
+        )
+        .unwrap();
+    assert_eq!(model.count("umount"), 1);
+}
+
+#[test]
 fn create_intent_persists_before_create_and_restart_adopts_present_or_drops_absent() {
     let control = scratch();
     let map = control.path().join("vm-ownership.json");
