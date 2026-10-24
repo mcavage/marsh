@@ -1171,6 +1171,16 @@ impl StockDaemonBackend {
         // The run's agent sandboxes go with it: ask its coordinator (the
         // run may be stopped; this resumes it), else use the last list seen.
         if record.delegate.is_some() {
+            // Stop the workload first, so its coordinator starts no further
+            // agent sandbox after the list below (and deletes its own).
+            let _ = small_control(
+                adapter,
+                id,
+                Ctl { kit: record.kit },
+                &["--internal-cloud", "signal", "KILL"],
+                64 * 1024,
+                RESUME_TIMEOUT,
+            );
             if let Ok((step, bytes)) = small_control(
                 adapter,
                 id,

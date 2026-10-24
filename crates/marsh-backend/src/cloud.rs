@@ -403,13 +403,11 @@ mod tests {
     #[test]
     fn the_delegate_token_is_never_serialized() {
         const SECRET: &str = "dckr_pat_NEVER_SERIALIZED_42";
-        let token = marsh_daemon::cloud_delegate::DelegateToken::new(
-            "someone",
-            SECRET.as_bytes().to_vec(),
-        )
-        .unwrap();
-        let kit = OciImage::parse(format!("docker.io/docker/codex@sha256:{}", "c".repeat(64)))
-            .unwrap();
+        let token =
+            marsh_daemon::cloud_delegate::DelegateToken::new("someone", SECRET.as_bytes().to_vec())
+                .unwrap();
+        let kit =
+            OciImage::parse(format!("docker.io/docker/codex@sha256:{}", "c".repeat(64))).unwrap();
         let bindings = BTreeMap::from([(
             "codex".to_owned(),
             Binding {
@@ -450,7 +448,11 @@ mod tests {
             assert!(!form.contains(SECRET), "{form}");
         }
         // The upload is the only place it appears.
-        assert!(String::from_utf8(token.upload_bytes()).unwrap().contains(SECRET));
+        assert!(
+            String::from_utf8(token.upload_bytes())
+                .unwrap()
+                .contains(SECRET)
+        );
     }
 
     #[test]
