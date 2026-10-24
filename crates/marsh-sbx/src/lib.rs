@@ -1151,12 +1151,38 @@ impl StockSbx {
                 token.validate_in(&self.ephemeral_root, grant)?;
             }
         }
-        self.reject_source_overlap(grants)
+        self.reject_source_overlap(grants, false)
+    }
+
+    /// [`Self::preflight_host_grants`] for early admission, before any mount.
+    /// A conflict with an idle retained mount (no job, no session pin, no
+    /// attached shell) is not a rejection: the mount step evicts it first and
+    /// repeats the strict check, so only live grants refuse the request.
+    ///
+    /// # Errors
+    /// Returns path, overlap with a live grant, or slot-ownership failures.
+    pub fn preflight_host_grants_evicting_idle(
+        &self,
+        grants: &[AdmittedHostGrant],
+    ) -> Result<(), SbxError> {
+        for grant in grants {
+            grant.verify_path()?;
+            if let Some(token) = &grant.ephemeral {
+                token.validate_in(&self.ephemeral_root, grant)?;
+            }
+        }
+        self.reject_source_overlap(grants, true)
     }
 
     /// Reject nested/aliased sources within one batch or against any source
     /// this daemon currently has mounted. Identical sources may be shared.
-    fn reject_source_overlap(&self, grants: &[AdmittedHostGrant]) -> Result<(), SbxError> {
+    /// With `ignore_idle`, retained mounts that `evict_idle_conflicts` would
+    /// unmount are not counted as active.
+    fn reject_source_overlap(
+        &self,
+        grants: &[AdmittedHostGrant],
+        ignore_idle: bool,
+    ) -> Result<(), SbxError> {
         let batch = grants
             .iter()
             .map(|grant| source_chain::SourceRecord::new(&grant.source, &grant.chain))
@@ -1174,6 +1200,9 @@ impl StockSbx {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
+            .filter(|reference| {
+                !ignore_idle || reference.active_jobs > 0 || !reference.pinned_sessions.is_empty()
+            })
             .map(|reference| reference.source_record.clone())
             .collect::<Vec<_>>();
         active.extend(
@@ -1182,12 +1211,15 @@ impl StockSbx {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .values()
                 .filter(|reference| {
-                    reference
+                    let state = reference
                         .state
                         .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .phase
-                        != ShellMountPhase::Dormant
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    match state.phase {
+                        ShellMountPhase::Dormant => false,
+                        ShellMountPhase::Mounted if ignore_idle => !state.owners.is_empty(),
+                        _ => true,
+                    }
                 })
                 .map(|reference| reference.source_record.clone()),
         );

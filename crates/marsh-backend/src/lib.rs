@@ -346,7 +346,7 @@ impl StockDaemonBackend {
         // Pure preflight creates no Untracked/pending record; actual mount/Create
         // adapters reserve and enroll their exact VM before any source effect.
         self.sbx
-            .preflight_host_grants(&grants)
+            .preflight_host_grants_evicting_idle(&grants)
             .map_err(backend_error)?;
         Ok(grants)
     }

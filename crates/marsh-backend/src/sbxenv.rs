@@ -411,7 +411,7 @@ impl StockDaemonBackend {
                 .map_err(backend_error)
         }).collect::<Result<Vec<_>, _>>()?;
         self.sbx
-            .preflight_host_grants(&grants)
+            .preflight_host_grants_evicting_idle(&grants)
             .map_err(backend_error)?;
         Ok(grants)
     }
