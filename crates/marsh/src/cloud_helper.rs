@@ -25,6 +25,7 @@ use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+mod coordinator;
 mod detached;
 
 /// Control state: root-owned in a session shell sandbox; in a Kit sandbox
@@ -90,12 +91,13 @@ pub fn main(arguments: &[OsString]) -> i32 {
         [op, stream, offset] if *op == "tail" => detached::tail(stream, offset),
         [op] if *op == "fetch" => detached::fetch(),
         [op] if *op == "baseline" => detached::baseline(),
+        [op] if *op == "delegate" => coordinator::store_delegate(),
         [op] if *op == "status" => status(),
         [op, name] if *op == "signal" => signal(name),
         [op, root, out] if *op == "delta" => delta(Path::new(root), Path::new(out)),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: --internal-cloud prepare|unpack|run [--detached]|status|state|tail|fetch|baseline|signal|delta",
+            "usage: --internal-cloud prepare|unpack|run [--detached]|status|state|tail|fetch|baseline|delegate|signal|delta",
         )),
     };
     match result {
@@ -1400,7 +1402,7 @@ pub fn link(name: &str, arguments: &[OsString]) -> i32 {
     use std::io::Read as _;
     if std::env::var_os(detached::DETACHED_VARIABLE).is_some() {
         eprintln!(
-            "marsh: {name}: a detached cloud run cannot call registered Kits (there is no laptop to relay the call); run `cloud -d {{ {name} ...; }}` on its own, or the block without -d"
+            "marsh: {name}: this detached cloud run cannot start agent sandboxes: turn that on with `marsh config cloud-delegate on` and a Docker access token in your Keychain (`security add-generic-password -s marsh-cloud-delegate -a YOUR_DOCKER_ID -w`); or run `cloud -d {{ {name} ...; }}` on its own, or the block without -d"
         );
         return 126;
     }

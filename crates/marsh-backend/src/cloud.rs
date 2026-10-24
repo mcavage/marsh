@@ -11,7 +11,13 @@
 use crate::{StockDaemonBackend, backend_error, merge_exported_environment};
 use marsh_contracts::OciImage;
 use marsh_contracts::cloud::{CloudMode, CloudRequest, LinkRequest, MAX_ARCHIVE, run_frame};
-use marsh_daemon::cloud_fs::{self, ApplyReport, SNAPSHOT_LIMIT};
+use marsh_daemon::cloud_call::{
+    self, CONTROL_TIMEOUT, CallHost, CallReply, Caller, Ctl, LOCAL_ONLY, STEP_TIMEOUT,
+    SharedBuffer, Step, WORKSPACE_MIXIN, actionable, capture_delta, confirm_status,
+    failed_before_start, hex, os_args, read_bounded, retried_step, run_carrier, signal_control,
+    small_step, spawn_run, step, summary, upload_helper,
+};
+use marsh_daemon::cloud_fs::{self, SNAPSHOT_LIMIT};
 use marsh_daemon::process::JobControl;
 use marsh_daemon::split_fs::Dir;
 use marsh_daemon::{
@@ -22,11 +28,10 @@ use marsh_runtime::Attachment;
 use marsh_sbx::cloud::{CloudError, CloudImageSpec, CloudSandboxId, CloudSbx};
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::OsString;
-use std::fs::{self, OpenOptions};
-use std::io::{self, Read, Write};
+use std::fs;
+use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt as _;
-use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+use std::os::unix::fs::DirBuilderExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -37,16 +42,8 @@ mod detach;
 
 /// The pinned cloud shell image (`docs/plan/cloud-feasibility.md`).
 pub const DEFAULT_CLOUD_IMAGE: &str = "docker.io/docker/sandbox-templates:shell-docker@sha256:b2c007bbb5dcdb60a29f3019c7160ebe0c50c968e08854fbba6093834f8f6a1b";
-/// The uploaded helper (sandbox user's private directory); `prepare` installs
-/// the root-owned copy every later step runs through `sudo -n`.
-const UPLOADED: &str = "/tmp/marsh-cloud/marsh-local";
-const HELPER: &str = marsh_contracts::cloud::INSTALLED_HELPER;
 const TTL: Duration = Duration::from_hours(4);
-const STEP_TIMEOUT: Duration = Duration::from_mins(10);
-const CONTROL_TIMEOUT: Duration = Duration::from_mins(1);
 const STDIN_QUEUE: usize = marsh_daemon::SHELL_STDIN_WINDOW + 1;
-/// Exported names that describe the caller's machine, not the sandbox.
-const LOCAL_ONLY: [&str; 6] = ["SHLVL", "OLDPWD", "PWD", "TMPDIR", "SHELL", "_"];
 
 /// Lazily opened owned cloud boundary and per-destination import locks.
 #[derive(Default)]
@@ -70,360 +67,6 @@ fn image(requested: Option<&str>) -> Result<OciImage, DaemonError> {
     }
     OciImage::parse(reference)
         .map_err(|_| DaemonError::Refused("cloud: not a valid image reference".into()))
-}
-
-/// Make stock CLI failures actionable: sign-in and entitlement come first.
-fn actionable(error: &CloudError) -> String {
-    let text = error.to_string();
-    let lower = text.to_ascii_lowercase();
-    if lower.contains("login")
-        || lower.contains("sign in")
-        || lower.contains("unauthorized")
-        || lower.contains("not authenticated")
-    {
-        format!(
-            "{text}\nmarsh: cloud: sign in with `sbx login` using an account with Docker Cloud sandbox access"
-        )
-    } else if lower.contains("subscription") || lower.contains("entitle") || lower.contains("quota")
-    {
-        format!(
-            "{text}\nmarsh: cloud: this Docker account has no Docker Cloud sandbox capacity (subscription or quota)"
-        )
-    } else {
-        text
-    }
-}
-
-/// How control steps reach the helper: the session cloud shell runs them as
-/// root through `sudo` (installed helper, `marsh-run` workload); a Kit
-/// sandbox has no root, so the uploaded helper runs as the Kit's own user.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct Ctl {
-    pub kit: bool,
-}
-
-impl Ctl {
-    /// A control step: `(program, words)`.
-    fn step(self, args: &[&str]) -> (String, Vec<String>) {
-        let mut words = Vec::new();
-        let program = if self.kit {
-            UPLOADED.to_owned()
-        } else {
-            words.extend(["-n".to_owned(), HELPER.to_owned()]);
-            "/usr/bin/sudo".to_owned()
-        };
-        words.extend(args.iter().map(|arg| (*arg).to_owned()));
-        (program, words)
-    }
-
-    /// A step that touches the workspace as the workload user.
-    fn as_workload(self, args: &[&str]) -> (String, Vec<String>) {
-        if self.kit {
-            return self.step(args);
-        }
-        let mut words = ["-n", "-u", "marsh-run", HELPER]
-            .map(str::to_owned)
-            .to_vec();
-        words.extend(args.iter().map(|arg| (*arg).to_owned()));
-        ("/usr/bin/sudo".to_owned(), words)
-    }
-
-    /// The first step, from the uploaded helper (it installs itself).
-    fn prepare(self, root: &str) -> (String, Vec<String>) {
-        let mut words = Vec::new();
-        let program = if self.kit {
-            UPLOADED.to_owned()
-        } else {
-            words.extend(["-n".to_owned(), UPLOADED.to_owned()]);
-            "/usr/bin/sudo".to_owned()
-        };
-        words.extend(["--internal-cloud", "prepare", root].map(str::to_owned));
-        (program, words)
-    }
-
-    /// `sh -c` script that unpacks a gzip snapshot from stdin into `$1`.
-    fn unpack_script(self) -> String {
-        if self.kit {
-            format!("/usr/bin/gzip -dc | {UPLOADED} --internal-cloud unpack - \"$1\"")
-        } else {
-            format!(
-                "/usr/bin/gzip -dc | /usr/bin/sudo -n {HELPER} --internal-cloud unpack - \"$1\""
-            )
-        }
-    }
-}
-
-fn os_args(args: &[String]) -> Vec<OsString> {
-    args.iter().map(OsString::from).collect()
-}
-
-/// One stock exec step's result.
-struct Step {
-    code: Option<i32>,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-}
-
-impl Step {
-    fn ok(&self) -> bool {
-        self.code == Some(0)
-    }
-
-    fn diagnostic(&self) -> String {
-        String::from_utf8_lossy(&self.stderr)
-            .chars()
-            .take(1024)
-            .collect::<String>()
-            .trim()
-            .to_owned()
-    }
-}
-
-fn read_bounded(mut reader: impl Read, mut sink: impl Write, limit: u64) -> io::Result<u64> {
-    let copied = io::copy(&mut (&mut reader).take(limit + 1), &mut sink)?;
-    if copied > limit {
-        return Err(io::Error::new(
-            io::ErrorKind::FileTooLarge,
-            "stream exceeds its byte limit",
-        ));
-    }
-    sink.flush()?;
-    // Drain without keeping anything, so the remote side is never blocked.
-    io::copy(&mut reader, &mut io::sink())?;
-    Ok(copied)
-}
-
-/// Run one control step to completion within `timeout`, feeding `input` and
-/// copying stdout to `stdout` (at most `limit` bytes). On timeout the local
-/// carrier is terminated and the step fails; that is not proof the remote
-/// command stopped, so callers quarantine on failure.
-fn step(
-    attachment: Attachment,
-    input: Option<Box<dyn Read + Send>>,
-    stdout: Box<dyn Write + Send>,
-    limit: u64,
-    timeout: Duration,
-) -> Result<Step, String> {
-    let Attachment {
-        mut stdin,
-        stdout: out,
-        stderr: err,
-        mut process,
-        ..
-    } = attachment;
-    let feeder = thread::spawn(move || -> io::Result<()> {
-        if let Some(mut input) = input {
-            io::copy(&mut input, &mut stdin)?;
-        }
-        drop(stdin);
-        Ok(())
-    });
-    let output = thread::spawn(move || read_bounded(out, stdout, limit));
-    let errors = thread::spawn(move || {
-        let mut bytes = Vec::new();
-        read_bounded(err, &mut bytes, 64 * 1024).map(|_| bytes)
-    });
-    let deadline = Instant::now() + timeout;
-    let code = loop {
-        match process.try_wait() {
-            Ok(Some(code)) => break Some(code),
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = process.terminate();
-                break None;
-            }
-            Ok(None) => thread::sleep(Duration::from_millis(50)),
-            Err(error) => return Err(error.to_string()),
-        }
-    };
-    let fed = feeder.join().map_err(|_| "input thread panicked")?;
-    let copied = output.join().map_err(|_| "output thread panicked")?;
-    let stderr = errors
-        .join()
-        .map_err(|_| "error thread panicked")?
-        .unwrap_or_default();
-    let Some(code) = code else {
-        return Err("cloud step timed out".into());
-    };
-    if code == 0 {
-        fed.map_err(|e| format!("cloud upload failed: {e}"))?;
-        copied.map_err(|e| e.to_string())?;
-    }
-    Ok(Step {
-        code: Some(code),
-        stdout: Vec::new(),
-        stderr,
-    })
-}
-
-/// [`step`] keeping a small stdout in memory.
-fn small_step<S: AsRef<str>>(
-    adapter: &CloudSbx,
-    id: &CloudSandboxId,
-    program: &str,
-    args: &[S],
-    input: Option<Box<dyn Read + Send>>,
-    timeout: Duration,
-) -> Result<Step, String> {
-    let args = args
-        .iter()
-        .map(|arg| OsString::from(arg.as_ref()))
-        .collect::<Vec<_>>();
-    let attachment = adapter
-        .spawn(id, program, &args)
-        .map_err(|e| actionable(&e))?;
-    let buffer = Arc::new(Mutex::new(Vec::new()));
-    let mut result = step(
-        attachment,
-        input,
-        Box::new(SharedBuffer(Arc::clone(&buffer))),
-        64 * 1024,
-        timeout,
-    )?;
-    result.stdout = std::mem::take(
-        &mut *buffer
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-    );
-    Ok(result)
-}
-
-/// The stock CLI failed before reaching the sandbox (sign-in token refresh,
-/// often contended with other stock processes, or a TLS timeout while
-/// attaching the exec): the command did not run. Only repeatable steps, and
-/// the at-most-once `run`, are started again on this.
-fn failed_before_start(step: &Step) -> bool {
-    let text = String::from_utf8_lossy(&step.stderr);
-    !step.ok()
-        && (text.contains("init cloud dispatcher")
-            || text.contains("access token source")
-            || text.contains("refresh lock held")
-            || (text.contains("attach exec in cloud sandbox")
-                && text.contains("TLS handshake timeout")))
-}
-
-/// Start the helper's `run` and wait for its start signal (an empty ACK).
-/// When the stock CLI failed before reaching the sandbox, the run is
-/// started again: the helper runs at most once per sandbox (an exclusive
-/// marker), so a repeat can never run the command twice.
-fn spawn_run(adapter: &CloudSbx, id: &CloudSandboxId, ctl: Ctl) -> Result<Attachment, String> {
-    let (program, words) = ctl.step(&["--internal-cloud", "run"]);
-    let mut attempt = 0;
-    loop {
-        attempt += 1;
-        let Attachment {
-            stdin,
-            mut stdout,
-            mut stderr,
-            mut process,
-            control,
-        } = adapter
-            .spawn(id, &program, &os_args(&words))
-            .map_err(|error| actionable(&error))?;
-        match run_frame::read(&mut stdout) {
-            Ok(Some((run_frame::ACK, payload))) if payload == 0_u64.to_be_bytes() => {
-                return Ok(Attachment {
-                    stdin,
-                    stdout,
-                    stderr,
-                    process,
-                    control,
-                });
-            }
-            Ok(None) => {
-                let mut diagnostic = Vec::new();
-                let _ = read_bounded(&mut stderr, &mut diagnostic, 64 * 1024);
-                let code = process.wait().ok();
-                let step = Step {
-                    code,
-                    stdout: Vec::new(),
-                    stderr: diagnostic,
-                };
-                if attempt < 4 && failed_before_start(&step) {
-                    thread::sleep(Duration::from_secs(2 * attempt));
-                    continue;
-                }
-                // Not started, or started and lost: the caller confirms.
-                return Ok(Attachment {
-                    stdin,
-                    stdout: Box::new(io::empty()),
-                    stderr: Box::new(io::Cursor::new(step.stderr)),
-                    process: Box::new(Exited(code)),
-                    control,
-                });
-            }
-            Ok(Some(_)) | Err(_) => {
-                return Ok(Attachment {
-                    stdin,
-                    stdout: Box::new(io::empty()),
-                    stderr,
-                    process,
-                    control,
-                });
-            }
-        }
-    }
-}
-
-/// A stock exec that already ended, handed on with its exit code.
-struct Exited(Option<i32>);
-
-impl marsh_runtime::AttachedProcess for Exited {
-    fn wait(&mut self) -> io::Result<i32> {
-        self.0
-            .ok_or_else(|| io::Error::other("the stock exec ended without a status"))
-    }
-    fn try_wait(&mut self) -> io::Result<Option<i32>> {
-        self.wait().map(Some)
-    }
-    fn terminate(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-/// [`small_step`] for steps that are safe to repeat when the stock CLI
-/// failed before starting them; `input` is replayed whole.
-fn retried_step<S: AsRef<str>>(
-    adapter: &CloudSbx,
-    id: &CloudSandboxId,
-    program: &str,
-    args: &[S],
-    input: Option<&[u8]>,
-    timeout: Duration,
-) -> Result<Step, String> {
-    let mut attempt = 0;
-    loop {
-        let feed =
-            input.map(|bytes| Box::new(io::Cursor::new(bytes.to_vec())) as Box<dyn Read + Send>);
-        let step = small_step(adapter, id, program, args, feed, timeout)?;
-        attempt += 1;
-        if attempt >= 4 || !failed_before_start(&step) {
-            return Ok(step);
-        }
-        thread::sleep(Duration::from_secs(2 * attempt));
-    }
-}
-
-struct SharedBuffer(Arc<Mutex<Vec<u8>>>);
-
-impl Write for SharedBuffer {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .extend_from_slice(bytes);
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-    bytes.iter().fold(String::new(), |mut text, byte| {
-        let _ = write!(text, "{byte:02x}");
-        text
-    })
 }
 
 /// A pipe whose write end the snapshot writer fills while the read end
@@ -890,17 +533,34 @@ impl StockDaemonBackend {
             }),
             _ => None,
         };
-        // A detached block has no laptop relay: refuse an agent call in it
+        // A detached block has no laptop relay. With cloud-delegate on, its
+        // supervisor starts agent sandboxes itself, signed in with the token
+        // from the Keychain (read now: a missing token refuses the run, and
+        // every block that can reach a Kit gets it, since the word check
+        // below is best effort). Off, an agent call in the block is refused
         // now (its command links also refuse, if one is reached otherwise).
-        if options.detach
-            && direct.is_none()
-            && let Some(name) = detach::nested_call(mode, &argv, &self.cloud_bindings())
-        {
-            return Err(DaemonError::Refused(format!(
-                "cloud: this detached block calls {name}, a registered Kit, and a detached run cannot call back to the laptop. \
-                 Run that call on its own as `cloud -d {{ {name} ...; }}`, or run the block without -d"
-            )));
-        }
+        let delegate = if options.detach && direct.is_none() {
+            let bound = self.cloud_bindings();
+            if !marsh_daemon::cloud_delegate::configured(
+                &self.config.daemon_home.join("config.json"),
+            ) {
+                if let Some(name) = detach::nested_call(mode, &argv, &bound) {
+                    return Err(DaemonError::Refused(
+                        marsh_daemon::cloud_delegate::off_message(&name),
+                    ));
+                }
+                None
+            } else if bound.is_empty() {
+                None
+            } else {
+                Some(
+                    marsh_daemon::cloud_delegate::read_keychain()
+                        .map_err(|message| DaemonError::Refused(format!("cloud: {message}")))?,
+                )
+            }
+        } else {
+            None
+        };
         // The Kit this node runs in, if not the cloud shell: `(binding, name)`.
         let kit_form = origin
             .as_ref()
@@ -1073,7 +733,22 @@ impl StockDaemonBackend {
             kits: bindings.keys().cloned().collect(),
             stdin_terminal: options.stdin_terminal && !options.detach,
             detached: options.detach,
+            delegate: delegate
+                .as_ref()
+                .filter(|_| !bindings.is_empty())
+                .map(|token| marsh_contracts::cloud::DelegatePlan {
+                    kits: bindings
+                        .iter()
+                        .map(|(name, binding)| (name.clone(), binding.kit.as_str().to_owned()))
+                        .collect(),
+                    max_children: marsh_daemon::cloud_delegate::max_children(),
+                    ttl_seconds: options.ttl.as_secs(),
+                    cpus: options.cpus,
+                    account: token.account.clone(),
+                    vm_prefix: marsh_sbx::vm_prefix().to_owned(),
+                }),
         };
+        let delegated = cloud_request.delegate.clone();
 
         // Provision.
         let _ = attachment.send(&AttachmentFrame::ColdBoot {
@@ -1286,6 +961,36 @@ impl StockDaemonBackend {
         if relay.cancelled() {
             return cancelled_setup(settle);
         }
+        if let (Some(plan), Some(token)) = (&delegated, &delegate) {
+            // The token goes only on this root-only step's stdin, into a
+            // root-only file the workload cannot read.
+            let mut bytes = token.upload_bytes();
+            let (program, words) = ctl.step(&["--internal-cloud", "delegate"]);
+            let stored = retried_step(
+                &adapter,
+                &id,
+                &program,
+                &words,
+                Some(&bytes),
+                CONTROL_TIMEOUT,
+            );
+            bytes.fill(0);
+            match stored {
+                Ok(step) if step.ok() => {}
+                Ok(step) => {
+                    return setup_failed(settle, format!("cloud-delegate: {}", step.diagnostic()));
+                }
+                Err(message) => return setup_failed(settle, format!("cloud-delegate: {message}")),
+            }
+            let _ = attachment.send(&AttachmentFrame::Stderr {
+                bytes: format!(
+                    "marsh: this run can start agent sandboxes in Docker Cloud as {} (cloud-delegate on)\n",
+                    plan.account
+                )
+                .into_bytes(),
+            });
+        }
+        drop(delegate);
         if options.detach {
             let display = match &direct {
                 Some((_, _, words)) => words.clone(),
@@ -1307,6 +1012,7 @@ impl StockDaemonBackend {
                 identity,
                 confinement.is_some(),
                 options.ttl,
+                delegated.map(|plan| plan.account),
             );
         }
         // Execute with live streams.
@@ -1516,40 +1222,6 @@ impl StockDaemonBackend {
     }
 }
 
-fn summary(report: &ApplyReport) -> String {
-    use std::fmt::Write as _;
-    let plural = |count: u64| if count == 1 { "" } else { "s" };
-    let mut text = format!(
-        "wrote back {} change{} ({} created, {} modified, {} deleted)",
-        report.total(),
-        plural(report.total()),
-        report.created,
-        report.modified,
-        report.deleted
-    );
-    if !report.kept.is_empty() {
-        let shown = report
-            .kept
-            .iter()
-            .take(5)
-            .cloned()
-            .collect::<Vec<_>>()
-            .join(", ");
-        let more = report.kept.len().saturating_sub(5);
-        let _ = write!(
-            text,
-            "; kept {} directories deleted remotely that still hold local files: {shown}{}",
-            report.kept.len(),
-            if more > 0 {
-                format!(" and {more} more")
-            } else {
-                String::new()
-            }
-        );
-    }
-    text
-}
-
 /// The caller's side of a placement, read from admission on: stdin is queued
 /// (bounded) for the remote command, and Ctrl-C or a lost caller cancels the
 /// node at any phase. Before execution that stops setup; during execution it
@@ -1642,98 +1314,6 @@ impl Drop for Relay {
     }
 }
 
-/// Relay queued stdin to the carrier and its output back to the caller.
-/// Returns the carrier's exit code (`None` if it could not be observed).
-/// Unacknowledged stdin bytes in flight to the remote workload.
-struct Window {
-    state: Mutex<(u64, bool)>,
-    changed: std::sync::Condvar,
-    limit: u64,
-}
-
-impl Default for Window {
-    fn default() -> Self {
-        Self::with_limit(run_frame::STDIN_WINDOW)
-    }
-}
-
-impl Window {
-    fn with_limit(limit: u64) -> Self {
-        Self {
-            state: Mutex::new((0, false)),
-            changed: std::sync::Condvar::new(),
-            limit,
-        }
-    }
-
-    /// Wait until `len` more bytes fit; false once input is closed.
-    fn reserve(&self, len: u64) -> bool {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        while !state.1 && state.0 > 0 && state.0 + len > self.limit {
-            state = self
-                .changed
-                .wait(state)
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-        }
-        if state.1 {
-            return false;
-        }
-        state.0 += len;
-        true
-    }
-
-    fn acknowledge(&self, len: u64) {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.0 = state.0.saturating_sub(len);
-        self.changed.notify_all();
-    }
-
-    fn close(&self) {
-        self.state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .1 = true;
-        self.changed.notify_all();
-    }
-}
-
-/// The carrier's stdin, shared by the stdin writer and output acknowledgements.
-type CarrierInput = Arc<Mutex<Box<dyn Write + Send>>>;
-
-fn carrier_frame(input: &CarrierInput, tag: u8, payload: &[u8]) -> io::Result<()> {
-    let mut input = input
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    run_frame::write(&mut **input, tag, payload)
-}
-
-/// What the run carrier delivered.
-struct Carried {
-    /// The carrier's own exit code, if observed.
-    code: Option<i32>,
-    /// The helper's end-of-output marker arrived: no output was lost.
-    output_complete: bool,
-}
-
-/// Who a run carrier serves: the session caller, or an agent call relayed
-/// from a parent cloud workload.
-pub(crate) trait Caller: Send + Sync + 'static {
-    /// Workload stdout or stderr (`run_frame::STDOUT`/`STDERR`); may block.
-    fn deliver(&self, tag: u8, bytes: Vec<u8>);
-    /// One input chunk of `len` bytes was forwarded to the carrier.
-    fn forwarded(&self, len: u64);
-    /// The workload stopped reading its input.
-    fn input_closed(&self);
-    /// Helper diagnostics (unframed carrier stderr).
-    fn diagnostic(&self, bytes: Vec<u8>);
-}
-
 struct AttachmentCaller(ServerAttachment);
 
 impl Caller for AttachmentCaller {
@@ -1757,265 +1337,12 @@ impl Caller for AttachmentCaller {
     }
 }
 
-/// Replies to one agent call over its parent's carrier, within the parent's
-/// acknowledged window.
-#[derive(Clone)]
-pub(crate) struct CallReply {
-    id: u32,
-    input: CarrierInput,
-    window: Arc<Window>,
-}
-
-impl CallReply {
-    fn tagged(&self, body: &[u8]) -> Vec<u8> {
-        let mut payload = self.id.to_be_bytes().to_vec();
-        payload.extend_from_slice(body);
-        payload
-    }
-
-    fn send(&self, tag: u8, bytes: &[u8]) {
-        for chunk in bytes.chunks(run_frame::MAX_PAYLOAD - 4) {
-            let len = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
-            if !self.window.reserve(len) {
-                return;
-            }
-            let _ = carrier_frame(&self.input, tag, &self.tagged(chunk));
-        }
-    }
-
-    pub(crate) fn stderr(&self, text: &str) {
-        self.send(run_frame::KIT_ERR, text.as_bytes());
-    }
-
-    pub(crate) fn exit(&self, code: i32) {
-        let _ = carrier_frame(
-            &self.input,
-            run_frame::KIT_EXIT,
-            &self.tagged(&code.to_be_bytes()),
-        );
-    }
-
-    /// The call's stdin bytes were taken: let the parent helper send more.
-    fn taken(&self, len: u64) {
-        let _ = carrier_frame(&self.input, run_frame::OUTPUT_ACK, &len.to_be_bytes());
-    }
-}
-
-impl Caller for CallReply {
-    fn deliver(&self, tag: u8, bytes: Vec<u8>) {
-        let tag = if tag == run_frame::STDOUT {
-            run_frame::KIT_OUT
-        } else {
-            run_frame::KIT_ERR
-        };
-        self.send(tag, &bytes);
-    }
-    fn forwarded(&self, len: u64) {
-        self.taken(len);
-    }
-    fn input_closed(&self) {}
-    fn diagnostic(&self, bytes: Vec<u8>) {
-        self.send(run_frame::KIT_ERR, &bytes);
-    }
-}
-
-/// Serves agent calls made by a cloud workload (`KIT_OPEN`).
-pub(crate) trait CallHost: Send + Sync + 'static {
-    /// Count a call before its thread starts (so settlement waits for it);
-    /// false once the parent is settling: refuse it.
-    fn begin(&self) -> bool;
-    fn call(&self, request: LinkRequest, input: mpsc::Receiver<Option<Vec<u8>>>, reply: CallReply);
-}
-
-/// Relay queued stdin to the carrier within the acknowledged window and the
-/// helper's framed output back to the caller, acknowledging each delivered
-/// output frame (the stock channel drops output a slow reader leaves behind).
-/// Agent calls from the workload go to `calls`.
-#[allow(clippy::too_many_lines)] // Cooperating stream threads and one join.
-#[allow(clippy::needless_pass_by_value)] // Cloned into each stream thread.
-fn run_carrier(
-    carrier: Attachment,
-    caller: Arc<dyn Caller>,
-    queue: Option<mpsc::Receiver<Option<Vec<u8>>>>,
-    resize: Option<mpsc::Receiver<(u16, u16)>>,
-    calls: Option<Arc<dyn CallHost>>,
-) -> Carried {
-    let Attachment {
-        stdin,
-        stdout,
-        stderr,
-        mut process,
-        ..
-    } = carrier;
-    let input: CarrierInput = Arc::new(Mutex::new(stdin));
-    if let Some(resize) = resize {
-        let input = Arc::clone(&input);
-        thread::spawn(move || {
-            while let Ok((rows, columns)) = resize.recv() {
-                let mut size = rows.to_be_bytes().to_vec();
-                size.extend_from_slice(&columns.to_be_bytes());
-                if carrier_frame(&input, run_frame::RESIZE, &size).is_err() {
-                    break;
-                }
-            }
-        });
-    }
-    let window = Arc::new(Window::default());
-    {
-        let (caller, window, input) =
-            (Arc::clone(&caller), Arc::clone(&window), Arc::clone(&input));
-        thread::spawn(move || {
-            let Some(queue) = queue else {
-                let _ = carrier_frame(&input, run_frame::EOF, &[]);
-                return;
-            };
-            while let Ok(Some(bytes)) = queue.recv() {
-                let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-                if !window.reserve(len) || carrier_frame(&input, run_frame::DATA, &bytes).is_err() {
-                    // The remote command stopped reading: end the input.
-                    caller.input_closed();
-                    return;
-                }
-                caller.forwarded(len);
-            }
-            let _ = carrier_frame(&input, run_frame::EOF, &[]);
-        });
-    }
-    // Delivery to the caller may be slow; the carrier must still be read
-    // promptly (the stock channel drops output left unread). Output waits
-    // here, bounded by the helper's acknowledged window.
-    let (deliver, deliveries) = mpsc::channel::<(u8, Vec<u8>)>();
-    let delivery = {
-        let (caller, input) = (Arc::clone(&caller), Arc::clone(&input));
-        thread::spawn(move || {
-            while let Ok((tag, payload)) = deliveries.recv() {
-                let len = u64::try_from(payload.len()).unwrap_or(u64::MAX);
-                caller.deliver(tag, payload);
-                let _ = carrier_frame(&input, run_frame::OUTPUT_ACK, &len.to_be_bytes());
-            }
-        })
-    };
-    let frames = {
-        let (window, input) = (Arc::clone(&window), Arc::clone(&input));
-        let mut stdout = stdout;
-        thread::spawn(move || {
-            let mut complete = false;
-            let mut inboxes =
-                std::collections::HashMap::<u32, mpsc::Sender<Option<Vec<u8>>>>::new();
-            // Each call's replies have their own window, so a caller that
-            // stops reading stalls only its own call.
-            let mut windows = std::collections::HashMap::<u32, Arc<Window>>::new();
-            while let Ok(Some((tag, payload))) = run_frame::read(&mut stdout) {
-                match tag {
-                    run_frame::STDOUT | run_frame::STDERR => {
-                        let _ = deliver.send((tag, payload));
-                    }
-                    run_frame::ACK => {
-                        window.acknowledge(payload.try_into().map_or(u64::MAX, u64::from_be_bytes));
-                    }
-                    run_frame::END => complete = true,
-                    run_frame::KIT_ACK if payload.len() == 12 => {
-                        let id =
-                            u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
-                        if let Some(window) = windows.get(&id) {
-                            window.acknowledge(
-                                payload[4..].try_into().map_or(u64::MAX, u64::from_be_bytes),
-                            );
-                        }
-                    }
-                    run_frame::KIT_OPEN | run_frame::KIT_IN | run_frame::KIT_IN_EOF
-                        if payload.len() >= 4 =>
-                    {
-                        let id =
-                            u32::from_be_bytes([payload[0], payload[1], payload[2], payload[3]]);
-                        let body = payload[4..].to_vec();
-                        let call_window = Arc::clone(windows.entry(id).or_insert_with(|| {
-                            Arc::new(Window::with_limit(run_frame::CALL_WINDOW))
-                        }));
-                        let reply = CallReply {
-                            id,
-                            input: Arc::clone(&input),
-                            window: call_window,
-                        };
-                        match tag {
-                            run_frame::KIT_OPEN => {
-                                reply.taken(u64::try_from(body.len()).unwrap_or(u64::MAX));
-                                let (sender, inbox) = mpsc::channel();
-                                inboxes.insert(id, sender);
-                                if let (Ok(request), Some(calls)) =
-                                    (serde_json::from_slice::<LinkRequest>(&body), &calls)
-                                    && calls.begin()
-                                {
-                                    let calls = Arc::clone(calls);
-                                    thread::spawn(move || calls.call(request, inbox, reply));
-                                } else {
-                                    reply.stderr("marsh: agent call refused: not available here, or the cloud block is ending\n");
-                                    reply.exit(127);
-                                }
-                            }
-                            run_frame::KIT_IN => {
-                                let len = u64::try_from(body.len()).unwrap_or(u64::MAX);
-                                let delivered = inboxes
-                                    .get(&id)
-                                    .is_some_and(|inbox| inbox.send(Some(body)).is_ok());
-                                if !delivered {
-                                    reply.taken(len);
-                                }
-                            }
-                            _ => {
-                                if let Some(inbox) = inboxes.remove(&id) {
-                                    let _ = inbox.send(None);
-                                }
-                            }
-                        }
-                    }
-                    _ => window.close(),
-                }
-            }
-            window.close();
-            for call in windows.values() {
-                call.close();
-            }
-            // Drain anything after a malformed frame so the carrier can end.
-            let _ = io::copy(&mut stdout, &mut io::sink());
-            complete
-        })
-    };
-    // Helper diagnostics (not workload output) arrive unframed on stderr.
-    let diagnostics = {
-        let caller = Arc::clone(&caller);
-        let mut stderr = stderr;
-        thread::spawn(move || {
-            let mut buffer = vec![0_u8; 64 * 1024];
-            while let Ok(count) = stderr.read(&mut buffer) {
-                if count == 0 {
-                    break;
-                }
-                caller.diagnostic(buffer[..count].to_vec());
-            }
-        })
-    };
-    let code = process.wait().ok();
-    let output_complete = frames.join().unwrap_or(false);
-    let _ = delivery.join();
-    let _ = diagnostics.join();
-    window.close();
-    // Release the carrier's stdin so nothing keeps the exec session open.
-    if let Ok(mut input) = input.lock() {
-        *input = Box::new(io::sink());
-    }
-    Carried {
-        code,
-        output_complete,
-    }
-}
-
 fn run_attached(
     carrier: Attachment,
     attachment: &ServerAttachment,
     relay: &Relay,
     calls: Option<Arc<dyn CallHost>>,
-) -> Carried {
+) -> cloud_call::Carried {
     fn take<T>(slot: &Mutex<Option<T>>) -> Option<T> {
         slot.lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -2048,23 +1375,6 @@ pub(crate) struct Binding {
 struct BindingOverride {
     kit: String,
 }
-
-/// The marsh workspace mixin: creates the caller's natural workspace path,
-/// owned by the Kit's user, at sandbox startup (a Kit sandbox has no root).
-const WORKSPACE_MIXIN: &str = r#"# syntax=docker/sandbox-kit:3@sha256:11bb68806aef6a68d45c10c0c3b3dc86c2f794a296b5a933661d9dadf760b753
-schemaVersion: "3"
-displayName: marsh cloud workspace
-description: Creates the caller's natural workspace path for a marsh cloud placement
-kind: mixin
-capabilities:
-  - type: com.docker.sandbox/lifecycle@1
-    config:
-      startup:
-        - command: [sh, -c, 'case "$MARSH_CLOUD_ROOT" in /?*) [ ! -e "$MARSH_CLOUD_ROOT" ] && mkdir -p "$MARSH_CLOUD_ROOT" && chown agent:agent "$MARSH_CLOUD_ROOT";; esac']
-          user: "0"
-          env: [MARSH_CLOUD_ROOT]
-          description: Create the natural workspace path
-"#;
 
 impl StockDaemonBackend {
     /// Cloud Kits of registered commands: each command's own pinned Kit, or
@@ -2253,7 +1563,6 @@ impl AgentCalls {
         self.done(job);
     }
 
-    #[allow(clippy::too_many_lines)] // One ordered crossing: admit, provision, copy, run, return.
     fn run_call(
         &self,
         request: LinkRequest,
@@ -2297,237 +1606,91 @@ impl AgentCalls {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(job.clone());
         self.store.set_job_args(&job, &request.argv);
-        let not_started = |message: String, cleanup: CleanupState| {
-            reply.stderr(&format!("marsh: {name}: {message}\n"));
-            self.finish(
+        if self.store.cancel_requested(&job) {
+            reply.stderr(&format!("marsh: {name}: cancelled\n"));
+            return self.finish(
                 &job,
                 ExecutionOutcome::NotStarted,
                 125,
-                format!("cloud_setup_failed: {message}"),
-                cleanup,
+                "cloud_setup_failed: cancelled".into(),
+                CleanupState::NotRequired,
                 reply,
             );
-        };
-        if self.store.cancel_requested(&job) {
-            return not_started("cancelled".into(), CleanupState::NotRequired);
         }
         let manifest = match self.adapter.kit_manifest(&binding.kit) {
             Ok(manifest) => manifest,
-            Err(error) => return not_started(actionable(&error), CleanupState::NotRequired),
+            Err(error) => {
+                let message = actionable(&error);
+                reply.stderr(&format!("marsh: {name}: {message}\n"));
+                return self.finish(
+                    &job,
+                    ExecutionOutcome::NotStarted,
+                    125,
+                    format!("cloud_setup_failed: {message}"),
+                    CleanupState::NotRequired,
+                    reply,
+                );
+            }
         };
-        let entry = manifest.entrypoint;
-        let spec = CloudImageSpec {
-            image: binding.kit.clone(),
-            kit: Some(marsh_sbx::cloud::CloudKit {
-                name: manifest.name,
-                mixins: vec![self.mixin.clone()],
-                env: vec![("MARSH_CLOUD_ROOT".into(), self.root.clone())],
-            }),
+        let call = cloud_call::ChildCall {
+            adapter: &self.adapter,
+            kit: &binding.kit,
+            manifest,
+            mixin: &self.mixin,
+            root: &self.root,
             cpus: self.shape.0,
-            memory_mib: self.shape.0 * 2048,
             ttl: self.shape.1,
             stop_on_timeout: false,
+            helper: &self.helper,
+            payload: self.results.join(format!("{job}.delta")),
         };
-        reply.stderr(&format!("[starting a Docker Cloud sandbox: Kit {name}…]\n"));
-        let record = match self.adapter.create(&spec) {
-            Ok(record) => record,
-            Err(CloudError::CreateUncertain {
-                name: created,
-                diagnostic,
-            }) => {
-                // The sandbox may exist; ownership keeps it for cleanup.
-                let cleanup = match self
-                    .adapter
-                    .reconcile()
-                    .ok()
-                    .and_then(|records| records.into_iter().find(|r| r.name == created))
-                    .and_then(|record| record.id)
-                    .map(|id| self.adapter.retire(&id))
-                {
-                    Some(Ok(())) => CleanupState::Verified,
-                    _ => CleanupState::Uncertain,
-                };
-                let error = CloudError::CreateUncertain {
-                    name: created,
-                    diagnostic,
-                };
-                return not_started(actionable(&error), cleanup);
-            }
-            Err(error) => return not_started(actionable(&error), CleanupState::NotRequired),
+        let parent = CallParent {
+            calls: self,
+            job: &job,
         };
-        let Some(id) = record.id.clone() else {
-            return not_started("created sandbox has no ID".into(), CleanupState::Uncertain);
-        };
-        let _ = self.store.record_cloud_sandbox(&job, id.as_str());
-        let retire = || match self.adapter.retire(&id) {
-            Ok(()) => CleanupState::Verified,
-            Err(_) => CleanupState::Uncertain,
-        };
-        let setup_failed = |message: String| {
-            let _ = self.adapter.quarantine(&id);
-            not_started(message, retire());
-        };
-        let child = Ctl { kit: true };
-        if let Err(message) = upload_helper(&self.adapter, &id, &self.helper) {
-            return setup_failed(message);
-        }
-        let (program, words) = child.prepare(&self.root);
-        match retried_step(&self.adapter, &id, &program, &words, None, CONTROL_TIMEOUT) {
-            Ok(step) if step.ok() => {}
-            Ok(step) => return setup_failed(format!("workspace path: {}", step.diagnostic())),
-            Err(message) => return setup_failed(format!("workspace path: {message}")),
-        }
-        let requested = Path::new(std::ffi::OsStr::from_bytes(&request.cwd));
-        let cwd = if requested.starts_with(&self.root)
-            && requested
-                .components()
-                .all(|component| !matches!(component, std::path::Component::ParentDir))
-        {
-            request.cwd.clone()
-        } else {
-            self.root.as_bytes().to_vec()
-        };
-        let mut argv = entry
-            .iter()
-            .map(|word| word.as_bytes().to_vec())
-            .collect::<Vec<_>>();
-        argv.extend(request.argv.iter().cloned());
-        let child_request = CloudRequest {
-            cwd,
-            root: self.root.as_bytes().to_vec(),
-            mode: CloudMode::Argv,
-            argv,
-            env: request
-                .env
-                .into_iter()
-                .filter(|(name, _)| {
-                    marsh_daemon::split::forwardable(name)
-                        && !marsh_contracts::reserved_exported_environment_name(name)
-                        && !marsh_contracts::placement_bound_environment_name(name)
-                        && !LOCAL_ONLY.contains(&name.as_str())
-                })
-                .collect(),
-            terminal: None,
-            kits: Vec::new(),
-            stdin_terminal: false,
-            detached: false,
-        };
-        if let Err(message) = self.copy_view(&id, &child_request) {
-            return setup_failed(format!("copying the block's files: {message}"));
-        }
-        if self.store.cancel_requested(&job) {
-            return setup_failed("cancelled".into());
-        }
-        if let Err(error) = self.store.mark_cloud_running(&job, id.as_str()) {
-            return setup_failed(error.to_string());
-        }
-        self.store
-            .register_job_control(&job, signal_control(&self.adapter, &id, child));
-        let carrier = match spawn_run(&self.adapter, &id, child) {
-            Ok(carrier) => carrier,
-            Err(message) => return setup_failed(message),
-        };
-        let delivered = run_carrier(carrier, Arc::new(reply.clone()), Some(input), None, None);
-        let Some(exit_code) = confirm_status(&self.adapter, &id, child) else {
-            reply.stderr(&format!(
-                "marsh: {name}: lost the call before it was confirmed ended; nothing was written back\n"
-            ));
-            let _ = self.adapter.quarantine(&id);
-            let cleanup = retire();
-            return self.finish(
-                &job,
-                ExecutionOutcome::Unknown,
-                125,
-                format!("transport_lost: carrier exit {:?}", delivered.code),
-                cleanup,
-                reply,
-            );
-        };
-        // Capture, retire, then return the changes to the block's live view.
-        let payload = self.results.join(format!("{job}.delta"));
-        if let Err(message) = capture_delta(
-            &self.adapter,
-            &id,
-            child,
-            &self.root,
-            &self.results,
-            &payload,
-        ) {
-            let _ = fs::remove_file(&payload);
-            let _ = self.adapter.quarantine(&id);
-            reply.stderr(&format!(
-                "marsh: {name}: could not download its file changes: {message}; the sandbox {} is kept\n",
-                id.as_str()
-            ));
-            return self.finish(
-                &job,
-                ExecutionOutcome::Exited { code: exit_code },
-                125,
-                format!("capture_failed: {message}; sandbox retained"),
-                CleanupState::Uncertain,
-                reply,
-            );
-        }
-        let cleanup = retire();
-        let sealed = self
-            .sealed
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let applied = if *sealed {
-            Err("the cloud block ended before the call returned".to_owned())
-        } else {
-            self.apply(&payload)
-        };
-        drop(sealed);
-        let (code, cause) = match applied {
-            Ok(summary) => {
-                let _ = fs::remove_file(&payload);
-                if !summary.is_empty() {
-                    reply.stderr(&format!("marsh: {name}: {summary}\n"));
-                }
-                if delivered.output_complete {
-                    (exit_code, "exited".to_owned())
-                } else {
-                    reply.stderr(&format!("marsh: {name}: its output did not all arrive\n"));
-                    (125, "output_incomplete".to_owned())
-                }
-            }
-            Err(message) => {
-                reply.stderr(&format!(
-                    "marsh: {name}: write-back stopped: {message}; the full delta is kept at {}\n",
-                    payload.display()
-                ));
-                (125, format!("write_back_failed: {message}"))
-            }
-        };
+        let outcome = cloud_call::run_child(
+            &call,
+            &parent,
+            &name,
+            request,
+            input,
+            Arc::new(reply.clone()),
+        );
         self.finish(
             &job,
-            ExecutionOutcome::Exited { code: exit_code },
-            code,
-            cause,
-            cleanup,
+            outcome.execution,
+            outcome.code,
+            outcome.cause,
+            outcome.cleanup,
             reply,
         );
     }
+}
 
-    /// Stream the parent's current files (`archive`) into the agent sandbox
-    /// (`unpack`), never through host storage.
-    fn copy_view(&self, child: &CloudSandboxId, request: &CloudRequest) -> Result<(), String> {
-        let request = serde_json::to_vec(request).map_err(|e| e.to_string())?;
+/// The laptop's side of one call: the parent sandbox over stock exec, and
+/// the call's job receipt.
+struct CallParent<'a> {
+    calls: &'a AgentCalls,
+    job: &'a str,
+}
+
+impl cloud_call::ChildParent for CallParent<'_> {
+    fn archive(&self, request: Vec<u8>) -> Result<cloud_call::Archive, String> {
+        let calls = self.calls;
         let (program, args) =
-            self.parent_ctl
-                .as_workload(&["--internal-cloud", "archive", &self.root]);
-        let parent = self
-            .adapter
-            .spawn(&self.parent, &program, &os_args(&args))
-            .map_err(|e| actionable(&e))?;
+            calls
+                .parent_ctl
+                .as_workload(&["--internal-cloud", "archive", &calls.root]);
         let Attachment {
             mut stdin,
             stdout,
             stderr,
             mut process,
             ..
-        } = parent;
+        } = calls
+            .adapter
+            .spawn(&calls.parent, &program, &os_args(&args))
+            .map_err(|e| actionable(&e))?;
         stdin.write_all(&request).map_err(|e| e.to_string())?;
         drop(stdin);
         let errors = thread::spawn(move || {
@@ -2535,166 +1698,64 @@ impl AgentCalls {
             let _ = read_bounded(stderr, &mut bytes, 64 * 1024);
             bytes
         });
-        let script = Ctl { kit: true }.unpack_script();
-        let unpack = self
-            .adapter
-            .spawn(
-                child,
-                "/bin/sh",
-                &[
-                    "-c".into(),
-                    script.into(),
-                    "sh".into(),
-                    self.root.clone().into(),
-                ],
-            )
-            .map_err(|e| actionable(&e))?;
-        let unpacked = step(unpack, Some(stdout), Box::new(io::sink()), 0, STEP_TIMEOUT);
-        let archived = process.wait().map_err(|e| e.to_string())?;
-        let diagnostic = String::from_utf8_lossy(&errors.join().unwrap_or_default()).into_owned();
-        match unpacked {
-            Ok(step) if step.ok() && archived == 0 => Ok(()),
-            Ok(step) => Err(format!("{} {}", diagnostic.trim(), step.diagnostic())
-                .trim()
-                .to_owned()),
-            Err(message) => Err(message),
-        }
+        Ok(cloud_call::Archive {
+            stdout,
+            finish: Box::new(move || {
+                let code = process.wait().map_err(|e| e.to_string())?;
+                let diagnostic =
+                    String::from_utf8_lossy(&errors.join().unwrap_or_default()).into_owned();
+                if code == 0 {
+                    Ok(())
+                } else {
+                    Err(diagnostic.trim().to_owned())
+                }
+            }),
+        })
     }
 
-    /// Apply a returned delta in the parent as its workload user; the summary.
+    /// Apply in the parent as its workload user, unless the parent's capture
+    /// has begun (a late result is kept instead).
     fn apply(&self, payload: &Path) -> Result<String, String> {
+        let calls = self.calls;
+        let sealed = calls
+            .sealed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *sealed {
+            return Err("the cloud block ended before the call returned".to_owned());
+        }
         let file = fs::File::open(payload).map_err(|e| e.to_string())?;
         let (program, args) =
-            self.parent_ctl
-                .as_workload(&["--internal-cloud", "apply", &self.root]);
+            calls
+                .parent_ctl
+                .as_workload(&["--internal-cloud", "apply", &calls.root]);
         let step = small_step(
-            &self.adapter,
-            &self.parent,
+            &calls.adapter,
+            &calls.parent,
             &program,
             &args,
             Some(Box::new(file)),
             STEP_TIMEOUT,
         )?;
-        let report: serde_json::Value =
-            serde_json::from_slice(&step.stdout).unwrap_or(serde_json::Value::Null);
-        let count = |key: &str| report[key].as_u64().unwrap_or(0);
-        let applied = ApplyReport {
-            created: count("created"),
-            modified: count("modified"),
-            deleted: count("deleted"),
-            kept: report["kept"]
-                .as_array()
-                .map(|kept| {
-                    kept.iter()
-                        .filter_map(|k| k.as_str().map(ToOwned::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default(),
-            listings: std::collections::BTreeSet::new(),
-        };
-        match report["error"].as_str() {
-            Some(error) => Err(format!("{error}; {} already written", summary(&applied))),
-            None if !step.ok() => Err(step.diagnostic()),
-            None if applied.total() == 0 && applied.kept.is_empty() => Ok(String::new()),
-            None => Ok(summary(&applied)),
-        }
+        drop(sealed);
+        cloud_call::apply_report(&step.stdout, step.ok(), &step.diagnostic())
     }
-}
 
-/// Upload the gzip helper to a fresh sandbox and check its digest.
-fn upload_helper(
-    adapter: &CloudSbx,
-    id: &CloudSandboxId,
-    helper: &(Vec<u8>, String),
-) -> Result<(), String> {
-    let (bytes, digest) = helper;
-    match retried_step(
-        adapter,
-        id,
-        "/bin/sh",
-        &[
-            "-c",
-            "PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH; umask 077 && mkdir -p /tmp/marsh-cloud && gzip -dc > /tmp/marsh-cloud/marsh-local && chmod 700 /tmp/marsh-cloud/marsh-local && sha256sum /tmp/marsh-cloud/marsh-local",
-        ],
-        Some(bytes),
-        STEP_TIMEOUT,
-    ) {
-        Ok(step)
-            if step.ok() && String::from_utf8_lossy(&step.stdout).starts_with(digest.as_str()) =>
-        {
-            Ok(())
-        }
-        Ok(step) => Err(format!("helper upload failed: {}", step.diagnostic())),
-        Err(message) => Err(format!("helper upload failed: {message}")),
+    fn cancelled(&self) -> bool {
+        self.calls.store.cancel_requested(self.job)
     }
-}
 
-/// The job control that signals a node's workload (INT, TERM, KILL).
-fn signal_control(adapter: &Arc<CloudSbx>, id: &CloudSandboxId, ctl: Ctl) -> JobControl {
-    let (adapter, id) = (Arc::clone(adapter), id.clone());
-    JobControl(Arc::new(move |signal: &str| {
-        let signal = match signal {
-            "KILL" => "KILL",
-            "TERM" | "HUP" => "TERM",
-            _ => "INT",
-        };
-        let (adapter, id) = (Arc::clone(&adapter), id.clone());
-        thread::spawn(move || {
-            let (program, args) = ctl.step(&["--internal-cloud", "signal", signal]);
-            let _ = retried_step(&adapter, &id, &program, &args, None, CONTROL_TIMEOUT);
-        });
-    }))
-}
+    fn created(&self, id: &CloudSandboxId) {
+        let _ = self.calls.store.record_cloud_sandbox(self.job, id.as_str());
+    }
 
-/// The recorded status: present only once every workload writer is gone.
-fn confirm_status(adapter: &CloudSbx, id: &CloudSandboxId, ctl: Ctl) -> Option<i32> {
-    let (program, args) = ctl.step(&["--internal-cloud", "status"]);
-    retried_step(adapter, id, &program, &args, None, CONTROL_TIMEOUT)
-        .ok()
-        .filter(Step::ok)
-        .and_then(|step| {
-            String::from_utf8_lossy(&step.stdout)
-                .trim()
-                .parse::<i32>()
-                .ok()
-        })
-}
-
-/// Download the node's delta into owner-only retained storage.
-fn capture_delta(
-    adapter: &CloudSbx,
-    id: &CloudSandboxId,
-    ctl: Ctl,
-    root: &str,
-    results: &Path,
-    payload: &Path,
-) -> Result<(), String> {
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(results)
-        .map_err(|e| e.to_string())?;
-    let file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(payload)
-        .map_err(|e| e.to_string())?;
-    let (program, args) = ctl.step(&["--internal-cloud", "delta", root, "-"]);
-    let attachment = adapter
-        .spawn(id, &program, &os_args(&args))
-        .map_err(|e| actionable(&e))?;
-    let step = step(
-        attachment,
-        None,
-        Box::new(io::BufWriter::new(file)),
-        MAX_ARCHIVE,
-        STEP_TIMEOUT,
-    )?;
-    if step.ok() {
+    fn running(&self, id: &CloudSandboxId, control: JobControl) -> Result<(), String> {
+        self.calls
+            .store
+            .mark_cloud_running(self.job, id.as_str())
+            .map_err(|error| error.to_string())?;
+        self.calls.store.register_job_control(self.job, control);
         Ok(())
-    } else {
-        Err(step.diagnostic())
     }
 }
 

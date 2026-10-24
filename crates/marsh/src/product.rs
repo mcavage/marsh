@@ -829,6 +829,7 @@ fn write_results(writer: &mut impl Write, value: serde_json::Value) -> Result<()
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // One receipt, field by field.
 fn write_result(writer: &mut impl Write, value: serde_json::Value) -> Result<(), ProductError> {
     let children = value
         .get("children")
@@ -859,6 +860,22 @@ fn write_result(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
     )?;
     if let Some(detached) = &receipt.detached {
         writeln!(writer, "  detached:   {detached}")?;
+    }
+    for call in &receipt.cloud_children {
+        let words = std::iter::once(call.kit.as_str())
+            .chain(call.args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
+        writeln!(
+            writer,
+            "  agent call: {words} (exit {}){}",
+            call.exit,
+            if call.summary.is_empty() {
+                String::new()
+            } else {
+                format!("; {}", call.summary)
+            }
+        )?;
     }
     writeln!(writer, "  execution:  {}", typed_value(&receipt.execution)?)?;
     writeln!(writer, "  status:     {}", state_name(receipt.state)).map_err(ProductError::from)?;

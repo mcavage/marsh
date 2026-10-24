@@ -6,9 +6,10 @@
 //! and writes `done`. Later steps only read (`state`, `tail`, `fetch`,
 //! `baseline`) or signal; none starts the workload again.
 
+use super::coordinator::{self, Coordinator};
 use super::{
-    CloudRequest, delta, helper_path, kill_workload, link_dir, privileged, record_status, run_user,
-    state_dir, state_path, workload_command,
+    CloudRequest, delta, helper_path, kill_workload, link_dir, prepare_links, privileged,
+    record_status, run_user, state_dir, state_path, workload_command,
 };
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead as _, BufReader, Read as _, Seek as _, SeekFrom, Write as _};
@@ -22,7 +23,8 @@ use std::process::{Command, Stdio};
 pub(super) const SPOOL_CAP: u64 = 256 << 20;
 /// The most one `tail` step returns.
 pub(super) const TAIL_CHUNK: u64 = 512 << 10;
-/// Set for a detached workload: command links refuse instead of relaying.
+/// Set for a detached workload without a coordinator (cloud-delegate off):
+/// command links refuse instead of relaying.
 pub(super) const DETACHED_VARIABLE: &str = "MARSH_CLOUD_DETACHED";
 
 /// `run --detached`: claim the at-most-once start, start the supervisor in
@@ -39,8 +41,20 @@ pub(super) fn run() -> i32 {
         eprintln!("marsh cloud: the command was already started in this sandbox: {error}");
         return 125;
     }
-    let child = Command::new(helper_path())
-        .args(["--internal-cloud", "supervise"])
+    let mut command = Command::new(helper_path());
+    command.args(["--internal-cloud", "supervise"]);
+    // Agent sandboxes are named as the laptop's own (`MARSH_VM_PREFIX`).
+    if let Some(prefix) = state_dir()
+        .ok()
+        .and_then(|state| fs::read(state.join("request")).ok())
+        .and_then(|bytes| serde_json::from_slice::<CloudRequest>(&bytes).ok())
+        .and_then(|request| request.delegate)
+        .map(|plan| plan.vm_prefix)
+        .filter(|prefix| marsh_sbx::valid_vm_prefix(prefix))
+    {
+        command.env("MARSH_VM_PREFIX", prefix);
+    }
+    let child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -121,6 +135,7 @@ type Supervised = (
     u32,
     Vec<std::thread::JoinHandle<()>>,
     PathBuf,
+    Option<std::sync::Arc<Coordinator>>,
 );
 
 /// The supervisor: in its own session, owned by the control user, outside
@@ -153,16 +168,30 @@ pub(super) fn supervise() -> i32 {
             serde_json::from_slice(&fs::read(state.join("request"))?).map_err(io::Error::other)?;
         let root = request_root(&request);
         let stubs = !request.kits.is_empty();
-        if stubs {
-            prepare_stubs(&request.kits)?;
-        }
+        // With cloud-delegate on, this supervisor serves the command links
+        // (before the workload starts: a refused token refuses the run).
+        let coordinator = match request.delegate.clone() {
+            Some(plan) if stubs => {
+                let coordinator = Coordinator::start(&request, plan, user.clone())?;
+                coordinator.serve(prepare_links(&request.kits, &user)?);
+                Some(coordinator)
+            }
+            _ => {
+                if stubs {
+                    prepare_stubs(&request.kits)?;
+                }
+                None
+            }
+        };
         let spools = vec![
             Spool::create(&state, 1, SPOOL_CAP)?,
             Spool::create(&state, 2, SPOOL_CAP)?,
         ];
         let mut command = workload_command(&request, &user, false, stubs)?;
+        if coordinator.is_none() {
+            command.env(DETACHED_VARIABLE, "1");
+        }
         command
-            .env(DETACHED_VARIABLE, "1")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -200,9 +229,9 @@ pub(super) fn supervise() -> i32 {
                 }
             }));
         }
-        Ok((child, group, user.uid.as_raw(), pumps, root))
+        Ok((child, group, user.uid.as_raw(), pumps, root, coordinator))
     })();
-    let (mut child, group, uid, pumps, root) = match started {
+    let (mut child, group, uid, pumps, root, coordinator) = match started {
         Ok(started) => started,
         Err(error) => {
             report(&format!("failed: {error}"));
@@ -212,6 +241,9 @@ pub(super) fn supervise() -> i32 {
     };
     report("started");
     let status = child.wait();
+    if let Some(coordinator) = &coordinator {
+        coordinator.seal();
+    }
     let _ = nix::sys::signal::killpg(
         nix::unistd::Pid::from_raw(group),
         nix::sys::signal::Signal::SIGKILL,
@@ -224,7 +256,18 @@ pub(super) fn supervise() -> i32 {
         Err(_) => 125,
     };
     let state = state_path();
-    if !kill_workload(uid) {
+    let stopped = kill_workload(uid);
+    // Agent calls end with the run: every agent sandbox is deleted before
+    // `done` (one that cannot be is listed by `state` for the laptop).
+    if let Some(coordinator) = &coordinator
+        && !coordinator.settle()
+    {
+        let _ = fs::write(
+            state.join("children-left"),
+            "some agent sandboxes could not be deleted",
+        );
+    }
+    if !stopped {
         let _ = fs::write(state.join("failed"), "workload processes did not stop");
         let _ = fs::write(state.join("done"), b"");
         return 125;
@@ -238,8 +281,8 @@ pub(super) fn supervise() -> i32 {
     0
 }
 
-/// Command links in a detached run: each refuses (there is no laptop
-/// relay to serve an agent call).
+/// Command links in a detached run without a coordinator: each refuses
+/// (there is no laptop relay to serve an agent call).
 fn prepare_stubs(kits: &[String]) -> io::Result<()> {
     let dir = &link_dir();
     let bin = dir.join("bin");
@@ -469,6 +512,9 @@ pub(super) fn state() {
         "delta": fs::metadata(state.join("result.delta")).ok().map(|metadata| metadata.len()),
         "stdout": streams[0],
         "stderr": streams[1],
+        "delegate": exists(coordinator::DELEGATE_FILE),
+        "children": coordinator::call_records(&state),
+        "sandboxes": coordinator::owned_sandboxes(&state),
     });
     println!("{document}");
 }

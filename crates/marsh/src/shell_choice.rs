@@ -109,7 +109,7 @@ pub fn resolve(
     Ok(configured(scope_root)?.unwrap_or_default())
 }
 
-pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n       marsh config auto-update [on|off]\n       marsh config open-urls [on|off]\n\nshell        Show or set this home's default interactive shell. `marsh` (the\n             default) is marsh's Brush; `bash` and `zsh` are the shell VM's own,\n             started with your ~/.bashrc or ~/.zshrc from the selected home. One\n             launch may override it with --shell NAME or MARSH_SHELL=NAME.\nauto-update  Show or set whether Kits that follow a tag update themselves, and\n             whether hermes and pix appear by themselves (default on).\n             MARSH_AUTO_UPDATE=0 at daemon start also turns it off.\nopen-urls    Show or set whether `xdg-open URL` in a shell or job started from\n             your terminal opens the link on your Mac (default on). Off, the\n             link is only printed. MARSH_OPEN_URLS=0 at daemon start also\n             turns it off.\n\nStored in $MARSH_HOME/config.json. Run a script named `config` as\n`marsh ./config`.\n";
+pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n       marsh config auto-update [on|off]\n       marsh config open-urls [on|off]\n       marsh config cloud-delegate [on|off]\n\nshell        Show or set this home's default interactive shell. `marsh` (the\n             default) is marsh's Brush; `bash` and `zsh` are the shell VM's own,\n             started with your ~/.bashrc or ~/.zshrc from the selected home. One\n             launch may override it with --shell NAME or MARSH_SHELL=NAME.\nauto-update  Show or set whether Kits that follow a tag update themselves, and\n             whether hermes and pix appear by themselves (default on).\n             MARSH_AUTO_UPDATE=0 at daemon start also turns it off.\nopen-urls    Show or set whether `xdg-open URL` in a shell or job started from\n             your terminal opens the link on your Mac (default on). Off, the\n             link is only printed. MARSH_OPEN_URLS=0 at daemon start also\n             turns it off.\ncloud-delegate\n             Show or set whether a detached cloud run (`cloud -d`) may start\n             agent sandboxes itself (default off). On, marsh uploads the Docker\n             access token stored in your Keychain (`security add-generic-password\n             -s marsh-cloud-delegate -a YOUR_DOCKER_ID -w`) into the run's\n             root-only state; it can use all of your Docker Cloud sandboxes\n             and quota. See docs/cloud.md.\n\nStored in $MARSH_HOME/config.json. Run a script named `config` as\n`marsh ./config`.\n";
 
 /// `auto_update` in `config.json`; read by the daemon (`docs/kits.md`).
 pub const AUTO_UPDATE_KEY: &str = "auto_update";
@@ -134,17 +134,33 @@ pub fn open_urls(scope_root: &Path) -> Result<bool, String> {
     config_switch(scope_root, OPEN_URLS_KEY)
 }
 
+/// `cloud_delegate` in `config.json`; read by the daemon at a detached
+/// cloud run's start (`docs/cloud.md`).
+pub const CLOUD_DELEGATE_KEY: &str = marsh_daemon::cloud_delegate::CONFIG_KEY;
+
+/// Whether detached cloud runs may start agent sandboxes (default off).
+///
+/// # Errors
+/// Reports an unreadable or malformed config file.
+pub fn cloud_delegate(scope_root: &Path) -> Result<bool, String> {
+    config_switch_default(scope_root, CLOUD_DELEGATE_KEY, false)
+}
+
 fn config_switch(scope_root: &Path, key: &str) -> Result<bool, String> {
+    config_switch_default(scope_root, key, true)
+}
+
+fn config_switch_default(scope_root: &Path, key: &str, default: bool) -> Result<bool, String> {
     let path = scope_root.join(CONFIG_FILE);
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(default),
         Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
     };
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid {}: {error}", path.display()))?;
     match value.get(key) {
-        None | Some(serde_json::Value::Null) => Ok(true),
+        None | Some(serde_json::Value::Null) => Ok(default),
         Some(serde_json::Value::Bool(on)) => Ok(*on),
         Some(_) => Err(format!(
             "invalid {}: {key} must be true or false",
@@ -183,11 +199,16 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
             println!("{}", if on { "on" } else { "off" });
             Ok(0)
         }
-        [key @ ("auto-update" | "open-urls"), value @ ("on" | "off")] => {
-            let key = if *key == "auto-update" {
-                AUTO_UPDATE_KEY
-            } else {
-                OPEN_URLS_KEY
+        ["cloud-delegate"] => {
+            let on = cloud_delegate(scope_root).map_err(|message| (message, 1))?;
+            println!("{}", if on { "on" } else { "off" });
+            Ok(0)
+        }
+        [key @ ("auto-update" | "open-urls" | "cloud-delegate"), value @ ("on" | "off")] => {
+            let key = match *key {
+                "auto-update" => AUTO_UPDATE_KEY,
+                "open-urls" => OPEN_URLS_KEY,
+                _ => CLOUD_DELEGATE_KEY,
             };
             write_config(scope_root, key, (*value == "on").into()).map_err(
                 |error| {
@@ -219,7 +240,7 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
             Ok(0)
         }
         _ => Err((
-            "usage: marsh config shell [marsh|bash|zsh] | marsh config auto-update [on|off] | marsh config open-urls [on|off]"
+            "usage: marsh config shell [marsh|bash|zsh] | marsh config auto-update [on|off] | marsh config open-urls [on|off] | marsh config cloud-delegate [on|off]"
                 .to_owned(),
             2,
         )),
@@ -503,6 +524,26 @@ mod tests {
             Ok(0)
         );
         assert_eq!(auto_update(&root), Ok(true));
+    }
+
+    #[test]
+    fn cloud_delegate_is_off_by_default_and_the_daemon_reads_the_same_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("home");
+        assert_eq!(cloud_delegate(&root), Ok(false));
+        let config = root.join(CONFIG_FILE);
+        assert!(!marsh_daemon::cloud_delegate::configured(&config));
+        assert_eq!(
+            config_command(&["cloud-delegate".into(), "on".into()], &root),
+            Ok(0)
+        );
+        assert_eq!(cloud_delegate(&root), Ok(true));
+        assert!(marsh_daemon::cloud_delegate::configured(&config));
+        assert_eq!(
+            config_command(&["cloud-delegate".into(), "off".into()], &root),
+            Ok(0)
+        );
+        assert!(!marsh_daemon::cloud_delegate::configured(&config));
     }
 
     #[test]
