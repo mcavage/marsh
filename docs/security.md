@@ -179,6 +179,21 @@ Agents running agents
   and credentials. Narrow this with `MARSH_SPAWN=codex,pi` (a comma-separated
   list, or `none`) or `marsh run --spawn a,b NAME`. Nothing inside a job can widen it.
 
+Detached cloud runs with `cloud-delegate` on
+: Off by default. On, each detached cloud run that can call a registered Kit
+  carries your Docker access token (Allow Cloud Sandboxes access) in a
+  root-only file in its sandbox, so its supervisor can start agent sandboxes.
+  That access is all or nothing: anyone holding the token can create, use,
+  and delete every cloud sandbox on your account and spend its quota. The
+  run's commands run as an unprivileged user without `sudo` and cannot read
+  the file; they can only ask the supervisor to start one of the run's own
+  Kits, within a per-run cap and the run's time limit. What remains exposed
+  is the sandbox itself (its disk holds the file until the sandbox is
+  deleted) and the supervisor. marsh reads the token from your Keychain only
+  at a run's start and passes it on one root-only step's stdin; it is not in
+  requests, records, receipts, logs, or command lines. See
+  [Docker Cloud](cloud.md#agents-calling-agents-with-the-lid-closed).
+
 MCP and ACP publications
 : Every client that loads a published pipeline can run it with your project's
   shell privileges. A published session gives its callers control of that

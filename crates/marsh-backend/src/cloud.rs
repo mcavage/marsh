@@ -229,6 +229,28 @@ impl CloudPlacement {
     }
 }
 
+/// What a detached run's coordinator may do: exactly the Kits this node
+/// resolved (their pinned cloud forms), the cap, and the time limit. The
+/// token is not part of it.
+fn delegate_plan(
+    token: &marsh_daemon::cloud_delegate::DelegateToken,
+    bindings: &BTreeMap<String, Binding>,
+    ttl: Duration,
+    cpus: u32,
+) -> marsh_contracts::cloud::DelegatePlan {
+    marsh_contracts::cloud::DelegatePlan {
+        kits: bindings
+            .iter()
+            .map(|(name, binding)| (name.clone(), binding.kit.as_str().to_owned()))
+            .collect(),
+        max_children: marsh_daemon::cloud_delegate::max_children(),
+        ttl_seconds: ttl.as_secs(),
+        cpus,
+        account: token.account.clone(),
+        vm_prefix: marsh_sbx::vm_prefix().to_owned(),
+    }
+}
+
 /// The caller's words: the arguments without the client's internal
 /// `--stdin-terminal` and `--direct N WORD...` (always ahead of the command).
 fn caller_words(arguments: &[Vec<u8>]) -> Vec<Vec<u8>> {
@@ -374,6 +396,62 @@ fn parse(arguments: &[Vec<u8>]) -> Result<(Options, CloudMode, Vec<Vec<u8>>), Da
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The token reaches the sandbox only on one step's stdin: no
+    /// serialized form marsh writes (the request in the snapshot, the
+    /// detached record, the receipt) or prints carries it.
+    #[test]
+    fn the_delegate_token_is_never_serialized() {
+        const SECRET: &str = "dckr_pat_NEVER_SERIALIZED_42";
+        let token = marsh_daemon::cloud_delegate::DelegateToken::new(
+            "someone",
+            SECRET.as_bytes().to_vec(),
+        )
+        .unwrap();
+        let kit = OciImage::parse(format!("docker.io/docker/codex@sha256:{}", "c".repeat(64)))
+            .unwrap();
+        let bindings = BTreeMap::from([(
+            "codex".to_owned(),
+            Binding {
+                kit: kit.clone(),
+                identity: "codex-identity".into(),
+            },
+        )]);
+        let plan = delegate_plan(&token, &bindings, Duration::from_hours(2), 2);
+        assert_eq!(plan.kits["codex"], kit.as_str());
+        assert_eq!((plan.ttl_seconds, plan.account.as_str()), (7200, "someone"));
+        let request = CloudRequest {
+            cwd: b"/p".to_vec(),
+            root: b"/p".to_vec(),
+            mode: CloudMode::Shell,
+            argv: vec![b"-c".to_vec(), b"codex exec x".to_vec()],
+            env: BTreeMap::new(),
+            terminal: None,
+            kits: vec!["codex".into()],
+            stdin_terminal: false,
+            detached: true,
+            delegate: Some(plan.clone()),
+        };
+        let mut receipt_calls = vec![marsh_daemon::CloudChildCall {
+            kit: "codex".into(),
+            args: vec!["exec".into(), "x".into()],
+            exit: 0,
+            summary: "wrote back 1 change".into(),
+        }];
+        receipt_calls.push(marsh_daemon::CloudChildCall::default());
+        let forms = [
+            serde_json::to_string(&request).unwrap(),
+            serde_json::to_string(&plan).unwrap(),
+            serde_json::to_string(&receipt_calls).unwrap(),
+            format!("{request:?}"),
+            format!("{token:?}"),
+        ];
+        for form in &forms {
+            assert!(!form.contains(SECRET), "{form}");
+        }
+        // The upload is the only place it appears.
+        assert!(String::from_utf8(token.upload_bytes()).unwrap().contains(SECRET));
+    }
 
     #[test]
     fn options_precede_the_command_and_are_bounded() {
@@ -736,17 +814,7 @@ impl StockDaemonBackend {
             delegate: delegate
                 .as_ref()
                 .filter(|_| !bindings.is_empty())
-                .map(|token| marsh_contracts::cloud::DelegatePlan {
-                    kits: bindings
-                        .iter()
-                        .map(|(name, binding)| (name.clone(), binding.kit.as_str().to_owned()))
-                        .collect(),
-                    max_children: marsh_daemon::cloud_delegate::max_children(),
-                    ttl_seconds: options.ttl.as_secs(),
-                    cpus: options.cpus,
-                    account: token.account.clone(),
-                    vm_prefix: marsh_sbx::vm_prefix().to_owned(),
-                }),
+                .map(|token| delegate_plan(token, &bindings, options.ttl, options.cpus)),
         };
         let delegated = cloud_request.delegate.clone();
 

@@ -264,18 +264,72 @@ pub(super) fn owned_sandboxes(state: &Path) -> Vec<serde_json::Value> {
         .unwrap_or_default()
 }
 
+/// The coordinator's guardrails, decided on the laptop (the plan): which
+/// Kits, how many agent sandboxes, and how long each may run.
+struct Guard {
+    plan: DelegatePlan,
+    started_at: Instant,
+    /// Agent sandboxes admitted so far (refused calls do not count).
+    started: Mutex<u32>,
+}
+
+impl Guard {
+    fn new(plan: DelegatePlan) -> Self {
+        Self {
+            plan,
+            started_at: Instant::now(),
+            started: Mutex::new(0),
+        }
+    }
+
+    /// Admit one call: an allowed Kit (its pinned reference) within the cap.
+    fn admit(&self, name: &str) -> Result<String, (i32, String)> {
+        let Some(kit) = self.plan.kits.get(name) else {
+            return Err((
+                127,
+                format!("marsh: {name}: not available in this detached cloud run\n"),
+            ));
+        };
+        let mut started = self
+            .started
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *started >= self.plan.max_children {
+            return Err((
+                125,
+                format!(
+                    "marsh: {name}: refused: this detached run has started {} agent sandboxes, its limit (MARSH_CLOUD_CHILDREN)\n",
+                    self.plan.max_children
+                ),
+            ));
+        }
+        *started += 1;
+        Ok(kit.clone())
+    }
+
+    /// What remains of the run's time limit after `elapsed` (at least the
+    /// stock minimum of one minute).
+    fn ttl_after(&self, elapsed: Duration) -> Duration {
+        Duration::from_secs(self.plan.ttl_seconds)
+            .saturating_sub(elapsed)
+            .max(Duration::from_mins(1))
+            .min(Duration::from_hours(24))
+    }
+
+    fn ttl(&self) -> Duration {
+        self.ttl_after(self.started_at.elapsed())
+    }
+}
+
 pub(super) struct Coordinator {
     adapter: Arc<CloudSbx>,
-    plan: DelegatePlan,
+    guard: Guard,
     root: String,
     user: nix::unistd::User,
     helper: (Vec<u8>, String),
     mixin: PathBuf,
     results: PathBuf,
     state: PathBuf,
-    started_at: Instant,
-    /// Agent sandboxes started (admitted) so far.
-    started: Mutex<u32>,
     pending: Mutex<usize>,
     idle: Condvar,
     controls: Mutex<BTreeMap<u32, JobControl>>,
@@ -326,7 +380,7 @@ impl Coordinator {
         let results = private_directory(&children.join("results"))?;
         Ok(Arc::new(Self {
             adapter,
-            plan,
+            guard: Guard::new(plan),
             root: String::from_utf8(request.root.clone())
                 .map_err(|_| io::Error::other("the workspace path is not UTF-8"))?,
             user,
@@ -334,8 +388,6 @@ impl Coordinator {
             mixin,
             results,
             state,
-            started_at: Instant::now(),
-            started: Mutex::new(0),
             pending: Mutex::new(0),
             idle: Condvar::new(),
             controls: Mutex::new(BTreeMap::new()),
@@ -431,40 +483,12 @@ impl Coordinator {
         clean
     }
 
-    fn remaining_ttl(&self) -> Duration {
-        let limit = Duration::from_secs(self.plan.ttl_seconds);
-        limit
-            .saturating_sub(self.started_at.elapsed())
-            .max(Duration::from_mins(1))
-            .min(Duration::from_hours(24))
-    }
-
-    /// Admit one call: an allowed Kit within the cap.
+    /// Admit one call: refused once the run is ending, else as the guard says.
     fn admit(&self, name: &str) -> Result<String, (i32, String)> {
-        let Some(kit) = self.plan.kits.get(name) else {
-            return Err((
-                127,
-                format!("marsh: {name}: not available in this detached cloud run\n"),
-            ));
-        };
         if self.closing.load(Ordering::Acquire) {
             return Err((125, format!("marsh: {name}: refused: the run is ending\n")));
         }
-        let mut started = self
-            .started
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if *started >= self.plan.max_children {
-            return Err((
-                125,
-                format!(
-                    "marsh: {name}: refused: this detached run has started {} agent sandboxes, its limit (MARSH_CLOUD_CHILDREN)\n",
-                    self.plan.max_children
-                ),
-            ));
-        }
-        *started += 1;
-        Ok(kit.clone())
+        self.guard.admit(name)
     }
 
     #[allow(clippy::needless_pass_by_value)] // The call owns its connection until it ends.
@@ -561,8 +585,8 @@ impl Coordinator {
             manifest,
             mixin: &self.mixin,
             root: &self.root,
-            cpus: self.plan.cpus,
-            ttl: self.remaining_ttl(),
+            cpus: self.guard.plan.cpus,
+            ttl: self.guard.ttl(),
             stop_on_timeout: true,
             helper: &self.helper,
             payload: self.results.join(format!("{id}.delta")),
@@ -742,6 +766,51 @@ fn refuse(stream: &UnixStream, code: i32, message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn plan(max_children: u32) -> DelegatePlan {
+        DelegatePlan {
+            kits: BTreeMap::from([(
+                "codex".to_owned(),
+                format!("docker.io/docker/codex@sha256:{}", "c".repeat(64)),
+            )]),
+            max_children,
+            ttl_seconds: 7200,
+            cpus: 2,
+            account: "someone".into(),
+            vm_prefix: "marsh-".into(),
+        }
+    }
+
+    #[test]
+    fn only_the_runs_kits_start_and_never_past_the_cap() {
+        let guard = Guard::new(plan(8));
+        assert!(matches!(guard.admit("claude"), Err((127, _))));
+        for _ in 0..8 {
+            assert_eq!(
+                guard.admit("codex").unwrap(),
+                format!("docker.io/docker/codex@sha256:{}", "c".repeat(64))
+            );
+        }
+        let (code, message) = guard.admit("codex").unwrap_err();
+        assert_eq!(code, 125);
+        assert!(message.contains("limit (MARSH_CLOUD_CHILDREN)"), "{message}");
+        // A refused name never used a slot.
+        let guard = Guard::new(plan(1));
+        assert!(guard.admit("pi").is_err());
+        assert!(guard.admit("codex").is_ok());
+    }
+
+    #[test]
+    fn a_child_gets_what_remains_of_the_runs_time_limit() {
+        let guard = Guard::new(plan(8));
+        assert_eq!(guard.ttl_after(Duration::ZERO), Duration::from_hours(2));
+        assert_eq!(
+            guard.ttl_after(Duration::from_mins(90)),
+            Duration::from_mins(30)
+        );
+        // Never below the stock minimum, even past the limit.
+        assert_eq!(guard.ttl_after(Duration::from_hours(3)), Duration::from_mins(1));
+    }
 
     #[test]
     fn the_delegate_input_is_an_id_and_one_token() {
