@@ -93,6 +93,27 @@ pub(super) struct Record {
     pub sandbox_gone: bool,
     #[serde(default)]
     pub finished_unix_ms: Option<u64>,
+    /// The Docker ID whose token the run's coordinator signed in with
+    /// (`marsh config cloud-delegate on`); never the token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegate: Option<String>,
+    /// Agent sandboxes the run's coordinator reported owning, last seen:
+    /// deleted with the run if it could not delete them itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub child_sandboxes: Vec<ChildSandbox>,
+}
+
+/// An agent sandbox a detached run's coordinator created (its record).
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ChildSandbox {
+    pub name: String,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub image: String,
+    #[serde(default)]
+    pub agent: Option<String>,
 }
 
 fn now_ms() -> u64 {
@@ -263,6 +284,22 @@ struct RemoteState {
     failed_start: Option<String>,
     stdout: Option<Range>,
     stderr: Option<Range>,
+    /// Agent calls the coordinator finished.
+    #[serde(default)]
+    children: Vec<RemoteCall>,
+    /// Agent sandboxes the coordinator owns now.
+    #[serde(default)]
+    sandboxes: Vec<ChildSandbox>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct RemoteCall {
+    kit: String,
+    #[serde(default)]
+    args: Vec<String>,
+    exit: i32,
+    #[serde(default)]
+    summary: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize)]
@@ -533,6 +570,7 @@ impl StockDaemonBackend {
         identity: (u64, u64),
         fork: bool,
         ttl: Duration,
+        delegate: Option<String>,
     ) -> Result<(), DaemonError> {
         let paths = self.detached_paths();
         let job_id = settle.job_id.clone();
@@ -619,6 +657,8 @@ impl StockDaemonBackend {
             notified: false,
             sandbox_gone: false,
             finished_unix_ms: None,
+            delegate,
+            child_sandboxes: Vec::new(),
         };
         // Durable before the run can start.
         if let Err(error) = record.save(&paths) {
@@ -737,6 +777,14 @@ impl StockDaemonBackend {
         let Some(status) = status else {
             // Absent from a complete inventory: verify, then it is lost.
             let _ = adapter.retire(&id);
+            if let Err(message) = delete_children(&adapter, &record.child_sandboxes) {
+                record.detail = format!(
+                    "its sandbox is gone; deleting its agent sandboxes ({message}); marsh retries"
+                );
+                record.save(&paths)?;
+                return Ok(record);
+            }
+            record.child_sandboxes.clear();
             return Self::settle(
                 store,
                 &paths,
@@ -816,7 +864,23 @@ impl StockDaemonBackend {
             );
         }
         Self::tail_output(&adapter, &id, ctl, &paths, &mut record, &remote);
+        record.child_sandboxes.clone_from(&remote.sandboxes);
         record.save(&paths)?;
+        if !remote.children.is_empty() {
+            store.set_cloud_children(
+                job,
+                remote
+                    .children
+                    .iter()
+                    .map(|call| marsh_daemon::CloudChildCall {
+                        kit: call.kit.clone(),
+                        args: call.args.clone(),
+                        exit: call.exit,
+                        summary: call.summary.clone(),
+                    })
+                    .collect(),
+            );
+        }
         if !remote.done {
             if !remote.supervisor_alive && remote.status.is_none() {
                 // The supervisor is gone without an end (the sandbox was
@@ -894,6 +958,13 @@ impl StockDaemonBackend {
         record.detail = "deleting its sandbox".into();
         record.save(&paths)?;
         store.set_detached_state(job, "finished");
+        // Agent sandboxes the coordinator could not delete go first.
+        if let Err(message) = delete_children(&adapter, &record.child_sandboxes) {
+            record.detail = format!("deleting its agent sandboxes ({message}); marsh retries");
+            record.save(&paths)?;
+            return Ok(record);
+        }
+        record.child_sandboxes.clear();
         // Retire before apply: the result is local and verified.
         match retire_settled(&adapter, &id) {
             Ok(()) => {
@@ -1097,6 +1168,29 @@ impl StockDaemonBackend {
         label: &'static str,
         detail: &str,
     ) -> Result<Record, DaemonError> {
+        // The run's agent sandboxes go with it: ask its coordinator (the
+        // run may be stopped; this resumes it), else use the last list seen.
+        if record.delegate.is_some() {
+            if let Ok((step, bytes)) = small_control(
+                adapter,
+                id,
+                Ctl { kit: record.kit },
+                &["--internal-cloud", "state"],
+                64 * 1024,
+                RESUME_TIMEOUT,
+            ) && step.ok()
+                && let Ok(remote) = serde_json::from_slice::<RemoteState>(&bytes)
+            {
+                record.child_sandboxes = remote.sandboxes;
+            }
+            if let Err(message) = delete_children(adapter, &record.child_sandboxes) {
+                record.detail =
+                    format!("{detail}; deleting its agent sandboxes ({message}); marsh retries");
+                record.save(paths)?;
+                return Ok(record);
+            }
+            record.child_sandboxes.clear();
+        }
         if let Err(message) = retire_settled(adapter, id) {
             record.detail = format!("{detail}; deleting its sandbox ({message}); marsh retries");
             record.save(paths)?;
@@ -1609,6 +1703,46 @@ fn retire_settled(adapter: &CloudSbx, id: &CloudSandboxId) -> Result<(), String>
         thread::sleep(Duration::from_secs(5 * (attempt + 1)));
     }
     Err(last)
+}
+
+/// Delete agent sandboxes a detached run's coordinator left: each is
+/// adopted into this daemon's ownership (only while a complete inventory
+/// lists that name with that ID), then deleted and its absence observed.
+fn delete_children(adapter: &CloudSbx, children: &[ChildSandbox]) -> Result<(), String> {
+    let mut failures = Vec::new();
+    for child in children {
+        // A create that never reported its ID is found by name (the record
+        // is the coordinator's own, root-only), or it never happened.
+        let id = match child.id.clone().map(CloudSandboxId::parse) {
+            Some(Ok(id)) => id,
+            Some(Err(_)) => {
+                failures.push(format!("{}: invalid recorded ID", child.name));
+                continue;
+            }
+            None => match adapter
+                .inventory()
+                .map_err(|error| error.to_string())?
+                .get(&child.name)
+            {
+                Some(vm) => vm.id.clone(),
+                None => continue,
+            },
+        };
+        match adapter.adopt(&child.name, &id, &child.image, child.agent.as_deref()) {
+            Ok(false) => {}
+            Ok(true) => {
+                if let Err(message) = retire_settled(adapter, &id) {
+                    failures.push(format!("{}: {message}", child.name));
+                }
+            }
+            Err(error) => failures.push(format!("{}: {error}", child.name)),
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
 }
 
 /// One chunk of a local file from `offset`, and its length.

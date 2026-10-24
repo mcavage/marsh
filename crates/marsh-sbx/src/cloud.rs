@@ -1071,6 +1071,74 @@ impl CloudSbx {
         })
     }
 
+    /// Take over, for deletion only, an agent sandbox a detached run's
+    /// coordinator created and recorded (its name, ID, Kit and agent). It
+    /// is adopted quarantined, and only when a complete inventory lists
+    /// that name with that ID: `false` when it is already gone.
+    ///
+    /// # Errors
+    /// Refuses a name marsh would not create, a foreign or colliding
+    /// identity, an invalid record, or a full ownership map.
+    pub fn adopt(
+        &self,
+        name: &str,
+        id: &CloudSandboxId,
+        image: &str,
+        agent: Option<&str>,
+    ) -> Result<bool, CloudError> {
+        if !owned_name(name)
+            || image.len() > 4096
+            || image.chars().any(char::is_control)
+            || agent.is_some_and(|agent| !valid_name(agent))
+            || (agent.is_none()
+                && (!image.contains("@sha256:") || OciImage::parse(image.to_owned()).is_err()))
+        {
+            return Err(CloudError::Invalid("invalid agent sandbox record"));
+        }
+        let view = self.inventory()?;
+        let Some(vm) = view.get(name) else {
+            return Ok(false);
+        };
+        if vm.id != *id {
+            return Err(CloudError::Foreign(name.to_owned()));
+        }
+        self.update(|file| {
+            if let Some(existing) = file.entries.get(name) {
+                return if existing.id.as_ref() == Some(id) {
+                    Ok(())
+                } else {
+                    Err(CloudError::Foreign(name.to_owned()))
+                };
+            }
+            if file
+                .entries
+                .values()
+                .any(|entry| entry.id.as_ref() == Some(id))
+            {
+                return Err(CloudError::Foreign(name.to_owned()));
+            }
+            if file.entries.len() >= MAX_OWNED + MAX_DETACHED {
+                return Err(CloudError::Invalid(
+                    "cloud ownership is full; retry after other sandboxes are deleted",
+                ));
+            }
+            file.entries.insert(
+                name.to_owned(),
+                CloudRecord {
+                    name: name.to_owned(),
+                    id: Some(id.clone()),
+                    image: image.to_owned(),
+                    agent: agent.map(ToOwned::to_owned),
+                    phase: CloudPhase::Quarantined,
+                    observed: true,
+                    detached: false,
+                },
+            );
+            Ok(())
+        })?;
+        Ok(true)
+    }
+
     /// Detached sandboxes owned now.
     ///
     /// # Errors
