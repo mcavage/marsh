@@ -36,7 +36,7 @@
     },
     {
       "path": "/usr/bin/gh",
-      "sha256": "73761b092d7bce4a06f8d9cbf990c02109ab8c42a39d8c03a3d77224016fb55e"
+      "sha256": "a3f7e4e07863cf9fd16346d9ad42117b2db70e58e7539b9ca04a3ea688da840e"
     },
     {
       "path": "/usr/bin/runc",
@@ -47,7 +47,7 @@
       "sha256": "1648ada3c9bc1a7d58bcf23fff866be9e50f6524ff3151148b36b81ade04c94b"
     }
   ],
-  "input_sha256": "03ef66ad5bdcd3c9cbccf19ab212f7cf8821e550b4b7c95a8201a93732e18195",
+  "input_sha256": "95b45842641809572a45fba525061058b0e3831d72ac41de90fca041cf221647",
   "checksum_database": "sum.golang.org",
   "modules": [
     {
@@ -2347,7 +2347,6 @@
       "version": "v0.0.0-20230818184609-3a137a874352",
       "binaries": [
         "/usr/bin/dockerd",
-        "/usr/bin/gh",
         "/usr/libexec/docker/cli-plugins/docker-buildx"
       ],
       "sum": "h1:ge14PCmCvPjpMQMIAH7uKg0lrtNSOdpYsRXlwk3QbaE=",
@@ -2356,6 +2355,23 @@
       "notices": [
         {
           "source_path": "github.com/digitorus/pkcs7@v0.0.0-20230818184609-3a137a874352/LICENSE",
+          "sha256": "d01c6d371866b3c7a1a7e20994d88d2ce83f22974ec6d3596a6125b44495813d",
+          "file": "texts/d01c6d371866b3c7a1a7e20994d88d2ce83f22974ec6d3596a6125b44495813d.txt"
+        }
+      ]
+    },
+    {
+      "path": "github.com/digitorus/pkcs7",
+      "version": "v0.0.0-20260914070511-d678ea5ea03f",
+      "binaries": [
+        "/usr/bin/gh"
+      ],
+      "sum": "h1:LBDTasGDT7gkpSl3tIq+V4Yy0nr+l+ZmI6VN9MY9FU0=",
+      "go_mod_sum": "h1:OQvyvldkvDCxGsUPLSibXqM4B/Pz5RaXQP4CPo5LXs4=",
+      "archive_sha256": "0c1d1372341a2746d63e5dd5a837f0dbd3872282eb0539acd7de5807c1123c78",
+      "notices": [
+        {
+          "source_path": "github.com/digitorus/pkcs7@v0.0.0-20260914070511-d678ea5ea03f/LICENSE",
           "sha256": "d01c6d371866b3c7a1a7e20994d88d2ce83f22974ec6d3596a6125b44495813d",
           "file": "texts/d01c6d371866b3c7a1a7e20994d88d2ce83f22974ec6d3596a6125b44495813d.txt"
         }

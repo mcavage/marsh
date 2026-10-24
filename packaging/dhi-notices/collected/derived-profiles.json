@@ -1,26 +1,26 @@
 {
   "claude-kit": {
-    "2.1.309": {
+    "2.1.310": {
       "arm64": {
         "required_notices": [
           {
-            "file": "provider-notices/claude-2.1.309-package-LICENSE.md",
+            "file": "provider-notices/claude-2.1.310-package-LICENSE.md",
             "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a"
           },
           {
-            "file": "provider-notices/claude-2.1.309-package-README.md",
+            "file": "provider-notices/claude-2.1.310-package-README.md",
             "sha256": "da7cf15ce4e35bad6a107acd6a36b4fe052083068bb9e564b1aa3f2078b5d0ce"
           }
         ],
         "files": [
           {
-            "path": "/home/agent/.local/share/claude/versions/2.1.309",
+            "path": "/home/agent/.local/share/claude/versions/2.1.310",
             "type": "file",
             "mode": 493,
             "uid": 1000,
             "gid": 1000,
-            "sha256": "9796dd26899337f687739a0b39a7353b639f062a3436a7b941fcf19a1b757a9b",
-            "size": 293331128
+            "sha256": "9c64d9a7442436b65fcd7cc02c1aa0051bb5a7041e7788576ed3b5f29c447d54",
+            "size": 291496120
           },
           {
             "path": "/home/agent/.local/bin/claude",
@@ -28,14 +28,14 @@
             "mode": 511,
             "uid": 1000,
             "gid": 1000,
-            "target": "/home/agent/.local/share/claude/versions/2.1.309"
+            "target": "/home/agent/.local/share/claude/versions/2.1.310"
           }
         ],
         "exact_trees": [
           {
             "path": "/home/agent/.local/share/claude/versions",
             "entries": [
-              "/home/agent/.local/share/claude/versions/2.1.309"
+              "/home/agent/.local/share/claude/versions/2.1.310"
             ]
           }
         ]
@@ -43,23 +43,23 @@
       "amd64": {
         "required_notices": [
           {
-            "file": "provider-notices/claude-2.1.309-package-LICENSE.md",
+            "file": "provider-notices/claude-2.1.310-package-LICENSE.md",
             "sha256": "8ce94b9478bb9868f9641f818e06cd722fbe55d4c22e2d2ed11971b20146173a"
           },
           {
-            "file": "provider-notices/claude-2.1.309-package-README.md",
+            "file": "provider-notices/claude-2.1.310-package-README.md",
             "sha256": "da7cf15ce4e35bad6a107acd6a36b4fe052083068bb9e564b1aa3f2078b5d0ce"
           }
         ],
         "files": [
           {
-            "path": "/home/agent/.local/share/claude/versions/2.1.309",
+            "path": "/home/agent/.local/share/claude/versions/2.1.310",
             "type": "file",
             "mode": 493,
             "uid": 1000,
             "gid": 1000,
-            "sha256": "4d704a8aecbe038affa3000f498ae17c1b4f753add8facb8764120affc99b658",
-            "size": 293469552
+            "sha256": "b73676430af12f97316a798b8371f81d640f90a58bdcb8f3ce56a835bb47df56",
+            "size": 291638640
           },
           {
             "path": "/home/agent/.local/bin/claude",
@@ -67,14 +67,14 @@
             "mode": 511,
             "uid": 1000,
             "gid": 1000,
-            "target": "/home/agent/.local/share/claude/versions/2.1.309"
+            "target": "/home/agent/.local/share/claude/versions/2.1.310"
           }
         ],
         "exact_trees": [
           {
             "path": "/home/agent/.local/share/claude/versions",
             "entries": [
-              "/home/agent/.local/share/claude/versions/2.1.309"
+              "/home/agent/.local/share/claude/versions/2.1.310"
             ]
           }
         ]
