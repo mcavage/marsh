@@ -9,7 +9,7 @@
 # `claude install` to wire the symlink. That second step is a Bun runtime,
 # which aborts under QEMU when cross-building arm64, so the kit fetches
 # the platform binary directly into the layout install.sh would have left.
-FROM dhi.io/node:24-debian13@sha256:32a2fa6af5209698a9354cef0b19ada3dbfac3090b1010b70afa9f1a298ba2d9 AS base
+FROM dhi.io/node:24-debian13@sha256:c2dc799f9e47eb25fc032db1801b028219da31e6081369ab5d9bdddc0faa61fc AS base
 
 FROM dhi.io/debian-base:trixie-dev@sha256:cc4e05ff415ee2d83918f2af45c737983209924ef7362c53f00cfcdaa1c94326 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
