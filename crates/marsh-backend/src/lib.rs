@@ -386,7 +386,7 @@ impl StockDaemonBackend {
     }
 
     /// Turn on automatic Kit updates for this scope: a check when the daemon
-    /// starts and then daily, which on a release build also adds the known
+    /// starts and then hourly, which on a release build also adds the known
     /// Kits (`builtin_kits`). `environment` is
     /// `MARSH_AUTO_UPDATE` at launch; it or `scope_root/config.json` can turn
     /// them off again.
@@ -1610,6 +1610,9 @@ impl DaemonBackend for StockDaemonBackend {
             &registered,
         )?;
         store.set_job_args(&job_id, &request.arguments);
+        if request.session.terminal && link.parent_job.is_none() {
+            store.mark_terminal_job(&job_id);
+        }
         // A root job started by a stage after `join` consumes that split.
         if link.parent_job.is_none()
             && let Some(split) = request.environment.get("SPLIT_ID")
@@ -2284,7 +2287,17 @@ impl DaemonBackend for StockDaemonBackend {
             if let Err(error) = relay.ready(&attachment) {
                 return Err(rollback(relay, error));
             }
-            let mut extra_environment = Vec::new();
+            // Programs that open a link find marsh's `xdg-open`
+            // (`docs/agents.md`); an interactive session also names the
+            // user's terminal, so programs enable what it supports.
+            let mut extra_environment = vec!["BROWSER=xdg-open".to_owned()];
+            if request.session.terminal {
+                extra_environment.extend(
+                    marsh_contracts::terminal::identity(&request.terminal_environment)
+                        .into_iter()
+                        .map(|(name, value)| format!("{name}={value}")),
+                );
+            }
             if let Some((broker, grant)) = &dev_grant {
                 if let Err(error) = broker.write_relay(grant, &socket_path, &token_path) {
                     return Err(rollback(relay, error));
@@ -3603,7 +3616,7 @@ impl StockDaemonBackend {
     }
 
     /// One pass of the automatic updater at `now_ms`: a check when this daemon
-    /// has not run one yet or a day has passed, else a retry of Kits that were
+    /// has not run one yet or an hour has passed, else a retry of Kits that were
     /// waiting for their jobs.
     fn auto_update_pass(&self, store: &DaemonStore, now_ms: u64) {
         let Some(auto) = &self.auto_update else {
@@ -3993,7 +4006,7 @@ mod tests {
             set: BTreeMap::from([("OVERRIDDEN".into(), vec![0xfe, 0xff])]),
         };
         let (merged, omitted) = merge_exported_environment(&inherited, &rules).unwrap();
-        assert!(omitted.is_empty());
+        assert_eq!(omitted, [] as [std::string::String; 0]);
         assert_eq!(merged["RAW_VALUE"], [0xff, 0xfe, b'=', b'\n']);
         assert_eq!(merged["OVERRIDDEN"], [0xfe, 0xff]);
         assert!(!merged.contains_key("DROP_ME"));
@@ -4463,6 +4476,7 @@ mod tests {
                 terminal_size: None,
             },
             arguments: vec![b"-c".to_vec(), b"true".to_vec()],
+            terminal_environment: std::collections::BTreeMap::new(),
         };
         let (server, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
         let error = backend
@@ -4472,8 +4486,11 @@ mod tests {
             error.to_string().contains("source batch overlaps"),
             "{error}"
         );
-        assert!(store.status(None).workers.is_empty());
-        assert!(store.jobs().jobs.is_empty());
+        assert_eq!(
+            store.status(None).workers,
+            [] as [marsh_daemon::WorkerStatus; 0]
+        );
+        assert_eq!(store.jobs().jobs, [] as [marsh_daemon::JobSummary; 0]);
     }
 
     #[test]
@@ -4528,6 +4545,7 @@ mod tests {
                     dev: false,
                     session,
                     arguments: vec![],
+                    terminal_environment: std::collections::BTreeMap::new(),
                 },
                 ServerAttachment::new(server).unwrap(),
                 store.clone(),
@@ -4539,8 +4557,11 @@ mod tests {
                 .contains("attached project identity changed before mount admission"),
             "{error}"
         );
-        assert!(store.status(None).workers.is_empty());
-        assert!(store.jobs().jobs.is_empty());
+        assert_eq!(
+            store.status(None).workers,
+            [] as [marsh_daemon::WorkerStatus; 0]
+        );
+        assert_eq!(store.jobs().jobs, [] as [marsh_daemon::JobSummary; 0]);
     }
 
     #[test]
@@ -5107,7 +5128,10 @@ mod tests {
                 .install_kit("alternate".into(), reference, store)
                 .is_err()
         );
-        assert!(backend.registered_commands().unwrap().is_empty());
+        assert_eq!(
+            backend.registered_commands().unwrap(),
+            [] as [std::string::String; 0]
+        );
         assert!(!backend.config.control_home.join("commands.json").exists());
         assert!(!runner.runs.lock().unwrap().is_empty());
     }
@@ -5455,8 +5479,8 @@ mod tests {
             b"marsh: container cleanup could not be verified; worker quarantined\n"
         );
         assert_eq!(cleanup_diagnostic("cleanup failed", 10, 6), b"mars");
-        assert!(cleanup_diagnostic("cleanup failed", 10, 10).is_empty());
-        assert!(cleanup_diagnostic("cleanup failed", 10, 11).is_empty());
+        assert_eq!(cleanup_diagnostic("cleanup failed", 10, 10), [] as [u8; 0]);
+        assert_eq!(cleanup_diagnostic("cleanup failed", 10, 11), [] as [u8; 0]);
     }
 
     #[test]
@@ -6332,7 +6356,8 @@ mod kit_lifecycle_callers {
         assert!(backend.uninstall_kit("nope".into(), store).is_err());
     }
 
-    const DAY: u64 = 24 * 60 * 60 * 1000;
+    const HOUR: u64 = 60 * 60 * 1000;
+    const DAY: u64 = 24 * HOUR;
 
     fn automatic(
         backend: StockDaemonBackend,
@@ -6389,7 +6414,7 @@ mod kit_lifecycle_callers {
     }
 
     #[test]
-    fn one_daemon_checks_at_most_once_a_day() {
+    fn one_daemon_checks_at_most_once_an_hour() {
         let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(OLD, Some(1));
         let backend = automatic(
@@ -6405,11 +6430,14 @@ mod kit_lifecycle_callers {
         let check = status(&backend).last_check.unwrap();
         assert_eq!((check.unix_ms, check.result.as_str()), (10 * DAY, "ok"));
 
-        backend.auto_update_pass(&store, 10 * DAY + DAY / 2);
-        assert_eq!(registry.calls("kit"), 1, "not again the same day");
-        backend.auto_update_pass(&store, 11 * DAY);
+        backend.auto_update_pass(&store, 10 * DAY + HOUR / 2);
+        assert_eq!(registry.calls("kit"), 1, "not again within the hour");
+        backend.auto_update_pass(&store, 10 * DAY + HOUR);
         assert_eq!(registry.calls("kit"), 2);
-        assert!(status(&backend).recent.is_empty());
+        assert_eq!(
+            status(&backend).recent,
+            [] as [marsh_daemon::KitUpdateRecord; 0]
+        );
     }
 
     #[test]
@@ -6428,24 +6456,24 @@ mod kit_lifecycle_callers {
         assert_eq!(registry.calls("kit"), 0);
         assert_eq!(status(&backend).waiting, ["pix"]);
 
-        // Idle within the same day: the waiting Kit is retried. Preparing the
+        // Idle within the same hour: the waiting Kit is retried. Preparing the
         // new VM fails here, so the old digest stays registered.
         let idle = DaemonStore::new(home.path());
         assert!(!idle.worker_busy(&backend.kit_spec("pix").unwrap().name));
         backend.auto_update_pass(&idle, DAY + 60_000);
         assert_eq!(registry.calls("kit"), 1);
         let after = status(&backend);
-        assert!(after.waiting.is_empty());
+        assert_eq!(after.waiting, [] as [std::string::String; 0]);
         let check = after.last_check.unwrap();
         assert_eq!(check.result, "error");
         assert!(check.problems[0].starts_with("pix: "), "{check:?}");
-        assert!(after.recent.is_empty());
+        assert_eq!(after.recent, [] as [marsh_daemon::KitUpdateRecord; 0]);
         assert_eq!(overlay(&backend), before);
         assert_eq!(
             backend.registered_kit("pix").unwrap().workload.identity(),
             OLD
         );
-        // Nothing waits, so later passes that day do nothing.
+        // Nothing waits, so later passes that hour do nothing.
         backend.auto_update_pass(&idle, DAY + 120_000);
         assert_eq!(registry.calls("kit"), 1);
     }
@@ -6493,7 +6521,10 @@ mod kit_lifecycle_callers {
         );
         kit_lifecycle::write_sources(&pinned.config.control_home, &BTreeMap::new()).unwrap();
         decline_builtins(&pinned);
-        assert!(pinned.auto_update_names(&sources).is_empty());
+        assert_eq!(
+            pinned.auto_update_names(&sources),
+            [] as [std::string::String; 0]
+        );
         pinned.auto_update_pass(&DaemonStore::new(home.path()), DAY);
         assert_eq!(registry.calls("kit"), 0);
         assert_eq!(status(&pinned).last_check.unwrap().result, "ok");
@@ -6502,7 +6533,10 @@ mod kit_lifecycle_callers {
         let shipped = daemon(home.path(), &registry, None, Some("latest"));
         assert_eq!(shipped.auto_update_names(&sources), ["pi"]);
         let local = daemon(home.path(), &registry, None, None);
-        assert!(local.auto_update_names(&sources).is_empty());
+        assert_eq!(
+            local.auto_update_names(&sources),
+            [] as [std::string::String; 0]
+        );
     }
 
     const HERMES: &str = "docker.io/mcavage/marsh-hermes@sha256:6666666666666666666666666666666666666666666666666666666666666666";
@@ -6525,7 +6559,7 @@ mod kit_lifecycle_callers {
     }
 
     #[test]
-    fn every_daemon_start_checks_once_then_daily() {
+    fn every_daemon_start_checks_once_then_hourly() {
         let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(OLD, Some(1));
         let first = automatic(
@@ -6535,18 +6569,18 @@ mod kit_lifecycle_callers {
         );
         first.auto_update_pass(&DaemonStore::new(home.path()), 10 * DAY);
         assert_eq!(registry.calls("kit"), 1);
-        // A restart an hour later checks again; that daemon then waits a day.
+        // A restart half an hour later checks again; that daemon then waits an hour.
         let restarted = automatic(
             daemon(home.path(), &registry, None, None),
             home.path(),
             None,
         );
         let store = DaemonStore::new(home.path());
-        restarted.auto_update_pass(&store, 10 * DAY + DAY / 24);
+        restarted.auto_update_pass(&store, 10 * DAY + HOUR / 2);
         assert_eq!(registry.calls("kit"), 2);
-        restarted.auto_update_pass(&store, 10 * DAY + DAY / 12);
+        restarted.auto_update_pass(&store, 10 * DAY + HOUR);
         assert_eq!(registry.calls("kit"), 2);
-        restarted.auto_update_pass(&store, 11 * DAY + DAY / 24);
+        restarted.auto_update_pass(&store, 10 * DAY + HOUR / 2 + HOUR);
         assert_eq!(registry.calls("kit"), 3);
     }
 

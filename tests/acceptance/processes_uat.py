@@ -189,7 +189,7 @@ class Processes(ScenarioSuite):
         require(v.get("bv") == "set", "the image's bash does not set BASH_VERSION")
         require((v.get("bashlink"), v.get("shlink")) == ("no", "no"), f"a bash/sh link exists: {v}")
         links = set(v.get("links", "").split())
-        require({"marsh", "fixture", ALT, "shell"} <= links, f"links lack registered names: {links}")
+        require({"marsh", "fixture", ALT, "shell", "xdg-open", "open"} <= links, f"links lack registered names: {links}")
         require(not v.get("binsh", "/run").startswith("/run/marsh") and
                 not v.get("binbash", "/run").startswith("/run/marsh"), f"image shells shadowed: {v}")
         require((v.get("w_art"), v.get("w_bin"), v.get("w_json")) == ("no", "no", "no"),
@@ -469,12 +469,12 @@ class Processes(ScenarioSuite):
         self.verify_deleted(receipts)
 
     def fan_out_cap(self) -> None:
-        """s6 fan-out 4 (FanOutBound): a fifth live child of one job is refused fast; the four run."""
+        """s6 fan-out 8 (FanOutBound): a ninth live child of one job is refused fast; the eight run."""
         gate = self.project / "p14-gate"
         before = self.job_ids()
-        script = ("d=p14-gate; mkdir -p $d; for i in 1 2 3 4; do shell -c \"touch $d/r$i; sleep 20\" & done; "
-                  "n=0; while [ $(ls $d | wc -l) -lt 4 ] && [ $n -lt 900 ]; do sleep 0.2; n=$((n+1)); done; "
-                  "echo ready=$(ls $d | wc -l); s=$(date +%s); shell -c true; echo fifth=$?; "
+        script = ("d=p14-gate; mkdir -p $d; for i in 1 2 3 4 5 6 7 8; do shell -c \"touch $d/r$i; sleep 20\" & done; "
+                  "n=0; while [ $(ls $d | wc -l) -lt 8 ] && [ $n -lt 900 ]; do sleep 0.2; n=$((n+1)); done; "
+                  "echo ready=$(ls $d | wc -l); s=$(date +%s); shell -c true; echo ninth=$?; "
                   "echo took=$(( $(date +%s) - s )); wait; echo waited")
         try:
             completed = self.injob(script, timeout=300)
@@ -484,30 +484,30 @@ class Processes(ScenarioSuite):
                     path.unlink()
                 gate.rmdir()
         v = self.kv(completed.stdout)
-        require(v.get("ready") == "4", f"four children did not start: {v} {text(completed.stderr)[-500:]!r}")
-        require(v.get("fifth") == "125" and "fan-out limit 4" in text(completed.stderr),
-                f"fifth child not refused with `fan-out limit 4`: {v} {text(completed.stderr)[-500:]!r}")
+        require(v.get("ready") == "8", f"eight children did not start: {v} {text(completed.stderr)[-500:]!r}")
+        require(v.get("ninth") == "125" and "fan-out limit 8" in text(completed.stderr),
+                f"ninth child not refused with `fan-out limit 8`: {v} {text(completed.stderr)[-500:]!r}")
         require(int(v.get("took", "99")) <= 10, "fan-out refusal was not fail-fast")
-        receipts = self.settle(before, 5)
-        self.assert_children(receipts, self.one_top(receipts, "fan-out"), ["shell"] * 4, "fan-out")
+        receipts = self.settle(before, 9)
+        self.assert_children(receipts, self.one_top(receipts, "fan-out"), ["shell"] * 8, "fan-out")
         self.verify_deleted(receipts)
 
     def pool_fail_fast(self) -> None:
-        """s6 session pool 8 (BudgetBound): a nested 9th job is refused at once with `capacity: 8 jobs`; no deadlock."""
+        """s6 session pool 16 (BudgetBound): a nested 17th job is refused at once with `capacity: 16 jobs`; no deadlock."""
         before = self.job_ids()
-        script = ("g=.git/marsh-p15; mkdir -p $g; for i in 1 2 3 4 5 6 7; do fixture hold 45 > $g/h$i & done; "
-                  "n=0; while [ $(cat $g/h* 2>/dev/null | grep -c READY) -lt 7 ] && [ $n -lt 1200 ]; do sleep 0.2; "
+        script = ("g=.git/marsh-p15; mkdir -p $g; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do fixture hold 45 > $g/h$i & done; "
+                  "n=0; while [ $(cat $g/h* 2>/dev/null | grep -c READY) -lt 15 ] && [ $n -lt 1200 ]; do sleep 0.2; "
                   "n=$((n+1)); done; echo held=$(cat $g/h* | grep -c READY); s=$(date +%s); "
                   + q(["fixture", "pipeline", "|", "bash", "-c", "fixture identity; echo inner=$?"])
                   + "; echo outer=$?; echo took=$(( $(date +%s) - s )); wait; rm -rf $g")
         completed = self.brush(script, self.project, timeout=400)
         v = self.kv(completed.stdout)
-        require(v.get("held") == "7", f"seven holds did not start: {v} {text(completed.stderr)[-500:]!r}")
-        require(v.get("inner") == "125" and "capacity: 8 jobs" in text(completed.stderr),
-                f"9th job not refused with `capacity: 8 jobs`: {v} {text(completed.stderr)[-600:]!r}")
+        require(v.get("held") == "15", f"fifteen holds did not start: {v} {text(completed.stderr)[-500:]!r}")
+        require(v.get("inner") == "125" and "capacity: 16 jobs" in text(completed.stderr),
+                f"17th job not refused with `capacity: 16 jobs`: {v} {text(completed.stderr)[-600:]!r}")
         require(v.get("outer") == "0" and int(v.get("took", "999")) <= 30,
                 f"parent of the refused child did not finish promptly (queueing/deadlock): {v}")
-        receipts = self.settle(before, 8, timeout=180)
+        receipts = self.settle(before, 16, timeout=180)
         self.verify_deleted(receipts)
 
     def spawn_narrowing(self) -> None:
@@ -671,7 +671,7 @@ class Processes(ScenarioSuite):
         self.records.append({"scenario": "P21", "client_stderr": text(stderr)[-2000:]})
 
     def cap_socket_cap(self) -> None:
-        """s3 socket fixes: >= 8 concurrent connections admitted; excess ones get a refusal frame, not a drop."""
+        """s3 socket fixes: >= 12 concurrent connections admitted; excess ones get a refusal frame, not a drop."""
         before = self.job_ids()
         completed = self.injob("/usr/local/bin/marsh-fixture cap-flood 24; fixture identity; echo after=$?",
                                shell="/bin/sh")
@@ -683,7 +683,7 @@ class Processes(ScenarioSuite):
         admitted = [r for r in rows if r["connect"] == "ok" and not r["eof"] and message not in r["read"]]
         silent = [r["i"] for r in rows if r not in refused and r not in admitted]
         self.records.append({"scenario": "P22", "admitted": len(admitted), "refused": len(refused), "silent": silent})
-        require(len(admitted) >= 8, f"fewer than 8 concurrent connections admitted: {len(admitted)}")
+        require(len(admitted) >= 12, f"fewer than 12 concurrent connections admitted: {len(admitted)}")
         require(refused, "no excess connection received the refusal frame")
         require(not silent, f"connections dropped or refused without the frame: {silent}")
         require(self.kv(completed.stdout).get("after") == "0", "the job could not spawn after the flood")

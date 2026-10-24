@@ -23,11 +23,13 @@ pub(crate) struct PrintfCommand {
     format_and_args: Vec<String>,
 }
 
-impl builtins::Command for PrintfCommand {
+brush_clap_adapter::impl_parse_args!(PrintfCommand);
+
+impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for PrintfCommand {
     type Error = brush_core::Error;
 
-    async fn execute<SE: brush_core::ShellExtensions>(
-        &self,
+    async fn execute(
+        self,
         context: brush_core::ExecutionContext<'_, SE>,
     ) -> Result<ExecutionResult, Self::Error> {
         let diagnostics;
@@ -711,16 +713,13 @@ fn range_error() -> String {
 }
 
 fn quote_printf_q(s: &str) -> String {
-    let quoted = escape::quote_if_needed(s, escape::QuoteMode::BackslashEscape);
-    if quoted.starts_with("$'") {
-        return quoted.into_owned();
-    }
-
-    let mut quoted = quoted.replace(":~", ":\\~").replace("=~", "=\\~");
-    if matches!(quoted.as_bytes().first(), Some(b'~' | b'#')) {
-        quoted.insert(0, '\\');
-    }
-    quoted
+    // Like bash's, this escapes commas too, so the result is safe even inside a brace
+    // expansion.
+    let options = escape::QuoteOptions::builder()
+        .preferred_mode(escape::QuoteMode::BackslashEscape)
+        .quote_commas(true)
+        .build();
+    escape::quote(s, &options).into_owned()
 }
 
 /// A format item; for a `%q` one whether it is `%#q` (quote with single
@@ -771,7 +770,7 @@ fn parse_format_string(
             Ok(item) => items.push((item, None, vec![])),
             // Fixed q/Q modifiers are deliberately ignored; dynamic modifiers remain unsupported
             // until uucore exposes quoted-string metadata.
-            Err(format::FormatError::SpecError(spec))
+            Err(format::FormatError::SpecError(spec, span))
                 if matches!(spec.last(), Some(b'q' | b'Q'))
                     && !spec.contains(&b'*')
                     && !spec.contains(&b'$') =>
@@ -780,14 +779,16 @@ fn parse_format_string(
                 let mut bare_q: &[u8] = b"q";
                 let item = format::Spec::parse(&mut bare_q)
                     .map(format::FormatItem::Spec)
-                    .map_err(|spec| parse_error(format::FormatError::SpecError(spec.to_vec())))?;
+                    .map_err(|spec| {
+                        parse_error(format::FormatError::SpecError(spec.to_vec(), span))
+                    })?;
                 items.push((
                     item,
                     Some(spec.contains(&b'#')),
                     vec![(None, ArgKind::Text)],
                 ));
             }
-            Err(format::FormatError::SpecError(spec)) => {
+            Err(format::FormatError::SpecError(spec, _)) => {
                 return Ok((items, Some(invalid_conversion(format_string, &spec))));
             }
             Err(e) => return Err(parse_error(e).into()),

@@ -113,7 +113,7 @@ fn prewarm_fails_when_the_nested_image_disappears() {
             ..
         })
     ));
-    assert!(kit.home_entries().is_empty());
+    assert_eq!(kit.home_entries(), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn local_create_timeout_is_typed_quarantined_and_released_by_reset() {
             ..
         })
     ));
-    assert!(kit.home_entries().is_empty());
+    assert_eq!(kit.home_entries(), [] as [std::string::String; 0]);
     // An uncertain create quarantines the name: no implicit retry.
     assert!(matches!(
         adapter.ensure_kit_vm(&kit.spec),
@@ -181,7 +181,7 @@ fn local_create_timeout_is_typed_quarantined_and_released_by_reset() {
     assert!(!adapter.reset_kit_vm(&kit.spec).unwrap());
     assert!(adapter.ensure_kit_vm(&kit.spec).unwrap().cold_started);
     assert_eq!(model.count("create"), 2);
-    assert!(kit.home_entries().is_empty());
+    assert_eq!(kit.home_entries(), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -196,9 +196,9 @@ fn host_and_stock_builds_that_never_agree_fail_after_one_stock_rebuild() {
         Err(SbxError::LocalKitDigestMismatch(detail)) if detail.contains("after stock SBX rebuilt")
     ));
     assert_eq!(create_rebuilds(&model), [false, true]);
-    assert!(model.vm_names().is_empty());
+    assert_eq!(model.vm_names(), [] as [std::string::String; 0]);
     assert_eq!(model.retained_spawns(WORKER_PATH), 0);
-    assert!(kit.home_entries().is_empty());
+    assert_eq!(kit.home_entries(), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -215,7 +215,7 @@ fn a_stale_stock_build_is_rebuilt_and_the_vm_recreated() {
     let guest = model.vm(KIT).unwrap();
     assert_eq!(guest.image_digest.as_deref(), Some(HOST_BUILD_DIGEST));
     assert_eq!(adapter.ownership.uuid(KIT), Some(guest.id));
-    assert!(kit.home_entries().is_empty());
+    assert_eq!(kit.home_entries(), [] as [std::string::String; 0]);
 }
 
 #[test]

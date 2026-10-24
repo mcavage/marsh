@@ -502,7 +502,7 @@ fn unanswerable_permissions_agent_errors_and_oversize_updates_are_reported() {
     rig.prompt("always-only");
     let s = rig.done();
     assert!(s.permission_note.unwrap().contains("allow_once"));
-    assert!(s.permissions.is_empty());
+    assert_eq!(s.permissions, [] as [marsh_daemon::AcpPendingPermission; 0]);
     rig.prompt("agent-error");
     let s = rig.done();
     let error = s.last_error.unwrap();

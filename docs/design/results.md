@@ -71,8 +71,8 @@ daemon can report no job defaults; absence is not an unlimited policy.
 
 | Resource | Built-in per-job value | Daemon-launch variable |
 | --- | --- | --- |
-| CPU | 4,000 millicpus (4 CPUs) | `MARSH_JOB_CPU_MILLIS` |
-| Memory | 8 GiB (8,589,934,592 bytes) | `MARSH_JOB_MEMORY_BYTES` |
+| CPU | 2,000 millicpus (2 CPUs) | `MARSH_JOB_CPU_MILLIS` |
+| Memory | 4 GiB (4,294,967,296 bytes) | `MARSH_JOB_MEMORY_BYTES` |
 | PIDs | 4,096 | `MARSH_JOB_PIDS` |
 | Writable layer | 10 GiB (10,737,418,240 bytes) | `MARSH_JOB_WRITABLE_BYTES` |
 | Combined stdout/stderr | 256 MiB (268,435,456 bytes) | `MARSH_JOB_OUTPUT_BYTES` |

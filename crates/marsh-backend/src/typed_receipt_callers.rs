@@ -364,7 +364,7 @@ fn observed_effects(task: &Path, mode: &'static str) -> WorkerReport {
             assert_eq!(stderr, b"direct-stderr\0\n");
         }
         "seven" => {
-            assert!(stdout.is_empty());
+            assert_eq!(stdout, [] as [u8; 0]);
             assert_eq!(stderr, b"native-seven\n");
         }
         "output" => {

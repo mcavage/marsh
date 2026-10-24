@@ -347,7 +347,7 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `W13-nested-dotgit`: s8 capture verification: nested `.git` (any case) -> rejected and removed.
 - `W14-hostile-user-repo`: s8 isolated gix: the user's fsmonitor/filters/hooks/diff.external/include never run.
 - `W15-label-and-argv-refusal`: s2/s7 setup all-or-nothing: bad labels and unregistered argv -> 2, nothing runs.
-- `W16-caps-and-pool`: s4: 16-branch cap (setup 2) and the 8-process session pool (`failed: capacity`).
+- `W16-caps-and-pool`: s4: 16-branch cap (setup 2) and the 16-process session pool (`failed: capacity`).
 - `W17-nested-from-kit`: s2/s3/s4: nested split via in-Kit shim (argv-only); ancestor join refused; sibling layout.
 - `W18-depth-cap`: s4: depth 3 allowed (root=1), a depth-4 split is refused (2) and nothing runs.
 - `W19-interrupt-subtree`: s2/s7: Ctrl-C cancels the subtree: shell branch, Kit branch, nested Kit job; join never runs.
@@ -379,15 +379,15 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `P11-env-forwarding`: s6: a child gets only job-exported (set or changed) vars, never image ENV, unexported vars, or secrets.
 - `P12-depth-cap`: s6 depth 4 (LineageWF): an alternating fixture/shell chain stops at depth 4 with exit 125.
 - `P13-same-kit-chain`: s6 same-Kit chain 2 (SameKitBound): fixture -> fixture is allowed, a third fixture is refused.
-- `P14-fan-out-cap`: s6 fan-out 4 (FanOutBound): a fifth live child of one job is refused fast; the four run.
-- `P15-pool-fail-fast`: s6 session pool 8 (BudgetBound): a nested 9th job is refused at once with `capacity: 8 jobs`; no deadlock.
+- `P14-fan-out-cap`: s6 fan-out 8 (FanOutBound): a ninth live child of one job is refused fast; the eight run.
+- `P15-pool-fail-fast`: s6 session pool 16 (BudgetBound): a nested 17th job is refused at once with `capacity: 16 jobs`; no deadlock.
 - `P16-spawn-narrowing`: s6 narrowing only (SpawnSetAttenuates): MARSH_SPAWN/--spawn/--no-spawn narrow; nothing widens.
 - `P17-branch-confinement`: s7: a split branch job's child gets the branch's mounts verbatim: the fork, never the project.
 - `P18-tty-child-refused`: s6 no TTY children: a link whose stdin/stdout are terminals is refused with the stated message.
 - `P19-ctrl-c-tree`: s8 Ctrl-C: SIGINT to the root caller cancels the whole tree across Kit VMs with verified deletion.
 - `P20-parent-exit-cascade`: s8 job end: a parent that exits while its child runs cancels the child (no orphan).
 - `P21-daemon-restart`: s8 restart (RestartUncertain, NoReplay): a live tree becomes uncertain; nothing is resubmitted.
-- `P22-cap-socket-cap`: s3 socket fixes: >= 8 concurrent connections admitted; excess ones get a refusal frame, not a drop.
+- `P22-cap-socket-cap`: s3 socket fixes: >= 12 concurrent connections admitted; excess ones get a refusal frame, not a drop.
 - `P23-awareness-context`: s9: `marsh context` prints (never writes) the job context; job.json/context.md; status `nested`.
 - `P24-real-bash-startup`: s4: PATH `bash` is the image's own (no wrapper: p50 within 2 ms of /bin/bash); the static
 - `P25-child-after-first-split`: s7: a job started before the project's first split still spawns children after it splits.

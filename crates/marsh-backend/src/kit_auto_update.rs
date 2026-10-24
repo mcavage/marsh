@@ -1,5 +1,5 @@
 //! Automatic Kit updates (`docs/kits.md`): the host record
-//! `kit-updates.json`, the daily gate, the opt-out, and the one-line notices.
+//! `kit-updates.json`, the hourly gate, the opt-out, and the one-line notices.
 
 use marsh_daemon::{DaemonError, KitUpdateCheck, KitUpdateRecord};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,7 @@ use std::{
 pub(crate) const UPDATES_FILE: &str = "kit-updates.json";
 /// Key in `$MARSH_HOME/config.json`, written by `marsh config auto-update`.
 pub(crate) const CONFIG_KEY: &str = "auto_update";
-const CHECK_INTERVAL_MS: u64 = 24 * 60 * 60 * 1000;
+const CHECK_INTERVAL_MS: u64 = 60 * 60 * 1000;
 const MAX_RECENT: usize = 20;
 const MAX_RECORD_BYTES: u64 = 256 * 1024;
 
@@ -35,7 +35,7 @@ pub(crate) struct Record {
 }
 
 impl Record {
-    /// A day since the last check. A clock that moved backwards counts as due.
+    /// An hour since the last check. A clock that moved backwards counts as due.
     /// (Each daemon start also checks once; the backend tracks that.)
     pub fn check_due(&self, now_ms: u64) -> bool {
         self.last_check.as_ref().is_none_or(|check| {
@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn a_check_is_due_once_a_day() {
+    fn a_check_is_due_once_an_hour() {
         let mut record = Record::default();
         assert!(record.check_due(100 * HOUR));
         record.last_check = Some(KitUpdateCheck {
@@ -159,8 +159,8 @@ mod tests {
             problems: Vec::new(),
         });
         assert!(!record.check_due(100 * HOUR));
-        assert!(!record.check_due(123 * HOUR));
-        assert!(record.check_due(124 * HOUR));
+        assert!(!record.check_due(100 * HOUR + HOUR / 2));
+        assert!(record.check_due(101 * HOUR));
         assert!(record.check_due(99 * HOUR), "a clock moved backwards");
     }
 
@@ -174,7 +174,10 @@ mod tests {
             record.take_notices(Some("claude")),
             ["marsh: claude updated (2.1.305 → 2.1.307)"]
         );
-        assert!(record.take_notices(Some("claude")).is_empty());
+        assert_eq!(
+            record.take_notices(Some("claude")),
+            [] as [std::string::String; 0]
+        );
         assert!(!record.has_notices(Some("claude")));
         assert_eq!(
             record.take_notices(None),
@@ -184,7 +187,7 @@ mod tests {
                 "2".repeat(12)
             )]
         );
-        assert!(record.take_notices(None).is_empty());
+        assert_eq!(record.take_notices(None), [] as [std::string::String; 0]);
         assert!(!record.has_notices(None));
     }
 

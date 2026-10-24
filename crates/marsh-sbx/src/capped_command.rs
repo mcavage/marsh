@@ -31,7 +31,7 @@ fn capture(
             return Ok(output);
         }
         if total
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |previous| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |previous| {
                 previous.checked_add(count).filter(|next| *next <= limit)
             })
             .is_err()

@@ -64,7 +64,7 @@ The Pi Kit declares an Anthropic API key only. `shell` has no credentials.
 ### Updates
 
 Each Kit image pins its agent's version. Each time the marsh daemon starts,
-and once a day while it runs, marsh checks in the background whether a
+and once an hour while it runs, marsh checks in the background whether a
 command's tag names a newer image, so you get a new Claude Code, Codex, Pi,
 Pix or Hermes without waiting for a marsh release. It never delays what you
 are doing, and an offline check is reported only in `marsh status`.
@@ -122,7 +122,7 @@ When you invoke a registered command:
    checked. The VM stays warm for the next call.
 
 Each call gets its own container, including concurrent and background calls.
-Up to 8 jobs run at once per daemon.
+Up to 16 jobs run at once per daemon.
 
 An agent can edit or delete the project files its container mounts. The
 packaged agent Kits disable their agents' own sandboxes and permission
@@ -143,8 +143,8 @@ in the Kit's descriptor
 
 | Limit | Default |
 |---|---|
-| CPUs | 4 |
-| Memory | 8 GiB |
+| CPUs | 2 |
+| Memory | 4 GiB |
 | Processes | 4,096 |
 | Writable layer | 10 GiB |
 | Output | 256 MiB |
@@ -239,8 +239,9 @@ nonroot user in the caller's directory, with these mounts and variables:
 
 - `HOME` set to the mounted guest home. The same path is in
   `MARSH_SELECTED_HOME`.
-- `/run/marsh/bin` first on `PATH`. It holds the registered commands and an
-  in-job `marsh`.
+- `/run/marsh/bin` first on `PATH`. It holds the registered commands, an
+  in-job `marsh`, and `xdg-open` and `open` ([opening links](agents.md#opening-links)).
+  `BROWSER=xdg-open` unless the job already has a `BROWSER`.
 - `/run/marsh/context.md`, a short text telling an agent what it may start,
   followed by the Kit's own instructions (`agent-context`).
 

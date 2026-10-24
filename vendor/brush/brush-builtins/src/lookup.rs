@@ -74,10 +74,9 @@ pub(crate) fn resolve<'a, SE: ShellExtensions>(
         // Check for builtins. A process-backed registration (an marsh
         // registered command) runs as a separate process, so it is described
         // as the file on PATH that reaches it, when there is one.
-        if let Some(builtin) = shell.builtins().get(name).filter(|b| !b.disabled) {
+        if let Some(builtin) = shell.builtins().get(name).filter(|b| b.is_enabled()) {
             match builtin
-                .process_shim
-                .as_ref()
+                .process_shim()
                 .and_then(|shim| shim_path(shell, name, &shim.executable))
             {
                 Some(path) => resolved.push(Resolved::File {

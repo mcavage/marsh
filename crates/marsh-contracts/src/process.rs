@@ -10,16 +10,19 @@ use std::path::{Path, PathBuf};
 pub const CAPABILITY_DIR: &str = "/run/marsh";
 /// The per-name links (`#!/run/marsh/marsh --link=NAME`).
 pub const LINK_DIR: &str = "/run/marsh/bin";
+/// Links in [`LINK_DIR`] (and the shell VM's command directory) that run
+/// `marsh open`, unless a registered command has the name.
+pub const OPEN_LINKS: [&str; 2] = ["xdg-open", "open"];
 /// The static job artifact, bound read-only.
 pub const ARTIFACT: &str = "/run/marsh/marsh";
 pub const SOCKET: &str = "/run/marsh/cap.sock";
 pub const JOB_JSON: &str = "/run/marsh/job.json";
 
-pub const POOL_LIMIT: usize = 8;
+pub const POOL_LIMIT: usize = 16;
 pub const DEPTH_LIMIT: u32 = 4;
 pub const SAME_KIT_LIMIT: usize = 2;
-pub const FAN_OUT_LIMIT: usize = 4;
-pub const TOTAL_LIMIT: usize = 64;
+pub const FAN_OUT_LIMIT: usize = 8;
+pub const TOTAL_LIMIT: usize = 128;
 /// Distinct Kit VMs one job tree may use at once (`MARSH_TREE_KIT_VMS`
 /// lowers or raises it at daemon start).
 pub const TREE_KIT_VM_LIMIT: usize = 4;
@@ -437,11 +440,13 @@ mod tests {
             narrow_spawn(&parent, Some(&wide)),
             (vec!["fixture".to_owned()], vec!["shell".to_owned()])
         );
-        assert!(
-            narrow_spawn(&parent, Some(&parse_spawn("none")))
-                .0
-                .is_empty()
+        assert_eq!(
+            narrow_spawn(&parent, Some(&parse_spawn("none"))).0,
+            [] as [std::string::String; 0]
         );
-        assert!(narrow_spawn(&[], Some(&wide)).0.is_empty());
+        assert_eq!(
+            narrow_spawn(&[], Some(&wide)).0,
+            [] as [std::string::String; 0]
+        );
     }
 }

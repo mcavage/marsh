@@ -9,23 +9,9 @@ use crate::{InputBackend, ReadResult, ShellError, input_backend::InteractiveProm
 /// and reporting results to standard output and standard error streams.
 pub struct ReedlineInputBackend {
     reedline: Option<reedline::Reedline>,
-    /// Set once the terminal fails to answer reedline's cursor position query
-    /// (at the first prompt, or twice in a row later); lines are then read
-    /// plainly for the rest of the session.
-    plain: bool,
-    /// Whether reedline has read a line in this session.
-    answered: bool,
-    /// Text typed while reedline waited for the unanswered cursor position
-    /// query; the plain reader takes it before reading the terminal again.
-    typed_ahead: String,
 }
 
 const COMPLETION_MENU_NAME: &str = "completion_menu";
-
-/// How many times `reedline.read_line()` is attempted before its error is
-/// propagated: the initial call plus this many minus one retries. See
-/// `read_line` below.
-const MAX_READ_LINE_ATTEMPTS: u32 = 3;
 
 fn completion_menu_text_style() -> Style {
     Style::new()
@@ -92,6 +78,10 @@ impl ReedlineInputBackend {
                 .with_name(COMPLETION_MENU_NAME)
                 .with_marker("")
                 .with_columns(10)
+                // Like readline, hand completion the whole line, not just the text before
+                // the cursor: completion functions see the words after the cursor (e.g. in
+                // COMP_WORDS), and candidates completed mid-line don't get a trailing space.
+                .with_input_mode(reedline::InputMode::FullBuffer)
                 .with_text_style(completion_menu_text_style())
                 .with_match_text_style(completion_menu_match_text_style())
                 .with_selected_text_style(completion_menu_selected_text_style())
@@ -137,9 +127,6 @@ impl ReedlineInputBackend {
 
         Ok(Self {
             reedline: Some(reedline),
-            plain: false,
-            answered: false,
-            typed_ahead: String::new(),
         })
     }
 }
@@ -167,82 +154,31 @@ impl InputBackend for ReedlineInputBackend {
     /// # Arguments
     ///
     /// * `prompt` - The prompt to display to the user.
-    fn read_line(
+    #[allow(
+        clippy::unused_async_trait_impl,
+        reason = "this backend reads synchronously; the trait is async for those that don't"
+    )]
+    async fn read_line(
         &mut self,
-        shell: &crate::ShellRef<impl brush_core::ShellExtensions>,
+        _shell: &crate::ShellRef<impl brush_core::ShellExtensions>,
         prompt: InteractivePrompt,
     ) -> Result<ReadResult, ShellError> {
         let Some(reedline) = &mut self.reedline else {
             return Ok(ReadResult::Eof);
         };
 
-        if self.plain {
-            return read_plain_line(shell, &prompt, &mut self.typed_ahead);
-        }
-
-        let mut attempt: u32 = 1;
-        loop {
-            #[cfg(unix)]
-            enter_raw_mode_keeping_output_processing();
-            match reedline.read_line(&prompt) {
-                Ok(reedline::Signal::Success(s)) => {
-                    self.answered = true;
-                    return Ok(ReadResult::Input(s));
-                }
-                Ok(reedline::Signal::CtrlC) => return Ok(ReadResult::Interrupted),
-                Ok(reedline::Signal::CtrlD) => return Ok(ReadResult::Eof),
-                Ok(reedline::Signal::ExternalBreak(_)) => {
-                    return Err(ShellError::UnexpectedInputFailure);
-                }
-                Ok(reedline::Signal::HostCommand(cmd)) => return Ok(ReadResult::BoundCommand(cmd)),
-                Ok(_) => return Err(ShellError::UnexpectedInputFailure),
-                // An error here is almost always transient. The prevalent case:
-                // reedline asks the terminal for the cursor position (DSR,
-                // `ESC [ 6 n`) before painting a prompt, and again after an
-                // external program (a `bind -x` command such as atuin's search
-                // UI, fzf, ...) hands the terminal back. crossterm waits a fixed
-                // 2s for the reply and then fails; a terminal busy repainting or
-                // a multiplexer briefly holding the reply is enough to trip it,
-                // and giving up would end the whole interactive session. That
-                // failure happens before any input is read, so re-issuing the
-                // read is safe; retry a bounded number of times before treating
-                // the failure as real. A terminal that never answers therefore
-                // fails after MAX_READ_LINE_ATTEMPTS x 2s rather than 2s.
-                //
-                // The one known exception: reedline restores the terminal mode
-                // *after* computing its result, so if `disable_raw_mode` itself
-                // fails, a line that was already submitted is lost and the retry
-                // prompts afresh. That is a tcsetattr failure on a tty that just
-                // worked; the alternative -- exiting the shell -- loses the same
-                // line and everything else with it.
-                // A terminal (or pty driver) that never answers the cursor
-                // position query must not end the session. One that never
-                // answered gets no retry; after that, one retry. Then lines are
-                // read without reedline for the rest of the session (Bash's
-                // readline never queries the cursor).
-                Err(err)
-                    if is_cursor_position_timeout(&err) && (attempt >= 2 || !self.answered) =>
-                {
-                    tracing::debug!(
-                        target: trace_categories::INPUT,
-                        "terminal did not report the cursor position; reading lines plainly: {err}"
-                    );
-                    eprintln!(
-                        "warning: the terminal did not answer a cursor position query; line editing is off for this session"
-                    );
-                    self.plain = true;
-                    self.typed_ahead = take_queued_keys();
-                    return read_plain_line(shell, &prompt, &mut self.typed_ahead);
-                }
-                Err(err) if attempt < MAX_READ_LINE_ATTEMPTS => {
-                    attempt += 1;
-                    tracing::debug!(
-                        target: trace_categories::INPUT,
-                        "reedline read_line failed; retrying (attempt {attempt}/{MAX_READ_LINE_ATTEMPTS}): {err}"
-                    );
-                }
-                Err(err) => return Err(ShellError::InputError(err)),
-            }
+        // reedline no longer fails `read_line` when the terminal never answers its cursor
+        // position query, so there is no error to fall back from to plain line reading. Such a
+        // terminal costs crossterm's wait on each query; `--input-backend vt` never queries.
+        #[cfg(unix)]
+        enter_raw_mode_keeping_output_processing();
+        match reedline.read_line(&prompt) {
+            Ok(reedline::Signal::Success(s)) => Ok(ReadResult::Input(s)),
+            Ok(reedline::Signal::CtrlC) => Ok(ReadResult::Interrupted),
+            Ok(reedline::Signal::CtrlD) => Ok(ReadResult::Eof),
+            Ok(reedline::Signal::HostCommand(cmd)) => Ok(ReadResult::BoundCommand(cmd)),
+            Ok(_) => Err(ShellError::UnexpectedInputFailure),
+            Err(err) => Err(ShellError::InputError(err)),
         }
     }
 
@@ -427,112 +363,4 @@ fn enter_raw_mode_keeping_output_processing() {
             std::io::Error::last_os_error()
         );
     }
-}
-
-/// Whether `err` is crossterm's timeout waiting for a cursor position report.
-fn is_cursor_position_timeout(err: &std::io::Error) -> bool {
-    err.to_string()
-        .contains("cursor position could not be read")
-}
-
-/// Reads one complete program a line at a time from the terminal in its
-/// ordinary (cooked) mode, showing the prompt and continuation prompt. Ctrl-C
-/// typed while reading is reported when the line ends, discarding it.
-/// Takes the keys crossterm read from the terminal while it waited for a
-/// cursor position report that never came. crossterm parses every byte it
-/// reads and holds the events that are not the report, so without this the
-/// lines typed during the wait were lost: the plain reader reads the terminal
-/// itself. Characters, Tab and Enter are kept as text; editing keys are not
-/// replayed.
-fn take_queued_keys() -> String {
-    use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
-
-    let mut text = String::new();
-    while crossterm::event::poll(std::time::Duration::ZERO).unwrap_or(false) {
-        let Ok(Event::Key(key)) = crossterm::event::read() else {
-            continue;
-        };
-        if key.kind == KeyEventKind::Release {
-            continue;
-        }
-        match key.code {
-            KeyCode::Char('j' | 'm') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                text.push('\n');
-            }
-            KeyCode::Char(c)
-                if !key
-                    .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
-            {
-                text.push(c);
-            }
-            KeyCode::Enter => text.push('\n'),
-            KeyCode::Tab => text.push('\t'),
-            _ => {}
-        }
-    }
-    text
-}
-
-fn read_plain_line(
-    shell: &crate::ShellRef<impl brush_core::ShellExtensions>,
-    prompt: &InteractivePrompt,
-    typed_ahead: &mut String,
-) -> Result<ReadResult, ShellError> {
-    use std::io::Write as _;
-
-    let mut program = String::new();
-    loop {
-        let shown = if program.is_empty() {
-            &prompt.prompt
-        } else {
-            &prompt.continuation_prompt
-        };
-        let mut stderr = std::io::stderr();
-        stderr.write_all(&brush_core::bytes::encode(shown))?;
-        stderr.flush()?;
-
-        let mut line = String::new();
-        let read = if typed_ahead.is_empty() {
-            read_stdin_line(&mut line)?
-        } else {
-            // Typed while the terminal was raw, so never echoed: show it as the
-            // terminal would have.
-            let end = typed_ahead.find('\n').map_or(typed_ahead.len(), |i| i + 1);
-            line = typed_ahead.drain(..end).collect();
-            write!(stderr, "{line}")?;
-            stderr.flush()?;
-            if !line.ends_with('\n') {
-                read_stdin_line(&mut line)?;
-            }
-            line.len()
-        };
-        #[cfg(unix)]
-        if brush_core::traps::take_pending_interrupt() {
-            writeln!(stderr)?;
-            return Ok(ReadResult::Interrupted);
-        }
-        if read == 0 {
-            break;
-        }
-        // Bash ignores NUL bytes in its input.
-        line.retain(|c| c != '\0');
-        program.push_str(&line);
-        if !crate::completeness::needs_more_input(shell, &program) {
-            break;
-        }
-    }
-    if program.is_empty() {
-        Ok(ReadResult::Eof)
-    } else {
-        Ok(ReadResult::Input(program))
-    }
-}
-
-/// Appends a line of standard input, decoded as shell text, to `line`.
-fn read_stdin_line(line: &mut String) -> std::io::Result<usize> {
-    let mut bytes = Vec::new();
-    let read = std::io::BufRead::read_until(&mut std::io::stdin().lock(), b'\n', &mut bytes)?;
-    line.push_str(&brush_core::bytes::decode(&bytes));
-    Ok(read)
 }

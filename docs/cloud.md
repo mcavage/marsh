@@ -294,7 +294,7 @@ marsh cloud collect 42      # check on it now
   seconds); its changes so far come back as usual.
 - `marsh stop`, `marsh reset`, and `marsh workers reset cloud` keep
   detached runs and say how many they kept; add `--detached` to discard them.
-- Up to 8 detached runs at a time. They don't count toward the 8 jobs that
+- Up to 8 detached runs at a time. They don't count toward the 16 jobs that
   run at once.
 
 A detached block can't call registered commands that run in their own Kit
@@ -309,7 +309,7 @@ job. Design: [detached cloud work](design/cloud-detach.md).
 Each cloud call is a job: `marsh jobs` shows `cloud -c ...` with placement
 `cloud`, and `marsh jobs show JOB --json` records the sandbox ID (`vm_id`),
 the exit status, and the cleanup result. Cloud calls count toward the
-8-jobs-at-once limit.
+16-jobs-at-once limit.
 
 - **Ctrl-C** sends `INT` to the remote command (then `KILL` after 10 seconds).
   When it has stopped, its changes so far are written back and the call exits

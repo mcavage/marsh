@@ -109,7 +109,7 @@ pub fn resolve(
     Ok(configured(scope_root)?.unwrap_or_default())
 }
 
-pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n       marsh config auto-update [on|off]\n\nshell        Show or set this home's default interactive shell. `marsh` (the\n             default) is marsh's Brush; `bash` and `zsh` are the shell VM's own,\n             started with your ~/.bashrc or ~/.zshrc from the selected home. One\n             launch may override it with --shell NAME or MARSH_SHELL=NAME.\nauto-update  Show or set whether Kits that follow a tag update themselves, and\n             whether hermes and pix appear by themselves (default on).\n             MARSH_AUTO_UPDATE=0 at daemon start also turns it off.\n\nStored in $MARSH_HOME/config.json. Run a script named `config` as\n`marsh ./config`.\n";
+pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n       marsh config auto-update [on|off]\n       marsh config open-urls [on|off]\n\nshell        Show or set this home's default interactive shell. `marsh` (the\n             default) is marsh's Brush; `bash` and `zsh` are the shell VM's own,\n             started with your ~/.bashrc or ~/.zshrc from the selected home. One\n             launch may override it with --shell NAME or MARSH_SHELL=NAME.\nauto-update  Show or set whether Kits that follow a tag update themselves, and\n             whether hermes and pix appear by themselves (default on).\n             MARSH_AUTO_UPDATE=0 at daemon start also turns it off.\nopen-urls    Show or set whether `xdg-open URL` in a shell or job started from\n             your terminal opens the link on your Mac (default on). Off, the\n             link is only printed. MARSH_OPEN_URLS=0 at daemon start also\n             turns it off.\n\nStored in $MARSH_HOME/config.json. Run a script named `config` as\n`marsh ./config`.\n";
 
 /// `auto_update` in `config.json`; read by the daemon (`docs/kits.md`).
 pub const AUTO_UPDATE_KEY: &str = "auto_update";
@@ -119,6 +119,22 @@ pub const AUTO_UPDATE_KEY: &str = "auto_update";
 /// # Errors
 /// Reports an unreadable or malformed config file.
 pub fn auto_update(scope_root: &Path) -> Result<bool, String> {
+    config_switch(scope_root, AUTO_UPDATE_KEY)
+}
+
+/// `open_urls` in `config.json`; read by the daemon (`docs/agents.md`).
+pub const OPEN_URLS_KEY: &str = marsh_daemon::open_url::CONFIG_KEY;
+
+/// Whether `xdg-open` from a terminal session opens links on the Mac
+/// (default on).
+///
+/// # Errors
+/// Reports an unreadable or malformed config file.
+pub fn open_urls(scope_root: &Path) -> Result<bool, String> {
+    config_switch(scope_root, OPEN_URLS_KEY)
+}
+
+fn config_switch(scope_root: &Path, key: &str) -> Result<bool, String> {
     let path = scope_root.join(CONFIG_FILE);
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
@@ -127,11 +143,11 @@ pub fn auto_update(scope_root: &Path) -> Result<bool, String> {
     };
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid {}: {error}", path.display()))?;
-    match value.get(AUTO_UPDATE_KEY) {
+    match value.get(key) {
         None | Some(serde_json::Value::Null) => Ok(true),
         Some(serde_json::Value::Bool(on)) => Ok(*on),
         Some(_) => Err(format!(
-            "invalid {}: {AUTO_UPDATE_KEY} must be true or false",
+            "invalid {}: {key} must be true or false",
             path.display()
         )),
     }
@@ -162,8 +178,18 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
             println!("{}", if on { "on" } else { "off" });
             Ok(0)
         }
-        ["auto-update", value @ ("on" | "off")] => {
-            write_config(scope_root, AUTO_UPDATE_KEY, (*value == "on").into()).map_err(
+        ["open-urls"] => {
+            let on = open_urls(scope_root).map_err(|message| (message, 1))?;
+            println!("{}", if on { "on" } else { "off" });
+            Ok(0)
+        }
+        [key @ ("auto-update" | "open-urls"), value @ ("on" | "off")] => {
+            let key = if *key == "auto-update" {
+                AUTO_UPDATE_KEY
+            } else {
+                OPEN_URLS_KEY
+            };
+            write_config(scope_root, key, (*value == "on").into()).map_err(
                 |error| {
                     (
                         format!(
@@ -193,7 +219,7 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
             Ok(0)
         }
         _ => Err((
-            "usage: marsh config shell [marsh|bash|zsh] | marsh config auto-update [on|off]"
+            "usage: marsh config shell [marsh|bash|zsh] | marsh config auto-update [on|off] | marsh config open-urls [on|off]"
                 .to_owned(),
             2,
         )),
@@ -477,6 +503,25 @@ mod tests {
             Ok(0)
         );
         assert_eq!(auto_update(&root), Ok(true));
+    }
+
+    #[test]
+    fn open_urls_is_on_by_default_and_the_daemon_reads_the_same_key() {
+        let scope = tempfile::tempdir().unwrap();
+        let root = scope.path().join("scope");
+        assert_eq!(open_urls(&root), Ok(true));
+        assert_eq!(
+            config_command(&["open-urls".into(), "off".into()], &root),
+            Ok(0)
+        );
+        assert_eq!(open_urls(&root), Ok(false));
+        assert_eq!(auto_update(&root), Ok(true));
+        assert!(!marsh_daemon::open_url::configured(&root.join(CONFIG_FILE)));
+        assert_eq!(
+            config_command(&["open-urls".into(), "on".into()], &root),
+            Ok(0)
+        );
+        assert!(marsh_daemon::open_url::configured(&root.join(CONFIG_FILE)));
     }
 
     fn parses(shell: &str, flags: &[&str], contents: &str) -> bool {

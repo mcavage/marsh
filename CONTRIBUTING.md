@@ -12,13 +12,13 @@ To share a Kit, a pipeline, or an AGENTS.md recipe instead of code, post it in
 ## Building on a Mac
 
 You need an Apple Silicon Mac with Xcode Command Line Tools, Docker Desktop
-(with Buildx), `sbx` 0.47.0 or newer, Rust 1.95.0 (`rust-toolchain.toml` picks
+(with Buildx), `sbx` 0.47.0 or newer, Rust 1.99.1 (`rust-toolchain.toml` picks
 it), `cargo-nextest`, Python 3.10+, Node 24.11+ (24.x), GNU Bash 5.3 (the test oracle),
 and `jq`.
 
 ```sh
 brew install jq bash node cargo-nextest docker/tap/sbx
-rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
 sbx login
 ```
 
@@ -140,7 +140,7 @@ suites use fixture Kits, not provider accounts.
 
 A Linux arm64 machine runs `make test-rust` and `make test-harness` without a
 Mac, Docker, `sbx`, or credentials; that is CI's Linux job. You need Rust
-1.95.0, `cargo-nextest`, Python 3.10+, Node 24.11+ (24.x), and GNU Bash 5.3 first on
+1.99.1, `cargo-nextest`, Python 3.10+, Node 24.11+ (24.x), and GNU Bash 5.3 first on
 `PATH` (`bash_audit` and the other differential tests compare marsh with the
 `bash` on `PATH`; include `bash --version` when you report results). On a small
 disk, set `CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_PROFILE_TEST_DEBUG=0`.
@@ -160,8 +160,8 @@ divergence from Bash is classified and tested.
 
 To fix a shell bug, reproduce it through the shipped `marsh-local` entrypoint
 and compare with Bash (see `crates/marsh/tests/bash_audit.rs`). Then fix it in
-Brush as a small patch: add it to `docs/upstream/brush/` in order, apply it
-under `vendor/brush/`, and describe it in the patch README. A general Bash fix
+Brush: change `vendor/brush/` and fold the change into the patch for its area in
+`docs/upstream/brush/` (see `vendor/brush/MARSH-VENDORING.md`). A general Bash fix
 should be one upstream Brush could take; marsh-specific behavior stays here.
 A suite mismatch you do not fix gets an entry in
 `tests/acceptance/bash_divergences.json` and `docs/design/bash-compatibility.md`.

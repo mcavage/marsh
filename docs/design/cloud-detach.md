@@ -118,7 +118,7 @@ At start, before the command runs, marsh writes a durable detached record
 name, request, destination root and its identity, the time limit, and a
 **base manifest** with the path, type, mode and SHA-256 of every entry it
 uploaded. The job's receipt shows `placement cloud, detached`. Detached jobs
-don't hold one of the 8 local job slots once the start is confirmed; a
+don't hold one of the local job slots once the start is confirmed; a
 separate cap (default 8 outstanding detached jobs) bounds sandboxes and cost.
 
 **Collect** (automatic, or `marsh cloud collect`):
@@ -303,3 +303,9 @@ Where the built version differs from, or adds to, the sections above:
 - **Collection timing.** At daemon start and every 2 minutes while a run is
   outstanding. `MARSH_CLOUD_DETACHED_RETENTION` (daemon environment)
   overrides the 14-day retention, for testing.
+- **Lifecycle.** Detached-run requests (collection, an attach refresh) do not
+  hold the request admission that `marsh stop` and `marsh reset` wait for:
+  they are resumable, so a stop ends them instead of waiting. Only the
+  write-back (and `marsh cloud apply`) holds a short admission.
+- **Listing.** `marsh jobs` shows a detached run's job number (the one
+  `marsh cloud attach N` takes) in its ID column, and its own state.

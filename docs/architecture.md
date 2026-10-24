@@ -65,8 +65,9 @@ distinct and are never derived from each other.
    `ProcessRun`; the daemon (`process.rs`) admits it under one lineage tree
    and runs it through its own `Execute` with the parent's mounts. The
    capability admits only `ProcessRun`, `ProcessShow`, `Jobs`, `ShowJob`,
-   `SplitCreate`, and `SplitJoin`. Job inspection is limited to the caller's
-   own subtree.
+   `SplitCreate`, `SplitJoin`, and `OpenUrl`. Job inspection is limited to
+   the caller's own subtree. `OpenUrl` (`xdg-open`, `marsh-daemon`
+   `open_url.rs`) also comes from a shell's relay, never from the host owner.
 5. The daemon resolves the Kit, ensures an owned Kit VM, and sends the attempt
    over that VM's retained worker transport. The worker creates one fresh
    container from the exact Kit image with nonroot identity and resource

@@ -23,11 +23,13 @@ pub(crate) struct WaitCommand {
     ids: Vec<String>,
 }
 
-impl builtins::Command for WaitCommand {
+brush_clap_adapter::impl_parse_args!(WaitCommand);
+
+impl<SE: brush_core::ShellExtensions> builtins::Builtin<SE> for WaitCommand {
     type Error = brush_core::Error;
 
-    async fn execute<SE: brush_core::ShellExtensions>(
-        &self,
+    async fn execute(
+        self,
         mut context: brush_core::ExecutionContext<'_, SE>,
     ) -> Result<ExecutionResult, Self::Error> {
         if let Some(name) = &self.variable_to_receive_id {
@@ -92,7 +94,7 @@ impl builtins::Command for WaitCommand {
                     env::EnvironmentScope::Global,
                 )?;
             }
-            return Ok(result);
+            return Ok(result.exit_code.into());
         }
         #[cfg(unix)]
         {
@@ -124,11 +126,14 @@ impl WaitCommand {
                     if let Some(job) = context.shell.jobs_mut().resolve_job_spec(id) {
                         let pid = job.representative_pid();
                         let job_id = job.id;
-                        result = if self.wait_for_terminate {
+                        // Take the job's status, but not its control flow: an `exit` in a
+                        // background job ends only that job.
+                        let waited = if self.wait_for_terminate {
                             job.wait_for_termination().await?
                         } else {
                             job.wait().await?
                         };
+                        result = waited.exit_code.into();
                         last_waited_id =
                             Some(pid.map_or_else(|| format!("%{job_id}"), |pid| pid.to_string()));
                     } else if let Some(job_id) = id.strip_prefix('%').and_then(|id| id.parse().ok())
@@ -170,11 +175,12 @@ impl WaitCommand {
                         continue;
                     };
                     if let Some(job) = context.shell.jobs_mut().job_for_pid_mut(pid) {
-                        result = if self.wait_for_terminate {
+                        let waited = if self.wait_for_terminate {
                             job.wait_for_termination().await?
                         } else {
                             job.wait().await?
                         };
+                        result = waited.exit_code.into();
                         last_waited_id = Some(pid.to_string());
                         context.shell.jobs_mut().remember_reaped(pid, &result);
                     } else if let Some(completed) =

@@ -453,7 +453,7 @@ fn startup_history_disable_preserves_command_and_script_arguments() {
         .unwrap();
     assert_eq!(output.status.code(), Some(23));
     assert_eq!(output.stdout, b"name|arg");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 
     let directory = tempfile::tempdir().unwrap();
     let script = directory.path().join("history.sh");
@@ -481,7 +481,7 @@ fn startup_history_disable_preserves_command_and_script_arguments() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"argument");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -498,8 +498,8 @@ fn supports_bash_pipeline_and_pipefail_behavior() {
         .expect("run marsh");
 
     assert_eq!(output.status.code(), Some(1));
-    assert!(output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -530,7 +530,7 @@ fn background_pid_jobs_and_wait_use_the_real_child() {
         .expect("run marsh");
 
     assert_eq!(output.status.code(), Some(23));
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
     assert!(
         output.stderr.is_empty(),
         "{}",
@@ -552,8 +552,8 @@ fn background_pipeline_wait_returns_rightmost_status() {
         .expect("run marsh");
 
     assert_eq!(output.status.code(), Some(23));
-    assert!(output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -657,7 +657,7 @@ fn fanout_runs_pipelines_concurrently_and_collects_in_declaration_order() {
     assert!(stdout.contains("one"));
     assert!(stdout.contains("INPUT"));
     assert!(stdout.contains("Timing:"));
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 /// Runs a two-branch fanout whose branches only finish once both are running,
@@ -746,7 +746,7 @@ fn collect_renders_failed_branch_stderr_inline_and_propagates_required_failure()
     assert_eq!(output.status.code(), Some(7));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("good"));
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
     assert_eq!(
         std::fs::read_to_string(directory.path().join("diagnostics")).unwrap(),
         ""
@@ -910,7 +910,7 @@ fn fanout_enforces_branch_cap_and_json_rejects_non_utf8() {
         .output()
         .expect("run binary JSON fanout");
     assert!(!binary.status.success());
-    assert!(binary.stdout.is_empty());
+    assert_eq!(binary.stdout, [] as [u8; 0]);
     assert!(String::from_utf8_lossy(&binary.stderr).contains("requires UTF-8"));
 }
 
@@ -945,7 +945,7 @@ fn fanout_enforces_prefix_and_combined_output_bounds_before_delivery() {
     );
     let output = common::wait_for_exit(child, "over-limit fanout", Duration::from_mins(1));
     assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
     assert!(String::from_utf8_lossy(&output.stderr).contains("combined output exceeds 16 MiB"));
 }
 
@@ -1089,7 +1089,7 @@ fn collect_help_redirects_and_invalid_options_launch_no_branch() {
         .output()
         .expect("redirect collect help");
     assert!(redirected.status.success());
-    assert!(redirected.stdout.is_empty());
+    assert_eq!(redirected.stdout, [] as [u8; 0]);
     let help_text = std::fs::read_to_string(&help).unwrap();
     assert!(help_text.contains("64 MiB completed stdin"));
     assert!(help_text.contains("16 MiB combined branch stdout and stderr"));
@@ -1194,7 +1194,7 @@ fn collect_stdout_redirection_overrides_a_downstream_pipe() {
         .output()
         .expect("run redirected collect pipeline");
     assert!(output.status.success());
-    assert!(output.stdout.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
     assert!(
         std::fs::read_to_string(directory.path().join("captured"))
             .unwrap()
@@ -1320,7 +1320,7 @@ fn flagless_command_works_with_an_isolated_home() {
     let _ = std::fs::remove_dir_all(&root);
     assert!(output.status.success());
     assert_eq!(output.stdout, b"flagless\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -1340,7 +1340,7 @@ fn empty_bash_env_skips_noninteractive_startup_file() {
 
     assert!(output.status.success());
     assert_eq!(output.stdout, b"executed");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -1366,7 +1366,7 @@ fn bash_env_is_expanded_and_sourced_for_noninteractive_shell() {
     let _ = std::fs::remove_dir_all(&root);
     assert!(output.status.success());
     assert_eq!(output.stdout, b"loaded");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -1385,7 +1385,7 @@ fn reports_the_script_supplied_zero_argument() {
 
     assert!(output.status.success());
     assert_eq!(output.stdout, b"marsh\n");
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 #[test]
@@ -1404,8 +1404,8 @@ fn compound_background_list_has_a_waitable_pid() {
         .expect("run marsh");
 
     assert!(output.status.success());
-    assert!(output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
+    assert_eq!(output.stdout, [] as [u8; 0]);
+    assert_eq!(output.stderr, [] as [u8; 0]);
 }
 
 /// Bracketed paste on: emitted once each time the shell starts reading a line.

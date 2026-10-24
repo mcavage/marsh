@@ -37,12 +37,10 @@ use brush_builtins::ShellBuilderExt as _;
 #[cfg(feature = "experimental-builtins")]
 use brush_experimental_builtins::ShellBuilderExt as _;
 use clap::CommandFactory;
+use std::io::IsTerminal;
 use std::sync::LazyLock;
 use std::{path::Path, sync::Arc};
 use tokio::sync::Mutex;
-
-#[allow(unused_imports, reason = "only used in some configs")]
-use std::io::IsTerminal;
 
 static TRACE_EVENT_CONFIG: LazyLock<Arc<tokio::sync::Mutex<Option<events::TraceEventConfig>>>> =
     LazyLock::new(|| Arc::new(tokio::sync::Mutex::new(None)));
@@ -217,174 +215,40 @@ fn bash_startup_options(args: &mut Vec<String>) -> Result<(), String> {
 }
 
 impl CommandLineArgs {
-    // Work around clap's limitation handling `--` like a regular value
-    // TODO(cmdline): We can safely remove this `impl` after the issue is resolved
-    // https://github.com/clap-rs/clap/issues/5055
     // This function takes precedence over [`clap::Parser::parse_from`]
     pub(crate) fn try_parse_from(
         itr: impl IntoIterator<Item = String>,
     ) -> Result<Self, clap::Error> {
-        let mut args: Vec<String> = itr.into_iter().collect();
-        Self::gnu_command_order(&mut args);
+        let (mut this, script_args) =
+            brush_clap_adapter::try_parse_before_double_dash::<Self>(itr)?;
 
-        // In bash, `-c` treats `--` as an option terminator and takes its
-        // command string from the first argument *after* `--`. (Other
-        // value-taking flags like `-o` and `-O` instead consume `--` as their
-        // literal value in bash, rejecting it as an invalid option name.)
-        //
-        // Remove the `--` so that `-c` naturally consumes the next token as its
-        // value via clap. Other value-taking flags are unaffected: for them
-        // try_parse_known splits at `--` before clap sees it, so they still
-        // produce an error for invocations like `-o --`/`-O --` (via a missing
-        // value rather than an invalid option name). In both cases, we
-        // intentionally do not treat `--` as an option terminator for those
-        // flags.
-        if let Some(dd_idx) = args.iter().position(|a| a == "--") {
-            if let Some(flag_idx) = dd_idx
-                .checked_sub(1)
-                .filter(|&i| Self::has_pending_c_flag(&args[i]))
-            {
-                // Remove the option-terminating `--`.
-                args.remove(dd_idx);
+        // Collect any args from after `--` (handled by try_parse_before_double_dash) into
+        // script_args, which become positional parameters ($0, $1, ...).
+        let mut script_args = script_args.into_iter().peekable();
 
-                // If the command value (now at dd_idx) is itself `--`, merge it
-                // into the flag as an attached value (e.g., "-c" + "--" → "-c--").
-                // Clap parses `-c--` as `-c` with value `"--"` (standard POSIX
-                // short-option-with-attached-value syntax). This prevents
-                // try_parse_known from splitting at it again.
-                if args.get(dd_idx).map(String::as_str) == Some("--") {
-                    let value = args.remove(dd_idx);
-                    args[flag_idx].push_str(&value);
-                }
-            }
+        // Bash stops option parsing at the first non-option word: a script path
+        // or the `-c` command string. A `--` seen before either is the option
+        // terminator and is dropped (`bash -s -- a`, `bash -- script.sh`); one
+        // seen after is an ordinary positional (`bash script.sh -- a`).
+        if this.script_args.is_empty() {
+            script_args.next_if(|a| a == "--");
         }
+        this.script_args.extend(script_args);
 
-        let (mut this, script_args) = brush_core::builtins::try_parse_known::<Self>(args)?;
-
-        // Collect any args from after `--` (handled by try_parse_known) into
-        // script_args, which become positional parameters ($0, $1, ...). As in
-        // Bash, a `--` before the script ends the options; after `-c CMD` or
-        // the script name it is an argument itself.
-        if let Some(args) = script_args {
-            let mut args = args.peekable();
-            if this.command.is_none() && this.script_args.is_empty() {
-                args.next_if(|arg| arg == "--");
+        // With `-c`, bash takes the command string from the first operand; the
+        // operands after it keep their usual meaning, so the next one sets `$0`
+        // and the rest become positional parameters.
+        if this.command_string_mode {
+            if this.script_args.is_empty() {
+                return Err(Self::command().error(
+                    clap::error::ErrorKind::MissingRequiredArgument,
+                    "-c: option requires an argument",
+                ));
             }
-            this.script_args.extend(args);
+            this.command = Some(this.script_args.remove(0));
         }
 
         Ok(this)
-    }
-
-    /// Applies Bash's option order to `-c`: in Bash, `-c` is a flag and the
-    /// command string is the first operand after *all* options, so
-    /// `bash -c -l CMD`, `bash -ce CMD`, and `bash -c -o pipefail CMD` run
-    /// `CMD`. Clap treats `-c` as taking the next argument, so move the flag
-    /// to just before the first operand (or `--`), where clap reads it as
-    /// Bash does. Options are scanned as Bash does: value-taking short
-    /// options (`-o`, `-O`) end their cluster, and the scan stops at the
-    /// first operand, `-`, or `--`.
-    fn gnu_command_order(args: &mut Vec<String>) {
-        let cmd = Self::command();
-        let takes_value = |arg: &clap::Arg| {
-            matches!(
-                arg.get_action(),
-                clap::ArgAction::Set | clap::ArgAction::Append
-            )
-        };
-        let short_value = |ch: char| {
-            ch != 'c'
-                && cmd
-                    .get_arguments()
-                    .any(|a| a.get_short() == Some(ch) && takes_value(a))
-        };
-        let long_value = |name: &str| {
-            cmd.get_arguments().any(|a| {
-                takes_value(a)
-                    && (a.get_long() == Some(name)
-                        || a.get_all_aliases()
-                            .is_some_and(|aliases| aliases.contains(&name)))
-            })
-        };
-
-        let mut flag = None;
-        let mut index = 1;
-        while let Some(arg) = args.get(index) {
-            if let Some(plus) = arg.strip_prefix('+').filter(|plus| !plus.is_empty()) {
-                index += 1 + usize::from(plus == "o" || plus == "O");
-                continue;
-            }
-            if arg == "--" || arg == "-" || !arg.starts_with('-') {
-                break;
-            }
-            if let Some(long) = arg.strip_prefix("--") {
-                index += 1 + usize::from(!long.contains('=') && long_value(long));
-                continue;
-            }
-            let mut value_follows = false;
-            for (pos, ch) in arg.char_indices().skip(1) {
-                if ch == 'c' {
-                    flag.get_or_insert((index, pos));
-                } else if short_value(ch) {
-                    value_follows = pos + ch.len_utf8() == arg.len();
-                    break;
-                }
-            }
-            index += 1 + usize::from(value_follows);
-        }
-
-        let Some((flag_index, pos)) = flag else {
-            return;
-        };
-        let mut operand = index.min(args.len());
-        if operand == flag_index + 1 && args[flag_index].ends_with('c') {
-            // Already `... -c CMD` (or `-ec CMD`).
-            return;
-        }
-        args[flag_index].remove(pos);
-        if args[flag_index] == "-" {
-            args.remove(flag_index);
-            operand -= 1;
-        }
-        args.insert(operand, "-c".to_owned());
-    }
-
-    /// Returns true if `arg` is `-c` or a combined short-flag group ending in
-    /// `c` (like `-ec`) where all preceding characters are boolean flags.
-    ///
-    /// This specifically targets `-c` because it is the only short flag with
-    /// special `--` option-terminator behavior in bash. Other value-taking flags
-    /// (`-o`, `-O`) consume `--` as their literal value instead.
-    ///
-    /// Uses clap's argument definitions to validate preceding flags, avoiding
-    /// a hardcoded list of boolean flag characters.
-    fn has_pending_c_flag(arg: &str) -> bool {
-        // Must be a short flag group ending in 'c': "-c", "-ec", "-xec", etc.
-        let Some(flags) = arg.strip_prefix('-') else {
-            return false;
-        };
-        let Some(preceding) = flags.strip_suffix('c') else {
-            return false;
-        };
-        // Reject long-option-like args (e.g., "--c").
-        if preceding.starts_with('-') {
-            return false;
-        }
-
-        // For "-c" alone, preceding is empty and the check below is vacuously
-        // true. For combined flags like `-ec`, verify all chars before the
-        // trailing `c` are boolean flags. If any preceding char takes a value
-        // (like `o`), then `c` is consumed as that flag's value, not as `-c`.
-        let cmd = Self::command();
-        preceding.chars().all(|ch| {
-            cmd.get_arguments().any(|a| {
-                a.get_short() == Some(ch)
-                    && !matches!(
-                        a.get_action(),
-                        clap::ArgAction::Set | clap::ArgAction::Append
-                    )
-            })
-        })
     }
 }
 
@@ -582,30 +446,45 @@ async fn run_async(
     let ui_options = file_config.to_ui_options(&args);
 
     let result = match selected_backend {
-        #[cfg(all(feature = "reedline", any(unix, windows)))]
+        #[cfg(reedline_backend)]
         InputBackendType::Reedline => {
             let mut input_backend =
                 brush_interactive::ReedlineInputBackend::new(&ui_options, &shell)?;
             run_in_shell(&shell, args, &mut input_backend, &ui_options).await
         }
-        #[cfg(any(not(feature = "reedline"), not(any(unix, windows))))]
+        #[cfg(not(reedline_backend))]
         InputBackendType::Reedline => Err(brush_interactive::ShellError::InputBackendNotSupported),
 
-        #[cfg(feature = "basic")]
+        #[cfg(basic_backend)]
         InputBackendType::Basic => {
-            let mut input_backend = brush_interactive::BasicInputBackend;
+            let mut input_backend = brush_interactive::VtInputBackend::default().with_basic_style();
+            let mut locked_shell = shell.lock().await;
+            input_backend.install_key_bindings(&mut locked_shell);
+            drop(locked_shell);
             run_in_shell(&shell, args, &mut input_backend, &ui_options).await
         }
-        #[cfg(not(feature = "basic"))]
+        #[cfg(not(basic_backend))]
         InputBackendType::Basic => Err(brush_interactive::ShellError::InputBackendNotSupported),
 
-        #[cfg(feature = "minimal")]
+        #[cfg(minimal_backend)]
         InputBackendType::Minimal => {
             let mut input_backend = brush_interactive::MinimalInputBackend::default();
             run_in_shell(&shell, args, &mut input_backend, &ui_options).await
         }
-        #[cfg(not(feature = "minimal"))]
+        #[cfg(not(minimal_backend))]
         InputBackendType::Minimal => Err(brush_interactive::ShellError::InputBackendNotSupported),
+
+        #[cfg(vt_backend)]
+        InputBackendType::Vt => {
+            let mut input_backend =
+                brush_interactive::VtInputBackend::default().with_ui_options(&ui_options);
+            let mut locked_shell = shell.lock().await;
+            input_backend.install_key_bindings(&mut locked_shell);
+            drop(locked_shell);
+            run_in_shell(&shell, args, &mut input_backend, &ui_options).await
+        }
+        #[cfg(not(vt_backend))]
+        InputBackendType::Vt => Err(brush_interactive::ShellError::InputBackendNotSupported),
     };
 
     // Display any error that percolated up.
@@ -644,6 +523,16 @@ async fn run_in_shell(
 ) -> Result<u8, brush_interactive::ShellError> {
     let read_commands_from_stdin = args.will_read_commands_from_stdin();
     let interactive_options: brush_interactive::InteractiveOptions = ui_options.into();
+
+    // Before config files run, so they (and what they source) observe it -- and only for a
+    // shell that goes on to read commands interactively below, since only such a shell
+    // dispatches hooks.
+    if read_commands_from_stdin {
+        brush_interactive::init_zsh_style_hooks(
+            &mut *shell_ref.lock().await,
+            &interactive_options,
+        )?;
+    }
 
     // Like Bash, an interactive shell without a terminal (standard error is not
     // one and there is no controlling terminal) says so and runs without job
@@ -688,9 +577,10 @@ async fn run_in_shell(
         None
     };
 
-    // If a command was specified via -c, then run that command and then exit.
+    // If a command was specified via -c, then run that command and then exit. Its result
+    // is also the shell's last exit status, which is what's returned below for every mode.
     if let Some(command) = args.command {
-        shell_ref.lock().await.run_dash_c_command(command).await?;
+        let _ = shell_ref.lock().await.run_dash_c_command(command).await?;
 
     // Otherwise read commands interactively: -s was given (positional args become parameters;
     // a script named among them is *not* run), or nothing to run was specified.
@@ -699,9 +589,9 @@ async fn run_in_shell(
             .run_interactively()
             .await?;
 
-    // Otherwise a script path was given; run it.
+    // Otherwise a script path was given; run it. As with -c, its status is returned below.
     } else {
-        shell_ref
+        let _ = shell_ref
             .lock()
             .await
             .run_script(
@@ -802,13 +692,13 @@ fn instantiate_shell_from_file(
     let builtins = brush_builtins::default_builtins(builtin_set);
 
     for (builtin_name, builtin) in builtins {
-        shell.register_builtin(&builtin_name, builtin);
+        shell.builtins_mut().register(builtin_name, builtin);
     }
 
     // Add experimental builtins (if enabled).
     #[cfg(feature = "experimental-builtins")]
     for (builtin_name, builtin) in brush_experimental_builtins::experimental_builtins() {
-        shell.register_builtin(&builtin_name, builtin);
+        shell.builtins_mut().register(builtin_name, builtin);
     }
 
     Ok(shell)
@@ -990,23 +880,48 @@ const fn new_error_behavior(args: &CommandLineArgs) -> error_formatter::Formatte
     }
 }
 
+// The default input backend must be one this build offers.
+#[cfg(not(any(reedline_backend, vt_backend, basic_backend, minimal_backend)))]
+compile_error!("no input backend is enabled that works on this target; enable `minimal`");
+
+/// Whether this build offers the given input backend; see `build.rs`.
+const fn is_input_backend_available(backend: InputBackendType) -> bool {
+    match backend {
+        InputBackendType::Reedline => cfg!(reedline_backend),
+        InputBackendType::Basic => cfg!(basic_backend),
+        InputBackendType::Minimal => cfg!(minimal_backend),
+        InputBackendType::Vt => cfg!(vt_backend),
+    }
+}
+
 fn get_default_input_backend_type(args: &CommandLineArgs) -> InputBackendType {
-    #[cfg(any(unix, windows))]
-    {
-        // If stdin isn't a terminal, then `reedline` doesn't do the right thing
-        // (reference: https://github.com/nushell/reedline/issues/509). Switch to
-        // the minimal input backend instead for that scenario.
-        if std::io::stdin().is_terminal() && args.will_read_commands_from_stdin() {
-            InputBackendType::Reedline
-        } else {
-            InputBackendType::Minimal
-        }
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
-        let _args = args;
-        InputBackendType::Minimal
-    }
+    default_input_backend_type(
+        std::io::stdin().is_terminal() && args.will_read_commands_from_stdin(),
+    )
+}
+
+/// Returns the input backend to use if none is requested: the first this build
+/// offers, of the richest for commands typed at a terminal, or else the simplest.
+///
+/// # Arguments
+///
+/// * `at_terminal` - Whether commands are typed at a terminal.
+fn default_input_backend_type(at_terminal: bool) -> InputBackendType {
+    use InputBackendType as B;
+
+    // If stdin isn't a terminal, then `reedline` doesn't do the right thing
+    // (reference: https://github.com/nushell/reedline/issues/509), so it comes last.
+    let preferred = if at_terminal {
+        [B::Reedline, B::Vt, B::Basic, B::Minimal]
+    } else {
+        [B::Minimal, B::Vt, B::Basic, B::Reedline]
+    };
+
+    // Some backend is always offered (see the `compile_error!` above).
+    preferred
+        .into_iter()
+        .find(|backend| is_input_backend_available(*backend))
+        .unwrap_or(B::Minimal)
 }
 
 pub(crate) fn get_event_config() -> Arc<tokio::sync::Mutex<Option<events::TraceEventConfig>>> {
@@ -1127,11 +1042,158 @@ mod tests {
     }
 
     #[test]
+    fn parse_c_with_option_before_command() -> Result<()> {
+        // bash takes -c's command string from the first operand, so options may
+        // sit between the two: `bash -c -l 'echo hello' arg0`.
+        let parsed_args =
+            CommandLineArgs::try_parse_from(args(&["brush", "-c", "-l", "echo hello", "arg0"]))?;
+        assert_eq!(parsed_args.command, Some("echo hello".to_string()));
+        assert!(parsed_args.login);
+        assert_eq!(parsed_args.script_args, ["arg0"]);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_c_with_value_taking_option_before_command() -> Result<()> {
+        // -o consumes its own value, so the first operand is still the command.
+        let parsed_args =
+            CommandLineArgs::try_parse_from(args(&["brush", "-c", "-o", "errexit", "echo hello"]))?;
+        assert_eq!(parsed_args.command, Some("echo hello".to_string()));
+        assert_eq!(parsed_args.enabled_options, ["errexit"]);
+        assert_eq!(parsed_args.script_args, Vec::<String>::new());
+        Ok(())
+    }
+
+    #[test]
+    fn parse_ec_with_option_before_command() -> Result<()> {
+        // Only the `c` leaves the combined group; -e still applies.
+        let parsed_args =
+            CommandLineArgs::try_parse_from(args(&["brush", "-ec", "-l", "echo hello"]))?;
+        assert_eq!(parsed_args.command, Some("echo hello".to_string()));
+        assert!(parsed_args.exit_on_nonzero_command_exit);
+        assert!(parsed_args.login);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_c_with_several_options_before_command() -> Result<()> {
+        let parsed_args =
+            CommandLineArgs::try_parse_from(args(&["brush", "-c", "-l", "-x", "echo hello"]))?;
+        assert_eq!(parsed_args.command, Some("echo hello".to_string()));
+        assert!(parsed_args.login);
+        assert!(parsed_args.print_commands_and_arguments);
+        assert_eq!(parsed_args.script_args, Vec::<String>::new());
+        Ok(())
+    }
+
+    #[test]
+    fn parse_c_after_value_taking_option() -> Result<()> {
+        // "errexit" is -o's value rather than an operand, so option parsing
+        // continues and the command is still the first operand.
+        let parsed_args = CommandLineArgs::try_parse_from(args(&[
+            "brush",
+            "-o",
+            "errexit",
+            "-c",
+            "-l",
+            "echo hello",
+        ]))?;
+        assert_eq!(parsed_args.command, Some("echo hello".to_string()));
+        assert_eq!(parsed_args.enabled_options, ["errexit"]);
+        assert!(parsed_args.login);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_c_after_script_stays_a_script_argument() -> Result<()> {
+        // Option parsing stops at the first operand, so these reach the script:
+        // `bash announce.sh -c -l` passes "-c" and "-l" as $1 and $2.
+        let parsed_args =
+            CommandLineArgs::try_parse_from(args(&["brush", "announce.sh", "-c", "-l"]))?;
+        assert!(parsed_args.command.is_none());
+        assert!(!parsed_args.login);
+        assert_eq!(parsed_args.script_args, ["announce.sh", "-c", "-l"]);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_c_with_double_dash_and_option_like_command() -> Result<()> {
+        // After `--`, the next token is the command even when it looks like an
+        // option: `bash -c -- -l 'echo zero'` runs `-l` with $0 of "echo zero".
+        let parsed_args =
+            CommandLineArgs::try_parse_from(args(&["brush", "-c", "--", "-l", "echo zero"]))?;
+        assert_eq!(parsed_args.command, Some("-l".to_string()));
+        assert!(!parsed_args.login);
+        assert_eq!(parsed_args.script_args, ["echo zero"]);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_c_with_option_and_no_command() {
+        // bash: "-c: option requires an argument", exit 2.
+        assert!(CommandLineArgs::try_parse_from(args(&["brush", "-c", "-l"])).is_err());
+    }
+
+    #[test]
+    fn parse_c_with_option_then_double_dash() -> Result<()> {
+        let parsed_args =
+            CommandLineArgs::try_parse_from(args(&["brush", "-c", "-l", "--", "echo hello"]))?;
+        assert_eq!(parsed_args.command, Some("echo hello".to_string()));
+        assert!(parsed_args.login);
+        assert_eq!(parsed_args.script_args, Vec::<String>::new());
+        Ok(())
+    }
+
+    #[test]
+    fn parse_c_with_option_and_doubled_double_dash() -> Result<()> {
+        // Only the first `--` terminates options; the second is the command
+        // operand, matching `bash -c -l -- -- echo hi`.
+        let parsed_args = CommandLineArgs::try_parse_from(args(&[
+            "brush", "-c", "-l", "--", "--", "echo", "hi",
+        ]))?;
+        assert_eq!(parsed_args.command, Some("--".to_string()));
+        assert_eq!(parsed_args.script_args, ["echo", "hi"]);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_c_combined_with_other_flags() -> Result<()> {
+        // `-c` groups with other short flags in any order, as in `brush -cl "echo hi"`.
+        for argv in [
+            &["brush", "-cl", "echo hi", "name"][..],
+            &["brush", "-lc", "echo hi", "name"][..],
+            &["brush", "-c", "-l", "echo hi", "name"][..],
+        ] {
+            let parsed_args = CommandLineArgs::try_parse_from(args(argv))?;
+            assert!(parsed_args.login, "for {argv:?}");
+            assert_eq!(
+                parsed_args.command,
+                Some("echo hi".to_string()),
+                "for {argv:?}"
+            );
+            assert_eq!(parsed_args.script_args, ["name"], "for {argv:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn parse_c_without_command_string() {
+        assert!(CommandLineArgs::try_parse_from(args(&["brush", "-c"])).is_err());
+    }
+
+    #[test]
+    fn parse_c_with_empty_command_string() -> Result<()> {
+        let parsed_args = CommandLineArgs::try_parse_from(args(&["brush", "-c", ""]))?;
+        assert_eq!(parsed_args.command, Some(String::new()));
+        Ok(())
+    }
+
+    #[test]
     fn parse_o_with_double_dash_is_not_transformed() {
         // Unlike -c, bash's -o consumes -- as its literal value (invalid option
-        // name), not as an option terminator. Verify we don't transform it.
+        // name), not as an option terminator.
         let result = CommandLineArgs::try_parse_from(args(&["brush", "-o", "--"]));
-        // Here, try_parse_from / try_parse_known splits at --, so -o ends up
+        // try_parse_before_double_dash splits at --, so -o ends up
         // without a value and parsing correctly fails. The key assertion is
         // that we MUST NOT reinterpret -- as an option terminator for -o and
         // then take any later argument as its value.
@@ -1139,36 +1201,68 @@ mod tests {
     }
 
     #[test]
-    fn parse_oc_not_treated_as_pending_c() -> Result<()> {
-        // -oc means -o with value "c", not -o flag + -c flag. The --
-        // should NOT be treated as an option terminator for -c.
+    fn parse_oc_is_o_with_an_attached_value() -> Result<()> {
+        // To brush's parser, -oc is -o with attached value "c", not -o flag + -c
+        // flag, so the -- is an ordinary option terminator here. NOTE: bash instead
+        // takes the *next* word as -o's option name; see the known-failure compat
+        // case "-oc with -- takes its option name from the next word".
         let parsed_args = CommandLineArgs::try_parse_from(args(&["brush", "-oc", "--", "echo"]))?;
-        // -o consumed "c" as its value; -- split the rest; no -c command.
+        // -o consumed "c" as its value; -- ended the options; no -c command.
         assert!(parsed_args.command.is_none());
-        assert_eq!(parsed_args.script_args, ["--", "echo"]);
+        assert_eq!(parsed_args.script_args, ["echo"]);
         Ok(())
     }
 
     #[test]
     fn parse_bool_flag_before_double_dash_not_transformed() -> Result<()> {
-        // -e is a boolean flag, not -c. The -- should NOT be removed;
-        // everything from -- onward becomes positional (including -c).
+        // -e is a boolean flag, not -c. The -- ends the options, so
+        // everything after it is positional (including -c).
         let parsed_args =
             CommandLineArgs::try_parse_from(args(&["brush", "-e", "--", "-c", "echo"]))?;
         assert!(parsed_args.command.is_none());
         assert!(parsed_args.exit_on_nonzero_command_exit);
-        assert_eq!(parsed_args.script_args, ["--", "-c", "echo"]);
+        assert_eq!(parsed_args.script_args, ["-c", "echo"]);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_s_with_double_dash_separator() -> Result<()> {
+        let parsed_args = CommandLineArgs::try_parse_from(args(&["brush", "-s", "--", "--", "a"]))?;
+        assert!(parsed_args.read_commands_from_stdin);
+        assert_eq!(parsed_args.script_args, ["--", "a"]);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_double_dash_before_script() -> Result<()> {
+        let parsed_args =
+            CommandLineArgs::try_parse_from(args(&["brush", "--", "script.sh", "--", "x"]))?;
+        assert_eq!(parsed_args.script_args, ["script.sh", "--", "x"]);
         Ok(())
     }
 
     #[test]
     fn parse_c_with_double_dash_and_later_double_dash() -> Result<()> {
         // After removing the first --, -c gets "echo". The second -- is
-        // handled by try_parse_known and appears in script_args.
+        // handled by try_parse_before_double_dash and appears in script_args.
         let parsed_args =
             CommandLineArgs::try_parse_from(args(&["brush", "-c", "--", "echo", "--", "more"]))?;
         assert_eq!(parsed_args.command, Some("echo".to_string()));
         assert_eq!(parsed_args.script_args, ["--", "more"]);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_c_flag_group_edge_cases() -> Result<()> {
+        // `-C` is a different flag, and `-oc` is `-o` with the value "c", so
+        // neither puts the shell in command mode.
+        let parsed_args = CommandLineArgs::try_parse_from(args(&["brush", "-C", "script.sh"]))?;
+        assert!(!parsed_args.command_string_mode);
+        assert!(parsed_args.command.is_none());
+
+        let parsed_args = CommandLineArgs::try_parse_from(args(&["brush", "-oc", "script.sh"]))?;
+        assert!(!parsed_args.command_string_mode);
+        assert_eq!(parsed_args.enabled_options, ["c"]);
         Ok(())
     }
 
@@ -1215,15 +1309,28 @@ mod tests {
     }
 
     #[test]
-    fn has_pending_c_flag_edge_cases() {
-        // Direct tests for the detection function.
-        assert!(CommandLineArgs::has_pending_c_flag("-c"));
-        assert!(CommandLineArgs::has_pending_c_flag("-ec"));
-        assert!(!CommandLineArgs::has_pending_c_flag("-C")); // uppercase, different flag
-        assert!(!CommandLineArgs::has_pending_c_flag("-oc")); // -o takes a value
-        assert!(!CommandLineArgs::has_pending_c_flag("--c")); // long-option-like
-        assert!(!CommandLineArgs::has_pending_c_flag("-")); // bare dash
-        assert!(!CommandLineArgs::has_pending_c_flag("c")); // no leading dash
-        assert!(!CommandLineArgs::has_pending_c_flag("")); // empty
+    fn defaults_to_an_available_input_backend() {
+        for at_terminal in [true, false] {
+            let backend = default_input_backend_type(at_terminal);
+            assert!(is_input_backend_available(backend), "{backend:?}");
+        }
+    }
+
+    #[cfg(reedline_backend)]
+    #[test]
+    fn defaults_to_reedline_at_a_terminal() {
+        assert_eq!(default_input_backend_type(true), InputBackendType::Reedline);
+    }
+
+    #[cfg(all(not(reedline_backend), vt_backend))]
+    #[test]
+    fn defaults_to_vt_at_a_terminal_without_reedline() {
+        assert_eq!(default_input_backend_type(true), InputBackendType::Vt);
+    }
+
+    #[cfg(minimal_backend)]
+    #[test]
+    fn defaults_to_minimal_away_from_a_terminal() {
+        assert_eq!(default_input_backend_type(false), InputBackendType::Minimal);
     }
 }

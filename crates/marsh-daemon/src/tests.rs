@@ -1004,7 +1004,11 @@ fn attachment_rejects_guest_mounts_overlapping_daemon_runtime() {
             ));
         }
     }
-    assert!(server.store.status(None).shells.is_empty());
+    assert!(
+        server.store.status(None).shells.is_empty(),
+        "{:?}",
+        server.store.status(None).shells
+    );
     let session = authority(project.to_str().unwrap(), &selected_home);
     assert!(matches!(
         client
@@ -1171,7 +1175,11 @@ fn store_exposes_safe_versioned_documents() {
         )
         .unwrap();
     let status = store.status(None);
-    assert!(status.workers[0].active_container_ids.is_empty());
+    assert!(
+        status.workers[0].active_container_ids.is_empty(),
+        "{:?}",
+        status.workers[0].active_container_ids
+    );
     assert_eq!(store.job(&job).unwrap().state, JobState::Finished);
 }
 
@@ -1221,7 +1229,11 @@ fn uncertain_cleanup_quarantines_worker_and_releases_capacity() {
         .unwrap();
     let status = store.status(None);
     assert_eq!(status.workers[0].health, WorkerHealth::Quarantined);
-    assert!(status.workers[0].active_container_ids.is_empty());
+    assert!(
+        status.workers[0].active_container_ids.is_empty(),
+        "{:?}",
+        status.workers[0].active_container_ids
+    );
     let receipt = store.job(&job).unwrap();
     assert_eq!(receipt.state, JobState::Unknown);
     assert_eq!(receipt.exit.unwrap().code, Some(125));
@@ -1232,7 +1244,11 @@ fn uncertain_cleanup_quarantines_worker_and_releases_capacity() {
     assert!(store.worker_reuse_blocked("vm-1"));
     drop(store);
     let reopened = reopen(home.path()).unwrap();
-    assert!(reopened.status(None).workers.is_empty());
+    assert!(
+        reopened.status(None).workers.is_empty(),
+        "{:?}",
+        reopened.status(None).workers
+    );
     assert!(
         !reopened.worker_reuse_blocked("vm-1"),
         "a historical receipt must not block a physically recreated VM"
@@ -1607,7 +1623,7 @@ fn worker_reset_refuses_active_selection_atomically_and_preserves_other_state() 
     store.finish_worker_reset("first", true).unwrap();
     store.finish_worker_reset("second", true).unwrap();
     let status = store.status(None);
-    assert!(status.workers.is_empty());
+    assert!(status.workers.is_empty(), "{:?}", status.workers);
     assert_eq!(status.shells.len(), 1);
     assert_eq!(store.job(&job).unwrap().state, JobState::Cancelled);
 }
@@ -1873,7 +1889,11 @@ fn production_receipts_ignore_guest_written_legacy_journal() {
         Server::bind_with_stock_sbx_and_control_home(selected.path(), sbx.path(), &control_home)
             .unwrap();
     assert_eq!(server.store.status(None).scope_id, scope_id);
-    assert!(server.store.jobs().jobs.is_empty());
+    assert!(
+        server.store.jobs().jobs.is_empty(),
+        "{:?}",
+        server.store.jobs().jobs
+    );
     let session = server
         .store
         .attach_shell(2, authority("/Users/example/project", selected.path()));
@@ -2880,7 +2900,11 @@ fn wrong_token_fails_without_dispatch() {
         }
     ));
     task.join().unwrap();
-    assert!(server.store.status(None).shells.is_empty());
+    assert!(
+        server.store.status(None).shells.is_empty(),
+        "{:?}",
+        server.store.status(None).shells
+    );
 }
 
 #[derive(Debug)]
@@ -3025,6 +3049,7 @@ fn failed_shell_setup_and_preparation_detach_their_sessions() {
                 dev: false,
                 session: session(&shell_session, home.path()),
                 arguments: Vec::new(),
+                terminal_environment: std::collections::BTreeMap::new(),
             })
             .is_err()
     );
@@ -3128,6 +3153,7 @@ fn execution_attachment_preserves_bytes_and_exit_status() {
                     dev: false,
                     arguments: vec![b"-c".to_vec(), b"printf ok".to_vec()],
                     session: selected,
+                    terminal_environment: std::collections::BTreeMap::new(),
                 },
                 File::open("/dev/null").unwrap(),
                 Vec::new(),
@@ -3452,6 +3478,7 @@ fn attached_open_shell_refuses_lifecycle_immediately_without_blocking_status() {
             dev: false,
             arguments: Vec::new(),
             session: session(&session_id, home.path()),
+            terminal_environment: std::collections::BTreeMap::new(),
         })
         .unwrap();
 
@@ -4612,7 +4639,7 @@ fn acp_permission_requires_controller_and_offered_one_time_choice() {
         .acp_respond(id.clone(), first.clone(), request.request_id, "once".into())
         .unwrap();
     let status = acp.turn_ended(&id, &first, "approved turn ends");
-    assert!(status.permissions.is_empty());
+    assert!(status.permissions.is_empty(), "{:?}", status.permissions);
     client.acp_stop(id, first).unwrap();
     drop(lease);
 }
@@ -4767,6 +4794,7 @@ fn ended_shell_releases_acp_controller_without_explicit_detach() {
             dev: false,
             arguments: vec![],
             session: acp.first.clone(),
+            terminal_environment: std::collections::BTreeMap::new(),
         })),
         Ok(PublicReply::ShellAccepted)
     ));

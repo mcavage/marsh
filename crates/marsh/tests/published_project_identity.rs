@@ -81,5 +81,5 @@ fn published_project_missing_identity_is_rejected_before_daemon_start() {
         String::from_utf8_lossy(&result.stderr).contains("incomplete attached project identity")
     );
     assert!(!root.join("scope").exists());
-    assert!(result.stdout.is_empty());
+    assert_eq!(result.stdout, [] as [u8; 0]);
 }

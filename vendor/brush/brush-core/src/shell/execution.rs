@@ -33,14 +33,19 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
     ) -> Result<bool, error::Error> {
         let path = path.as_ref();
         if path.exists() {
-            self.parse_and_execute_script_file(
-                path,
-                std::iter::empty::<String>(),
-                params,
-                callstack::ScriptCallType::Source,
-                NulInput::Startup,
-            )
-            .await?;
+            // TODO(startup): an `exit` in a startup file should end the shell, but
+            // `load_config` has no way to tell its caller to stop; until it does, the
+            // file's result is dropped. Tracked by the compat case "exit in an rc file
+            // ends the shell".
+            let _ = self
+                .parse_and_execute_script_file(
+                    path,
+                    std::iter::empty::<String>(),
+                    params,
+                    callstack::ScriptCallType::Source,
+                    NulInput::Startup,
+                )
+                .await?;
             Ok(true)
         } else {
             tracing::debug!("skipping non-existent file: {}", path.display());
@@ -182,16 +187,9 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
 
         let script_positional_args = args.map(Into::into);
 
-        self.call_stack
-            .push_script(call_type, source_info, script_positional_args);
-
-        let result = self
+        self.enter_script(call_type, source_info, script_positional_args)
             .run_source_text(&text, parse_result, source_info, params)
-            .await;
-
-        self.call_stack.pop();
-
-        result
+            .await
     }
 
     /// Executes the given string as a shell program, returning the resulting exit status.
@@ -287,12 +285,15 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         // Execute the command string.
         let params = self.default_exec_params();
         let source_info = SourceInfo::from("-c");
-        let result = self.run_string(command, &source_info, &params).await?;
+        let mut result = self.run_string(command, &source_info, &params).await?;
 
         self.end_command_string_mode()?;
 
-        // Give the shell a chance to run on-exit tasks, but ignore the result.
-        let _ = self.on_exit().await;
+        // Give the shell a chance to run on-exit tasks. An `exit` there sets the shell's
+        // status; a failure there doesn't change the command's outcome.
+        if let Ok(Some(status)) = self.run_exit_trap().await {
+            result.exit_code = status.into();
+        }
 
         Ok(result)
     }
@@ -313,7 +314,7 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
         args: I,
     ) -> Result<ExecutionResult, error::Error> {
         let params = self.default_exec_params();
-        let result = match self
+        let mut result = match self
             .parse_and_execute_script_file(
                 script_path.as_ref(),
                 args,
@@ -338,8 +339,11 @@ impl<SE: crate::extensions::ShellExtensions> crate::Shell<SE> {
             result => result?,
         };
 
-        // Give the shell a chance to run on-exit tasks, but ignore the result.
-        let _ = self.on_exit().await;
+        // Give the shell a chance to run on-exit tasks. An `exit` there sets the shell's
+        // status; a failure there doesn't change the script's outcome.
+        if let Ok(Some(status)) = self.run_exit_trap().await {
+            result.exit_code = status.into();
+        }
 
         Ok(result)
     }

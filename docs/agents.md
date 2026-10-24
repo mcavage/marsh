@@ -120,11 +120,11 @@ link outside `MARSH_SPAWN` exits 126; other refusals, including those through
 
 | Limit | Message |
 |---|---|
-| 8 jobs at once per daemon, all depths | `capacity: 8 jobs` |
+| 16 jobs at once per daemon, all depths | `capacity: 16 jobs` |
 | Depth 4 (your command is depth 1) | `depth limit 4` |
 | The same Kit at most twice in a row | `claude → claude → claude refused: same-Kit chain limit 2` |
-| 4 live children per job | `fan-out limit 4` |
-| 64 launches per tree, counting refused child calls | `total limit 64` |
+| 8 live children per job | `fan-out limit 8` |
+| 128 launches per tree, counting refused child calls | `total limit 128` |
 | 4 distinct Kit VMs used by live jobs in one tree, by default | `tree already uses 4 Kit VMs (...) (MARSH_TREE_KIT_VMS)` |
 | At least one second must remain before the parent's deadline | `deadline: parent job ... has ... ms of wall time left` |
 | A name outside `MARSH_SPAWN` | `spawn refused: NAME not in this job's spawn set (MARSH_SPAWN)` |
@@ -184,8 +184,9 @@ stdout, stderr, and exit status pass through.
 
 `bash`, `sh`, and every other tool in the job come from the image. The in-job
 `marsh` command is also in `/run/marsh/bin`. It has `run`, `split`, `join`,
-`fanout`, `collect`, `jobs`, `context`, and `cloud`
-([Cloud from a job](cloud.md#cloud-from-a-job)).
+`fanout`, `collect`, `jobs`, `context`, `open`, and `cloud`
+([Cloud from a job](cloud.md#cloud-from-a-job)). `xdg-open` and `open` are
+there too (see [Opening links](#opening-links)).
 
 ## Variables
 
@@ -195,6 +196,48 @@ control variables. It also drops names containing `KEY`, `SECRET`, `PASS`,
 `TOKEN`, `CREDENTIAL`, or `COOKIE`, plus `AWS_*` and `*_PAT`, ignoring case.
 This includes ordinary names such as `KEYMAP`. Supply provider credentials through
 [Docker Sandboxes](kits.md#signing-in).
+
+### Your terminal
+
+When you start marsh in a terminal, the shell and its jobs see which terminal
+it is, so programs such as Pi, Claude Code, and Codex turn on the colors and
+clickable links it supports. marsh copies these variables from your Mac, when
+they are set:
+
+`TERM`, `COLORTERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, `LC_TERMINAL`,
+`LC_TERMINAL_VERSION`, `ITERM_SESSION_ID`, `KITTY_WINDOW_ID`, `WEZTERM_PANE`
+
+Each value must be at most 128 letters, digits, or `. _ - : + @`; anything
+else is left out. A `TERM` that Linux may not know, such as `xterm-ghostty`
+or `xterm-kitty`, becomes `xterm-256color`; `xterm`, `xterm-256color`,
+`screen*`, `tmux*`, `vt100`, `vt220`, `linux`, `ansi`, and `dumb` pass as they
+are. With no `TERM`, the shell uses `xterm`. Nothing is copied when marsh runs
+without a terminal (a pipe, ACP, or MCP).
+
+### Opening links
+
+`xdg-open URL`, `open URL`, and `marsh open URL` in the shell VM or a job open
+a web link in your Mac's browser. `BROWSER` is set to `xdg-open`, so programs
+that open a sign-in page or a report find it.
+
+- Only `http://` and `https://` links open. A file, a path, or any other kind
+  of link is refused: `marsh: can't open file:///tmp/x from a job; open it on
+  your Mac`.
+- The link opens only while your terminal is attached to the session, from
+  the session's own shell or a job started from it (and that job's children).
+  From a job started without a terminal (ACP, MCP, or a split or fanout
+  branch), or once you detach, the link is printed instead. Cloud sandboxes
+  have no marsh `xdg-open`.
+- At most 3 links per session open in 10 seconds; more are printed.
+- The link is always printed on stderr, as a clickable link when stderr is a
+  terminal, so you can open it yourself.
+- `xdg-open` exits 0 when the Mac opened the link, 4 when it only printed
+  it, and 1 for a refused link.
+- `marsh jobs show JOB --json` lists the sites (`scheme://host`) a job opened
+  under `opened`.
+
+To only print links, run `marsh config open-urls off` on your Mac, or start
+the daemon with `MARSH_OPEN_URLS=0`.
 
 <!-- doc-test: shell replace=["claude -p \"use your Bash tool to run: codex exec 'print the value of TICKET'\"", "fixture pipeline '|' bash -c \"shell -c 'echo TICKET=\\$TICKET'\""] stdout="TICKET=ABC-123" -->
 ```sh

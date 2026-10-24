@@ -180,9 +180,16 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 
 **config auto-update** [**on**|**off**]
 : Set, or with no value print, whether Kits that follow a tag update
-  themselves in this **MARSH_HOME** (when the daemon starts, then daily), and
+  themselves in this **MARSH_HOME** (when the daemon starts, then hourly), and
   whether a release build adds **pix** and **hermes** by itself. The default
   is **on**. To update now, run **marsh stop** when idle, then marsh again.
+
+**config open-urls** [**on**|**off**]
+: Set, or with no value print, whether **xdg-open** *URL* (also **open**,
+  **marsh open**) in the shell VM or a job started from your terminal opens an
+  **http**/**https** link in your Mac's browser. Off, links are only printed.
+  The default is **on**. See
+  https://runmar.sh/docs/agents.html#opening-links.
 
 **kit install** *NAME* [*REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*]
 : Register a published Kit under *NAME* in this scope. A tag is resolved to its
@@ -385,6 +392,14 @@ See https://runmar.sh/docs/acp.html.
   updates and the adding of **pix** and **hermes**, as
   **marsh config auto-update off** does.
 
+**MARSH_OPEN_URLS**
+: **0** (or **off**) when the daemon starts stops **xdg-open** in a shell or
+  job from opening links on the Mac, as **marsh config open-urls off** does.
+
+**MARSH_OPEN_COMMAND**
+: The program the daemon runs as *PROGRAM* *URL* to open a link, read when
+  the daemon starts. Default */usr/bin/open*.
+
 # FILES
 
 *$MARSH_HOME/home* (default *~/.marsh/home*)
@@ -392,7 +407,7 @@ See https://runmar.sh/docs/acp.html.
 
 *$MARSH_HOME/config.json* (default *~/.marsh/config.json*)
 : The default shell set by **marsh config shell**, and the
-  **marsh config auto-update** setting.
+  **marsh config auto-update** and **marsh config open-urls** settings.
 
 *$MARSH_HOME/sbxenv.yaml*, *$MARSH_HOME/sbxenvs/NAME.yaml*
 : Optional shared and per-command MCP servers and extra directories. Read at

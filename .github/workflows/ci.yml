@@ -35,7 +35,7 @@ jobs:
         with:
           node-version: '24'
       - name: Rust toolchain
-        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
       - name: Compiler cache (content-addressed, reusable across source changes)
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -71,7 +71,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target
-          key: cargo-linux-${{ runner.arch }}-rust1.95-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**', 'tests/**') }}
+          key: cargo-linux-${{ runner.arch }}-rust1.99-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**', 'tests/**') }}
       - name: Tool versions
         run: |
           cargo --version
@@ -106,7 +106,7 @@ jobs:
         with:
           node-version: '24'
       - name: Rust toolchain
-        run: rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
       - name: Compiler cache (content-addressed, reusable across source changes)
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -134,7 +134,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target
-          key: cargo-macos-${{ runner.arch }}-rust1.95-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**', 'tests/**') }}
+          key: cargo-macos-${{ runner.arch }}-rust1.99-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**', 'tests/**') }}
       - name: Tool versions
         run: |
           cargo --version
@@ -168,7 +168,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Rust toolchain
-        run: rustup toolchain install 1.95.0 --profile minimal
+        run: rustup toolchain install 1.99.1 --profile minimal
       - name: Compiler cache (content-addressed, reusable across source changes)
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -182,7 +182,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: target/release
-          key: cargo-macos-release-${{ runner.arch }}-rust1.95-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**') }}
+          key: cargo-macos-release-${{ runner.arch }}-rust1.99-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**') }}
       - name: Release build, man page, and install script
         run: |
           cargo build --workspace --release --locked

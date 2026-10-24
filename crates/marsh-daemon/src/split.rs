@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 
 const MAX_BRANCHES: usize = 16;
 const MAX_DEPTH: u32 = 3;
-const POOL: usize = 8;
+const POOL: usize = 16;
 const SPOOL_LIMIT: usize = 64 << 20;
 const OUTPUT_LIMIT: usize = 16 << 20;
 const LEASE: Duration = Duration::from_mins(1);
@@ -398,7 +398,6 @@ pub fn forwardable(name: &str) -> bool {
                 | "SHLVL"
                 | "SHELL"
                 | "_"
-                | "TERM_PROGRAM"
                 | "TERM_SESSION_ID"
                 // A split branch is its own lineage scope: an enclosing
                 // fanout branch's id must not group the branch's jobs.
@@ -1359,6 +1358,7 @@ impl SplitEngine {
                 arguments,
                 session: session_spec(&session_id, &authority),
                 dev: false,
+                terminal_environment: std::collections::BTreeMap::new(),
             };
             let result = self
                 .client

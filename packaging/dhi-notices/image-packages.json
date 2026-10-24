@@ -42,7 +42,7 @@
       },
       {
         "package": "containerd.io",
-        "version": "2.4.2-0",
+        "version": "2.4.2-1",
         "families": [
           "Apache-2.0"
         ],
@@ -121,7 +121,7 @@
       },
       {
         "package": "docker-ce",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -132,7 +132,7 @@
       },
       {
         "package": "docker-ce-cli",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -1553,7 +1553,7 @@
       },
       {
         "package": "containerd.io",
-        "version": "2.4.2-0",
+        "version": "2.4.2-1",
         "families": [
           "Apache-2.0"
         ],
@@ -1688,7 +1688,7 @@
       },
       {
         "package": "docker-ce",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -1699,7 +1699,7 @@
       },
       {
         "package": "docker-ce-cli",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -3545,7 +3545,7 @@
       },
       {
         "package": "containerd.io",
-        "version": "2.4.2-0",
+        "version": "2.4.2-1",
         "families": [
           "Apache-2.0"
         ],
@@ -3680,7 +3680,7 @@
       },
       {
         "package": "docker-ce",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -3691,7 +3691,7 @@
       },
       {
         "package": "docker-ce-cli",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -5537,7 +5537,7 @@
       },
       {
         "package": "containerd.io",
-        "version": "2.4.2-0",
+        "version": "2.4.2-1",
         "families": [
           "Apache-2.0"
         ],
@@ -5672,7 +5672,7 @@
       },
       {
         "package": "docker-ce",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -5683,7 +5683,7 @@
       },
       {
         "package": "docker-ce-cli",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -7499,7 +7499,7 @@
       },
       {
         "package": "containerd.io",
-        "version": "2.4.2-0",
+        "version": "2.4.2-1",
         "families": [
           "Apache-2.0"
         ],
@@ -7578,7 +7578,7 @@
       },
       {
         "package": "docker-ce",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -7589,7 +7589,7 @@
       },
       {
         "package": "docker-ce-cli",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -9034,7 +9034,7 @@
       },
       {
         "package": "containerd.io",
-        "version": "2.4.2-0",
+        "version": "2.4.2-1",
         "families": [
           "Apache-2.0"
         ],
@@ -9179,7 +9179,7 @@
       },
       {
         "package": "docker-buildx-plugin",
-        "version": "0.38.0-2",
+        "version": "0.38.1-0",
         "families": [
           "Apache-2.0"
         ],
@@ -9189,7 +9189,7 @@
       },
       {
         "package": "docker-ce",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -9200,7 +9200,7 @@
       },
       {
         "package": "docker-ce-cli",
-        "version": "5:29.9.1-0",
+        "version": "5:29.9.2-0",
         "families": [
           "Apache-2.0"
         ],
@@ -11143,7 +11143,7 @@
       },
       {
         "package": "nodejs-24",
-        "version": "24.22.0-0",
+        "version": "24.22.1-0",
         "families": [
           "Apache-2.0",
           "Artistic",

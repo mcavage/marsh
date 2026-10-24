@@ -380,7 +380,7 @@ impl<'a, SE: brush_core::ShellExtensions> Highlighter<'a, SE> {
             return CommandType::Alias;
         } else if self.shell.funcs().get(name).is_some() {
             return CommandType::Function;
-        } else if self.shell.builtins().contains_key(name) {
+        } else if self.shell.builtins().get(name).is_some() {
             return CommandType::Builtin;
         }
 
@@ -420,7 +420,7 @@ mod tests {
         let highlighted = highlight_command(&shell, line, line.len());
 
         // Should have at least 2 spans
-        assert!(!highlighted.spans().is_empty());
+        assert_ne!(highlighted.spans(), []);
 
         // Verify highlighting produces spans that cover the input
         let total_covered: usize = highlighted.spans().iter().map(|s| s.range.len()).sum();
@@ -441,7 +441,7 @@ mod tests {
         let highlighted = highlight_command(&shell, line, 0);
 
         // Should have spans for: echo, space, "hello world"
-        assert!(!highlighted.spans().is_empty());
+        assert_ne!(highlighted.spans(), []);
 
         // Check that quoted parts are marked as Quoted
         assert!(

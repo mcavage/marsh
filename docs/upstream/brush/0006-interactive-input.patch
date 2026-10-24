@@ -1,0 +1,497 @@
+diff --git a/brush-interactive/Cargo.toml b/brush-interactive/Cargo.toml
+index 966e524b..677f0ff0 100644
+--- a/brush-interactive/Cargo.toml
++++ b/brush-interactive/Cargo.toml
+@@ -24,7 +24,7 @@ minimal = []
+ vt = ["dep:unicode-width", "completion", "minimal", "highlighting"]
+ # The backend is built only where reedline builds (not, e.g., on wasm); see
+ # `build.rs`.
+-reedline = ["dep:reedline", "completion", "highlighting"]
++reedline = ["dep:reedline", "dep:crossterm", "dep:libc", "completion", "highlighting"]
+ highlighting = ["dep:nu-ansi-term"]
+ 
+ [lints]
+@@ -38,14 +38,14 @@ indexmap = "2.13.0"
+ nu-ansi-term = { version = "0.50.3", optional = true }
+ radix_trie = "0.3.0"
+ thiserror = "2.0.18"
+-tokio = { version = "1.52.3", features = ["rt", "sync"] }
++tokio = { version = "1.52.3", features = ["io-std", "io-util", "rt", "sync"] }
+ tracing = "0.1.44"
+ unicode-width = { version = "0.2.2", optional = true }
+ 
+ # reedline builds only for these targets; see `build.rs`.
+ [target.'cfg(any(unix, windows))'.dependencies]
++crossterm = { version = "0.29.0", optional = true }
+ reedline = { version = "0.52.0", optional = true }
+ 
+-[dev-dependencies]
+-pretty_assertions = { version = "1.4.1", features = ["unstable"] }
+-vt100 = "0.16.2"
++[target.'cfg(unix)'.dependencies]
++libc = { version = "0.2.183", optional = true }
+diff --git a/brush-interactive/src/completeness.rs b/brush-interactive/src/completeness.rs
+index b7974318..85c56572 100644
+--- a/brush-interactive/src/completeness.rs
++++ b/brush-interactive/src/completeness.rs
+@@ -40,7 +40,7 @@ fn needs_more_input_locked(shell: &Shell<impl brush_core::ShellExtensions>, inpu
+             true
+         }
+         // Ran out of tokens partway through a construct; more input may complete it.
+-        Err(brush_parser::ParseError::ParsingAtEndOfInput) => true,
++        Err(brush_parser::ParseError::ParsingAtEndOfInput(_)) => true,
+         // A bad token at a specific position stays bad no matter what follows it.
+         Err(_) => false,
+         // Parsed cleanly. One catch: a trailing backslash-newline is a line
+diff --git a/brush-interactive/src/highlighting.rs b/brush-interactive/src/highlighting.rs
+index c1123a89..56b28221 100644
+--- a/brush-interactive/src/highlighting.rs
++++ b/brush-interactive/src/highlighting.rs
+@@ -276,6 +276,12 @@ impl<'a, SE: brush_core::ShellExtensions> Highlighter<'a, SE> {
+                 self.highlight_program(command.as_str(), piece.start + 2 /* opening $( */);
+                 self.set_next_missing_kind(HighlightKind::CommandSubstitution);
+             }
++            brush_parser::word::WordPiece::FunctionSubstitution { command, reply } => {
++                self.set_next_missing_kind(HighlightKind::CommandSubstitution);
++                let open = if reply { 3 } else { 2 };
++                self.highlight_program(command.as_str(), piece.start + open);
++                self.set_next_missing_kind(HighlightKind::CommandSubstitution);
++            }
+             brush_parser::word::WordPiece::ArithmeticExpression(_) => {
+                 // TODO(highlighting): Consider individually highlighting pieces of the expression
+                 // itself.
+diff --git a/brush-interactive/src/interactive_shell.rs b/brush-interactive/src/interactive_shell.rs
+index 8163bae2..81f868b1 100644
+--- a/brush-interactive/src/interactive_shell.rs
++++ b/brush-interactive/src/interactive_shell.rs
+@@ -210,8 +210,80 @@ impl<'a, IB: InputBackend, SE: brush_core::ShellExtensions> InteractiveShell<'a,
+ 
+         drop(shell);
+ 
+-        // Read input.
+-        match self.input.read_line(&self.shell, prompt).await? {
++        // The minimal input backend can await stdin without occupying the runtime
++        // thread. Keep a TERM receiver active while input is idle so a registered
++        // cleanup trap runs even when no further line arrives.
++        #[cfg(unix)]
++        let (read_result, watch_hangup) = {
++            let term_signal: brush_core::traps::TrapSignal = "TERM".parse()?;
++            let hup_signal: brush_core::traps::TrapSignal = "HUP".parse()?;
++            let (term_trapped, watch_hangup, editing) = {
++                let shell = self.shell.lock().await;
++                let hup_ignored = shell
++                    .traps()
++                    .get_handler(hup_signal)
++                    .is_some_and(|handler| handler.command.is_empty());
++                (
++                    shell.traps().handles(term_signal),
++                    shell.options().interactive && !hup_ignored,
++                    shell.options().emacs_mode || shell.options().vi_mode,
++                )
++            };
++            // Like Bash, a hangup at the prompt runs a HUP trap, or else ends the
++            // shell. The line editors block this task while they read, so a task
++            // of its own waits for it.
++            let hangup_watch = watch_hangup.then(|| {
++                let shell = self.shell.clone();
++                tokio::spawn(async move {
++                    if brush_core::traps::await_hangup().await.is_ok() {
++                        let mut shell = shell.lock().await;
++                        Self::on_hangup(&mut shell, editing).await;
++                    }
++                })
++            });
++            let read_result = if term_trapped {
++                tokio::select! {
++                    biased;
++                    result = brush_core::traps::await_undelivered_term() => {
++                        result?;
++                        let mut shell = self.shell.lock().await;
++                        shell.set_last_exit_status(143);
++                        let params = shell.default_exec_params();
++                        let trap_result = shell.invoke_trap_handler(term_signal, &params).await?;
++                        let result = if trap_result.is_normal_flow() {
++                            brush_core::ExecutionResult::new(143)
++                        } else {
++                            trap_result
++                        };
++                        shell.set_last_exit_status(result.exit_code.into());
++                        return Ok(InteractiveExecutionResult::Executed(result));
++                    },
++                    result = self.input.read_line(&self.shell, prompt) => result?,
++                }
++            } else {
++                self.input.read_line(&self.shell, prompt).await?
++            };
++            if let Some(watch) = hangup_watch {
++                watch.abort();
++            }
++            (read_result, watch_hangup)
++        };
++        #[cfg(not(unix))]
++        let read_result = self.input.read_line(&self.shell, prompt).await?;
++
++        // A hangup can end the read first (the terminal returns what was
++        // typed, or end of file) before the signal is seen above.
++        #[cfg(unix)]
++        if watch_hangup && brush_core::traps::take_pending_hangup() {
++            let mut shell = self.shell.lock().await;
++            let editing = shell.options().emacs_mode || shell.options().vi_mode;
++            Self::on_hangup(&mut shell, editing).await;
++            return Ok(InteractiveExecutionResult::Executed(
++                brush_core::ExecutionResult::new(shell.last_exit_status()),
++            ));
++        }
++
++        match read_result {
+             ReadResult::Input(read_result) => {
+                 // We got a line of input -- execute it.
+                 self.execute_line(read_result, true /* user input */).await
+@@ -237,6 +309,29 @@ impl<'a, IB: InputBackend, SE: brush_core::ShellExtensions> InteractiveShell<'a,
+         }
+     }
+ 
++    /// Handles a SIGHUP that arrived at the prompt, as Bash does: without a HUP
++    /// trap the shell saves its history, runs its EXIT trap and dies by the
++    /// signal; with one it runs the trap, and then, if a line editor was
++    /// reading, exits (with the last status); otherwise reading goes on. The line
++    /// being read, which the hangup cut short, is dropped.
++    #[cfg(unix)]
++    async fn on_hangup(shell: &mut brush_core::Shell<SE>, editing: bool) {
++        let Ok(hup_signal) = "HUP".parse::<brush_core::traps::TrapSignal>() else {
++            return;
++        };
++        if !shell.traps().handles(hup_signal) {
++            brush_core::traps::die_by_hangup(shell).await;
++        }
++        let params = shell.default_exec_params();
++        let _ = shell.invoke_trap_handler(hup_signal, &params).await;
++        if editing {
++            let status = shell.last_exit_status();
++            let _ = shell.save_history();
++            let _ = shell.on_exit().await;
++            std::process::exit(i32::from(status));
++        }
++    }
++
+     async fn compose_prompt(
+         shell: &mut brush_core::Shell<SE>,
+         terminal_integration: &crate::term_integration::TerminalIntegration,
+diff --git a/brush-interactive/src/minimal/input_backend.rs b/brush-interactive/src/minimal/input_backend.rs
+index c93b9f4e..6f97cb22 100644
+--- a/brush-interactive/src/minimal/input_backend.rs
++++ b/brush-interactive/src/minimal/input_backend.rs
+@@ -1,4 +1,5 @@
+-use std::io::{BufRead, IsTerminal, Write};
++use std::io::{IsTerminal, Write};
++use tokio::io::{AsyncBufRead, AsyncBufReadExt};
+ 
+ use crate::{
+     InputBackend, ShellError,
+@@ -7,29 +8,49 @@ use crate::{
+ 
+ /// Represents a minimal shell input backend, capable of taking commands from standard input.
+ #[derive(Default)]
+-pub struct MinimalInputBackend;
++pub struct MinimalInputBackend {
++    async_stdin: Option<tokio::io::BufReader<tokio::io::Stdin>>,
++    pending: PendingInput,
++}
++
++/// Input consumed from the reader but not yet returned: a partial line, and the
++/// complete lines of a program that isn't complete yet.
++#[derive(Default)]
++struct PendingInput {
++    line: Vec<u8>,
++    program: String,
++}
+ 
+ impl InputBackend for MinimalInputBackend {
+-    #[allow(
+-        clippy::unused_async_trait_impl,
+-        reason = "this backend reads synchronously; the trait is async for those that don't"
+-    )]
+     async fn read_line(
+         &mut self,
+         shell_ref: &crate::ShellRef<impl brush_core::ShellExtensions>,
+         prompt: InteractivePrompt,
+     ) -> Result<ReadResult, ShellError> {
+-        let stdin = std::io::stdin();
+-        let prompt = stdin.is_terminal().then_some(&prompt);
+-
+-        Self::read_program_from(shell_ref, prompt, &mut stdin.lock(), &mut std::io::stderr())
++        // An interactive shell prompts even when its input is not a terminal.
++        let display_prompt =
++            std::io::stdin().is_terminal() || shell_ref.lock().await.options().interactive;
++        let reader = self
++            .async_stdin
++            .get_or_insert_with(|| tokio::io::BufReader::new(tokio::io::stdin()));
++
++        Self::read_program_from(
++            shell_ref,
++            display_prompt.then_some(&prompt),
++            reader,
++            &mut std::io::stderr(),
++            &mut self.pending,
++        )
++        .await
+     }
+ }
+ 
+ impl MinimalInputBackend {
+     /// Reads lines from the given reader until they form a complete shell program.
+     /// Compound commands, here documents, and backslash continuations all span lines,
+-    /// so a single line is often not a program on its own.
++    /// so a single line is often not a program on its own. Input consumed is kept in
++    /// `pending` until it's returned, so cancelling the read (as when a `TERM` trap
++    /// must run while input is idle) loses none of it.
+     ///
+     /// # Arguments
+     ///
+@@ -37,55 +58,69 @@ impl MinimalInputBackend {
+     /// * `prompt` - The prompt to display, or `None` to display nothing.
+     /// * `reader` - The source to read lines from.
+     /// * `writer` - Where prompts are written.
+-    fn read_program_from<R: BufRead, W: Write>(
++    /// * `pending` - Input already consumed from `reader`.
++    async fn read_program_from<R: AsyncBufRead + Unpin, W: Write>(
+         shell_ref: &crate::ShellRef<impl brush_core::ShellExtensions>,
+         prompt: Option<&InteractivePrompt>,
+         reader: &mut R,
+         writer: &mut W,
++        pending: &mut PendingInput,
+     ) -> Result<ReadResult, ShellError> {
+-        let mut result = String::new();
+-
+         loop {
+-            if let Some(prompt) = prompt {
+-                let to_display = if result.is_empty() {
++            if let Some(prompt) = prompt
++                && pending.line.is_empty()
++            {
++                let to_display = if pending.program.is_empty() {
+                     &prompt.prompt
+                 } else {
+                     &prompt.continuation_prompt
+                 };
+ 
+-                write!(writer, "{to_display}")?;
++                writer.write_all(&brush_core::bytes::encode(to_display))?;
+                 writer.flush()?;
+             }
+ 
++            // `read_line` is not cancellation safe: a TERM trap could discard
++            // bytes already consumed into its local String. Keep each partial
++            // line in `pending` before consuming the reader instead.
++            let available = reader.fill_buf().await.map_err(ShellError::InputError)?;
+             // Nothing more is coming; run what we have and let the parser complain if
+             // it's still incomplete.
+-            let Some(line) = Self::read_input_line(reader)? else {
++            if available.is_empty() {
+                 break;
+-            };
+-
+-            result.push_str(line.as_str());
++            }
++            let count = available
++                .iter()
++                .position(|byte| *byte == b'\n')
++                .map_or(available.len(), |index| index + 1);
++            let line_complete = available[count - 1] == b'\n';
++            // Bash ignores NUL bytes in its input.
++            pending
++                .line
++                .extend(available[..count].iter().filter(|byte| **byte != 0));
++            reader.consume(count);
++            if !line_complete {
++                continue;
++            }
+ 
+-            if !crate::completeness::needs_more_input(shell_ref, result.as_str()) {
++            let line = brush_core::bytes::decode_vec(std::mem::take(&mut pending.line));
++            pending.program.push_str(&line);
++            if !crate::completeness::needs_more_input(shell_ref, &pending.program) {
+                 break;
+             }
+         }
+ 
+-        if result.is_empty() {
++        if !pending.line.is_empty() {
++            let line = brush_core::bytes::decode_vec(std::mem::take(&mut pending.line));
++            pending.program.push_str(&line);
++        }
++
++        if pending.program.is_empty() {
+             Ok(ReadResult::Eof)
+         } else {
+-            Ok(ReadResult::Input(result))
++            Ok(ReadResult::Input(std::mem::take(&mut pending.program)))
+         }
+     }
+-
+-    /// Reads a single line, returning `None` at end of input.
+-    fn read_input_line<R: BufRead>(reader: &mut R) -> Result<Option<String>, ShellError> {
+-        let mut input = String::new();
+-        let bytes_read = reader
+-            .read_line(&mut input)
+-            .map_err(ShellError::InputError)?;
+-
+-        Ok((bytes_read > 0).then_some(input))
+-    }
+ }
+ 
+ #[cfg(test)]
+@@ -112,8 +147,15 @@ mod tests {
+         let shell_ref = test_shell_ref().await;
+         let mut reader = Cursor::new(input.as_bytes());
+ 
+-        MinimalInputBackend::read_program_from(&shell_ref, None, &mut reader, &mut Vec::new())
+-            .unwrap()
++        MinimalInputBackend::read_program_from(
++            &shell_ref,
++            None,
++            &mut reader,
++            &mut Vec::new(),
++            &mut PendingInput::default(),
++        )
++        .await
++        .unwrap()
+     }
+ 
+     async fn assert_reads(input: &str, expected: &str) {
+@@ -170,7 +212,9 @@ mod tests {
+             Some(&prompt),
+             &mut Cursor::new(b"if true\nthen\necho hi\nfi\n".as_slice()),
+             &mut prompts,
++            &mut PendingInput::default(),
+         )
++        .await
+         .unwrap();
+ 
+         assert_eq!(String::from_utf8(prompts).unwrap(), "$ > > > ");
+@@ -186,7 +230,9 @@ mod tests {
+             None,
+             &mut Cursor::new(b"if true\nthen\necho hi\nfi\n".as_slice()),
+             &mut prompts,
++            &mut PendingInput::default(),
+         )
++        .await
+         .unwrap();
+ 
+         assert_eq!(prompts, Vec::<u8>::new());
+diff --git a/brush-interactive/src/reedline/input_backend.rs b/brush-interactive/src/reedline/input_backend.rs
+index 0b8c74df..90a50ce0 100644
+--- a/brush-interactive/src/reedline/input_backend.rs
++++ b/brush-interactive/src/reedline/input_backend.rs
+@@ -1,3 +1,4 @@
++use brush_core::trace_categories;
+ use nu_ansi_term::Style;
+ use reedline::MenuBuilder;
+ 
+@@ -166,6 +167,11 @@ impl InputBackend for ReedlineInputBackend {
+             return Ok(ReadResult::Eof);
+         };
+ 
++        // reedline no longer fails `read_line` when the terminal never answers its cursor
++        // position query, so there is no error to fall back from to plain line reading. Such a
++        // terminal costs crossterm's wait on each query; `--input-backend vt` never queries.
++        #[cfg(unix)]
++        enter_raw_mode_keeping_output_processing();
+         match reedline.read_line(&prompt) {
+             Ok(reedline::Signal::Success(s)) => Ok(ReadResult::Input(s)),
+             Ok(reedline::Signal::CtrlC) => Ok(ReadResult::Interrupted),
+@@ -296,3 +302,65 @@ mod tests {
+         assert!(selected_match_text_style.is_underline);
+     }
+ }
++
++/// Puts the terminal in crossterm's raw mode *before* reedline does, keeping
++/// the terminal's output flags (`c_oflag`: `OPOST`, `ONLCR`, ...) as they
++/// were. reedline's own `enable_raw_mode()` is then a no-op (crossterm keeps
++/// one saved mode), and its `disable_raw_mode()` restores the full original
++/// termios when the line is read.
++///
++/// `cfmakeraw` clears `OPOST`, so without this a background job that writes
++/// `a\nb\n` while the prompt is up stair-steps (LF without CR). GNU readline
++/// leaves output processing on while editing, and so does this. Input line
++/// feeds arrive as carriage returns (see below).
++#[cfg(unix)]
++fn enter_raw_mode_keeping_output_processing() {
++    use std::os::fd::AsRawFd as _;
++
++    // The descriptor crossterm uses: stdin when it is a terminal, else /dev/tty.
++    // SAFETY: isatty on a constant descriptor.
++    let tty_file;
++    let fd = if unsafe { libc::isatty(libc::STDIN_FILENO) } == 1 {
++        libc::STDIN_FILENO
++    } else if let Ok(file) = std::fs::OpenOptions::new()
++        .read(true)
++        .write(true)
++        .open("/dev/tty")
++    {
++        tty_file = file;
++        tty_file.as_raw_fd()
++    } else {
++        return;
++    };
++
++    // SAFETY: termios is plain data; tcgetattr fills it on success.
++    let mut original: libc::termios = unsafe { std::mem::zeroed() };
++    if unsafe { libc::tcgetattr(fd, &raw mut original) } != 0 {
++        return;
++    }
++    // A failure here is reported by reedline's own attempt.
++    if crossterm::terminal::enable_raw_mode().is_err() {
++        return;
++    }
++    // SAFETY: as above.
++    let mut raw: libc::termios = unsafe { std::mem::zeroed() };
++    if unsafe { libc::tcgetattr(fd, &raw mut raw) } != 0 {
++        return;
++    }
++    raw.c_oflag = original.c_oflag;
++    // Deliver a typed line feed as a carriage return. reedline stops reading a
++    // batch of queued input at Enter (CR) and leaves the rest for the next line,
++    // but a raw LF is Ctrl-J, which also submits the line and so discarded every
++    // later line typed ahead in the same batch. Readline treats both as
++    // accept-line; pasted text keeps its newlines (reedline turns CR back into
++    // LF in a bracketed paste).
++    raw.c_iflag |= libc::INLCR;
++    // SAFETY: fd is an open terminal; raw is a valid termios.
++    if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw const raw) } != 0 {
++        tracing::debug!(
++            target: trace_categories::INPUT,
++            "could not keep terminal output processing on: {}",
++            std::io::Error::last_os_error()
++        );
++    }
++}
+diff --git a/brush-interactive/src/vt/input_backend.rs b/brush-interactive/src/vt/input_backend.rs
+index 38fb9dd6..24608498 100644
+--- a/brush-interactive/src/vt/input_backend.rs
++++ b/brush-interactive/src/vt/input_backend.rs
+@@ -28,6 +28,7 @@ use crate::{
+ pub struct VtInputBackend<T: Terminal = StdTerminal> {
+     terminal: T,
+     reader: LineReader,
++    minimal: crate::MinimalInputBackend,
+ }
+ 
+ impl Default for VtInputBackend<StdTerminal> {
+@@ -46,6 +47,7 @@ impl<T: Terminal> VtInputBackend<T> {
+         Self {
+             terminal,
+             reader: LineReader::default(),
++            minimal: crate::MinimalInputBackend::default(),
+         }
+         .with_ui_options(&crate::UIOptions::default())
+     }
+@@ -95,7 +97,7 @@ impl<T: Terminal> InputBackend for VtInputBackend<T> {
+ 
+         // Without a terminal, there's nothing to edit on; just read lines.
+         if !self.terminal.is_terminal() {
+-            return crate::MinimalInputBackend.read_line(shell, prompt).await;
++            return self.minimal.read_line(shell, prompt).await;
+         }
+ 
+         let mut terminal = RawMode::enable(&mut self.terminal)?;

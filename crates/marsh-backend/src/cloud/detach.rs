@@ -1419,6 +1419,7 @@ impl StockDaemonBackend {
                 payload.display()
             )));
         }
+        let _admission = store.begin_background_request()?;
         let applied = {
             let lock = self.cloud.import_lock(&record.root);
             let _held = lock

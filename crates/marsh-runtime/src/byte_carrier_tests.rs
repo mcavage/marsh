@@ -326,7 +326,7 @@ fn complete_reclaim_observation_includes_volume_sources_and_rejects_unknown_moun
             &serde_json::to_vec(&document).unwrap(),
         )
         .unwrap();
-        assert!(observation.unreferenced.is_empty());
+        assert_eq!(observation.unreferenced, [] as [std::string::String; 0]);
     }
     for mount in [
         serde_json::json!({"Type":"unknown", "Source":""}),

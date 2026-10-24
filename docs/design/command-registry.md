@@ -107,7 +107,7 @@ overwritten.
 `marsh kit install NAME repository:TAG` resolves the tag once through
 `sbx kit inspect`, accepting only a digest of the same repository, and installs
 that digest; the tag is recorded in the control directory's `kit-sources.json`.
-The daemon's automatic update (at each start, then daily; `docs/kits.md`)
+The daemon's automatic update (at each start, then hourly; `docs/kits.md`)
 re-resolves recorded tags, and on a release build the packaged commands'
 channel tags (`:latest` or `:nightly` of their pinned repository). On a release
 build it also installs the known Kits (`marsh_contracts::builtin_kits`) that

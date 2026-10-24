@@ -421,7 +421,10 @@ fn relays_run_as_supervisor_children_on_private_per_session_paths() {
         assert_eq!(spec.program, RELAY_PATH.as_bytes());
         // Paths only: the token itself never crosses as an argument.
         assert_eq!(spec.arguments, [socket.into_bytes(), token.into_bytes()]);
-        assert!(spec.environment.is_empty());
+        assert_eq!(
+            spec.environment,
+            [] as [(std::vec::Vec<u8>, std::vec::Vec<u8>); 0]
+        );
     }
 }
 

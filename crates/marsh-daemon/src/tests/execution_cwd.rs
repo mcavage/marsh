@@ -184,7 +184,11 @@ fn execution_cwd_keeps_raw_child_path_distinct_from_authenticated_root() {
         fixture.project.to_str().unwrap()
     );
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 3);
-    assert!(fixture.server.store.jobs().jobs.is_empty());
+    assert!(
+        fixture.server.store.jobs().jobs.is_empty(),
+        "{:?}",
+        fixture.server.store.jobs().jobs
+    );
 }
 
 #[test]
@@ -226,5 +230,9 @@ fn execution_cwd_denies_outside_and_malformed_before_acceptance_or_backend() {
         0,
         "denial must precede backend effects"
     );
-    assert!(fixture.server.store.jobs().jobs.is_empty());
+    assert!(
+        fixture.server.store.jobs().jobs.is_empty(),
+        "{:?}",
+        fixture.server.store.jobs().jobs
+    );
 }

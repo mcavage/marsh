@@ -1458,6 +1458,15 @@ impl DaemonClient for LocalDaemonClient {
         session: &SessionConfig,
         brush_args: &[OsString],
     ) -> Result<i32, ClientError> {
+        let session = daemon_session(session)?;
+        // Only an interactive terminal has an identity worth forwarding.
+        let terminal_environment = if session.terminal {
+            marsh_contracts::terminal::identity(std::env::vars_os().filter_map(|(name, value)| {
+                Some((name.into_string().ok()?, value.into_string().ok()?))
+            }))
+        } else {
+            std::collections::BTreeMap::new()
+        };
         self.0
             .open_shell(marsh_daemon::ShellSpec {
                 arguments: brush_args
@@ -1465,8 +1474,9 @@ impl DaemonClient for LocalDaemonClient {
                     .skip(1)
                     .map(|argument| argument.as_encoded_bytes().to_vec())
                     .collect(),
-                session: daemon_session(session)?,
+                session,
                 dev: crate::cli::DEV_SESSION.load(std::sync::atomic::Ordering::Relaxed),
+                terminal_environment,
             })
             .map_err(map_daemon_error)
     }

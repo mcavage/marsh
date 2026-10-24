@@ -134,7 +134,7 @@ Frames are credited per attempt.
 
 ## 4. Budgets and capability
 
-- **Split branch pool**: 8 concurrent branches per creating session, with
+- **Split branch pool**: 16 concurrent branches per creating session, with
   nested splits using the same pool and all host CLI splits sharing `host`.
   Kit jobs also pass the daemon-wide process admission in `processes.md`;
   the split pool does not count Kit jobs started by a shell branch.
@@ -427,7 +427,7 @@ is 130. `split` exits with the first nonzero code in declaration order.
    - credential-shaped names (`*KEY*`, `*SECRET*`, `*PASS*`, `*TOKEN*`,
     `*CREDENTIAL*`, `*COOKIE*`, `AWS_*`, `*_PAT`).
 - **Capability socket.**
-  - It admits at most 8 open connections per attempt, including idle ones;
+  - It admits at most 12 open connections per attempt, including idle ones;
     an excess connection receives a refusal frame.
   - Each connection's queue is bounded in both directions (64 chunks), so
     a job that stops reading is disconnected instead of stalling the

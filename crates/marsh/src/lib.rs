@@ -7,6 +7,7 @@ pub mod cloud_split;
 pub mod external_commands;
 pub mod fanout_cli;
 pub mod job;
+pub mod open_link;
 pub mod product;
 pub mod registered_commands;
 pub mod session;

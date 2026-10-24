@@ -529,7 +529,10 @@ fn runtime_profile_rejects_cross_location_or_expanded_authority_before_docker() 
             matches!(&error, RuntimeError::InvalidSbxEnvironment { variable } if variable == offending),
             "{error}"
         );
-        assert!(runtime.runner.calls().is_empty());
+        assert_eq!(
+            runtime.runner.calls(),
+            [] as [std::vec::Vec<std::string::String>; 0]
+        );
         assert!(!error.to_string().contains("canary-not-a-credential"));
     }
 }
@@ -674,7 +677,10 @@ fn nested_job_rejects_forged_or_incomplete_mcp_gateway_before_create() {
             matches!(&error, RuntimeError::InvalidSbxEnvironment { variable } if variable == offending),
             "{error}"
         );
-        assert!(runtime.runner.calls().is_empty());
+        assert_eq!(
+            runtime.runner.calls(),
+            [] as [std::vec::Vec<std::string::String>; 0]
+        );
         assert!(!error.to_string().contains("secret\nkey"));
     }
 }
@@ -1296,7 +1302,10 @@ fn invalid_specs_never_reach_the_runtime() {
         runtime.create(&socket),
         Err(RuntimeError::InvalidSpec(JobSpecError::InvalidMount))
     ));
-    assert!(runtime.runner.calls().is_empty());
+    assert_eq!(
+        runtime.runner.calls(),
+        [] as [std::vec::Vec<std::string::String>; 0]
+    );
 }
 
 #[test]
@@ -1907,5 +1916,5 @@ fn kit_skills_bind_read_only_outside_host_mounts() {
         &destinations_only,
     )
     .unwrap();
-    assert!(none.is_empty());
+    assert_eq!(none, [] as [std::ffi::OsString; 0]);
 }

@@ -27,6 +27,7 @@ Usage:
                                                            This job's Kit in Docker Cloud
   marsh jobs [--json] | jobs --tree [--json] | jobs show JOB [--json]   This job's subtree
   marsh context                                            Print this job's context
+  marsh open URL                                           Open a web link on the Mac (also xdg-open, open)
 
 Registered names in /run/marsh/bin are links: calling one starts a child job.
 See /run/marsh/context.md.
@@ -56,6 +57,17 @@ pub fn main() -> i32 {
         let rest = arguments.get(3..).unwrap_or_default().to_vec();
         return match name {
             "marsh" => cli(&rest),
+            // A registered Kit of the same name keeps its link.
+            "xdg-open" | "open"
+                if !document().is_some_and(|document| {
+                    document
+                        .registered
+                        .iter()
+                        .any(|registered| registered == name)
+                }) =>
+            {
+                open(&rest)
+            }
             name => link(name, &rest),
         };
     }
@@ -71,6 +83,7 @@ pub fn main() -> i32 {
                 | "fanout"
                 | "collect"
                 | "cloud"
+                | "open"
         )
         && Path::new(JOB_JSON).exists()
     {
@@ -366,11 +379,23 @@ fn cli(arguments: &[OsString]) -> i32 {
         "jobs" => jobs(&marsh_daemon::Client::capability(Path::new(SOCKET)), rest),
         "fanout" => crate::fanout_cli::fanout(rest, crate::fanout_cli::Place::Job),
         "collect" => crate::fanout_cli::collect(rest),
+        "open" => open(rest),
         other => {
             eprintln!("marsh: `{other}` is not available inside a job; see `marsh --help`");
             2
         }
     }
+}
+
+/// `xdg-open URL`, `open URL`, `marsh open URL`: through this job's `cap.sock`.
+fn open(arguments: &[OsString]) -> i32 {
+    crate::open_link::run(arguments, crate::open_link::Place::Job, || {
+        if Path::new(SOCKET).exists() {
+            Ok(marsh_daemon::Client::capability(Path::new(SOCKET)))
+        } else {
+            Err("this job has no marsh capability".into())
+        }
+    })
 }
 
 /// `run [--spawn a,b | --no-spawn] NAME ARGS`; `None` for `--help`.
@@ -654,16 +679,9 @@ fn row_line(row: &Row<'_>, tree: bool, now: i64, id_width: usize) -> String {
             ),
         },
         _ => match job.get("detached").and_then(serde_json::Value::as_str) {
-            // A detached cloud run: its own state, and the number its
-            // `marsh cloud` commands and notices use.
-            Some(detached) => (
-                detached,
-                format!(
-                    "{}  (cloud job {})",
-                    command_line(job),
-                    number(job, "cursor").unwrap_or_default()
-                ),
-            ),
+            // A detached cloud run: its own state (its ID column is the
+            // number `marsh cloud` commands and notices use).
+            Some(detached) => (detached, format!("{}  (detached)", command_line(job))),
             None => (text(job, "state"), command_line(job)),
         },
     };
@@ -719,6 +737,14 @@ fn row_id(row: &Row<'_>) -> String {
                 _ => "-".to_owned(),
             },
         },
+        // A detached cloud run: the number `marsh cloud attach N` takes.
+        _ if job
+            .get("detached")
+            .is_some_and(serde_json::Value::is_string) =>
+        {
+            number(job, "cursor")
+                .map_or_else(|| short(text(job, "job_id")).to_owned(), |n| n.to_string())
+        }
         _ => short(text(job, "job_id")).to_owned(),
     }
 }
@@ -1001,6 +1027,36 @@ mod tests {
             "exit_code": finished.map(|_| 0), "created_unix_ms": NOW - ago_ms,
             "finished_unix_ms": finished, "children": children,
         })
+    }
+
+    #[test]
+    fn a_detached_cloud_run_shows_its_job_number_and_own_state() {
+        let mut cloud = node(
+            "ffffffff",
+            "s1",
+            "cloud",
+            &["--detach", "-c", "make"],
+            "detached",
+            5_000,
+            &[],
+        );
+        cloud["cursor"] = 42.into();
+        cloud["detached"] = "paused".into();
+        let document = serde_json::json!({"jobs": [
+            cloud,
+            node("aaaaaaaa", "s1", "claude", &[], "finished", 60_000, &[]),
+        ]});
+        let listing = render_jobs(&document, JobScope::Session("s1"), false, NOW);
+        let lines = listing.lines().collect::<Vec<_>>();
+        assert!(
+            lines[1].starts_with("42        5s ago    paused"),
+            "{listing}"
+        );
+        assert!(
+            lines[1].ends_with("cloud --detach -c make  (detached)"),
+            "{listing}"
+        );
+        assert!(lines[2].starts_with("aaaaaaaa"), "{listing}");
     }
 
     #[test]

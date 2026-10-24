@@ -2,7 +2,7 @@
 # The one shell VM template: the DHI Debian base (its -dev variant: the shell
 # user has sudo and apt for their own tools) with Docker Engine, the build
 # tools `make dev` needs (gcc, make, git, python3, node, npm), zsh, Vim and
-# terminal-only Emacs, the pinned Rust 1.95 toolchain with the aarch64 gnu and
+# terminal-only Emacs, the pinned Rust 1.99 toolchain with the aarch64 gnu and
 # musl targets `make dev-inner`
 # needs, and the Pi coding agent (`pi-dev`, locked by
 # pi/package-lock.json). `marsh --dev` uses this same image; it only adds the
@@ -10,9 +10,9 @@
 # exported reference names this image, never the upstream input. No agent
 # image, host profile or credential is a build input.
 ARG SHELL_BASE_IMAGE
-FROM rust:1.95-bookworm@sha256:6258907abe69656e41cd992e0b705cdcfabcbbe3db374f92ed2d47121282d4a1 AS rust
-RUN rustup component add --toolchain 1.95.0 rustfmt clippy \
- && rustup target add --toolchain 1.95.0 aarch64-unknown-linux-musl aarch64-unknown-linux-gnu \
+FROM rust:1.99-bookworm@sha256:48b7f435b8fc6378ce43b44f15e3a47fd8919b2825f835c39bd4bd3da50af5b8 AS rust
+RUN rustup component add --toolchain 1.99.1 rustfmt clippy \
+ && rustup target add --toolchain 1.99.1 aarch64-unknown-linux-musl aarch64-unknown-linux-gnu \
  && rustc --version && cargo fmt --version && cargo clippy --version
 
 FROM ${SHELL_BASE_IMAGE} AS emacs
@@ -68,9 +68,9 @@ COPY image-base /tmp/marsh-image-base
 RUN apt-get update \
  && sh /tmp/marsh-image-base/align-perl.sh \
  && apt-get install -y --no-install-recommends \
-      docker-ce=5:29.9.1-0 docker-ce-cli=5:29.9.1-0 containerd.io=2.4.2-0 \
-      docker-buildx-plugin=0.38.0-2 \
-      nodejs-24=24.22.0-0 npm=11.21.1-1 \
+      docker-ce=5:29.9.2-0 docker-ce-cli=5:29.9.2-0 containerd.io=2.4.2-1 \
+      docker-buildx-plugin=0.38.1-0 \
+      nodejs-24=24.22.1-0 npm=11.21.1-1 \
       python-3.14=3.14.8-0 python3-pip=26.2.2-0 python3-pip-whl=26.2.2-0 \
       python3-setuptools-whl=84.2.1-0 python3-wheel=0.48.0-0 \
       sudo passwd ca-certificates curl git openssh-client less procps jq \
@@ -147,7 +147,7 @@ WORKDIR /
 LABEL com.docker.sandboxes.start-docker=true
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
-    RUSTUP_TOOLCHAIN=1.95.0 \
+    RUSTUP_TOOLCHAIN=1.99.1 \
     HOME=/home/agent \
     BASH_ENV=/etc/sandbox-persistent.sh \
     PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
