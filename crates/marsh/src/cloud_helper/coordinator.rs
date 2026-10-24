@@ -793,7 +793,10 @@ mod tests {
         }
         let (code, message) = guard.admit("codex").unwrap_err();
         assert_eq!(code, 125);
-        assert!(message.contains("limit (MARSH_CLOUD_CHILDREN)"), "{message}");
+        assert!(
+            message.contains("limit (MARSH_CLOUD_CHILDREN)"),
+            "{message}"
+        );
         // A refused name never used a slot.
         let guard = Guard::new(plan(1));
         assert!(guard.admit("pi").is_err());
@@ -809,7 +812,10 @@ mod tests {
             Duration::from_mins(30)
         );
         // Never below the stock minimum, even past the limit.
-        assert_eq!(guard.ttl_after(Duration::from_hours(3)), Duration::from_mins(1));
+        assert_eq!(
+            guard.ttl_after(Duration::from_hours(3)),
+            Duration::from_mins(1)
+        );
     }
 
     #[test]

@@ -1454,19 +1454,37 @@ mod tests {
             adapter.adopt("marsh-s-cccccccc", &other, &kit, Some("codex")),
             Err(CloudError::Foreign(_))
         ));
-        assert!(!adapter.adopt("marsh-s-dddddddd", &other, &kit, Some("codex")).unwrap());
-        assert!(adapter.adopt("not-marsh", &id, &kit, Some("codex")).is_err());
-        assert!(adapter.adopt("marsh-s-cccccccc", &id, &kit, Some("codex")).unwrap());
+        assert!(
+            !adapter
+                .adopt("marsh-s-dddddddd", &other, &kit, Some("codex"))
+                .unwrap()
+        );
+        assert!(
+            adapter
+                .adopt("not-marsh", &id, &kit, Some("codex"))
+                .is_err()
+        );
+        assert!(
+            adapter
+                .adopt("marsh-s-cccccccc", &id, &kit, Some("codex"))
+                .unwrap()
+        );
         let adopted = adapter.records().unwrap();
         assert_eq!(adopted.len(), 1);
         assert_eq!(adopted[0].phase, CloudPhase::Quarantined);
         assert!(!adopted[0].detached);
         // Adopting again is the same record; a restart keeps it cleanup-only.
-        assert!(adapter.adopt("marsh-s-cccccccc", &id, &kit, Some("codex")).unwrap());
+        assert!(
+            adapter
+                .adopt("marsh-s-cccccccc", &id, &kit, Some("codex"))
+                .unwrap()
+        );
         drop(adapter);
         let reopened = open().unwrap();
-        assert_eq!(reopened.records().unwrap()[0].phase, CloudPhase::Quarantined);
+        assert_eq!(
+            reopened.records().unwrap()[0].phase,
+            CloudPhase::Quarantined
+        );
         assert!(reopened.spawn(&id, "/bin/true", &[]).is_err());
     }
-
 }
