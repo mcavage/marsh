@@ -108,10 +108,13 @@ removes its VMs, only by the recorded VM name and UUID
 
 ### What CI covers, and what needs your Mac
 
-CI runs `make test-rust` and `make test-harness` on Linux arm64 and on macOS,
-the full TLA+ sweep, and the docs and link checks. The macOS release build,
-man page, and install-script checks run in a separate parallel job. Rust jobs
-use content-addressed `sccache` compiler results across source changes; Cargo
+A pull request runs only the lanes its files need (`scripts/ci-changes.sh`):
+a docs-only change runs just the docs and link checks, and the macOS host tests
+run when crates, Cargo files, tests, vendor, the Makefile or the toolchain
+changed. A merge to `main` runs every lane: `make test-rust` and
+`make test-harness` on Linux arm64 and on macOS, the full TLA+ sweep, and the
+docs and link checks. The macOS release build runs in the nightly and release
+workflows, not in CI. Rust jobs use content-addressed `sccache` compiler results across source changes; Cargo
 build-output caches still require an exact source key. The isolated Python
 harness tests run concurrently (`HARNESS_JOBS=3`; set it to 1 to serialize).
 On Linux that includes the shell's Bash differential tests (against GNU Bash
