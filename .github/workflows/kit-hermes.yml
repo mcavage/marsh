@@ -1,0 +1,90 @@
+name: Kit marsh-hermes
+# Builds docker.io/mcavage/marsh-hermes (kits/marsh-hermes), which marsh follows
+# at :stable. Follows Hermes Agent's releases: every six hours, build the latest
+# stable Hermes release as this Kit, smoke-test it, then push :VERSION and move
+# :stable. A failed build or smoke test never moves :stable. A change to the Kit
+# itself (push to main) or a manual run republishes the current release.
+# A pull request builds and smoke-tests the same way and pushes nothing.
+# (Moved here from the standalone mcavage/marsh-hermes repository.)
+on:
+  pull_request:
+    paths:
+      - "kits/marsh-hermes/**"
+      - ".github/workflows/kit-hermes.yml"
+  push:
+    branches: [main]
+    paths:
+      - "kits/marsh-hermes/**"
+      - ".github/workflows/kit-hermes.yml"
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: kit-hermes-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+env:
+  IMAGE: docker.io/mcavage/marsh-hermes
+jobs:
+  publish:
+    name: build, test and publish marsh-hermes
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: kits/marsh-hermes
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Latest Hermes release
+        id: hermes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          tag=$(gh api repos/NousResearch/hermes-agent/releases/latest -q .tag_name)
+          commit=$(gh api "repos/NousResearch/hermes-agent/commits/$tag" -q .sha)
+          case "$commit" in *[!0-9a-f]*|'') echo "bad commit for $tag" >&2; exit 1;; esac
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "Hermes $tag at $commit"
+      - name: Already published?
+        id: check
+        env:
+          VERSION: ${{ steps.hermes.outputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && docker buildx imagetools inspect "$IMAGE:$VERSION" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"; echo "$VERSION is already published"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        if: steps.check.outputs.skip == 'false'
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        if: steps.check.outputs.skip == 'false' && github.event_name != 'pull_request'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and smoke-test
+        if: steps.check.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.hermes.outputs.version }}
+          COMMIT: ${{ steps.hermes.outputs.commit }}
+        run: |
+          set -eu
+          sed -i "s/\"hermes-agent@[^\"]*\"/\"hermes-agent@$VERSION\"/" hermes.yaml
+          docker buildx build --platform linux/arm64 --load -f hermes.yaml \
+            --build-arg "HERMES_COMMIT=$COMMIT" --build-arg "HERMES_VERSION=$VERSION" \
+            -t marsh-hermes:candidate .
+          sh smoke.sh marsh-hermes:candidate "$VERSION"
+      - name: Publish
+        if: steps.check.outputs.skip == 'false' && github.event_name != 'pull_request'
+        env:
+          VERSION: ${{ steps.hermes.outputs.version }}
+          COMMIT: ${{ steps.hermes.outputs.commit }}
+        run: |
+          docker buildx build --platform linux/arm64 --push -f hermes.yaml \
+            --build-arg "HERMES_COMMIT=$COMMIT" --build-arg "HERMES_VERSION=$VERSION" \
+            -t "$IMAGE:$VERSION" -t "$IMAGE:stable" .
