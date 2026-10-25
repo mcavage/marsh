@@ -26,6 +26,14 @@ The shell examples below assume `notes.txt` contains `alpha` and `beta` on
 separate lines. Use a scratch project to try them. Agent examples also need
 [provider credentials](kits.md#signing-in).
 
+## Long splits from an agent's tool
+
+`split` blocks until every branch finishes. An agent's tool call usually has a
+timeout, and when it expires `split` is cancelled and takes every branch with
+it (exit 130). Start a long split in the background and poll
+`marsh jobs --tree`. After `join --keep`, each branch's full output is in
+`.marsh/split/ID/out/LABEL/stdout`.
+
 ## What split touches
 
 - marsh creates `.marsh/split/ID/` for the snapshot, forks, and results. In a

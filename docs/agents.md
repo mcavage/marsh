@@ -254,6 +254,8 @@ Every Kit job gets `/run/marsh/context.md`, written for that job. It contains:
 - the limits,
 - short examples of `codex exec`, `marsh split`, `marsh fanout`, and
   `marsh jobs --tree`,
+- how to run a long split from a tool with a timeout, and what a child cannot
+  read from the parent's image,
 - advice on when not to start more jobs.
 
 `marsh context` prints it. Outside a job, it prints the shared text with no job
