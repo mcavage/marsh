@@ -3,7 +3,7 @@ schemaVersion: "3"
 kind: workload
 displayName: Hermes
 description: Hermes Agent on marsh, sharing the marsh home's skills folder
-sourceUrl: https://github.com/mcavage/marsh-hermes
+sourceUrl: https://github.com/mcavage/marsh/tree/main/kits/marsh-hermes
 licenses: [MIT]
 provides: ["hermes-agent@0.22.5"]
 dockerfile: ./Dockerfile

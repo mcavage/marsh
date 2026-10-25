@@ -105,3 +105,16 @@ state, never raw keys.
 Claude's old outer-only block volumes were removed. Selected-home persistence
 is the single state mechanism for nested jobs, avoiding hidden state that the
 user cannot see or carry between worker VMs.
+
+## Kits that publish themselves
+
+Not every directory here ships inside marsh. `make kits` and `make kit-publish`
+cover only the packaged Kits listed in `packaging/commands.json`. The others
+build and publish on their own, from a workflow of their own
+(`.github/workflows/kit-NAME.yml`): it builds the Kit, smoke-tests it, and moves
+its `:stable` tag on Docker Hub, which marsh follows for automatic updates.
+A pull request that touches one builds and tests it and pushes nothing.
+
+| Directory | Image | Workflow |
+|---|---|---|
+| `marsh-hermes` | `docker.io/mcavage/marsh-hermes:stable` | [kit-hermes.yml](../.github/workflows/kit-hermes.yml): follows Hermes Agent's releases every six hours |
