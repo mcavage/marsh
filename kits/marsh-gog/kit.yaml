@@ -1,0 +1,33 @@
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: workload
+displayName: gog
+description: Google Workspace for agents (read, drafts, tool-created files; never send, share or delete)
+sourceUrl: https://github.com/mcavage/marsh-tools
+licenses: [MIT]
+provides: ["gogcli@0.46.0"]
+dockerfile: ./Dockerfile
+capabilities:
+  - type: com.docker.sandbox/sbx@1
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - gmail.googleapis.com:443
+          - www.googleapis.com:443
+          - docs.googleapis.com:443
+          - sheets.googleapis.com:443
+          - slides.googleapis.com:443
+  - type: com.docker.sandbox/credential@1
+    description: Google access token, minted on the Mac (sbx secret set gog --command ...)
+    config:
+      service: gog
+      phase: runtime
+      apiKey:
+        name: GOG_ACCESS_TOKEN
+        inject:
+          - {domain: gmail.googleapis.com, header: Authorization, format: "Bearer %s"}
+          - {domain: www.googleapis.com, header: Authorization, format: "Bearer %s"}
+          - {domain: docs.googleapis.com, header: Authorization, format: "Bearer %s"}
+          - {domain: sheets.googleapis.com, header: Authorization, format: "Bearer %s"}
+          - {domain: slides.googleapis.com, header: Authorization, format: "Bearer %s"}

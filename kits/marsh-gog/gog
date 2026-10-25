@@ -1,0 +1,29 @@
+#!/bin/sh
+# gog for agents. Full Google read access, drafts, and files this tool creates.
+# It cannot send mail, share, or delete: gog refuses every command not listed
+# in allowed-commands, and Google's grant limits edits to tool-created files.
+# The access token never enters this job: SBX's proxy swaps the placeholder.
+set -eu
+
+for arg in "$@"; do
+  case "$arg" in
+    --enable-commands*|--disable-commands*|--access-token*|--gmail-no-send*|--home*|--client*|--readonly*)
+      echo "gog: $arg is fixed by this tool and can't be changed" >&2
+      exit 2 ;;
+  esac
+done
+
+list=/usr/local/share/gog-allowed-commands
+allowed=$(grep -v '^[[:space:]]*\(#\|$\)' "$list" | paste -sd, -) || allowed=
+# An empty list would mean "everything", so refuse to run without one.
+case "$allowed" in
+  ''|*[!a-z0-9.,-]*) echo "gog: the allowed-command list is missing or invalid" >&2; exit 2 ;;
+esac
+mkdir -p /tmp/gog-home
+
+# Inherited GOG_* settings can't widen what is allowed. Everything else stays:
+# SBX's proxy settings in the environment are how the credential gets attached.
+for name in $(env | sed -n 's/^\(GOG_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$name"; done
+export HOME=/tmp/gog-home
+exec /usr/local/libexec/gog --home=/tmp/gog-home --access-token=proxy-managed --gmail-no-send \
+  --enable-commands-exact="$allowed" "$@"

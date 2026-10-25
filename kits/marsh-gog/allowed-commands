@@ -1,0 +1,60 @@
+# gog commands this Kit allows, one exact command path per line.
+# Anything not listed is refused by gog itself (--enable-commands-exact).
+# Never add: gmail send/reply/forward, gmail drafts send, any share, delete,
+# trash, move, permission or auth command.
+
+# Gmail: read, and drafts that you send yourself
+gmail.search
+gmail.messages.search
+gmail.get
+gmail.thread.get
+gmail.thread.attachments
+gmail.attachment
+gmail.url
+gmail.labels.list
+gmail.labels.get
+gmail.drafts.list
+gmail.drafts.get
+gmail.drafts.create
+gmail.drafts.update
+
+# Drive: read
+drive.ls
+drive.search
+drive.get
+drive.download
+drive.url
+
+# Docs: read; create and edit documents this tool created
+docs.info
+docs.cat
+docs.export
+docs.list-tabs
+docs.create
+docs.write
+docs.add-tab
+
+# Sheets: read; create and edit sheets this tool created
+sheets.get
+sheets.metadata
+sheets.export
+sheets.create
+sheets.update
+sheets.append
+
+# Slides: read; create decks
+slides.info
+slides.list-slides
+slides.read-slide
+slides.export
+slides.create
+slides.create-from-markdown
+
+# Calendar: read
+calendar.calendars
+calendar.events
+calendar.event
+calendar.search
+calendar.freebusy
+
+version
