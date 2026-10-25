@@ -105,3 +105,5 @@ state, never raw keys.
 Claude's old outer-only block volumes were removed. Selected-home persistence
 is the single state mechanism for nested jobs, avoiding hidden state that the
 user cannot see or carry between worker VMs.
+
+<!-- ci routing test: delete -->
