@@ -9,7 +9,7 @@
 # `claude install` to wire the symlink. That second step is a Bun runtime,
 # which aborts under QEMU when cross-building arm64, so the kit fetches
 # the platform binary directly into the layout install.sh would have left.
-FROM dhi.io/node:24-debian13@sha256:c2dc799f9e47eb25fc032db1801b028219da31e6081369ab5d9bdddc0faa61fc AS base
+FROM dhi.io/node:24-debian13@sha256:5eb921faefd07559999aad0571d9c26eccfc1c7aef8d386dc66481ed8f989cac AS base
 
 FROM dhi.io/debian-base:trixie-dev@sha256:cc4e05ff415ee2d83918f2af45c737983209924ef7362c53f00cfcdaa1c94326 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
@@ -42,7 +42,7 @@ RUN case "$TARGETARCH" in \
 # Claude ACP adapter, pinned by package-lock.json. Its Agent SDK carries the
 # matching native Claude Code build, which the adapter drives through
 # claude-cli.sh so the container, not bubblewrap, stays the sandbox.
-FROM dhi.io/node:24-debian13-dev@sha256:20cf36e12660c68b1e28887d1e71a7f2494bcea9d034709368e0afce77728eb0 AS npm
+FROM dhi.io/node:24-debian13-dev@sha256:2ec882ca264cab7e34990a0aac6cc633ca9936ee4f1e86689152002adebce9ee AS npm
 WORKDIR /opt/marsh/claude-acp
 COPY package.json package-lock.json ./
 COPY collect-notices.mjs ./
