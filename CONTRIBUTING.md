@@ -60,7 +60,7 @@ real `sbx` stack:
 | `make test-model` | quick TLA+ sweep (Docker, or `TLC_RUNNER=java`) | CI's model job runs every config |
 | `make check` | real smoke test of the installed dev product | Mac, after `make dev` |
 | `make verify` | `check` plus the highest-signal sbx suites | Mac, before you push |
-| `make regress` | every sbx suite, then `make test` with the full model | Mac, before a release |
+| `make regress` | every sbx suite, then `make test` with the full model | Mac; `make release` runs it |
 | `make acceptance` | builds a fresh candidate, runs the full gate with a receipt | Mac, the release run |
 
 `make test` needs `cargo-nextest`; it stops with an install hint rather than
@@ -257,17 +257,31 @@ edit a version number in the source.
   when the rule at the top of `release.yml` allows), so agent updates reach
   users the same day. That run does not build marsh, publish a prerelease, or
   touch Homebrew.
-- **Stable.** Push a tag `vX.Y.Z` on a commit that is on `main` and whose CI run
-  has passed. The tag is the version. That publishes a GitHub Release, Docker Hub images tagged `:X.Y.Z`
+- **Stable.** Run `make release VERSION=X.Y.Z` on the Mac (below). It tags a
+  commit that is on `main` and whose CI run has passed, after the full
+  regression passes on that commit. The tag is the version. That publishes a GitHub Release, Docker Hub images tagged `:X.Y.Z`
   and `:latest`, and the `marsh` formula.
 
 ```sh
-git tag v0.1.3 && git push origin v0.1.3
+make release VERSION=0.1.3
 ```
+
+CI cannot start a microVM, so the regression runs on your Mac, with Docker
+Desktop running. `make release` checks that you are on a clean `main` equal to
+`origin/main`, that CI passed on that commit, and that the tag is new. It then
+runs `make regress` (every sbx suite, then the full model) on that commit and
+refuses to go on if anything fails or `main` moves meanwhile. After you confirm,
+it makes an annotated tag whose message records the result
+(`Regression: passed on <sha> ...`) and pushes it, which starts the release.
+`DRY_RUN=1` stops after the regression; `YES=1` skips the confirmation. The
+Release workflow refuses a tag that is not annotated with that record, so
+`git tag` and `git push` alone do not publish. The check guards against
+accidents: nothing stops someone from typing the line by hand.
 
 To rehearse a release, run the Release workflow by hand with a version: it
 builds a draft and announces nothing. Its images get only the moving tag
-`:draft`, so no tag a user reads moves. Without a version it publishes a nightly
+`:draft`, so no tag a user reads moves, and it replaces any earlier draft
+release of the same version. Without a version it publishes a nightly
 from the branch you pick, any time. [.github/workflows/release.yml](.github/workflows/release.yml)
 documents the secrets and the stages.
 
