@@ -117,7 +117,9 @@ pub fn seed_git_identity_from_host(home: &Path) -> GitSeed {
         return GitSeed::AlreadyPresent;
     }
     let identity = host_git_identity();
-    let identity = identity.as_ref().map(|(name, email)| (name.as_str(), email.as_str()));
+    let identity = identity
+        .as_ref()
+        .map(|(name, email)| (name.as_str(), email.as_str()));
     seed_git_identity(home, identity).unwrap_or(GitSeed::NoIdentity)
 }
 
@@ -136,8 +138,14 @@ mod tests {
             seed_git_identity(home.path(), Some(("Mark Cavage", "mark@example.com"))).unwrap(),
             GitSeed::Seeded
         );
-        assert_eq!(read(home.path()), "[user]\n\tname = \"Mark Cavage\"\n\temail = \"mark@example.com\"\n");
-        assert_eq!(fs::metadata(home.path().join(".gitconfig")).unwrap().mode() & 0o777, 0o644);
+        assert_eq!(
+            read(home.path()),
+            "[user]\n\tname = \"Mark Cavage\"\n\temail = \"mark@example.com\"\n"
+        );
+        assert_eq!(
+            fs::metadata(home.path().join(".gitconfig")).unwrap().mode() & 0o777,
+            0o644
+        );
     }
 
     #[test]
@@ -168,12 +176,19 @@ mod tests {
             Some(("A", "a@b\0")),
         ] {
             let home = tempfile::tempdir().unwrap();
-            assert_eq!(seed_git_identity(home.path(), identity).unwrap(), GitSeed::NoIdentity, "{identity:?}");
+            assert_eq!(
+                seed_git_identity(home.path(), identity).unwrap(),
+                GitSeed::NoIdentity,
+                "{identity:?}"
+            );
             assert!(!home.path().join(".gitconfig").exists());
         }
         let home = tempfile::tempdir().unwrap();
         let long = "x".repeat(GIT_IDENTITY_LIMIT + 1);
-        assert_eq!(seed_git_identity(home.path(), Some((&long, "a@b"))).unwrap(), GitSeed::NoIdentity);
+        assert_eq!(
+            seed_git_identity(home.path(), Some((&long, "a@b"))).unwrap(),
+            GitSeed::NoIdentity
+        );
     }
 
     #[test]
@@ -187,7 +202,10 @@ mod tests {
             .output();
         if let Ok(out) = out {
             // Where git is installed, it must parse back exactly what was given.
-            assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), r#"Ann "Ace" O\Neil"#);
+            assert_eq!(
+                String::from_utf8_lossy(&out.stdout).trim(),
+                r#"Ann "Ace" O\Neil"#
+            );
         }
     }
 }

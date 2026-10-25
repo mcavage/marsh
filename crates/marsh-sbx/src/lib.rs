@@ -59,7 +59,7 @@ const SHELL_USER_MISMATCH_EXIT: i32 = 86;
 /// One root step: install trusted binaries, ensure the host-identical user,
 /// its sudo policy and private Docker Engine group, the relay runtime base,
 /// and finally the ownership marker. The sandbox proxy re-signs TLS with its
-/// own CA and hands it to the guest as PROXY_CA_CERT_B64; the shell image has
+/// own CA and hands it to the guest as `PROXY_CA_CERT_B64`; the shell image has
 /// no /usr/local/share/ca-certificates, so Docker Sandboxes cannot add it, and
 /// git and curl reject GitHub. This step adds it, best effort.
 const SHELL_SETUP_SCRIPT: &str = concat!(

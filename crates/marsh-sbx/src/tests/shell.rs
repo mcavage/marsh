@@ -542,7 +542,9 @@ fn shell_setup_script_is_valid_shell_and_adds_the_proxy_ca_without_blocking_star
         .status()
         .unwrap();
     assert!(syntax.success(), "the shell setup script must parse");
-    assert!(SHELL_SETUP_SCRIPT.contains("/usr/local/share/ca-certificates/docker-sandboxes-proxy.crt"));
+    assert!(
+        SHELL_SETUP_SCRIPT.contains("/usr/local/share/ca-certificates/docker-sandboxes-proxy.crt")
+    );
     assert!(SHELL_SETUP_SCRIPT.contains("command -v update-ca-certificates"));
     // A failure to add the CA is reported and never fails the setup (it runs under `set -eu`).
     assert!(SHELL_SETUP_SCRIPT.contains("could not add the sandbox proxy CA' >&2; fi;"));

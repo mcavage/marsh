@@ -59,7 +59,8 @@ const MAX_ENGINE_RESPONSE: u64 = 16 * 1024;
 const TRUSTED_CA_BUNDLE: &str = "/etc/ssl/certs/ca-certificates.crt";
 mod guest_home;
 pub use guest_home::{
-    host_git_identity, prepare_persistent_guest_home, seed_git_identity, seed_git_identity_from_host, GitSeed,
+    GitSeed, host_git_identity, prepare_persistent_guest_home, seed_git_identity,
+    seed_git_identity_from_host,
 };
 
 const STOCK_SBX_PROXY_ENDPOINT: &[u8] = b"http://gateway.docker.internal:3128";

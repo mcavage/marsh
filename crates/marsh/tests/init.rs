@@ -36,7 +36,11 @@ fn init_creates_the_home_and_copies_only_the_name_and_email() {
 
     // No identity on the Mac: the home is made, nothing is seeded, and it says what to do.
     let first = init(&host_home, &scope, &[]);
-    assert!(first.status.success(), "{}", String::from_utf8_lossy(&first.stderr));
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
     assert!(text(&first).contains("(created)"), "{}", text(&first));
     assert!(text(&first).contains("none found"), "{}", text(&first));
     assert!(!config.exists());
@@ -50,8 +54,16 @@ fn init_creates_the_home_and_copies_only_the_name_and_email() {
     .unwrap();
     let second = init(&host_home, &scope, &[]);
     assert!(second.status.success());
-    assert!(text(&second).contains("(already there)"), "{}", text(&second));
-    assert!(text(&second).contains("copied your name and email"), "{}", text(&second));
+    assert!(
+        text(&second).contains("(already there)"),
+        "{}",
+        text(&second)
+    );
+    assert!(
+        text(&second).contains("copied your name and email"),
+        "{}",
+        text(&second)
+    );
     assert_eq!(
         fs::read_to_string(&config).unwrap(),
         "[user]\n\tname = \"Ada Lovelace\"\n\temail = \"ada@example.com\"\n"
@@ -60,8 +72,15 @@ fn init_creates_the_home_and_copies_only_the_name_and_email() {
     // An existing file is never changed, even if the Mac's identity differs.
     fs::write(&config, "[user]\n\tname = Edited in marsh\n").unwrap();
     let third = init(&host_home, &scope, &[]);
-    assert!(text(&third).contains("already exists; left as it is"), "{}", text(&third));
-    assert_eq!(fs::read_to_string(&config).unwrap(), "[user]\n\tname = Edited in marsh\n");
+    assert!(
+        text(&third).contains("already exists; left as it is"),
+        "{}",
+        text(&third)
+    );
+    assert_eq!(
+        fs::read_to_string(&config).unwrap(),
+        "[user]\n\tname = Edited in marsh\n"
+    );
 }
 
 #[test]
@@ -73,8 +92,15 @@ fn init_has_help_and_refuses_arguments() {
     private_dir(&scope);
     let help = init(&host_home, &scope, &["--help"]);
     assert!(help.status.success());
-    assert!(text(&help).starts_with("Usage: marsh init"), "{}", text(&help));
-    assert!(!scope.join("home").exists(), "--help must not create anything");
+    assert!(
+        text(&help).starts_with("Usage: marsh init"),
+        "{}",
+        text(&help)
+    );
+    assert!(
+        !scope.join("home").exists(),
+        "--help must not create anything"
+    );
     let extra = init(&host_home, &scope, &["now"]);
     assert_eq!(extra.status.code(), Some(2));
     assert!(!scope.join("home").exists());
