@@ -106,6 +106,11 @@ pub struct StockDaemonBackend {
     config: BackendConfig,
     registered_workers: Mutex<BTreeSet<String>>,
     ready_kits: Mutex<BTreeMap<String, ReadyKitVm>>,
+    /// Kit VMs of an image a command has switched away from while jobs were
+    /// still running on them: VM name to (command, spec). New jobs use the new
+    /// image's VM; `retire_drained` removes each once it is idle. Memory only:
+    /// after a daemon restart `marsh reset` or `marsh stop` removes a leftover.
+    draining_kits: Mutex<BTreeMap<String, (String, KitVmSpec)>>,
     // Cleanup selectors only; private HOME authority remains in the native ledger.
     ephemeral_kits: Mutex<BTreeMap<String, BTreeMap<String, KitVmSpec>>>,
     kit_locks: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
@@ -141,7 +146,8 @@ struct AutoUpdate {
 #[derive(Debug, Eq, PartialEq)]
 enum AutoOutcome {
     Nothing,
-    /// Newer and compatible, but the Kit has running jobs.
+    /// Newer and compatible, but the switch could not be started now (for
+    /// example a retirement is already in progress); retried on the next pass.
     Waiting,
     Updated(KitUpdateRecord),
     Problem(String),
@@ -371,6 +377,7 @@ impl StockDaemonBackend {
             config,
             registered_workers: Mutex::new(BTreeSet::new()),
             ready_kits: Mutex::new(BTreeMap::new()),
+            draining_kits: Mutex::new(BTreeMap::new()),
             ephemeral_kits: Mutex::new(BTreeMap::new()),
             kit_locks: Mutex::new(BTreeMap::new()),
             kit_validation_flights: Mutex::new(BTreeMap::new()),
@@ -1002,6 +1009,7 @@ impl DaemonBackend for StockDaemonBackend {
     }
 
     fn auto_update_kits(&self, store: &DaemonStore) {
+        self.retire_drained(store);
         self.auto_update_pass(store, unix_millis(SystemTime::now()));
     }
 
@@ -3403,6 +3411,7 @@ enum UpgradeCheck {
 }
 
 /// Why a switch did not happen: the Kit has running jobs, or anything else.
+#[derive(Debug)]
 enum UpgradeFailure {
     Busy,
     Failed(DaemonError),
@@ -3695,23 +3704,16 @@ impl StockDaemonBackend {
         });
     }
 
-    /// One automatic update of one Kit: a busy Kit waits
-    /// without any network or VM work; the new image is prepared before the
+    /// One automatic update of one Kit: the new image is prepared before the
     /// old Kit is locked, so its jobs keep starting meanwhile; then the switch
-    /// is the upgrade's own, under an ordinary request admission.
+    /// is the upgrade's own, under an ordinary request admission. Running jobs
+    /// do not hold it back: they finish on the old VM (see `apply_upgrade`).
     fn auto_update_one(
         &self,
         command: &str,
         recorded: Option<&KitTag>,
         store: &DaemonStore,
     ) -> AutoOutcome {
-        let busy = || {
-            self.kit_spec(command)
-                .is_ok_and(|spec| store.worker_busy(&spec.name))
-        };
-        if busy() {
-            return AutoOutcome::Waiting;
-        }
         let (current_identity, image) = match self.check_upgrade(command, recorded) {
             UpgradeCheck::Available { current, image } => (current, image),
             UpgradeCheck::Problem(problem) => return AutoOutcome::Problem(problem),
@@ -3745,14 +3747,14 @@ impl StockDaemonBackend {
             // Changed (or removed) while the new image was prepared.
             Ok(_) | Err(_) => return AutoOutcome::Nothing,
         };
-        if busy() {
-            return AutoOutcome::Waiting;
-        }
         match self.apply_upgrade(command, &current, &image, store) {
-            Ok(()) => {
+            Ok(drained) => {
                 // As after a worker reset: the retired VM no longer holds
-                // slots for its cleanup-uncertain jobs.
-                store.release_process_slots(&[command.to_owned()]);
+                // slots for its cleanup-uncertain jobs. A draining VM still
+                // has live jobs, and `retire_drained` releases them later.
+                if !drained {
+                    store.release_process_slots(&[command.to_owned()]);
+                }
                 AutoOutcome::Updated(KitUpdateRecord {
                     command: command.to_owned(),
                     from: current_identity,
@@ -3841,14 +3843,17 @@ impl StockDaemonBackend {
 
     /// Prepares the new Kit VM before switching the name, so a failed upgrade
     /// leaves the old one registered and running; then retires the old VM
-    /// unless another name still uses it.
+    /// unless another name still uses it. If the old VM has running jobs the
+    /// switch still happens: new jobs start on the new image's VM, and the old
+    /// VM is left to finish and retired later (`retire_drained`). Returns
+    /// whether the old VM is draining.
     fn apply_upgrade(
         &self,
         command: &str,
         current: &RegisteredKit,
         image: &OciImage,
         store: &DaemonStore,
-    ) -> Result<(), UpgradeFailure> {
+    ) -> Result<bool, UpgradeFailure> {
         let workload = NativeKitRef::immutable_oci(image.as_str()).map_err(backend_error)?;
         let environment = self.environment(command);
         for name in self.command_names() {
@@ -3868,13 +3873,20 @@ impl StockDaemonBackend {
         let _guard = lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut drain = false;
         let claim = if still_used {
             None
         } else {
-            Some(
-                Self::claim_retirement(store, vec![old_spec.name.clone()])
-                    .map_err(|_| UpgradeFailure::Busy)?,
-            )
+            match Self::claim_retirement(store, vec![old_spec.name.clone()]) {
+                Ok(claim) => Some(claim),
+                // Running jobs keep the old VM; the Kit still switches. A
+                // limit that counts VMs does not apply to this transition.
+                Err(_) if store.worker_busy(&old_spec.name) => {
+                    drain = true;
+                    None
+                }
+                Err(_) => return Err(UpgradeFailure::Busy),
+            }
         };
         let release = |claim: &Option<RetirementClaim>| {
             if let Some(claim) = claim {
@@ -3901,14 +3913,64 @@ impl StockDaemonBackend {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(command.to_owned(), RegisteredKit { workload });
-        if let Some(claim) = claim {
+        if drain {
+            self.draining_kits
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(old_spec.name.clone(), (command.to_owned(), old_spec));
+        } else if let Some(claim) = claim {
             self.retire_claimed(
                 store,
                 &BTreeMap::from([(old_spec.name.clone(), old_spec)]),
                 &claim,
             )?;
         }
-        Ok(())
+        Ok(drain)
+    }
+
+    /// Retires each draining Kit VM that has gone idle. A job that reserved it
+    /// in the meantime makes the claim fail, and the next pass tries again.
+    fn retire_drained(&self, store: &DaemonStore) {
+        let names = self
+            .draining_kits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        for name in names {
+            let Some((command, spec)) = self
+                .draining_kits
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&name)
+                .cloned()
+            else {
+                continue;
+            };
+            if store.worker_busy(&name) {
+                continue;
+            }
+            let Ok(lock) = self.kit_lock(&spec) else {
+                continue;
+            };
+            let _guard = lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Ok(claim) = Self::claim_retirement(store, vec![name.clone()]) else {
+                continue;
+            };
+            if self
+                .retire_claimed(store, &BTreeMap::from([(name.clone(), spec)]), &claim)
+                .is_ok()
+            {
+                self.draining_kits
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(&name);
+                store.release_process_slots(&[command]);
+            }
+        }
     }
 
     /// Removes the claimed workers' VMs and forgets their cached state.
@@ -6234,7 +6296,7 @@ mod kit_lifecycle_callers {
     }
 
     #[test]
-    fn a_kit_with_running_jobs_is_neither_switched_nor_uninstalled() {
+    fn a_kit_with_running_jobs_is_switched_not_blocked_but_never_uninstalled() {
         let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(NEW, Some(1));
         let backend = daemon(home.path(), &registry, None, None);
@@ -6279,7 +6341,14 @@ mod kit_lifecycle_callers {
         let current = backend.registered_kit("pix").unwrap();
         let switched =
             backend.apply_upgrade("pix", &current, &OciImage::parse(NEW).unwrap(), &store);
-        assert!(matches!(switched, Err(UpgradeFailure::Busy)));
+        // Running jobs no longer stop the switch: it goes on to prepare the new
+        // image's VM. This fake sbx cannot create one, so it fails there, and
+        // a failed switch leaves the old image registered and drains nothing.
+        assert!(
+            matches!(switched, Err(UpgradeFailure::Failed(_))),
+            "{switched:?}"
+        );
+        assert!(backend.draining_kits.lock().unwrap().is_empty());
         assert!(
             backend
                 .uninstall_kit("pix".into(), store)
@@ -6429,7 +6498,7 @@ mod kit_lifecycle_callers {
     }
 
     #[test]
-    fn a_busy_kit_waits_and_a_failed_switch_keeps_the_old_image() {
+    fn a_busy_kit_is_not_held_back_and_a_failed_switch_keeps_the_old_image() {
         let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(NEW, Some(1));
         let backend = automatic(
@@ -6439,17 +6508,11 @@ mod kit_lifecycle_callers {
         );
         let before = overlay(&backend);
 
-        // Running jobs: no network, no preparation, retried later.
+        // Running jobs do not make it wait: the tag is resolved and the new
+        // image's VM is prepared while they run. Preparing it fails here, so
+        // the old digest stays registered and the problem is recorded.
         backend.auto_update_pass(&busy_store(home.path(), &backend), DAY);
-        assert_eq!(registry.calls("kit"), 0);
-        assert_eq!(status(&backend).waiting, ["pix"]);
-
-        // Idle within the same hour: the waiting Kit is retried. Preparing the
-        // new VM fails here, so the old digest stays registered.
-        let idle = DaemonStore::new(home.path());
-        assert!(!idle.worker_busy(&backend.kit_spec("pix").unwrap().name));
-        backend.auto_update_pass(&idle, DAY + 60_000);
-        assert_eq!(registry.calls("kit"), 1);
+        assert_eq!(registry.calls("kit"), 1, "pix follows a tag");
         let after = status(&backend);
         assert_eq!(after.waiting, [] as [std::string::String; 0]);
         let check = after.last_check.unwrap();
@@ -6462,8 +6525,56 @@ mod kit_lifecycle_callers {
             OLD
         );
         // Nothing waits, so later passes that hour do nothing.
-        backend.auto_update_pass(&idle, DAY + 120_000);
+        backend.auto_update_pass(&busy_store(home.path(), &backend), DAY + 60_000);
         assert_eq!(registry.calls("kit"), 1);
+    }
+
+    #[test]
+    fn a_draining_kit_vm_with_running_jobs_is_left_alone() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(NEW, Some(1));
+        let backend = daemon(home.path(), &registry, None, None);
+        let store = busy_store(home.path(), &backend);
+        let spec = backend.kit_spec("pix").unwrap();
+        backend
+            .draining_kits
+            .lock()
+            .unwrap()
+            .insert(spec.name.clone(), ("pix".into(), spec.clone()));
+        backend.retire_drained(&store);
+        assert!(
+            registry.runs.lock().unwrap().is_empty(),
+            "no VM work while its jobs run"
+        );
+        assert!(
+            backend
+                .draining_kits
+                .lock()
+                .unwrap()
+                .contains_key(&spec.name)
+        );
+    }
+
+    #[test]
+    fn an_idle_draining_kit_vm_is_retired_and_forgotten() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(NEW, Some(1));
+        let backend = daemon(home.path(), &registry, None, None);
+        let idle = DaemonStore::new(home.path());
+        let spec = backend.kit_spec("pix").unwrap();
+        backend
+            .draining_kits
+            .lock()
+            .unwrap()
+            .insert(spec.name.clone(), ("pix".into(), spec.clone()));
+        backend.retire_drained(&idle);
+        assert!(
+            registry.calls("sbx") > 0,
+            "an idle draining VM is retired through sbx"
+        );
+        // The fake sbx has no such VM, so there is nothing left to remove:
+        // retiring an absent VM succeeds and the entry is forgotten.
+        assert!(backend.draining_kits.lock().unwrap().is_empty());
     }
 
     #[test]

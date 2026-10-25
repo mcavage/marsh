@@ -72,9 +72,14 @@ are doing, and an offline check is reported only in `marsh status`.
 - The packaged commands follow the image tag of your release channel
   (`:latest` for stable, `:nightly` for nightly) on a release build. A Kit
   you installed from a tag follows that tag.
-- The new image is prepared first. A command whose Kit is running jobs waits
-  and switches when they finish. A failure keeps the old image. An image
-  that needs a newer marsh (its `org.marsh.kit.contract` label) is refused.
+- The new image is prepared first, in a second Kit VM. Running jobs do not
+  hold the switch back: new jobs start on the new image at once, and the jobs
+  already running finish on the old VM, which is removed when it goes idle (up
+  to a minute later). Both VMs exist meanwhile, and the per-job-tree Kit VM
+  limit counts a command's old and new image once. A failure keeps the old
+  image. An image that needs a newer marsh (its `org.marsh.kit.contract`
+  label) is refused. A VM that was still draining when the daemon stopped is
+  removed by `marsh reset` or `marsh stop`.
 - After a switch, the next time you run that command at a terminal, or open a
   marsh shell, marsh prints one line on stderr, once:
 
@@ -83,8 +88,9 @@ are doing, and an offline check is reported only in `marsh status`.
   ```
 
   A rebuild with the same version switches without a notice.
-- `marsh status` shows when the last check ran, any problem, commands waiting
-  for their jobs, and recent updates (`kit_updates` in `marsh status --json`).
+- `marsh status` shows when the last check ran, any problem, commands whose
+  switch has not started yet, and recent updates (`kit_updates` in
+  `marsh status --json`).
 - To update right now, run `marsh stop` when nothing is running, then use
   marsh again.
 - To turn updates off for a `MARSH_HOME`, run `marsh config auto-update off`,

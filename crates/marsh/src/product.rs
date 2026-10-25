@@ -593,7 +593,7 @@ fn write_kit_updates(
     if !updates.waiting.is_empty() {
         writeln!(
             writer,
-            "    waiting:    {} (switches when its jobs finish)",
+            "    waiting:    {} (switch not started; retried each minute)",
             updates.waiting.join(", ")
         )?;
     }
@@ -960,7 +960,7 @@ mod tests {
         write_kit_updates(&mut text, Some(&updates)).unwrap();
         assert_eq!(
             String::from_utf8(text).unwrap(),
-            "  Kit updates:  on; checked 3h ago (error)\n    problem:    pix: registry unreachable\n    waiting:    codex (switches when its jobs finish)\n    2h ago: claude updated (2.1.305 → 2.1.307)\n"
+            "  Kit updates:  on; checked 3h ago (error)\n    problem:    pix: registry unreachable\n    waiting:    codex (switch not started; retried each minute)\n    2h ago: claude updated (2.1.305 → 2.1.307)\n"
         );
         let mut off = Vec::new();
         let disabled = marsh_daemon::KitUpdateStatus::default();

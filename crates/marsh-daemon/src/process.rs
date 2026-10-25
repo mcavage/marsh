@@ -363,7 +363,9 @@ fn wall_time_left(parent: &JobLineage, id: &str, command: &str) -> Result<(), St
 
 /// The per-tree Kit VM cap: a child whose Kit is not already live in its
 /// tree is refused when the tree uses the limit's distinct Kit VMs (one warm
-/// VM per Kit identity; registered aliases of one Kit share it).
+/// VM per Kit identity; registered aliases of one Kit share it). A command
+/// whose Kit switched images while jobs ran on the old one has two live
+/// identities in the tree: that is one Kit, and its new image is admitted.
 fn kit_vm_cap(state: &State, root: &str, command: &str, kit: &str) -> Result<(), String> {
     let limit = state
         .job_defaults
@@ -388,15 +390,17 @@ fn kit_vm_cap(state: &State, root: &str, command: &str, kit: &str) -> Result<(),
             kits.push((job.kit_ref.as_str(), job.command.as_str()));
         }
     }
-    if kits.len() < limit || kits.iter().any(|(seen, _)| *seen == kit) {
-        return Ok(());
-    }
     let mut names = kits.iter().map(|(_, name)| *name).collect::<Vec<_>>();
     names.sort_unstable();
+    names.dedup();
+    if names.len() < limit || kits.iter().any(|(seen, _)| *seen == kit) || names.contains(&command)
+    {
+        return Ok(());
+    }
     Err(format!(
         "{command} refused: tree already uses {} Kit VM{} ({}) (MARSH_TREE_KIT_VMS)",
-        kits.len(),
-        if kits.len() == 1 { "" } else { "s" },
+        names.len(),
+        if names.len() == 1 { "" } else { "s" },
         names.join(", ")
     ))
 }
