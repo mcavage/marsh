@@ -1,25 +1,36 @@
 name: Release
 # One pipeline, two channels. The version is never hand-edited: it is stamped
-# into the build (scripts/stamp-version.py) and never committed.
+# into the build (scripts/stamp-version.py) and never committed. It runs on
+# three triggers: a tag (stable), a daily schedule (nightly), and every passing
+# CI run on main (the Kit images only).
 #
 #   stable   push a tag vX.Y.Z. Version = the tag. Publishes the GitHub Release,
 #            Docker Hub images (:X.Y.Z, :latest, :release) and the Homebrew
 #            formula `marsh`.
-#   nightly  every commit on main whose CI run passed. Version =
+#   nightly  once a day (08:00 UTC: midnight PST, 1am PDT), from the newest
+#            commit on main whose CI run passed, and only if main has moved
+#            since the last nightly. Version =
 #            <next patch>-nightly.<commit UTC time>.g<sha>, e.g.
 #            0.1.3-nightly.20261009171916.gb1f7e8b. Publishes a GitHub
 #            prerelease (the newest 10 are kept), Docker Hub images (:nightly
 #            and :<version>; prune-nightlies.yml trims them the same way) and
-#            the Homebrew formula `marsh-nightly`.
+#            the Homebrew formula `marsh-nightly`. A manual run without a
+#            version publishes a nightly from the selected ref any time.
+#   per commit  every commit on main whose CI run passed runs only the version
+#            and images stages: the Kit images are built, :nightly moves, and
+#            the stable Kit tag may move (below). No version tags are made, so
+#            the 10 kept nightly image tags stay the daily builds. The guest,
+#            host, release and tap stages (the macOS build and the Homebrew
+#            nightly) do not run.
 #   manual   workflow_dispatch with a version builds a DRAFT stable release
 #            (nothing announced); without a version it publishes a nightly
 #            from the selected ref.
 #
 # Kit images move to stable without a marsh release. Stable marsh follows each
 # packaged Kit's :latest tag (automatic updates at each daemon start and
-# daily). After every nightly from a main CI run that passed, the images job
-# also moves :latest of each packaged Kit image (claude, codex, pi, shell) to
-# this build, when and only when:
+# daily). After every per-commit run from a main CI run that passed, the images
+# job also moves :latest of each packaged Kit image (claude, codex, pi, shell)
+# to this build, when and only when:
 #   * the image's org.marsh.kit.contract label is in the range that the newest
 #     stable marsh release supports (SUPPORTED_KIT_CONTRACTS in that tag's
 #     crates/marsh-contracts/src/kit_source.rs), so a stable user is never
@@ -49,6 +60,8 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [main]
+  schedule:
+    - cron: '0 8 * * *'
   workflow_dispatch:
     inputs:
       version:
@@ -56,10 +69,11 @@ on:
         required: false
 permissions:
   contents: read
-# Stable and nightly queue separately so a stream of nightlies can never
-# replace a pending release. Nothing is cancelled: runs publish in order.
+# Stable, nightly and per-commit runs queue separately: GitHub keeps one pending
+# run per group, so a stream of per-commit runs must not replace a pending
+# release or a pending daily nightly. Nothing in progress is cancelled.
 concurrency:
-  group: release-${{ (github.event_name == 'push' || github.event.inputs.version) && 'stable' || 'nightly' }}
+  group: release-${{ (github.event_name == 'push' || github.event.inputs.version) && 'stable' || (github.event_name == 'workflow_run' && 'commit' || 'nightly') }}
   cancel-in-progress: false
 env:
   KIT_REPOSITORY_PREFIX: docker.io/mcavage
@@ -75,7 +89,11 @@ jobs:
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     outputs:
+      stages: ${{ steps.v.outputs.stages }}
       channel: ${{ steps.v.outputs.channel }}
       version: ${{ steps.v.outputs.version }}
       draft: ${{ steps.v.outputs.draft }}
@@ -93,21 +111,42 @@ jobs:
       - id: v
         env:
           INPUT: ${{ github.event.inputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           sha=$(git rev-parse HEAD)
           promote_kits=false; stable_contracts=
+          # all: every stage. images: the Kit images only (a per-commit run).
+          # none: nothing to publish.
+          stages=all
           case $GITHUB_EVENT_NAME in
             push) channel=stable; version=${GITHUB_REF_NAME#v}; draft=false ;;
             workflow_dispatch)
               if [ -n "$INPUT" ]; then channel=stable; version=${INPUT#v}; draft=true
               else channel=nightly; draft=false; fi ;;
-            *) channel=nightly; draft=false ;;
+            schedule)
+              channel=nightly; draft=false
+              # The newest commit on main whose CI passed, not necessarily its tip.
+              sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" \
+                --jq '.workflow_runs[0].head_sha // empty')
+              if [ -z "$sha" ]; then
+                echo "No passing CI run on main; no nightly."; stages=none; sha=$(git rev-parse HEAD)
+              else
+                git checkout -q "$sha"
+                last_nightly=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 50 --json tagName,isPrerelease \
+                  --jq '[.[] | select(.isPrerelease and (.tagName | test("-nightly\\.")))][0].tagName // empty')
+                if [ -n "$last_nightly" ] && [ "${last_nightly##*.g}" = "$(git rev-parse --short=7 "$sha")" ]; then
+                  echo "main has not moved since $last_nightly; no nightly."; stages=none
+                fi
+              fi ;;
+            *) channel=nightly; draft=false; stages=images ;;
           esac
           if [ "$channel" = stable ]; then
             echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "bad version: $version"; exit 1; }
             if [ "$draft" = false ]; then
               git merge-base --is-ancestor "$sha" origin/main || { echo "tag $GITHUB_REF_NAME is not on main"; exit 1; }
+              passed=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&status=success" --jq '.total_count')
+              [ "$passed" -ge 1 ] || { echo "CI has not passed on ${sha:0:7}: wait for CI on main to finish, then push the tag again"; exit 1; }
             fi
             formula=marsh; image_tag=; extra_tags="$version latest"
           else
@@ -117,6 +156,9 @@ jobs:
             stamp=$(TZ=UTC git show -s --format=%cd --date=format-local:%Y%m%d%H%M%S "$sha")
             version="$major.$minor.$((patch + 1))-nightly.$stamp.g$(git rev-parse --short=7 "$sha")"
             formula=marsh-nightly; image_tag=nightly; extra_tags="$version"
+            # A per-commit run builds the Kit images but makes no version tag:
+            # the kept nightly image tags are the daily builds'.
+            [ "$stages" = images ] && extra_tags=""
             # Only a main build whose CI passed moves the stable Kit tag.
             if [ "$GITHUB_EVENT_NAME" = workflow_run ] && [ -n "$last" ]; then
               promote_kits=true
@@ -126,6 +168,7 @@ jobs:
             fi
           fi
           {
+            echo "stages=$stages"
             echo "channel=$channel"; echo "version=$version"; echo "draft=$draft"; echo "sha=$sha"
             echo "formula=$formula"; echo "image_tag=$image_tag"; echo "extra_tags=$extra_tags"
             echo "promote_kits=$promote_kits"; echo "stable_contracts=$stable_contracts"
@@ -134,6 +177,7 @@ jobs:
 
   guest:
     needs: version
+    if: needs.version.outputs.stages == 'all'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 60
     steps:
@@ -160,6 +204,7 @@ jobs:
   # checkout as committed and does not stamp it.
   images:
     needs: version
+    if: needs.version.outputs.stages != 'none'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     permissions:
@@ -250,6 +295,7 @@ jobs:
 
   host:
     needs: [version, guest, images]
+    if: needs.version.outputs.stages == 'all'
     runs-on: macos-14
     timeout-minutes: 60
     env:
