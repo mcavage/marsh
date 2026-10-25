@@ -33,6 +33,17 @@ source ~/.bashrc
 alias ll
 ```
 
+## Git identity
+
+The first time marsh starts a session, and again with `marsh init`, it creates
+`~/.marsh/home` and, if that home has no `.gitconfig`, copies your git name and
+email from your Mac's `git config --global` into one. Every shell and Kit job
+shares that home, so commits made in them have an author. Only those two values
+are copied: not your credential helper, signing key, or other settings. An
+existing `.gitconfig` is never changed, so edit `~/.marsh/home/.gitconfig` (or
+run `git config --global ...` inside marsh) to change the identity. If your Mac
+has no identity, `marsh init` says so; set one there and run it again.
+
 ## Connect an MCP server
 
 Save connections for one registered command in `~/.marsh/sbxenvs/NAME.yaml`.

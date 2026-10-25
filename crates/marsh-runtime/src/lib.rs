@@ -58,7 +58,9 @@ const ENGINE_IO_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_ENGINE_RESPONSE: u64 = 16 * 1024;
 const TRUSTED_CA_BUNDLE: &str = "/etc/ssl/certs/ca-certificates.crt";
 mod guest_home;
-pub use guest_home::prepare_persistent_guest_home;
+pub use guest_home::{
+    host_git_identity, prepare_persistent_guest_home, seed_git_identity, seed_git_identity_from_host, GitSeed,
+};
 
 const STOCK_SBX_PROXY_ENDPOINT: &[u8] = b"http://gateway.docker.internal:3128";
 const CLOUD_V2_PROXY_ENDPOINT: &[u8] = b"http://192.0.2.1:8889";
