@@ -1,3 +1,3 @@
-module github.com/mcavage/marsh-tools/kits/bamboohr
+module github.com/mcavage/marsh/kits/marsh-bamboohr
 
 go 1.26

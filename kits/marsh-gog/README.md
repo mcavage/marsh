@@ -1,4 +1,7 @@
-# marsh-tools
+# gog and bamboohr: work tools as marsh Kits
+
+> These Kits live in the marsh repository (`kits/marsh-gog`, `kits/marsh-bamboohr`).
+> They used to be the standalone `marsh-tools` repository; the history is kept.
 
 Work tools for agents running in [marsh](https://github.com/mcavage/marsh), as
 marsh Kits. An agent runs them like any command (`gog gmail search …`), and
@@ -46,7 +49,7 @@ echo yourcompany > ~/.marsh/home/.config/bamboohr/company
 ## How `gog` stays safe
 
 - **gog refuses everything not listed** in
-  [`kits/gog/allowed-commands`](kits/gog/allowed-commands), using its own
+  [`allowed-commands`](allowed-commands), using its own
   `--enable-commands-exact`. Aliases resolve first, so `gog send` and
   `gmail drafts post` are refused too.
 - **The wrapper's settings can't be changed.** The wrapper rejects
@@ -59,9 +62,9 @@ echo yourcompany > ~/.marsh/home/.config/bamboohr/company
 ## Develop
 
 ```sh
-docker buildx build --platform linux/arm64 --load -f kits/gog/kit.yaml -t marsh-gog:candidate kits/gog
-docker buildx build --platform linux/arm64 --load -f kits/bamboohr/kit.yaml -t marsh-bamboohr:candidate kits/bamboohr
-tests/smoke.sh marsh-gog:candidate marsh-bamboohr:candidate
+docker buildx build --platform linux/arm64 --load -f kits/marsh-gog/kit.yaml -t marsh-gog:candidate kits/marsh-gog
+docker buildx build --platform linux/arm64 --load -f kits/marsh-bamboohr/kit.yaml -t marsh-bamboohr:candidate kits/marsh-bamboohr
+tests/kits/tools-smoke.sh marsh-gog:candidate marsh-bamboohr:candidate
 ```
 
 To try a change in marsh before publishing, point the command at the Kit

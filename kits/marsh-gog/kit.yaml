@@ -3,7 +3,7 @@ schemaVersion: "3"
 kind: workload
 displayName: gog
 description: Google Workspace for agents (read, drafts, tool-created files; never send, share or delete)
-sourceUrl: https://github.com/mcavage/marsh-tools
+sourceUrl: https://github.com/mcavage/marsh/tree/main/kits/marsh-gog
 licenses: [MIT]
 provides: ["gogcli@0.46.0"]
 dockerfile: ./Dockerfile

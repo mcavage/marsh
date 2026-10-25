@@ -3,7 +3,7 @@ schemaVersion: "3"
 kind: workload
 displayName: bamboohr
 description: Read-only BambooHR directory lookups for agents
-sourceUrl: https://github.com/mcavage/marsh-tools
+sourceUrl: https://github.com/mcavage/marsh/tree/main/kits/marsh-bamboohr
 licenses: [MIT]
 # CI stamps the version: the date and commit of the last change to this folder.
 provides: ["bamboohr@0.0.0"]

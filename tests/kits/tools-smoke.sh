@@ -1,6 +1,6 @@
 #!/bin/sh
 # Offline checks of the built Kit images (no credentials, no network calls
-# succeed). Usage: tests/smoke.sh GOG_IMAGE BAMBOOHR_IMAGE
+# succeed). Usage: tests/kits/tools-smoke.sh GOG_IMAGE BAMBOOHR_IMAGE
 set -eu
 gog_image=$1 bamboo_image=$2
 gog() { docker run --rm --network none -e GOG_ENABLE_COMMANDS_EXACT=gmail.send "$gog_image" "$@" 2>&1 || true; }
