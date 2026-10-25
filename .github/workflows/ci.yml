@@ -7,7 +7,10 @@ permissions:
   contents: read
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # A newer push cancels a superseded pull request run. Runs on main finish: a
+  # cancelled run cannot be the "CI passed" that release.yml waits for, and
+  # frequent merges would otherwise keep cancelling a cold TLA+ sweep.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "0"
@@ -15,15 +18,46 @@ env:
 
 # What CI checks: `make test` (formatting, lints, every workspace test, the
 # Python and shell harnesses, the TLA+ model) on Linux and macOS, and docs
-# links.
+# links. A pull request runs only the lanes its files need (scripts/ci-changes.sh):
+# a docs-only change runs the docs check alone, and the macOS host tests run
+# when host code, tests or the build changed. A merge to main runs every lane,
+# including the full TLA+ sweep. The macOS release build is not here: the
+# nightly and release workflows build it (release.yml).
 # What it does not: start microVMs. GitHub's macOS arm64 runners are VMs
 # without nested virtualization and its Linux arm64 runners have no KVM; Linux
 # x64 has KVM, but the guests are linux/arm64 and the host needs APFS file IDs
 # (crates/marsh-host-identity). So the stock-SBX gate (make verify / regress /
 # acceptance) runs on a Mac by hand; see CONTRIBUTING.md.
 jobs:
+  changes:
+    # Which lanes a pull request needs. A merge or manual run needs them all.
+    # The lanes below run when this job fails, so a broken classifier can only
+    # cost time, never skip a check.
+    name: What changed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.classify.outputs.code }}
+      host: ${{ steps.classify.outputs.host }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Classify the changed files
+        id: classify
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            printf 'code=true\nhost=true\n' >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git diff --name-only "origin/$BASE_REF...HEAD" | sh scripts/ci-changes.sh | tee -a "$GITHUB_OUTPUT"
+
   linux:
     name: Linux arm64 (shell, guest crates, protocols)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 45
     env:
@@ -95,6 +129,8 @@ jobs:
 
   macos:
     name: macOS arm64 (host build and tests)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
     runs-on: macos-14
     timeout-minutes: 45
     env:
@@ -156,40 +192,6 @@ jobs:
       - name: make test-harness (onboarding, MCP callers, publisher, tool self-tests)
         run: make test-harness
 
-  macos-release:
-    # Compilation needs neither test lane: keep this check off their critical
-    # path, but still require it before CI passes (including nightly admission).
-    name: macOS arm64 (release build and packaging checks)
-    runs-on: macos-14
-    timeout-minutes: 45
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_ENABLED: 'true'
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal
-      - name: Compiler cache (content-addressed, reusable across source changes)
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: v0.18.0
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-registry-macos-${{ hashFiles('Cargo.lock') }}
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: target/release
-          key: cargo-macos-release-${{ runner.arch }}-rust1.99-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**') }}
-      - name: Release build, man page, and install script
-        run: |
-          cargo build --workspace --release --locked
-          make man
-          target/release/marsh --version
-          sh -n scripts/install.sh
-
   docs:
     name: Docs and site
     runs-on: ubuntu-24.04
@@ -202,15 +204,20 @@ jobs:
         run: make man
       - name: Site and every Markdown link
         run: make site-check
+      # The one test that reads docs/. A docs-only pull request skips the
+      # harness that otherwise runs it.
+      - name: Guides reach the site navigation and the manual
+        run: python3 tests/release/test_site.py
 
   model:
     # Workspace_depth3_pass alone runs ~30 min, so the config marked `huge` is
     # its own shard and the rest share one; inside a shard check.sh runs configs
-    # concurrently (docs/model/check.sh --help). Both shards check only when a
-    # model input changed (docs/model, the pinned TLA+ tools, the model target
-    # or this job); otherwise they pass at once. The huge shard runs on pull
-    # requests, not on pushes to main: a merge was already checked on its PR, and
-    # a scheduled full sweep is planned with the self-hosted Mac runner.
+    # concurrently (docs/model/check.sh --help). On a pull request both shards
+    # check only when a model input changed (docs/model, the pinned TLA+ tools,
+    # the model target or this job); otherwise they pass at once. A merge to main
+    # checks every config. The verdict cache is keyed by the model files, so an
+    # unchanged model is quick; the first run after a model change on main is
+    # cold (the pull request's cache is not visible there) and takes ~30 min.
     name: TLA+ model (${{ matrix.shard }})
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -226,17 +233,12 @@ jobs:
         id: changes
         env:
           BASE_REF: ${{ github.base_ref }}
-          BEFORE: ${{ github.event.before }}
-          SHARD: ${{ matrix.shard }}
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$SHARD" = depth3 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "The huge config is checked on the pull request, not on pushes."; exit 0
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then range="origin/$BASE_REF...HEAD"
-          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then range="$BEFORE...HEAD"
-          else echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          range="origin/$BASE_REF...HEAD"
           if git diff --name-only "$range" | grep -q '^docs/model/' ||
              git diff -U0 "$range" -- Makefile .github/workflows/ci.yml | grep -Ev '^(\+\+\+|---) ' |
                grep -Eq '^[-+].*(TLA2TOOLS|tla2tools|test-model|MODEL_FLAGS|MODEL_CACHE|setup-java|tlc-)'; then
