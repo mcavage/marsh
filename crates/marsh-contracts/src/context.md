@@ -23,6 +23,21 @@ Each `::: LABEL CMD [ARG...]` branch is a child job in its own private fork
 of the files; your files change only when you apply a patch. In one line:
 `marsh split -n ::: a CMD... ::: b CMD... | marsh join`.
 
+`marsh split` blocks until every branch finishes. If your tool call has a
+timeout shorter than the work, the timeout cancels every branch (exit 130).
+For anything longer, run it in the background and poll:
+    nohup sh -c 'h=$(marsh split -n ::: a codex exec "..." ::: b claude -p "...");
+                 marsh join --keep <<<"$h"' >/tmp/split.out 2>&1 &
+then `marsh jobs --tree` to watch and `cat /tmp/split.out` when it is done.
+After `join --keep`, read a branch's full output from
+`.marsh/split/ID/out/LABEL/stdout` (ID is in the handle and `marsh splits`).
+`marsh splits rm ID` may be refused inside a job; leave cleanup to the user
+and tell them which IDs to remove.
+
+A child is a fresh container from its own Kit's image. It cannot read files
+that exist only in your image (for example skills under /opt/...): paste what
+it needs into its prompt, or put it in the project.
+
 ## Parallel work on the same files (no fork)
     marsh fanout -n ::: tests make test ::: lint make lint | marsh collect
 runs the branches at once in this container and prints each one's output in
