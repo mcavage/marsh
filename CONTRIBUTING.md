@@ -245,14 +245,20 @@ By contributing you agree that your work is licensed under the Apache License
 CI stamps the release version into the build without committing it. Do not
 edit a version number in the source.
 
-- **Nightly.** Every commit on `main` whose CI run passes is published as
-  `X.Y.(Z+1)-nightly.<UTC commit time>.g<sha>`: a GitHub prerelease (the
-  newest 10 are kept), Docker Hub images tagged `:nightly`, and the
-  `marsh-nightly` Homebrew formula. A separate workflow
+- **Nightly.** Once a day (08:00 UTC), the newest commit on `main` whose CI run
+  passed is published as `X.Y.(Z+1)-nightly.<UTC commit time>.g<sha>`, unless
+  `main` has not moved since the last nightly: a GitHub prerelease (the newest
+  10 are kept), Docker Hub images tagged `:nightly`, and the `marsh-nightly`
+  Homebrew formula. A separate workflow
   ([prune-nightlies.yml](.github/workflows/prune-nightlies.yml)) deletes older
   nightly image tags on Docker Hub; it needs a token with delete permission.
-- **Stable.** Push a tag `vX.Y.Z` on a commit that is on `main`. The tag is the
-  version. That publishes a GitHub Release, Docker Hub images tagged `:X.Y.Z`
+- **Kit images, per commit.** Every commit on `main` whose CI run passes also
+  builds and publishes the Kit images (`:nightly`, and the stable `:latest`
+  when the rule at the top of `release.yml` allows), so agent updates reach
+  users the same day. That run does not build marsh, publish a prerelease, or
+  touch Homebrew.
+- **Stable.** Push a tag `vX.Y.Z` on a commit that is on `main` and whose CI run
+  has passed. The tag is the version. That publishes a GitHub Release, Docker Hub images tagged `:X.Y.Z`
   and `:latest`, and the `marsh` formula.
 
 ```sh
@@ -261,7 +267,7 @@ git tag v0.1.3 && git push origin v0.1.3
 
 To rehearse a release, run the Release workflow by hand with a version: it
 builds a draft and announces nothing. Without a version it publishes a nightly
-from the branch you pick. [.github/workflows/release.yml](.github/workflows/release.yml)
+from the branch you pick, any time. [.github/workflows/release.yml](.github/workflows/release.yml)
 documents the secrets and the stages.
 
 ## Thanks
