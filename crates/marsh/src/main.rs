@@ -65,6 +65,7 @@ Usage:
   marsh config open-urls [on|off]      Show or set opening job links on the Mac
   marsh stop [--json]                  Remove this home's VMs and stop its daemon
   marsh reset [--json]                 Remove this home's VMs; keep the daemon
+  marsh init                           Create this home and copy your git name and email into it
   marsh recover-home SLOT --discard
   marsh mcp serve [MCP_OPTIONS...]
   marsh mcp export-serve [MCP_OPTIONS...] --declaration PATH
@@ -236,6 +237,45 @@ an hour; `marsh status` lists updates. To update now, run `marsh stop` when
 nothing is running, then use marsh again. `marsh config auto-update off` or
 MARSH_AUTO_UPDATE=0 turns updates off.
 ";
+const INIT_HELP: &str = "Usage: marsh init\n\nCreate this MARSH_HOME's guest home (by default ~/.marsh/home, which is ~ inside marsh) if it is\nmissing. If it has no .gitconfig, copy your git name and email from this Mac into one, so commits\nmade in the shell and by agents have an author. Only those two values are copied, and an existing\n.gitconfig is never changed. marsh does this the first time it starts a session; `marsh init` shows\nwhat it did.\n";
+
+/// `marsh init`: create the guest home and seed its git identity, reporting both.
+fn init_home(arguments: &[OsString]) -> Result<i32, RunError> {
+    match arguments {
+        [] => {}
+        [flag] if flag == "-h" || flag == "--help" => {
+            print!("{INIT_HELP}");
+            return Ok(0);
+        }
+        _ => return Err(RunError::new("usage: marsh init", 2)),
+    }
+    let session = SessionConfig::from_environment(false)
+        .map_err(|error| RunError::new(error.to_string(), 1))?;
+    let existed = session.home_backing.exists();
+    let home = marsh_runtime::prepare_persistent_guest_home(&session.home_backing, session.uid)
+        .map_err(|error| RunError::new(error, 1))?;
+    println!(
+        "marsh home: {} ({})",
+        home.display(),
+        if existed { "already there" } else { "created" }
+    );
+    let config = home.join(".gitconfig");
+    match marsh_runtime::seed_git_identity_from_host(&home) {
+        marsh_runtime::GitSeed::Seeded => println!(
+            "git identity: copied your name and email from this Mac into {}",
+            config.display()
+        ),
+        marsh_runtime::GitSeed::AlreadyPresent => println!(
+            "git identity: {} already exists; left as it is",
+            config.display()
+        ),
+        marsh_runtime::GitSeed::NoIdentity => println!(
+            "git identity: none found. Run `git config --global user.name \"Your Name\"` and\n  `git config --global user.email you@example.com` on this Mac, then `marsh init` again."
+        ),
+    }
+    Ok(0)
+}
+
 const STOP_HELP: &str = "Usage: marsh stop [--json]\n\nRemove the shell and Kit VMs owned by the selected MARSH_HOME, then stop its daemon.\nRefuses while shells or jobs are active. Home and results are kept.\nPrints what was removed on stderr; --json also writes the daemon report on stdout.\nExits nonzero if any cleanup could not be verified. Run a script named `stop` as `marsh ./stop`.\n";
 const RESET_HELP: &str = "Usage: marsh reset [--json]\n\nRemove the shell and Kit VMs owned by the selected MARSH_HOME; the daemon keeps running.\nRefuses while shells or jobs are active. Home and results are kept.\nPrints what was removed on stderr; --json also writes the daemon report on stdout.\nExits nonzero if any cleanup could not be verified. Run a script named `reset` as `marsh ./reset`.\n";
 const RECOVER_HOME_HELP: &str = "Usage: marsh recover-home SLOT --discard\n\nrecover-home explicitly selects one retained private slot (0..15), after all shell/Kit owners and pending work are closed. Use the SAME SDK selection; unknown/live authority remains retained. It never removes VMs or sweeps other slots.\n";
@@ -532,6 +572,7 @@ fn section_help(command: &str) -> Option<&'static str> {
         "stop" => Some(STOP_HELP),
         "reset" => Some(RESET_HELP),
         "recover-home" => Some(RECOVER_HOME_HELP),
+        "init" => Some(INIT_HELP),
         "acp" => Some(ACP_HOST_HELP),
         "mcp" => Some(MCP_HELP),
         "config" => Some(marsh::shell_choice::CONFIG_HELP),
@@ -654,6 +695,9 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
     }
     if arguments.get(1).is_some_and(|arg| arg == "recover-home") {
         return ephemeral_recovery::run(&arguments[2..]);
+    }
+    if arguments.get(1).is_some_and(|arg| arg == "init") {
+        return init_home(&arguments[2..]);
     }
     if arguments.get(1).is_some_and(|arg| arg == "config") {
         let scope = SessionConfig::from_environment(false)

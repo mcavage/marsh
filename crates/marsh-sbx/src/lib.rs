@@ -58,7 +58,10 @@ pub const RELAY_PATH: &str = "/usr/local/libexec/marsh-relay";
 const SHELL_USER_MISMATCH_EXIT: i32 = 86;
 /// One root step: install trusted binaries, ensure the host-identical user,
 /// its sudo policy and private Docker Engine group, the relay runtime base,
-/// and finally the ownership marker.
+/// and finally the ownership marker. The sandbox proxy re-signs TLS with its
+/// own CA and hands it to the guest as `PROXY_CA_CERT_B64`; the shell image has
+/// no /usr/local/share/ca-certificates, so Docker Sandboxes cannot add it, and
+/// git and curl reject GitHub. This step adds it, best effort.
 const SHELL_SETUP_SCRIPT: &str = concat!(
     "set -eu; umask 022; install -d -m 0755 /usr/local/bin /usr/local/libexec; ",
     "install -m 0755 /tmp/marsh-shell.install /usr/local/bin/marsh; ",
@@ -74,6 +77,10 @@ const SHELL_SETUP_SCRIPT: &str = concat!(
     "/usr/sbin/visudo -cf \"$temporary\" >/dev/null; install -o root -g root -m 0440 \"$temporary\" \"$entry\"; ",
     "test \"$(stat --format=%u:%g:%a \"$entry\")\" = 0:0:440; ",
     "test \"$(cat \"$entry\")\" = \"$MARSH_SHELL_USER ALL=(root) NOPASSWD: ALL\"); ",
+    "if [ -n \"${PROXY_CA_CERT_B64:-}\" ] && command -v update-ca-certificates >/dev/null 2>&1; then ",
+    "(install -d -m 0755 /usr/local/share/ca-certificates && ",
+    "printf '%s' \"$PROXY_CA_CERT_B64\" | base64 -d >/usr/local/share/ca-certificates/docker-sandboxes-proxy.crt && ",
+    "update-ca-certificates >/dev/null) || echo 'marsh: could not add the sandbox proxy CA' >&2; fi; ",
     "for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do ",
     "test ! -f \"$source\" || sed -i 's#http://deb.debian.org/#https://deb.debian.org/#g' \"$source\"; done; ",
     "test -S /var/run/docker.sock; test \"$(stat -c %G /var/run/docker.sock)\" = docker; ",

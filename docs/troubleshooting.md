@@ -25,6 +25,7 @@ marsh results
 | A VM will not go away | [Removing VMs](#removing-vms) |
 | `join` left a split behind | [A split was kept](#a-split-was-kept) |
 | `ephemeral home capacity exhausted` | [Ephemeral home slots](#ephemeral-home-slots) |
+| `Author identity unknown`, or `SSL certificate problem` from `git` or `curl` in the shell | [Git in the shell and Kits](#git-in-the-shell-and-kits) |
 | A local Kit's image digest does not match | [Local Kit builds](#local-kit-build-does-not-match) |
 
 ## The first command is slow
@@ -203,6 +204,20 @@ is free, it fails with `ephemeral home capacity exhausted`.
 
 When nothing is using the slot, run `marsh recover-home SLOT --discard`,
 substituting its slot number. This deletes the slot's data.
+
+## Git in the shell and Kits
+
+**`Author identity unknown`.** The guest home has no `.gitconfig`. marsh copies
+your Mac's git name and email into it the first time it starts a session; run
+`marsh init` to see whether it did, and why not. If your Mac has no identity,
+set one there (`git config --global user.name`, `user.email`) and run
+`marsh init` again.
+
+**`SSL certificate problem: self-signed certificate` from `git` or `curl` in the
+shell.** The Docker Sandboxes proxy re-signs HTTPS with its own CA. A shell VM
+created by an older marsh did not trust it. Run `marsh reset` (or `marsh stop`)
+from your Mac, then start marsh again: the new shell VM adds the CA. Kit jobs
+were not affected.
 
 ## Stale daemon after an upgrade
 

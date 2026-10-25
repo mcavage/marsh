@@ -202,6 +202,13 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   jobs are active. The guest home and results are kept. Exits nonzero if any
   cleanup could not be verified.
 
+**init**
+: Create the guest home (**~/.marsh/home** by default) if it is missing. When it
+  has no **.gitconfig**, copy your git name and email from this Mac into one, so
+  commits made in the shell and by agents have an author. Only those two values
+  are copied, and an existing **.gitconfig** is never changed. marsh does this
+  the first time it starts a session; **init** reports what it did.
+
 **recover-home** *SLOT* **--discard**
 : Discard a retained **--ephemeral-home** slot (0 to 15).
 

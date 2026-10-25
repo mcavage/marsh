@@ -91,6 +91,9 @@ impl SessionConfig {
         self.home_backing =
             marsh_runtime::prepare_persistent_guest_home(&self.home_backing, self.uid)
                 .map_err(SessionError)?;
+        // Every shell and Kit job shares this home, so one `.gitconfig` gives
+        // them all an author. Best effort, and an existing file is never touched.
+        let _ = marsh_runtime::seed_git_identity_from_host(&self.home_backing);
         Ok(())
     }
 
