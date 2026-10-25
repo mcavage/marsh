@@ -114,11 +114,19 @@ build it also installs the known Kits (`marsh_contracts::builtin_kits`) that
 are not registered and were not uninstalled, without preparing a VM. A new digest must carry an `org.marsh.kit.contract` image label in
 `marsh_contracts::kit_source::SUPPORTED_KIT_CONTRACTS` (required for packaged
 commands, checked when present otherwise), read with `docker buildx imagetools`.
-A Kit with running jobs waits. Otherwise the new VM is prepared first, then
-the switch claims the old worker (refusing one with running jobs), persists the
-override to `commands.json`, switches the live registry and retires the old VM
-unless another name still uses it. A failure before the switch releases the
-claim and changes nothing. ACP declarations
+Running jobs do not hold the switch back. The new VM is prepared first, then
+the switch tries to claim the old worker. If the old worker has running jobs the
+claim is skipped and the switch goes on: it persists the override to
+`commands.json` and switches the live registry, so new jobs resolve to the new
+image's VM (the VM name derives from the image identity, so the two coexist),
+and the old VM is recorded as draining. Each updater pass (every minute)
+retires a draining VM once it has no job, through the same claim, so a job that
+reserves it in between makes the claim fail and the next pass retries. With no
+running jobs the old VM is retired at the switch, unless another name still uses
+it (then it is never retired). The per-tree Kit VM cap counts a command's old
+and new image once. The draining list is memory only: after a daemon restart
+`marsh reset` and `marsh stop` remove a leftover VM as a stale generation. A
+failure before the switch releases the claim and changes nothing. ACP declarations
 follow an upgraded command when they pin its packaged digest or the command was
 installed from a tag (it is in `kit-sources.json`); a declaration pinned to any
 other digest blocks the update. `marsh kit

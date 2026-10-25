@@ -453,6 +453,45 @@ fn tree_kit_vm_cap_counts_distinct_live_kits() {
 }
 
 #[test]
+fn tree_kit_vm_cap_counts_a_commands_old_and_new_image_once() {
+    // A Kit that switched images while jobs still ran on the old one has two
+    // live identities in the tree. That is one Kit: its new image is admitted
+    // at the limit, and it does not use up a second slot.
+    let home = tempfile::tempdir().unwrap();
+    let store = reopen(home.path()).unwrap();
+    let session = session(&store, home.path());
+    let root = launch(&store, &session, None, "fixture", view(), false).unwrap();
+    child(&store, &session, &root, "claude").unwrap();
+    child(&store, &session, &root, "codex").unwrap();
+    child(&store, &session, &root, "shell").unwrap();
+    let link = ProcessLink {
+        parent_job: Some(root.clone()),
+        ..ProcessLink::default()
+    };
+    let registered = registered();
+    let job = |command: &str, kit_ref: &str| NewJob {
+        session_id: session.clone(),
+        command: command.into(),
+        kit_ref: kit_ref.into(),
+        workload_image: format!("example/{command}@sha256:{}", "a".repeat(64)),
+        mounts: view(),
+    };
+    // claude's new image: same command, a different Kit identity.
+    store
+        .begin_job_process(job("claude", "claude-new-image"), &link, &registered)
+        .expect("the new image of a live command is admitted at the limit");
+    // The tree still uses four Kits, so a fifth command is refused.
+    let refused = store
+        .begin_job_process(job("pi", "pi"), &link, &registered)
+        .unwrap_err();
+    assert!(
+        matches!(&refused, DaemonError::Refused(message) if message
+            == "pi refused: tree already uses 4 Kit VMs (claude, codex, fixture, shell) (MARSH_TREE_KIT_VMS)"),
+        "{refused:?}"
+    );
+}
+
+#[test]
 fn tree_kit_vm_cap_follows_the_daemon_setting() {
     let home = tempfile::tempdir().unwrap();
     let store = reopen(home.path()).unwrap();
