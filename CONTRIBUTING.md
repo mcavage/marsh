@@ -266,7 +266,8 @@ git tag v0.1.3 && git push origin v0.1.3
 ```
 
 To rehearse a release, run the Release workflow by hand with a version: it
-builds a draft and announces nothing. Without a version it publishes a nightly
+builds a draft and announces nothing. Its images get only the moving tag
+`:draft`, so no tag a user reads moves. Without a version it publishes a nightly
 from the branch you pick, any time. [.github/workflows/release.yml](.github/workflows/release.yml)
 documents the secrets and the stages.
 

@@ -23,8 +23,8 @@ name: Release
 #            host, release and tap stages (the macOS build and the Homebrew
 #            nightly) do not run.
 #   manual   workflow_dispatch with a version builds a DRAFT stable release
-#            (nothing announced); without a version it publishes a nightly
-#            from the selected ref.
+#            (nothing announced; its images get only the moving tag :draft);
+#            without a version it publishes a nightly from the selected ref.
 #
 # Kit images move to stable without a marsh release. Stable marsh follows each
 # packaged Kit's :latest tag (automatic updates at each daemon start and
@@ -149,6 +149,11 @@ jobs:
               [ "$passed" -ge 1 ] || { echo "CI has not passed on ${sha:0:7}: wait for CI on main to finish, then push the tag again"; exit 1; }
             fi
             formula=marsh; image_tag=; extra_tags="$version latest"
+            # A draft rehearses the pipeline and announces nothing, so it must not
+            # move a tag that users or the next release read (:release, :repaired,
+            # :latest) and makes no version tag. Its images get the moving tag
+            # :draft; the digests are in the run's artifacts.
+            if [ "$draft" = true ]; then image_tag=draft; extra_tags=""; fi
           else
             last=$(git tag --list 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
             base=${last#v}; base=${base:-0.0.0}
@@ -368,8 +373,15 @@ jobs:
           subject-path: dist/marsh-${{ env.VERSION }}-darwin-arm64.tar.gz
       # A token-created tag does not start another workflow run, so a nightly's
       # tag (which also matches v*.*.*) cannot re-trigger this one.
+      # Creating the release has failed twice with HTTP 403 "Resource not
+      # accessible by integration", a few seconds in, on 2026-10-24 (the next
+      # run succeeded both times). Retry. An attempt may have created the release
+      # before failing, so a later attempt finishes it by uploading the assets,
+      # but only when the release was created after this step started. A release
+      # that already existed is never overwritten.
       - name: Create the GitHub Release
         run: |
+          started=$(date -u +%s)
           args=(--repo "$GITHUB_REPOSITORY" --target "$SHA")
           if [ "$CHANNEL" = nightly ]; then
             args+=(--prerelease --latest=false --title "marsh $VERSION (nightly)"
@@ -378,10 +390,23 @@ jobs:
             args+=(--title "marsh $VERSION" --generate-notes)
             if [ "$DRAFT" = true ]; then args+=(--draft); fi
           fi
-          gh release create "v$VERSION" "${args[@]}" \
-            "dist/marsh-$VERSION-darwin-arm64.tar.gz" \
-            "dist/marsh-$VERSION-darwin-arm64.tar.gz.sha256" \
-            dist/fixture-ref.txt "dist/$FORMULA.rb"
+          files=("dist/marsh-$VERSION-darwin-arm64.tar.gz"
+                 "dist/marsh-$VERSION-darwin-arm64.tar.gz.sha256"
+                 dist/fixture-ref.txt "dist/$FORMULA.rb")
+          for attempt in 1 2 3; do
+            if [ "$attempt" -gt 1 ] && made=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json createdAt --jq .createdAt 2>/dev/null); then
+              made=$(python3 -c 'import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00")).timestamp()))' "$made")
+              if [ "$made" -lt $((started - 60)) ]; then
+                echo "::error::release v$VERSION already existed before this step; not overwriting it"; exit 1
+              fi
+              gh release upload "v$VERSION" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber && exit 0
+            elif gh release create "v$VERSION" "${args[@]}" "${files[@]}"; then
+              exit 0
+            fi
+            [ "$attempt" = 3 ] && { echo "::error::could not create the release after $attempt attempts"; exit 1; }
+            echo "Attempt $attempt failed; retrying in $((attempt * 30))s"
+            sleep $((attempt * 30))
+          done
       - name: Keep the newest 10 nightly releases
         if: env.CHANNEL == 'nightly'
         run: |
