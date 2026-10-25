@@ -17,8 +17,10 @@ import threading
 import time
 import uuid
 
-ROOT=Path(__file__).resolve().parents[2]
-spec=importlib.util.spec_from_file_location('pix_kit_inputs',ROOT/'marsh/kit_inputs.py')
+KIT=Path(__file__).resolve().parents[1]
+# The public skills, roles and themes come from a checkout of the Pix repository.
+PIX=Path(os.environ['PIX_SOURCE']).resolve()
+spec=importlib.util.spec_from_file_location('pix_kit_inputs',KIT/'kit_inputs.py')
 kit_inputs=importlib.util.module_from_spec(spec);spec.loader.exec_module(kit_inputs)
 
 def rpc(image, home, commands, mounts=()):
@@ -123,7 +125,7 @@ def main():
     # Tests never read or mount the user's real agent home or control scope.
     with tempfile.TemporaryDirectory(prefix='pix-public-runtime-',dir=os.environ.get('PIX_TEST_TMPDIR')) as temp:
         temp=Path(temp);kit=temp/'kit';home=temp/'home';home.mkdir()
-        subprocess.run(['python3',str(ROOT/'marsh/prepare.py'),str(kit)],check=True)
+        subprocess.run(['python3',str(KIT/'prepare.py'),'--pix-source',str(PIX),str(kit)],check=True)
         # The same base digest CI publishes from (PIX_MARSH_PI_BASE), else the current tag.
         base=kit_inputs.resolve_base(os.environ.get('PIX_MARSH_PI_BASE') or kit_inputs.BASE_TAG)
         arguments,version=kit_inputs.stamp(kit,base);BASE=arguments['base']

@@ -3,11 +3,11 @@
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
 
 def load(name):
     spec=importlib.util.spec_from_file_location('pix_'+name,HERE/f'{name}.py')
@@ -16,9 +16,10 @@ def load(name):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--publisher',type=Path,required=True,help='path to marsh/scripts/publish-kits.py')
+    parser.add_argument('--publisher',type=Path,required=True,help='path to scripts/publish-kits.py in the marsh repository')
     parser.add_argument('--python',default='python3',help='interpreter with publisher requirements installed')
-    parser.add_argument('--output',type=Path,required=True,help='new owner-private directory outside this checkout')
+    parser.add_argument('--pix-source',default=os.environ.get('PIX_SOURCE'),help='a checkout of the Pix repository (default: $PIX_SOURCE)')
+    parser.add_argument('--output',type=Path,required=True,help='new owner-private directory outside the source trees')
     parser.add_argument('--repository-prefix',default='docker.io/mcavage')
     parser.add_argument('--base',default='docker.io/mcavage/marsh-pi:latest',
                         help="marsh's Pi image; a tag is resolved to its current digest")
@@ -28,16 +29,19 @@ def main():
     args=parser.parse_args()
     output=args.output.expanduser().resolve()
     if output.exists():parser.error('output must be a new directory; do not overwrite publication evidence')
-    if output.is_relative_to(ROOT) or ROOT.is_relative_to(output):parser.error('output must be outside the source tree')
+    prepare,kit_inputs=load('prepare'),load('kit_inputs')
+    try:pix_root=prepare.pix_source(args.pix_source)
+    except ValueError as error:parser.error(str(error))
+    for tree in (pix_root,HERE):
+        if output.is_relative_to(tree) or tree.is_relative_to(output):parser.error('output must be outside the source trees')
     publisher=args.publisher.expanduser().resolve()
     if not publisher.is_file():parser.error('publisher script does not exist')
-    prepare,kit_inputs=load('prepare'),load('kit_inputs')
     base=kit_inputs.resolve_base(args.base)
     output.mkdir(mode=0o700,parents=True)
     # The publisher builds a Git source tree. Give it the exported snapshot, with
     # the Kit version stamped into its descriptor, rather than this checkout.
     source=output/'source'
-    snapshot=prepare.export(source/'pix')
+    snapshot=prepare.export(source/'pix',pix_root)
     arguments,version=kit_inputs.stamp(snapshot,base)
     if args.expect_version and version!=args.expect_version:
         parser.error(f'Kit version is {version}, expected {args.expect_version}')

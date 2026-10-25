@@ -1,14 +1,17 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
 from unittest import mock
 
-ROOT = Path(__file__).resolve().parents[2]
-spec = importlib.util.spec_from_file_location("pix_kit_inputs", ROOT / "marsh/kit_inputs.py")
+KIT = Path(__file__).resolve().parents[1]
+# The public skills, roles and themes come from a checkout of the Pix repository.
+PIX = Path(os.environ["PIX_SOURCE"]).resolve()
+spec = importlib.util.spec_from_file_location("pix_kit_inputs", KIT / "kit_inputs.py")
 kit_inputs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(kit_inputs)
 
@@ -19,8 +22,8 @@ BASE = {"base": "docker.io/mcavage/marsh-pi@" + DIGEST, "pi": "1.3.0", "piAcp": 
 class KitInputs(unittest.TestCase):
     def snapshot(self, temp):
         target = Path(temp) / "kit"
-        subprocess.run(["python3", str(ROOT / "marsh/prepare.py"), str(target)],
-                       cwd=ROOT, check=True, capture_output=True)
+        subprocess.run(["python3", str(KIT / "prepare.py"), "--pix-source", str(PIX), str(target)],
+                       cwd=KIT, check=True, capture_output=True)
         return target
 
     def test_version_is_stable_and_stamping_is_idempotent(self):

@@ -41,9 +41,10 @@ control directory's `agents.json` (`marsh status --json` shows it), with
 
 ```sh
 kit=~/.local/share/pix-marsh-kit
-python3 marsh/prepare.py "$kit"                  # empty destination
+# The Pix content (skills, roles, themes) comes from a checkout of the Pix repository.
+python3 kits/marsh-pix/prepare.py --pix-source ~/src/pix "$kit"   # empty destination
 docker buildx build --platform linux/arm64 --load -t pix-marsh:local \
-  $(python3 marsh/kit_inputs.py build-args "$kit") -f "$kit/pix.yaml" "$kit"
+  $(python3 kits/marsh-pix/kit_inputs.py build-args "$kit") -f "$kit/pix.yaml" "$kit"
 ```
 
 `kit_inputs.py build-args` resolves `docker.io/mcavage/marsh-pi:latest` to its
@@ -101,8 +102,9 @@ this repository.
 ## Tests
 
 ```sh
-python3 -m unittest discover -s marsh/tests -v   # export boundary and preparation
-python3 marsh/tests/runtime.py                   # builds the Kit and runs Pi with fake keys
+export PIX_SOURCE=~/src/pix                      # a checkout of the Pix repository
+python3 -m unittest discover -s kits/marsh-pix/tests -v   # export boundary and preparation
+python3 kits/marsh-pix/tests/runtime.py          # builds the Kit and runs Pi with fake keys
 ```
 
 `runtime.py` builds on the current `marsh-pi:latest`; set `PIX_MARSH_PI_BASE`
@@ -110,22 +112,26 @@ to a `docker.io/mcavage/marsh-pi@sha256:…` reference to pin it.
 
 ## Publishing
 
-The `marsh-pix` workflow publishes `docker.io/mcavage/marsh-pix:stable`. It
-runs on pushes to `main` that change the Kit's inputs (`marsh/`, `skills/`,
-`agents/`, `themes/`), every 6 hours, and by hand. marsh's Pi image moves
-without a marsh release, so the schedule is what picks up a new Pi.
+The [`Kit marsh-pix` workflow](../../.github/workflows/kit-pix.yml) publishes
+`docker.io/mcavage/marsh-pix:stable`. The Kit's own files are here, in the marsh
+repository. The Pix content it ships (skills, roles, themes, `LICENSE`) stays in
+the [Pix repository](https://github.com/mcavage/pix), which the workflow checks
+out at every run. It runs on pushes to `main` that change this directory, every
+hour, on a `pix-content-changed` repository dispatch, and by hand. marsh's Pi
+image moves without a marsh release and the Pix content changes in its own
+repository, so the schedule is what picks up either.
 
 Each run resolves `marsh-pi:latest` to a digest and builds from exactly that
 digest, which the image records in its `org.opencontainers.image.base.name`
 label. A push or scheduled run stops there when `stable` already has the same
 Kit version and base digest; a manual run always publishes. Otherwise it runs
 the tests above, publishes an immutable `<version>-r<run>` tag with the
-pinned marsh publisher, checks that image's version, base and
+publisher in this repository, checks that image's version, base and
 `org.marsh.kit.contract` (which must be one the newest stable marsh
 supports), and only then moves `stable`. A failure leaves `stable` where it
 was. A manual run with `stable` off publishes only the immutable tag. Pull
 requests run the tests and a cache-only build.
 
-Locally, `python3 marsh/publish.py --publisher <marsh>/scripts/publish-kits.py --output DIR --tag TAG [--push]`
+Locally, `python3 kits/marsh-pix/publish.py --pix-source ~/src/pix --publisher scripts/publish-kits.py --output DIR --tag TAG [--push]`
 does the same build and writes the `pix` → digest mapping; it never moves
 `stable`.

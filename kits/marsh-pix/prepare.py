@@ -3,12 +3,14 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 
-ROOT = Path(__file__).resolve().parent.parent
-HERE = ROOT / "marsh"
+# This Kit's directory (kits/marsh-pix in the marsh repository): its Dockerfile,
+# entrypoint, descriptor, skill selection and marsh-specific package files.
+HERE = Path(__file__).resolve().parent
 RUNTIME_NOTE = """> **Runtime:** this Kit uses marsh, not the legacy Pix launcher or subagent
 > API. Load `marsh-orchestration` for executable delegation/composition forms.
 > Historical task/chain/repair-packet outputs describe work orders only; do not
@@ -29,58 +31,73 @@ PACKAGE_FILES = [
     "skills/deliver/references/review.md", "skills/deliver/references/verification.md",
 ]
 
-def tracked(relative):
-    raw = subprocess.check_output(["git", "ls-files", "-z", "--", relative], cwd=ROOT)
-    return [ROOT / path.decode() for path in raw.split(b"\0") if path]
+def pix_source(value):
+    """The checkout of the Pix repository (github.com/mcavage/pix) that the public
+    skills, roles and themes are exported from. They stay in that repository; only
+    this Kit's own files live next to this script."""
+    if not value:
+        raise ValueError("Pass --pix-source (or set PIX_SOURCE): a checkout of the Pix repository")
+    root = Path(value).expanduser().resolve()
+    if not (root / "skills").is_dir() or not (root / "agents").is_dir():
+        raise ValueError(f"Not a Pix checkout (it has no skills/ and agents/): {root}")
+    return root
+
+def tracked(root, relative):
+    raw = subprocess.check_output(["git", "ls-files", "-z", "--", relative], cwd=root)
+    return [root / path.decode() for path in raw.split(b"\0") if path]
 
 def copy_file(source, target):
     if source.is_symlink() or not source.is_file():
-        raise ValueError(f"Public source must be a regular file: {source.relative_to(ROOT)}")
+        raise ValueError(f"Public source must be a regular file: {source.name}")
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, target)
     target.chmod(0o755 if source.name == "entrypoint.sh" else 0o644)
 
-def regular_public_source(source):
-    if not source.is_file() or not source.resolve().is_relative_to(ROOT):
+def regular_public_source(source, base):
+    # `base` is the tree the input must stay inside: the Pix checkout for the
+    # exported content, this Kit's directory for the Kit's own files.
+    if not source.is_file() or not source.resolve().is_relative_to(base):
         return False
     for part in [source, *source.parents]:
-        if part == ROOT: return True
+        if part == base: return True
         if part.is_symlink(): return False
     return False
 
-def export(destination):
+def export(destination, root):
     destination = destination.expanduser().resolve()
-    if destination == ROOT or destination.is_relative_to(ROOT) or ROOT.is_relative_to(destination):
-        raise ValueError("Snapshot must be outside the checkout and must not contain it")
+    for tree in (root, HERE):
+        if destination == tree or destination.is_relative_to(tree) or tree.is_relative_to(destination):
+            raise ValueError("Snapshot must be outside the checkouts and must not contain them")
     if destination.exists() and any(destination.iterdir()):
         raise ValueError("Destination is not empty; refusing to overwrite existing work")
     selected = json.loads((HERE / "skills.json").read_text())
     if len(selected) != len(set(selected)) or any(not name.replace("-", "").isalnum() for name in selected):
         raise ValueError("Invalid public skill selection")
+    # (source, destination, the tree the source must stay inside)
     sources = []
     for name in selected:
-        files = tracked(f"skills/{name}")
-        if ROOT / f"skills/{name}/SKILL.md" not in files:
+        files = tracked(root, f"skills/{name}")
+        if root / f"skills/{name}/SKILL.md" not in files:
             raise ValueError(f"Untracked or missing public skill: {name}")
-        sources.extend((source, Path("package") / source.relative_to(ROOT)) for source in files)
-    for source in tracked("agents"):
+        sources.extend((source, Path("package") / source.relative_to(root), root) for source in files)
+    for source in tracked(root, "agents"):
         if source.suffix == ".md":
-            sources.append((source, Path("package/roles") / source.name))
-    for source in tracked("themes"):
+            sources.append((source, Path("package/roles") / source.name, root))
+    for source in tracked(root, "themes"):
         if source.suffix == ".json" and source.name != "host.json":
-            sources.append((source, Path("package/themes") / source.name))
+            sources.append((source, Path("package/themes") / source.name, root))
     for name in KIT_FILES:
-        sources.append((HERE / "pix" / name, Path(name)))
-    sources.append((HERE / "verify-public.py", Path("verify-public.py")))
-    sources.append((ROOT / "LICENSE", Path("LICENSE")))
+        sources.append((HERE / "pix" / name, Path(name), HERE))
+    sources.append((HERE / "verify-public.py", Path("verify-public.py"), HERE))
+    sources.append((root / "LICENSE", Path("LICENSE"), root))
     # Exact new-package inputs, not a recursive copy. Even a local secrets.json
     # or MCP declaration in this source directory cannot enter the build context.
-    overrides = [(HERE / "package" / name, Path("package") / name) for name in PACKAGE_FILES]
+    overrides = [(HERE / "package" / name, Path("package") / name, HERE) for name in PACKAGE_FILES]
     # Preflight before making output, including symlinks and unreviewed files.
-    for source, _ in [*sources, *overrides]:
-        if not regular_public_source(source): raise ValueError("Non-regular or symlinked public input")
+    for source, _, base in [*sources, *overrides]:
+        if not regular_public_source(source, base): raise ValueError("Non-regular or symlinked public input")
     destination.mkdir(parents=True, exist_ok=True)
-    for source, relative in sources:
+    for source, relative, _ in sources:
         target = destination / relative
         copy_file(source, target)
         if relative.name == "SKILL.md":
@@ -89,7 +106,7 @@ def export(destination):
             if not text.startswith("---\n") or end < 0: raise ValueError("Malformed skill frontmatter")
             offset = text.find("\n", end + 1) + 1
             target.write_text(text[:offset] + "\n" + RUNTIME_NOTE + text[offset:].lstrip("\n"))
-    for source, relative in overrides: copy_file(source, destination / relative)
+    for source, relative, _ in overrides: copy_file(source, destination / relative)
     # BuildKit preserves source directory modes. The nonroot workload must be
     # able to traverse the public package even if preparation used umask 077.
     for directory in destination.rglob("*"):
@@ -97,7 +114,7 @@ def export(destination):
     inventory = {str(file.relative_to(destination)): hashlib.sha256(file.read_bytes()).hexdigest()
                  for file in sorted(destination.rglob("*")) if file.is_file()}
     (destination / "PUBLIC-SOURCES.json").write_text(json.dumps({
-        "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip(),
         "files_sha256": inventory,
         "note": "Public input inventory, not an image signature or authority receipt",
     }, indent=2) + "\n")
@@ -106,8 +123,10 @@ def export(destination):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("destination", type=Path)
+    parser.add_argument("--pix-source", default=os.environ.get("PIX_SOURCE"),
+                        help="a checkout of the Pix repository (default: $PIX_SOURCE)")
     args = parser.parse_args()
-    try: result = export(args.destination)
+    try: result = export(args.destination, pix_source(args.pix_source))
     except (ValueError, OSError, subprocess.CalledProcessError) as error: parser.exit(2, f"prepare: {error}\n")
     print(f"Prepared public native Kit source: {result}")
 
