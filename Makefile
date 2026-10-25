@@ -74,7 +74,7 @@ LEAK_CHECK = $(PYTHON) tests/leaked_processes.py --bin "$(TEST_BIN)" --token "$(
 MCP_TEST_FILES := test_stdio_protocol.py test_guest_export_boundary.py test_publication_cli.py \
 	$(if $(filter Darwin,$(shell uname -s)),test_export_stdio_protocol.py)
 
-.PHONY: help build build-host build-linux prepare-shell-image test test-rust test-harness test-model mcp kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf man site site-check dist dist-local fixture-ref formula
+.PHONY: release help build build-host build-linux prepare-shell-image test test-rust test-harness test-model mcp kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf man site site-check dist dist-local fixture-ref formula
 
 help:
 	@printf '%s\n' \
@@ -108,6 +108,7 @@ help:
 		'make site              Build the runmar.sh site into $$(SITE_DIR) and check its links' \
 		'make site-check        make site, plus every relative link in tracked Markdown' \
 		'make dist              Package a release tarball (needs pinned KIT_COMMANDS and shell-image)' \
+		'make release VERSION=X.Y.Z  Mac: check main, run make regress, tag with the result, push (DRY_RUN=1, YES=1)' \
 		'make dev-inner         Inside marsh --dev: build a Linux candidate into $$MARSH_DEV_SCRATCH/artifacts' \
 		'make dev-inner-run CMD=...  Inside marsh --dev: run the inner candidate via the broker'
 
@@ -318,6 +319,12 @@ site:
 # Relative links in every tracked Markdown doc, plus the built site.
 site-check: site
 	$(PYTHON) scripts/check-links.py --markdown .
+
+# Cut a stable release: the one way to make a tag the Release workflow accepts.
+# It runs the full regression on this Mac first (scripts/cut-release.py).
+release:
+	@test "$(origin VERSION)" = "command line" || { echo 'make release: pass VERSION=X.Y.Z on the command line (the Makefile default is not a release version)'; exit 1; }
+	$(PYTHON) scripts/cut-release.py "$(VERSION)" $(if $(DRY_RUN),--dry-run) $(if $(YES),--yes)
 
 # Release packaging. CI (.github/workflows/release.yml) builds the inputs:
 # host binaries, guest artifacts, published Kit digests, and the shell image.

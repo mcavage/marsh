@@ -4,7 +4,9 @@ name: Release
 # three triggers: a tag (stable), a daily schedule (nightly), and every passing
 # CI run on main (the Kit images only).
 #
-#   stable   push a tag vX.Y.Z. Version = the tag. Publishes the GitHub Release,
+#   stable   push a tag vX.Y.Z made by `make release` (it records a passing full
+#            regression on the Mac in the tag). Version = the tag. Publishes the
+#            GitHub Release,
 #            Docker Hub images (:X.Y.Z, :latest, :release) and the Homebrew
 #            formula `marsh`.
 #   nightly  once a day (08:00 UTC: midnight PST, 1am PDT), from the newest
@@ -142,6 +144,16 @@ jobs:
             *) channel=nightly; draft=false; stages=images ;;
           esac
           if [ "$channel" = stable ]; then
+            # A release tag comes from `make release` on the Mac, which runs the
+            # full regression (CI cannot start a microVM) and records it in an
+            # annotated tag. Refuse any other tag before anything is built.
+            if [ "$GITHUB_EVENT_NAME" = push ]; then
+              git fetch --quiet --force origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME" || true
+              [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME" 2>/dev/null)" = tag ] || {
+                echo "::error::$GITHUB_REF_NAME is not an annotated tag: cut releases with 'make release VERSION=X.Y.Z' on the Mac"; exit 1; }
+              git tag --list --format='%(contents)' "$GITHUB_REF_NAME" | grep -Eq "^Regression: passed on ${sha:0:7} \(" || {
+                echo "::error::$GITHUB_REF_NAME does not record a passing regression on ${sha:0:7}: cut releases with 'make release VERSION=X.Y.Z' on the Mac"; exit 1; }
+            fi
             echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "bad version: $version"; exit 1; }
             if [ "$draft" = false ]; then
               git merge-base --is-ancestor "$sha" origin/main || { echo "tag $GITHUB_REF_NAME is not on main"; exit 1; }
@@ -393,6 +405,14 @@ jobs:
           files=("dist/marsh-$VERSION-darwin-arm64.tar.gz"
                  "dist/marsh-$VERSION-darwin-arm64.tar.gz.sha256"
                  dist/fixture-ref.txt "dist/$FORMULA.rb")
+          # GitHub allows several drafts with one tag, so each rehearsal would add
+          # one. A rehearsal replaces the earlier drafts of its version. Drafts
+          # only: a published release is never touched.
+          if [ "$DRAFT" = true ]; then
+            gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+              --jq ".[] | select(.draft and .tag_name == \"v$VERSION\") | .id" |
+              while read -r id; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"; done
+          fi
           for attempt in 1 2 3; do
             if [ "$attempt" -gt 1 ] && made=$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json createdAt --jq .createdAt 2>/dev/null); then
               made=$(python3 -c 'import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00")).timestamp()))' "$made")
