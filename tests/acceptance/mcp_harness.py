@@ -186,6 +186,7 @@ class McpScope(IsolatedScope):
         self.published: set[str] = set()
         self.sandbox_created = False
         self.sandbox_id = None
+        self.sandbox_keepalive: subprocess.Popen[bytes] | None = None
         self.child: subprocess.Popen[bytes] | None = None
         self.log_out = None
         self.log_err = None
@@ -237,6 +238,15 @@ class McpScope(IsolatedScope):
         self.sandbox_id = stock_vm_names(self.sbx).get(self.sandbox)
         if not self.sandbox_id or self.sandbox_id in self.stock_before.values():
             raise ValueError("created Gateway sandbox lacks a new stable stock identity")
+        # Stock SBX auto-stops a sandbox 30 s after its last session disconnects
+        # (sbx 0.49). The steps below publish to this sandbox with nothing else
+        # attached in between, so on a busy machine a gap can outlast that and
+        # the next publish correctly refuses a stopped target. Hold one session
+        # open for the whole test; cleanup ends it before removing the sandbox.
+        self.sandbox_keepalive = subprocess.Popen(
+            [self.sbx, "exec", self.sandbox, "sleep", "86400"], cwd=self.root, env=self.environment,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
 
     def start_publishing_shell(self, evidence: pathlib.Path) -> None:
         tool = self.tools[0]
@@ -325,6 +335,16 @@ mcp unpublish {tool} || exit 45
             result = self.command("mcp", "unpublish", tool, timeout=90)
             if result.returncode:
                 errors.append(f"could not unpublish {tool}: {result.stderr.decode(errors='replace')}")
+        if self.sandbox_keepalive is not None and self.sandbox_keepalive.poll() is None:
+            try:
+                os.killpg(self.sandbox_keepalive.pid, signal.SIGTERM)
+                self.sandbox_keepalive.wait(timeout=10)
+            except (ProcessLookupError, subprocess.TimeoutExpired):
+                try:
+                    os.killpg(self.sandbox_keepalive.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self.sandbox_keepalive.wait(timeout=5)
         if self.sandbox_created:
             try:
                 remove_owned_stock_vm(self.sbx, self.sandbox, self.sandbox_id, self.stock_before)
