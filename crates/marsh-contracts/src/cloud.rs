@@ -499,6 +499,19 @@ pub struct CloudRequest {
     pub delegate: Option<DelegatePlan>,
 }
 
+/// One Kit a detached run's coordinator may start, as the laptop resolved
+/// it (`sbx kit inspect` needs a local daemon the sandbox does not have).
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DelegateKit {
+    /// The digest-pinned Kit reference.
+    pub kit: String,
+    /// The Kit's declared name (the sandbox's agent).
+    pub name: String,
+    /// What a call runs in the Kit, before its arguments.
+    pub entrypoint: Vec<String>,
+}
+
 /// What a detached run's coordinator may do (`docs/design/cloud-detach.md`
 /// s6), decided on the laptop. The workload can only ask; the supervisor
 /// enforces this.
@@ -507,7 +520,7 @@ pub struct CloudRequest {
 pub struct DelegatePlan {
     /// The registered names it may start, each with the exact
     /// digest-pinned cloud Kit the laptop resolved for this run.
-    pub kits: BTreeMap<String, String>,
+    pub kits: BTreeMap<String, DelegateKit>,
     /// Agent sandboxes it may start in all (refused past this).
     pub max_children: u32,
     /// The run's time limit: a child gets what remains of it.

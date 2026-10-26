@@ -241,7 +241,15 @@ fn delegate_plan(
     marsh_contracts::cloud::DelegatePlan {
         kits: bindings
             .iter()
-            .map(|(name, binding)| (name.clone(), binding.kit.as_str().to_owned()))
+            .map(|(name, binding)| {
+                (
+                    name.clone(),
+                    marsh_contracts::cloud::DelegateKit {
+                        kit: binding.kit.as_str().to_owned(),
+                        ..Default::default()
+                    },
+                )
+            })
             .collect(),
         max_children: marsh_daemon::cloud_delegate::max_children(),
         ttl_seconds: ttl.as_secs(),
@@ -416,7 +424,7 @@ mod tests {
             },
         )]);
         let plan = delegate_plan(&token, &bindings, Duration::from_hours(2), 2);
-        assert_eq!(plan.kits["codex"], kit.as_str());
+        assert_eq!(plan.kits["codex"].kit, kit.as_str());
         assert_eq!((plan.ttl_seconds, plan.account.as_str()), (7200, "someone"));
         let request = CloudRequest {
             cwd: b"/p".to_vec(),
@@ -818,7 +826,6 @@ impl StockDaemonBackend {
                 .filter(|_| !bindings.is_empty())
                 .map(|token| delegate_plan(token, &bindings, options.ttl, options.cpus)),
         };
-        let delegated = cloud_request.delegate.clone();
 
         // Provision.
         let _ = attachment.send(&AttachmentFrame::ColdBoot {
@@ -836,6 +843,32 @@ impl StockDaemonBackend {
             Ok(adapter) => adapter,
             Err(error) => return not_started(settle, error.to_string()),
         };
+        // The coordinator cannot inspect Kits in the sandbox (stock `kit
+        // inspect` needs a local daemon): resolve each one's name and
+        // entrypoint here, from the same pinned reference.
+        if let Some(plan) = cloud_request.delegate.as_mut() {
+            for (name, kit) in &mut plan.kits {
+                let manifest = OciImage::parse(kit.kit.clone())
+                    .map_err(|_| "invalid Kit reference".to_owned())
+                    .and_then(|image| {
+                        adapter
+                            .kit_manifest(&image)
+                            .map_err(|error| actionable(&error))
+                    });
+                match manifest {
+                    Ok(manifest) => {
+                        kit.name = manifest.name;
+                        kit.entrypoint = manifest.entrypoint;
+                    }
+                    Err(message) => {
+                        return not_started(
+                            settle,
+                            format!("cloud-delegate: resolving the Kit of {name}: {message}"),
+                        );
+                    }
+                }
+            }
+        }
         if options.detach
             && adapter
                 .detached_count()
@@ -995,6 +1028,7 @@ impl StockDaemonBackend {
             },
             None => cloud_fs::GitView::Project,
         };
+        let delegated = cloud_request.delegate.clone();
         let (pipe, writer) = match snapshot_pipe(root_dir, filtered, git_view, cloud_request) {
             Ok(pipe) => pipe,
             Err(error) => return setup_failed(settle, error.to_string()),

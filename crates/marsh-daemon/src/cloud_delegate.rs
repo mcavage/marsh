@@ -146,7 +146,7 @@ pub fn read_keychain() -> Result<DelegateToken, String> {
     let missing = || {
         format!(
             "cloud-delegate is on, but no access token is in your Keychain. Create a Docker personal access token with \
-             \"Allow Cloud Sandboxes access\", then store it: {}",
+             \"Allow Cloud Sandboxes access\" and \"Public Repo Read-only\" access, then store it: {}",
             keychain_command(None)
         )
     };

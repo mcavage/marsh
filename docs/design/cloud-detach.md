@@ -309,9 +309,23 @@ Where the built version differs from, or adds to, the sections above:
   stdin of one root step (`--internal-cloud delegate`) into
   `/var/lib/marsh-cloud/delegate` (root, 0600); the request carries only a
   plan (`DelegatePlan`: the allowed names and their pinned cloud Kits, the cap,
-  the time limit, the CPUs, the Docker ID). A direct Kit run (`cloud -d {
+  the time limit, the CPUs, the Docker ID). The laptop resolves each Kit's
+  name and entrypoint into the plan, since stock `sbx kit inspect` needs a
+  local daemon the sandbox lacks. Before signing in, the supervisor asks
+  Docker Hub's token service for pull access to each Kit's repository and
+  refuses the run on 401/403: a token with only "Allow Cloud Sandboxes
+  access" signs in but cannot fetch a Kit. A direct Kit run (`cloud -d {
   claude -p ...; }`) never gets it: a Kit sandbox has no root to keep it from
   the workload.
+- **Token scope.** The stock CLI resolves a Kit from Docker Hub with its
+  sign-in (it does not fall back to anonymous pulls), and a token with only
+  `sandbox:use` gets 401 from Docker Hub's token service even for a public
+  repository (measured 2026-10-26). So the token also needs **Public Repo
+  Read-only** (or **Read-only** for private Kits). The supervisor asks the
+  token service for each allowed Kit's repository before the run starts
+  (credentials to `curl` on stdin) and refuses the run with that instruction
+  on 401/403. `sbx kit inspect` needs a local daemon the sandbox cannot run,
+  so the laptop resolves each Kit's name and entrypoint into the plan.
 - **Coordinator mechanism.** The supervisor downloads a pinned Docker
   Sandboxes CLI release (linux-arm64, checked by SHA-256) into the root-only
   state directory, signs it in with `sbx login --username ID
