@@ -273,7 +273,11 @@ runs `make regress` (every sbx suite, then the full model) on that commit and
 refuses to go on if anything fails or `main` moves meanwhile. After you confirm,
 it makes an annotated tag whose message records the result
 (`Regression: passed on <sha> ...`) and pushes it, which starts the release.
-`DRY_RUN=1` stops after the regression; `YES=1` skips the confirmation. The
+`DRY_RUN=1` stops after the regression; `YES=1` skips the confirmation.
+`SKIP=SUITE SKIP_REASON="..."` leaves a suite out for a known failure that is
+not the release's (for example one that fails the same way on the previous
+release); the reason is required and is written into the tag message as
+`Skipped: SUITE: REASON`, next to the result. The
 Release workflow refuses a tag that is not annotated with that record, so
 `git tag` and `git push` alone do not publish. The check guards against
 accidents: nothing stops someone from typing the line by hand.

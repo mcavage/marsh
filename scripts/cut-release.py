@@ -12,6 +12,10 @@ other way does not publish.
 
   DRY_RUN=1  check and run the regression, then stop without tagging.
   YES=1      do not ask before pushing the tag (which starts the release).
+  SKIP=SUITE SKIP_REASON="..."
+             leave one suite out of the regression (repeat with commas), for a
+             known failure that is not this release's. The reason is required
+             and goes into the tag message next to the result.
 """
 from __future__ import annotations
 
@@ -96,10 +100,11 @@ def check_ci(sha: str) -> None:
         raise Refusal(f"CI has not passed on {sha[:7]}: wait for CI on main to finish")
 
 
-def regress() -> dict:
+def regress(skip: tuple[str, ...] = ()) -> dict:
     """Run the full regression and return its summary; refuse on any failure."""
     (ROOT / SUMMARY).unlink(missing_ok=True)
-    for argv in (["make", "fixture-ref"], ["make", "regress"]):
+    regress_argv = ["make", "regress"] + ([f"SKIP={' '.join(skip)}"] if skip else [])
+    for argv in (["make", "fixture-ref"], regress_argv):
         if subprocess.run(argv, cwd=ROOT).returncode:
             raise Refusal(f"`{' '.join(argv)}` failed; nothing was tagged")
     path = ROOT / SUMMARY
@@ -108,9 +113,12 @@ def regress() -> dict:
     return json.loads(path.read_text())
 
 
-def verify(summary: dict, sha: str) -> None:
+def verify(summary: dict, sha: str, skip: tuple[str, ...] = ()) -> None:
     if summary.get("tier") != "regress":
         raise Refusal(f"the summary is for tier {summary.get('tier')!r}, not regress")
+    ran = {s.get("name") for s in summary.get("suites", [])}
+    if ran & set(skip):
+        raise Refusal(f"suite(s) asked to be skipped still ran: {', '.join(sorted(ran & set(skip)))}")
     bad = [f"{s['name']} ({s['status']})" for s in summary.get("suites", []) if s.get("status") != "PASS"]
     if bad or not summary.get("ok") or not summary.get("suites"):
         raise Refusal("the regression did not pass: " + (", ".join(bad) or "see its summary"))
@@ -118,12 +126,14 @@ def verify(summary: dict, sha: str) -> None:
         raise Refusal(f"the regression ran on {str(summary.get('source_revision'))[:7]}, not {sha[:7]}")
 
 
-def message(version: str, sha: str, summary: dict) -> str:
+def message(version: str, sha: str, summary: dict, skip: tuple[str, ...] = (), reason: str = "") -> str:
     when = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     minutes = round(summary.get("wall_seconds", 0) / 60)
     sbx = re.findall(r"v[0-9]+\.[0-9]+\.[0-9]+\S*", text("sbx", "version", check=False))[0:1]
+    skipped = f"Skipped: {', '.join(skip)}: {reason}\n" if skip else ""
     return (f"marsh {version}\n\n"
             f"Regression: passed on {sha[:7]} ({len(summary['suites'])} suites, {minutes} min)\n"
+            f"{skipped}"
             f"Run: {when}\n"
             f"Host: macOS {platform.mac_ver()[0]} {platform.machine()}, sbx {sbx[0] if sbx else 'unknown'}\n")
 
@@ -133,19 +143,27 @@ def release(argv: list[str], *, machine=check_machine, ci=check_ci, run_regress=
     parser.add_argument("version", help="X.Y.Z")
     parser.add_argument("--dry-run", action="store_true", help="run the regression but do not tag")
     parser.add_argument("--yes", action="store_true", help="push the tag without asking")
+    parser.add_argument("--skip", default="", help="comma-separated suites to leave out (needs --skip-reason)")
+    parser.add_argument("--skip-reason", default="", help="why; recorded in the tag message")
     args = parser.parse_args(argv)
+    skip = tuple(name for name in args.skip.replace(",", " ").split() if name)
+    reason = " ".join(args.skip_reason.split())
     try:
+        if skip and not reason:
+            raise Refusal("SKIP needs SKIP_REASON: say why the suite is left out; it goes into the tag message")
+        if any(not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) for name in skip):
+            raise Refusal(f"bad suite name in SKIP: {args.skip!r}")
         sha = check_git(args.version)
         machine()
         ci(sha)
         print(f"release {args.version}: {sha[:7]} is clean, on main, and passed CI. Running the full regression.",
               flush=True)
-        summary = run_regress()
-        verify(summary, sha)
+        summary = run_regress(skip) if skip else run_regress()
+        verify(summary, sha, skip)
         # The regression takes a long time: the commit must still be the tip of main.
         if check_git(args.version) != sha:
             raise Refusal("main moved during the regression")
-        note = message(args.version, sha, summary)
+        note = message(args.version, sha, summary, skip, reason)
     except Refusal as refusal:
         print(f"release: {refusal}", file=sys.stderr)
         return 1
