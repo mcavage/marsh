@@ -402,6 +402,22 @@ impl VmOwnership {
         Ok(())
     }
 
+    /// Persist a just-forgotten name again as an intent (no UUID), before a
+    /// replacement VM is created under it.
+    pub(crate) fn restore_intent(&self, name: &str) -> Result<(), SbxError> {
+        let mut state = self.lock();
+        if let Some(entry) = state.retired.remove(name) {
+            state.entries.insert(name.to_owned(), entry);
+            if let Err(error) = self.persist(&state) {
+                if let Some(entry) = state.entries.remove(name) {
+                    state.retired.insert(name.to_owned(), entry);
+                }
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn dev_grants(&self) -> BTreeMap<String, DevGrantRecord> {
         self.lock().grants.clone()
     }

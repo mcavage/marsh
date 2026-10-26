@@ -2382,28 +2382,35 @@ impl StockSbx {
             });
         }
         self.invalidate_shell_cache(&spec.name);
+        let create = || {
+            // Do not create a replacement underneath retained acquisitions
+            // from an observed VM generation. Explicit recovery must first
+            // prove its UUID absent and settle the old references.
+            self.reject_observed_shell_disappearance(&spec.name)?;
+            let expected_digest =
+                (selected_template != template.image().as_str()).then(|| template.digest());
+            self.create_shell_from_template(spec, selected_template, pull_policy, expected_digest)
+        };
         let cold_started = match self.classify_vm(&spec.name, false)? {
             VmClass::Foreign => return Err(SbxError::ForeignVm(spec.name.clone())),
             VmClass::Owned { .. } => {
                 if let Err(error) = self.verify_owned_marker(&spec.name, &marker) {
                     self.ownership.invalidate();
-                    return Err(error);
+                    // Our own VM from another shell image (an upgrade, or a
+                    // dev build sharing the scope): replace it, as a reset would.
+                    if !self.is_owned_shell_of_another_image(&spec.name, &marker) {
+                        return Err(error);
+                    }
+                    self.retire_stale_shell(&spec.name)?;
+                    self.remember_shell_recovery_spec(spec);
+                    create()?;
+                    true
+                } else {
+                    false
                 }
-                false
             }
             VmClass::Absent => {
-                // Do not create a replacement underneath retained acquisitions
-                // from an observed VM generation. Explicit recovery must first
-                // prove its UUID absent and settle the old references.
-                self.reject_observed_shell_disappearance(&spec.name)?;
-                let expected_digest =
-                    (selected_template != template.image().as_str()).then(|| template.digest());
-                self.create_shell_from_template(
-                    spec,
-                    selected_template,
-                    pull_policy,
-                    expected_digest,
-                )?;
+                create()?;
                 true
             }
         };
@@ -2424,6 +2431,35 @@ impl StockSbx {
             user: spec.user.clone(),
             cold_started,
         })
+    }
+
+    /// An owned shell VM whose readable marker is this name's, from another image.
+    fn is_owned_shell_of_another_image(&self, name: &str, marker: &str) -> bool {
+        self.read_owned_marker(name).is_ok_and(|actual| {
+            actual.schema == "marsh.worker/v1"
+                && actual.basis == KIT_VM_BASIS
+                && actual.profile != marker
+                && actual.profile.starts_with(&format!("shell:{name}:"))
+        })
+    }
+
+    /// Remove a stale owned shell VM before its replacement (the caller holds
+    /// the shell's write and init fences). No session of this daemon can be
+    /// on it: its marker never verified here, so it was never ready, and the
+    /// scope lock excludes other daemons. Sessions being admitted now are
+    /// waiting for the replacement. A retained live mount still refuses, and
+    /// removal is by exact UUID.
+    fn retire_stale_shell(&self, name: &str) -> Result<(), SbxError> {
+        let deadline = Instant::now() + self.preparation_timeouts.sbx;
+        self.reject_observed_shell_disappearance(name)?;
+        let (operation, _cleanup) =
+            weak_mutex_transition_lock(&self.grant_stock_operation_locks, name.to_owned());
+        let _operation = shell_admission_before(|| operation.try_lock(), deadline)?;
+        self.drop_shell_lease_before(name, deadline)?;
+        self.remove_owned_vm(name, deadline)?;
+        self.finish_shell_vm_recovery(name);
+        // The replacement keeps this name: record it before its create.
+        self.ownership.restore_intent(name)
     }
 
     fn create_shell_from_template(
