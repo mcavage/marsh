@@ -120,8 +120,27 @@ fn private_directory(path: &Path) -> io::Result<PathBuf> {
     path.canonicalize()
 }
 
+/// The stock CLI warns into every call's output when the sandbox has no
+/// machine ID (the cloud image's is empty): give the sandbox a random one.
+fn ensure_machine_id() {
+    let path = Path::new("/etc/machine-id");
+    if fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0) {
+        return;
+    }
+    let mut id = [0_u8; 16];
+    if File::open("/dev/urandom")
+        .and_then(|mut random| random.read_exact(&mut id))
+        .is_err()
+    {
+        return;
+    }
+    let _ = fs::write(path, format!("{}\n", marsh_daemon::cloud_call::hex(&id)));
+    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o444));
+}
+
 /// Download the pinned stock CLI, check its digest, and keep only `sbx`.
 fn install_sbx(state: &Path) -> io::Result<PathBuf> {
+    ensure_machine_id();
     let directory = private_directory(&state.join("sbx"))?;
     let program = directory.join("sbx");
     if program.exists() {
@@ -378,11 +397,10 @@ impl Guard {
         Ok(kit.clone())
     }
 
-    /// What remains of the run's time limit after `elapsed` (at least the
-    /// stock minimum of one minute).
+    /// What remains of the run's time limit after `elapsed`, in whole
+    /// seconds (as the stock CLI takes it), at least its minimum of one minute.
     fn ttl_after(&self, elapsed: Duration) -> Duration {
-        Duration::from_secs(self.plan.ttl_seconds)
-            .saturating_sub(elapsed)
+        Duration::from_secs(self.plan.ttl_seconds.saturating_sub(elapsed.as_secs()))
             .max(Duration::from_mins(1))
             .min(Duration::from_hours(24))
     }
@@ -589,10 +607,12 @@ impl Coordinator {
             .iter()
             .take(DISPLAY_ARGS)
             .map(|arg| {
-                String::from_utf8_lossy(arg)
-                    .chars()
-                    .take(DISPLAY_ARG_CHARS)
-                    .collect()
+                let arg = String::from_utf8_lossy(arg);
+                if arg.chars().count() > DISPLAY_ARG_CHARS {
+                    arg.chars().take(DISPLAY_ARG_CHARS - 1).collect::<String>() + "…"
+                } else {
+                    arg.into_owned()
+                }
             })
             .collect::<Vec<String>>();
         let caller: Arc<dyn Caller> = match stream.try_clone() {
@@ -907,6 +927,10 @@ mod tests {
         assert_eq!(
             guard.ttl_after(Duration::from_mins(90)),
             Duration::from_mins(30)
+        );
+        assert_eq!(
+            guard.ttl_after(Duration::from_millis(1500)),
+            Duration::from_secs(7199)
         );
         // Never below the stock minimum, even past the limit.
         assert_eq!(

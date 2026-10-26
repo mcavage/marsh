@@ -1604,7 +1604,7 @@ impl StockDaemonBackend {
                 record,
                 Settle {
                     label: "discarded",
-                    detail: "discarded; nothing was written back".into(),
+                    detail: "nothing was written back".into(),
                     execution: ExecutionOutcome::Unknown,
                     exit: 130,
                     final_state: Some(JobState::Cancelled),
@@ -1620,7 +1620,7 @@ impl StockDaemonBackend {
             &id,
             record,
             "discarded",
-            "discarded; nothing was written back",
+            "nothing was written back",
         )?;
         record.notified = true;
         record.save(paths)?;

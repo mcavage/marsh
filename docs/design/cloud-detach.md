@@ -328,7 +328,8 @@ Where the built version differs from, or adds to, the sections above:
   so the laptop resolves each Kit's name and entrypoint into the plan.
 - **Coordinator mechanism.** The supervisor downloads a pinned Docker
   Sandboxes CLI release (linux-arm64, checked by SHA-256) into the root-only
-  state directory, signs it in with `sbx login --username ID
+  state directory (giving the sandbox a random `/etc/machine-id` if it has
+  none, which the CLI otherwise warns about in every call), signs it in with `sbx login --username ID
   --password-stdin` under a root-only `HOME`, checks `sbx --cloud ls`, and
   only then starts the workload, so a bad token refuses the run. It then
   serves the command links' socket with the laptop's own crossing code,
