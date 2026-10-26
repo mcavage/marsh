@@ -126,6 +126,13 @@ pub trait DaemonClient: Send + Sync + 'static {
         Err(ClientError("stop is unavailable".into()))
     }
     fn status_json(&self) -> Result<Value, ClientError>;
+    /// A detached cloud run's control (`docs/design/cloud-detach.md`).
+    fn cloud_detached(
+        &self,
+        _request: marsh_daemon::cloud_detached::CloudDetachedRequest,
+    ) -> Result<marsh_daemon::cloud_detached::CloudDetachedReply, ClientError> {
+        Err(ClientError("detached cloud runs are unavailable".into()))
+    }
     fn process_view(
         &self,
         _session: &SessionConfig,
@@ -1532,6 +1539,13 @@ impl DaemonClient for LocalDaemonClient {
 
     fn stop_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
         self.0.stop_scope().map_err(map_daemon_error)
+    }
+
+    fn cloud_detached(
+        &self,
+        request: marsh_daemon::cloud_detached::CloudDetachedRequest,
+    ) -> Result<marsh_daemon::cloud_detached::CloudDetachedReply, ClientError> {
+        self.0.cloud_detached(request).map_err(map_daemon_error)
     }
 
     fn status_json(&self) -> Result<Value, ClientError> {

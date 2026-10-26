@@ -1111,6 +1111,8 @@ mod git_tests {
             terminal: None,
             kits: Vec::new(),
             stdin_terminal: false,
+            detached: false,
+            delegate: None,
         }
     }
 

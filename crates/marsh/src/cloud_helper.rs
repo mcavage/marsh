@@ -25,6 +25,9 @@ use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+mod coordinator;
+mod detached;
+
 /// Control state: root-owned in a session shell sandbox; in a Kit sandbox
 /// (no root there) the helper runs as the Kit's user and keeps it private
 /// to that user.
@@ -79,12 +82,22 @@ pub fn main(arguments: &[OsString]) -> i32 {
         [op, root] if *op == "apply" => apply(Path::new(root)),
         [op, archive, root] if *op == "unpack" => unpack(Path::new(archive), Path::new(root)),
         [op] if *op == "run" => return run(),
+        [op, flag] if *op == "run" && *flag == "--detached" => return detached::run(),
+        [op] if *op == "supervise" => return detached::supervise(),
+        [op] if *op == "state" => {
+            detached::state();
+            Ok(())
+        }
+        [op, stream, offset] if *op == "tail" => detached::tail(stream, offset),
+        [op] if *op == "fetch" => detached::fetch(),
+        [op] if *op == "baseline" => detached::baseline(),
+        [op] if *op == "delegate" => coordinator::store_delegate(),
         [op] if *op == "status" => status(),
         [op, name] if *op == "signal" => signal(name),
         [op, root, out] if *op == "delta" => delta(Path::new(root), Path::new(out)),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: --internal-cloud prepare|unpack|run|status|signal|delta",
+            "usage: --internal-cloud prepare|unpack|run [--detached]|status|state|tail|fetch|baseline|delegate|signal|delta",
         )),
     };
     match result {
@@ -529,6 +542,111 @@ fn prepare_links(
     Ok(listener)
 }
 
+/// The workload's command: as the workload user, in its cwd (created if
+/// the snapshot lacked it), with the request's environment over the trusted
+/// sandbox settings. `terminal` starts it under `setsid --ctty`; `links`
+/// puts the command links first on PATH. Stdio is the caller's to set.
+fn workload_command(
+    request: &CloudRequest,
+    user: &nix::unistd::User,
+    terminal: bool,
+    links: bool,
+) -> io::Result<Command> {
+    let program = |command: &mut Command| {
+        if terminal {
+            command.arg("--ctty");
+        }
+    };
+    let mut command = match request.mode {
+        CloudMode::Shell => {
+            let mut command = if terminal {
+                let mut command = Command::new("setsid");
+                program(&mut command);
+                command.arg(helper_path());
+                command
+            } else {
+                let mut command = Command::new(helper_path());
+                command.arg0("marsh");
+                command
+            };
+            command.args(request.argv.iter().map(|arg| OsStr::from_bytes(arg)));
+            command
+        }
+        CloudMode::Argv => {
+            let (first, rest) = request
+                .argv
+                .split_first()
+                .ok_or_else(|| io::Error::other("empty cloud argv"))?;
+            let mut command = if terminal {
+                let mut command = Command::new("setsid");
+                program(&mut command);
+                command.arg(OsStr::from_bytes(first));
+                command
+            } else {
+                Command::new(OsStr::from_bytes(first))
+            };
+            command.args(rest.iter().map(|arg| OsStr::from_bytes(arg)));
+            command
+        }
+    };
+    let cwd = PathBuf::from(OsString::from_vec(request.cwd.clone()));
+    ensure_cwd(&cwd, user)?;
+    // A Kit sandbox (no root): the workload is the Kit's own user, in the
+    // environment the stock sandbox gives it (network proxy, credentials).
+    let trusted = if privileged() {
+        TRUSTED_ENV
+            .iter()
+            .filter_map(|name| Some(((*name).to_owned(), std::env::var_os(name)?)))
+            .collect::<Vec<_>>()
+    } else {
+        std::env::vars_os()
+            .filter(|(name, _)| {
+                !matches!(name.to_str(), Some("HOME" | "USER" | "LOGNAME" | "PATH"))
+            })
+            .map(|(name, value)| (name.to_string_lossy().into_owned(), value))
+            .collect::<Vec<_>>()
+    };
+    let path = {
+        let base = if privileged() {
+            PATH.to_owned()
+        } else {
+            std::env::var("PATH").unwrap_or_else(|_| PATH.to_owned())
+        };
+        if links {
+            format!("{}/bin:{base}", link_dir().display())
+        } else {
+            base
+        }
+    };
+    command
+        .env_clear()
+        .envs(
+            request
+                .env
+                .iter()
+                .filter(|(name, _)| {
+                    !TRUSTED_ENV.contains(&name.as_str())
+                        && !matches!(name.as_str(), "HOME" | "USER" | "LOGNAME" | "PATH")
+                })
+                .map(|(name, value)| (name, OsStr::from_bytes(value))),
+        )
+        .envs(trusted)
+        .env("HOME", &user.dir)
+        .env("USER", &user.name)
+        .env("LOGNAME", &user.name)
+        .env("PATH", path)
+        .env(
+            crate::cloud_split::ROOT_VARIABLE,
+            OsStr::from_bytes(&request.root),
+        )
+        .env(LINK_VARIABLE, link_dir().join("cap.sock"))
+        .current_dir(&cwd);
+    if privileged() {
+        command.uid(user.uid.as_raw()).gid(user.gid.as_raw());
+    }
+    Ok(command)
+}
+
 /// As root: run the request as the workload user in a new process group.
 /// After its leader exits, every workload process is killed; only then is
 /// the status recorded.
@@ -600,101 +718,10 @@ fn run() -> i32 {
                 .map_err(io::Error::other)
             })
             .transpose()?;
-        let program = |command: &mut Command| {
-            if terminal.is_some() {
-                command.arg("--ctty");
-            }
-        };
-        let mut command = match request.mode {
-            CloudMode::Shell => {
-                let mut command = if terminal.is_some() {
-                    let mut command = Command::new("setsid");
-                    program(&mut command);
-                    command.arg(helper_path());
-                    command
-                } else {
-                    let mut command = Command::new(helper_path());
-                    command.arg0("marsh");
-                    command
-                };
-                command.args(request.argv.iter().map(|arg| OsStr::from_bytes(arg)));
-                command
-            }
-            CloudMode::Argv => {
-                let (first, rest) = request
-                    .argv
-                    .split_first()
-                    .ok_or_else(|| io::Error::other("empty cloud argv"))?;
-                let mut command = if terminal.is_some() {
-                    let mut command = Command::new("setsid");
-                    program(&mut command);
-                    command.arg(OsStr::from_bytes(first));
-                    command
-                } else {
-                    Command::new(OsStr::from_bytes(first))
-                };
-                command.args(rest.iter().map(|arg| OsStr::from_bytes(arg)));
-                command
-            }
-        };
-        let cwd = PathBuf::from(OsString::from_vec(request.cwd.clone()));
-        ensure_cwd(&cwd, &user)?;
         let links = (!request.kits.is_empty())
             .then(|| prepare_links(&request.kits, &user))
             .transpose()?;
-        // A Kit sandbox (no root): the workload is the Kit's own user, in the
-        // environment the stock sandbox gives it (network proxy, credentials).
-        let trusted = if privileged() {
-            TRUSTED_ENV
-                .iter()
-                .filter_map(|name| Some(((*name).to_owned(), std::env::var_os(name)?)))
-                .collect::<Vec<_>>()
-        } else {
-            std::env::vars_os()
-                .filter(|(name, _)| {
-                    !matches!(name.to_str(), Some("HOME" | "USER" | "LOGNAME" | "PATH"))
-                })
-                .map(|(name, value)| (name.to_string_lossy().into_owned(), value))
-                .collect::<Vec<_>>()
-        };
-        let path = {
-            let base = if privileged() {
-                PATH.to_owned()
-            } else {
-                std::env::var("PATH").unwrap_or_else(|_| PATH.to_owned())
-            };
-            if links.is_some() {
-                format!("{}/bin:{base}", link_dir().display())
-            } else {
-                base
-            }
-        };
-        command
-            .env_clear()
-            .envs(
-                request
-                    .env
-                    .iter()
-                    .filter(|(name, _)| {
-                        !TRUSTED_ENV.contains(&name.as_str())
-                            && !matches!(name.as_str(), "HOME" | "USER" | "LOGNAME" | "PATH")
-                    })
-                    .map(|(name, value)| (name, OsStr::from_bytes(value))),
-            )
-            .envs(trusted)
-            .env("HOME", &user.dir)
-            .env("USER", &user.name)
-            .env("LOGNAME", &user.name)
-            .env("PATH", path)
-            .env(
-                crate::cloud_split::ROOT_VARIABLE,
-                OsStr::from_bytes(&request.root),
-            )
-            .env(LINK_VARIABLE, link_dir().join("cap.sock"))
-            .current_dir(&cwd);
-        if privileged() {
-            command.uid(user.uid.as_raw()).gid(user.gid.as_raw());
-        }
+        let mut command = workload_command(&request, &user, terminal.is_some(), links.is_some())?;
         let master = if let Some(pty) = terminal {
             if !request.env.contains_key("TERM") {
                 command.env("TERM", "xterm-256color");
@@ -1373,6 +1400,12 @@ fn apply(root: &Path) -> io::Result<()> {
 pub fn link(name: &str, arguments: &[OsString]) -> i32 {
     use marsh_contracts::cloud::{LinkRequest, run_frame};
     use std::io::Read as _;
+    if std::env::var_os(detached::DETACHED_VARIABLE).is_some() {
+        eprintln!(
+            "marsh: {name}: this detached cloud run cannot start agent sandboxes: turn that on with `marsh config cloud-delegate on` and a Docker access token in your Keychain (`security add-generic-password -s marsh-cloud-delegate -a YOUR_DOCKER_ID -w`); or run `cloud -d {{ {name} ...; }}` on its own, or the block without -d"
+        );
+        return 126;
+    }
     let request = LinkRequest {
         command: name.to_owned(),
         argv: arguments

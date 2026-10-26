@@ -253,6 +253,120 @@ the sandbox and is deleted with it, so copy anything you want out of it
 within the block. Host `marsh splits` and `marsh jobs --tree` show only the
 cloud job, not the split inside it.
 
+## Close the lid: detached runs
+
+Add `-d` to start work that keeps running after you close the laptop:
+
+```sh
+cloud -d { make long-benchmark > bench.txt; }
+marsh cloud -d -- make long-benchmark
+```
+
+marsh uploads the project as usual, starts the command, prints its job
+number, and returns at once. The run has no terminal and reads no input.
+
+```sh
+marsh jobs                  # running, paused, finished, collected, kept-as-patch, lost
+marsh cloud attach 42       # output so far, then live; Ctrl-C stops following, not the run
+marsh cloud collect 42      # check on it now
+```
+
+- **Collection happens by itself.** marsh checks detached runs when its
+  daemon starts and every two minutes while one is outstanding. When a run
+  has finished, marsh downloads its output and file changes, deletes the
+  sandbox, and tells you once, on your next `marsh` command:
+  `marsh: cloud job 42 finished (exit 0); changes applied`.
+- **Conflicts wait as a patch.** marsh remembers every file it uploaded. If
+  any file the run changed was also changed here since it started, nothing is
+  written back: `marsh cloud diff 42` shows the patch, `marsh cloud apply 42`
+  applies it anyway, and `marsh cloud discard 42` drops it. A split fork that
+  is gone, or a project directory that was replaced, also keeps the patch.
+- **The time limit pauses, it doesn't kill.** A detached run's `--ttl`
+  defaults to 2 hours of running without your laptop. When it runs out, the
+  sandbox is suspended with the run inside it; the next check resumes it
+  where it was, for another `--ttl`. While your laptop is on, marsh's checks
+  keep it going.
+- **Costs.** A sandbox is billed while it runs. If your laptop is away when
+  the work finishes, the sandbox idles until its time limit suspends it, so a
+  shorter `--ttl` bounds that idle time. A run nobody collects is deleted
+  after 14 days.
+- `marsh cloud stop 42` interrupts a run (`INT`, then `KILL` after 10
+  seconds); its changes so far come back as usual.
+- `marsh stop`, `marsh reset`, and `marsh workers reset cloud` keep
+  detached runs and say how many they kept; add `--detached` to discard them.
+- Up to 8 detached runs at a time. They don't count toward the 8 jobs that
+  run at once.
+
+A block that is exactly one call to a registered command runs in that
+command's Kit, so `cloud -d { claude -p "refactor the parser" </dev/null; }`
+always works. Detached runs start from your marsh session or a host
+terminal, not from inside a job. Design:
+[detached cloud work](design/cloud-detach.md).
+
+### Agents calling agents with the lid closed
+
+In an attached block, your laptop starts a sandbox for each registered Kit
+the block calls (`codex exec ...` inside `cloud { }`). A detached run has no
+laptop to do that, so by default marsh refuses a detached block that calls
+one, and a call it misses at start fails in the sandbox (exit 126).
+
+To let detached runs start those sandboxes themselves, give marsh a Docker
+access token and turn on delegation:
+
+1. In Docker Hub, create a personal access token with **Public Repo
+   Read-only** access (**Read-only** if your Kits are private) and **Allow
+   Cloud Sandboxes access**. The stock CLI in the sandbox fetches each Kit
+   from Docker Hub with this token, so a token with only sandbox access is
+   refused when the run starts.
+2. Store it in your login Keychain, with your Docker ID as the account:
+
+   ```sh
+   security add-generic-password -s marsh-cloud-delegate -a YOUR_DOCKER_ID -w
+   ```
+
+3. `marsh config cloud-delegate on` (`off` turns it off again).
+
+Then a detached block can call any registered Kit that has a cloud form, as
+an attached block can:
+
+```sh
+marsh cloud -d -- sh -c 'codex exec "add a test for the parser" </dev/null; make test'
+```
+
+Each run that can do this says so when it starts:
+`marsh: this run can start agent sandboxes in Docker Cloud as YOUR_DOCKER_ID (cloud-delegate on)`.
+Each call starts its own sandbox from the Kit, with the run's current files;
+its output appears in the run's output (`marsh cloud attach`), and its file
+changes return to the run before the call returns. Model credentials come
+from your Docker Cloud secrets (`sbx --cloud secret`), as for attached
+calls. `marsh jobs show JOB` lists each call (`agent call: codex exec ...
+(exit 0); wrote back 1 change`).
+
+**What the token can do.** Docker's sandbox access is all or nothing: the
+token can create, use, and delete every cloud sandbox on your account and
+spend its quota. marsh uploads it into each such run's sandbox, into a file
+only root can read; the run's commands run as an unprivileged user without
+`sudo` and can't read it. They can only ask the run's supervisor to start a
+call. If you don't want a token in your sandboxes, leave delegation off.
+
+**marsh's limits on a run's calls**, enforced by the supervisor:
+
+- only the registered Kits this run could call (the same Kits and pinned
+  versions an attached block gets, narrowed by `MARSH_SPAWN`);
+- at most 8 agent sandboxes per run in all (`MARSH_CLOUD_CHILDREN` in the
+  daemon's environment, 1 to 64); the next call is refused;
+- each gets what remains of the run's `--ttl`, and pauses rather than ends
+  when it runs out;
+- each is deleted when its call returns, any left are deleted before the
+  run's end is recorded, and collecting, `marsh cloud discard`, or retention
+  deletes any the run could not;
+- the called agent can't call further agents (its sandbox has no command
+  links), as in an attached block.
+
+Delegation needs the marsh cloud shell (the default image, or an `--image`
+with `curl`, `tar` and `sudo`): the supervisor installs a pinned Docker
+Sandboxes CLI in the sandbox and signs in with the token.
+
 ## Jobs, Ctrl-C, and cleanup
 
 Each cloud call is a job: `marsh jobs` shows `cloud -c ...` with placement
@@ -273,7 +387,8 @@ the exit status, and the cleanup result. Cloud calls count toward the
 - `marsh workers reset` (all) and `marsh workers reset cloud` delete every
   cloud sandbox this daemon owns, including those of calls still running;
   such calls end as lost and write nothing back. `marsh stop` and
-  `marsh reset` delete owned cloud sandboxes too.
+  `marsh reset` delete owned cloud sandboxes too. Detached runs are kept
+  unless you add `--detached`.
 - If marsh loses the connection or the daemon stops before it can confirm the
   remote command ended, nothing is written back and nothing is re-run. The job
   shows `cleanup uncertain` and holds its slot. Run

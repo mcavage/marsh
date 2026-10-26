@@ -301,6 +301,17 @@ impl SystemCommandRunner {
             stock_environment,
         }
     }
+
+    /// Add trusted control variables (for example a sandbox's network
+    /// proxy settings) to every stock invocation.
+    #[must_use]
+    pub fn with_stock_environment(
+        mut self,
+        environment: impl IntoIterator<Item = (OsString, OsString)>,
+    ) -> Self {
+        self.stock_environment.extend(environment);
+        self
+    }
 }
 
 struct SystemAttachedProcess {

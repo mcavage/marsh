@@ -88,7 +88,7 @@ pub(crate) struct ProcessTable {
     /// then ends with status 130 (SIGINT) ends `cancelled` (s8).
     pub(crate) interrupted: std::collections::BTreeSet<String>,
     /// How to signal each running job's container (`INT`, `KILL`).
-    controls: BTreeMap<String, JobControl>,
+    pub(crate) controls: BTreeMap<String, JobControl>,
 }
 
 /// Sends a signal (`INT`, `KILL`) to one running job's container.
@@ -968,6 +968,7 @@ fn node(
     serde_json::json!({
         "node": "job",
         "job_id": job.job_id,
+        "cursor": job.cursor,
         "session_id": job.session_id,
         "command": job.command,
         "args": job.args,
@@ -977,6 +978,8 @@ fn node(
         "created_unix_ms": job.created_unix_ms,
         "finished_unix_ms": job.finished_unix_ms,
         "lineage": job.lineage,
+        "placement": job.placement,
+        "detached": job.detached,
         "children": if depth > 64 { Vec::new() } else {
             children.iter().map(|child| node(child, by_parent, depth + 1)).collect()
         },

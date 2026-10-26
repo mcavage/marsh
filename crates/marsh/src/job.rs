@@ -621,9 +621,17 @@ pub fn render_jobs(
             .max()
             .unwrap_or(0)
             .max(8);
+        // A detached run's `kept-as-patch` is wider than a job state.
+        let state_width = rows
+            .iter()
+            .filter_map(|row| row.node.get("detached").and_then(serde_json::Value::as_str))
+            .map(str::len)
+            .max()
+            .unwrap_or(0)
+            .max(9);
         let _ = writeln!(
             out,
-            "{:<id_width$}  {:<8}  {:<9}  {:>4}  {:>7}  {}COMMAND",
+            "{:<id_width$}  {:<8}  {:<state_width$}  {:>4}  {:>7}  {}COMMAND",
             "ID",
             "STARTED",
             "STATE",
@@ -632,7 +640,7 @@ pub fn render_jobs(
             if tree { "" } else { "PARENT    " }
         );
         for row in rows {
-            let _ = writeln!(out, "{}", row_line(&row, tree, now, id_width));
+            let _ = writeln!(out, "{}", row_line(&row, tree, now, id_width, state_width));
         }
     }
     if hidden > 0 {
@@ -647,7 +655,7 @@ pub fn render_jobs(
 }
 
 /// One listing line (`render_jobs`): a job, a split, or a split branch.
-fn row_line(row: &Row<'_>, tree: bool, now: i64, id_width: usize) -> String {
+fn row_line(row: &Row<'_>, tree: bool, now: i64, id_width: usize, state_width: usize) -> String {
     let job = row.node;
     let created = number(job, "created_unix_ms");
     let started = created.map_or_else(|| "-".to_owned(), |at| ago(now - at));
@@ -678,7 +686,19 @@ fn row_line(row: &Row<'_>, tree: bool, now: i64, id_width: usize) -> String {
                 labelled(text(job, "label"), &printable(text(job, "command"))),
             ),
         },
-        _ => (text(job, "state"), command_line(job)),
+        _ => match job.get("detached").and_then(serde_json::Value::as_str) {
+            // A detached cloud run: its own state, and the number its
+            // `marsh cloud` commands and notices use.
+            Some(detached) => (
+                detached,
+                format!(
+                    "{}  (cloud job {})",
+                    command_line(job),
+                    number(job, "cursor").unwrap_or_default()
+                ),
+            ),
+            None => (text(job, "state"), command_line(job)),
+        },
     };
     let row_node = row.merged.unwrap_or(job);
     let (exit, elapsed, started) = match row.merged {
@@ -696,7 +716,7 @@ fn row_line(row: &Row<'_>, tree: bool, now: i64, id_width: usize) -> String {
         None => (exit, elapsed, started),
     };
     let mut line = format!(
-        "{id:<id_width$}  {started:<8}  {state:<9}  {exit:>4}  {elapsed:>7}  {parent}{}{command}",
+        "{id:<id_width$}  {started:<8}  {state:<state_width$}  {exit:>4}  {elapsed:>7}  {parent}{}{command}",
         row.prefix,
     );
     if let Some(split) = row_node
@@ -919,7 +939,7 @@ fn number(node: &serde_json::Value, name: &str) -> Option<i64> {
 fn active(node: &serde_json::Value) -> bool {
     matches!(
         text(node, "state"),
-        "queued" | "running" | "run" | "pending"
+        "queued" | "running" | "run" | "pending" | "detached"
     ) || node
         .get("children")
         .and_then(serde_json::Value::as_array)

@@ -23,12 +23,13 @@ preparation; `marsh jobs` RUN is only the job's own run in the ready VM.
 
 const WORKERS_HELP: &str = "\
 Usage:
-  marsh workers reset KIT[,KIT...]|all
+  marsh workers reset KIT[,KIT...]|all [--detached]
 
 Stops and removes only the selected idle marsh Kit worker VMs. Active jobs are
 never cancelled. The project shell, selected home, results, credentials, and
 unrelated Docker Sandboxes are preserved. Run marsh --load KIT[,KIT...]|all to
-recreate and prewarm the workers.
+recreate and prewarm the workers. `cloud` removes this daemon's Docker Cloud
+sandboxes, except those of detached runs; --detached discards those runs too.
 ";
 
 #[derive(Debug)]
@@ -109,6 +110,9 @@ pub fn prepare(
             return run_kit_command(command, client.as_ref(), &mut stdout, &mut stderr);
         }
         ProductCommand::Status { json } => {
+            if !json {
+                print_cloud_notices(client.as_ref(), &mut stderr);
+            }
             let value = client.status_json()?;
             if json {
                 write_json(&mut stdout, &value)?;
@@ -118,6 +122,9 @@ pub fn prepare(
             return Ok(ProductOutcome::Complete(0));
         }
         ProductCommand::Results { json } => {
+            if !json {
+                print_cloud_notices(client.as_ref(), &mut stderr);
+            }
             let value = client.jobs_json()?;
             if json {
                 write_json(&mut stdout, &value)?;
@@ -138,7 +145,7 @@ pub fn prepare(
         ProductCommand::ResultsHelp => return write_help(&mut stdout, RESULTS_HELP),
         ProductCommand::WorkersHelp => return write_help(&mut stdout, WORKERS_HELP),
         ProductCommand::WorkersReset { selection } => {
-            return reset_workers(client.as_ref(), &selection, &mut stdout);
+            return workers_reset(client.as_ref(), &selection, &mut stdout, &mut stderr);
         }
         ProductCommand::Reset { json } | ProductCommand::Stop { json } => {
             let reset = matches!(parsed.command, ProductCommand::Reset { .. });
@@ -146,7 +153,11 @@ pub fn prepare(
                 .home_backing
                 .parent()
                 .unwrap_or(&session.home_backing);
-            return scope_lifecycle(client.as_ref(), reset, json, home, &mut stdout, &mut stderr);
+            let kept = detached_before(client.as_ref(), &mut stderr)?;
+            let outcome =
+                scope_lifecycle(client.as_ref(), reset, json, home, &mut stdout, &mut stderr)?;
+            detached_kept(&mut stderr, kept, if reset { "reset" } else { "stop" })?;
+            return Ok(outcome);
         }
         ProductCommand::Shell => {}
     }
@@ -177,6 +188,7 @@ pub fn prepare(
             guest_args.extend(["--marsh-shell".into(), shell.name().into()]);
         }
         guest_args.extend(parsed.brush_args.iter().skip(1).cloned());
+        print_cloud_notices(client.as_ref(), &mut stderr);
         // OpenShell transfers cleanup ownership to the server. In particular,
         // a lost delivery may return here BEFORE its cleanup has completed.
         // A client-side detach must not clear the server's retained authority,
@@ -319,6 +331,77 @@ fn shell_registered_commands(
     }
     names.extend(["acp".into(), "mcp".into(), "ps".into(), "top".into()]);
     RegisteredCommands::new(names).map_err(|error| ProductError::Operation(error.to_string()))
+}
+
+/// Finish notices of detached cloud runs, each shown once, on an
+/// interactive command (stderr is a terminal).
+pub fn print_cloud_notices(client: &dyn DaemonClient, stderr: &mut impl Write) {
+    if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+        return;
+    }
+    if let Ok(reply) =
+        client.cloud_detached(marsh_daemon::cloud_detached::CloudDetachedRequest::Notices)
+    {
+        for notice in reply.notices {
+            let _ = writeln!(stderr, "{notice}");
+        }
+    }
+}
+
+/// `workers reset`: with `cloud` (or `all`), detached runs are kept unless
+/// `--detached`.
+fn workers_reset(
+    client: &dyn DaemonClient,
+    selection: &crate::cli::LoadSelection,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> Result<ProductOutcome, ProductError> {
+    let cloud = match selection {
+        crate::cli::LoadSelection::All => true,
+        crate::cli::LoadSelection::Kits(kits) => kits.iter().any(|kit| kit == "cloud"),
+    };
+    let kept = if cloud {
+        detached_before(client, stderr)?
+    } else {
+        0
+    };
+    let outcome = reset_workers(client, selection, stdout)?;
+    detached_kept(stderr, kept, "workers reset cloud")?;
+    Ok(outcome)
+}
+
+/// Before `stop`, `reset`, or `workers reset` with cloud: with
+/// `--detached`, discard every detached run; otherwise count the runs kept.
+fn detached_before(
+    client: &dyn DaemonClient,
+    stderr: &mut impl Write,
+) -> Result<u64, ProductError> {
+    use marsh_daemon::cloud_detached::CloudDetachedRequest;
+    if crate::cli::DISCARD_DETACHED.load(std::sync::atomic::Ordering::Relaxed) {
+        let reply = client.cloud_detached(CloudDetachedRequest::DiscardAll)?;
+        writeln!(stderr, "marsh: {}", reply.message)?;
+        return Ok(0);
+    }
+    Ok(client
+        .cloud_detached(CloudDetachedRequest::Outstanding)
+        .map_or(0, |reply| reply.total))
+}
+
+fn detached_kept(stderr: &mut impl Write, kept: u64, command: &str) -> Result<(), ProductError> {
+    if kept > 0 {
+        writeln!(
+            stderr,
+            "marsh: kept {kept} detached cloud run{}; {} (`marsh {command} --detached` discards {})",
+            if kept == 1 { "" } else { "s" },
+            if kept == 1 {
+                "it comes back by itself"
+            } else {
+                "they come back by themselves"
+            },
+            if kept == 1 { "it" } else { "them" }
+        )?;
+    }
+    Ok(())
 }
 
 fn write_help(stdout: &mut impl Write, help: &str) -> Result<ProductOutcome, ProductError> {
@@ -728,8 +811,14 @@ fn write_results(writer: &mut impl Write, value: serde_json::Value) -> Result<()
             job.cursor,
             job.job_id,
             truncate(&job.command, 23),
-            placement_name(job.placement),
-            state_name(job.state),
+            if job.detached.is_some() {
+                "cloud -d"
+            } else {
+                placement_name(job.placement)
+            },
+            job.detached
+                .as_deref()
+                .unwrap_or_else(|| state_name(job.state)),
             cleanup_name(job.cleanup),
             duration,
             result,
@@ -740,6 +829,7 @@ fn write_results(writer: &mut impl Write, value: serde_json::Value) -> Result<()
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)] // One receipt, field by field.
 fn write_result(writer: &mut impl Write, value: serde_json::Value) -> Result<(), ProductError> {
     let children = value
         .get("children")
@@ -760,9 +850,33 @@ fn write_result(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
     writeln!(writer, "  command:    {}", receipt.command).map_err(ProductError::from)?;
     writeln!(
         writer,
-        "  placement:  {}",
-        placement_name(receipt.placement)
+        "  placement:  {}{}",
+        placement_name(receipt.placement),
+        if receipt.detached.is_some() {
+            ", detached"
+        } else {
+            ""
+        }
     )?;
+    if let Some(detached) = &receipt.detached {
+        writeln!(writer, "  detached:   {detached}")?;
+    }
+    for call in &receipt.cloud_children {
+        let words = std::iter::once(call.kit.as_str())
+            .chain(call.args.iter().map(String::as_str))
+            .collect::<Vec<_>>()
+            .join(" ");
+        writeln!(
+            writer,
+            "  agent call: {words} (exit {}){}",
+            call.exit,
+            if call.summary.is_empty() {
+                String::new()
+            } else {
+                format!("; {}", call.summary)
+            }
+        )?;
+    }
     writeln!(writer, "  execution:  {}", typed_value(&receipt.execution)?)?;
     writeln!(writer, "  status:     {}", state_name(receipt.state)).map_err(ProductError::from)?;
     writeln!(
@@ -851,6 +965,7 @@ fn state_name(state: marsh_daemon::JobState) -> &'static str {
     match state {
         marsh_daemon::JobState::Queued => "queued",
         marsh_daemon::JobState::Running => "running",
+        marsh_daemon::JobState::Detached => "detached",
         marsh_daemon::JobState::Finished => "finished",
         marsh_daemon::JobState::Failed => "failed",
         marsh_daemon::JobState::Cancelled => "cancelled",

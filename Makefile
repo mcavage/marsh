@@ -111,7 +111,7 @@ help:
 		'make site              Build the runmar.sh site into $$(SITE_DIR) and check its links' \
 		'make site-check        make site, plus every relative link in tracked Markdown' \
 		'make dist              Package a release tarball (needs pinned KIT_COMMANDS and shell-image)' \
-		'make release VERSION=X.Y.Z  Mac: check main, run make regress, tag with the result, push (DRY_RUN=1, YES=1)' \
+		'make release VERSION=X.Y.Z  Mac: check main, run make regress, tag with the result, push (DRY_RUN=1, YES=1, SKIP=suite SKIP_REASON=...)' \
 		'make dev-inner         Inside marsh --dev: build a Linux candidate into $$MARSH_DEV_SCRATCH/artifacts' \
 		'make dev-inner-run CMD=...  Inside marsh --dev: run the inner candidate via the broker'
 
@@ -327,7 +327,8 @@ site-check: site
 # It runs the full regression on this Mac first (scripts/cut-release.py).
 release:
 	@test "$(origin VERSION)" = "command line" || { echo 'make release: pass VERSION=X.Y.Z on the command line (the Makefile default is not a release version)'; exit 1; }
-	$(PYTHON) scripts/cut-release.py "$(VERSION)" $(if $(DRY_RUN),--dry-run) $(if $(YES),--yes)
+	$(PYTHON) scripts/cut-release.py "$(VERSION)" $(if $(DRY_RUN),--dry-run) $(if $(YES),--yes) \
+		$(if $(SKIP),--skip "$(SKIP)" --skip-reason "$(SKIP_REASON)")
 
 # Release packaging. CI (.github/workflows/release.yml) builds the inputs:
 # host binaries, guest artifacts, published Kit digests, and the shell image.
