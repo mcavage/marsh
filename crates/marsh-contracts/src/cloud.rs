@@ -487,6 +487,11 @@ pub struct CloudRequest {
     /// [`TERMINAL_STDIN`]).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stdin_terminal: bool,
+    /// A detached run (`docs/design/cloud-detach.md`): no terminal, stdin
+    /// from `/dev/null`, output spooled in the sandbox, and agent calls
+    /// refused (there is no laptop relay).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub detached: bool,
 }
 
 /// Set in a cloud workload whose stdin relays the caller's terminal: the

@@ -194,6 +194,7 @@ fn storage_failure(sbx: &Path, directory: &Path, image: OciImage) -> Result<(), 
                 cpus: 2,
                 memory_mib: 4096,
                 ttl: Duration::from_mins(30),
+                stop_on_timeout: false,
             })?;
             let id = record.id.ok_or("created sandbox has no ID")?;
             created = Some(id.clone());
@@ -281,6 +282,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 cpus: 2,
                 memory_mib: 4096,
                 ttl: Duration::from_mins(30),
+                stop_on_timeout: false,
             };
             let own = a.as_ref().unwrap().create(&spec)?;
             let other = b.create(&spec)?;
