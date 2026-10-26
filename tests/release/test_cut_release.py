@@ -46,8 +46,8 @@ class CutRelease(unittest.TestCase):
     def release(self, *argv, summary=None, ci=lambda sha: None, answer="y", after=lambda: None):
         calls = []
 
-        def regress():
-            calls.append("regress")
+        def regress(skip=()):
+            calls.append(("regress", skip) if skip else "regress")
             after()
             return summary if summary is not None else passing(self.sha)
 
@@ -114,6 +114,26 @@ class CutRelease(unittest.TestCase):
             git(other, "push", "-q", "origin", "main")
         code, calls = self.release("1.2.3", "--yes", after=move)
         self.assertEqual((code, calls), (1, ["regress"]))
+        self.assertEqual(git(self.work, "tag", "--list", "v1.2.3"), "")
+
+    def test_a_skip_is_passed_to_the_regression_and_recorded_with_its_reason(self):
+        code, calls = self.release("1.2.3", "--yes", "--skip", "acceptance",
+                                   "--skip-reason", "fails the same on v0.1.11 (issue #9)")
+        self.assertEqual((code, calls), (0, [("regress", ("acceptance",))]))
+        body = git(self.work, "tag", "-l", "--format=%(contents)", "v1.2.3").splitlines()
+        self.assertIn(f"Regression: passed on {self.sha[:7]} (3 suites, 90 min)", body)
+        self.assertIn("Skipped: acceptance: fails the same on v0.1.11 (issue #9)", body)
+
+    def test_a_skip_needs_a_reason_and_a_plain_suite_name(self):
+        self.assertEqual(self.release("1.2.3", "--yes", "--skip", "acceptance"), (1, []))
+        self.assertEqual(self.release("1.2.3", "--yes", "--skip", "acc;rm -rf", "--skip-reason", "x"), (1, []))
+        self.assertEqual(git(self.work, "tag", "--list", "v1.2.3"), "")
+
+    def test_a_skipped_suite_that_still_ran_is_refused(self):
+        summary = passing(self.sha)
+        summary["suites"].append({"name": "acceptance", "status": "PASS"})
+        code, calls = self.release("1.2.3", "--yes", "--skip", "acceptance", "--skip-reason", "x", summary=summary)
+        self.assertEqual(code, 1)
         self.assertEqual(git(self.work, "tag", "--list", "v1.2.3"), "")
 
     def test_a_dry_run_tags_nothing_and_declining_tags_nothing(self):
