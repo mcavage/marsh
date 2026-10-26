@@ -127,6 +127,8 @@ Edit `~/.bashrc` at the marsh prompt (or `~/.marsh/home/.bashrc` from your
 Mac in the default scope) to set aliases, environment variables, and your
 prompt. The [home guide](guides/set-up-your-home.md) walks through setup.
 Your dotfiles survive VM removal. Packages you install in the VM do not.
+A marsh upgrade that changes the shell image replaces the shell VM the next
+time you open a shell, as `marsh stop` would.
 
 Brush reads these startup files, with `~` referring to the guest home:
 

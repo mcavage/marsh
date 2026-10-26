@@ -549,3 +549,71 @@ fn shell_setup_script_is_valid_shell_and_adds_the_proxy_ca_without_blocking_star
     // A failure to add the CA is reported and never fails the setup (it runs under `set -eu`).
     assert!(SHELL_SETUP_SCRIPT.contains("could not add the sandbox proxy CA' >&2; fi;"));
 }
+
+#[test]
+fn a_restarted_daemon_with_another_shell_image_replaces_its_owned_shell_vm() {
+    let model = StockModel::new();
+    let root = tempfile::tempdir().unwrap();
+    let map = root.path().join("ownership.json");
+    let first = model.adapter().with_vm_ownership(map.clone()).unwrap();
+    let mut shell = ShellFixture::new();
+    shell.spec.name = first.vm_name(VmPurpose::Shell, "shell").unwrap();
+    first.ensure_shell_vm(&shell.spec).unwrap();
+    let old = model.vm(&shell.spec.name).unwrap().id;
+    drop(first);
+
+    // An upgrade (or a dev build on the same scope) brings another shell image
+    // under the same persisted name.
+    let upgraded = model.adapter().with_vm_ownership(map.clone()).unwrap();
+    assert_eq!(
+        upgraded.vm_name(VmPurpose::Shell, "shell").unwrap(),
+        shell.spec.name
+    );
+    shell.spec.image =
+        OciImage::parse(format!("dhi.example/shell@sha256:{}", "f".repeat(64))).unwrap();
+    let vm = upgraded.ensure_shell_vm(&shell.spec).unwrap();
+    assert!(vm.cold_started);
+    let guest = model.vm(&shell.spec.name).unwrap();
+    assert_ne!(guest.id, old);
+    let marker =
+        serde_json::from_slice::<OwnedWorkerMarker>(&guest.files["/var/lib/marsh/worker.json"])
+            .unwrap();
+    assert_eq!(
+        marker.profile,
+        format!("shell:{}:{}", shell.spec.name, shell.spec.image.as_str())
+    );
+    // The replacement is recorded durably under the same name.
+    let reloaded = model.adapter().with_vm_ownership(map).unwrap();
+    assert_eq!(reloaded.ownership.uuid(&shell.spec.name), Some(guest.id));
+}
+
+#[test]
+fn an_owned_shell_vm_without_its_own_marker_still_fails_closed() {
+    let model = StockModel::new();
+    let adapter = model.adapter();
+    let shell = ShellFixture::new();
+    let id = model.seed_owned(&adapter, SHELL);
+    // No marker at all: never replaced.
+    assert!(matches!(
+        adapter.ensure_shell_vm(&shell.spec),
+        Err(SbxError::ForeignVm(_))
+    ));
+    // Another name's shell marker: never replaced either.
+    let other = serde_json::json!({
+        "schema": "marsh.worker/v1",
+        "profile": format!("shell:marsh-s-other:{}", shell.spec.image.as_str()),
+        "basis": KIT_VM_BASIS,
+    });
+    model.with_vm(SHELL, |vm| {
+        vm.files.insert(
+            "/var/lib/marsh/worker.json".into(),
+            serde_json::to_vec(&other).unwrap(),
+        )
+    });
+    assert!(matches!(
+        adapter.ensure_shell_vm(&shell.spec),
+        Err(SbxError::ForeignVm(_))
+    ));
+    assert_eq!(model.vm(SHELL).unwrap().id, id);
+    assert_eq!(model.count("rm"), 0);
+}
