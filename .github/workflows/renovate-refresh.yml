@@ -33,7 +33,7 @@ jobs:
   refresh:
     name: Refresh pins
     if: github.repository == 'mcavage/marsh' && github.event.head_commit.author.email != 'refresh-pins@users.noreply.github.com'
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 120
     # Job-level, so the skipped run on the refresh commit cannot cancel this one.
     concurrency:

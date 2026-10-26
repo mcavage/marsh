@@ -34,7 +34,7 @@ jobs:
     # The lanes below run when this job fails, so a broken classifier can only
     # cost time, never skip a check.
     name: What changed
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
@@ -58,7 +58,7 @@ jobs:
     name: Linux arm64 (shell, guest crates, protocols)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 45
     env:
       RUSTC_WRAPPER: sccache
@@ -131,7 +131,7 @@ jobs:
     name: macOS arm64 (host build and tests)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 45
     env:
       RUSTC_WRAPPER: sccache
@@ -189,12 +189,19 @@ jobs:
       # Docker Sandboxes or credentials.
       - name: make test-rust (fmt, clippy, every workspace test, MCP load callers)
         run: make test-rust NEXTEST_PROFILE=ci
+      # The runner's Python is newer than the publisher's pinned PyYAML has
+      # wheels for; give the publisher venv one it does, leaving python3 alone.
+      - id: publisher-python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+          update-environment: false
       - name: make test-harness (onboarding, MCP callers, publisher, tool self-tests)
-        run: make test-harness
+        run: make test-harness PUBLISHER_PYTHON="${{ steps.publisher-python.outputs.python-path }}"
 
   docs:
     name: Docs and site
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -219,7 +226,7 @@ jobs:
     # unchanged model is quick; the first run after a model change on main is
     # cold (the pull request's cache is not visible there) and takes ~30 min.
     name: TLA+ model (${{ matrix.shard }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -275,7 +282,7 @@ jobs:
     # when an input changed, and not for fork PRs (no registry secrets there).
     name: Kit and shell images (build, no push)
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-26.04-arm
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -320,7 +327,7 @@ jobs:
 
   renovate-config:
     name: Renovate config
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
