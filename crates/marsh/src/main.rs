@@ -1365,6 +1365,7 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
                 | marsh_daemon::DaemonError::Refused(message) => message,
                 other => other.to_string(),
             };
+            let message = message.strip_prefix("cloud: ").unwrap_or(&message);
             eprintln!("marsh: cloud: {message}");
             125
         }
@@ -1473,6 +1474,7 @@ fn attach_detached(
         eprintln!("marsh: following cloud job {job}; Ctrl-C stops following (the run continues)");
     }
     let mut offsets = [0_u64; 2];
+    let mut shown = String::new();
     loop {
         let mut view = None;
         let mut pending = false;
@@ -1503,6 +1505,17 @@ fn attach_detached(
                     break;
                 }
             }
+        }
+        // A paused run prints nothing: say so, and when it resumes.
+        if let Some(view) = view.as_ref().filter(|view| !view.settled)
+            && view.state != shown
+        {
+            if view.state == "paused" {
+                eprintln!("marsh: cloud job {} paused: {}", view.cursor, view.detail);
+            } else if shown == "paused" {
+                eprintln!("marsh: cloud job {} {}", view.cursor, view.state);
+            }
+            shown.clone_from(&view.state);
         }
         if let Some(view) = view.filter(|view| view.settled)
             && !pending
