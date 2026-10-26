@@ -63,6 +63,7 @@ Usage:
   marsh config shell [marsh|bash|zsh]  Show or set this home's default shell
   marsh config auto-update [on|off]    Show or set automatic Kit updates
   marsh config open-urls [on|off]      Show or set opening job links on the Mac
+  marsh config cloud-delegate [on|off] Let detached cloud runs start agent sandboxes
   marsh stop [--json]                  Remove this home's VMs and stop its daemon
   marsh reset [--json]                 Remove this home's VMs; keep the daemon
   marsh init                           Create this home and copy your git name and email into it

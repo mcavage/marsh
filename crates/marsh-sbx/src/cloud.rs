@@ -1071,6 +1071,74 @@ impl CloudSbx {
         })
     }
 
+    /// Take over, for deletion only, an agent sandbox a detached run's
+    /// coordinator created and recorded (its name, ID, Kit and agent). It
+    /// is adopted quarantined, and only when a complete inventory lists
+    /// that name with that ID: `false` when it is already gone.
+    ///
+    /// # Errors
+    /// Refuses a name marsh would not create, a foreign or colliding
+    /// identity, an invalid record, or a full ownership map.
+    pub fn adopt(
+        &self,
+        name: &str,
+        id: &CloudSandboxId,
+        image: &str,
+        agent: Option<&str>,
+    ) -> Result<bool, CloudError> {
+        if !owned_name(name)
+            || image.len() > 4096
+            || image.chars().any(char::is_control)
+            || agent.is_some_and(|agent| !valid_name(agent))
+            || (agent.is_none()
+                && (!image.contains("@sha256:") || OciImage::parse(image.to_owned()).is_err()))
+        {
+            return Err(CloudError::Invalid("invalid agent sandbox record"));
+        }
+        let view = self.inventory()?;
+        let Some(vm) = view.get(name) else {
+            return Ok(false);
+        };
+        if vm.id != *id {
+            return Err(CloudError::Foreign(name.to_owned()));
+        }
+        self.update(|file| {
+            if let Some(existing) = file.entries.get(name) {
+                return if existing.id.as_ref() == Some(id) {
+                    Ok(())
+                } else {
+                    Err(CloudError::Foreign(name.to_owned()))
+                };
+            }
+            if file
+                .entries
+                .values()
+                .any(|entry| entry.id.as_ref() == Some(id))
+            {
+                return Err(CloudError::Foreign(name.to_owned()));
+            }
+            if file.entries.len() >= MAX_OWNED + MAX_DETACHED {
+                return Err(CloudError::Invalid(
+                    "cloud ownership is full; retry after other sandboxes are deleted",
+                ));
+            }
+            file.entries.insert(
+                name.to_owned(),
+                CloudRecord {
+                    name: name.to_owned(),
+                    id: Some(id.clone()),
+                    image: image.to_owned(),
+                    agent: agent.map(ToOwned::to_owned),
+                    phase: CloudPhase::Quarantined,
+                    observed: true,
+                    detached: false,
+                },
+            );
+            Ok(())
+        })?;
+        Ok(true)
+    }
+
     /// Detached sandboxes owned now.
     ///
     /// # Errors
@@ -1352,5 +1420,71 @@ mod tests {
             adapter.spawn(&id, "/bin/true", &[]),
             Err(CloudError::NotReady(_))
         ));
+    }
+
+    /// A detached run's agent sandbox is adopted (for deletion only) just
+    /// when a complete inventory lists that name with that ID.
+    #[test]
+    fn adoption_needs_the_listed_name_and_id_and_stays_cleanup_only() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("control")).unwrap();
+        let directory = dir.path().join("control").canonicalize().unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let inventory = dir.path().join("inventory.json");
+        fs::write(
+            &inventory,
+            r#"[{"name":"marsh-s-cccccccc","id":"sbx_ccc","status":"running","agent":"codex"}]"#,
+        )
+        .unwrap();
+        let stock = dir.path().join("sbx");
+        fs::write(
+            &stock,
+            "#!/bin/sh\n[ \"$2\" = ls ] && exec cat \"$MARSH_TEST_INVENTORY\"\nexit 1\n",
+        )
+        .unwrap();
+        fs::set_permissions(&stock, fs::Permissions::from_mode(0o755)).unwrap();
+        let runner = marsh_runtime::SystemCommandRunner::new(dir.path())
+            .with_stock_environment([("MARSH_TEST_INVENTORY".into(), inventory.into())]);
+        let kit = format!("docker.io/docker/codex@sha256:{}", "c".repeat(64));
+        let open = || CloudSbx::open(stock.clone(), Arc::new(runner.clone()), directory.clone());
+        let adapter = open().unwrap();
+        let id = CloudSandboxId::parse("sbx_ccc".into()).unwrap();
+        let other = CloudSandboxId::parse("sbx_ddd".into()).unwrap();
+        assert!(matches!(
+            adapter.adopt("marsh-s-cccccccc", &other, &kit, Some("codex")),
+            Err(CloudError::Foreign(_))
+        ));
+        assert!(
+            !adapter
+                .adopt("marsh-s-dddddddd", &other, &kit, Some("codex"))
+                .unwrap()
+        );
+        assert!(
+            adapter
+                .adopt("not-marsh", &id, &kit, Some("codex"))
+                .is_err()
+        );
+        assert!(
+            adapter
+                .adopt("marsh-s-cccccccc", &id, &kit, Some("codex"))
+                .unwrap()
+        );
+        let adopted = adapter.records().unwrap();
+        assert_eq!(adopted.len(), 1);
+        assert_eq!(adopted[0].phase, CloudPhase::Quarantined);
+        assert!(!adopted[0].detached);
+        // Adopting again is the same record; a restart keeps it cleanup-only.
+        assert!(
+            adapter
+                .adopt("marsh-s-cccccccc", &id, &kit, Some("codex"))
+                .unwrap()
+        );
+        drop(adapter);
+        let reopened = open().unwrap();
+        assert_eq!(
+            reopened.records().unwrap()[0].phase,
+            CloudPhase::Quarantined
+        );
+        assert!(reopened.spawn(&id, "/bin/true", &[]).is_err());
     }
 }

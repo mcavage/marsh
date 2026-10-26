@@ -492,6 +492,33 @@ pub struct CloudRequest {
     /// refused (there is no laptop relay).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub detached: bool,
+    /// A detached run whose remote supervisor serves agent calls itself
+    /// (`marsh config cloud-delegate on`). Never carries the access token:
+    /// that is uploaded separately into a root-only file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegate: Option<DelegatePlan>,
+}
+
+/// What a detached run's coordinator may do (`docs/design/cloud-detach.md`
+/// s6), decided on the laptop. The workload can only ask; the supervisor
+/// enforces this.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DelegatePlan {
+    /// The registered names it may start, each with the exact
+    /// digest-pinned cloud Kit the laptop resolved for this run.
+    pub kits: BTreeMap<String, String>,
+    /// Agent sandboxes it may start in all (refused past this).
+    pub max_children: u32,
+    /// The run's time limit: a child gets what remains of it.
+    pub ttl_seconds: u64,
+    /// CPUs per agent sandbox (the run's own shape).
+    pub cpus: u32,
+    /// The Docker ID the token belongs to (for messages only).
+    pub account: String,
+    /// The laptop's VM name prefix (`MARSH_VM_PREFIX`), so agent sandboxes
+    /// are named as the laptop's own are.
+    pub vm_prefix: String,
 }
 
 /// Set in a cloud workload whose stdin relays the caller's terminal: the

@@ -49,6 +49,8 @@ pub use daemon_startup::{
     DEFAULT_JOB_RESOURCES, JobDefaults, StartupFailure, adopt_startup_lock,
     finish_startup_diagnostics,
 };
+pub mod cloud_call;
+pub mod cloud_delegate;
 pub mod cloud_detached;
 pub mod cloud_fs;
 pub mod open_url;
@@ -1560,6 +1562,22 @@ pub struct JobReceipt {
     /// at most `open_url::MAX_RECORDED`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub opened: Vec<String>,
+    /// Agent calls a detached cloud run's coordinator served
+    /// (`marsh config cloud-delegate on`), as collected.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cloud_children: Vec<CloudChildCall>,
+}
+
+/// One agent call served inside a detached cloud run: the Kit, its
+/// arguments (for display), its exit status, and what it wrote back.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CloudChildCall {
+    pub kit: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    pub exit: i32,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub summary: String,
 }
 
 /// Receipt lineage (`docs/design/processes.md` s9): `parent` is `session:<id>`,
@@ -2603,6 +2621,7 @@ impl DaemonStore {
             children: Vec::new(),
             detached: None,
             opened: Vec::new(),
+            cloud_children: Vec::new(),
             mounts: job.mounts,
             worker_id: None,
             vm_id: None,
@@ -2792,6 +2811,22 @@ impl DaemonStore {
         }
         let mut updated = receipt.clone();
         updated.detached = Some(label.into());
+        if state.journal.append(&updated, true).is_ok() {
+            state.jobs.insert(job_id.into(), updated);
+        }
+    }
+
+    /// A detached run's served agent calls, journaled when they change.
+    pub fn set_cloud_children(&self, job_id: &str, calls: Vec<CloudChildCall>) {
+        let mut state = self.lock();
+        let Some(receipt) = state.jobs.get(job_id) else {
+            return;
+        };
+        if receipt.cloud_children == calls {
+            return;
+        }
+        let mut updated = receipt.clone();
+        updated.cloud_children = calls;
         if state.journal.append(&updated, true).is_ok() {
             state.jobs.insert(job_id.into(), updated);
         }
