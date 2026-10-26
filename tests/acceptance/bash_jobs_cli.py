@@ -338,7 +338,10 @@ def invoke(binary, case, work, brush):
     if case.lifecycle.startswith('partial-') or case.lifecycle == 'first-done-pipeline':
         (work / 'empty').write_bytes(b'')
     if case.raw_name:
-        os.symlink(b'/usr/bin/cat', os.fsencode(work) + b'/cat-\xff')
+        # uutils' multicall cat (Ubuntu 26.04) picks its tool from argv[0], so
+        # `cat-\xff` must point at a cat that ignores it (GNU's, as gnucat).
+        target = b'/usr/bin/gnucat' if os.path.exists('/usr/bin/gnucat') else b'/usr/bin/cat'
+        os.symlink(target, os.fsencode(work) + b'/cat-\xff')
     shutil.copyfile(Path(__file__).with_name('bash_jobs_child.py'), work / 'latch')
     (work / 'latch').chmod(0o700)
     directory_paths = set()

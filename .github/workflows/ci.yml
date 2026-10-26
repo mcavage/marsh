@@ -189,8 +189,15 @@ jobs:
       # Docker Sandboxes or credentials.
       - name: make test-rust (fmt, clippy, every workspace test, MCP load callers)
         run: make test-rust NEXTEST_PROFILE=ci
+      # The runner's Python is newer than the publisher's pinned PyYAML has
+      # wheels for; give the publisher venv one it does, leaving python3 alone.
+      - id: publisher-python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+          update-environment: false
       - name: make test-harness (onboarding, MCP callers, publisher, tool self-tests)
-        run: make test-harness
+        run: make test-harness PUBLISHER_PYTHON="${{ steps.publisher-python.outputs.python-path }}"
 
   docs:
     name: Docs and site

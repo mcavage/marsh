@@ -45,6 +45,9 @@ GITHUB_REPOSITORY ?= mcavage/marsh
 NEXTEST_PROFILE ?= default
 TEST_BIN = $(abspath $(TARGET_DIR))/debug
 PUBLISHER_VENV ?= $(abspath $(TARGET_DIR))/publisher-venv
+# The pinned PyYAML has wheels through Python 3.14: prefer the newest such
+# interpreter installed, else $(PYTHON).
+PUBLISHER_PYTHON ?= $(firstword $(foreach version,3.14 3.13 3.12 3.11 3.10,$(shell command -v python$(version) 2>/dev/null)) $(PYTHON))
 # Each isolated Python test gets a process; set to 1 to diagnose serially.
 HARNESS_JOBS ?= 3
 MODEL_FLAGS ?= --quick
@@ -193,7 +196,7 @@ test-harness:
 # The publisher's one dependency, hash-pinned.
 $(PUBLISHER_VENV)/.ready: scripts/requirements-publish.txt
 	rm -rf "$(PUBLISHER_VENV)"
-	$(PYTHON) -m venv "$(PUBLISHER_VENV)"
+	"$(PUBLISHER_PYTHON)" -m venv "$(PUBLISHER_VENV)"
 	"$(PUBLISHER_VENV)/bin/python" -m pip install --quiet --require-hashes --no-deps --only-binary=:all: -r scripts/requirements-publish.txt
 	@touch "$@"
 

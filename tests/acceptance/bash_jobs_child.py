@@ -28,7 +28,9 @@ def identity():
 if sys.argv[1] == '--observe-cats':
     proof_path = Path('pid-proof.json')
     proof = json.loads(proof_path.read_bytes()) if proof_path.exists() else {}
-    expected = os.stat('/usr/bin/cat')
+    # The raw-name cases' `cat-\xff` may be a different cat (bash_jobs_cli.py).
+    expected = {(found.st_dev, found.st_ino) for found in
+                (os.stat(path) for path in ('/usr/bin/cat', b'cat-\xff') if os.path.exists(path))}
     reported = [os.fsencode(arg) for arg in sys.argv[2:]] if len(sys.argv) > 2 else Path('pids').read_bytes().splitlines()
     for text in reported:
         pid = int(text)
@@ -46,7 +48,7 @@ if sys.argv[1] == '--observe-cats':
                 continue
             if int(fields[3]) != os.getsid(0):
                 raise RuntimeError('reported job PID belongs to another session')
-            if (executable.st_dev, executable.st_ino) == (expected.st_dev, expected.st_ino):
+            if (executable.st_dev, executable.st_ino) in expected:
                 proof[str(pid)] = {'pid': pid, 'ppid': int(fields[1]), 'pgid': int(fields[2]),
                                    'sid': int(fields[3]), 'starttime': int(fields[19])}
                 break
