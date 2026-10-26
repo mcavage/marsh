@@ -14,7 +14,7 @@
 //! deleted when its call returns; leftovers are deleted before `done`.
 
 use super::{INSTALLED, PATH, TRUSTED_ENV, state_path};
-use marsh_contracts::cloud::{CloudRequest, DelegatePlan, LinkRequest, run_frame};
+use marsh_contracts::cloud::{CloudRequest, DelegateKit, DelegatePlan, LinkRequest, run_frame};
 use marsh_daemon::cloud_call::{self, Caller, STEP_TIMEOUT};
 use marsh_daemon::process::JobControl;
 use marsh_sbx::cloud::{CloudSandboxId, CloudSbx};
@@ -120,8 +120,27 @@ fn private_directory(path: &Path) -> io::Result<PathBuf> {
     path.canonicalize()
 }
 
+/// The stock CLI warns into every call's output when the sandbox has no
+/// machine ID (the cloud image's is empty): give the sandbox a random one.
+fn ensure_machine_id() {
+    let path = Path::new("/etc/machine-id");
+    if fs::metadata(path).is_ok_and(|metadata| metadata.len() > 0) {
+        return;
+    }
+    let mut id = [0_u8; 16];
+    if File::open("/dev/urandom")
+        .and_then(|mut random| random.read_exact(&mut id))
+        .is_err()
+    {
+        return;
+    }
+    let _ = fs::write(path, format!("{}\n", marsh_daemon::cloud_call::hex(&id)));
+    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o444));
+}
+
 /// Download the pinned stock CLI, check its digest, and keep only `sbx`.
 fn install_sbx(state: &Path) -> io::Result<PathBuf> {
+    ensure_machine_id();
     let directory = private_directory(&state.join("sbx"))?;
     let program = directory.join("sbx");
     if program.exists() {
@@ -176,6 +195,77 @@ fn install_sbx(state: &Path) -> io::Result<PathBuf> {
     }
     fs::set_permissions(&program, fs::Permissions::from_mode(0o700))?;
     Ok(program)
+}
+
+/// The stock CLI fetches a Kit from Docker Hub with its sign-in, so the
+/// token must be able to pull each Kit's repository (Docker access tokens
+/// with only "Allow Cloud Sandboxes access" cannot). Ask Docker Hub's
+/// token service for each one now, so such a token refuses the run at
+/// start. The credentials go to curl on stdin, never on its command line.
+/// Network failures do not refuse here (a call reports them).
+fn check_hub_access(plan: &DelegatePlan, account: &str, token: &str) -> io::Result<()> {
+    for (name, kit) in &plan.kits {
+        let Some(repository) = hub_repository(&kit.kit) else {
+            continue;
+        };
+        let url = format!(
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:{repository}:pull"
+        );
+        let mut child = Command::new("/usr/bin/curl")
+            .args([
+                "-s",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                "-K",
+                "-",
+                &url,
+            ])
+            .env_clear()
+            .env("PATH", PATH)
+            .envs(trusted_environment())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = writeln!(stdin, "user = \"{account}:{token}\"");
+        }
+        let output = child.wait_with_output()?;
+        if matches!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            "401" | "403"
+        ) {
+            return Err(io::Error::other(format!(
+                "cloud-delegate: the access token cannot pull {name}'s Kit ({repository}) from Docker Hub; \
+                 create one with \"Public Repo Read-only\" (or \"Read-only\", for private Kits) access as well as \
+                 \"Allow Cloud Sandboxes access\", and store it again in your Keychain"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// `NAMESPACE/REPO` of a Docker Hub reference, else `None`.
+fn hub_repository(reference: &str) -> Option<String> {
+    let name = reference.split('@').next()?;
+    let name = name.split(':').next()?;
+    let path = name
+        .strip_prefix("docker.io/")
+        .or_else(|| name.strip_prefix("registry-1.docker.io/"))
+        .or_else(|| name.strip_prefix("index.docker.io/"))?;
+    let valid = !path.is_empty()
+        && path.bytes().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'/' | b'.' | b'_' | b'-')
+        });
+    valid.then(|| {
+        if path.contains('/') {
+            path.to_owned()
+        } else {
+            format!("library/{path}")
+        }
+    })
 }
 
 /// Sign the stock CLI in as root with the uploaded token (stdin only).
@@ -282,8 +372,8 @@ impl Guard {
         }
     }
 
-    /// Admit one call: an allowed Kit (its pinned reference) within the cap.
-    fn admit(&self, name: &str) -> Result<String, (i32, String)> {
+    /// Admit one call: an allowed Kit (as the laptop resolved it) within the cap.
+    fn admit(&self, name: &str) -> Result<DelegateKit, (i32, String)> {
         let Some(kit) = self.plan.kits.get(name) else {
             return Err((
                 127,
@@ -307,11 +397,10 @@ impl Guard {
         Ok(kit.clone())
     }
 
-    /// What remains of the run's time limit after `elapsed` (at least the
-    /// stock minimum of one minute).
+    /// What remains of the run's time limit after `elapsed`, in whole
+    /// seconds (as the stock CLI takes it), at least its minimum of one minute.
     fn ttl_after(&self, elapsed: Duration) -> Duration {
-        Duration::from_secs(self.plan.ttl_seconds)
-            .saturating_sub(elapsed)
+        Duration::from_secs(self.plan.ttl_seconds.saturating_sub(elapsed.as_secs()))
             .max(Duration::from_mins(1))
             .min(Duration::from_hours(24))
     }
@@ -355,6 +444,7 @@ impl Coordinator {
         })?;
         let (account, token) = parse_delegate(delegate.as_bytes())
             .ok_or_else(|| io::Error::other("cloud-delegate: the uploaded token is unreadable"))?;
+        check_hub_access(&plan, &account, &token)?;
         let program = install_sbx(&state)?;
         let home = private_directory(&state.join("sbx-home"))?;
         sign_in(&program, &home, &account, &token)?;
@@ -484,7 +574,7 @@ impl Coordinator {
     }
 
     /// Admit one call: refused once the run is ending, else as the guard says.
-    fn admit(&self, name: &str) -> Result<String, (i32, String)> {
+    fn admit(&self, name: &str) -> Result<DelegateKit, (i32, String)> {
         if self.closing.load(Ordering::Acquire) {
             return Err((125, format!("marsh: {name}: refused: the run is ending\n")));
         }
@@ -517,10 +607,12 @@ impl Coordinator {
             .iter()
             .take(DISPLAY_ARGS)
             .map(|arg| {
-                String::from_utf8_lossy(arg)
-                    .chars()
-                    .take(DISPLAY_ARG_CHARS)
-                    .collect()
+                let arg = String::from_utf8_lossy(arg);
+                if arg.chars().count() > DISPLAY_ARG_CHARS {
+                    arg.chars().take(DISPLAY_ARG_CHARS - 1).collect::<String>() + "…"
+                } else {
+                    arg.into_owned()
+                }
             })
             .collect::<Vec<String>>();
         let caller: Arc<dyn Caller> = match stream.try_clone() {
@@ -557,7 +649,7 @@ impl Coordinator {
         &self,
         id: u32,
         name: &str,
-        kit: &str,
+        kit: &DelegateKit,
         request: LinkRequest,
         input: mpsc::Receiver<Option<Vec<u8>>>,
         caller: Arc<dyn Caller>,
@@ -572,16 +664,19 @@ impl Coordinator {
                 summary: String::new(),
             }
         };
-        let Ok(kit) = marsh_contracts::OciImage::parse(kit.to_owned()) else {
+        let Ok(image) = marsh_contracts::OciImage::parse(kit.kit.clone()) else {
             return failed("the run's Kit reference is invalid".into());
         };
-        let manifest = match self.adapter.kit_manifest(&kit) {
-            Ok(manifest) => manifest,
-            Err(error) => return failed(cloud_call::actionable(&error)),
+        if kit.name.is_empty() || kit.entrypoint.is_empty() {
+            return failed("the run's Kit was not resolved".into());
+        }
+        let manifest = marsh_sbx::cloud::KitManifest {
+            name: kit.name.clone(),
+            entrypoint: kit.entrypoint.clone(),
         };
         let call = cloud_call::ChildCall {
             adapter: &self.adapter,
-            kit: &kit,
+            kit: &image,
             manifest,
             mixin: &self.mixin,
             root: &self.root,
@@ -771,7 +866,11 @@ mod tests {
         DelegatePlan {
             kits: BTreeMap::from([(
                 "codex".to_owned(),
-                format!("docker.io/docker/codex@sha256:{}", "c".repeat(64)),
+                DelegateKit {
+                    kit: format!("docker.io/docker/codex@sha256:{}", "c".repeat(64)),
+                    name: "codex".into(),
+                    entrypoint: vec!["codex".into()],
+                },
             )]),
             max_children,
             ttl_seconds: 7200,
@@ -787,7 +886,7 @@ mod tests {
         assert!(matches!(guard.admit("claude"), Err((127, _))));
         for _ in 0..8 {
             assert_eq!(
-                guard.admit("codex").unwrap(),
+                guard.admit("codex").unwrap().kit,
                 format!("docker.io/docker/codex@sha256:{}", "c".repeat(64))
             );
         }
@@ -804,12 +903,34 @@ mod tests {
     }
 
     #[test]
+    fn hub_repositories_are_found_for_the_access_check() {
+        let digest = "c".repeat(64);
+        assert_eq!(
+            hub_repository(&format!("docker.io/mcavage/marsh-codex@sha256:{digest}")).as_deref(),
+            Some("mcavage/marsh-codex")
+        );
+        assert_eq!(
+            hub_repository(&format!("docker.io/alpine:3@sha256:{digest}")).as_deref(),
+            Some("library/alpine")
+        );
+        assert_eq!(
+            hub_repository(&format!("ghcr.io/o/k@sha256:{digest}")),
+            None
+        );
+        assert_eq!(hub_repository("docker.io/Bad\"Name@sha256:x"), None);
+    }
+
+    #[test]
     fn a_child_gets_what_remains_of_the_runs_time_limit() {
         let guard = Guard::new(plan(8));
         assert_eq!(guard.ttl_after(Duration::ZERO), Duration::from_hours(2));
         assert_eq!(
             guard.ttl_after(Duration::from_mins(90)),
             Duration::from_mins(30)
+        );
+        assert_eq!(
+            guard.ttl_after(Duration::from_millis(1500)),
+            Duration::from_secs(7199)
         );
         // Never below the stock minimum, even past the limit.
         assert_eq!(

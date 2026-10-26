@@ -313,8 +313,11 @@ one, and a call it misses at start fails in the sandbox (exit 126).
 To let detached runs start those sandboxes themselves, give marsh a Docker
 access token and turn on delegation:
 
-1. In Docker Hub, create a personal access token with **Allow Cloud
-   Sandboxes access**.
+1. In Docker Hub, create a personal access token with **Public Repo
+   Read-only** access (**Read-only** if your Kits are private) and **Allow
+   Cloud Sandboxes access**. The stock CLI in the sandbox fetches each Kit
+   from Docker Hub with this token, so a token with only sandbox access is
+   refused when the run starts.
 2. Store it in your login Keychain, with your Docker ID as the account:
 
    ```sh

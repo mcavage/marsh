@@ -52,7 +52,8 @@ pub fn keychain_command(account: Option<&str>) -> String {
 pub fn off_message(name: &str) -> String {
     format!(
         "cloud: this detached block calls {name}, a registered Kit. A detached run can start agent sandboxes only with \
-         `marsh config cloud-delegate on` and a Docker access token with \"Allow Cloud Sandboxes access\" in your Keychain \
+         `marsh config cloud-delegate on` and a Docker access token with \"Allow Cloud Sandboxes access\" and \
+         \"Public Repo Read-only\" access in your Keychain \
          ({}). Or run that call on its own as `cloud -d {{ {name} ...; }}`, or the block without -d",
         keychain_command(None)
     )
@@ -146,7 +147,7 @@ pub fn read_keychain() -> Result<DelegateToken, String> {
     let missing = || {
         format!(
             "cloud-delegate is on, but no access token is in your Keychain. Create a Docker personal access token with \
-             \"Allow Cloud Sandboxes access\", then store it: {}",
+             \"Allow Cloud Sandboxes access\" and \"Public Repo Read-only\" access, then store it: {}",
             keychain_command(None)
         )
     };

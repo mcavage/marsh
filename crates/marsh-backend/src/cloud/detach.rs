@@ -700,6 +700,9 @@ impl StockDaemonBackend {
             Ok(step) => step.diagnostic(),
             Err(message) => message.clone(),
         };
+        let diagnostic = diagnostic
+            .strip_prefix("marsh cloud: ")
+            .map_or_else(|| diagnostic.clone(), str::to_owned);
         let collected = self.collect_job(store, &job_id, Trigger::User);
         let record = collected.unwrap_or(record);
         let code = if record.settled {
@@ -905,7 +908,20 @@ impl StockDaemonBackend {
         }
         // Done: the status is the workload's.
         record.exit_code = remote.status;
-        if let Some(message) = remote.failed_start.or(remote.failed) {
+        if let Some(message) = remote.failed_start {
+            // The workload never ran: not started (125), not its 127.
+            record.exit_code = None;
+            return Self::discard_unsettled(
+                store,
+                &paths,
+                &adapter,
+                &id,
+                record,
+                "failed",
+                &format!("the run never started: {}", message.trim()),
+            );
+        }
+        if let Some(message) = remote.failed {
             return Self::discard_unsettled(
                 store,
                 &paths,
@@ -1259,10 +1275,14 @@ impl StockDaemonBackend {
         } else {
             CleanupState::Uncertain
         };
-        let timing = store
+        let mut timing = store
             .job(&record.job_id)
             .map(|job| job.timing)
             .unwrap_or_default();
+        // The job's time is the run's, not its start step's.
+        if let Some(finished) = record.finished_unix_ms {
+            timing.wall_ms = finished.saturating_sub(record.created_unix_ms);
+        }
         record.save(paths)?;
         if store
             .finish_detached_job(
@@ -1584,7 +1604,7 @@ impl StockDaemonBackend {
                 record,
                 Settle {
                     label: "discarded",
-                    detail: "discarded; nothing was written back".into(),
+                    detail: "nothing was written back".into(),
                     execution: ExecutionOutcome::Unknown,
                     exit: 130,
                     final_state: Some(JobState::Cancelled),
@@ -1600,7 +1620,7 @@ impl StockDaemonBackend {
             &id,
             record,
             "discarded",
-            "discarded; nothing was written back",
+            "nothing was written back",
         )?;
         record.notified = true;
         record.save(paths)?;
