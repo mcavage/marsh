@@ -32,6 +32,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 AGENTS = ("claude", "codex", "pi")
@@ -53,8 +54,20 @@ def agent_dir() -> pathlib.Path:
     for name in AGENTS + ("marsh", "shell"):
         link = bin_dir / name
         if not link.exists():
-            link.write_text(f"#!/bin/sh\nexec {sys.executable} {HERE} \"$0\" \"$@\"\n")
-            link.chmod(0o755)
+            # Branches initialize these launchers concurrently. Publish only
+            # a complete executable: writing the shared path directly lets a
+            # shell execute an empty/truncated script and silently skip an agent.
+            with tempfile.NamedTemporaryFile(mode="w", dir=bin_dir, delete=False) as temporary:
+                temporary.write(f"#!/bin/sh\nexec {sys.executable} {HERE} \"$0\" \"$@\"\n")
+                candidate = pathlib.Path(temporary.name)
+            try:
+                candidate.chmod(0o755)
+                try:
+                    link.hardlink_to(candidate)
+                except FileExistsError:
+                    pass
+            finally:
+                candidate.unlink()
     return bin_dir
 
 
