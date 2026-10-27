@@ -9,6 +9,9 @@ FROM dhi.io/debian-base:trixie-dev@sha256:cc4e05ff415ee2d83918f2af45c73798320992
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
+# The notice index names each package's exact version: when it changes (a DHI
+# package update), the cached package layer must not be reused.
+COPY dhi-notices/installed-package-notices.json /tmp/marsh-notice-index.json
 RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
 
 # Pi, its MCP Gateway extension, and (for ACP mode, `pi --acp`) the community
