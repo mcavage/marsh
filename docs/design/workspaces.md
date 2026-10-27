@@ -115,7 +115,10 @@ Labels, `PIPESTATUS`, and Ctrl-C are preserved; Brush does not fork split branch
 gives ENXIO) and their stdin is the spool. Ctrl-C at the client sends
 `SplitCancel`. Ctrl-Z stops only the client while branches keep running,
 and `fg` resumes the wait. Client death or SIGHUP before capture drops the
-stream, and a dropped stream cancels the split.
+stream, and a dropped stream cancels the split, unless it was created with
+`marsh split -d` (`SplitCreateSpec.detach`): then the create stream ends after
+`SplitStarted` and only an explicit signal or `SplitCancel` cancels it.
+`SplitJoin` on a running split waits for it to finish.
 
 ## 3. Daemon requests
 
@@ -143,7 +146,8 @@ Frames are credited per attempt.
   still runs (`BudgetBound`). A slot frees only when its process's end is
   confirmed (captured, rejected, or reaped). Uncertain and unreaped slots
   stay held until `marsh workers reset`.
-- **Caps**: depth 3, 16 branches per split, 1 h per split. Spool (64 MiB)
+- **Caps**: depth 3, 16 branches per split, and the job wall limit per split
+  (`MARSH_JOB_WALL_SECONDS`, 24 h by default; it was 1 h before 0.2.1). Spool (64 MiB)
   and captured output (16 MiB) are hard limits; crossing either cancels
   the split. There are no per-branch reservations or byte quotas in v1.
 - **Capability**: a daemon record per branch `{split, creator, live|revoked}`,
@@ -216,8 +220,8 @@ public state strings.
 
 - Setup failure (snapshot, fork, or a caller not entitled to create) is
   all-or-nothing: status 2 and nothing runs.
-- **Cancel** (Ctrl-C, stream drop, deadline, output limit, or creator
-  branch exit) revokes and signals the whole subtree in one step: SIGINT,
+- **Cancel** (Ctrl-C, a client signal, stream drop, deadline, output limit,
+  or creator branch exit; the message names which) revokes and signals the whole subtree in one step: SIGINT,
   10 s, SIGKILL. When every branch's end is confirmed the whole split
   directory is removed (the record stays as `cancelled` until `splits rm`);
   otherwise everything is kept and the message names the unconfirmed

@@ -30,7 +30,6 @@ const POOL: usize = 16;
 const SPOOL_LIMIT: usize = 64 << 20;
 const OUTPUT_LIMIT: usize = 16 << 20;
 const LEASE: Duration = Duration::from_mins(1);
-const DEADLINE: Duration = Duration::from_hours(1);
 const CANCEL_GRACE: Duration = Duration::from_secs(10);
 /// How long a shell branch's Kit jobs get to end after the shell exited.
 const JOB_SETTLE: Duration = Duration::from_secs(30);
@@ -74,6 +73,10 @@ pub struct SplitCreateSpec {
     /// From a job: starting digests of offered variables (as `ProcessLink`).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub start_env: std::collections::BTreeMap<String, String>,
+    /// `marsh split -d`: the split outlives its create stream; only an
+    /// explicit signal or `marsh splits cancel` cancels it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub detach: bool,
 }
 
 /// Sent by the joiner after its consumer ends (`SplitRelease`).
@@ -330,10 +333,28 @@ impl SplitRecord {
 #[derive(Default)]
 struct Runtime {
     cancelled: AtomicBool,
+    /// Why it was cancelled (the first cause wins), for the message.
+    reason: Mutex<Option<String>>,
     finished: AtomicBool,
     executions: Mutex<Vec<ClientExecution>>,
     held: AtomicBool,
     unheld_since: Mutex<Option<Instant>>,
+}
+
+impl Runtime {
+    fn note_reason(&self, reason: &str) {
+        self.reason
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_or_insert_with(|| reason.to_owned());
+    }
+
+    fn reason(&self) -> Option<String> {
+        self.reason
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
 }
 
 #[derive(Default)]
@@ -634,7 +655,7 @@ impl SplitEngine {
             .record(id)
             .filter(|record| Self::visible(record, caller))
             .ok_or_else(|| DaemonError::NotFound(format!("split {id}")))?;
-        self.cancel(&record.id);
+        self.cancel(&record.id, "marsh splits cancel");
         Ok(())
     }
 
@@ -652,13 +673,14 @@ impl SplitEngine {
             .collect()
     }
 
-    fn cancel(&self, id: &str) {
+    fn cancel(&self, id: &str, reason: &str) {
         for child in self.children(id, None) {
-            self.cancel(&child);
+            self.cancel(&child, "its parent split was cancelled");
         }
         let Some(runtime) = self.lock().runtime.get(id).cloned() else {
             return;
         };
+        runtime.note_reason(reason);
         if runtime.cancelled.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -769,6 +791,15 @@ impl SplitEngine {
                 &mut stream,
                 format!("split {id}: only its creator can join it"),
             );
+        }
+        // A split still running (started with `marsh split -d`): wait for it.
+        let mut record = record;
+        while record.state == SplitState::Run {
+            thread::sleep(Duration::from_millis(500));
+            match self.record(id) {
+                Some(current) => record = current,
+                None => return error(&mut stream, format!("no split {id}")),
+            }
         }
         if !matches!(record.state, SplitState::Await | SplitState::Kept) {
             return error(
@@ -884,16 +915,31 @@ impl SplitEngine {
         }
         self.save();
         write_frame(&mut stream, &PublicReply::SplitStarted { id: id.clone() })?;
-        // A dropped stream or a signal frame before capture cancels.
+        // A signal frame before capture cancels; so does a dropped stream,
+        // unless the split was started detached.
         {
             let engine = Arc::clone(self);
             let id = id.clone();
             let mut reader = stream.try_clone()?;
             let runtime = Arc::clone(&runtime);
+            let detach = spec.detach;
             thread::spawn(move || {
-                let _ = read_frame::<AttachmentFrame>(&mut reader);
-                if !runtime.finished.load(Ordering::Acquire) {
-                    engine.cancel(&id);
+                let reason = match read_frame::<AttachmentFrame>(&mut reader) {
+                    Ok(AttachmentFrame::Signal { signal }) if signal == "INT" => {
+                        Some("interrupted".to_owned())
+                    }
+                    Ok(AttachmentFrame::Signal { signal }) => Some(format!(
+                        "its client got SIG{signal} (start long splits with `marsh split -d`)"
+                    )),
+                    _ if detach => None,
+                    _ => Some(
+                        "its client went away (start long splits with `marsh split -d`)".into(),
+                    ),
+                };
+                if let Some(reason) = reason
+                    && !runtime.finished.load(Ordering::Acquire)
+                {
+                    engine.cancel(&id, &reason);
                 }
                 runtime.held.store(false, Ordering::Release);
                 *runtime
@@ -902,20 +948,36 @@ impl SplitEngine {
                     .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
             });
         }
-        // The 1 h split deadline (`docs/design/workspaces.md` s4).
+        // The split's time limit: the job wall limit (`MARSH_JOB_WALL_SECONDS`,
+        // `docs/design/workspaces.md` s4).
         {
             let engine = Arc::clone(self);
             let id = id.clone();
             let runtime = Arc::clone(&runtime);
+            let deadline = Duration::from_secs(
+                store
+                    .lock()
+                    .job_defaults
+                    .as_ref()
+                    .map_or(crate::DEFAULT_JOB_RESOURCES.wall_seconds, |defaults| {
+                        defaults.resources.wall_seconds
+                    }),
+            );
             thread::spawn(move || {
                 let started = Instant::now();
-                while started.elapsed() < DEADLINE {
+                while started.elapsed() < deadline {
                     if runtime.finished.load(Ordering::Acquire) {
                         return;
                     }
-                    thread::sleep(Duration::from_secs(5));
+                    thread::sleep(Duration::from_secs(5).min(deadline));
                 }
-                engine.cancel(&id);
+                engine.cancel(
+                    &id,
+                    &format!(
+                        "it reached its time limit ({}, MARSH_JOB_WALL_SECONDS)",
+                        crate::split::human_duration(deadline)
+                    ),
+                );
             });
         }
         runtime.held.store(true, Ordering::Release);
@@ -995,6 +1057,10 @@ impl SplitEngine {
             // A cancelled split is removed whole once every branch end is
             // confirmed; a fork whose writers may live on is never removed
             // (`NoRemoveWhileLive`).
+            let cancelled_because = runtime.reason().map_or_else(
+                || "cancelled".to_owned(),
+                |reason| format!("cancelled: {reason}"),
+            );
             let unconfirmed = record
                 .branches
                 .iter()
@@ -1007,16 +1073,16 @@ impl SplitEngine {
                 drop(split);
                 let message = Self::remove_files(&record);
                 if message.starts_with("removed") {
-                    format!("cancelled; every branch ended; {message}")
+                    format!("{cancelled_because}; every branch ended; {message}")
                 } else {
                     format!(
-                        "cancelled; {message}; remove it with: marsh splits rm {}",
+                        "{cancelled_because}; {message}; remove it with: marsh splits rm {}",
                         record.id
                     )
                 }
             } else {
                 format!(
-                    "cancelled; kept {} because the end of {} {} was not confirmed; run `marsh workers reset all`, inspect, then: marsh splits rm {}",
+                    "{cancelled_because}; kept {} because the end of {} {} was not confirmed; run `marsh workers reset all`, inspect, then: marsh splits rm {}",
                     record.dir.display(),
                     plural(unconfirmed.len(), "branch", "branches"),
                     unconfirmed.join(", "),
@@ -1193,7 +1259,7 @@ impl SplitEngine {
         }
         // The creator branch is gone: everything it created is cancelled.
         for child in self.children(&record.id, Some(&label)) {
-            self.cancel(&child);
+            self.cancel(&child, "the branch that created it ended");
         }
         let split = match record.open() {
             Ok(split) => split,
@@ -1462,6 +1528,7 @@ impl SplitEngine {
         let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
         let account = |bytes: &[u8], into: &mut Vec<u8>| {
             if output.fetch_add(bytes.len(), Ordering::AcqRel) + bytes.len() > OUTPUT_LIMIT {
+                runtime.note_reason("the branches' output exceeded 16 MiB");
                 runtime.cancelled.store(true, Ordering::Release);
                 let _ = execution.send(&AttachmentFrame::Signal {
                     signal: "KILL".into(),
@@ -2206,5 +2273,17 @@ impl LocalSplit {
     #[must_use]
     pub fn dir(&self) -> &Path {
         &self.record.dir
+    }
+}
+
+/// `90m`, `2h`, `24h`, `45s`: the largest whole unit.
+pub(crate) fn human_duration(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+    if seconds >= 3600 && seconds.is_multiple_of(3600) {
+        format!("{}h", seconds / 3600)
+    } else if seconds >= 60 && seconds.is_multiple_of(60) {
+        format!("{}m", seconds / 60)
+    } else {
+        format!("{seconds}s")
     }
 }

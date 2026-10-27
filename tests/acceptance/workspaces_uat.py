@@ -73,6 +73,7 @@ SCENARIOS = {
     "W29-doc-examples": "doc_examples",
     "W30-capture-ignored": "capture_ignored",
     "W31-shell-git-config": "shell_git_config",
+    "W32-detached-split": "detached_split",
 }
 # Ordered so the scenario that quarantines the fixture VM runs last.
 ORDER = [
@@ -84,7 +85,7 @@ ORDER = [
     "W14-hostile-user-repo", "W15-label-and-argv-refusal", "W16-caps-and-pool",
     "W17-nested-from-kit", "W18-depth-cap", "W23-non-creator-join",
     "W19-interrupt-subtree", "W20-creator-exit-cascade", "W22-git-clean-replaced",
-    "W25-planted-symlinks", "W26-nested-repository", "W27-sugar-interrupt",
+    "W25-planted-symlinks", "W26-nested-repository", "W27-sugar-interrupt", "W32-detached-split",
     "W02-lease-kept-joinable", "W24-performance", "W21-daemon-restart",
     "W28-quarantine-retire",
 ]
@@ -94,7 +95,7 @@ KIT_SCENARIOS = {
     "W12-admin-tamper", "W13-nested-dotgit", "W15-label-and-argv-refusal",
     "W17-nested-from-kit", "W18-depth-cap", "W19-interrupt-subtree",
     "W20-creator-exit-cascade", "W21-daemon-restart", "W25-planted-symlinks",
-    "W28-quarantine-retire", "W29-doc-examples", "W31-shell-git-config",
+    "W28-quarantine-retire", "W29-doc-examples", "W31-shell-git-config", "W32-detached-split",
 }
 
 SPLIT_OVERHEAD_BUDGET_S = 1.5  # proposed (docs/design/workspaces-acceptance.md W24)
@@ -753,6 +754,41 @@ class Workspaces(ScenarioSuite):
         require(not left, f"confirmed-cancelled split directories were left on disk: {left}")
         self.records.append({"scenario": "W19", "cancel_seconds": round(elapsed, 2)})
         require(elapsed <= 25, f"cancel took {elapsed:.1f}s (> SIGINT, 10 s, SIGKILL bound)")
+
+    def detached_split(self) -> None:
+        """s4: `split -d` returns at once and outlives its client; join waits for it. A plain
+        split whose client gets SIGTERM (an agent tool timeout) is cancelled and says so."""
+        project, gate = self.project, self.project / ".git" / "marsh-w32"
+        gate.mkdir()
+        began = time.monotonic()
+        started = self.cli(["split", "-d", "-b", f"s=touch {gate}/s-running; sleep 30; printf S > s.txt",
+                            ":::", "k", "fixture", "project-write", "k.txt", "K"], project, timeout=300)
+        require(started.returncode == 0, f"split -d exited {started.returncode}: {text(started.stderr)[-600:]!r}")
+        split_id = self.handle(started, "W32 split -d")
+        self.wait_until(lambda: (gate / "s-running").exists(), 180, "detached shell branch running")
+        # The client is gone; the split runs on.
+        require(self.split_record(project, split_id).get("state") == "run",
+                f"detached split is not running after its client exited: {self.split_record(project, split_id)!r}")
+        joined = self.cli(["join", "--", "sh", "-c", 'cat >/dev/null; cat "$SPLIT_DIR/s/files" "$SPLIT_DIR/k/files"'],
+                          project, stdin=self.handle_line(split_id), timeout=300)
+        elapsed = time.monotonic() - began
+        require(joined.returncode == 0, f"join of a detached split failed: {text(joined.stderr)[-600:]!r}")
+        require(b"s.txt" in joined.stdout and b"k.txt" in joined.stdout,
+                f"join did not show both branches' changes: {joined.stdout!r}")
+        require(elapsed >= 30, f"join returned before the 30 s branch could finish ({elapsed:.1f}s)")
+        require(split_id not in self.split_ids(project), "consumed(0) did not remove the detached split")
+        # Without -d, SIGTERM at the client cancels, and the message names the cause.
+        process = self.spawn([self.marsh, "split", "-n", "-b", f"h=touch {gate}/h-running; sleep 600"], project)
+        try:
+            self.wait_until(lambda: (gate / "h-running").exists(), 180, "held branch running", (process,))
+            process.send_signal(signal.SIGTERM)
+            status, _, stderr = self.reap(process, 60)
+        finally:
+            self.kill(process)
+        require(status == 130, f"SIGTERM'd split exited {status}")
+        require(b"cancelled: its client got SIGTERM" in stderr and b"marsh split -d" in stderr,
+                f"cancel message does not name SIGTERM and -d: {stderr[-600:]!r}")
+        self.records.append({"scenario": "W32", "detached_join_seconds": round(elapsed, 2)})
 
     def creator_exit_cascade(self) -> None:
         """s4/s7: a Kit branch that exits while its child split runs cancels that subtree."""

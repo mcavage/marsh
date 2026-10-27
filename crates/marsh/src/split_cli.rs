@@ -12,7 +12,7 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::Path;
 
-pub const SPLIT_HELP: &str = "Usage: marsh split [-n] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]...\n\nRun each branch in a private fork of the current tree. `-b` runs STRING with\nthe session shell in the shell VM (trusted, your own commands); `:::` runs one\nregistered command in a fresh confined container. stdin is spooled once and\nread by every branch (`-n` or a terminal: empty). Waits for every branch,\nprints one handle line, and exits with the first nonzero branch status.\n";
+pub const SPLIT_HELP: &str = "Usage: marsh split [-n] [-d] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]...\n\nRun each branch in a private fork of the current tree. `-b` runs STRING with\nthe session shell in the shell VM (trusted, your own commands); `:::` runs one\nregistered command in a fresh confined container. stdin is spooled once and\nread by every branch (`-n`, `-d`, or a terminal: empty). Waits for every branch,\nprints one handle line, and exits with the first nonzero branch status.\nInterrupting or killing it cancels every branch.\n\n-d  detach: print the handle line at once and exit 0; the branches run on\n    without this command (for long splits, e.g. from an agent's tool call).\n    `marsh join` waits for them; `marsh splits cancel ID` stops them.\n";
 pub const JOIN_HELP: &str = "Usage: marsh join [--json] [--keep] [--timing] [-- CMD [ARG...]]\n\nRead a split handle on stdin (creator only). With `-- CMD`, CMD reads the\nrendering with SPLIT_ID, SPLIT_DIR, SPLIT_MANIFEST, and SPLIT_OBJECTS set;\nthe split is removed when CMD exits 0 and kept otherwise. Without CMD the\nrendering (or manifest with --json) goes to stdout. --timing prints the\nsplit's phase times (snapshot, forks, run, capture, consumer) on stderr.\n";
 pub const SPLITS_HELP: &str = "Usage: marsh splits [--json] [ID]\n       marsh splits cancel ID\n       marsh splits rm ID\n\nList this scope's splits, cancel a running one, or remove a kept one.\nWith ID, a joined split is still shown (states and phase times, no files).\n";
 
@@ -61,13 +61,21 @@ pub fn help(verb: &str, arguments: &[OsString]) -> Option<&'static str> {
         })
 }
 
-fn parse_split(arguments: &[OsString]) -> Result<(Vec<BranchSpec>, bool), String> {
+struct SplitArguments {
+    branches: Vec<BranchSpec>,
+    no_input: bool,
+    detach: bool,
+}
+
+fn parse_split(arguments: &[OsString]) -> Result<SplitArguments, String> {
     let mut branches = Vec::new();
     let mut no_input = false;
+    let mut detach = false;
     let mut index = 0;
     while index < arguments.len() {
         match text(&arguments[index]) {
             Some("-n") => no_input = true,
+            Some("-d") => detach = true,
             Some("-b") => {
                 index += 1;
                 let value = arguments
@@ -116,7 +124,11 @@ fn parse_split(arguments: &[OsString]) -> Result<(Vec<BranchSpec>, bool), String
     if branches.is_empty() {
         return Err("split: no branches; see `marsh split --help`".into());
     }
-    Ok((branches, no_input))
+    Ok(SplitArguments {
+        branches,
+        no_input,
+        detach,
+    })
 }
 
 /// Exported variables for branches, minus marsh, SBX, Docker, token, and
@@ -139,12 +151,16 @@ fn exported_environment() -> (
 }
 
 fn split(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, String>) -> i32 {
-    let (branches, no_input) = match parse_split(arguments) {
+    let SplitArguments {
+        branches,
+        no_input,
+        detach,
+    } = match parse_split(arguments) {
         Ok(parsed) => parsed,
         Err(message) => return usage(&message),
     };
     let mut spool = Vec::new();
-    if !no_input && !std::io::stdin().is_terminal() {
+    if !no_input && !detach && !std::io::stdin().is_terminal() {
         let mut stdin = std::io::stdin().lock().take(SPOOL_LIMIT as u64 + 1);
         if stdin.read_to_end(&mut spool).is_err() || spool.len() > SPOOL_LIMIT {
             return usage("split: input exceeds the 64 MiB spool");
@@ -154,8 +170,9 @@ fn split(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
         Ok(channel) => channel,
         Err(message) => return usage(&format!("split: {message}")),
     };
-    let status = create(&channel, branches, &spool);
-    if let Some(session) = &channel.detach {
+    let status = create(&channel, branches, &spool, detach);
+    // A detached host split's session ends with the split, in the daemon.
+    if !detach && let Some(session) = &channel.detach {
         let _ = channel.client.request(PublicRequest::DetachShell {
             session_id: session.clone(),
         });
@@ -163,7 +180,7 @@ fn split(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
     status
 }
 
-fn create(channel: &Channel, branches: Vec<BranchSpec>, spool: &[u8]) -> i32 {
+fn create(channel: &Channel, branches: Vec<BranchSpec>, spool: &[u8], detach: bool) -> i32 {
     let Some(session) = channel.session.clone() else {
         return usage("split: no session for branches");
     };
@@ -177,6 +194,7 @@ fn create(channel: &Channel, branches: Vec<BranchSpec>, spool: &[u8]) -> i32 {
         branches,
         environment,
         start_env,
+        detach,
     };
     let mut stream = match channel
         .client
@@ -198,6 +216,11 @@ fn create(channel: &Channel, branches: Vec<BranchSpec>, spool: &[u8]) -> i32 {
         write_frame(&mut stream, &AttachmentFrame::StdinEof)
     })();
     match read_frame::<PublicReply>(&mut stream) {
+        Ok(PublicReply::SplitStarted { id }) if detach => {
+            // The split runs on in the daemon; `marsh join` waits for it.
+            println!("{{\"marsh_split\":1,\"id\":\"{id}\"}}");
+            return 0;
+        }
         Ok(PublicReply::SplitStarted { .. }) => {}
         Ok(PublicReply::Error { message, .. }) => return usage(&message),
         Ok(reply) => return usage(&format!("split: unexpected reply {reply:?}")),
@@ -241,11 +264,16 @@ impl CancelOnSignal {
         let mut signals = signal_hook::iterator::Signals::new([SIGINT, SIGTERM, SIGHUP]).ok()?;
         let handle = signals.handle();
         std::thread::spawn(move || {
-            if signals.forever().next().is_some() {
+            if let Some(signal) = signals.forever().next() {
+                let name = match signal {
+                    SIGTERM => "TERM",
+                    SIGHUP => "HUP",
+                    _ => "INT",
+                };
                 let _ = write_frame(
                     &mut writer,
                     &AttachmentFrame::Signal {
-                        signal: "INT".into(),
+                        signal: name.into(),
                     },
                 );
             }
@@ -631,6 +659,7 @@ impl brush_shell::bundled::split::SplitWorkspace for SessionSplit {
                 .map(|(name, value)| (name, value.into_bytes()))
                 .collect(),
             start_env: std::collections::BTreeMap::new(),
+            detach: false,
         };
         let client = self.client()?;
         let mut stream = client
@@ -689,8 +718,17 @@ impl brush_shell::bundled::split::SplitHandle for SugarSplit {
     fn wait(mut self: Box<Self>) -> Result<brush_shell::bundled::split::SplitRun, String> {
         let (id, status) = match reply(&mut self.stream)? {
             PublicReply::SplitFinished {
-                cancelled: true, ..
+                id,
+                cancelled: true,
+                message,
+                ..
             } => {
+                // Ctrl-C needs no words; any other cause does.
+                if let Some(message) = message
+                    && !message.starts_with("cancelled: interrupted")
+                {
+                    eprintln!("marsh: split {id}: {message}");
+                }
                 return Ok(brush_shell::bundled::split::SplitRun {
                     status: 130,
                     cancelled: true,
