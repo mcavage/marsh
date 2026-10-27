@@ -27,11 +27,11 @@
   platformAutomerge: false,
   prConcurrentLimit: 6,
   prHourlyLimit: 3,
-  // Only rebase a branch that conflicts with main. The default ("auto") rebases
-  // every open automerge branch each time another one merges, which restarts CI
-  // and Refresh pins on all of them and pushes their merge to a later run. Main
-  // does not require branches to be up to date, and CI runs again on main.
-  rebaseWhen: "conflicted",
+  // Refresh pins and CI must use current main: a nonconflicting branch can
+  // still carry obsolete apt pins after another dependency update merges.
+  // Rebase every automerge branch so generated records and checks cover the
+  // combination that will actually land.
+  rebaseWhen: "behind-base-branch",
   // Avoid just-published releases (a compromised release is usually pulled
   // within days). Security updates ignore this.
   minimumReleaseAge: "3 days",
