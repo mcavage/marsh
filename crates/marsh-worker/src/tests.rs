@@ -1150,6 +1150,16 @@ fn only_a_pre_effect_create_rejection_skips_quarantine() {
             CleanupOutcome::Uncertain,
             true,
         ),
+        // Docker refused and the runtime proved no container of it remains:
+        // the job fails, the VM is not quarantined.
+        (
+            RuntimeError::CreateRefused {
+                code: 1,
+                stderr: "no space left on device".into(),
+            },
+            CleanupOutcome::Verified,
+            false,
+        ),
     ] {
         let runtime = Arc::new(FakeRuntime {
             create_error: Mutex::new(Some(error)),

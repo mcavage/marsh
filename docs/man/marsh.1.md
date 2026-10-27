@@ -112,12 +112,14 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 **results show** *CURSOR*|*JOB* [**--json**]
 : Show one finished job.
 
-**split** [**-n**] [**-b** *LABEL*=*STRING*]... [**:::** *LABEL* *CMD* [*ARG*...]]...
+**split** [**-n**] [**-d**] [**-b** *LABEL*=*STRING*]... [**:::** *LABEL* *CMD* [*ARG*...]]...
 : Run each branch at once in its own private copy of the current directory and
   wait for all of them. **-b** runs *STRING* with the shell in the shell VM;
   **:::** runs one registered command in a container that sees only its copy.
   **-n** gives branches empty stdin. Prints one handle line, which **join**
-  reads on stdin.
+  reads on stdin. Interrupting or killing **split** cancels every branch.
+  **-d** prints the handle line at once and exits; the branches run on, and
+  **join** waits for them.
 
 **join** [**--json**] [**--keep**] [**--timing**] [**--** *CMD* [*ARG*...]]
 : Read a split handle on stdin and print each branch's status, output, and

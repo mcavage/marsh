@@ -502,15 +502,20 @@ impl Worker {
                 // create. Unknown/post-create errors, including carrier binding,
                 // must retain ownership and quarantine even if deterministic.
                 let rejected_before_effect = matches!(error, RuntimeError::ByteBridge(_));
+                // Docker refused the create and the runtime proved nothing
+                // of it remains: this job failed, the VM is fine.
+                let refused_and_removed = matches!(error, RuntimeError::CreateRefused { .. });
                 setup_failure(
                     events,
                     SetupStage::Create,
                     if rejected_before_effect {
                         CleanupOutcome::NotRequired
+                    } else if refused_and_removed {
+                        CleanupOutcome::Verified
                     } else {
                         CleanupOutcome::Uncertain
                     },
-                    !rejected_before_effect,
+                    !(rejected_before_effect || refused_and_removed),
                     streams.delivery(),
                 )
             })?;
@@ -547,7 +552,9 @@ impl Worker {
     }
 
     fn delete(&self, container: &ContainerId) -> CleanupOutcome {
-        let cancel = marsh_runtime::Cancellation::default().with_timeout(Duration::from_secs(5));
+        // The runtime's own `rm` and verification take up to 10 s each; a
+        // tighter cap here turned a slow `rm` under load into a quarantine.
+        let cancel = marsh_runtime::Cancellation::default().with_timeout(Duration::from_secs(30));
         if self.runtime.delete_cancellable(container, &cancel).is_ok() {
             CleanupOutcome::Verified
         } else {

@@ -29,10 +29,20 @@ separate lines. Use a scratch project to try them. Agent examples also need
 ## Long splits from an agent's tool
 
 `split` blocks until every branch finishes. An agent's tool call usually has a
-timeout, and when it expires `split` is cancelled and takes every branch with
-it (exit 130). Start a long split in the background and poll
-`marsh jobs --tree`. After `join --keep`, each branch's full output is in
-`.marsh/split/ID/out/LABEL/stdout`.
+timeout, and when it expires the harness kills `split`, which cancels every
+branch and deletes its work (exit 130, `cancelled: its client got SIGTERM`).
+For long work, start the split detached and join it in a later call:
+
+```sh
+handle=$(marsh split -d ::: a claude -p 'refactor the parser' ::: b codex exec 'refactor the parser')
+marsh join --keep <<<"$handle"    # waits for every branch
+```
+
+`-d` prints the handle line and exits at once; the branches run on without
+it. `marsh join` waits for a running split, and Ctrl-C there stops only the
+waiting. Check progress with `marsh splits ID` or `marsh jobs --tree`, and stop
+a detached split with `marsh splits cancel ID`. After `join --keep`, each
+branch's full output is in `.marsh/split/ID/out/LABEL/stdout`.
 
 ## What split touches
 
@@ -356,7 +366,8 @@ creator can still join it.
 - `snapshot`, `forks`, `capture`: marsh's own overhead.
 
 Splits allow 16 branches, 64 MiB of input, and 16 MiB of combined branch
-output. They have a one-hour deadline and can nest three splits deep. Nested
+output. A split's time limit is the job wall limit (`MARSH_JOB_WALL_SECONDS`,
+24 hours by default), and splits can nest three deep. Nested
 splits snapshot the calling branch's fork and accept only argv branches.
 Branches share a 16-slot session pool, while registered commands also
 count against the daemon's [job limits](agents.md#limits-and-messages).

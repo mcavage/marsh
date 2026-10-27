@@ -45,7 +45,8 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-const WORKER_START_PROGRESS_TIMEOUT: Duration = Duration::from_secs(10);
+/// Covers the worker's own create budget (30 s) plus a failed create's cleanup.
+const WORKER_START_PROGRESS_TIMEOUT: Duration = Duration::from_secs(60);
 const WORKER_TERMINAL_GRACE: Duration = Duration::from_secs(15);
 const WORKER_CANCEL_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 

@@ -759,7 +759,8 @@ fn only_a_terminal_session_and_its_terminal_job_trees_open_links() {
         store.job(&kid).unwrap().opened,
         vec!["https://example.com".to_owned()]
     );
-    for _ in 0..100 {
+    // The fake opener is a spawned process: allow a loaded test host 10 s.
+    for _ in 0..500 {
         if fs::read_to_string(&opened).is_ok_and(|text| text.lines().count() == 3) {
             break;
         }

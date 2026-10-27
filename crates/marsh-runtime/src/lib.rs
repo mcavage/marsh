@@ -1272,6 +1272,10 @@ impl<R: CommandRunner> DockerCliRuntime<R> {
             )
             .map_err(pre_create_error)?;
         let image = byte_carrier::ImageCommand::inspect(&inspection, spec)?;
+        // A label unique to this create, so a failed create's leftover (if
+        // any) can be found, removed, and proven absent.
+        let create_label = create_label()?;
+        arguments.extend(["--label".into(), create_label.clone().into()]);
         let carrier = if byte_bridge {
             self.byte_carriers
                 .reclaim(|candidates| self.unreferenced_carriers_with_cancel(candidates, cancel))
@@ -1332,7 +1336,58 @@ impl<R: CommandRunner> DockerCliRuntime<R> {
             })?;
             Ok(container)
         } else {
-            result
+            match result {
+                // Docker ran and refused (disk full, bad option, ...): its
+                // create is over, so a labelled leftover is all there can be.
+                // A timeout or I/O error stays uncertain: dockerd may still
+                // be creating.
+                Err(RuntimeError::CommandFailed {
+                    exit_code: Some(code),
+                    stderr,
+                    ..
+                }) if self.remove_labelled(&create_label).is_ok() => {
+                    Err(RuntimeError::CreateRefused { code, stderr })
+                }
+                result => result,
+            }
+        }
+    }
+
+    /// Remove every container carrying `label` and verify none remain.
+    fn remove_labelled(&self, label: &str) -> Result<(), RuntimeError> {
+        let cancel = Cancellation::default().with_timeout(Duration::from_secs(15));
+        let filter = format!("label={label}");
+        let list = || {
+            self.checked_cancellable(
+                "list a failed create's containers",
+                &self.invocation([
+                    "container",
+                    "ls",
+                    "--all",
+                    "--no-trunc",
+                    "--filter",
+                    &filter,
+                    "--format",
+                    "{{.ID}}",
+                ]),
+                &cancel,
+                Some(Duration::from_secs(10)),
+            )
+        };
+        for id in String::from_utf8_lossy(&list()?).split_whitespace() {
+            let container = ContainerId::parse(id.to_owned())
+                .map_err(|_| RuntimeError::InvalidContainerIdentity)?;
+            self.checked_cancellable(
+                "remove a failed create's container",
+                &self.invocation(["rm", "--force", container.as_str()]),
+                &cancel,
+                Some(Duration::from_secs(10)),
+            )?;
+        }
+        if list()?.iter().all(u8::is_ascii_whitespace) {
+            Ok(())
+        } else {
+            Err(RuntimeError::DeletionUncertain)
         }
     }
 
@@ -2532,12 +2587,22 @@ pub enum RuntimeError {
     EngineResizeFailed { status: u16, body: String },
     #[error("container deletion could not be verified")]
     DeletionUncertain,
+    /// `docker create` exited with an error and no container of it remains.
+    #[error("container runtime create failed (exit code {code}): {stderr}")]
+    CreateRefused { code: i32, stderr: String },
     #[error("{0}")]
     ByteBridge(&'static str),
     #[error(
         "native byte create outcome uncertain; retain carrier for {attempt} until worker/container deletion is verified: {stderr}"
     )]
     ByteCreateUncertain { attempt: String, stderr: String },
+}
+
+/// `marsh.create=<128 random bits>`, unique to one `docker create`.
+fn create_label() -> Result<String, RuntimeError> {
+    let mut random = [0_u8; 16];
+    File::open("/dev/urandom")?.read_exact(&mut random)?;
+    Ok(format!("marsh.create={}", byte_exec::hex_encode(&random)))
 }
 
 // Used ONLY on the pre-create side of the boundary. Post-create I/O and bind
