@@ -2715,15 +2715,18 @@ fn a_daemon_whose_stock_sbx_was_removed_can_be_replaced_unless_work_is_attached(
         Client::reconcile_resident(home.path(), &paths, &expected),
         Err(DaemonError::Remote(ref message)) if message == BUSY_LIFECYCLE_MESSAGE
     ));
-    // An attached shell is live work: still refused after SBX is removed.
+    // An attached shell is live work: still refused after SBX is removed,
+    // and the refusal says why.
     let attached = store.attach_shell(2, authority("/Users/example/project", home.path()));
     let old_path = old_sbx.path().to_owned();
     old_sbx.close().unwrap();
     assert!(!old_path.exists());
-    assert!(matches!(
-        Client::reconcile_resident(home.path(), &paths, &expected),
-        Err(DaemonError::Remote(ref message)) if message == BUSY_LIFECYCLE_MESSAGE
-    ));
+    let removed = stock_sbx_removed_message(&old_path);
+    let refused = Client::reconcile_resident(home.path(), &paths, &expected);
+    assert!(
+        matches!(&refused, Err(DaemonError::Remote(message)) if *message == removed),
+        "{refused:?}"
+    );
     // Once nothing is attached, a daemon that cannot reach SBX steps aside.
     store.detach_shell(&attached).unwrap();
     assert!(
@@ -2731,6 +2734,49 @@ fn a_daemon_whose_stock_sbx_was_removed_can_be_replaced_unless_work_is_attached(
             .unwrap()
             .is_none()
     );
+    task.join().unwrap();
+}
+
+#[test]
+fn a_daemon_whose_stock_sbx_was_removed_reports_it_and_stops_once_nothing_is_attached() {
+    let home = home();
+    let sbx = stock_sbx(b"stock-sbx-old");
+    let server = Arc::new(
+        Server::bind_with_stock_sbx(home.path(), sbx.path())
+            .unwrap()
+            .with_stock_sbx_probe_interval(Duration::from_millis(10)),
+    );
+    let store = server.store.clone();
+    let shell = store.attach_shell(1, authority("/Users/example/project", home.path()));
+    let task_server = Arc::clone(&server);
+    let task = thread::spawn(move || task_server.serve_until(|| false).unwrap());
+    drop(server);
+    let status = || {
+        let PublicReply::Status(status) = Client::connect(home.path())
+            .unwrap()
+            .request(PublicRequest::Status { session_id: None })
+            .unwrap()
+        else {
+            panic!("expected status")
+        };
+        status
+    };
+    assert_eq!(status().stock_sbx_removed, None);
+
+    let path = sbx.path().to_owned();
+    sbx.close().unwrap();
+    // The attached shell keeps working through its running SBX process, so
+    // the daemon stays and says why.
+    thread::sleep(Duration::from_millis(200));
+    assert!(!task.is_finished());
+    assert_eq!(status().stock_sbx_removed, Some(path));
+
+    store.detach_shell(&shell).unwrap();
+    let deadline = Instant::now() + PATIENCE;
+    while !task.is_finished() {
+        assert!(Instant::now() < deadline, "the daemon did not stop");
+        thread::sleep(Duration::from_millis(10));
+    }
     task.join().unwrap();
 }
 

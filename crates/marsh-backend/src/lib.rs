@@ -3644,6 +3644,21 @@ impl StockDaemonBackend {
             auto.checked
                 .store(true, std::sync::atomic::Ordering::Release);
         }
+        // Every Kit would fail the same way; the daemon that replaces this
+        // one checks at its start.
+        if let Some(removed) = self.sbx.removed_executable() {
+            if due {
+                let problem = marsh_daemon::stock_sbx_removed_message(removed);
+                self.update_kit_record(|record| {
+                    record.last_check = Some(marsh_daemon::KitUpdateCheck {
+                        unix_ms: now_ms,
+                        result: "skipped".into(),
+                        problems: vec![problem],
+                    });
+                });
+            }
+            return;
+        }
         let mut problems = Vec::new();
         if due {
             problems.extend(self.add_builtin_kits(&record));
@@ -6507,6 +6522,29 @@ mod kit_lifecycle_callers {
         assert_eq!(
             status(&backend).recent,
             [] as [marsh_daemon::KitUpdateRecord; 0]
+        );
+    }
+
+    #[test]
+    fn a_removed_stock_sbx_skips_the_check_with_one_plain_problem() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(NEW, Some(1));
+        let mut backend = daemon(home.path(), &registry, None, None);
+        let gone = home.path().join("Caskroom/sbx/0.49.0/sbx");
+        backend.sbx = Arc::new(StockSbx::new(&gone, registry.clone()));
+        let backend = automatic(backend, home.path(), None);
+
+        backend.auto_update_pass(&DaemonStore::new(home.path()), DAY);
+        assert_eq!(registry.calls("kit"), 0, "no Kit is tried");
+        let check = status(&backend).last_check.unwrap();
+        assert_eq!(check.result, "skipped");
+        assert_eq!(
+            check.problems,
+            [marsh_daemon::stock_sbx_removed_message(&gone)]
+        );
+        assert_eq!(
+            backend.registered_kit("pix").unwrap().workload.identity(),
+            OLD
         );
     }
 

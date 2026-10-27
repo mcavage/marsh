@@ -148,7 +148,8 @@ Stop refuses while shells or jobs are active; see
 [Removing VMs](troubleshooting.md#removing-vms).
 
 After an `sbx` upgrade, marsh replaces its daemon automatically once no shell
-or job is running. In projects where you registered an MCP client, rerun
+or job is running ([Stale daemon after an upgrade](troubleshooting.md#stale-daemon-after-an-upgrade)).
+In projects where you registered an MCP client, rerun
 `marsh mcp install CLIENT` with that client's name because the registration
 stores the `sbx` path.
 
