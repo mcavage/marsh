@@ -1,6 +1,16 @@
 #!/bin/sh
 set -eu
 
+# Preserve the failed assertion in CI instead of only make's exit status.
+test() {
+  command test "$@" || {
+    printf 'selected-home assertion failed:' >&2
+    printf ' <%s>' "$@" >&2
+    printf '\n' >&2
+    return 1
+  }
+}
+
 root=$(mktemp -d "${TMPDIR:-/tmp}/marsh-kit-home.XXXXXX")
 trap 'rm -rf "$root"' EXIT HUP INT TERM
 bin="$root/bin"
