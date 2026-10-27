@@ -1,16 +1,6 @@
 #!/bin/sh
 set -eu
 
-# Preserve the failed assertion in CI instead of only make's exit status.
-test() {
-  command test "$@" || {
-    printf 'selected-home assertion failed:' >&2
-    printf ' <%s>' "$@" >&2
-    printf '\n' >&2
-    return 1
-  }
-}
-
 root=$(mktemp -d "${TMPDIR:-/tmp}/marsh-kit-home.XXXXXX")
 trap 'rm -rf "$root"' EXIT HUP INT TERM
 bin="$root/bin"
@@ -283,6 +273,19 @@ grep -Fq 'must contain a JSON object; preserved unchanged' \
 cp "$root/codex-home/.codex/config.toml" "$root/codex-config.before"
 run_kit codex
 cmp "$root/codex-config.before" "$root/codex-home/.codex/config.toml"
+
+# Reproduce Ubuntu 26.04 uutils mkdir's false success on an existing lock.
+# Configuration exclusion must use an atomic create, even with this utility
+# on PATH. Ordinary directory setup keeps the real mkdir behavior.
+real_mkdir=$(command -v mkdir)
+cat >"$bin/mkdir" <<EOF
+#!/bin/sh
+case "\${1:-}" in
+  *.marsh-lock) "$real_mkdir" "\$@" 2>/dev/null || [ -d "\$1" ] ;;
+  *) exec "$real_mkdir" "\$@" ;;
+esac
+EOF
+chmod 755 "$bin/mkdir"
 
 # Concurrent fresh containers sharing one home must retain every project trust
 # entry exactly once. This also exercises concurrent first initialization.
