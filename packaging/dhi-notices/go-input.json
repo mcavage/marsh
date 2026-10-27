@@ -35,7 +35,7 @@
     },
     {
       "path": "/usr/bin/gh",
-      "sha256": "a3f7e4e07863cf9fd16346d9ad42117b2db70e58e7539b9ca04a3ea688da840e"
+      "sha256": "e9107faf75cbd3bf04e1c56780a0aa6204e3e4685e4c4a17a2db263a438b44e0"
     },
     {
       "path": "/usr/bin/runc",

@@ -79,12 +79,12 @@
     },
     {
       "package": "gh",
-      "version": "2.103.2-0",
+      "version": "2.103.3-0",
       "notices": [],
       "archive_notices": [],
       "upstream_notices": [
         {
-          "url": "https://raw.githubusercontent.com/cli/cli/4f2cfe92e3499f8581bf39db77e0a1431fa7b55c/LICENSE",
+          "url": "https://raw.githubusercontent.com/cli/cli/63837fb778d6a39f02be0ce76ff89f2bc8d74bdc/LICENSE",
           "sha256": "6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f",
           "file": "texts/6da4adc42392c8485e40b4251c7e332fc3352df1947c9ffade71dd60b14a7a4f.txt"
         }
@@ -92,7 +92,7 @@
     },
     {
       "package": "libpython-3.14",
-      "version": "3.14.8-0",
+      "version": "3.14.10-0",
       "notices": [
         {
           "path": "/usr/lib/python3.14/LICENSE.txt",
@@ -105,7 +105,7 @@
     },
     {
       "package": "libpython-3.14-minimal",
-      "version": "3.14.8-0",
+      "version": "3.14.10-0",
       "notices": [
         {
           "path": "/usr/lib/python3.14/LICENSE.txt",
@@ -118,7 +118,7 @@
     },
     {
       "package": "libpython-3.14-stdlib",
-      "version": "3.14.8-0",
+      "version": "3.14.10-0",
       "notices": [
         {
           "path": "/usr/lib/python3.14/LICENSE.txt",
@@ -887,7 +887,7 @@
     },
     {
       "package": "python-3.14",
-      "version": "3.14.8-0",
+      "version": "3.14.10-0",
       "notices": [
         {
           "path": "/usr/lib/python3.14/LICENSE.txt",
@@ -900,7 +900,7 @@
     },
     {
       "package": "python-3.14-minimal",
-      "version": "3.14.8-0",
+      "version": "3.14.10-0",
       "notices": [
         {
           "path": "/usr/lib/python3.14/LICENSE.txt",
