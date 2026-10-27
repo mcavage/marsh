@@ -575,6 +575,13 @@ fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
         "Daemon {} (pid {})",
         status.daemon_id, status.endpoint_owner.pid
     )?;
+    if let Some(removed) = &status.stock_sbx_removed {
+        writeln!(
+            writer,
+            "  warning:      {}",
+            marsh_daemon::stock_sbx_removed_message(removed)
+        )?;
+    }
     writeln!(writer, "  scope:        {}", status.scope_id)?;
     writeln!(writer, "  control_home: {}", status.control_home.display())?;
     writeln!(

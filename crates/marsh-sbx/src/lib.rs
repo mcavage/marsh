@@ -962,6 +962,14 @@ impl StockSbx {
         cloud::CloudSbx::open(self.sbx.clone(), Arc::clone(&self.runner), directory)
     }
 
+    /// The configured executable, when it was an absolute path that no longer
+    /// exists (a Homebrew upgrade deletes the old version's directory). A
+    /// bare name is resolved on `PATH` by the runner and is never reported.
+    #[must_use]
+    pub fn removed_executable(&self) -> Option<&Path> {
+        (self.sbx.is_absolute() && !self.sbx.is_file()).then_some(self.sbx.as_path())
+    }
+
     #[must_use]
     pub fn new(sbx: impl Into<PathBuf>, runner: Arc<dyn CommandRunner>) -> Self {
         Self {

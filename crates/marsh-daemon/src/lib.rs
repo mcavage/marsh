@@ -95,6 +95,30 @@ const SCOPE_LIFECYCLE_REPLY_TIMEOUT: Duration = Duration::from_mins(9);
 const RESIDENT_SHUTDOWN_RETRY_TIMEOUT: Duration = Duration::from_millis(250);
 const RESIDENT_SHUTDOWN_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 const BUSY_LIFECYCLE_MESSAGE: &str = "daemon has active shell sessions or jobs, or unrecovered shell cleanup uncertainty; exit active shells and use host `marsh reset` or `marsh stop` to recover";
+const STOCK_SBX_REMOVED: &str = "stock sbx was removed (upgraded?)";
+/// How often an idle daemon looks for its pinned stock SBX executable.
+const STOCK_SBX_PROBE_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Why a daemon whose pinned stock SBX executable is gone cannot serve, and
+/// what lets marsh restart it with the new one.
+#[must_use]
+pub fn stock_sbx_removed_message(path: &Path) -> String {
+    format!(
+        "{STOCK_SBX_REMOVED}: {}; this marsh daemon can no longer reach its VMs, and marsh restarts it with the new sbx once no marsh shell or job is running: exit every marsh shell and let its jobs finish",
+        path.display()
+    )
+}
+
+/// The pinned stock SBX executable no longer exists (a Homebrew upgrade
+/// deletes the old version's directory).
+fn stock_sbx_removed(path: Option<&Path>) -> bool {
+    path.is_some_and(|path| !path.is_file())
+}
+
+/// A refusal a replacing client waits out briefly before reporting it.
+fn busy_lifecycle_refusal(message: &str) -> bool {
+    message == BUSY_LIFECYCLE_MESSAGE || message.starts_with(STOCK_SBX_REMOVED)
+}
 // Leave descriptor headroom for relay socket clones, active attachments,
 // worker transports, and the listener on macOS's default soft FD limit.
 /// Each connection holds one descriptor plus at most two transient ones. A
@@ -1343,6 +1367,10 @@ pub struct StatusDocument {
     /// The hourly automatic Kit update check (`docs/kits.md`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kit_updates: Option<Box<KitUpdateStatus>>,
+    /// The pinned stock SBX executable, when it was removed: this daemon can
+    /// no longer reach its VMs (`stock_sbx_removed_message`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stock_sbx_removed: Option<PathBuf>,
 }
 
 /// `marsh status` `kit_updates`: the hourly background check of Kits that
@@ -1364,7 +1392,8 @@ pub struct KitUpdateStatus {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct KitUpdateCheck {
     pub unix_ms: u64,
-    /// `ok`, or `error` when at least one Kit could not be checked or moved.
+    /// `ok`, `error` when at least one Kit could not be checked or moved, or
+    /// `skipped` when the daemon's stock SBX executable was removed.
     pub result: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub problems: Vec<String>,
@@ -2016,6 +2045,13 @@ impl DaemonStore {
 
     fn can_recover(&self) -> bool {
         scope_can_recover(&self.lock())
+    }
+
+    /// As [`Self::can_recover`], with no request or lifecycle transition in
+    /// flight: the daemon may stop without a client asking.
+    fn can_exit_unasked(&self) -> bool {
+        let state = self.lock();
+        scope_can_recover(&state) && state.ordinary_requests == 0 && !state.lifecycle_active
     }
 
     fn begin_ordinary_request(&self) -> Result<RequestAdmission, DaemonError> {
@@ -3214,6 +3250,7 @@ impl DaemonStore {
             splits: split::SplitCounts::default(),
             processes: process::ProcessCounts::default(),
             kit_updates: None,
+            stock_sbx_removed: None,
         }
     }
 
@@ -3491,6 +3528,7 @@ pub struct Server {
     mcp_host: Option<McpHostControl>,
     /// The stock SBX executable this daemon's identity pins.
     stock_sbx: Option<PathBuf>,
+    stock_sbx_probe_interval: Duration,
     protected_guest_roots: Vec<PathBuf>,
     dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
@@ -3576,6 +3614,7 @@ impl Server {
             acp: Arc::new(AcpSessionManager::new()?),
             mcp_host: None,
             stock_sbx: None,
+            stock_sbx_probe_interval: STOCK_SBX_PROBE_INTERVAL,
             protected_guest_roots: Vec::new(),
             dev_broker: None,
             splits,
@@ -3656,6 +3695,28 @@ impl Server {
         self
     }
 
+    #[cfg(test)]
+    fn with_stock_sbx_probe_interval(mut self, interval: Duration) -> Self {
+        self.stock_sbx_probe_interval = interval;
+        self
+    }
+
+    /// The pinned stock SBX was removed and nothing is attached, starting,
+    /// running or in flight: stop, so the next `marsh` call starts a daemon
+    /// with the new SBX. With work attached the daemon stays; it keeps
+    /// working through its already-running SBX processes.
+    fn exit_for_removed_stock_sbx(&self) -> bool {
+        let Some(path) = self.stock_sbx.as_deref() else {
+            return false;
+        };
+        if !stock_sbx_removed(Some(path)) || !self.store.can_exit_unasked() {
+            return false;
+        }
+        eprintln!("marshd: stopping: {STOCK_SBX_REMOVED}: {}", path.display());
+        self.shutdown_requested.store(true, Ordering::Release);
+        true
+    }
+
     #[must_use]
     pub fn store(&self) -> DaemonStore {
         self.store.clone()
@@ -3676,7 +3737,17 @@ impl Server {
         self.spawn_kit_updater(Arc::clone(&updater_stop));
         self.spawn_cloud_collector(Arc::clone(&updater_stop));
         let _stop_updater = StopOnDrop(updater_stop);
+        let mut next_sbx_probe = Instant::now() + self.stock_sbx_probe_interval;
         while !stop() && !self.shutdown_requested.load(Ordering::Acquire) {
+            if Instant::now() >= next_sbx_probe {
+                next_sbx_probe = Instant::now() + self.stock_sbx_probe_interval;
+                // An accepted connection may not hold its admission yet.
+                if active_connections.load(Ordering::Acquire) == 0
+                    && self.exit_for_removed_stock_sbx()
+                {
+                    break;
+                }
+            }
             match marsh_runtime::accept_unix(&self.lifecycle.listener) {
                 Ok(stream) => {
                     let Some(permit) = acquire_daemon_connection(&active_connections) else {
@@ -3987,24 +4058,28 @@ impl ConnectionHandler {
         )
     }
 
-    /// The pinned stock SBX was removed (a Homebrew upgrade deletes the old
-    /// version's directory): this daemon can no longer reach a VM, so it can
-    /// neither clean up nor serve, and only a new daemon can recover.
-    fn stock_sbx_removed(&self) -> bool {
-        self.stock_sbx.as_ref().is_some_and(|path| !path.is_file())
+    /// The busy refusal of a lifecycle request; once the pinned stock SBX is
+    /// gone, what the refusal now waits for and why.
+    fn busy_lifecycle_message(&self) -> String {
+        match self.stock_sbx.as_deref() {
+            Some(path) if stock_sbx_removed(Some(path)) => stock_sbx_removed_message(path),
+            _ => BUSY_LIFECYCLE_MESSAGE.into(),
+        }
     }
 
     fn handle_shutdown(&self, stream: &mut UnixStream) -> Result<(), DaemonError> {
-        // Never with live work attached: an open shell or a running job keeps
-        // working through its already-running SBX process.
-        let may_stop =
-            self.store.safe_to_shutdown() || (self.stock_sbx_removed() && self.store.can_recover());
+        // The pinned stock SBX was removed: this daemon can no longer reach a
+        // VM, so it can neither clean up nor serve, and only a new daemon can
+        // recover. Never with live work attached: an open shell or a running
+        // job keeps working through its already-running SBX process.
+        let removed = stock_sbx_removed(self.stock_sbx.as_deref());
+        let may_stop = self.store.safe_to_shutdown() || (removed && self.store.can_recover());
         if !may_stop {
             return write_frame(
                 stream,
                 &PublicReply::Error {
                     code: ErrorCode::InvalidRequest,
-                    message: BUSY_LIFECYCLE_MESSAGE.into(),
+                    message: self.busy_lifecycle_message(),
                 },
             );
         }
@@ -4963,6 +5038,11 @@ impl ConnectionHandler {
                     &PublicReply::Error {
                         code: ErrorCode::InvalidRequest,
                         message: match error {
+                            DaemonError::InvalidState(message)
+                                if message == BUSY_LIFECYCLE_MESSAGE =>
+                            {
+                                self.busy_lifecycle_message()
+                            }
                             DaemonError::InvalidState(message) => message,
                             other => other.to_string(),
                         },
@@ -5048,6 +5128,10 @@ impl ConnectionHandler {
                 status.splits = self.splits.counts();
                 status.processes = self.store.process_counts();
                 status.kit_updates = self.backend.kit_update_status().map(Box::new);
+                status.stock_sbx_removed = self
+                    .stock_sbx
+                    .clone()
+                    .filter(|path| stock_sbx_removed(Some(path)));
                 write_frame(&mut stream, &PublicReply::Status(status))
             }
             PublicRequest::ResetWorkers { selection } => {
@@ -5761,7 +5845,7 @@ impl Client {
                 PublicReply::Error {
                     code: ErrorCode::InvalidRequest,
                     ref message,
-                } if message == BUSY_LIFECYCLE_MESSAGE && Instant::now() < deadline => {
+                } if busy_lifecycle_refusal(message) && Instant::now() < deadline => {
                     thread::sleep(
                         RESIDENT_SHUTDOWN_RETRY_INTERVAL
                             .min(deadline.saturating_duration_since(Instant::now())),

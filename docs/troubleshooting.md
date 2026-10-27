@@ -222,7 +222,11 @@ were not affected.
 ## Stale daemon after an upgrade
 
 - Upgrading `sbx`: marsh replaces its daemon on its own once no shell or job
-  is running, including when the upgrade removed the old `sbx`. Rerun
+  is running. When the upgrade removed the old `sbx`, an idle daemon stops
+  within seconds and the next `marsh` call starts one with the new `sbx`.
+  Until then, `marsh status` and refused calls say
+  `stock sbx was removed (upgraded?): PATH`, and the automatic Kit update
+  check is `skipped`. Exit every marsh shell and let its jobs finish. Rerun
   `marsh mcp install ...` for any MCP registrations.
 - Upgrading marsh: a running daemon keeps the old binaries. Run `marsh stop`
   when nothing is running; the next launch uses the new marsh and checks for

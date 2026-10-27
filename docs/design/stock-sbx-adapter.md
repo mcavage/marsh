@@ -19,8 +19,12 @@ writable-layer discard fix; acceptance checks container cleanup directly.
 Homebrew owns installation of `sbx`. marsh resolves `MARSH_SBX`, otherwise
 `sbx` on `PATH`, and canonicalizes it. A running daemon keeps the executable it
 resolved at startup, and its handshake includes a digest of that executable, so
-a client restarts an idle daemon after an SBX upgrade. MCP registrations keep
-their stored path; rerun them after an upgrade.
+a client restarts an idle daemon after an SBX upgrade. A daemon never switches
+to another executable. When Homebrew deletes the pinned one, the daemon reports
+it (`marsh status`, the busy refusal, a `skipped` Kit update check), and once
+nothing is attached, starting, running, or in flight it stops on its own so the
+next call starts a daemon that passes the startup checks with the new SBX.
+MCP registrations keep their stored path; rerun them after an upgrade.
 
 ## Ownership map and names
 
