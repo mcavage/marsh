@@ -981,7 +981,13 @@ fn run_command(arguments: &[OsString]) -> i32 {
         eprintln!("marsh: run: no session");
         return 125;
     };
-    let (environment, _) = marsh::registered_commands::collect_exported_environment(env::vars_os());
+    let (mut environment, _) =
+        marsh::registered_commands::collect_exported_environment(env::vars_os());
+    // From a Mac terminal or app, host-only values (TMPDIR, credentials) stay
+    // on the Mac, as for a split's branches.
+    if channel.detach.is_some() {
+        environment.retain(|name, _| marsh_daemon::split::forwardable(name));
+    }
     let spec = marsh_daemon::ExecuteSpec {
         command: name,
         arguments: rest

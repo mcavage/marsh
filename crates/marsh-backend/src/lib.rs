@@ -578,24 +578,43 @@ impl StockDaemonBackend {
             .control_home
             .join("kit-agent")
             .join(format!("{}.json", identity_digest(kit.identity())));
-        if let Ok(bytes) = fs::read(&path)
-            && let Ok(agent) = serde_json::from_slice(&bytes)
+        let cached = fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<KitAgent>(&bytes).ok());
+        let mut agent = if let Some(agent) = cached {
+            agent
+        } else {
+            let (descriptor, done) = self.sbx.kit_descriptor(&kit).map_err(backend_error)?;
+            let agent =
+                KitAgent::from_descriptor(&descriptor).map_err(DaemonError::InvalidState)?;
+            if done {
+                let store = || -> std::io::Result<()> {
+                    let directory = path.parent().unwrap_or(&path);
+                    fs::create_dir_all(directory)?;
+                    fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
+                    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+                    serde_json::to_writer(&mut temporary, &agent)?;
+                    temporary.persist(&path).map_err(|error| error.error)?;
+                    Ok(())
+                };
+                let _ = store();
+            }
+            agent
+        };
+        // marsh's own agent Kits published before they declared acp@1 have
+        // the same `--acp` entrypoint mode (kits/README.md).
+        if agent.acp.is_none()
+            && let Some(name) = ["claude", "codex", "pi"].into_iter().find(|name| {
+                kit.identity()
+                    .starts_with(&format!("docker.io/mcavage/marsh-{name}@sha256:"))
+            })
         {
-            return Ok(agent);
-        }
-        let (descriptor, done) = self.sbx.kit_descriptor(&kit).map_err(backend_error)?;
-        let agent = KitAgent::from_descriptor(&descriptor).map_err(DaemonError::InvalidState)?;
-        if done {
-            let store = || -> std::io::Result<()> {
-                let directory = path.parent().unwrap_or(&path);
-                fs::create_dir_all(directory)?;
-                fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
-                let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-                serde_json::to_writer(&mut temporary, &agent)?;
-                temporary.persist(&path).map_err(|error| error.error)?;
-                Ok(())
-            };
-            let _ = store();
+            agent.acp = Some(marsh_contracts::kit_assets::AcpAdapter {
+                agent: name.into(),
+                command: vec![format!("/usr/local/bin/marsh-{name}"), "--acp".into()],
+                env: BTreeMap::new(),
+                protocol_version: None,
+            });
         }
         Ok(agent)
     }
