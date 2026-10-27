@@ -91,13 +91,20 @@ A script named like a marsh subcommand (`stop`, `reset`) must be run as
 | `marsh jobs`, `marsh split`, ... | The `marsh` CLI works inside the shell too |
 | `xdg-open URL`, `open URL` | Open a web link in your Mac's browser; see [Opening links](agents.md#opening-links) |
 
+`marsh` at a marsh prompt can't open another marsh shell: starting a shell is
+a host operation, and the shell VM has only a scoped relay. It fails with
+`relay token cannot perform host lifecycle operations`. For a second marsh
+shell, open another terminal on your Mac and run `marsh`. For a subshell, run
+`bash` or `zsh`. The `shell` command is not a marsh shell either; see
+[What `shell` is for](kits.md#what-shell-is-for).
+
 `split {` and `join` directly after a split stage are marsh syntax. To reach
 the coreutils programs, use `command split` or `command join`.
 
 ## Registered commands
 
 Registered commands such as `claude`, `codex`, `pi`, and `shell` each run in
-a fresh container in a VM for that Kit. stdin, stdout, stderr, and exit
+a fresh container in a VM for that Kit, not in your shell's VM. stdin, stdout, stderr, and exit
 status pass through. They work in pipelines, `$( )`, background jobs,
 scripts, and `make`.
 

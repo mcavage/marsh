@@ -38,6 +38,30 @@ A foreground call that boots a Kit VM prints `[starting NAME worker VM…]`.
 To prepare VMs before the prompt, start marsh with `marsh --load KIT,...` or
 `marsh --load all`.
 
+### What `shell` is for
+
+`shell` is not a second marsh shell. It runs a plain `/bin/sh` as a job in the
+`shell` Kit's own VM, separate from the VM your prompt runs in. The first call
+prints `[starting shell VM…]`. Typed bare on a terminal it opens an
+interactive `/bin/sh` in that VM. It has no Brush, so no `split { }` or
+`fanout { }`, and the `marsh` inside it is the in-job CLI, which can't open a
+shell ([How a child job starts](agents.md#how-a-child-job-starts)).
+
+Use it to run scripts and pipeline stages with no credentials, in their own
+container. It is also the second, different Kit in marsh's own tests, and a
+base image for your own Kit.
+
+It is not a place to explore or install tools:
+
+- The image is a minimal Debian runtime with POSIX text tools and `python3`.
+  It has no package manager, no `sudo`, and no Docker.
+- The job runs as your Mac user ID, which the image has no name for.
+  `id` can fail with `cannot find name for user ID 501`, and installers that
+  call `id` or `whoami` can stop on it.
+
+For that, use your marsh prompt. Its VM has a normal user with passwordless
+`sudo` and a private Docker Engine ([The shell VM](shell.md)).
+
 ### Signing in
 
 marsh has no login of its own. Docker Sandboxes (`sbx`) holds the credentials
