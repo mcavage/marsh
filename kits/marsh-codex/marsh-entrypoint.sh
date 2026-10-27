@@ -41,7 +41,9 @@ trap 'cleanup_codex_lock; exit 143' TERM
 # mutation, bound healthy contention to ten seconds, and reclaim only the
 # protocol-owned files from a writer that died at least thirty seconds ago.
 codex_lock_attempt=0
-while ! mkdir "$codex_lock" 2>/dev/null; do
+# Ubuntu 26.04's uutils mkdir can report success after losing a creation
+# race. Use Node's atomic mkdir syscall for exclusion (Node is required below).
+while ! node -e 'require("node:fs").mkdirSync(process.argv[1])' "$codex_lock" 2>/dev/null; do
   codex_now=$(date +%s)
   codex_created=$(cat "$codex_lock/created" 2>/dev/null || printf '0')
   case "$codex_created" in

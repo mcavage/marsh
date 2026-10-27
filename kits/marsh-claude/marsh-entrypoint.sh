@@ -60,7 +60,9 @@ trap 'cleanup_claude_lock; exit 130' INT
 trap 'cleanup_claude_lock; exit 143' TERM
 
 claude_lock_attempt=0
-while ! mkdir "$claude_lock" 2>/dev/null; do
+# Ubuntu 26.04's uutils mkdir can report success after losing a creation
+# race. Use Node's atomic mkdir syscall for exclusion (Node is required below).
+while ! node -e 'require("node:fs").mkdirSync(process.argv[1])' "$claude_lock" 2>/dev/null; do
   claude_now=$(date +%s)
   claude_created=$(cat "$claude_lock/created" 2>/dev/null || printf '0')
   case "$claude_created" in
