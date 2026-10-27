@@ -603,7 +603,12 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
     if let Some(verb) = arguments
         .get(1)
         .and_then(|value| value.to_str())
-        .filter(|verb| matches!(*verb, "split" | "join" | "splits"))
+        .filter(|verb| {
+            matches!(
+                *verb,
+                "split" | "join" | "splits" | "checkpoint" | "checkpoints" | "events" | "storage"
+            )
+        })
     {
         let verb = verb.to_owned();
         if let Some(help) = marsh::split_cli::help(&verb, &arguments[2..]) {
@@ -1034,6 +1039,7 @@ Options (defaults from MARSH_CLOUD_CPUS, MARSH_CLOUD_TTL, MARSH_CLOUD_IMAGE):
   --image REF     sandbox image pinned by digest (REPOSITORY@sha256:...)
   -d, --detach    run detached: print the job number and return at once; the
                   run goes on with the laptop closed (`cloud -d { ... }`)
+  --json          with -d: print {\"job_id\":...,\"cursor\":...} on stdout
 
 Run a shell script or one program in a new Docker Cloud sandbox. The current
 project (or split fork) is uploaded as a snapshot, Git-ignored files excluded;
@@ -1274,7 +1280,20 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
     {
         return detached_command(action, &arguments[1..]);
     }
-    let (arguments, interactive) = match cloud_arguments(arguments) {
+    // `--json` among the options (before `-c`/`--`): a detached run prints
+    // `{"job_id","cursor"}` on stdout.
+    let options = arguments
+        .iter()
+        .position(|word| word == "-c" || word == "--")
+        .unwrap_or(arguments.len());
+    let json = arguments[..options].iter().any(|word| word == "--json");
+    let arguments = arguments
+        .iter()
+        .enumerate()
+        .filter(|(index, word)| *index >= options || *word != "--json")
+        .map(|(_, word)| word.clone())
+        .collect::<Vec<_>>();
+    let (arguments, interactive) = match cloud_arguments(&arguments) {
         Ok(parsed) => parsed,
         Err(message) => {
             eprint!("marsh: cloud: {message}\n{CLOUD_HELP}");
@@ -1282,6 +1301,10 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
         }
     };
     let detach = arguments.iter().any(|word| word == "--detach");
+    if json && !detach {
+        eprint!("marsh: cloud: --json is for a detached run (-d)\n{CLOUD_HELP}");
+        return 2;
+    }
     if detach && interactive {
         eprint!(
             "marsh: cloud: a detached run has no terminal; give it -c SCRIPT or -- PROGRAM\n{CLOUD_HELP}"
@@ -1340,7 +1363,9 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
         inner: std::io::stdout(),
         closed: std::sync::Arc::clone(&closed),
     };
-    let result = if interactive {
+    let result = if json {
+        detached_json(&channel.client, spec)
+    } else if interactive {
         // Raw terminal, initial size, and resizes, as for a local terminal job.
         channel.client.execute(spec)
     } else {
@@ -1378,6 +1403,46 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
             });
     }
     status
+}
+
+/// `marsh cloud -d --json`: the run's messages go to stderr and one
+/// `{"job_id","cursor"}` line to stdout once it is detached.
+fn detached_json(
+    client: &marsh_daemon::Client,
+    spec: marsh_daemon::ExecuteSpec,
+) -> Result<i32, marsh_daemon::DaemonError> {
+    use marsh_daemon::AttachmentFrame as Frame;
+    let execution = client.start_execution(spec)?;
+    execution.send(&Frame::StdinEof)?;
+    let mut job = None;
+    loop {
+        match execution.receive()? {
+            Frame::Stdout { bytes } | Frame::Stderr { bytes } => {
+                let _ = std::io::stderr().write_all(&bytes);
+            }
+            Frame::Notice { message } => eprintln!("{message}"),
+            Frame::JobStarted { job_id } => job = Some(job_id),
+            Frame::Exited { code } => {
+                if code == 0
+                    && let Some(job_id) = job
+                {
+                    let cursor = match client.request(marsh_daemon::PublicRequest::ShowJob {
+                        job_id: job_id.clone(),
+                    })? {
+                        marsh_daemon::PublicReply::Job(job) => job.cursor,
+                        _ => 0,
+                    };
+                    println!(
+                        "{}",
+                        serde_json::json!({"job_id": job_id, "cursor": cursor})
+                    );
+                }
+                return Ok(code);
+            }
+            Frame::Failed { message } => return Err(marsh_daemon::DaemonError::Remote(message)),
+            _ => {}
+        }
+    }
 }
 
 /// Finish notices of detached cloud runs (each shown once).
@@ -1568,6 +1633,12 @@ fn split_channel(create: bool) -> Result<marsh::split_cli::Channel, String> {
         });
     }
     let mut session = SessionConfig::from_environment(false).map_err(|error| error.to_string())?;
+    // In a lane (a split fork), the project is the split's root and the fork
+    // is only the working directory, so a job there is confined to the fork.
+    if let Some(project) = marsh_daemon::split_confinement::fork_project(&session.launch_directory)
+    {
+        session.launch_directory = project;
+    }
     let daemon_home = session
         .home_backing
         .parent()

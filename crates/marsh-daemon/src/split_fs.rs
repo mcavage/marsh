@@ -347,24 +347,82 @@ impl Dir {
 /// # Errors
 /// Returns the open failure (`ELOOP`/`ENOTDIR` for a symlink).
 pub fn splits_dir(root: &Path, create: bool) -> io::Result<Dir> {
+    area(root, "split", create)
+}
+
+/// `<root>/.marsh/<name>` (`split`, `checkpoints`, `.trash`), as
+/// [`splits_dir`]. Creating it also keeps `.marsh` out of Time Machine (the
+/// sticky exclusion attribute `tmutil addexclusion` sets) and Spotlight.
+///
+/// # Errors
+/// Returns the open failure (`ELOOP`/`ENOTDIR` for a symlink).
+pub fn area(root: &Path, name: &str, create: bool) -> io::Result<Dir> {
     let in_git = create && root.ancestors().any(|dir| dir.join(".git").exists());
     let root = Dir::open_root(root)?;
-    let marsh = if create {
-        let marsh = root.ensure(".marsh")?;
-        if in_git {
-            match marsh.write_new(".gitignore", b"*\n") {
-                Err(error) if error.kind() != io::ErrorKind::AlreadyExists => return Err(error),
-                _ => {}
-            }
+    if !create {
+        return root.open(".marsh")?.open(name);
+    }
+    let marsh = root.ensure(".marsh")?;
+    let mut files = vec![(".metadata_never_index", &b""[..])];
+    if in_git {
+        files.push((".gitignore", b"*\n"));
+    }
+    for (file, bytes) in files {
+        match marsh.write_new(file, bytes) {
+            Err(error) if error.kind() != io::ErrorKind::AlreadyExists => return Err(error),
+            _ => {}
         }
-        marsh
-    } else {
-        root.open(".marsh")?
-    };
-    if create {
-        marsh.ensure("split")
-    } else {
-        marsh.open("split")
+    }
+    #[cfg(target_os = "macos")]
+    let _ = rustix::fs::fsetxattr(
+        &marsh.0,
+        "com.apple.metadata:com_apple_backup_excludeItem",
+        BACKUP_EXCLUDE,
+        rustix::fs::XattrFlags::empty(),
+    );
+    marsh.ensure(name)
+}
+
+/// A binary property list holding the string `com.apple.backupd`.
+#[cfg(target_os = "macos")]
+const BACKUP_EXCLUDE: &[u8] = b"bplist00_\x10\x11com.apple.backupd\x08\0\0\0\0\0\0\x01\x01\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x1c";
+
+/// The volume holding `root`: `(available, total)` bytes.
+///
+/// # Errors
+/// Returns the `statvfs` failure.
+pub fn volume_space(root: &Path) -> io::Result<(u64, u64)> {
+    let stat = rustix::fs::fstatvfs(&Dir::open_root(root)?.0).map_err(rustix_err)?;
+    Ok((
+        stat.f_bavail.saturating_mul(stat.f_frsize),
+        stat.f_blocks.saturating_mul(stat.f_frsize),
+    ))
+}
+
+/// Logical bytes of the regular files under `dir` (clones count in full).
+#[must_use]
+pub fn logical_bytes(dir: &Dir) -> u64 {
+    dir.entries()
+        .unwrap_or_default()
+        .iter()
+        .fold(0, |total, (name, kind)| {
+            total.saturating_add(match *kind {
+                FileType::Directory => dir.open(name).map_or(0, |child| logical_bytes(&child)),
+                FileType::RegularFile => dir.stat(name).map_or(0, |stat| stat.size),
+                _ => 0,
+            })
+        })
+}
+
+/// Delete what an interrupted background removal left in `<root>/.marsh/.trash`.
+pub fn sweep_trash(root: &Path) {
+    if let Ok(trash) = Dir::open_root(root)
+        .and_then(|root| root.open(".marsh"))
+        .and_then(|marsh| marsh.open(".trash"))
+    {
+        for (name, _) in trash.entries().unwrap_or_default() {
+            let _ = trash.remove_tree(&name);
+        }
     }
 }
 
@@ -484,6 +542,35 @@ pub fn git_source(root: &Path) -> Result<Option<GitSnapshot>, String> {
     let mut snapshot = read_git_dir(&git_dir)?;
     snapshot.source.objects.push(root.join(".git/objects"));
     Ok(Some(snapshot))
+}
+
+/// Save what a fork's admin directory is built from (a checkpoint's `git/`):
+/// the resolved `HEAD`, the index, `packed-refs`, and `info/exclude`.
+///
+/// # Errors
+/// Returns the first I/O failure.
+pub fn save_git(git: &GitSnapshot, dir: &Dir) -> io::Result<()> {
+    dir.write_new("HEAD", format!("{}\n", git.source.head).as_bytes())?;
+    if let Some(index) = &git.index {
+        dir.write_new("index", index)?;
+    }
+    dir.write_new("packed-refs", &git.packed_refs)?;
+    dir.create("info")?.write_new("exclude", &git.exclude)
+}
+
+/// A checkpoint's saved Git metadata ([`save_git`]), reading objects from
+/// `root`'s repository.
+///
+/// # Errors
+/// Returns why the saved files or the repository cannot be read.
+pub fn saved_git(dir: &Dir, root: &Path) -> Result<GitSnapshot, String> {
+    Dir::open_root(root)
+        .and_then(|root| root.open(".git"))
+        .and_then(|git| git.open("objects"))
+        .map_err(|e| format!("{}/.git/objects: {e}", root.display()))?;
+    let mut snapshot = read_git_dir(dir)?;
+    snapshot.source.objects.push(root.join(".git/objects"));
+    Ok(snapshot)
 }
 
 /// A nested split's Git source: the creator branch's admin directory.

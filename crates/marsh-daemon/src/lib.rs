@@ -43,8 +43,10 @@ use thiserror::Error;
 use uuid::Uuid;
 
 mod acp_bridge;
+pub mod checkpoint;
 mod client_liveness;
 mod daemon_startup;
+pub mod events;
 mod receipt_journal;
 pub use daemon_startup::{
     DEFAULT_JOB_RESOURCES, JobDefaults, StartupFailure, adopt_startup_lock,
@@ -87,7 +89,14 @@ pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// Maximum shell stdin frames in flight while the guest is not reading.
 pub const SHELL_STDIN_WINDOW: usize = 64;
 pub const SHELL_STDIN_CHUNK: usize = 16 * 1024;
-pub const FEATURES: &[&str] = &["direct-command-acceptance-v1", "durable-results-v1"];
+pub const FEATURES: &[&str] = &[
+    "direct-command-acceptance-v1",
+    "durable-results-v1",
+    "events-v1",
+    "lanes-v1",
+    "checkpoints-v1",
+    "acp-descriptors-v1",
+];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while
 // still giving its caller one finite aggregate deadline.
@@ -728,6 +737,23 @@ pub enum PublicRequest {
     SplitRemove {
         split: String,
     },
+    /// Close an open lane split: capture every lane, keep it.
+    SplitClose {
+        split: String,
+    },
+    /// `marsh checkpoint(s)`; a relay caller's root is its session's project.
+    Checkpoint {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        root: Option<PathBuf>,
+        action: CheckpointAction,
+    },
+    /// `marsh storage`: checkpoints and kept splits per project.
+    Storage {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        root: Option<PathBuf>,
+    },
+    /// `marsh events`: host only, outside request admission; `Event` frames follow.
+    Events,
     /// A job's `cap.sock` child: attachment frames follow, as for `Execute`
     /// (`docs/design/processes.md` s3).
     ProcessRun(ExecuteSpec),
@@ -742,6 +768,14 @@ pub enum PublicRequest {
     OpenUrl {
         url: String,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CheckpointAction {
+    Create { label: Option<String> },
+    List { label: Option<String> },
+    Remove { id: String },
 }
 
 /// Host-approved identity and paths captured before entering the guest VM.
@@ -855,6 +889,19 @@ pub enum PublicReply {
     },
     Splits {
         document: serde_json::Value,
+    },
+    /// `split --open`: each lane's fork.
+    SplitOpened {
+        id: String,
+        lanes: BTreeMap<String, PathBuf>,
+    },
+    /// A JSON document (`SplitClose` manifest, checkpoints, storage).
+    Document {
+        document: serde_json::Value,
+    },
+    /// One `marsh events` line.
+    Event {
+        line: String,
     },
     /// `OpenUrl`: whether the Mac opened it, or why not.
     UrlOpen {
@@ -1294,6 +1341,8 @@ pub enum ErrorCode {
     InvalidRequest,
     NotFound,
     Internal,
+    /// Too little free disk space (`marsh checkpoint` exits 75).
+    NoSpace,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1500,6 +1549,24 @@ pub struct JobSummary {
     pub detached: Option<String>,
 }
 
+impl JobSummary {
+    #[must_use]
+    pub fn of(job: &JobReceipt) -> Self {
+        Self {
+            cursor: job.cursor,
+            job_id: job.job_id.clone(),
+            command: job.command.clone(),
+            placement: job.placement,
+            cleanup: job.cleanup,
+            state: job.state,
+            exit_code: job.exit.as_ref().and_then(|exit| exit.code),
+            wall_ms: job.timing.wall_ms,
+            parent: job.lineage.as_ref().map(|lineage| lineage.parent.clone()),
+            detached: job.detached.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {
@@ -1671,6 +1738,12 @@ pub const DISPLAY_ARGS: usize = 16;
 /// Characters kept of each displayed argument.
 pub const DISPLAY_ARG_CHARS: usize = 200;
 
+#[derive(Debug, Default)]
+pub(crate) struct ForkJobs {
+    pub live: Vec<String>,
+    pub uncertain: usize,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewJob {
     pub session_id: String,
@@ -1786,6 +1859,10 @@ impl PublicRequest {
             | Self::SplitShow { .. }
             | Self::SplitCancel { .. }
             | Self::SplitRemove { .. }
+            | Self::SplitClose { .. }
+            | Self::Checkpoint { .. }
+            | Self::Storage { .. }
+            | Self::Events
             | Self::ProcessRun(_)
             | Self::ProcessShow
             | Self::CloudDetached { .. } => RequestAuthority::Shared,
@@ -2275,6 +2352,27 @@ impl DaemonStore {
                 .values()
                 .filter(|kit| kit.shell_session_id == session)
                 .count()
+    }
+
+    /// Jobs that mount a fork of `split` (lane `label`, or any): the live
+    /// ones, and how many ended with unconfirmed cleanup.
+    pub(crate) fn fork_jobs(&self, split: &str, label: Option<&str>) -> ForkJobs {
+        let state = self.lock();
+        let mut found = ForkJobs::default();
+        for job in state.jobs.values() {
+            let Some((id, lane)) = JobLineage::split_of(&job.mounts) else {
+                continue;
+            };
+            if id != split || label.is_some_and(|label| label != lane) {
+                continue;
+            }
+            if matches!(job.state, JobState::Queued | JobState::Running) {
+                found.live.push(job.job_id.clone());
+            } else if job.cleanup == CleanupState::Uncertain || job.state == JobState::Unknown {
+                found.uncertain += 1;
+            }
+        }
+        found
     }
 
     /// Whether a shell VM is already bound to this session (relay callers).
@@ -3431,22 +3529,7 @@ impl DaemonStore {
     #[must_use]
     pub fn jobs(&self) -> JobsDocument {
         let state = self.lock();
-        let mut jobs: Vec<_> = state
-            .jobs
-            .values()
-            .map(|job| JobSummary {
-                cursor: job.cursor,
-                job_id: job.job_id.clone(),
-                command: job.command.clone(),
-                placement: job.placement,
-                cleanup: job.cleanup,
-                state: job.state,
-                exit_code: job.exit.as_ref().and_then(|exit| exit.code),
-                wall_ms: job.timing.wall_ms,
-                parent: job.lineage.as_ref().map(|lineage| lineage.parent.clone()),
-                detached: job.detached.clone(),
-            })
-            .collect();
+        let mut jobs: Vec<_> = state.jobs.values().map(JobSummary::of).collect();
         jobs.sort_by_key(|job| std::cmp::Reverse(job.cursor));
         JobsDocument {
             schema: "marsh.jobs/v1".into(),
@@ -3540,6 +3623,7 @@ pub struct Server {
     protected_guest_roots: Vec<PathBuf>,
     dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
+    events: Arc<events::Bus>,
 }
 
 impl Server {
@@ -3604,14 +3688,17 @@ impl Server {
         let lifecycle = Lifecycle::bind(home)?;
         raise_descriptor_limit();
         let token = read_secret(&lifecycle.paths.token)?;
+        let events = Arc::new(events::Bus::default());
         let splits = split::SplitEngine::open(
             journal_home,
             Client {
                 paths: lifecycle.paths.clone(),
                 token: token.clone(),
             },
+            Arc::clone(&events),
         );
         let store = DaemonStore::with_master_token(home, journal_home, Some(token))?;
+        store.lock().journal.set_events(Arc::clone(&events));
         Ok(Self {
             lifecycle,
             store,
@@ -3626,6 +3713,7 @@ impl Server {
             protected_guest_roots: Vec::new(),
             dev_broker: None,
             splits,
+            events,
         })
     }
 
@@ -3871,6 +3959,7 @@ impl Server {
             protected_guest_roots: self.protected_guest_roots.clone(),
             dev_broker: self.dev_broker.clone(),
             splits: Arc::clone(&self.splits),
+            events: Arc::clone(&self.events),
         }
     }
 }
@@ -3902,6 +3991,7 @@ struct ConnectionHandler {
     protected_guest_roots: Vec<PathBuf>,
     dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
+    events: Arc<events::Bus>,
 }
 
 /// Reject a guest mount containing, or contained by, a host-owned path.
@@ -4054,6 +4144,30 @@ impl ConnectionHandler {
                 .to_path_buf(),
         );
         reject_guest_mount_overlap(&[&session.launch_directory, &session.home_backing], &roots)
+    }
+
+    /// `marsh events`: the hello line, then every change and a heartbeat
+    /// every 15 s; `resync` and the end of the stream when it fell behind.
+    fn serve_events(&self, mut stream: UnixStream) -> Result<(), DaemonError> {
+        let (seq, receiver) = self.events.subscribe();
+        stream.set_read_timeout(None)?;
+        let hello = serde_json::json!({"type": "hello", "seq": seq, "features": FEATURES});
+        let mut line = hello.to_string();
+        loop {
+            write_frame(&mut stream, &PublicReply::Event { line })?;
+            line = match receiver.recv_timeout(Duration::from_secs(15)) {
+                Ok(line) => line.to_string(),
+                Err(mpsc::RecvTimeoutError::Timeout) => r#"{"type":"heartbeat"}"#.into(),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return write_frame(
+                        &mut stream,
+                        &PublicReply::Event {
+                            line: r#"{"type":"resync"}"#.into(),
+                        },
+                    );
+                }
+            };
+        }
     }
 
     fn reject_unauthorized(stream: &mut UnixStream, message: &str) -> Result<(), DaemonError> {
@@ -5048,6 +5162,15 @@ impl ConnectionHandler {
                 ),
             };
         }
+        // A subscription is not an ordinary request: it never holds off
+        // `marsh stop`, `marsh reset`, or the daemon's exit.
+        if request.body == PublicRequest::Events {
+            return if authentication_scope == AuthenticationScope::Master {
+                self.serve_events(stream)
+            } else {
+                Self::reject_unauthorized(&mut stream, "marsh events is for the host")
+            };
+        }
         let lifecycle_request = matches!(
             request.body,
             PublicRequest::ResetScope | PublicRequest::StopScope | PublicRequest::Shutdown
@@ -5125,7 +5248,109 @@ impl ConnectionHandler {
             AuthenticationScope::Relay(session) => split::Creator::Session(session.clone()),
             AuthenticationScope::Capability(job) => split::Creator::Job(job.clone()),
         };
+        // A job in an open lane's fork is admitted by the split engine and
+        // counted live until it ends (`docs/design/workspaces.md` s14). A
+        // child job was admitted with its parent.
+        let _lane = match &request.body {
+            PublicRequest::Execute(spec)
+                if spec
+                    .process
+                    .as_ref()
+                    .is_none_or(|link| link.parent_job.is_none()) =>
+            {
+                match spec.split_confinement() {
+                    Ok(Some(lane)) => {
+                        match self.splits.admit_lane(&caller, &lane.split, &lane.label) {
+                            Ok(guard) => guard,
+                            Err(message) => {
+                                return write_frame(
+                                    &mut stream,
+                                    &PublicReply::Error {
+                                        code: ErrorCode::InvalidRequest,
+                                        message: format!("lane job refused: {message}"),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let root = |requested: Option<PathBuf>| match &authentication_scope {
+            AuthenticationScope::Relay(session) => self
+                .store
+                .lock()
+                .session_authorities
+                .get(session)
+                .map(|authority| authority.launch_directory.clone()),
+            _ => requested,
+        };
         match request.body {
+            PublicRequest::SplitClose { split } => {
+                let reply = self.splits.close(&caller, &split, &self.store).map_or_else(
+                    |error| public_error(&error),
+                    |document| PublicReply::Document { document },
+                );
+                write_frame(&mut stream, &reply)
+            }
+            PublicRequest::Checkpoint {
+                root: requested,
+                action,
+            } => {
+                let root = root(requested);
+                let checkpoints = &self.splits.checkpoints;
+                let invalid = |message: String| PublicReply::Error {
+                    code: ErrorCode::InvalidRequest,
+                    message,
+                };
+                let reply = match (action, root) {
+                    (CheckpointAction::Create { .. }, None) => {
+                        invalid("checkpoint: no project root".into())
+                    }
+                    (CheckpointAction::Create { .. }, Some(root)) if !root.is_absolute() => {
+                        invalid("checkpoint: the project root must be absolute".into())
+                    }
+                    (CheckpointAction::Create { label }, Some(root)) => {
+                        match checkpoints.create(&root, label) {
+                            Ok(checkpoint) => PublicReply::Document {
+                                document: checkpoint.document(),
+                            },
+                            Err(checkpoint::Refusal::LowDisk(message)) => PublicReply::Error {
+                                code: ErrorCode::NoSpace,
+                                message,
+                            },
+                            Err(checkpoint::Refusal::Invalid(message)) => invalid(message),
+                        }
+                    }
+                    (CheckpointAction::List { label }, root) => PublicReply::Document {
+                        document: serde_json::json!({
+                            "checkpoints": checkpoints
+                                .list(root.as_deref(), label.as_deref())
+                                .iter()
+                                .map(checkpoint::Checkpoint::document)
+                                .collect::<Vec<_>>(),
+                        }),
+                    },
+                    (CheckpointAction::Remove { id }, root) => {
+                        match checkpoints.remove(root.as_deref(), &id) {
+                            Ok(message) => PublicReply::SplitDone { message },
+                            Err(message) => PublicReply::Error {
+                                code: ErrorCode::NotFound,
+                                message,
+                            },
+                        }
+                    }
+                };
+                write_frame(&mut stream, &reply)
+            }
+            PublicRequest::Storage { root: requested } => write_frame(
+                &mut stream,
+                &PublicReply::Document {
+                    document: self.splits.storage(root(requested).as_deref()),
+                },
+            ),
             PublicRequest::SplitCreate(spec) => {
                 self.splits
                     .create(stream, caller, spec, self.backend.as_ref(), &self.store)
@@ -5145,12 +5370,15 @@ impl ConnectionHandler {
                 write_frame(&mut stream, &reply)
             }
             PublicRequest::SplitCancel { split } => {
-                let reply = self.splits.cancel_request(&caller, &split).map_or_else(
-                    |error| public_error(&error),
-                    |()| PublicReply::SplitDone {
-                        message: format!("cancelled {split}"),
-                    },
-                );
+                let reply = self
+                    .splits
+                    .cancel_request(&caller, &split, &self.store)
+                    .map_or_else(
+                        |error| public_error(&error),
+                        |()| PublicReply::SplitDone {
+                            message: format!("cancelled {split}"),
+                        },
+                    );
                 write_frame(&mut stream, &reply)
             }
             PublicRequest::SplitRemove { split } => {
@@ -5278,6 +5506,10 @@ fn authorize_request_session(
         | PublicRequest::SplitShow { .. }
         | PublicRequest::SplitCancel { .. }
         | PublicRequest::SplitRemove { .. }
+        | PublicRequest::SplitClose { .. }
+        | PublicRequest::Checkpoint { .. }
+        | PublicRequest::Storage { .. }
+        | PublicRequest::Events
         | PublicRequest::ProcessShow
         | PublicRequest::CloudDetached { .. }
         | PublicRequest::OpenUrl { .. }
@@ -5360,7 +5592,11 @@ fn dispatch_request(
         | PublicRequest::SplitJoin { .. }
         | PublicRequest::SplitShow { .. }
         | PublicRequest::SplitCancel { .. }
-        | PublicRequest::SplitRemove { .. } => PublicReply::Error {
+        | PublicRequest::SplitRemove { .. }
+        | PublicRequest::SplitClose { .. }
+        | PublicRequest::Checkpoint { .. }
+        | PublicRequest::Storage { .. }
+        | PublicRequest::Events => PublicReply::Error {
             code: ErrorCode::Internal,
             message: "split request was not handled by the split engine".into(),
         },
