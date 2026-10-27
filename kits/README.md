@@ -48,10 +48,10 @@ each ship the agent's CLI and its pinned ACP adapter (`package.json` /
 `package-lock.json`): the official `@agentclientprotocol/claude-agent-acp`
 and `@agentclientprotocol/codex-acp`, and the community `pi-acp`. The
 entrypoint chooses the mode from its first argument: `--acp` runs the ACP v1
-stdio adapter, anything else is the CLI as before. `packaging/agents.json`
-maps `claude-session`, `codex-session`, and `pi-session` to those commands
-with `"arguments": ["--acp"]`; the daemon appends the tail to the Kit's own
-entrypoint like typed arguments, and the declaration can change nothing else.
+stdio adapter, anything else is the CLI as before. Each Kit declares that
+adapter as `com.docker.sandbox/acp@1` (`/usr/local/bin/marsh-NAME --acp`), so
+`marsh run --acp NAME` and `acp run NAME` start it; the declaration selects
+the program and nothing else.
 ACP sessions therefore share the CLI's warm Kit VM, network allowlist, and
 credential binding. Claude's adapter drives its Agent SDK's own native Claude
 Code build (the SDK pins it) through `claude-cli.sh`. Codex ACP keeps its

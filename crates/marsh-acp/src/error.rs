@@ -77,14 +77,6 @@ pub enum AgentError {
     #[error("agent '{0}' not found in registry")]
     NotFound(String),
 
-    /// A second declaration attempted to replace an existing name.
-    #[error("agent '{0}' is registered more than once")]
-    DuplicateName(String),
-
-    /// Attempted to use ACP protocol with an ordinary CLI command.
-    #[error("unsupported protocol for '{command}': {reason}")]
-    UnsupportedProtocol { command: String, reason: String },
-
     /// Invalid adapter configuration.
     #[error("invalid agent adapter configuration: {0}")]
     InvalidConfiguration(String),

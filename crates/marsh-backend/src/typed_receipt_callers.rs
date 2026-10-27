@@ -271,6 +271,7 @@ fn worker_observation(root: &Path, mode: &'static str) -> (WorkerReport, Vec<u8>
         WorkerResponse::Ready { generation: 1 }
     ));
     let spec = JobSpec {
+        entrypoint: None,
         image: OciImage::parse(format!("sha256:{}", "b".repeat(64))).unwrap(),
         argv: vec![],
         identity: JobIdentity {

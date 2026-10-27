@@ -7,8 +7,7 @@
 //! - Bounded message frame sizes and operation timeouts
 //! - Capability-gated `session/load` and `session/resume`
 //! - Hard enforcement of NO host execution from agent RPCs (`terminal/*`, `fs/*`)
-//! - Versioned native Kit adapter declarations and agent registry (`AgentRegistry`)
-//! - Explicit rejection of fake claims that CLI tools (e.g. plain `claude`) support ACP
+//! - Versioned native Kit adapter declarations
 
 pub mod adapter;
 pub mod cancel;
@@ -17,7 +16,7 @@ pub mod error;
 pub mod protocol;
 pub mod transport;
 
-pub use adapter::{AgentAdapterDeclaration, AgentProtocol, AgentRegistry};
+pub use adapter::{AgentAdapterDeclaration, AgentProtocol};
 pub use cancel::{CancelPhase, CancelTracker};
 pub use client::{AcpClient, AcpClientConfig, DefaultDenyPermissionHandler, PermissionHandler};
 pub use error::{AcpError, AgentError};

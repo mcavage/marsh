@@ -1149,6 +1149,7 @@ impl ExportMcp {
 
         let spec = ExecuteSpec {
             process: None,
+            acp: false,
             // Protocol-created jobs retain the admitted publishing project root.
             working_directory: None,
             placement: marsh_daemon::Placement::Local,

@@ -1142,7 +1142,7 @@ fn acp_prompt_text(text: &[&str]) -> Result<String, ClientError> {
 fn print_acp_help(command: Option<&str>, error: bool) {
     let help = match command {
         None => {
-            "ACP agent sessions\n\nStart an agent as a shell background job, then use its session ID to talk to it.\n\n  acp run AGENT &                  Start a registered ACP agent\n  acp list [--mine] [--wait [ID]] [--json] Find sessions; use an exact ID when multiple exist\n  acp ask ID TEXT                 Send a turn and print its answer\n  acp status ID [CURSOR]           Show session state and updates\n  acp stop ID                      End a session\n\nExample:\n  id=$(acp reserve claude-session)\n  acp run --reservation \"$id\" claude-session &\n  acp list --mine --wait \"$id\"\n  acp ask \"$id\" 'Say hi'\n\nOther commands: prompt, permissions, respond, cancel, attach, release, publish, unpublish.\nRun `acp COMMAND --help` for details."
+            "ACP agent sessions\n\nStart an agent as a shell background job, then use its session ID to talk to it.\n\n  acp run AGENT &                  Start a registered ACP agent\n  acp list [--mine] [--wait [ID]] [--json] Find sessions; use an exact ID when multiple exist\n  acp ask ID TEXT                 Send a turn and print its answer\n  acp status ID [CURSOR]           Show session state and updates\n  acp stop ID                      End a session\n\nExample:\n  id=$(acp reserve claude)\n  acp run --reservation \"$id\" claude &\n  acp list --mine --wait \"$id\"\n  acp ask \"$id\" 'Say hi'\n\nOther commands: prompt, permissions, respond, cancel, attach, release, publish, unpublish.\nRun `acp COMMAND --help` for details."
         }
         Some("run") => {
             "Usage: acp run [--reservation ID] AGENT &\n\nStart an ACP agent as a Brush background job. Prints session and Kit job IDs to stderr when ready. For race-free composition, including quoted agent names: id=$(acp reserve AGENT); acp run --reservation \"$id\" AGENT & acp list --mine --wait \"$id\". Reservations expire after 15 seconds if not started."
@@ -1580,6 +1580,7 @@ impl DaemonClient for LocalDaemonClient {
                 placement: request.placement,
                 environment: request.environment,
                 working_directory: request.working_directory,
+                acp: false,
                 session: daemon_session(&request.session)?,
                 process: request
                     .spawn

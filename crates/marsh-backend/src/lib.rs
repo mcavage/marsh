@@ -4,7 +4,7 @@ pub mod account_home;
 mod cloud;
 pub mod command_registry;
 
-use marsh_acp::{AgentAdapterDeclaration, AgentRegistry};
+use marsh_acp::AgentAdapterDeclaration;
 pub mod config;
 mod ephemeral;
 mod kit_auto_update;
@@ -16,7 +16,7 @@ use marsh_contracts::{
     ExecutionOutcome, JobIdentity, JobMount, JobResources, JobSignal, JobSpec, MountAccess,
     OciImage, ResourceLimit, TerminalSize, WORKER_CONTAINER_CAPACITY,
     command_registry::{CommandName, CommandRegistry, validate_count},
-    kit_assets::KitAssets,
+    kit_assets::{KitAgent, KitAssets},
     kit_source::{KitTag, check_contract},
 };
 use marsh_daemon::{
@@ -99,11 +99,6 @@ pub struct StockDaemonBackend {
     /// a local or dev build.
     packaged_channel: Option<String>,
     registry_install: Mutex<()>,
-    agents: AgentRegistry,
-    acp_pins: BTreeMap<String, String>,
-    /// Commands whose ACP declarations pin the packaged digest: they follow
-    /// the command through its automatic updates instead of pinning it.
-    acp_follows: BTreeSet<String>,
     config: BackendConfig,
     registered_workers: Mutex<BTreeSet<String>>,
     ready_kits: Mutex<BTreeMap<String, ReadyKitVm>>,
@@ -372,9 +367,6 @@ impl StockDaemonBackend {
             packaged: BTreeMap::new(),
             packaged_channel: None,
             registry_install: Mutex::new(()),
-            agents: AgentRegistry::new(),
-            acp_pins: BTreeMap::new(),
-            acp_follows: BTreeSet::new(),
             config,
             registered_workers: Mutex::new(BTreeSet::new()),
             ready_kits: Mutex::new(BTreeMap::new()),
@@ -419,7 +411,7 @@ impl StockDaemonBackend {
     }
 
     /// The Kits this marsh shipped (before host overrides) and the release
-    /// channel tag they follow on upgrade. Call before [`Self::with_agents`].
+    /// channel tag they follow on upgrade.
     #[must_use]
     pub fn with_packaged(
         mut self,
@@ -429,67 +421,6 @@ impl StockDaemonBackend {
         self.packaged = packaged;
         self.packaged_channel = channel;
         self
-    }
-
-    /// Pin registered ACP agents to the exact Kit generation resolved at startup.
-    ///
-    /// # Errors
-    /// Returns an error for a missing Kit or a mismatched workload identity.
-    pub fn with_agents(mut self, agents: &AgentRegistry) -> Result<Self, DaemonError> {
-        let mut pinned = AgentRegistry::new();
-        let mut pins = BTreeMap::new();
-        // Commands installed from a tag were chosen to follow it.
-        let followed = kit_lifecycle::read_sources(&self.config.control_home)?;
-        for declaration in agents.declarations() {
-            let kit = self
-                .commands
-                .get(&declaration.command)
-                .ok_or_else(|| DaemonError::NotFound(declaration.command.clone()))?;
-            let exact = kit.workload.capture_generation().map_err(backend_error)?;
-            if declaration.workload_digest.is_empty() && kit.workload.source_dir().is_none() {
-                return Err(DaemonError::InvalidState(
-                    "immutable ACP Kit requires an explicit workload digest".into(),
-                ));
-            }
-            // A packaged declaration pins its packaged command, and a command
-            // installed from a tag follows that tag: through `marsh kit
-            // upgrade`, the declaration follows the command. A host copy of a
-            // packaged declaration names an earlier release's image of the
-            // same repository after marsh is upgraded; it still means the
-            // packaged command.
-            let follows = !declaration.workload_digest.is_empty()
-                && (followed.contains_key(&declaration.command)
-                    || self
-                        .packaged
-                        .get(&declaration.command)
-                        .is_some_and(|packaged| {
-                            same_repository(
-                                &declaration.workload_digest,
-                                packaged.workload.identity(),
-                            )
-                        }));
-            if !declaration.workload_digest.is_empty()
-                && declaration.workload_digest != exact.identity()
-                && !follows
-            {
-                return Err(DaemonError::InvalidState(format!(
-                    "ACP Kit identity mismatch for {}",
-                    declaration.name
-                )));
-            }
-            if follows {
-                self.acp_follows.insert(declaration.command.clone());
-            }
-            let mut resolved = declaration.clone();
-            resolved.workload_digest = exact.identity().into();
-            pinned
-                .register(resolved)
-                .map_err(|error| DaemonError::InvalidState(error.to_string()))?;
-            pins.insert(declaration.command.clone(), exact.identity().into());
-        }
-        self.agents = pinned;
-        self.acp_pins = pins;
-        Ok(self)
     }
 
     /// Host-only paths that must never be exported into a guest.
@@ -504,16 +435,6 @@ impl StockDaemonBackend {
             .workload
             .capture_generation()
             .map_err(backend_error)?;
-        if !self.acp_follows.contains(command)
-            && self
-                .acp_pins
-                .get(command)
-                .is_some_and(|expected| expected != workload.identity())
-        {
-            return Err(DaemonError::InvalidState(format!(
-                "ACP Kit {command} changed since daemon startup"
-            )));
-        }
         let environment = self.environment(command);
         self.kit_spec_for_environment(workload, &environment)
     }
@@ -641,6 +562,42 @@ impl StockDaemonBackend {
         // The cache only saves a registry read; failing to write it is harmless.
         let _ = store();
         Ok(assets)
+    }
+
+    /// The ACP adapter and session verbs a command's Kit declares; kept under
+    /// the control home (`kit-agent/`) once read from a published image or a
+    /// local build, so `marsh status` stays offline and fast.
+    fn kit_agent(&self, command: &str) -> Result<KitAgent, DaemonError> {
+        let kit = self
+            .registered_kit(command)?
+            .workload
+            .capture_generation()
+            .map_err(backend_error)?;
+        let path = self
+            .config
+            .control_home
+            .join("kit-agent")
+            .join(format!("{}.json", identity_digest(kit.identity())));
+        if let Ok(bytes) = fs::read(&path)
+            && let Ok(agent) = serde_json::from_slice(&bytes)
+        {
+            return Ok(agent);
+        }
+        let (descriptor, done) = self.sbx.kit_descriptor(&kit).map_err(backend_error)?;
+        let agent = KitAgent::from_descriptor(&descriptor).map_err(DaemonError::InvalidState)?;
+        if done {
+            let store = || -> std::io::Result<()> {
+                let directory = path.parent().unwrap_or(&path);
+                fs::create_dir_all(directory)?;
+                fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
+                let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+                serde_json::to_writer(&mut temporary, &agent)?;
+                temporary.persist(&path).map_err(|error| error.error)?;
+                Ok(())
+            };
+            let _ = store();
+        }
+        Ok(agent)
     }
 
     fn kit_spec_for_environment(
@@ -1055,19 +1012,7 @@ impl DaemonBackend for StockDaemonBackend {
         .map_err(DaemonError::InvalidState)?;
         let replacement = match plan {
             kit_lifecycle::Uninstall::RevertToPackaged => packaged,
-            kit_lifecycle::Uninstall::Remove => {
-                if let Some(agent) = self
-                    .agents
-                    .declarations()
-                    .find(|agent| agent.command == command)
-                {
-                    return Err(DaemonError::InvalidState(format!(
-                        "ACP agent {} uses {command}; remove it from agents.json first",
-                        agent.name
-                    )));
-                }
-                None
-            }
+            kit_lifecycle::Uninstall::Remove => None,
         };
         let current = self.registered_kit(&command)?;
         let old_spec = self.kit_spec(&command)?;
@@ -1125,27 +1070,41 @@ impl DaemonBackend for StockDaemonBackend {
         Ok(message)
     }
 
+    /// An ACP session runs the command's Kit through its declared
+    /// `com.docker.sandbox/acp@1` adapter (`docs/acp.md`).
     fn resolve_acp_agent(&self, name: &str) -> Result<AgentAdapterDeclaration, DaemonError> {
-        let declaration = self
-            .agents
-            .resolve_acp(name)
-            .map_err(|error| DaemonError::InvalidState(error.to_string()))?;
-        let kit = self.registered_kit(&declaration.command)?;
+        let kit = self.registered_kit(name)?;
         let exact = kit.workload.capture_generation().map_err(backend_error)?;
-        if self.acp_follows.contains(&declaration.command) {
-            let mut following = declaration.clone();
-            following.workload_digest = exact.identity().into();
-            return Ok(following);
-        }
-        if declaration.workload_digest != exact.identity() {
+        if self.kit_agent(name)?.acp.is_none() {
             return Err(DaemonError::InvalidState(format!(
-                "ACP agent '{}' Kit identity changed; expected {}, got {}",
-                name,
-                declaration.workload_digest,
-                exact.identity()
+                "{name}: its Kit declares no ACP adapter (com.docker.sandbox/acp@1)"
             )));
         }
-        Ok(declaration.clone())
+        Ok(AgentAdapterDeclaration {
+            schema_version: 1,
+            name: name.into(),
+            protocol: marsh_acp::AgentProtocol::AcpV1,
+            command: name.into(),
+            workload_digest: exact.identity().into(),
+            required_capabilities: Vec::new(),
+            description: None,
+        })
+    }
+
+    fn command_catalog(&self) -> Vec<marsh_daemon::CommandStatus> {
+        self.command_names()
+            .into_iter()
+            .filter_map(|name| {
+                let kit = self.registered_kit(&name).ok()?;
+                let agent = self.kit_agent(&name).unwrap_or_default();
+                Some(marsh_daemon::CommandStatus {
+                    reference: kit.workload.identity().to_owned(),
+                    acp: agent.acp.is_some(),
+                    sessions: agent.sessions,
+                    name,
+                })
+            })
+            .collect()
     }
 
     fn registered_kits(&self) -> Result<BTreeMap<String, String>, DaemonError> {
@@ -1606,6 +1565,18 @@ impl DaemonBackend for StockDaemonBackend {
             .map_err(|error| quarantine_hint(error, &request.command))?;
         let vm_ready_at = Instant::now();
         self.register_worker(&store, &vm)?;
+        // `run --acp` and ACP sessions run the adapter the Kit declares,
+        // read once the Kit is prepared (a local Kit's build is cached then).
+        let acp = if request.acp {
+            Some(self.kit_agent(&request.command)?.acp.ok_or_else(|| {
+                DaemonError::Refused(format!(
+                    "{}: its Kit declares no ACP adapter (com.docker.sandbox/acp@1)",
+                    request.command
+                ))
+            })?)
+        } else {
+            None
+        };
         let image = vm.job_image().clone();
         let (job_id, attempt_id, lineage) = store.begin_job_process(
             NewJob {
@@ -1690,8 +1661,15 @@ impl DaemonBackend for StockDaemonBackend {
                 request.session.guest_home.display().to_string(),
             ),
         ]);
-        let (exported_environment, omitted) =
+        let (mut exported_environment, omitted) =
             merge_exported_environment(&request.environment, &self.config.env)?;
+        if let Some(acp) = &acp {
+            exported_environment.extend(
+                acp.env
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.as_bytes().to_vec())),
+            );
+        }
         let forwarded_names = exported_environment
             .iter()
             .filter(|(name, value)| request.environment.get(*name) == Some(*value))
@@ -1750,6 +1728,7 @@ impl DaemonBackend for StockDaemonBackend {
             store.set_job_deadline(&job_id, resources.wall_seconds);
         resources.wall_seconds = wall_seconds;
         let spec = JobSpec {
+            entrypoint: acp.map(|acp| acp.command),
             image,
             argv: request.arguments,
             identity: JobIdentity {
@@ -3858,11 +3837,6 @@ impl StockDaemonBackend {
         if let Err(reason) = check_contract(contract, packaged.is_some()) {
             return UpgradeCheck::Problem(reason);
         }
-        if self.acp_pins.contains_key(command) && !self.acp_follows.contains(command) {
-            return UpgradeCheck::Problem(
-                "an ACP agent in agents.json pins this Kit's digest; update its workload_digest instead".into(),
-            );
-        }
         UpgradeCheck::Available {
             current: current.workload.identity().to_owned(),
             image,
@@ -4640,176 +4614,6 @@ mod tests {
             [] as [marsh_daemon::WorkerStatus; 0]
         );
         assert_eq!(store.jobs().jobs, [] as [marsh_daemon::JobSummary; 0]);
-    }
-
-    #[test]
-    fn acp_adapter_must_bind_exact_registered_kit_generation() {
-        let home = tempfile::tempdir().unwrap();
-        let identity = format!("registry.example/acp@sha256:{}", "a".repeat(64));
-        let workload = NativeKitRef::immutable_oci(identity.clone()).unwrap();
-        let commands = BTreeMap::from([("agent-kit".into(), RegisteredKit { workload })]);
-        let declaration = AgentAdapterDeclaration {
-            schema_version: 1,
-            name: "agent-session".into(),
-            protocol: marsh_acp::AgentProtocol::AcpV1,
-            command: "agent-kit".into(),
-            workload_digest: identity.clone(),
-            required_capabilities: vec![],
-            arguments: vec![],
-            description: None,
-        };
-        let mut registry = AgentRegistry::new();
-        registry.register(declaration.clone()).unwrap();
-        let backend = backend_for_kit_identity(home.path(), commands)
-            .with_agents(&registry)
-            .unwrap();
-        assert_eq!(
-            backend
-                .resolve_acp_agent("agent-session")
-                .unwrap()
-                .workload_digest,
-            identity
-        );
-        assert!(backend.resolve_acp_agent("agent-kit").is_err());
-        let mut wrong = AgentRegistry::new();
-        wrong
-            .register(AgentAdapterDeclaration {
-                workload_digest: format!("registry.example/acp@sha256:{}", "b".repeat(64)),
-                ..declaration
-            })
-            .unwrap();
-        let workload = NativeKitRef::immutable_oci(identity).unwrap();
-        let commands = BTreeMap::from([("agent-kit".into(), RegisteredKit { workload })]);
-        assert!(matches!(
-            backend_for_kit_identity(home.path(), commands).with_agents(&wrong),
-            Err(DaemonError::InvalidState(_))
-        ));
-    }
-
-    #[test]
-    fn a_copied_packaged_acp_declaration_follows_the_packaged_command_after_an_upgrade() {
-        let home = tempfile::tempdir().unwrap();
-        let shipped = format!("docker.io/mcavage/marsh-claude@sha256:{}", "c".repeat(64));
-        let previous = format!("docker.io/mcavage/marsh-claude@sha256:{}", "d".repeat(64));
-        let kit = || RegisteredKit {
-            workload: NativeKitRef::immutable_oci(shipped.clone()).unwrap(),
-        };
-        let declaration = AgentAdapterDeclaration {
-            schema_version: 1,
-            name: "claude-session".into(),
-            protocol: marsh_acp::AgentProtocol::AcpV1,
-            command: "claude".into(),
-            // Copied into the host agents.json under the previous release.
-            workload_digest: previous,
-            required_capabilities: vec![],
-            arguments: vec![],
-            description: None,
-        };
-        let mut registry = AgentRegistry::new();
-        registry.register(declaration.clone()).unwrap();
-        let backend =
-            backend_for_kit_identity(home.path(), BTreeMap::from([("claude".into(), kit())]))
-                .with_packaged(BTreeMap::from([("claude".into(), kit())]), None)
-                .with_agents(&registry)
-                .unwrap();
-        assert_eq!(
-            backend
-                .resolve_acp_agent("claude-session")
-                .unwrap()
-                .workload_digest,
-            shipped
-        );
-        // A pin to another image is still the user's explicit choice: refused.
-        let mut other = AgentRegistry::new();
-        other
-            .register(AgentAdapterDeclaration {
-                workload_digest: format!("docker.io/someone/claude@sha256:{}", "e".repeat(64)),
-                ..declaration
-            })
-            .unwrap();
-        assert!(matches!(
-            backend_for_kit_identity(home.path(), BTreeMap::from([("claude".into(), kit())]))
-                .with_packaged(BTreeMap::from([("claude".into(), kit())]), None)
-                .with_agents(&other),
-            Err(DaemonError::InvalidState(_))
-        ));
-    }
-
-    #[test]
-    fn acp_local_source_generation_is_pinned_at_daemon_startup() {
-        let home = tempfile::tempdir().unwrap();
-        let source = tempfile::tempdir().unwrap();
-        let source_path = source.path().join("kit");
-        fs::create_dir(&source_path).unwrap();
-        fs::write(source_path.join("kit.yaml"), "schemaVersion: \"3\"\n").unwrap();
-        let workload =
-            NativeKitRef::local_v3_source(fs::canonicalize(&source_path).unwrap()).unwrap();
-        let generation = workload.generation_identity().unwrap();
-        let commands = BTreeMap::from([("agent-kit".into(), RegisteredKit { workload })]);
-        let mut registry = AgentRegistry::new();
-        registry
-            .register(AgentAdapterDeclaration {
-                schema_version: 1,
-                name: "agent-session".into(),
-                protocol: marsh_acp::AgentProtocol::AcpV1,
-                command: "agent-kit".into(),
-                workload_digest: String::new(),
-                required_capabilities: vec![],
-                arguments: vec![],
-                description: None,
-            })
-            .unwrap();
-        let backend = backend_for_kit_identity(home.path(), commands)
-            .with_agents(&registry)
-            .unwrap();
-        assert_eq!(
-            backend
-                .resolve_acp_agent("agent-session")
-                .unwrap()
-                .workload_digest,
-            generation
-        );
-        backend.kit_spec("agent-kit").unwrap();
-
-        fs::write(
-            source_path.join("kit.yaml"),
-            "schemaVersion: \"3\"\n# edited\n",
-        )
-        .unwrap();
-        assert!(matches!(
-            backend.resolve_acp_agent("agent-session"),
-            Err(DaemonError::InvalidState(_))
-        ));
-        assert!(matches!(
-            backend.kit_spec("agent-kit"),
-            Err(DaemonError::InvalidState(_))
-        ));
-    }
-
-    #[test]
-    fn acp_immutable_kit_requires_explicit_generation_at_startup() {
-        let home = tempfile::tempdir().unwrap();
-        let workload =
-            NativeKitRef::immutable_oci(format!("registry.example/acp@sha256:{}", "a".repeat(64)))
-                .unwrap();
-        let commands = BTreeMap::from([("agent-kit".into(), RegisteredKit { workload })]);
-        let mut registry = AgentRegistry::new();
-        registry
-            .register(AgentAdapterDeclaration {
-                schema_version: 1,
-                name: "agent-session".into(),
-                protocol: marsh_acp::AgentProtocol::AcpV1,
-                command: "agent-kit".into(),
-                workload_digest: String::new(),
-                required_capabilities: vec![],
-                arguments: vec![],
-                description: None,
-            })
-            .unwrap();
-        assert!(matches!(
-            backend_for_kit_identity(home.path(), commands).with_agents(&registry),
-            Err(DaemonError::InvalidState(_))
-        ));
     }
 
     #[test]

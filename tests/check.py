@@ -213,17 +213,14 @@ class Scope:
                 errors = self.stop()
                 require(not errors, f"could not stop stale scope: {errors}")
         commands = {"fixture": self.kit, "fixture-acp": str(stage_acp_fixture(self.root / "kits"))}
-        agents = [{"schema_version": 1, "name": "fixture-session", "protocol": "acp_v1",
-                   "command": "fixture-acp", "required_capabilities": []}]
-        for name, value in (("commands.json", commands), ("agents.json", agents)):
-            path = self.control_home / name
-            content = json.dumps(value, sort_keys=True) + "\n"
-            if not path.exists() or path.read_text() != content:
-                if self.daemon_running():
-                    # The daemon freezes its registry at startup.
-                    errors = self.stop()
-                    require(not errors, f"could not stop scope for a registry change: {errors}")
-                path.write_text(content)
+        path = self.control_home / "commands.json"
+        content = json.dumps(commands, sort_keys=True) + "\n"
+        if not path.exists() or path.read_text() != content:
+            if self.daemon_running():
+                # The daemon freezes its registry at startup.
+                errors = self.stop()
+                require(not errors, f"could not stop scope for a registry change: {errors}")
+            path.write_text(content)
         self.stamp_path.write_text(json.dumps(current, sort_keys=True) + "\n")
         self.prepare_project()
         return info
@@ -483,8 +480,8 @@ def check_mcp(scope: Scope, run_id: str) -> dict[str, Any]:
 
 
 ACP_SCRIPT = r"""
-id=$(acp reserve fixture-session) || exit 30
-acp run --reservation "$id" fixture-session >/dev/null 2>&1 &
+id=$(acp reserve fixture-acp) || exit 30
+acp run --reservation "$id" fixture-acp >/dev/null 2>&1 &
 run_pid=$!
 acp list --mine --wait "$id" >/dev/null || exit 31
 fresh=$(acp status "$id") || exit 32

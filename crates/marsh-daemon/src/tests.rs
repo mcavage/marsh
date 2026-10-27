@@ -3177,6 +3177,7 @@ fn execution_attachment_preserves_bytes_and_exit_status() {
     let status = client
         .execute_with_io(
             ExecuteSpec {
+                acp: false,
                 command: "fixture".into(),
                 arguments: vec![b"invalid:\xff".to_vec()],
                 working_directory: None,
@@ -3583,6 +3584,7 @@ fn active_execute_refuses_lifecycle_immediately_without_blocking_status() {
     };
     let execution = client
         .start_execution(ExecuteSpec {
+            acp: false,
             working_directory: None,
             command: "fixture".into(),
             arguments: Vec::new(),
@@ -3977,7 +3979,6 @@ impl DaemonBackend for FakeAcpKit {
             command: "agent-kit".into(),
             workload_digest: "test-kit-identity".into(),
             required_capabilities: vec![],
-            arguments: vec![],
             description: None,
         })
     }
@@ -5060,6 +5061,7 @@ fn receipt_journal_is_owner_only_and_keeps_no_job_or_prompt_content() {
     let code = client
         .execute_with_io(
             ExecuteSpec {
+                acp: false,
                 placement: Placement::Local,
                 environment: BTreeMap::new(),
                 command: "fixture".into(),

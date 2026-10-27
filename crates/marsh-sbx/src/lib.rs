@@ -1560,6 +1560,81 @@ impl StockSbx {
         }
     }
 
+    /// A Kit's composed descriptor (the `vnd.docker.sandbox.kit.descriptor`
+    /// annotation): from the registry for a published Kit; for a local
+    /// source, from its last cached build, else from its source YAML (a
+    /// local Kit set or mixin is composed only by a build). The flag says
+    /// whether it is final (not the source YAML of a Kit not yet built).
+    ///
+    /// # Errors
+    /// Fails when Docker cannot read the manifests or a descriptor is invalid.
+    pub fn kit_descriptor(
+        &self,
+        kit: &NativeKitRef,
+    ) -> Result<(serde_json::Value, bool), SbxError> {
+        let manifest = match &kit.location {
+            NativeKitLocation::ImmutableOci(image) => self.arm64_manifest(image)?,
+            NativeKitLocation::LocalV3Source(source) => {
+                let cached = self.kit_image_cache.as_deref().and_then(|cache| {
+                    cached_local_build(cache, &local_source_fingerprint(source).ok()?)
+                });
+                if let Some(build) = cached {
+                    Some(self.archived_manifest(&build)?)
+                } else {
+                    let path = local_v3_descriptor(source)?;
+                    if path.extension().is_none_or(|extension| extension != "yaml") {
+                        return Ok((serde_json::Value::Null, false));
+                    }
+                    let yaml: serde_json::Value =
+                        serde_yaml::from_slice(&fs::read(&path).map_err(|source| {
+                            SbxError::Metadata {
+                                path: path.clone(),
+                                source,
+                            }
+                        })?)
+                        .map_err(|source| SbxError::InvalidLocalKitDescriptor { path, source })?;
+                    return Ok((yaml, false));
+                }
+            }
+        };
+        let Some(manifest) = manifest else {
+            return Ok((serde_json::Value::Null, true));
+        };
+        let value: serde_json::Value = serde_json::from_slice(&manifest)?;
+        match value
+            .get("annotations")
+            .and_then(|annotations| annotations.get(DESCRIPTOR_ANNOTATION))
+            .and_then(serde_json::Value::as_str)
+        {
+            Some(descriptor) => Ok((serde_json::from_str(descriptor)?, true)),
+            None => Ok((serde_json::Value::Null, true)),
+        }
+    }
+
+    /// A cached local build's image manifest, read from its OCI archive.
+    fn archived_manifest(&self, build: &LocalBuild) -> Result<Vec<u8>, SbxError> {
+        let blob = format!(
+            "blobs/sha256/{}",
+            build
+                .manifest_digest
+                .as_str()
+                .strip_prefix("sha256:")
+                .unwrap_or_default()
+        );
+        let output = self.run_program_bounded_os(
+            "read local Kit descriptor",
+            Path::new("/usr/bin/tar"),
+            KIT_RESOLUTION_TIMEOUT,
+            [
+                OsStr::new("-xOf"),
+                build.docker_archive.as_os_str(),
+                OsStr::new(&blob),
+            ],
+        )?;
+        Self::require_success("read local Kit descriptor", output.clone())?;
+        Ok(output.stdout)
+    }
+
     /// The version a published Kit image names for display: its
     /// `org.opencontainers.image.version` annotation, else the version of the
     /// first non-package entry its descriptor `provides` (`claude@2.1.307`).

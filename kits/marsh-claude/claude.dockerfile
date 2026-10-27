@@ -38,7 +38,7 @@ RUN case "$TARGETARCH" in \
  && tar -xOzf /tmp/claude-package.tgz package/LICENSE.md \
       > /out/usr/local/share/licenses/claude/LICENSE.md
 
-# ACP mode (`claude --acp`, packaging/agents.json claude-session): the official
+# ACP mode (`--acp`, the Kit's acp@1 adapter): the official
 # Claude ACP adapter, pinned by package-lock.json. Its Agent SDK carries the
 # matching native Claude Code build, which the adapter drives through
 # claude-cli.sh so the container, not bubblewrap, stays the sandbox.

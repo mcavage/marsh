@@ -56,7 +56,6 @@ impl DaemonBackend for Fixture {
             command: "fixture".into(),
             workload_digest: "fixture-process".into(),
             required_capabilities: vec![],
-            arguments: vec![],
             description: None,
         })
     }

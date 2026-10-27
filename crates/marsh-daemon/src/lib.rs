@@ -1006,6 +1006,9 @@ pub struct ExecuteSpec {
     /// the daemon's own endpoint may name a parent; relays may only narrow.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process: Option<process::ProcessLink>,
+    /// Run the Kit's declared ACP adapter (`acp@1`) instead of its entrypoint.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub acp: bool,
 }
 
 impl ExecuteSpec {
@@ -1237,6 +1240,11 @@ pub trait DaemonBackend: Send + Sync + 'static {
     fn resolve_acp_agent(&self, _name: &str) -> Result<AgentAdapterDeclaration, DaemonError> {
         Err(DaemonError::BackendUnavailable)
     }
+    /// `marsh status` `commands`: each registered command and what its Kit
+    /// declares about agent sessions.
+    fn command_catalog(&self) -> Vec<CommandStatus> {
+        Vec::new()
+    }
     fn registered_kits(&self) -> Result<BTreeMap<String, String>, DaemonError> {
         Ok(BTreeMap::new())
     }
@@ -1421,6 +1429,20 @@ pub struct StatusDocument {
     /// no longer reach its VMs (`stock_sbx_removed_message`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stock_sbx_removed: Option<PathBuf>,
+    /// Registered commands (`docs/acp.md`).
+    #[serde(default)]
+    pub commands: Vec<CommandStatus>,
+}
+
+/// One registered command: its Kit reference, whether the Kit declares an ACP
+/// adapter (`com.docker.sandbox/acp@1`), and its `agent-sessions@1` verbs.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CommandStatus {
+    pub name: String,
+    pub reference: String,
+    pub acp: bool,
+    #[serde(default)]
+    pub sessions: Option<serde_json::Value>,
 }
 
 /// `marsh status` `kit_updates`: the hourly background check of Kits that
@@ -3357,6 +3379,7 @@ impl DaemonStore {
             processes: process::ProcessCounts::default(),
             kit_updates: None,
             stock_sbx_removed: None,
+            commands: Vec::new(),
         }
     }
 
@@ -5397,6 +5420,7 @@ impl ConnectionHandler {
                     .stock_sbx
                     .clone()
                     .filter(|path| stock_sbx_removed(Some(path)));
+                status.commands = self.backend.command_catalog();
                 write_frame(&mut stream, &PublicReply::Status(status))
             }
             PublicRequest::ResetWorkers { selection } => {

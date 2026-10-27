@@ -967,13 +967,6 @@ impl AcpSessionManager {
         let (server, client) = ServerAttachment::pair()?;
         startup.bind(client.clone());
         let command = declaration.command.clone();
-        // The declaration's fixed tail (e.g. `--acp`) selects the Kit's ACP
-        // mode; the Kit entrypoint, image, and policy stay its own.
-        let arguments = declaration
-            .arguments
-            .iter()
-            .map(|argument| argument.as_bytes().to_vec())
-            .collect();
         // ACP speaks over pipes: never a terminal job (`open_url`).
         let execution_caller = SessionSpec {
             terminal: false,
@@ -985,12 +978,14 @@ impl AcpSessionManager {
             let result = backend.execute(
                 ExecuteSpec {
                     command,
-                    arguments,
+                    arguments: Vec::new(),
                     session: execution_caller,
                     working_directory: None,
                     placement: crate::Placement::Local,
                     environment: std::collections::BTreeMap::new(),
                     process: None,
+                    // The Kit's declared adapter (`acp@1`), image and policy its own.
+                    acp: true,
                 },
                 server.clone(),
                 execution_store,

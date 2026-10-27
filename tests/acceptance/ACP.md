@@ -30,7 +30,7 @@ status, and independent before/after stock-SBX inventories to `acp-uat.json`. It
 to its selected home and removes only that scope's VMs. A cleanup error fails
 the run and is retained in the evidence.
 
-The guest parent shell starts `acp run fixture-session &`, waits for its
+The guest parent shell starts `acp run fixture-acp &`, waits for its
 independent ACP session ID with `acp list --wait --json` in an initially empty scope, checks that default
 `acp list` and `acp status ID` are readable, checks that `ps --marsh` and
 `top --marsh --once` show the linked live session and Kit job, and checks
@@ -99,7 +99,7 @@ loss. Agent-private activity remains outside the ACP and Kit stream boundary.
 For unambiguous startup (including two simultaneous jobs or quoted agent names):
 
 ```sh
-agent=fixture-session
+agent=fixture-acp
 id=$(acp reserve "$agent")
 acp run --reservation "$id" "$agent" &
 pid=$!
@@ -277,12 +277,10 @@ Real provider Kit model turns remain a separate credentialed acceptance gate.
 ## Real provider Kits
 
 There is one Kit per agent. `claude`, `codex`, and `pi` run the agent's CLI;
-`acp run claude-session` (or `codex-session`, `pi-session`) runs the same Kit
-in its ACP mode for a steerable background session. `packaging/agents.json`
-selects the mode with a fixed `"arguments": ["--acp"]` tail, which the daemon
-appends to the Kit's own entrypoint exactly like typed arguments; the
-declaration cannot change the image, entrypoint, mounts, network, or
-credentials. Each Kit image ships the CLI and the pinned ACP adapter (the
+`acp run claude` (or `codex`, `pi`) runs the same Kit through the ACP adapter
+its descriptor declares (`com.docker.sandbox/acp@1`: the Kit's own entrypoint
+with `--acp`) for a steerable background session; the declaration selects
+the program and cannot change the image, mounts, network, or credentials. Each Kit image ships the CLI and the pinned ACP adapter (the
 official `claude-agent-acp` and `codex-acp`, the community `pi-acp`), so ACP
 sessions share the CLI's warm VM and its network allowlist. ACP mode disables
 the agent's own sandbox like the CLI does: Claude's Agent SDK runs Claude Code

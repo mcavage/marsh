@@ -1715,6 +1715,7 @@ mod tests {
                 client
                     .execute_with_io(
                         ExecuteSpec {
+                            acp: false,
                             command: "fixture".into(),
                             placement: crate::Placement::Local,
                             arguments: Vec::new(),

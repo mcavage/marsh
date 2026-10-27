@@ -946,8 +946,8 @@ impl SplitEngine {
             let index = record
                 .branches
                 .iter()
-                .position(|branch| branch.label == label)
-                .ok_or_else(|| format!("split {id} has no lane {label}"))?;
+                .position(|branch| branch.label == label && branch.state == BranchState::Running)
+                .ok_or_else(|| format!("split {id} has no open lane {label}"))?;
             record.branches[index].live += 1;
             index
         };
@@ -996,6 +996,10 @@ impl SplitEngine {
         let split = record.open();
         for (index, ended) in ended.iter().enumerate() {
             let branch = &record.branches[index];
+            // A lane captured by a close that a restart interrupted stays so.
+            if branch.state != BranchState::Running {
+                continue;
+            }
             let out = split.as_ref().ok().and_then(|split| {
                 split
                     .open("out")
@@ -1910,6 +1914,7 @@ impl SplitEngine {
                     branch: true,
                     start_env: std::collections::BTreeMap::new(),
                 }),
+                acp: false,
             };
             let execution = self
                 .client

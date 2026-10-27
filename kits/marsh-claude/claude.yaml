@@ -110,6 +110,13 @@ capabilities:
   # human at the terminal. Argv tails append to the entrypoint the way
   # user args do; the host substitutes the placeholders. Session state lives
   # in the selected home supplied by marsh rather than outer-only kit volumes.
+  # ACP mode: the entrypoint's `--acp` runs the pinned adapter on stdio
+  # (`marsh run --acp claude`, `acp run claude`).
+  - type: com.docker.sandbox/acp@1
+    config:
+      agent: claude
+      command: ["/usr/local/bin/marsh-claude", "--acp"]
+
   - type: com.docker.sandbox/agent-sessions@1
     description: Drive claude sessions programmatically
     config:

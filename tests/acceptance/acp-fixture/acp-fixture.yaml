@@ -7,3 +7,7 @@ provides: ["marsh-acp-fixture@1.0.0"]
 dockerfile: ./acp-fixture.dockerfile
 capabilities:
   - type: com.docker.sandbox/sbx@1
+  - type: com.docker.sandbox/acp@1
+    config:
+      agent: marsh-acp-fixture
+      command: ["node", "/usr/local/bin/marsh-acp-fixture.mjs"]

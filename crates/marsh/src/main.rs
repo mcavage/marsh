@@ -88,7 +88,7 @@ Inside the project shell:
   mcp load NAME --kit KIT | --sandbox SANDBOX
                            Load an existing publication without republishing
   mcp unpublish NAME       Revoke a published pipeline
-  acp run AGENT &          Start a registered ACP agent (e.g. claude-session) as a Brush background job
+  acp run AGENT &          Start a command's ACP agent (e.g. claude) as a Brush background job
   acp reserve AGENT        Reserve a session id; then acp run --reservation ID AGENT &
   acp list [--mine] [--wait [ID]] [--json]
                            Find sessions, including agents still starting
@@ -954,8 +954,8 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
 /// `marsh run` from the host or the shell VM: a session-root job through
 /// `Execute` (`docs/design/processes.md` s3), narrowed by `--spawn`/`MARSH_SPAWN`.
 fn run_command(arguments: &[OsString]) -> i32 {
-    let (spawn, name, rest) = match marsh::job::parse_run(arguments) {
-        Ok(Some(parsed)) => parsed,
+    let (spawn, name, rest, acp) = match marsh::job::parse_run(arguments) {
+        Ok(Some(run)) => (run.spawn, run.name, run.arguments, run.acp),
         Ok(None) => {
             print!("{}", marsh::job::RUN_HELP);
             return 0;
@@ -998,6 +998,7 @@ fn run_command(arguments: &[OsString]) -> i32 {
             branch: false,
             start_env: std::collections::BTreeMap::new(),
         }),
+        acp,
     };
     let status = match channel.client.execute_with_io(
         spec,
@@ -1357,6 +1358,7 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
                 branch: false,
                 start_env: std::collections::BTreeMap::new(),
             }),
+        acp: false,
     };
     let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stdout = ClosedPipeStdout {

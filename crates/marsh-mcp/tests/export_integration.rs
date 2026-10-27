@@ -1063,6 +1063,7 @@ fn run_decoy_job(
     harness: &TestHarness,
 ) {
     let spec = marsh_daemon::ExecuteSpec {
+        acp: false,
         process: None,
         placement: marsh_daemon::Placement::Local,
         environment: std::collections::BTreeMap::new(),

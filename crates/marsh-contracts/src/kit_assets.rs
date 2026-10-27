@@ -165,6 +165,126 @@ impl KitAssets {
     }
 }
 
+/// A Kit's `com.docker.sandbox/acp@1` adapter: how to start its agent as an
+/// ACP server on stdio. A string command runs through `/bin/sh -c`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcpAdapter {
+    pub agent: String,
+    pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub env: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_version: Option<u64>,
+}
+
+/// What a Kit declares about agent sessions: its ACP adapter and its
+/// `agent-sessions@1` verbs, from the composed descriptor (kit sets, mixins,
+/// and capability groups included).
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct KitAgent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acp: Option<AcpAdapter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sessions: Option<serde_json::Value>,
+}
+
+/// `claude`, `com.docker.kit/claude`, and `claude@2.1.3` name one agent.
+fn agent_name(name: &str) -> String {
+    let name = name.split('@').next().unwrap_or_default();
+    name.strip_prefix("com.docker.kit/")
+        .unwrap_or(name)
+        .to_ascii_lowercase()
+}
+
+impl KitAgent {
+    /// Reads `acp@1` and `agent-sessions@1` from a descriptor (JSON). Entries
+    /// with no agent or no command are not adapters. When a descriptor
+    /// declares several, the one for an agent it `provides` wins.
+    ///
+    /// # Errors
+    /// Returns why the descriptor or an adapter is malformed.
+    pub fn from_descriptor(descriptor: &serde_json::Value) -> Result<Self, String> {
+        fn walk<'a>(capabilities: &'a serde_json::Value, found: &mut Vec<&'a serde_json::Value>) {
+            for capability in capabilities.as_array().into_iter().flatten() {
+                match capability
+                    .get("group")
+                    .and_then(|group| group.get("capabilities"))
+                {
+                    Some(members) => walk(members, found),
+                    None => found.push(capability),
+                }
+            }
+        }
+        let mut capabilities = Vec::new();
+        if let Some(list) = descriptor.get("capabilities") {
+            walk(list, &mut capabilities);
+        }
+        let provided = descriptor
+            .get("provides")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(agent_name)
+            .collect::<Vec<_>>();
+        let mut agent = Self::default();
+        let mut adapters = Vec::new();
+        for capability in capabilities {
+            let config = capability.get("config").cloned().unwrap_or_default();
+            match capability.get("type").and_then(serde_json::Value::as_str) {
+                Some("com.docker.sandbox/acp@1") => {
+                    let command = match config.get("command") {
+                        Some(serde_json::Value::String(line)) if !line.trim().is_empty() => {
+                            vec!["/bin/sh".into(), "-c".into(), line.clone()]
+                        }
+                        Some(serde_json::Value::Array(words)) if !words.is_empty() => words
+                            .iter()
+                            .map(|word| word.as_str().map(str::to_owned))
+                            .collect::<Option<Vec<_>>>()
+                            .ok_or("acp@1: command words must be strings")?,
+                        _ => continue,
+                    };
+                    let Some(name) = config.get("agent").and_then(serde_json::Value::as_str) else {
+                        continue;
+                    };
+                    if command.len() > 64
+                        || command
+                            .iter()
+                            .any(|word| word.len() > 4096 || word.contains('\0'))
+                    {
+                        return Err("acp@1: command is too long or contains NUL".into());
+                    }
+                    let env = match config.get("env") {
+                        None => std::collections::BTreeMap::new(),
+                        Some(env) => serde_json::from_value(env.clone())
+                            .map_err(|_| "acp@1: env must map names to strings")?,
+                    };
+                    adapters.push(AcpAdapter {
+                        agent: name.to_owned(),
+                        command,
+                        env,
+                        protocol_version: config
+                            .get("protocolVersion")
+                            .and_then(serde_json::Value::as_u64),
+                    });
+                }
+                Some("com.docker.sandbox/agent-sessions@1") if agent.sessions.is_none() => {
+                    agent.sessions = Some(config);
+                }
+                _ => {}
+            }
+        }
+        agent.acp = adapters
+            .iter()
+            .find(|adapter| provided.contains(&agent_name(&adapter.agent)))
+            .or_else(|| adapters.first())
+            .cloned();
+        Ok(agent)
+    }
+}
+
 fn canonical_absolute(path: &Path) -> bool {
     path.is_absolute()
         && path != Path::new("/")
@@ -277,6 +397,32 @@ mod tests {
             );
         }
         assert!(KitAssets::from_descriptor("not json").is_err());
+    }
+
+    #[test]
+    fn reads_the_provided_agents_adapter_from_groups_and_mixins() {
+        let descriptor = serde_json::json!({
+            "kind": "workload",
+            "provides": ["com.docker.kit/codex@0.1"],
+            "capabilities": [
+                {"type": "com.docker.sandbox/acp@1", "config": {"agent": "claude", "command": ["claude-agent-acp"]}},
+                {"group": {"capabilities": [
+                    {"type": "com.docker.sandbox/acp@1", "config": {"agent": "com.docker.kit/codex", "command": "codex-acp --x", "env": {"A": "1"}, "protocolVersion": 1}},
+                    {"type": "com.docker.sandbox/agent-sessions@1", "config": {"list": "x"}}
+                ]}},
+                {"type": "com.docker.sandbox/acp@1", "config": {"command": ["no-agent"]}}
+            ]
+        });
+        let agent = KitAgent::from_descriptor(&descriptor).unwrap();
+        let acp = agent.acp.unwrap();
+        assert_eq!(acp.command, ["/bin/sh", "-c", "codex-acp --x"]);
+        assert_eq!(acp.env["A"], "1");
+        assert_eq!(acp.protocol_version, Some(1));
+        assert_eq!(agent.sessions, Some(serde_json::json!({"list": "x"})));
+        assert_eq!(
+            KitAgent::from_descriptor(&serde_json::json!({})).unwrap(),
+            KitAgent::default()
+        );
     }
 
     #[test]

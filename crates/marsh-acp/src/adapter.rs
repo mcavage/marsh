@@ -1,16 +1,10 @@
-//! Versioned native Kit adapter declarations and agent registry.
-//!
-//! Enforces PRD ACP-01:
-//! - Maps distinct explicit names (e.g. `claude-session`) to registered ACP-speaking workloads.
-//! - Rejects overrides of image, entrypoint, mounts, network, or credentials. A
-//!   declaration may only append a short fixed argument tail (e.g. `--acp`) to
-//!   the Kit's own entrypoint, as a user's typed arguments would be.
-//! - Forbids fake claims that ordinary CLI tools (such as plain `claude`) support ACP.
+//! The ACP session binding for one registered command whose Kit declares an
+//! ACP adapter (`com.docker.sandbox/acp@1`). The daemon builds it from the
+//! Kit descriptor; it names no image, entrypoint, mount, or credential.
 
 use crate::error::AgentError;
 use crate::protocol::AgentCapabilities;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// Supported protocol modes for agents.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -22,21 +16,13 @@ pub enum AgentProtocol {
     NativeCli,
 }
 
-const MAX_ARGUMENTS: usize = 8;
-const MAX_ARGUMENT_BYTES: usize = 128;
-
-/// Versioned declaration mapping an agent command name to an ACP-capable native Kit workload.
-///
-/// Under PRD ACP-01, this declaration references an existing registered native Kit
-/// command and workload generation. It CANNOT override the OCI entrypoint,
-/// image, mounts, credentials, or runtime policies; `arguments` is appended to
-/// the Kit entrypoint exactly like a user's command-line arguments.
+/// An ACP agent: a registered command and the exact Kit generation it ran.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentAdapterDeclaration {
     /// Schema version for the declaration (must be 1).
     pub schema_version: u32,
-    /// Explicit shell command name (e.g. `claude-session`).
+    /// The agent's name: its registered command (e.g. `claude`).
     pub name: String,
     /// Protocol spoken by the workload entrypoint.
     pub protocol: AgentProtocol,
@@ -49,10 +35,6 @@ pub struct AgentAdapterDeclaration {
     /// Required ACP capabilities that must be negotiated before turns begin.
     #[serde(default)]
     pub required_capabilities: Vec<String>,
-    /// Fixed arguments appended to the Kit entrypoint when an ACP session
-    /// starts, e.g. `["--acp"]` to select an agent Kit's ACP mode.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub arguments: Vec<String>,
     /// Optional human-readable description.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -86,34 +68,12 @@ impl AgentAdapterDeclaration {
             ));
         }
 
-        if self.arguments.len() > MAX_ARGUMENTS
-            || self.arguments.iter().any(|argument| {
-                argument.is_empty()
-                    || argument.len() > MAX_ARGUMENT_BYTES
-                    || argument.chars().any(char::is_control)
-            })
-        {
-            return Err(AgentError::InvalidConfiguration(format!(
-                "agent arguments must be at most {MAX_ARGUMENTS} non-empty printable values of at most {MAX_ARGUMENT_BYTES} bytes"
-            )));
-        }
-
         for capability in &self.required_capabilities {
             if capability != "loadSession" && capability != "sessionCapabilities.resume" {
                 return Err(AgentError::InvalidConfiguration(format!(
                     "unsupported required ACP capability '{capability}'"
                 )));
             }
-        }
-
-        // Truthfulness guard: plain CLI tools must not be registered as ACP.
-        // Specifically, the standard `claude` command is a CLI tool, not an ACP server.
-        // Only explicit names like `claude-session` referencing dedicated ACP workloads are valid.
-        if self.name == "claude" && self.protocol == AgentProtocol::AcpV1 {
-            return Err(AgentError::UnsupportedProtocol {
-                command: "claude".into(),
-                reason: "plain 'claude' CLI does not speak ACP stdio JSON-RPC; use an explicit name like 'claude-session' referencing a tested ACP workload".into(),
-            });
         }
 
         Ok(())
@@ -135,88 +95,6 @@ impl AgentAdapterDeclaration {
     }
 }
 
-/// Registry of agent adapters loaded from `agents.json`.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct AgentRegistry {
-    adapters: BTreeMap<String, AgentAdapterDeclaration>,
-}
-
-impl AgentRegistry {
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            adapters: BTreeMap::new(),
-        }
-    }
-
-    /// Parses and validates an `agents.json` document.
-    ///
-    /// # Errors
-    /// Returns [`AgentError`] if parsing or validation fails.
-    pub fn from_json_str(json: &str) -> Result<Self, AgentError> {
-        let declarations: Vec<AgentAdapterDeclaration> = serde_json::from_str(json)?;
-        let mut registry = Self::new();
-        for decl in declarations {
-            registry.register(decl)?;
-        }
-        Ok(registry)
-    }
-
-    /// Registers a single agent adapter declaration after validation.
-    ///
-    /// # Errors
-    /// Returns [`AgentError`] if declaration validation fails.
-    pub fn register(&mut self, decl: AgentAdapterDeclaration) -> Result<(), AgentError> {
-        decl.validate()?;
-        if self.adapters.contains_key(&decl.name) {
-            return Err(AgentError::DuplicateName(decl.name));
-        }
-        self.adapters.insert(decl.name.clone(), decl);
-        Ok(())
-    }
-
-    /// Looks up an adapter by name.
-    #[must_use]
-    pub fn get(&self, name: &str) -> Option<&AgentAdapterDeclaration> {
-        self.adapters.get(name)
-    }
-
-    /// Declarations for daemon startup binding to registered Kit generations.
-    pub fn declarations(&self) -> impl Iterator<Item = &AgentAdapterDeclaration> {
-        self.adapters.values()
-    }
-
-    /// Resolves an ACP adapter by explicit name.
-    ///
-    /// Explicitly rejects ordinary CLI names (e.g. `claude`) with [`AgentError::UnsupportedProtocol`].
-    ///
-    /// # Errors
-    /// Returns [`AgentError::UnsupportedProtocol`] if command is CLI only.
-    /// Returns [`AgentError::NotFound`] if command is unknown.
-    pub fn resolve_acp(&self, name: &str) -> Result<&AgentAdapterDeclaration, AgentError> {
-        if name == "claude" {
-            return Err(AgentError::UnsupportedProtocol {
-                command: "claude".into(),
-                reason: "plain 'claude' is a native CLI command; ACP session control requires an explicitly registered ACP workload such as 'claude-session'".into(),
-            });
-        }
-
-        let decl = self
-            .adapters
-            .get(name)
-            .ok_or_else(|| AgentError::NotFound(name.into()))?;
-
-        if decl.protocol != AgentProtocol::AcpV1 {
-            return Err(AgentError::UnsupportedProtocol {
-                command: name.into(),
-                reason: format!("protocol for '{name}' is not ACP v1"),
-            });
-        }
-
-        Ok(decl)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,133 +103,33 @@ mod tests {
     fn test_adapter_validation() {
         let valid = AgentAdapterDeclaration {
             schema_version: 1,
-            name: "codex-session".into(),
+            name: "codex".into(),
             protocol: AgentProtocol::AcpV1,
-            command: "codex-workload".into(),
+            command: "codex".into(),
             workload_digest: "sha256:abcd".into(),
             required_capabilities: vec![],
-            arguments: vec![],
             description: None,
         };
         assert!(valid.validate().is_ok());
-
-        let invalid_schema = AgentAdapterDeclaration {
-            schema_version: 2,
-            ..valid.clone()
-        };
-        assert!(invalid_schema.validate().is_err());
-
-        let empty_name = AgentAdapterDeclaration {
-            name: String::new(),
-            ..valid.clone()
-        };
-        assert!(empty_name.validate().is_err());
-
-        let empty_command = AgentAdapterDeclaration {
-            command: String::new(),
-            ..valid.clone()
-        };
-        assert!(empty_command.validate().is_err());
-
-        let empty_digest = AgentAdapterDeclaration {
-            workload_digest: String::new(),
-            ..valid
-        };
-        assert!(empty_digest.validate().is_ok());
-
-        let whitespace_digest = AgentAdapterDeclaration {
-            workload_digest: "  ".into(),
-            ..empty_digest
-        };
-        assert!(whitespace_digest.validate().is_err());
-
-        let mode = AgentAdapterDeclaration {
-            arguments: vec!["--acp".into()],
-            ..whitespace_digest.clone()
-        };
-        assert!(mode.validate().is_err(), "digest is still checked");
-        let mode = AgentAdapterDeclaration {
-            workload_digest: String::new(),
-            ..mode
-        };
-        assert!(mode.validate().is_ok());
-        for arguments in [
-            vec![String::new()],
-            vec!["a\nb".into()],
-            vec!["x".into(); 9],
+        for invalid in [
+            AgentAdapterDeclaration {
+                schema_version: 2,
+                ..valid.clone()
+            },
+            AgentAdapterDeclaration {
+                name: String::new(),
+                ..valid.clone()
+            },
+            AgentAdapterDeclaration {
+                command: String::new(),
+                ..valid.clone()
+            },
+            AgentAdapterDeclaration {
+                workload_digest: "  ".into(),
+                ..valid.clone()
+            },
         ] {
-            let bad = AgentAdapterDeclaration {
-                arguments,
-                ..mode.clone()
-            };
-            assert!(bad.validate().is_err());
-        }
-    }
-
-    #[test]
-    fn packaged_local_source_adapter_may_omit_generation() {
-        let registry = AgentRegistry::from_json_str(
-            r#"[{"schema_version":1,"name":"claude-session","protocol":"acp_v1","command":"claude-acp","required_capabilities":[]}]"#,
-        )
-        .unwrap();
-        assert_eq!(
-            registry
-                .resolve_acp("claude-session")
-                .unwrap()
-                .workload_digest,
-            ""
-        );
-        assert_eq!(registry.declarations().count(), 1);
-    }
-
-    #[test]
-    fn packaged_registry_selects_each_agent_kit_acp_mode() {
-        let registry =
-            AgentRegistry::from_json_str(include_str!("../../../packaging/agents.json")).unwrap();
-        for (session, command) in [
-            ("claude-session", "claude"),
-            ("codex-session", "codex"),
-            ("pi-session", "pi"),
-        ] {
-            let declaration = registry.resolve_acp(session).unwrap();
-            assert_eq!(declaration.command, command);
-            assert_eq!(declaration.arguments, ["--acp"]);
-        }
-    }
-
-    #[test]
-    fn plain_cli_commands_are_never_resolved_or_declared_as_acp() {
-        let registry = AgentRegistry::from_json_str(
-            r#"[{"schema_version":1,"name":"claude-session","protocol":"acp_v1","command":"claude-workload","workload_digest":"sha256:1111","required_capabilities":["loadSession"]}]"#,
-        )
-        .unwrap();
-        let declaration = registry.resolve_acp("claude-session").unwrap();
-        assert_eq!(declaration.command, "claude-workload");
-        assert_eq!(declaration.protocol, AgentProtocol::AcpV1);
-        assert!(registry.resolve_acp("unknown").is_err());
-        match registry.resolve_acp("claude") {
-            Err(AgentError::UnsupportedProtocol { command, reason }) => {
-                assert_eq!(command, "claude");
-                assert!(reason.contains("plain 'claude' is a native CLI command"));
-            }
-            other => panic!("plain claude resolved as ACP: {other:?}"),
-        }
-        let declared = AgentAdapterDeclaration {
-            schema_version: 1,
-            name: "claude".into(),
-            protocol: AgentProtocol::AcpV1,
-            command: "claude-kit".into(),
-            workload_digest: "sha256:2222".into(),
-            required_capabilities: vec![],
-            arguments: vec![],
-            description: None,
-        };
-        match declared.validate() {
-            Err(AgentError::UnsupportedProtocol { command, reason }) => {
-                assert_eq!(command, "claude");
-                assert!(reason.contains("plain 'claude' CLI does not speak ACP"));
-            }
-            other => panic!("plain claude declared as ACP: {other:?}"),
+            assert!(invalid.validate().is_err());
         }
     }
 }

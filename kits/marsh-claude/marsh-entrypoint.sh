@@ -19,7 +19,7 @@ case "$selected" in
 esac
 export HOME=$selected
 
-# ACP mode: packaging/agents.json starts claude-session as `claude --acp`.
+# ACP mode (`--acp`): the Kit's acp@1 adapter, `marsh run --acp claude`.
 # The official adapter speaks ACP v1 on stdio and drives the Agent SDK's
 # Claude Code through claude-cli.sh, which disables Claude's Bash sandbox.
 if [ "${1:-}" = --acp ]; then

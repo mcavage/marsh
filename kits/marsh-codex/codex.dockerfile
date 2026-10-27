@@ -42,7 +42,7 @@ RUN case "$TARGETARCH" in \
         -o "/out/usr/local/share/licenses/codex/$file" || exit 1; \
     done
 
-# ACP mode (`codex --acp`, packaging/agents.json codex-session): the official
+# ACP mode (`--acp`, the Kit's acp@1 adapter): the official
 # codex-acp adapter, pinned by package-lock.json, with the Codex build it
 # depends on kept inside its own node_modules (never on PATH).
 FROM dhi.io/node:26-debian13-dev@sha256:c8939885965365c675a024d062bcb761bda4b47e95ce0323aa998ac9bc312fd6 AS npm

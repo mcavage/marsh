@@ -21,7 +21,7 @@ from provenance import source_identity
 
 
 SCRIPT = r'''
-acp run fixture-session &
+acp run fixture-acp &
 run_pid=$!
 printf '@@IMMEDIATE_LIST@@\n'
 acp list --json
@@ -120,7 +120,7 @@ failed_id=$(acp list | awk '$1 == "failed" && $2 == "stale-ready-probe" { print 
 if acp list --wait "$failed_id" > .acp-newest-wait.out 2>&1; then exit 91; fi
 grep -q '^failed *stale-ready-probe' .acp-newest-wait.out || exit 92
 acp list --wait "$id" > .acp-id-wait.out || exit 93
-grep -q "^ready *fixture-session *$id" .acp-id-wait.out || exit 94
+grep -q "^ready *fixture-acp *$id" .acp-id-wait.out || exit 94
 printf '@@WAIT_TARGETED@@\n'
 
 printf '@@ASK@@\n'
@@ -165,8 +165,8 @@ done
 printf '@@PERMISSION@@\n'
 acp status "$id" --json
 
-idle_id=$(acp reserve fixture-session) || exit 96
-acp run --reservation "$idle_id" fixture-session > .acp-idle-run &
+idle_id=$(acp reserve fixture-acp) || exit 96
+acp run --reservation "$idle_id" fixture-acp > .acp-idle-run &
 idle_pid=$!
 acp list --wait "$idle_id" || exit 96
 [ -n "$idle_id" ] && [ "$idle_id" != "$id" ] || exit 96
@@ -215,7 +215,7 @@ printf '@@JOBS_AFTER@@\n'
 jobs -l
 before_shadow=$(acp list --json)
 acp() { printf 'shadowed acp\n'; }
-acp run fixture-session > .acp-shadow.out &
+acp run fixture-acp > .acp-shadow.out &
 wait || exit 71
 grep -qx 'shadowed acp' .acp-shadow.out || exit 71
 unset -f acp
@@ -225,7 +225,7 @@ printf '@@FUNCTION_SHADOW@@\n'
 before_alias=$(acp list --json)
 shopt -s expand_aliases
 alias acp='printf alias-shadow'
-acp run fixture-session > .acp-alias.out &
+acp run fixture-acp > .acp-alias.out &
 wait || exit 73
 unalias acp
 grep -q '^alias-shadow' .acp-alias.out || exit 73
@@ -242,25 +242,25 @@ after_invalid=$(acp list --json)
 printf '@@FAILED_LIST@@\n%s\n' "$after_invalid"
 printf '@@FAILED_START@@\n'
 export MARSH_PLACE=invalid
-acp run fixture-session > .acp-invalid-place.out 2>&1 &
+acp run fixture-acp > .acp-invalid-place.out 2>&1 &
 orphan_pid=$!
 export MARSH_PLACE=local
-orphan_id=$(acp list | awk '$1 == "starting" && $2 == "fixture-session" { print $3; exit }')
+orphan_id=$(acp list | awk '$1 == "starting" && $2 == "fixture-acp" { print $3; exit }')
 [ -n "$orphan_id" ] || exit 81
 acp stop "$orphan_id" || exit 82
 wait "$orphan_pid"
 if acp list --wait "$orphan_id" > .acp-failed-wait.out 2>&1; then exit 83; fi
-grep -q "failed *fixture-session *$orphan_id" .acp-failed-wait.out || exit 84
+grep -q "failed *fixture-acp *$orphan_id" .acp-failed-wait.out || exit 84
 printf '@@PENDING_CANCELLED@@%s\n' "$orphan_id"
 export MARSH_PLACE=invalid
-acp run fixture-session > .acp-expired-place.out 2>&1 &
+acp run fixture-acp > .acp-expired-place.out 2>&1 &
 expired_pid=$!
 export MARSH_PLACE=local
-expired_id=$(acp list | awk '$1 == "starting" && $2 == "fixture-session" { print $3; exit }')
+expired_id=$(acp list | awk '$1 == "starting" && $2 == "fixture-acp" { print $3; exit }')
 [ -n "$expired_id" ] && [ "$expired_id" != "$orphan_id" ] || exit 87
 wait "$expired_pid"
 if acp list --wait "$expired_id" > .acp-expired-wait.out 2>&1; then exit 88; fi
-grep -q "failed *fixture-session *$expired_id" .acp-expired-wait.out || exit 89
+grep -q "failed *fixture-acp *$expired_id" .acp-expired-wait.out || exit 89
 printf '@@PENDING_EXPIRED@@%s\n' "$expired_id"
 readonly MARSH_ACP_RESERVATION_ID=blocked
 acp run nonexistent-agent > .acp-readonly.out 2>&1 &
@@ -273,7 +273,7 @@ printf '@@READONLY_CONTINUED@@\n'
 '''
 
 PROTOCOL_SCRIPT = r'''
-agent=fixture-session
+agent=fixture-acp
 id=$(acp reserve "$agent") || exit 101
 acp run --reservation "$id" "$agent" > .protocol-run.out 2> .protocol-run.err &
 pid=$!
@@ -343,8 +343,8 @@ PRIVATE_SCRIPT = r'''
 set +o history || exit 51
 set -o | grep -Eq '^history[[:space:]]+off$' || exit 52
 printf '@@PRIVACY_HISTORY_OFF@@\n'
-id=$(acp reserve fixture-session) || exit 54
-acp run --reservation "$id" fixture-session > .acp-private-run &
+id=$(acp reserve fixture-acp) || exit 54
+acp run --reservation "$id" fixture-acp > .acp-private-run &
 run_pid=$!
 acp list --mine --wait "$id" || exit 54
 [ -n "$id" ] || exit 54
@@ -426,9 +426,9 @@ def verify(output: str) -> dict:
     assert retry["updates"] == first["updates"], "same-key retry sent another ACP turn"
     assert retry["last_stop_reason"] == first["last_stop_reason"]
     assert "fixture:second" in update_texts(second)
-    assert re.search(r"(?m)^ready +fixture-session +" + re.escape(identity.group(1)), output)
+    assert re.search(r"(?m)^ready +fixture-acp +" + re.escape(identity.group(1)), output)
     assert "Usage: acp list [--mine] [--wait [ID]] [--json]" in output.split("@@LIST_HELP@@\n", 1)[1]
-    assert re.search(r"@@HUMAN_STATUS@@\nfixture-session  " + re.escape(identity.group(1)) + r"  ready", output)
+    assert re.search(r"@@HUMAN_STATUS@@\nfixture-acp  " + re.escape(identity.group(1)) + r"  ready", output)
     ask_output = output.split("@@ASK@@\n", 1)[1].split("@@ASK_DONE@@\n", 1)[0]
     assert "fixture:third" in ask_output and "acp prompt key:" not in ask_output
     assert cancelled["last_stop_reason"] == "cancelled"
@@ -442,13 +442,13 @@ def verify(output: str) -> dict:
     assert idle_lost["last_error"] == "ACP transport lost"
     assert idle_lost["attachment"]["terminal"] is not None
     idle_list = output.split("@@IDLE_LIST@@\n", 1)[1].split("@@MALFORMED@@\n", 1)[0]
-    assert not re.search(r"(?m)^ready +fixture-session +" + re.escape(idle_lost["agent_session_id"]), idle_list)
+    assert not re.search(r"(?m)^ready +fixture-acp +" + re.escape(idle_lost["agent_session_id"]), idle_list)
     assert malformed["turn_active"] is False
     assert malformed["last_stop_reason"] is None
     assert malformed["last_error"], "malformed ACP frame was accepted"
     assert malformed["stopping"] is True, "lost ACP transport was still shown as ready"
     malformed_list = output.split("@@MALFORMED_LIST@@\n", 1)[1].split("@@AUTO_STOP@@\n", 1)[0]
-    assert not re.search(r"(?m)^ready +fixture-session +" + re.escape(identity.group(1)), malformed_list)
+    assert not re.search(r"(?m)^ready +fixture-acp +" + re.escape(identity.group(1)), malformed_list)
     assert auto_stop["attachment"]["terminal"] is not None, "broken ACP Kit did not stop without a user command"
     assert "fixture:malformed" in update_texts(malformed)
     assert "fixture:after-malformed" not in update_texts(malformed)
