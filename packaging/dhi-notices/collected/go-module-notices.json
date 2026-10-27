@@ -36,7 +36,7 @@
     },
     {
       "path": "/usr/bin/gh",
-      "sha256": "a3f7e4e07863cf9fd16346d9ad42117b2db70e58e7539b9ca04a3ea688da840e"
+      "sha256": "e9107faf75cbd3bf04e1c56780a0aa6204e3e4685e4c4a17a2db263a438b44e0"
     },
     {
       "path": "/usr/bin/runc",
@@ -47,7 +47,7 @@
       "sha256": "1648ada3c9bc1a7d58bcf23fff866be9e50f6524ff3151148b36b81ade04c94b"
     }
   ],
-  "input_sha256": "95b45842641809572a45fba525061058b0e3831d72ac41de90fca041cf221647",
+  "input_sha256": "4effaa864d0cafe5df8eb3162fb7eae80320f57677181f8be42090ff734200f2",
   "checksum_database": "sum.golang.org",
   "modules": [
     {
