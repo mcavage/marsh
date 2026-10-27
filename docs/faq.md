@@ -141,7 +141,8 @@ failure recovery.
 The packaged commands are `claude` (Claude Code), `codex` (OpenAI Codex
 CLI), `pi` (the Pi coding agent), and `shell` (plain `/bin/sh`, without
 provider credentials). They are Linux CLI versions supplied by marsh's
-Kits, not the installations on your Mac.
+Kits, not the installations on your Mac. `shell` is a job in its own VM, not
+a second marsh shell; see [What `shell` is for](kits.md#what-shell-is-for).
 
 You can package another tool as a Docker Sandboxes Kit and register it with
 `marsh kit install` or `commands.json`. See [Commands and Kits](kits.md).
