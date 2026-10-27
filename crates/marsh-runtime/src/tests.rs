@@ -69,6 +69,10 @@ struct DockerState {
     containers: BTreeMap<String, Option<usize>>,
     next: u8,
     create_failure: Option<CommandOutput>,
+    /// The failing create still left its (labelled) container behind.
+    create_failure_leaves_container: bool,
+    /// Each container's `--label` value.
+    labels: BTreeMap<String, String>,
     /// Successive `{{.State.Pid}}\t{{.State.Status}}` replies.
     pid_states: VecDeque<&'static str>,
     exit_code: i32,
@@ -135,13 +139,22 @@ impl DockerModel {
                 )
             }
             ["create", ..] => {
-                if let Some(failure) = state.create_failure.take() {
-                    return failure;
+                let label = values(call, "--label")
+                    .first()
+                    .map(|label| (*label).to_owned());
+                let failure = state.create_failure.take();
+                if let Some(failure) = &failure
+                    && !state.create_failure_leaves_container
+                {
+                    return failure.clone();
                 }
                 state.next += 1;
                 let id = format!("{:02x}", state.next).repeat(32);
                 state.containers.insert(id.clone(), None);
-                success(format!("{id}\n"))
+                if let Some(label) = label {
+                    state.labels.insert(id.clone(), label);
+                }
+                failure.unwrap_or_else(|| success(format!("{id}\n")))
             }
             [
                 "container",
@@ -178,6 +191,16 @@ impl DockerModel {
             ] => {
                 if let Some(failure) = state.listing_failure.take() {
                     return failure;
+                }
+                if let Some(label) = filter.strip_prefix("label=") {
+                    let mut listed = String::new();
+                    for (id, value) in &state.labels {
+                        if value.as_str() == label && state.containers.get(id) == Some(&None) {
+                            listed.push_str(id);
+                            listed.push('\n');
+                        }
+                    }
+                    return success(listed);
                 }
                 let id = filter.strip_prefix("id=").unwrap_or_default().to_owned();
                 let listed = match state.containers.get_mut(&id) {
@@ -348,18 +371,91 @@ fn command_failure_preserves_bounded_sanitized_stderr_and_exit_code() {
     });
     let runtime = DockerCliRuntime::new(model, "/trusted/docker");
     let error = runtime.create(&job()).unwrap_err();
-    let RuntimeError::CommandFailed {
-        operation,
-        exit_code,
-        stderr,
-    } = error
-    else {
-        panic!("unexpected runtime error")
+    let RuntimeError::CreateRefused { code, stderr } = error else {
+        panic!("unexpected runtime error {error:?}")
     };
-    assert_eq!(operation, "create");
-    assert_eq!(exit_code, Some(125));
+    assert_eq!(code, 125);
     assert!(stderr.starts_with("manifest rejected�: "));
     assert!(stderr.len() <= MAX_COMMAND_STDERR);
+}
+
+#[test]
+fn a_refused_create_removes_its_labelled_leftover_and_reports_it_clean() {
+    let model = DockerModel::new();
+    {
+        let mut state = model.state.lock().unwrap();
+        state.create_failure = Some(failure_output("no space left on device"));
+        state.create_failure_leaves_container = true;
+    }
+    let runtime = DockerCliRuntime::new(model, "/trusted/docker");
+    let error = runtime.create(&job()).unwrap_err();
+    let model = &runtime.runner;
+    assert!(
+        matches!(error, RuntimeError::CreateRefused { code: 1, .. }),
+        "{error:?}"
+    );
+    let create = model.create();
+    let label = values(&create, "--label")[0].to_owned();
+    assert!(label.starts_with("marsh.create=") && label.len() == "marsh.create=".len() + 32);
+    // The leftover was found by its label, removed, and the label listed empty.
+    let leftover = model
+        .state
+        .lock()
+        .unwrap()
+        .labels
+        .keys()
+        .next()
+        .cloned()
+        .unwrap();
+    assert!(!model.exists(&leftover));
+    assert_eq!(model.calls_of(&["rm", "--force"]).len(), 1);
+    assert_eq!(
+        model.calls_of(&["container", "ls"]).len(),
+        2,
+        "listed before and after removal"
+    );
+}
+
+#[test]
+fn a_refused_create_whose_leftovers_cannot_be_listed_stays_uncertain() {
+    let model = DockerModel::new();
+    {
+        let mut state = model.state.lock().unwrap();
+        state.create_failure = Some(failure_output("no space left on device"));
+        state.listing_failure = Some(failure_output("daemon unavailable"));
+    }
+    let runtime = DockerCliRuntime::new(model, "/trusted/docker");
+    let error = runtime.create(&job()).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            RuntimeError::CommandFailed {
+                operation: "create",
+                ..
+            }
+        ),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_create_that_times_out_stays_uncertain_and_is_not_cleaned_up() {
+    // A timed-out (I/O error) `docker create` may still complete in dockerd.
+    let runner = FakeRunner::with_outputs([byte_bridge_cases::inspected(
+        &job(),
+        serde_json::json!(["/entry"]),
+        serde_json::json!(["default"]),
+    )]);
+    let runtime = DockerCliRuntime::new(runner, "/trusted/docker");
+    let error = runtime.create(&job()).unwrap_err();
+    assert!(matches!(error, RuntimeError::Io(_)), "{error:?}");
+    let calls = runtime.runner.calls();
+    assert!(
+        calls
+            .iter()
+            .all(|call| call.first().map(String::as_str) != Some("container")),
+        "{calls:?}"
+    );
 }
 
 fn job() -> JobSpec {
