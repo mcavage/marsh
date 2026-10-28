@@ -1077,8 +1077,9 @@ impl SplitEngine {
     }
 
     /// A close or cancel whose journal write failed. It is not undone: the
-    /// split stays fenced and `closing` (a restart keeps it, lanes
-    /// uncertain), and repeating the request resumes it.
+    /// split stays fenced and `closing` in memory, and repeating the request
+    /// resumes it. A restart keeps it (lanes uncertain) only once `closing`
+    /// reached `splits.json`; if the first write failed, disk says open.
     fn unjournaled(id: &str, error: &std::io::Error) -> DaemonError {
         DaemonError::InvalidState(format!(
             "split {id}: could not journal the close ({error}); it admits no more lane jobs; run `marsh split close {id}` or `marsh splits cancel {id}` again"

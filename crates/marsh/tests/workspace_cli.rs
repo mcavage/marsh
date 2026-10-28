@@ -26,7 +26,7 @@ struct Fixture {
     project: PathBuf,
     endpoint: EndpointPaths,
     token: PathBuf,
-    store: marsh_daemon::DaemonStore,
+    store: Option<marsh_daemon::DaemonStore>,
     session: String,
     stop: Arc<AtomicBool>,
     server: Option<thread::JoinHandle<()>>,
@@ -78,7 +78,7 @@ impl Fixture {
         });
         Self {
             token: endpoint.token.clone(),
-            store,
+            store: Some(store),
             _directory: directory,
             home,
             project,
@@ -87,6 +87,42 @@ impl Fixture {
             stop,
             server: Some(server),
         }
+    }
+
+    /// Stop the daemon and start another on the same home, as a crash or an
+    /// upgrade does: only what reached the journal on disk carries over.
+    fn restart(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        self.server.take().unwrap().join().unwrap();
+        // The journal is locked by every handle on the old daemon's store.
+        self.store = None;
+        let server = Server::bind(&self.home).unwrap();
+        self.store = Some(server.store());
+        self.session = self.store().attach_shell(
+            std::process::id(),
+            SessionAuthority {
+                username: "fixture".into(),
+                uid: nix::unistd::Uid::effective().as_raw(),
+                gid: nix::unistd::Gid::effective().as_raw(),
+                launch_directory: self.project.clone(),
+                guest_home: self.home.parent().unwrap().to_path_buf(),
+                home_backing: self.home.join("home"),
+                ephemeral_home: false,
+            },
+        );
+        self.endpoint = EndpointPaths::for_home(&self.home).unwrap();
+        self.token = self.endpoint.token.clone();
+        self.stop = Arc::new(AtomicBool::new(false));
+        let stopping = Arc::clone(&self.stop);
+        self.server = Some(thread::spawn(move || {
+            server
+                .serve_until(|| stopping.load(Ordering::Acquire))
+                .unwrap();
+        }));
+    }
+
+    fn store(&self) -> &marsh_daemon::DaemonStore {
+        self.store.as_ref().unwrap()
     }
 
     fn command(&self, cwd: &Path, arguments: &[&str]) -> Command {
@@ -308,7 +344,7 @@ fn checkpoints_keep_the_tree_and_git_state_and_retain_twenty_per_label() {
     // Never inside .marsh, and the subscription never holds off shutdown.
     let output = fixture.run_in(dir.parent().unwrap(), &["checkpoint"]);
     assert_ne!(output.status.code(), Some(0));
-    fixture.store.detach_shell(&fixture.session).unwrap();
+    fixture.store().detach_shell(&fixture.session).unwrap();
     assert!(matches!(
         fixture.client().request(PublicRequest::Shutdown).unwrap(),
         PublicReply::ShuttingDown
@@ -348,7 +384,7 @@ fn open_lanes_from_a_checkpoint_capture_their_forks_and_admit_only_the_creator()
     assert_eq!(git(&lane_a, &["status", "--porcelain"]), "");
 
     // A non-creator (a shell session) may not start a job in the lane.
-    let shell = fixture.store.attach_shell(
+    let shell = fixture.store().attach_shell(
         std::process::id(),
         SessionAuthority {
             username: "fixture".into(),
@@ -361,7 +397,7 @@ fn open_lanes_from_a_checkpoint_capture_their_forks_and_admit_only_the_creator()
         },
     );
     let relay = fixture.home.parent().unwrap().join("relay-token");
-    fs::write(&relay, fixture.store.issue_relay_token(&shell).unwrap()).unwrap();
+    fs::write(&relay, fixture.store().issue_relay_token(&shell).unwrap()).unwrap();
     fs::set_permissions(&relay, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
     let refused = fixture
         .command(&lane_a, &["run", "claude", "-p", "x"])
@@ -480,7 +516,7 @@ fn events_take_at_most_eight_connections_and_never_hold_off_requests() {
         }
         assert!(Instant::now() < deadline, "no place freed");
     }
-    fixture.store.detach_shell(&fixture.session).unwrap();
+    fixture.store().detach_shell(&fixture.session).unwrap();
     assert!(matches!(
         fixture.client().request(PublicRequest::Shutdown).unwrap(),
         PublicReply::ShuttingDown
@@ -601,7 +637,7 @@ fn a_close_that_cannot_be_journaled_stays_fenced_and_a_retry_completes_it() {
     fs::set_permissions(&fixture.home, fs::Permissions::from_mode(0o700)).unwrap();
     // Never undone: the split admits no more lane jobs.
     let fenced = fixture
-        .store
+        .store()
         .begin_job_at(lane_job(&fixture, &lane), Placement::Local);
     assert_ne!(refused.status.code(), Some(0), "{refused:?}");
     let message = String::from_utf8_lossy(&refused.stderr);
@@ -620,6 +656,72 @@ fn a_close_that_cannot_be_journaled_stays_fenced_and_a_retry_completes_it() {
     let journal: serde_json::Value =
         serde_json::from_slice(&fs::read(fixture.home.join("splits.json")).unwrap()).unwrap();
     assert_eq!(journal[&id]["state"], "kept", "{journal}");
+}
+
+/// The first journal write (`splits.json`) fails before its rename: disk
+/// still says open, so a restart preserves the split as open, and a close
+/// then completes.
+#[test]
+fn a_restart_after_a_close_that_never_reached_the_journal_keeps_the_split_open() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let mut fixture = Fixture::new();
+    let opened = fixture.json(&["split", "--open", "a"]);
+    let id = opened["id"].as_str().unwrap().to_owned();
+    let lane = PathBuf::from(opened["lanes"]["a"].as_str().unwrap());
+    fs::write(lane.join("edited.txt"), "from the lane\n").unwrap();
+    fs::set_permissions(&fixture.home, fs::Permissions::from_mode(0o500)).unwrap();
+    let refused = fixture.run_in(&fixture.project, &["split", "close", &id, "--json"]);
+    fs::set_permissions(&fixture.home, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_ne!(refused.status.code(), Some(0), "{refused:?}");
+    let journal: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.home.join("splits.json")).unwrap()).unwrap();
+    assert_eq!(journal[&id]["state"], "run", "{journal}");
+    assert_ne!(journal[&id]["closing"], true, "{journal}");
+
+    fixture.restart();
+    let shown = fixture.json(&["splits", "--json", &id]);
+    assert_eq!(shown["splits"][0]["state"], "run", "{shown}");
+    assert_ne!(shown["splits"][0]["closing"], true, "{shown}");
+    assert!(lane.join("edited.txt").is_file());
+    let closed = fixture.json(&["split", "close", &id, "--json"]);
+    assert_eq!(closed["state"], "kept", "{closed}");
+}
+
+/// The second journal write (`split-lineage.json`) fails after `splits.json`
+/// carries `closing`: the close reached the journal, so a restart keeps the
+/// split and leaves its open lane uncertain, never open.
+#[test]
+fn a_restart_after_a_close_whose_lineage_write_failed_leaves_the_split_uncertain() {
+    let mut fixture = Fixture::new();
+    let opened = fixture.json(&["split", "--open", "a"]);
+    let id = opened["id"].as_str().unwrap().to_owned();
+    let lane = PathBuf::from(opened["lanes"]["a"].as_str().unwrap());
+    fs::write(lane.join("edited.txt"), "from the lane\n").unwrap();
+    // A directory where the lineage file goes: its rename fails, the
+    // `splits.json` write before it succeeds.
+    let lineage = fixture.home.join("split-lineage.json");
+    fs::remove_file(&lineage).unwrap();
+    fs::create_dir(&lineage).unwrap();
+    let refused = fixture.run_in(&fixture.project, &["split", "close", &id, "--json"]);
+    fs::remove_dir(&lineage).unwrap();
+    assert_ne!(refused.status.code(), Some(0), "{refused:?}");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("could not journal the close"),
+        "{refused:?}"
+    );
+    let journal: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.home.join("splits.json")).unwrap()).unwrap();
+    assert_eq!(journal[&id]["closing"], true, "{journal}");
+
+    fixture.restart();
+    let shown = fixture.json(&["splits", "--json", &id]);
+    assert_eq!(shown["splits"][0]["state"], "kept", "{shown}");
+    assert_ne!(shown["splits"][0]["closing"], true, "{shown}");
+    assert!(
+        shown.to_string().contains("uncertain"),
+        "the lane must be uncertain: {shown}"
+    );
+    assert!(lane.join("edited.txt").is_file(), "nothing is deleted");
 }
 
 /// A job receipt whose mounts name `lane`, as a lane job's do (no VM).
@@ -645,7 +747,7 @@ fn a_close_under_way_refuses_a_concurrent_close_or_cancel_and_fences_new_jobs() 
     let lane = PathBuf::from(opened["lanes"]["a"].as_str().unwrap());
     // A live job in the lane keeps the close waiting (up to 30 s).
     let (live, _) = fixture
-        .store
+        .store()
         .begin_job_at(lane_job(&fixture, &lane), Placement::Local)
         .unwrap();
     let closing = fixture
@@ -669,12 +771,12 @@ fn a_close_under_way_refuses_a_concurrent_close_or_cancel_and_fences_new_jobs() 
     );
     assert!(
         fixture
-            .store
+            .store()
             .begin_job_at(lane_job(&fixture, &lane), Placement::Local)
             .is_err()
     );
     fixture
-        .store
+        .store()
         .finish_job(
             &live,
             ExitStatus {
