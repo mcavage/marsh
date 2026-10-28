@@ -423,6 +423,22 @@ struct Inner {
     lineage: BTreeMap<String, SplitLineage>,
     /// The last `marsh events` line of each split.
     published: BTreeMap<String, serde_json::Value>,
+    /// Lane splits a close or cancel is running on now (not journaled). A
+    /// `closing` split not here is one whose close stopped at a journal
+    /// write: a retried close or cancel resumes it.
+    closers: std::collections::BTreeSet<String>,
+}
+
+/// Ends a close's claim on its split (`Inner::closers`), however it ends.
+struct Closer<'a> {
+    engine: &'a SplitEngine,
+    id: &'a str,
+}
+
+impl Drop for Closer<'_> {
+    fn drop(&mut self) {
+        self.engine.lock().closers.remove(self.id);
+    }
 }
 
 /// The split kernel. One per daemon.
@@ -989,8 +1005,11 @@ impl SplitEngine {
         // uncertain one only has the lane jobs a close timed out on to end.
         let open = {
             let mut inner = self.lock();
-            match inner.records.get_mut(id) {
-                Some(r) if r.state == SplitState::Run && r.closing => {
+            let Inner {
+                records, closers, ..
+            } = &mut *inner;
+            match records.get_mut(id) {
+                Some(r) if r.state == SplitState::Run && closers.contains(id) => {
                     return Err(DaemonError::InvalidState(format!(
                         "split {id} is closing; wait for its close"
                     )));
@@ -998,6 +1017,7 @@ impl SplitEngine {
                 Some(r) if r.state == SplitState::Run => {
                     r.closing = true;
                     store.fence_split(id);
+                    closers.insert(id.to_owned());
                     true
                 }
                 _ => {
@@ -1006,8 +1026,9 @@ impl SplitEngine {
                 }
             }
         };
-        if open {
-            self.commit_closing(id, store)?;
+        if open && let Err(error) = self.save_checked() {
+            self.lock().closers.remove(id);
+            return Err(Self::unjournaled(id, &error));
         }
         Self::cancel_lane_jobs(id, store);
         if !open {
@@ -1050,24 +1071,18 @@ impl SplitEngine {
                 r.reason = Some(reason);
                 r.closing = false;
             });
+            engine.lock().closers.remove(&record.id);
         });
         Ok(())
     }
 
-    /// Journal a close or cancel just begun. It happened only once durable:
-    /// otherwise a restart would reopen the lanes, so the split stays open
-    /// (unfenced) and the caller is told.
-    fn commit_closing(&self, id: &str, store: &DaemonStore) -> Result<(), DaemonError> {
-        let Err(error) = self.save_checked() else {
-            return Ok(());
-        };
-        if let Some(record) = self.lock().records.get_mut(id) {
-            record.closing = false;
-        }
-        store.unfence_split(id);
-        Err(DaemonError::InvalidState(format!(
-            "split {id}: could not journal the close ({error}); it is still open"
-        )))
+    /// A close or cancel whose journal write failed. It is not undone: the
+    /// split stays fenced and `closing` (a restart keeps it, lanes
+    /// uncertain), and repeating the request resumes it.
+    fn unjournaled(id: &str, error: &std::io::Error) -> DaemonError {
+        DaemonError::InvalidState(format!(
+            "split {id}: could not journal the close ({error}); it admits no more lane jobs; run `marsh split close {id}` or `marsh splits cancel {id}` again"
+        ))
     }
 
     /// Cancel every live job in a fork of split `id` not already cancelled
@@ -1176,8 +1191,10 @@ impl SplitEngine {
     ) -> Result<serde_json::Value, DaemonError> {
         {
             let mut inner = self.lock();
-            let record = inner
-                .records
+            let Inner {
+                records, closers, ..
+            } = &mut *inner;
+            let record = records
                 .get_mut(id)
                 .filter(|record| caller == &Creator::Host || &record.creator == caller)
                 .ok_or_else(|| DaemonError::NotFound(format!("split {id}")))?;
@@ -1186,7 +1203,7 @@ impl SplitEngine {
                     "split {id} is not an open lane split"
                 )));
             }
-            if record.closing {
+            if closers.contains(id) {
                 return Err(DaemonError::InvalidState(format!(
                     "split {id} is already closing"
                 )));
@@ -1194,10 +1211,15 @@ impl SplitEngine {
             // One admission step: no lane job is admitted (`admit_lane`
             // checks `closing` under this lock), recorded, or submitted
             // (the store's fence) once this returns; the journal follows.
+            // Never undone: a close stopped at the journal is resumed by
+            // repeating it.
             record.closing = true;
             store.fence_split(id);
+            closers.insert(id.to_owned());
         }
-        self.commit_closing(id, store)?;
+        let _closer = Closer { engine: self, id };
+        self.save_checked()
+            .map_err(|error| Self::unjournaled(id, &error))?;
         let settled = Instant::now();
         let ended = self.settle_lanes(id, store, LANE_SETTLE, || {});
         let record = self

@@ -2414,11 +2414,6 @@ impl DaemonStore {
         self.lock().fenced_splits.insert(split.to_owned());
     }
 
-    /// Undo `fence_split` for a close or cancel that was never journaled.
-    pub(crate) fn unfence_split(&self, split: &str) {
-        self.lock().fenced_splits.remove(split);
-    }
-
     /// Whether `mounts` name a fork of a fenced split.
     fn fenced(state: &State, mounts: &[PublicMount]) -> Result<(), DaemonError> {
         match JobLineage::split_of(mounts) {

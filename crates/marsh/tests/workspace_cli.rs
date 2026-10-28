@@ -3,7 +3,10 @@
 //! lane's edits are made directly in its fork, as a lane job would make them,
 //! and a lane job's admission is observed at the daemon boundary.
 
-use marsh_daemon::{EndpointPaths, PublicReply, PublicRequest, Server, SessionAuthority};
+use marsh_daemon::{
+    CleanupState, EndpointPaths, ExitStatus, NewJob, Placement, PublicReply, PublicRequest, Server,
+    SessionAuthority, TimingReport,
+};
 use std::{
     fs,
     io::{BufRead, BufReader},
@@ -573,27 +576,119 @@ fn an_open_split_label_is_recorded_listed_and_published() {
         let refused = fixture.run_in(&fixture.project, bad);
         assert_eq!(refused.status.code(), Some(2), "{bad:?}: {refused:?}");
     }
+    // A label's text is never read as an option: `--json`, `-c`, and `--`
+    // are labels here, so only the missing -d is refused.
+    for text in ["--json", "-c", "--"] {
+        let refused = fixture.run_in(&fixture.project, &["cloud", "--label", text, "--", "true"]);
+        assert_eq!(refused.status.code(), Some(2), "{text}: {refused:?}");
+        assert!(
+            String::from_utf8_lossy(&refused.stderr).contains("--label is for a detached run"),
+            "{text}: {refused:?}"
+        );
+    }
 }
 
 #[test]
-fn a_close_that_cannot_be_journaled_leaves_the_split_open() {
+fn a_close_that_cannot_be_journaled_stays_fenced_and_a_retry_completes_it() {
     use std::os::unix::fs::PermissionsExt as _;
     let fixture = Fixture::new();
     let opened = fixture.json(&["split", "--open", "a"]);
     let id = opened["id"].as_str().unwrap().to_owned();
+    let lane = PathBuf::from(opened["lanes"]["a"].as_str().unwrap());
     assert!(fixture.home.join("splits.json").is_file());
     fs::set_permissions(&fixture.home, fs::Permissions::from_mode(0o500)).unwrap();
     let refused = fixture.run_in(&fixture.project, &["split", "close", &id, "--json"]);
     fs::set_permissions(&fixture.home, fs::Permissions::from_mode(0o700)).unwrap();
+    // Never undone: the split admits no more lane jobs.
+    let fenced = fixture
+        .store
+        .begin_job_at(lane_job(&fixture, &lane), Placement::Local);
     assert_ne!(refused.status.code(), Some(0), "{refused:?}");
+    let message = String::from_utf8_lossy(&refused.stderr);
     assert!(
-        String::from_utf8_lossy(&refused.stderr).contains("could not journal the close"),
+        message.contains("could not journal the close") && message.contains("again"),
         "{refused:?}"
     );
+    assert!(
+        fenced.is_err(),
+        "a lane job was recorded after the close began"
+    );
     let shown = fixture.json(&["splits", "--json", &id]);
-    assert_eq!(shown["splits"][0]["state"], "run", "{shown}");
-    assert!(shown["splits"][0].get("closing").is_none(), "{shown}");
+    assert_eq!(shown["splits"][0]["closing"], true, "{shown}");
     let closed = fixture.json(&["split", "close", &id, "--json"]);
+    assert_eq!(closed["state"], "kept", "{closed}");
+    let journal: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.home.join("splits.json")).unwrap()).unwrap();
+    assert_eq!(journal[&id]["state"], "kept", "{journal}");
+}
+
+/// A job receipt whose mounts name `lane`, as a lane job's do (no VM).
+fn lane_job(fixture: &Fixture, lane: &Path) -> NewJob {
+    NewJob {
+        label: None,
+        session_id: fixture.session.clone(),
+        command: "fixture".into(),
+        kit_ref: "fixture-only-no-vm".into(),
+        workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+        mounts: vec![marsh_daemon::PublicMount {
+            target: lane.to_path_buf(),
+            access: "read_write".into(),
+        }],
+    }
+}
+
+#[test]
+fn a_close_under_way_refuses_a_concurrent_close_or_cancel_and_fences_new_jobs() {
+    let fixture = Fixture::new();
+    let opened = fixture.json(&["split", "--open", "a"]);
+    let id = opened["id"].as_str().unwrap().to_owned();
+    let lane = PathBuf::from(opened["lanes"]["a"].as_str().unwrap());
+    // A live job in the lane keeps the close waiting (up to 30 s).
+    let (live, _) = fixture
+        .store
+        .begin_job_at(lane_job(&fixture, &lane), Placement::Local)
+        .unwrap();
+    let closing = fixture
+        .command(&fixture.project, &["split", "close", &id, "--json"])
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while fixture.json(&["splits", "--json", &id])["splits"][0]["closing"] != true {
+        assert!(Instant::now() < deadline, "close never began");
+        thread::sleep(Duration::from_millis(20));
+    }
+    let again = fixture.run_in(&fixture.project, &["split", "close", &id]);
+    assert!(
+        String::from_utf8_lossy(&again.stderr).contains("already closing"),
+        "{again:?}"
+    );
+    let cancel = fixture.run_in(&fixture.project, &["splits", "cancel", &id]);
+    assert!(
+        String::from_utf8_lossy(&cancel.stderr).contains("is closing"),
+        "{cancel:?}"
+    );
+    assert!(
+        fixture
+            .store
+            .begin_job_at(lane_job(&fixture, &lane), Placement::Local)
+            .is_err()
+    );
+    fixture
+        .store
+        .finish_job(
+            &live,
+            ExitStatus {
+                code: Some(0),
+                cause: "exited".into(),
+            },
+            true,
+            CleanupState::Verified,
+            TimingReport::default(),
+        )
+        .unwrap();
+    let output = closing.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let closed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(closed["state"], "kept", "{closed}");
 }
 

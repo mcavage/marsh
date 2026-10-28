@@ -1291,39 +1291,39 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
     {
         return detached_command(action, &arguments[1..]);
     }
-    // `--json` among the options (before `-c`/`--`): a detached run prints
-    // `{"job_id","cursor"}` on stdout.
-    let options = arguments
-        .iter()
-        .position(|word| word == "-c" || word == "--")
-        .unwrap_or(arguments.len());
-    let json = arguments[..options].iter().any(|word| word == "--json");
-    // `--label TEXT` among the options likewise, for a detached run.
-    let labelled = arguments[..options]
-        .iter()
-        .position(|word| word == "--label");
-    let label = match labelled.map(|index| arguments.get(index + 1).filter(|_| index + 1 < options))
-    {
-        None => None,
-        Some(Some(text)) if text.to_str().is_some_and(marsh_daemon::valid_label) => {
-            text.to_str().map(str::to_owned)
+    // `--json` and `--label TEXT` among the options (before `-c`/`--`), in
+    // order: an option's value (`--label`, `--cpus`, `--ttl`, `--image`) is
+    // taken as text, never read as an option.
+    let (mut json, mut label, mut rest) = (false, None, Vec::new());
+    let mut index = 0;
+    while let Some(word) = arguments.get(index) {
+        match word.to_str() {
+            Some("-c" | "--") => {
+                rest.extend_from_slice(&arguments[index..]);
+                break;
+            }
+            Some("--json") => json = true,
+            Some("--label") => {
+                index += 1;
+                match arguments.get(index).and_then(|text| text.to_str()) {
+                    Some(text) if marsh_daemon::valid_label(text) => label = Some(text.to_owned()),
+                    _ => {
+                        eprint!(
+                            "marsh: cloud: --label needs 1 to 128 bytes of text with no control characters\n{CLOUD_HELP}"
+                        );
+                        return 2;
+                    }
+                }
+            }
+            Some("--cpus" | "--ttl" | "--image") => {
+                rest.extend(arguments[index..].iter().take(2).cloned());
+                index += 1;
+            }
+            _ => rest.push(word.clone()),
         }
-        Some(_) => {
-            eprint!(
-                "marsh: cloud: --label needs 1 to 128 bytes of text with no control characters\n{CLOUD_HELP}"
-            );
-            return 2;
-        }
-    };
-    let arguments = arguments
-        .iter()
-        .enumerate()
-        .filter(|(index, word)| {
-            *index >= options
-                || (*word != "--json" && labelled.is_none_or(|at| *index != at && *index != at + 1))
-        })
-        .map(|(_, word)| word.clone())
-        .collect::<Vec<_>>();
+        index += 1;
+    }
+    let arguments = rest;
     let (arguments, interactive) = match cloud_arguments(&arguments) {
         Ok(parsed) => parsed,
         Err(message) => {

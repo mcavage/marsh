@@ -529,3 +529,48 @@ fn a_stopped_kit_vm_whose_project_was_deleted_starts_again_for_the_next_daemon()
             .contains_key(Path::new("/opt/user-mount"))
     );
 }
+
+/// The same daemon, after its VM stopped while a project was moved away,
+/// then moved back: the lost mount and this daemon's reference to it were
+/// dropped, so the directory is mounted again, not taken as still mounted.
+#[test]
+fn a_project_restored_after_its_lost_mount_was_dropped_is_mounted_again() {
+    let model = StockModel::new();
+    let (adapter, kit, ready) = warm_kit(&model, KIT);
+    let root = scratch();
+    let project = directory(root.path(), "project");
+    let admitted = || {
+        grant(
+            project.clone(),
+            "/Users/alice/project",
+            MountAccess::ReadWrite,
+        )
+    };
+    let job = adapter.prepare_grants(&ready, "a1", &[admitted()]).unwrap();
+    adapter.revoke_grants(&job).unwrap();
+    // A session (a host `marsh run`'s prewarm) pins it too.
+    adapter
+        .prepare_session_grants(&ready, "session-one", &[admitted()])
+        .unwrap();
+    // Moved away (so stock cannot restore the mount), then back: the same
+    // directory, the same identity.
+    let aside = root.path().join("aside");
+    fs::rename(&project, &aside).unwrap();
+    model.with_vm(KIT, |vm| vm.running = false);
+    let warm = adapter.ensure_kit_vm(&kit.spec).unwrap();
+    assert!(model.vm(KIT).unwrap().mounts.is_empty());
+    fs::rename(&aside, &project).unwrap();
+    let mounts = model.count("mount");
+    let job = adapter.prepare_grants(&warm, "a2", &[admitted()]).unwrap();
+    adapter.revoke_grants(&job).unwrap();
+    assert_eq!(model.count("mount"), mounts + 1);
+    adapter.close_session_grants("session-one").unwrap();
+    assert!(
+        model
+            .vm(KIT)
+            .unwrap()
+            .mounts
+            .values()
+            .all(|(host, _)| host == &project)
+    );
+}

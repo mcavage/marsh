@@ -1577,12 +1577,19 @@ impl StockSbx {
         let manifest = match &kit.location {
             NativeKitLocation::ImmutableOci(image) => self.arm64_manifest(image)?,
             NativeKitLocation::LocalV3Source(source) => {
-                let cached = self.kit_image_cache.as_deref().and_then(|cache| {
-                    cached_local_build(cache, &local_source_fingerprint(source).ok()?)
-                });
+                // The captured generation's own build (content-addressed by
+                // its fingerprint), never whatever the source is now.
+                let fingerprint = kit.expected_local_fingerprint(source)?;
+                let cached = self
+                    .kit_image_cache
+                    .as_deref()
+                    .and_then(|cache| cached_local_build(cache, &fingerprint));
                 if let Some(build) = cached {
                     Some(self.archived_manifest(&build)?)
                 } else {
+                    // Not built yet: its source YAML, only while the source
+                    // still is that generation (before and after the read).
+                    kit.validate_captured_source(source)?;
                     let path = local_v3_descriptor(source)?;
                     if path.extension().is_none_or(|extension| extension != "yaml") {
                         return Ok((serde_json::Value::Null, false));
@@ -1595,6 +1602,7 @@ impl StockSbx {
                             }
                         })?)
                         .map_err(|source| SbxError::InvalidLocalKitDescriptor { path, source })?;
+                    kit.validate_captured_source(source)?;
                     return Ok((yaml, false));
                 }
             }
@@ -5674,12 +5682,43 @@ impl StockSbx {
     }
 
     /// Remove the saved grant mount `host` at `target` from this daemon's
-    /// own stopped VM `vm`. Only a mount under `GRANT_ROOT` whose host path
-    /// no longer exists, and only by exact UUID-fenced name.
+    /// own stopped VM `vm`, and the reference this daemon held for it (a
+    /// project recreated at that path is mounted afresh). Only a mount under
+    /// `GRANT_ROOT` whose host path is still gone once the grant's and the
+    /// VM's stock locks are held, and only by exact UUID-fenced name.
     fn drop_lost_grant_mount(&self, vm: &str, host: &Path, target: &Path) -> Result<(), SbxError> {
-        match fs::symlink_metadata(host) {
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            _ => return Err(SbxError::ForeignVm(vm.to_owned())),
+        let key = self
+            .grant_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .find(|((name, _), reference)| name == vm && reference.vm_source == target)
+            .map_or_else(|| (vm.to_owned(), host.to_owned()), |(key, _)| key.clone());
+        let (transition, _transition_cleanup) =
+            weak_mutex_transition_lock(&self.grant_transition_locks, key.clone());
+        let _transition = transition
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (operation, _operation_cleanup) =
+            weak_mutex_transition_lock(&self.grant_stock_operation_locks, vm.to_owned());
+        let _operation = operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A job this daemon still counts on that mount ends (and revokes it)
+        // first. Session pins go with the mount: the stopped VM no longer
+        // has it, and the session's next job mounts its project again.
+        let in_use = self
+            .grant_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+            .is_some_and(|reference| reference.active_jobs > 0);
+        let gone = matches!(
+            fs::symlink_metadata(host),
+            Err(error) if error.kind() == io::ErrorKind::NotFound
+        );
+        if in_use || !gone {
+            return Err(SbxError::ForeignVm(vm.to_owned()));
         }
         match self.classify_vm(vm, true)? {
             VmClass::Owned { running: false, .. } => {}
@@ -5689,11 +5728,6 @@ impl StockSbx {
         let mut spec = host.as_os_str().to_owned();
         spec.push(":");
         spec.push(target);
-        let (operation, _cleanup) =
-            weak_mutex_transition_lock(&self.grant_stock_operation_locks, vm.to_owned());
-        let _operation = operation
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // The host path is absolute and gone: run from `/`, never from it.
         let output = self
             .runner
@@ -5705,7 +5739,12 @@ impl StockSbx {
                 self.preparation_timeouts.sbx,
             )
             .map_err(SbxError::from)?;
-        Self::require_unmounted("remove a lost grant mount", output)
+        Self::require_unmounted("remove a lost grant mount", output)?;
+        self.grant_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&key);
+        Ok(())
     }
 
     fn is_owned_stale_local_vm(

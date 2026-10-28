@@ -841,3 +841,34 @@ fn published_kit_images_share_the_cache_by_full_reference() {
     assert!(cached_published_image(&cache.path, &reference).is_none());
     assert_eq!(fs::read_dir(&cache.path).unwrap().count(), 0);
 }
+
+/// A local Kit's descriptor is its captured generation's: once the source is
+/// edited (and that generation was never built), it is refused, never read
+/// from the edit.
+#[test]
+fn a_local_descriptor_is_the_captured_generations_or_refused() {
+    let kit = KitFixture::local(KIT);
+    let source = kit.source();
+    let yaml = |command: &str| {
+        format!(
+            "# syntax=docker/sandbox-kit:3\nschemaVersion: \"3\"\nkind: workload\ndockerfile: ./fixture.dockerfile\ncapabilities:\n  - type: com.docker.sandbox/acp@1\n    config:\n      agent: fixture\n      command: [\"{command}\"]\n"
+        )
+    };
+    fs::write(source.join("fixture.yaml"), yaml("adapter-a")).unwrap();
+    let captured = NativeKitRef::local_v3_source(source.clone())
+        .unwrap()
+        .capture_generation()
+        .unwrap();
+    let adapter = StockModel::new().adapter();
+    let (descriptor, done) = adapter.kit_descriptor(&captured).unwrap();
+    assert!(!done);
+    assert_eq!(
+        descriptor["capabilities"][0]["config"]["command"][0],
+        "adapter-a"
+    );
+    fs::write(source.join("fixture.yaml"), yaml("adapter-b")).unwrap();
+    assert!(matches!(
+        adapter.kit_descriptor(&captured),
+        Err(SbxError::SourceChanged(path)) if path == source
+    ));
+}

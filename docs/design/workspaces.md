@@ -526,9 +526,11 @@ cancelled.
   admitted with them. Admission comes before the Kit is prepared, so a close
   or cancel, in the same locked step that sets `closing`, also fences the
   split: from then on no job whose mounts name one of its forks is recorded
-  or submitted. The step is then journaled; if that write fails, the close
-  or cancel is undone (fence lifted, split still open) and reported, so a
-  restart never reopens lanes a close was told about.
+  or submitted. The step is then journaled. It is never undone: if that
+  write fails, the split stays fenced and `closing` (a restart keeps it
+  `kept`, its lanes `uncertain`), the error says so, and repeating
+  `marsh split close ID` or `marsh splits cancel ID` resumes it and writes
+  the journal again. A close or cancel already running refuses a second one.
 - **No split from a lane job.** A job's split is planned from the job's
   recorded mounts, never its cwd: a job (or any descendant, which inherits
   its parent's mounts) whose mounts name a branch fork nests in that fork,
