@@ -989,6 +989,7 @@ fn run_command(arguments: &[OsString]) -> i32 {
         environment.retain(|name, _| marsh_daemon::split::forwardable(name));
     }
     let spec = marsh_daemon::ExecuteSpec {
+        label: None,
         command: name,
         arguments: rest
             .iter()
@@ -1047,6 +1048,8 @@ Options (defaults from MARSH_CLOUD_CPUS, MARSH_CLOUD_TTL, MARSH_CLOUD_IMAGE):
   -d, --detach    run detached: print the job number and return at once; the
                   run goes on with the laptop closed (`cloud -d { ... }`)
   --json          with -d: print {\"job_id\":...,\"cursor\":...} on stdout
+  --label TEXT    with -d: record TEXT (1 to 128 bytes, no control characters)
+                  on the job (`marsh jobs --json`, `jobs show`, `marsh events`)
 
 Run a shell script or one program in a new Docker Cloud sandbox. The current
 project (or split fork) is uploaded as a snapshot, Git-ignored files excluded;
@@ -1294,10 +1297,30 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
         .position(|word| word == "-c" || word == "--")
         .unwrap_or(arguments.len());
     let json = arguments[..options].iter().any(|word| word == "--json");
+    // `--label TEXT` among the options likewise, for a detached run.
+    let labelled = arguments[..options]
+        .iter()
+        .position(|word| word == "--label");
+    let label = match labelled.map(|index| arguments.get(index + 1).filter(|_| index + 1 < options))
+    {
+        None => None,
+        Some(Some(text)) if text.to_str().is_some_and(marsh_daemon::valid_label) => {
+            text.to_str().map(str::to_owned)
+        }
+        Some(_) => {
+            eprint!(
+                "marsh: cloud: --label needs 1 to 128 bytes of text with no control characters\n{CLOUD_HELP}"
+            );
+            return 2;
+        }
+    };
     let arguments = arguments
         .iter()
         .enumerate()
-        .filter(|(index, word)| *index >= options || *word != "--json")
+        .filter(|(index, word)| {
+            *index >= options
+                || (*word != "--json" && labelled.is_none_or(|at| *index != at && *index != at + 1))
+        })
         .map(|(_, word)| word.clone())
         .collect::<Vec<_>>();
     let (arguments, interactive) = match cloud_arguments(&arguments) {
@@ -1310,6 +1333,10 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
     let detach = arguments.iter().any(|word| word == "--detach");
     if json && !detach {
         eprint!("marsh: cloud: --json is for a detached run (-d)\n{CLOUD_HELP}");
+        return 2;
+    }
+    if label.is_some() && !detach {
+        eprint!("marsh: cloud: --label is for a detached run (-d)\n{CLOUD_HELP}");
         return 2;
     }
     if detach && interactive {
@@ -1349,6 +1376,7 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
     // A detached run reads nothing: its stdin is /dev/null.
     let stdin_null = stdin_null || detach;
     let spec = marsh_daemon::ExecuteSpec {
+        label,
         command: "cloud".into(),
         arguments: words,
         placement: marsh_daemon::Placement::Cloud,

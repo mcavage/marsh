@@ -84,6 +84,9 @@ pub struct SplitCreateSpec {
     /// `split --from CHECKPOINT`: the checkpoint's tree is the base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
+    /// `split --open --label TEXT`: recorded on the split.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// Sent by the joiner after its consumer ends (`SplitRelease`).
@@ -215,6 +218,9 @@ pub struct SplitRecord {
     /// never reopens its lanes or captures one twice.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub closing: bool,
+    /// The creator's label (`split --open --label TEXT`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// What `marsh jobs --tree` keeps of a split, also after it is joined and
@@ -353,6 +359,7 @@ impl SplitRecord {
             "id": self.id,
             "state": self.state,
             "root": self.root,
+            "label": self.label,
             "branches": self.branches.iter().map(|branch| serde_json::json!({
                 "label": branch.label,
                 "state": branch.state,
@@ -1712,6 +1719,13 @@ impl SplitEngine {
         if spec.branches.is_empty() {
             return Err("split: no branches".into());
         }
+        match &spec.label {
+            Some(_) if !spec.open => return Err("split: --label is for an --open split".into()),
+            Some(label) if !crate::valid_label(label) => {
+                return Err("split: a label is 1 to 128 bytes with no control characters".into());
+            }
+            _ => {}
+        }
         if spec.branches.len() > MAX_BRANCHES {
             return Err(format!("split: at most {MAX_BRANCHES} branches"));
         }
@@ -2099,6 +2113,7 @@ impl SplitEngine {
         } else {
             let argv = spec.argv.clone().unwrap_or_default();
             let spec = ExecuteSpec {
+                label: None,
                 command: String::from_utf8_lossy(&argv[0]).into_owned(),
                 arguments: argv[1..].to_vec(),
                 placement: crate::Placement::Local,
@@ -2512,6 +2527,7 @@ fn setup(
         from: spec.from.clone(),
         kept_unix_ms: None,
         closing: false,
+        label: spec.label.clone(),
     })
 }
 
@@ -2827,6 +2843,7 @@ impl LocalSplit {
                 from: None,
                 kept_unix_ms: None,
                 closing: false,
+                label: None,
             },
         })
     }

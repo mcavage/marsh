@@ -518,6 +518,7 @@ fn guest_load_boots_the_kit_once_and_keeps_the_publication() {
     let (job, _) = f
         .store
         .begin_job(NewJob {
+            label: None,
             session_id: f.id.clone(),
             command: "other-kit".into(),
             kit_ref: "fixture".into(),

@@ -1575,6 +1575,7 @@ impl DaemonClient for LocalDaemonClient {
     fn execute(&self, request: ExecuteRequest) -> Result<i32, ClientError> {
         self.0
             .execute(marsh_daemon::ExecuteSpec {
+                label: None,
                 command: request.command,
                 arguments: request.args,
                 placement: request.placement,

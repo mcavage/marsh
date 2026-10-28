@@ -1599,6 +1599,7 @@ impl DaemonBackend for StockDaemonBackend {
         let image = vm.job_image().clone();
         let (job_id, attempt_id, lineage) = store.begin_job_process(
             NewJob {
+                label: None,
                 session_id: request.session.session_id.clone(),
                 command: request.command.clone(),
                 kit_ref: vm.kit_ref.clone(),
@@ -4752,6 +4753,7 @@ mod tests {
             .unwrap();
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: vm.kit_ref.clone(),
@@ -4790,6 +4792,7 @@ mod tests {
             .unwrap();
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: vm.kit_ref.clone(),
@@ -5342,6 +5345,7 @@ mod tests {
             .unwrap();
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "agent".into(),
                 kit_ref: workload.identity().into(),
@@ -5389,6 +5393,7 @@ mod tests {
             })
             .unwrap();
         let new_job = || NewJob {
+            label: None,
             session_id: session.clone(),
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -5500,6 +5505,7 @@ mod tests {
         );
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -5564,6 +5570,7 @@ mod tests {
             .unwrap();
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -5908,6 +5915,7 @@ mod tests {
             .unwrap();
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -6256,6 +6264,7 @@ mod kit_lifecycle_callers {
             .unwrap();
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "pix".into(),
                 kit_ref: OLD.into(),
@@ -6386,6 +6395,7 @@ mod kit_lifecycle_callers {
             .unwrap();
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "pix".into(),
                 kit_ref: OLD.into(),

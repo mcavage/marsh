@@ -397,6 +397,7 @@ fn persist_observation(
 ) -> String {
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session.into(),
             command: mode.into(),
             kit_ref: "fixture".into(),
@@ -443,6 +444,7 @@ fn persist_observation(
 fn check_legacy_receipt(store: &DaemonStore, client: &Client, session: &str) {
     let (legacy, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session.into(),
             command: "legacy".into(),
             kit_ref: "fixture".into(),

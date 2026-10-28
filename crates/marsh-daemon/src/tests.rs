@@ -1135,6 +1135,7 @@ fn store_exposes_safe_versioned_documents() {
         .unwrap();
     let (job, attempt) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -1205,6 +1206,7 @@ fn uncertain_cleanup_quarantines_worker_and_releases_capacity() {
         .unwrap();
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -1298,6 +1300,7 @@ fn pre_runtime_failures_stay_auditable_without_blocking_a_fresh_vm() {
             .unwrap();
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -1489,6 +1492,7 @@ fn capacity_is_reserved_before_container_identity_and_abort_releases_it() {
         })
         .unwrap();
     let new_job = || NewJob {
+        label: None,
         session_id: session.clone(),
         command: "fixture".into(),
         kit_ref: "fixture".into(),
@@ -1525,6 +1529,7 @@ fn worker_repair_claim_is_atomic_with_admission_and_live_work() {
         })
         .unwrap();
     let new_job = || NewJob {
+        label: None,
         session_id: session.clone(),
         command: "fixture".into(),
         kit_ref: "fixture".into(),
@@ -1601,6 +1606,7 @@ fn worker_reset_refuses_active_selection_atomically_and_preserves_other_state() 
     }
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session.clone(),
             command: "first".into(),
             kit_ref: "first".into(),
@@ -1636,6 +1642,7 @@ fn abort_receipt_is_explicitly_failed() {
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -1672,6 +1679,7 @@ fn incomplete_output_makes_terminal_receipt_failed() {
         })
         .unwrap();
     let new_job = || NewJob {
+        label: None,
         session_id: session.clone(),
         command: "fixture".into(),
         kit_ref: "fixture".into(),
@@ -1706,6 +1714,7 @@ fn receipts_survive_restart_and_active_work_becomes_unknown() {
         let store = reopen(home.path()).unwrap();
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let create = |command: &str| NewJob {
+            label: None,
             session_id: session.clone(),
             command: command.into(),
             kit_ref: "fixture".into(),
@@ -1750,6 +1759,7 @@ fn a_detached_cloud_job_survives_restart_outside_the_pool_and_settles_once() {
         let (job, _, _) = store
             .begin_cloud_job(
                 NewJob {
+                    label: None,
                     session_id: session,
                     command: "cloud".into(),
                     kit_ref: "cloud-shell".into(),
@@ -1805,6 +1815,7 @@ fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -1875,6 +1886,7 @@ fn production_receipts_ignore_guest_written_legacy_journal() {
         legacy.attach_shell(1, authority("/Users/example/project", selected.path()));
     legacy
         .begin_job(NewJob {
+            label: None,
             session_id: legacy_session,
             command: "guest-forged".into(),
             kit_ref: "fixture".into(),
@@ -1901,6 +1913,7 @@ fn production_receipts_ignore_guest_written_legacy_journal() {
     server
         .store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "host-owned".into(),
             kit_ref: "fixture".into(),
@@ -2015,6 +2028,7 @@ fn daemon_endpoint_cross_tmpdir_child() {
             server
                 .store
                 .begin_job(NewJob {
+                    label: None,
                     session_id: session,
                     command: "retained".into(),
                     kit_ref: "fixture".into(),
@@ -2100,6 +2114,7 @@ fn ordinary_terminal_transition_appends_without_compacting() {
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -2131,6 +2146,7 @@ fn receipt_retention_compacts_an_overfull_journal_on_restart() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -2196,6 +2212,7 @@ fn receipt_journal_compacts_and_replays_a_reserved_queued_receipt() {
         .unwrap();
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -2234,6 +2251,7 @@ fn receipt_journal_rejects_a_half_assigned_queued_receipt() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -2260,6 +2278,7 @@ fn receipt_journal_truncates_only_a_corrupt_tail() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -2292,6 +2311,7 @@ fn receipt_journal_fails_closed_on_interior_corruption() {
         for command in ["first", "second"] {
             store
                 .begin_job(NewJob {
+                    label: None,
                     session_id: session.clone(),
                     command: command.into(),
                     kit_ref: "fixture".into(),
@@ -2319,6 +2339,7 @@ fn receipt_journal_fails_closed_on_complete_corrupt_final_record() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "only-record".into(),
                 kit_ref: "fixture".into(),
@@ -2347,6 +2368,7 @@ fn receipt_journal_rejects_inconsistent_terminal_state_evidence() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -2398,6 +2420,7 @@ fn receipt_journal_accepts_coherent_terminal_placement_and_cleanup_states() {
             let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
             let (job, _) = store
                 .begin_job(NewJob {
+                    label: None,
                     session_id: session,
                     command: "fixture".into(),
                     kit_ref: "fixture".into(),
@@ -2441,6 +2464,7 @@ fn receipt_journal_rejects_terminal_container_without_worker_placement() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -2475,6 +2499,7 @@ fn receipt_journal_rejects_success_with_uncertain_cleanup() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -3177,6 +3202,7 @@ fn execution_attachment_preserves_bytes_and_exit_status() {
     let status = client
         .execute_with_io(
             ExecuteSpec {
+                label: None,
                 acp: false,
                 command: "fixture".into(),
                 arguments: vec![b"invalid:\xff".to_vec()],
@@ -3584,6 +3610,7 @@ fn active_execute_refuses_lifecycle_immediately_without_blocking_status() {
     };
     let execution = client
         .start_execution(ExecuteSpec {
+            label: None,
             acp: false,
             working_directory: None,
             command: "fixture".into(),
@@ -4001,6 +4028,7 @@ impl DaemonBackend for FakeAcpKit {
     ) -> Result<(), DaemonError> {
         assert_eq!(request.command, "agent-kit");
         let (job_id, _) = store.begin_job(NewJob {
+            label: None,
             session_id: request.session.session_id,
             command: request.command,
             kit_ref: "kit:fake-acp".into(),
@@ -4951,6 +4979,7 @@ impl DaemonBackend for StdinEchoBackend {
         store: DaemonStore,
     ) -> Result<(), DaemonError> {
         let (job_id, _) = store.begin_job(NewJob {
+            label: None,
             session_id: request.session.session_id,
             command: request.command,
             kit_ref: "kit:fixture".into(),
@@ -5061,6 +5090,7 @@ fn receipt_journal_is_owner_only_and_keeps_no_job_or_prompt_content() {
     let code = client
         .execute_with_io(
             ExecuteSpec {
+                label: None,
                 acp: false,
                 placement: Placement::Local,
                 environment: BTreeMap::new(),

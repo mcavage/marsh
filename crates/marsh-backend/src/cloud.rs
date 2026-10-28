@@ -713,6 +713,7 @@ impl StockDaemonBackend {
         let link = request.process.clone().unwrap_or_default();
         let (job_id, _attempt, lineage) = store.begin_cloud_job(
             NewJob {
+                label: request.label.clone(),
                 session_id: request.session.session_id.clone(),
                 command: direct
                     .as_ref()
@@ -1685,6 +1686,7 @@ impl AgentCalls {
         };
         let job = match self.store.begin_cloud_job(
             NewJob {
+                label: None,
                 session_id: self.session_id.clone(),
                 command: name.clone(),
                 kit_ref: binding.identity.clone(),

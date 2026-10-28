@@ -14,7 +14,7 @@ use std::path::Path;
 
 pub const SPLIT_HELP: &str =
     "Usage: marsh split [-n] [-d] [--from CHECKPOINT] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]...
-       marsh split --open [--from CHECKPOINT] LABEL...
+       marsh split --open [--from CHECKPOINT] [--label TEXT] LABEL...
        marsh split close ID [--json]
        marsh split apply ID LABEL [--3way]
 
@@ -36,6 +36,8 @@ confined to it; only the split's creator may start them. `close` stops
 admitting lane jobs, waits up to 30 s for running ones, captures every lane,
 keeps the split, and prints its manifest. `apply` applies a captured lane's
 patch to the project in the shell VM. --from bases the forks on a checkpoint.
+--label TEXT (1 to 128 bytes, no control characters) is recorded on the split:
+in its manifest, `marsh splits --json`, and its `marsh events` lines.
 ";
 pub const CHECKPOINT_HELP: &str = "Usage: marsh checkpoint [--label TEXT] [--json]
        marsh checkpoints [--json] [--label TEXT]
@@ -124,19 +126,31 @@ struct SplitArguments {
     detach: bool,
     open: bool,
     from: Option<String>,
+    label: Option<String>,
 }
 
 fn parse_split(arguments: &[OsString]) -> Result<SplitArguments, String> {
     let mut branches = Vec::new();
     let mut no_input = false;
     let mut detach = false;
-    let (mut open, mut from) = (false, None);
+    let (mut open, mut from, mut label) = (false, None, None);
     let mut index = 0;
     while index < arguments.len() {
         match text(&arguments[index]) {
             Some("-n") => no_input = true,
             Some("-d") => detach = true,
             Some("--open") => open = true,
+            Some("--label") => {
+                index += 1;
+                label = Some(
+                    arguments
+                        .get(index)
+                        .and_then(text)
+                        .filter(|label| marsh_daemon::valid_label(label))
+                        .ok_or("split: --label needs 1 to 128 bytes of text with no control characters")?
+                        .to_owned(),
+                );
+            }
             Some("--from") => {
                 index += 1;
                 from = Some(
@@ -201,12 +215,16 @@ fn parse_split(arguments: &[OsString]) -> Result<SplitArguments, String> {
     if branches.is_empty() {
         return Err("split: no branches; see `marsh split --help`".into());
     }
+    if label.is_some() && !open {
+        return Err("split: --label is for an --open split".into());
+    }
     Ok(SplitArguments {
         branches,
         no_input: no_input || open,
         detach,
         open,
         from,
+        label,
     })
 }
 
@@ -274,6 +292,7 @@ fn create(channel: &Channel, parsed: SplitArguments, spool: &[u8]) -> i32 {
         detach,
         open: parsed.open,
         from: parsed.from,
+        label: parsed.label,
     };
     let mut stream = match channel
         .client
@@ -747,6 +766,7 @@ impl brush_shell::bundled::split::SplitWorkspace for SessionSplit {
             start_env: std::collections::BTreeMap::new(),
             open: false,
             from: None,
+            label: None,
             detach: false,
         };
         let client = self.client()?;

@@ -526,3 +526,50 @@ fn kept_splits_are_collected_after_retention_but_never_while_joined() {
     let shown = fixture.json(&["splits", "--json", &id]);
     assert_eq!(shown["splits"][0]["removed"], true, "{shown}");
 }
+
+#[test]
+fn an_open_split_label_is_recorded_listed_and_published() {
+    let fixture = Fixture::new();
+    let events = subscribe(&fixture);
+    events.next_where(|line| line["type"] == "hello");
+    let opened = fixture.json(&["split", "--open", "--label", "narwhal-run:r-7", "a"]);
+    let id = opened["id"].as_str().unwrap().to_owned();
+    let listed = fixture.json(&["splits", "--json"]);
+    let row = listed["splits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|split| split["id"] == id.as_str())
+        .expect("listed");
+    assert_eq!(row["label"], "narwhal-run:r-7");
+    let event =
+        events.next_where(|line| line["type"] == "split" && line["split"]["id"] == id.as_str());
+    assert_eq!(event["split"]["label"], "narwhal-run:r-7");
+    let closed = fixture.json(&["split", "close", &id, "--json"]);
+    assert_eq!(closed["label"], "narwhal-run:r-7");
+    // Removal is confirmed by absence from a successful listing.
+    let removed = fixture.run_in(&fixture.project, &["splits", "rm", &id]);
+    assert_eq!(removed.status.code(), Some(0), "{removed:?}");
+    let listed = fixture.json(&["splits", "--json"]);
+    assert!(
+        listed["splits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|split| split["label"] != "narwhal-run:r-7"),
+        "{listed}"
+    );
+    for bad in [
+        &["split", "--open", "--label", "", "a"][..],
+        &["split", "--open", "--label", "bell\u{7}", "a"],
+        &["split", "--open", "--label", &"x".repeat(129), "a"],
+        &["split", "--label", "x", ":::", "a", "true"],
+        &["split", "--open", "a", "--label"],
+        &["cloud", "--label", "x", "--", "true"],
+        &["cloud", "-d", "--label", "", "--", "true"],
+        &["cloud", "-d", "--label", "nl\n", "--", "true"],
+    ] {
+        let refused = fixture.run_in(&fixture.project, bad);
+        assert_eq!(refused.status.code(), Some(2), "{bad:?}: {refused:?}");
+    }
+}

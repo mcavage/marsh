@@ -1009,6 +1009,9 @@ pub struct ExecuteSpec {
     /// Run the Kit's declared ACP adapter (`acp@1`) instead of its entrypoint.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub acp: bool,
+    /// `marsh cloud -d --label TEXT`: recorded on the job receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 impl ExecuteSpec {
@@ -1569,6 +1572,8 @@ pub struct JobSummary {
     pub parent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detached: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 impl JobSummary {
@@ -1585,6 +1590,7 @@ impl JobSummary {
             wall_ms: job.timing.wall_ms,
             parent: job.lineage.as_ref().map(|lineage| lineage.parent.clone()),
             detached: job.detached.clone(),
+            label: job.label.clone(),
         }
     }
 }
@@ -1677,6 +1683,9 @@ pub struct JobReceipt {
     /// `collected`, `kept-as-patch`, `lost`, ...).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detached: Option<String>,
+    /// The caller's label (`marsh cloud -d --label TEXT`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     /// `scheme://host` of each link this job opened on the Mac (`xdg-open`),
     /// at most `open_url::MAX_RECORDED`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1776,6 +1785,14 @@ pub struct NewJob {
     pub kit_ref: String,
     pub workload_image: String,
     pub mounts: Vec<PublicMount>,
+    /// The caller's label (`marsh cloud -d --label TEXT`), validated here.
+    pub label: Option<String>,
+}
+
+/// A split or job label: 1 to 128 bytes, no control characters.
+#[must_use]
+pub fn valid_label(label: &str) -> bool {
+    (1..=128).contains(&label.len()) && !label.chars().any(char::is_control)
 }
 
 #[derive(Debug)]
@@ -2750,6 +2767,15 @@ impl DaemonStore {
         if !state.shells.contains_key(&job.session_id) {
             return Err(DaemonError::NotFound(job.session_id));
         }
+        if job
+            .label
+            .as_deref()
+            .is_some_and(|label| !valid_label(label))
+        {
+            return Err(DaemonError::Refused(
+                "a label is 1 to 128 bytes with no control characters".into(),
+            ));
+        }
         let job_id = Uuid::new_v4().to_string();
         let mut lineage = match admission {
             Some((link, registered)) => {
@@ -2810,6 +2836,7 @@ impl DaemonStore {
             lineage: Some(lineage.clone()),
             children: Vec::new(),
             detached: None,
+            label: job.label,
             opened: Vec::new(),
             cloud_children: Vec::new(),
             mounts: job.mounts,

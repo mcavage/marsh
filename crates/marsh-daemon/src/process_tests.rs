@@ -57,6 +57,7 @@ fn launch(
     store
         .begin_job_process(
             NewJob {
+                label: None,
                 session_id: session.into(),
                 command: kit.into(),
                 kit_ref: kit.into(),
@@ -268,6 +269,7 @@ fn a_relay_cannot_name_a_parent_job() {
     let token = store.issue_relay_token(&session).unwrap();
     let request = |parent: &str| {
         PublicRequest::Execute(ExecuteSpec {
+            label: None,
             acp: false,
             command: "fixture".into(),
             arguments: Vec::new(),
@@ -426,6 +428,7 @@ fn tree_kit_vm_cap_counts_distinct_live_kits() {
     let refused = store
         .begin_job_process(
             NewJob {
+                label: None,
                 session_id: session.clone(),
                 command: "pi".into(),
                 kit_ref: "pi".into(),
@@ -471,6 +474,7 @@ fn tree_kit_vm_cap_counts_a_commands_old_and_new_image_once() {
     };
     let registered = registered();
     let job = |command: &str, kit_ref: &str| NewJob {
+        label: None,
         session_id: session.clone(),
         command: command.into(),
         kit_ref: kit_ref.into(),

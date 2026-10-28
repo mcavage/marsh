@@ -977,6 +977,7 @@ impl AcpSessionManager {
         std::thread::spawn(move || {
             let result = backend.execute(
                 ExecuteSpec {
+                    label: None,
                     command,
                     arguments: Vec::new(),
                     session: execution_caller,
