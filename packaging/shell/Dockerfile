@@ -66,8 +66,8 @@ COPY image-base /tmp/marsh-image-base
 RUN apt-get update \
  && sh /tmp/marsh-image-base/align-perl.sh \
  && apt-get install -y --no-install-recommends \
-      docker-ce=5:29.9.2-0 docker-ce-cli=5:29.9.2-0 containerd.io=2.4.2-1 \
-      docker-buildx-plugin=0.38.1-0 \
+      docker-ce=5:29.9.2-0 docker-ce-cli=5:29.9.2-1 containerd.io=2.4.2-2 \
+      docker-buildx-plugin=0.38.1-1 \
       nodejs-24=24.22.1-1 npm=11.21.1-1 \
       python-3.14=3.14.10-0 python3-pip=26.2.2-0 python3-pip-whl=26.2.2-0 \
       python3-setuptools-whl=84.2.1-0 python3-wheel=0.48.0-0 \
