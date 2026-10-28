@@ -277,8 +277,12 @@ it makes an annotated tag whose message records the result
 `SKIP=SUITE SKIP_REASON="..."` leaves a suite out for a known failure that is
 not the release's (for example one that fails the same way on the previous
 release); the reason is required and is written into the tag message as
-`Skipped: SUITE: REASON`, next to the result. The
-Release workflow refuses a tag that is not annotated with that record, so
+`Skipped: SUITE: REASON`, next to the result.
+`WAIVE_REGRESSION="..."` releases without running the regression at all (for
+example when other work on the Mac keeps creating and removing VMs, which the
+regression's cleanup check refuses); every other check still applies, and the
+tag records `Regression: waived on <sha> (REASON)` instead of `passed`. The
+Release workflow refuses a tag that is not annotated with one of those records, so
 `git tag` and `git push` alone do not publish. The check guards against
 accidents: nothing stops someone from typing the line by hand.
 

@@ -136,6 +136,25 @@ class CutRelease(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(git(self.work, "tag", "--list", "v1.2.3"), "")
 
+    def test_a_waived_regression_runs_nothing_and_the_tag_says_waived_with_its_reason(self):
+        code, calls = self.release("1.2.3", "--yes", "--waive-regression", "  machine busy;  urgent fix ")
+        self.assertEqual((code, calls), (0, []))
+        body = git(self.work, "tag", "-l", "--format=%(contents)", "v1.2.3").splitlines()
+        self.assertIn(f"Regression: waived on {self.sha[:7]} (machine busy; urgent fix)", body)
+        self.assertFalse(any(line.startswith("Regression: passed") for line in body))
+        self.assertIn("refs/tags/v1.2.3", git(self.work, "ls-remote", "--tags", "origin"))
+
+    def test_a_waiver_still_checks_the_tree_and_ci_and_needs_a_reason(self):
+        self.assertEqual(self.release("1.2.3", "--yes", "--waive-regression", "  "), (1, []))
+        self.assertEqual(self.release("1.2.3", "--yes", "--waive-regression", "x", "--skip", "smoke",
+                                      "--skip-reason", "y"), (1, []))
+        def failing_ci(sha):
+            raise cut.Refusal("no CI")
+        self.assertEqual(self.release("1.2.3", "--yes", "--waive-regression", "x", ci=failing_ci), (1, []))
+        (self.work / "stray").write_text("x")
+        self.assertEqual(self.release("1.2.3", "--yes", "--waive-regression", "x"), (1, []))
+        self.assertEqual(git(self.work, "tag", "-l"), "")
+
     def test_a_dry_run_tags_nothing_and_declining_tags_nothing(self):
         self.assertEqual(self.release("1.2.3", "--dry-run"), (0, ["regress"]))
         self.assertEqual(git(self.work, "tag", "--list", "v1.2.3"), "")
