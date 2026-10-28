@@ -576,7 +576,7 @@ cancelled.
   (the sandbox is then deleted), and around the upload, so a cancelled lane
   does not provision. The sandbox id is journaled on the job as soon as the
   create returns; a sandbox whose job was still being set up when the daemon
-  went away is retired by the next collector pass. A detached run stays live for its lane until
+  went away is retired by the next collector pass; its id is kept in `cloud-setup-orphans.json` across any number of restarts until the retirement is verified (an ownership read that fails is retried, never taken as "not owned"). A detached run stays live for its lane until
   collection settles it (kept as a patch, collected, failed, lost, or
   discarded): `close` collects it every 3 s while it waits (30 s), so a run
   that has finished writes back before capture; one still running makes the

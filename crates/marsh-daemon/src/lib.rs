@@ -1860,6 +1860,7 @@ struct State {
     /// Sandbox ids of cloud jobs that were still being set up at the last
     /// restart, until each is retired.
     cloud_setup_orphans: Vec<String>,
+    orphans_path: PathBuf,
     /// Terminal sessions, their terminal job trees, and recent opens.
     links: open_url::Links,
 }
@@ -2050,15 +2051,27 @@ impl DaemonStore {
         let (mut journal, mut jobs) = receipt_journal::ReceiptJournal::open(journal_home)?;
         let mut repaired = false;
         // A cloud job still being set up when the daemon went away has a
-        // sandbox (billing since its creation) that nothing will use: the
-        // backend retires it (`cloud_setup_orphans`).
-        let cloud_setup_orphans = jobs
+        // sandbox (billing since its creation) that nothing will use. Its id
+        // is kept in a file of its own, written before the receipt is
+        // settled as Unknown, until the backend has verified its retirement:
+        // any number of restarts in between keep it.
+        let orphans_path = journal_home.join("cloud-setup-orphans.json");
+        let mut cloud_setup_orphans: Vec<String> = fs::read(&orphans_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        let found = jobs
             .values()
             .filter(|receipt| {
                 receipt.state == JobState::Queued && receipt.placement == Placement::Cloud
             })
             .filter_map(|receipt| receipt.vm_id.clone())
+            .filter(|id| !cloud_setup_orphans.contains(id))
             .collect::<Vec<_>>();
+        if !found.is_empty() {
+            cloud_setup_orphans.extend(found);
+            write_orphans(&orphans_path, &cloud_setup_orphans)?;
+        }
         for receipt in jobs.values_mut() {
             if matches!(receipt.state, JobState::Queued | JobState::Running) {
                 receipt.state = JobState::Unknown;
@@ -2126,6 +2139,7 @@ impl DaemonStore {
             fenced_splits: std::collections::BTreeSet::new(),
             cancelled_splits: std::collections::BTreeSet::new(),
             cloud_setup_orphans,
+            orphans_path,
             links: open_url::Links::default(),
         }))))
     }
@@ -2493,9 +2507,11 @@ impl DaemonStore {
 
     /// One of them is retired (or was never owned).
     pub fn cloud_setup_orphan_retired(&self, sandbox_id: &str) {
-        self.lock()
-            .cloud_setup_orphans
-            .retain(|id| id != sandbox_id);
+        let mut state = self.lock();
+        state.cloud_setup_orphans.retain(|id| id != sandbox_id);
+        // Best effort: a failed write keeps the id on disk, so a later
+        // start retries a retirement that is already done (it is idempotent).
+        let _ = write_orphans(&state.orphans_path, &state.cloud_setup_orphans);
     }
 
     /// Whether `job` runs in a fork of a cancelled split.
@@ -4207,6 +4223,17 @@ impl Server {
             events: Arc::clone(&self.events),
         }
     }
+}
+
+fn write_orphans(path: &Path, ids: &[String]) -> Result<(), DaemonError> {
+    let temporary = path.with_extension("tmp");
+    let mut file = fs::File::create(&temporary)?;
+    file.write_all(
+        &serde_json::to_vec(ids).map_err(|error| DaemonError::InvalidState(error.to_string()))?,
+    )?;
+    file.sync_all()?;
+    fs::rename(&temporary, path)?;
+    Ok(())
 }
 
 /// Detach a host session: what `DetachShell` does, and what a dead client's

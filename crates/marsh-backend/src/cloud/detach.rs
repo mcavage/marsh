@@ -1348,9 +1348,11 @@ impl StockDaemonBackend {
                     store.cloud_setup_orphan_retired(&orphan);
                     continue;
                 };
-                let owned = adapter
-                    .records()
-                    .is_ok_and(|records| records.iter().any(|r| r.id.as_ref() == Some(&id)));
+                // An ownership read that fails is not "not owned": retry.
+                let Ok(records) = adapter.records() else {
+                    continue;
+                };
+                let owned = records.iter().any(|r| r.id.as_ref() == Some(&id));
                 if !owned || adapter.retire(&id).is_ok() {
                     store.cloud_setup_orphan_retired(&orphan);
                 } else {

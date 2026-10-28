@@ -1967,10 +1967,24 @@ fn a_cloud_sandbox_of_a_job_still_being_set_up_at_restart_is_left_to_be_retired(
         (first, second)
     };
     let _ = (setting_up, running);
-    let reopened = reopen(home.path()).unwrap();
-    assert_eq!(reopened.cloud_setup_orphans(), ["sbx_settingup"]);
-    reopened.cloud_setup_orphan_retired("sbx_settingup");
-    assert_eq!(reopened.cloud_setup_orphans(), Vec::<String>::new());
+    // First restart: found. Its retirement fails (offline): nothing is
+    // reported retired. Second restart: the receipt is long Unknown, the id
+    // is still owed. The third pass retires it, and a fourth start is clean.
+    let first = reopen(home.path()).unwrap();
+    assert_eq!(first.cloud_setup_orphans(), ["sbx_settingup"]);
+    drop(first);
+    let second = reopen(home.path()).unwrap();
+    assert_eq!(second.cloud_setup_orphans(), ["sbx_settingup"]);
+    drop(second);
+    let third = reopen(home.path()).unwrap();
+    assert_eq!(third.cloud_setup_orphans(), ["sbx_settingup"]);
+    third.cloud_setup_orphan_retired("sbx_settingup");
+    assert_eq!(third.cloud_setup_orphans(), Vec::<String>::new());
+    drop(third);
+    assert_eq!(
+        reopen(home.path()).unwrap().cloud_setup_orphans(),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
