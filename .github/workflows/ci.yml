@@ -7,10 +7,12 @@ permissions:
   contents: read
 concurrency:
   group: ci-${{ github.ref }}
-  # A newer push cancels a superseded pull request run. Runs on main finish: a
+  # Ordinary PRs cancel superseded runs. Renovate preparation must finish
+  # posting its license verdict after it pushes a prepared commit.
+  # Runs on main finish: a
   # cancelled run cannot be the "CI passed" that release.yml waits for, and
   # frequent merges would otherwise keep cancelling a cold TLA+ sweep.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && !startsWith(github.head_ref, 'renovate/') }}
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "0"
@@ -29,7 +31,18 @@ env:
 # (crates/marsh-host-identity). So the stock-SBX gate (make verify / regress /
 # acceptance) runs on a Mac by hand; see CONTRIBUTING.md.
 jobs:
+  prepare:
+    name: Prepare dependency records
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'renovate/')
+    uses: ./.github/workflows/renovate-refresh.yml
+    with:
+      branch: ${{ github.head_ref }}
+      sha: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit
+
   changes:
+    needs: prepare
+    if: ${{ !cancelled() && (needs.prepare.result == 'skipped' || needs.prepare.outputs.ready == 'true') }}
     # Which lanes a pull request needs. A merge or manual run needs them all.
     # The lanes below run when this job fails, so a broken classifier can only
     # cost time, never skip a check.
@@ -56,8 +69,8 @@ jobs:
 
   linux:
     name: Linux arm64 (shell, guest crates, protocols)
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    needs: [prepare, changes]
+    if: ${{ !cancelled() && (needs.prepare.result == 'skipped' || needs.prepare.outputs.ready == 'true') && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 45
     env:
@@ -129,8 +142,8 @@ jobs:
 
   macos:
     name: macOS arm64 (host build and tests)
-    needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
+    needs: [prepare, changes]
+    if: ${{ !cancelled() && (needs.prepare.result == 'skipped' || needs.prepare.outputs.ready == 'true') && (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
     runs-on: macos-26
     timeout-minutes: 45
     env:
@@ -200,6 +213,8 @@ jobs:
         run: make test-harness PUBLISHER_PYTHON="${{ steps.publisher-python.outputs.python-path }}"
 
   docs:
+    needs: prepare
+    if: ${{ !cancelled() && (needs.prepare.result == 'skipped' || needs.prepare.outputs.ready == 'true') }}
     name: Docs and site
     runs-on: ubuntu-26.04
     timeout-minutes: 10
@@ -217,6 +232,8 @@ jobs:
         run: python3 tests/release/test_site.py
 
   model:
+    needs: prepare
+    if: ${{ !cancelled() && (needs.prepare.result == 'skipped' || needs.prepare.outputs.ready == 'true') }}
     # Workspace_depth3_pass alone runs ~30 min, so the config marked `huge` is
     # its own shard and the rest share one; inside a shard check.sh runs configs
     # concurrently (docs/model/check.sh --help). On a pull request both shards
@@ -275,13 +292,14 @@ jobs:
           make test-model MODEL_FLAGS="$flag" MODEL_CACHE="$TLC_CACHE"
 
   images:
+    needs: prepare
     # Builds the shell template and every Kit from their pinned inputs, without
     # pushing (make kits, prepare-shell-image --validate-only). This is where a
     # base-image or agent-CLI bump (Renovate) proves it still builds: the build
     # verifies the downloaded checksums and the license notices. It runs only
     # when an input changed, and not for fork PRs (no registry secrets there).
     name: Kit and shell images (build, no push)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    if: ${{ !cancelled() && (needs.prepare.result == 'skipped' || needs.prepare.outputs.ready == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 90
     steps:
@@ -326,6 +344,8 @@ jobs:
         run: make kits TARGET_DIR="$RUNNER_TEMP/target"
 
   renovate-config:
+    needs: prepare
+    if: ${{ !cancelled() && (needs.prepare.result == 'skipped' || needs.prepare.outputs.ready == 'true') }}
     name: Renovate config
     runs-on: ubuntu-26.04
     timeout-minutes: 10
@@ -355,3 +375,39 @@ jobs:
         run: |
           npx --yes --package renovate@44.150.1 renovate-config-validator --strict
           RENOVATE_CONFIG_FILE=.github/renovate-global.js npx --yes --package renovate@44.150.1 renovate-config-validator --strict
+
+  dependency-validation:
+    name: Validate prepared dependency head
+    needs: [prepare, changes, linux, macos, docs, model, images, renovate-config]
+    if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'renovate/') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Record the validation verdict on this exact head
+        id: verdict
+        env:
+          GH_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          state=$(python3 - <<'PYTHON'
+          import json, os
+          jobs = json.loads(os.environ["RESULTS"])
+          prepare = jobs["prepare"]
+          if prepare["result"] == "success" and prepare["outputs"].get("ready") == "false":
+              print("superseded")
+          elif prepare["result"] == "success" and prepare["outputs"].get("ready") == "true" and all(
+                  job["result"] in ("success", "skipped") for job in jobs.values()):
+              print("success")
+          else:
+              print("failure")
+          PYTHON
+          )
+          if [ "$state" = superseded ]; then
+            echo 'A newer prepared commit will be validated by its own CI run.'
+            exit 0
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHA" -f state="$state" \
+            -f context='Prepared dependency validation' -f description="Prepared-head CI: $state" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          test "$state" = success
