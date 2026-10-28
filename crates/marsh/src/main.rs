@@ -2384,7 +2384,7 @@ fn reject_cross_protocol_name(name: &str, acp: bool) -> Result<(), RunError> {
                 "error: mcp server \"{}\" not found: mcp server not found\n  try: sbx mcp ls\n",
                 other.server_name
             );
-            if output.stdout.is_empty() && output.stderr == missing.as_bytes() {
+            if output.stdout.is_empty() && sbx_stderr(&output.stderr) == missing.as_bytes() {
                 Ok(())
             } else {
                 Err(RunError::new(
@@ -3036,7 +3036,7 @@ fn inspect_published_sbx_registration_with_prior_generation(
         "error: mcp server \"{}\" not found: mcp server not found\n  try: sbx mcp ls\n",
         registration.server_name
     );
-    if output.stdout.is_empty() && output.stderr == missing.as_bytes() {
+    if output.stdout.is_empty() && sbx_stderr(&output.stderr) == missing.as_bytes() {
         return Ok(false);
     }
     Err(RunError::new(
@@ -3491,7 +3491,20 @@ fn exact_missing_sbx_registration(output: &std::process::Output, name: &str) -> 
         return false;
     }
     let expected = format!("error: MCP server \"{name}\" not found");
-    output.stderr == expected.as_bytes() || output.stderr == format!("{expected}\n").as_bytes()
+    let stderr = sbx_stderr(&output.stderr);
+    stderr == expected.as_bytes() || stderr == format!("{expected}\n").as_bytes()
+}
+
+/// Stock `sbx` stderr without its `WARN: ` lines (v0.50.0 prints e.g. `WARN:
+/// docker hub refresh lock held by another process` when several run at once),
+/// so an exact refusal still matches.
+fn sbx_stderr(stderr: &[u8]) -> Vec<u8> {
+    stderr
+        .split_inclusive(|byte| *byte == b'\n')
+        .filter(|line| !line.starts_with(b"WARN: "))
+        .flatten()
+        .copied()
+        .collect()
 }
 
 fn mcp_client_diagnostic(output: &std::process::Output) -> String {
@@ -3842,6 +3855,36 @@ impl RunError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_missing_sbx_registration_still_matches_under_sbx_warnings() {
+        use std::os::unix::process::ExitStatusExt as _;
+        let output = |stderr: &str| std::process::Output {
+            status: std::process::ExitStatus::from_raw(1 << 8),
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        let refusal = "error: MCP server \"tool\" not found\n";
+        assert!(super::exact_missing_sbx_registration(
+            &output(refusal),
+            "tool"
+        ));
+        assert!(super::exact_missing_sbx_registration(
+            &output(&format!(
+                "WARN: docker hub refresh lock held by another process: context deadline exceeded\n{refusal}"
+            )),
+            "tool"
+        ));
+        // Anything else besides the refusal still does not match.
+        assert!(!super::exact_missing_sbx_registration(
+            &output(&format!("error: daemon unavailable\n{refusal}")),
+            "tool"
+        ));
+        assert!(!super::exact_missing_sbx_registration(
+            &output("WARN: x\n"),
+            "tool"
+        ));
+    }
+
     #[test]
     fn single_call_is_only_one_literal_call() {
         let call = |source: &str| super::single_call(source);
