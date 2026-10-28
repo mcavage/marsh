@@ -1782,7 +1782,27 @@ impl DaemonBackend for StockDaemonBackend {
             .checked_add(Duration::from_secs(spec.resources.wall_seconds))
             .and_then(|deadline| deadline.checked_add(WORKER_TERMINAL_GRACE))
             .unwrap_or_else(Instant::now);
-        store.mark_execution_submitted(&job_id)?;
+        // A closed or cancelled lane split fences its forks: nothing was
+        // launched, so the refusal ends the job cleanly (the worker stays in
+        // service).
+        if let Err(error) = store.mark_execution_submitted(&job_id) {
+            if matches!(error, DaemonError::Refused(_)) && self.sbx.revoke_grants(&grants).is_ok() {
+                grant_guard.complete();
+                store.finish_job_with_execution(
+                    &job_id,
+                    ExecutionOutcome::NotStarted,
+                    ExitStatus {
+                        code: Some(125),
+                        cause: format!("admission_failed: {error}"),
+                    },
+                    false,
+                    CleanupState::Verified,
+                    TimingReport::default(),
+                )?;
+                job_guard.complete();
+            }
+            return Err(error);
+        }
         let mut launch = match self.sbx.launch_worker(&vm, &grants, &attempt_id, spec) {
             Ok(launch) => launch,
             Err(error @ marsh_sbx::SbxError::AmbiguousWorkerStart { .. }) => {
@@ -4744,6 +4764,62 @@ mod tests {
             .mark_running(&job, &vm.name, &vm.name, container.as_str())
             .unwrap();
         (store, job)
+    }
+
+    /// A lane job recorded before its split was closed is refused at
+    /// submission; ending it as not started keeps the worker in service.
+    #[test]
+    fn a_fenced_lane_job_is_refused_at_submission_without_quarantine() {
+        let home = tempfile::tempdir().unwrap();
+        let vm = cleanup_test_vm(home.path());
+        let store = DaemonStore::new(home.path());
+        let session = store.attach_shell(
+            1,
+            SessionAuthority {
+                username: "alice".into(),
+                uid: 501,
+                gid: 20,
+                launch_directory: home.path().to_owned(),
+                guest_home: "/Users/alice".into(),
+                home_backing: home.path().to_owned(),
+                ephemeral_home: false,
+            },
+        );
+        store
+            .register_worker(public_worker_status(&store, &vm))
+            .unwrap();
+        let (job, _) = store
+            .begin_job(NewJob {
+                session_id: session,
+                command: "fixture".into(),
+                kit_ref: vm.kit_ref.clone(),
+                workload_image: vm.job_image.as_str().into(),
+                mounts: vec![marsh_daemon::PublicMount {
+                    target: "/Users/alice/project/.marsh/split/s1/a".into(),
+                    access: "read_write".into(),
+                }],
+            })
+            .unwrap();
+        store.reserve_worker(&job, &vm.name, &vm.name).unwrap();
+        store.fence_split("s1");
+        assert!(matches!(
+            store.mark_execution_submitted(&job),
+            Err(DaemonError::Refused(_))
+        ));
+        store
+            .finish_job_with_execution(
+                &job,
+                ExecutionOutcome::NotStarted,
+                ExitStatus {
+                    code: Some(125),
+                    cause: "admission_failed: split closed".into(),
+                },
+                false,
+                CleanupState::Verified,
+                TimingReport::default(),
+            )
+            .unwrap();
+        assert_eq!(store.status(None).workers[0].health, WorkerHealth::Ready);
     }
 
     #[test]

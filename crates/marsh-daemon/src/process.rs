@@ -121,7 +121,7 @@ fn live(job: &JobReceipt) -> bool {
 
 /// A job whose end was never confirmed holds its pool slot until its Kit is
 /// reset (`BudgetBound`, control `freeOnRevoke`).
-fn holds_slot(table: &ProcessTable, job: &JobReceipt) -> bool {
+pub(crate) fn holds_slot(table: &ProcessTable, job: &JobReceipt) -> bool {
     let ended = job.finished_unix_ms.unwrap_or(job.created_unix_ms);
     !live(job)
         && job.cleanup == CleanupState::Uncertain

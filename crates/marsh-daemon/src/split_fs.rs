@@ -414,15 +414,20 @@ pub fn logical_bytes(dir: &Dir) -> u64 {
         })
 }
 
-/// Delete what an interrupted background removal left in `<root>/.marsh/.trash`.
-pub fn sweep_trash(root: &Path) {
-    if let Ok(trash) = Dir::open_root(root)
+/// Delete what an interrupted background removal left in `<root>/.marsh/.trash`;
+/// whether it is now empty (or absent).
+#[must_use]
+pub fn sweep_trash(root: &Path) -> bool {
+    match Dir::open_root(root)
         .and_then(|root| root.open(".marsh"))
         .and_then(|marsh| marsh.open(".trash"))
     {
-        for (name, _) in trash.entries().unwrap_or_default() {
-            let _ = trash.remove_tree(&name);
-        }
+        Ok(trash) => trash
+            .entries()
+            .unwrap_or_default()
+            .iter()
+            .all(|(name, _)| trash.remove_tree(name).is_ok()),
+        Err(error) => error.kind() == io::ErrorKind::NotFound,
     }
 }
 

@@ -15,6 +15,14 @@ without Kit widening, split omission, credential-free MCP echo through a real
 job, restoration after worker reset, startup snapshots, and unsafe-config
 refusals without VM changes. It is included in `make verify`/`make regress`.
 
+`tests/acceptance/lanes_uat.py` exercises open lanes with the credential-free
+ACP fixture: a checkpoint and `split --open --from` it, `marsh run --acp`
+lane jobs over stdio that write their fork and are refused the project, the
+other lane, the checkpoint, and the gitfile, creator-only admission (a shell
+session is refused), `split close` capture, refusal after close, `split
+apply`, cancel ending a live lane job, `marsh storage`, and the `marsh events`
+stream. It is included in `make verify`/`make regress`.
+
 `tests/acceptance/cloud_uat.py` is the opt-in live Docker Cloud family for
 `cloud { }` / `marsh cloud` (C02-C06 and C09-C12 of the
 [cloud placement design](../../docs/design/cloud-placement.md#10-observable-acceptance)).

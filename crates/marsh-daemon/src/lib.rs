@@ -1737,7 +1737,7 @@ pub struct JobLineage {
 
 impl JobLineage {
     /// The fork a confined job mounts read-write: `.../.marsh/split/<id>/<label>`.
-    fn split_of(mounts: &[PublicMount]) -> Option<(String, String)> {
+    pub(crate) fn split_of(mounts: &[PublicMount]) -> Option<(String, String)> {
         mounts.iter().find_map(|mount| {
             let parts = mount
                 .target
@@ -1764,6 +1764,9 @@ pub const DISPLAY_ARG_CHARS: usize = 200;
 pub(crate) struct ForkJobs {
     pub live: Vec<String>,
     pub uncertain: usize,
+    /// Of `uncertain`, those whose Kit was not reset since (`process.rs`
+    /// `holds_slot`): they may still write.
+    pub held: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1807,6 +1810,10 @@ struct State {
     /// Session of each running split shell branch -> (split, label): a Kit
     /// job it starts is that branch's child (`docs/design/processes.md` s9).
     branch_sessions: BTreeMap<String, (String, String)>,
+    /// Open lane splits being closed or cancelled: no job in their forks is
+    /// recorded or submitted any more (`split.rs` `admit_lane` admits before
+    /// the Kit is prepared; this fence holds at the job's own creation).
+    fenced_splits: std::collections::BTreeSet<String>,
     /// Terminal sessions, their terminal job trees, and recent opens.
     links: open_url::Links,
 }
@@ -2060,6 +2067,7 @@ impl DaemonStore {
             ordinary_requests: 0,
             lifecycle_active: false,
             branch_sessions: BTreeMap::new(),
+            fenced_splits: std::collections::BTreeSet::new(),
             links: open_url::Links::default(),
         }))))
     }
@@ -2376,6 +2384,22 @@ impl DaemonStore {
                 .count()
     }
 
+    /// Close or cancel an open lane split: from now on no job in its forks is
+    /// recorded or submitted.
+    pub fn fence_split(&self, split: &str) {
+        self.lock().fenced_splits.insert(split.to_owned());
+    }
+
+    /// Whether `mounts` name a fork of a fenced split.
+    fn fenced(state: &State, mounts: &[PublicMount]) -> Result<(), DaemonError> {
+        match JobLineage::split_of(mounts) {
+            Some((split, _)) if state.fenced_splits.contains(&split) => Err(DaemonError::Refused(
+                format!("lane job refused: split {split} is closed; its lanes admit no more jobs"),
+            )),
+            _ => Ok(()),
+        }
+    }
+
     /// Jobs that mount a fork of `split` (lane `label`, or any): the live
     /// ones, and how many ended with unconfirmed cleanup.
     pub(crate) fn fork_jobs(&self, split: &str, label: Option<&str>) -> ForkJobs {
@@ -2392,6 +2416,7 @@ impl DaemonStore {
                 found.live.push(job.job_id.clone());
             } else if job.cleanup == CleanupState::Uncertain || job.state == JobState::Unknown {
                 found.uncertain += 1;
+                found.held += usize::from(process::holds_slot(&state.process, job));
             }
         }
         found
@@ -2755,6 +2780,7 @@ impl DaemonStore {
         // Only a branch job (or a job confined to a fork without a parent)
         // is marked with its split; a child copies its parent's mounts.
         let parented = admission.is_some_and(|(link, _)| link.parent_job.is_some() && !link.branch);
+        Self::fenced(&state, &job.mounts)?;
         if let Some((split, label)) = JobLineage::split_of(&job.mounts)
             .or_else(|| state.branch_sessions.get(&job.session_id).cloned())
             .filter(|_| !parented)
@@ -2890,6 +2916,12 @@ impl DaemonStore {
                 "job is not awaiting submission".into(),
             ));
         }
+        let mounts = receipt.mounts.clone();
+        Self::fenced(&state, &mounts)?;
+        let receipt = state
+            .jobs
+            .get_mut(job_id)
+            .ok_or_else(|| DaemonError::NotFound(job_id.into()))?;
         receipt.execution = ExecutionOutcome::Unknown;
         Ok(())
     }
@@ -3794,6 +3826,13 @@ impl Server {
         self
     }
 
+    /// How long a kept split is retained before removal (7 days).
+    #[must_use]
+    pub fn with_kept_split_retention(self, retention: Duration) -> Self {
+        self.splits.set_kept_retention(retention);
+        self
+    }
+
     /// Serve `DevSbx` relay requests for development grants.
     #[must_use]
     pub fn with_dev_broker(mut self, broker: Arc<dev_broker::DevBroker>) -> Self {
@@ -4172,13 +4211,25 @@ impl ConnectionHandler {
     /// `marsh events`: the hello line, then every change and a heartbeat
     /// every 15 s; `resync` and the end of the stream when it fell behind.
     fn serve_events(&self, mut stream: UnixStream) -> Result<(), DaemonError> {
-        let (seq, receiver) = self.events.subscribe();
+        let Some(subscription) = self.events.subscribe() else {
+            return write_frame(
+                &mut stream,
+                &PublicReply::Error {
+                    code: ErrorCode::InvalidRequest,
+                    message: format!(
+                        "marsh events: at most {} subscribers at once",
+                        events::SUBSCRIBERS
+                    ),
+                },
+            );
+        };
         stream.set_read_timeout(None)?;
-        let hello = serde_json::json!({"type": "hello", "seq": seq, "features": FEATURES});
+        let hello =
+            serde_json::json!({"type": "hello", "seq": subscription.seq, "features": FEATURES});
         let mut line = hello.to_string();
         loop {
             write_frame(&mut stream, &PublicReply::Event { line })?;
-            line = match receiver.recv_timeout(Duration::from_secs(15)) {
+            line = match subscription.receiver.recv_timeout(Duration::from_secs(15)) {
                 Ok(line) => line.to_string(),
                 Err(mpsc::RecvTimeoutError::Timeout) => r#"{"type":"heartbeat"}"#.into(),
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -5336,6 +5387,7 @@ impl ConnectionHandler {
                         invalid("checkpoint: the project root must be absolute".into())
                     }
                     (CheckpointAction::Create { label }, Some(root)) => {
+                        self.splits.note_root(&root);
                         match checkpoints.create(&root, label) {
                             Ok(checkpoint) => PublicReply::Document {
                                 document: checkpoint.document(),
@@ -5405,10 +5457,13 @@ impl ConnectionHandler {
                 write_frame(&mut stream, &reply)
             }
             PublicRequest::SplitRemove { split } => {
-                let reply = self.splits.remove(&caller, &split).map_or_else(
-                    |error| public_error(&error),
-                    |message| PublicReply::SplitDone { message },
-                );
+                let reply = self
+                    .splits
+                    .remove(&caller, &split, &self.store)
+                    .map_or_else(
+                        |error| public_error(&error),
+                        |message| PublicReply::SplitDone { message },
+                    );
                 write_frame(&mut stream, &reply)
             }
             PublicRequest::Status { session_id } => {

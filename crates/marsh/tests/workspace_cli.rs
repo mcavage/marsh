@@ -31,6 +31,11 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_retention(Duration::from_hours(7 * 24))
+    }
+
+    /// A daemon that removes kept splits `retention` after they were kept.
+    fn with_retention(retention: Duration) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap();
         let home = root.join("scope");
@@ -44,7 +49,9 @@ impl Fixture {
         git(&project, &["init", "-q", "-b", "main"]);
         git(&project, &["add", "."]);
         git(&project, &["commit", "-q", "-m", "init"]);
-        let server = Server::bind(&home).unwrap();
+        let server = Server::bind(&home)
+            .unwrap()
+            .with_kept_split_retention(retention);
         let store = server.store();
         let session = store.attach_shell(
             std::process::id(),
@@ -438,4 +445,84 @@ fn cancelling_an_open_split_with_no_lane_job_removes_it() {
         thread::sleep(Duration::from_millis(50));
     }
     assert!(!fixture.project.join(".marsh/split").join(id).exists());
+}
+
+#[test]
+fn events_take_at_most_eight_connections_and_never_hold_off_requests() {
+    let fixture = Fixture::new();
+    let subscribers = (0..8).map(|_| subscribe(&fixture)).collect::<Vec<_>>();
+    for subscriber in &subscribers {
+        subscriber.next_where(|line| line["type"] == "hello");
+    }
+    let ninth = fixture.run_in(&fixture.project, &["events", "--json"]);
+    assert_ne!(ninth.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&ninth.stderr).contains("at most 8 subscribers"),
+        "{ninth:?}"
+    );
+    // Ordinary and lifecycle requests still get through.
+    fixture.json(&["storage", "--json"]);
+    drop(subscribers);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    // A subscriber that went away frees its place.
+    loop {
+        let again = subscribe(&fixture);
+        let line = again
+            .lines
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap_or_default();
+        if line["type"] == "hello" {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no place freed");
+    }
+    fixture.store.detach_shell(&fixture.session).unwrap();
+    assert!(matches!(
+        fixture.client().request(PublicRequest::Shutdown).unwrap(),
+        PublicReply::ShuttingDown
+    ));
+}
+
+#[test]
+fn kept_splits_are_collected_after_retention_but_never_while_joined() {
+    let fixture = Fixture::with_retention(Duration::from_secs(2));
+    let opened = fixture.json(&["split", "--open", "a"]);
+    let id = opened["id"].as_str().unwrap().to_owned();
+    let lane = PathBuf::from(opened["lanes"]["a"].as_str().unwrap());
+    fs::write(lane.join("new.txt"), "x\n").unwrap();
+    fixture.json(&["split", "close", &id, "--json"]);
+    // The consumer reads the results across the retention window (2 s); the
+    // collector leaves a joined split alone, and a failing consumer keeps
+    // it with a fresh retention clock.
+    let joined = fixture
+        .command(
+            &fixture.project,
+            &[
+                "join",
+                "--",
+                "sh",
+                "-c",
+                "sleep 4; cat \"$SPLIT_DIR/a/files\"; exit 3",
+            ],
+        )
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write as _;
+        let mut stdin = joined.stdin.as_ref().unwrap();
+        writeln!(stdin, "{opened}").unwrap();
+    }
+    let output = joined.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "A\tnew.txt\n");
+    let shown = fixture.json(&["splits", "--json", &id]);
+    assert_eq!(shown["splits"][0]["state"], "kept", "{shown}");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while fixture.project.join(".marsh/split").join(&id).exists() {
+        assert!(Instant::now() < deadline, "kept split never collected");
+        thread::sleep(Duration::from_millis(200));
+    }
+    let shown = fixture.json(&["splits", "--json", &id]);
+    assert_eq!(shown["splits"][0]["removed"], true, "{shown}");
 }

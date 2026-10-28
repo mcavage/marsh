@@ -12,6 +12,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 /// Lines a subscriber may fall behind before it is dropped.
 const QUEUE: usize = 1024;
+/// Subscriptions at once. Each holds one of the daemon's 128 connections for
+/// its lifetime, so the rest stay free for ordinary and lifecycle requests.
+pub const SUBSCRIBERS: usize = 8;
 
 #[derive(Debug, Default)]
 pub struct Bus(Mutex<Inner>);
@@ -20,6 +23,7 @@ pub struct Bus(Mutex<Inner>);
 struct Inner {
     seq: u64,
     subscribers: Vec<SyncSender<Arc<str>>>,
+    active: usize,
 }
 
 impl Bus {
@@ -41,11 +45,34 @@ impl Bus {
             });
     }
 
-    /// A new subscription and the sequence number of the last change before it.
-    pub fn subscribe(&self) -> (u64, Receiver<Arc<str>>) {
+    /// A new subscription, or `None` when `SUBSCRIBERS` are connected.
+    pub fn subscribe(self: &Arc<Self>) -> Option<Subscription> {
         let (sender, receiver) = sync_channel(QUEUE);
         let mut inner = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if inner.active >= SUBSCRIBERS {
+            return None;
+        }
+        inner.active += 1;
         inner.subscribers.push(sender);
-        (inner.seq, receiver)
+        Some(Subscription {
+            seq: inner.seq,
+            receiver,
+            bus: Arc::clone(self),
+        })
+    }
+}
+
+/// One `marsh events` connection: the sequence number of the last change
+/// before it, and its queue. Dropping it frees its place.
+pub struct Subscription {
+    pub seq: u64,
+    pub receiver: Receiver<Arc<str>>,
+    bus: Arc<Bus>,
+}
+
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        let mut inner = self.bus.0.lock().unwrap_or_else(PoisonError::into_inner);
+        inner.active -= 1;
     }
 }

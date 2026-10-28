@@ -40,9 +40,35 @@ pub enum Refusal {
 }
 
 pub struct Checkpoints {
-    records: Mutex<BTreeMap<String, Checkpoint>>,
+    state: Mutex<State>,
     journal: PathBuf,
     events: Arc<Bus>,
+}
+
+#[derive(Default)]
+struct State {
+    records: BTreeMap<String, Checkpoint>,
+    /// Splits being made `--from` each checkpoint: it is not removed while
+    /// one clones its tree.
+    leases: BTreeMap<String, usize>,
+}
+
+/// A split's hold on the checkpoint it is cloning (`Checkpoints::lease`).
+pub struct CheckpointLease<'a> {
+    checkpoints: &'a Checkpoints,
+    id: String,
+}
+
+impl Drop for CheckpointLease<'_> {
+    fn drop(&mut self) {
+        let mut state = self.checkpoints.lock();
+        if let Some(count) = state.leases.get_mut(&self.id) {
+            *count -= 1;
+            if *count == 0 {
+                state.leases.remove(&self.id);
+            }
+        }
+    }
 }
 
 /// A label: at most 128 printable characters.
@@ -70,7 +96,10 @@ impl Checkpoints {
             .unwrap_or_default();
         records.retain(|_, checkpoint| checkpoint.open().is_ok());
         let checkpoints = Self {
-            records: Mutex::new(records),
+            state: Mutex::new(State {
+                records,
+                leases: BTreeMap::new(),
+            }),
             journal,
             events,
         };
@@ -81,18 +110,20 @@ impl Checkpoints {
         checkpoints
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, BTreeMap<String, Checkpoint>> {
-        self.records.lock().unwrap_or_else(PoisonError::into_inner)
+    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn save(&self) {
-        crate::split::SplitEngine::write_durable(&self.journal, &*self.lock());
+        let records = self.lock().records.clone();
+        crate::split::SplitEngine::write_durable(&self.journal, &records);
     }
 
     /// Every project with a recorded checkpoint.
     #[must_use]
     pub fn roots(&self) -> Vec<PathBuf> {
         self.lock()
+            .records
             .values()
             .map(|checkpoint| checkpoint.root.clone())
             .collect::<std::collections::BTreeSet<_>>()
@@ -165,7 +196,7 @@ impl Checkpoints {
             git: git.is_some(),
             identity,
         };
-        self.lock().insert(id, checkpoint.clone());
+        self.lock().records.insert(id, checkpoint.clone());
         self.publish(&checkpoint, false);
         self.retain(root);
         self.save();
@@ -177,6 +208,7 @@ impl Checkpoints {
     pub fn list(&self, root: Option<&Path>, label: Option<&str>) -> Vec<Checkpoint> {
         let mut found = self
             .lock()
+            .records
             .values()
             .filter(|checkpoint| root.is_none_or(|root| checkpoint.root == root))
             .filter(|checkpoint| {
@@ -190,12 +222,24 @@ impl Checkpoints {
         found
     }
 
+    /// Find a checkpoint of `root` and hold it until the lease is dropped:
+    /// retention and `rm` leave it alone meanwhile.
     #[must_use]
-    pub fn get(&self, root: &Path, id: &str) -> Option<Checkpoint> {
-        self.lock()
+    pub fn lease(&self, root: &Path, id: &str) -> Option<(Checkpoint, CheckpointLease<'_>)> {
+        let mut state = self.lock();
+        let checkpoint = state
+            .records
             .get(id)
             .filter(|checkpoint| checkpoint.root == root)
-            .cloned()
+            .cloned()?;
+        *state.leases.entry(id.to_owned()).or_default() += 1;
+        Some((
+            checkpoint,
+            CheckpointLease {
+                checkpoints: self,
+                id: id.to_owned(),
+            },
+        ))
     }
 
     /// `marsh checkpoints rm ID`.
@@ -203,19 +247,30 @@ impl Checkpoints {
     /// # Errors
     /// Returns why it was not found or not removed.
     pub fn remove(&self, root: Option<&Path>, id: &str) -> Result<String, String> {
-        let checkpoint = self
-            .lock()
-            .get(id)
-            .filter(|checkpoint| root.is_none_or(|root| checkpoint.root == root))
-            .cloned()
-            .ok_or_else(|| format!("no checkpoint {id}"))?;
+        let checkpoint = {
+            let mut state = self.lock();
+            let checkpoint = state
+                .records
+                .get(id)
+                .filter(|checkpoint| root.is_none_or(|root| checkpoint.root == root))
+                .cloned()
+                .ok_or_else(|| format!("no checkpoint {id}"))?;
+            if state.leases.contains_key(id) {
+                return Err(format!(
+                    "checkpoint {id} is in use by a split being made from it; retry"
+                ));
+            }
+            state.records.remove(id);
+            checkpoint
+        };
         let message = self.forget(&checkpoint);
         self.save();
         message
     }
 
-    /// Move the files to `.marsh/.trash` (deleted in the background) and drop
-    /// the record; a replaced directory is forgotten, never removed by path.
+    /// Move the files of a checkpoint whose record is already gone to
+    /// `.marsh/.trash` (deleted in the background); a replaced directory is
+    /// forgotten, never removed by path.
     fn forget(&self, checkpoint: &Checkpoint) -> Result<String, String> {
         let removed = split_fs::area(&checkpoint.root, "checkpoints", false)
             .and_then(|area| {
@@ -231,12 +286,12 @@ impl Checkpoints {
                     &trash,
                 )
             });
-        self.lock().remove(&checkpoint.id);
         self.publish(checkpoint, true);
         removed.map(|()| format!("removed checkpoint {}", checkpoint.id))
     }
 
-    /// Keep the newest 20 per label and 200 per project, none older than 7 days.
+    /// Keep the newest 20 per label and 200 per project, none older than 7
+    /// days. A leased checkpoint waits for the next pass.
     fn retain(&self, root: &Path) {
         let now = crate::unix_time_ms();
         let mut per_label = BTreeMap::<Option<String>, usize>::new();
@@ -253,6 +308,15 @@ impl Checkpoints {
             })
             .map(|(_, checkpoint)| checkpoint)
             .collect::<Vec<_>>();
+        let expired = {
+            let mut state = self.lock();
+            let State { records, leases } = &mut *state;
+            expired
+                .into_iter()
+                .filter(|checkpoint| !leases.contains_key(&checkpoint.id))
+                .filter(|checkpoint| records.remove(&checkpoint.id).is_some())
+                .collect::<Vec<_>>()
+        };
         for checkpoint in expired {
             let _ = self.forget(&checkpoint);
         }
@@ -285,5 +349,40 @@ impl Checkpoint {
             "dir": self.dir,
             "bytes": self.bytes,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A split cloning a checkpoint holds it: neither retention nor `rm`
+    /// removes it until the lease is dropped.
+    #[test]
+    fn a_leased_checkpoint_outlives_retention_until_released() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let project = root.join("project");
+        std::fs::create_dir(&project).unwrap();
+        std::fs::write(project.join("a"), "a").unwrap();
+        let checkpoints = Checkpoints::open(&root, Arc::new(Bus::default()));
+        let label = || Some("turn".to_owned());
+        let Ok(first) = checkpoints.create(&project, label()) else {
+            panic!("checkpoint refused");
+        };
+        let (_, lease) = checkpoints.lease(&project, &first.id).unwrap();
+        for _ in 0..PER_LABEL {
+            assert!(checkpoints.create(&project, label()).is_ok());
+        }
+        assert!(checkpoints.lease(&project, &first.id).is_some());
+        assert!(first.dir.join("tree/a").is_file());
+        assert!(checkpoints.remove(Some(&project), &first.id).is_err());
+        drop(lease);
+        assert!(checkpoints.create(&project, label()).is_ok());
+        assert!(checkpoints.lease(&project, &first.id).is_none());
+        assert_eq!(
+            checkpoints.list(Some(&project), Some("turn")).len(),
+            PER_LABEL
+        );
     }
 }

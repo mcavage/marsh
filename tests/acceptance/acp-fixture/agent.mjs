@@ -106,6 +106,23 @@ for await (const line of inputLines) {
       } else if (text === "oversize-update") {
         update("x".repeat(300000));
         endPrompt(id,"end_turn");
+      } else if (text?.startsWith("write ")) {
+        // `write PATH TEXT`: what a lane agent's edit can reach.
+        const [, path, ...words] = text.split(" ");
+        try {
+          fs.writeFileSync(path, words.join(" "));
+          update("fixture:wrote");
+        } catch (error) {
+          update(`fixture:refused:${error.code}`);
+        }
+        endPrompt(id, "end_turn");
+      } else if (text?.startsWith("read ")) {
+        try {
+          update(`fixture:read:${fs.readFileSync(text.slice(5), "utf8")}`);
+        } catch (error) {
+          update(`fixture:refused:${error.code}`);
+        }
+        endPrompt(id, "end_turn");
       } else if (text === "late") {
         endPrompt(id, "end_turn");
         update("late-after-end");
