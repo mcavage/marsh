@@ -297,15 +297,18 @@ fn checkpoints_keep_the_tree_and_git_state_and_retain_twenty_per_label() {
             .join(".marsh/.metadata_never_index")
             .is_file()
     );
-    let excluded = Command::new("tmutil")
-        .arg("isexcluded")
-        .arg(fixture.project.join(".marsh"))
-        .output()
-        .unwrap();
-    assert!(
-        String::from_utf8_lossy(&excluded.stdout).contains("[Excluded]"),
-        "{excluded:?}"
-    );
+    #[cfg(target_os = "macos")]
+    {
+        let excluded = Command::new("tmutil")
+            .arg("isexcluded")
+            .arg(fixture.project.join(".marsh"))
+            .output()
+            .unwrap();
+        assert!(
+            String::from_utf8_lossy(&excluded.stdout).contains("[Excluded]"),
+            "{excluded:?}"
+        );
+    }
 
     // Newest 20 per label; the oldest is removed (and announced).
     for _ in 0..20 {
