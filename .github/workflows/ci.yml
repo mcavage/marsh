@@ -220,7 +220,7 @@ jobs:
     # Workspace_depth3_pass alone runs ~30 min, so the config marked `huge` is
     # its own shard and the rest share one; inside a shard check.sh runs configs
     # concurrently (docs/model/check.sh --help). On a pull request both shards
-    # check only when a model input changed (docs/model, the pinned TLA+ tools,
+    # check only when a model input changed (spec/config/runner, pinned TLA+ tools,
     # the model target or this job); otherwise they pass at once. A merge to main
     # checks every config. The verdict cache is keyed by the model files, so an
     # unchanged model is quick; the first run after a model change on main is
@@ -246,7 +246,7 @@ jobs:
             echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           range="origin/$BASE_REF...HEAD"
-          if git diff --name-only "$range" | grep -q '^docs/model/' ||
+          if git diff --name-only "$range" | grep -Eq '^docs/model/(.*\.(tla|cfg)|check\.sh)$' ||
              git diff -U0 "$range" -- Makefile .github/workflows/ci.yml | grep -Ev '^(\+\+\+|---) ' |
                grep -Eq '^[-+].*(TLA2TOOLS|tla2tools|test-model|MODEL_FLAGS|MODEL_CACHE|setup-java|tlc-)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
@@ -264,14 +264,21 @@ jobs:
         with:
           path: ${{ runner.temp }}/tlc-cache
           key: tlc-${{ matrix.shard }}-java21-${{ hashFiles('docs/model/**') }}
+          # check.sh separately hashes each spec/config, tools jar and runner.
+          # Reuse unchanged verdicts when only another model or its docs moved.
+          restore-keys: tlc-${{ matrix.shard }}-java21-
       - name: Check every config (positive configs pass, negative controls fail as expected)
         if: steps.changes.outputs.run == 'true'
         env:
           TLC_RUNNER: java
+          # /tmp can be quota-limited; TLC's disk-backed queue needs the
+          # runner workspace filesystem for large state spaces.
+          TMPDIR: ${{ runner.temp }}
           TLC_CACHE: ${{ runner.temp }}/tlc-cache
           SHARD: ${{ matrix.shard }}
         run: |
           if [ "$SHARD" = depth3 ]; then flag=--huge; else flag=--no-huge; fi
+          df -h "$TMPDIR"
           make test-model MODEL_FLAGS="$flag" MODEL_CACHE="$TLC_CACHE"
 
   images:
