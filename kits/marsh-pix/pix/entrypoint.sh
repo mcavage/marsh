@@ -42,11 +42,20 @@ fi
 if [ "${PIX_UI:-on}" != off ]; then
   set -- -e /opt/pix/package/extensions/ui.mjs "$@"
 fi
-if [ -d /opt/pix/kit-skills ]; then
-  set -- --skill /opt/pix/kit-skills "$@"
+package_skills=/opt/pix/package/skills
+kit_skills=/opt/pix/kit-skills
+# A folder in Pix's `skills` setting (a dev checkout) replaces the Kit's and
+# Pix's skills of the same name without a collision warning.
+if sources=$(node /opt/pix/package/lib/skill-sources.mjs "$agent/settings.json" \
+    "$package_skills" "$kit_skills" 2>/dev/null) && [ -n "$sources" ]; then
+  package_skills=$(printf '%s\n' "$sources" | sed -n 1p)
+  kit_skills=$(printf '%s\n' "$sources" | sed -n 2p)
+fi
+if [ -d "$kit_skills" ]; then
+  set -- --skill "$kit_skills" "$@"
 fi
 set -- -e /opt/pix/package/extensions/output-style.ts \
-  --skill /opt/pix/package/skills \
+  --skill "$package_skills" \
   --append-system-prompt /opt/pix/package/instructions.md "$@"
 # Bare `pi` is marsh's separate packaged command, not this image's executable.
 exec /opt/marsh/pi-gateway/node_modules/.bin/pi --approve \
