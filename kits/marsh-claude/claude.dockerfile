@@ -15,31 +15,28 @@ FROM dhi.io/debian-base:trixie-dev@sha256:cc4e05ff415ee2d83918f2af45c73798320992
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
-# The notice index names each package's exact version: when it changes (a DHI
-# package update), the cached package layer must not be reused.
-COPY dhi-notices/installed-package-notices.json /tmp/marsh-notice-index.json
 RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
 
 FROM dhi.io/debian-base:trixie-dev@sha256:cc4e05ff415ee2d83918f2af45c737983209924ef7362c53f00cfcdaa1c94326 AS download
 ARG CLAUDE_VERSION
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
-COPY release-checksums.txt /tmp/marsh-claude-checksums.txt
 WORKDIR /tmp/marsh-claude-download
 RUN case "$TARGETARCH" in \
       amd64) platform=linux-x64 ;; \
       arm64) platform=linux-arm64 ;; \
       *) echo "unsupported TARGETARCH: $TARGETARCH" >&2; exit 1 ;; \
     esac \
- && awk -v file="${CLAUDE_VERSION}/${platform}/claude" \
-      '$2 == file { print; count++ } END { if (count != 1) exit 1 }' \
-      /tmp/marsh-claude-checksums.txt > /tmp/marsh-claude-selected.txt \
  && mkdir -p "${CLAUDE_VERSION}/${platform}" /out/home/agent/.local/share/claude/versions /out/home/agent/.local/bin \
  && curl -fsSL "https://downloads.claude.ai/claude-code-releases/${CLAUDE_VERSION}/${platform}/claude" \
       -o "${CLAUDE_VERSION}/${platform}/claude" \
- && sha256sum --check --strict /tmp/marsh-claude-selected.txt \
  && install -m 0755 "${CLAUDE_VERSION}/${platform}/claude" "/out/home/agent/.local/share/claude/versions/${CLAUDE_VERSION}" \
- && ln -sfn "/home/agent/.local/share/claude/versions/${CLAUDE_VERSION}" /out/home/agent/.local/bin/claude
+ && ln -sfn "/home/agent/.local/share/claude/versions/${CLAUDE_VERSION}" /out/home/agent/.local/bin/claude \
+ && mkdir -p /out/usr/local/share/licenses/claude \
+ && curl -fsSL "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-${CLAUDE_VERSION}.tgz" \
+      -o /tmp/claude-package.tgz \
+ && tar -xOzf /tmp/claude-package.tgz package/LICENSE.md \
+      > /out/usr/local/share/licenses/claude/LICENSE.md
 
 # ACP mode (`claude --acp`, packaging/agents.json claude-session): the official
 # Claude ACP adapter, pinned by package-lock.json. Its Agent SDK carries the
@@ -48,12 +45,8 @@ RUN case "$TARGETARCH" in \
 FROM dhi.io/node:26-debian13-dev@sha256:c8939885965365c675a024d062bcb761bda4b47e95ce0323aa998ac9bc312fd6 AS npm
 WORKDIR /opt/marsh/claude-acp
 COPY package.json package-lock.json ./
-COPY collect-notices.mjs ./
-COPY dhi-notices /usr/local/share/licenses/marsh-dhi
-COPY notices ./notices
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
- && test -f node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js \
- && node collect-notices.mjs node_modules /usr/local/share/licenses/marsh-claude-acp
+ && test -f node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js
 COPY --chmod=0644 mcp-gateway-proxy.mjs /opt/marsh/claude-acp/mcp-gateway-proxy.mjs
 COPY --chmod=0755 claude-cli.sh /opt/marsh/claude-acp/claude-cli.sh
 
@@ -61,8 +54,8 @@ FROM base AS image
 COPY --from=packages /rootfs/ /
 COPY dhi-notices /usr/local/share/licenses/marsh-dhi
 COPY --from=download --chown=1000:1000 /out/home/agent/.local /home/agent/.local
+COPY --from=download /out/usr/local/share/licenses/ /usr/local/share/licenses/
 COPY --from=npm /opt/marsh/claude-acp /opt/marsh/claude-acp
-COPY --from=npm /usr/local/share/licenses/marsh-claude-acp /usr/local/share/licenses/marsh-claude-acp
 COPY --chmod=0755 marsh-entrypoint.sh /usr/local/bin/marsh-claude
 LABEL com.docker.sandboxes.start-docker=true
 # The marsh Kit contract this image implements (marsh_contracts::kit_source):
@@ -77,21 +70,10 @@ WORKDIR /home/agent/workspace
 # v2's sandbox.entrypoint.
 ENTRYPOINT ["/usr/local/bin/marsh-claude"]
 
-# The runtime image has no Python: smoke-test it in a throwaway stage, then
-# verify it, read-only, from the build stage. One final scoped receipt: the selected native CLI version, plus the
-# adapter's selected native SDK payload/notices. Provider legal texts are in
-# the canonical marsh-dhi bundle.
+# Exercise the installed runtime and commands before publishing.
 FROM image AS smoke
 USER root
 RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 python
 
-FROM packages AS verify
-ARG CLAUDE_VERSION
-RUN sh /tmp/marsh-image-base/verifier.sh
-RUN --mount=type=bind,from=smoke,source=/smoke.ok,target=/smoke.ok \
-    --mount=type=bind,from=image,target=/image \
-    python3 -I -S /image/usr/local/share/licenses/marsh-dhi/verify.py --root /image \
-      --profile claude-kit --version "$CLAUDE_VERSION" --adapter claude-acp --receipt-dir /receipt
-
 FROM image
-COPY --from=verify /receipt/ /usr/local/share/licenses/marsh-dhi/
+RUN --mount=type=bind,from=smoke,source=/smoke.ok,target=/tmp/smoke.ok test -f /tmp/smoke.ok

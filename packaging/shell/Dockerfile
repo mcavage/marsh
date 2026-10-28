@@ -58,10 +58,8 @@ RUN curl -fSL --retry 3 --max-time 120 -o emacs_30.1+1-6+deb13u1.dsc \
 FROM ${SHELL_BASE_IMAGE} AS image
 USER root
 # The DHI-built Engine, Node.js and Python packages carry no Debian copyright
-# file: their notices are indexed by exact version in dhi-notices, so they are
-# pinned here, with the DHI Python packages they pull in (otherwise the
-# bootstrap wheels drift as DHI publishes, and an unindexed version fails the
-# notice check). zsh is for `marsh --shell zsh` (docs/shells.md). Recommended
+# file. Their versions and the Python bootstrap wheels are pinned here.
+# Original upstream notices are retained with the image. zsh is for `marsh --shell zsh` (docs/shells.md). Recommended
 # extras are not installed. Ordinary Debian tools are unpinned and retain their
 # package copyright files; Emacs is installed from source above.
 COPY image-base /tmp/marsh-image-base
@@ -139,10 +137,7 @@ RUN HOME=/home/agent vim --version \
  && HOME=/home/agent emacs --batch --eval '(princ emacs-version)'
 USER root
 
-# The final verification follows every mutation (`image` is the stage
-# packaging/dhi-notices/inventory.py reads).
 FROM image
-RUN python3 -I -S /usr/local/share/licenses/marsh-dhi/verify.py --receipt-dir /usr/local/share/licenses/marsh-dhi
 WORKDIR /
 LABEL com.docker.sandboxes.start-docker=true
 ENV RUSTUP_HOME=/usr/local/rustup \

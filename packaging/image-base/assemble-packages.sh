@@ -139,3 +139,17 @@ install -d -m 0755 -o 1000 -g 1000 "$rootfs/home/agent" "$rootfs/home/agent/work
 # ran, creates the local certificate directory it reads.
 install -d -m 0755 "$rootfs/usr/local/share/ca-certificates"
 rm -f "$selected" "$paths"
+
+# DHI's Node runtime omits Node's upstream LICENSE. Copy that original file
+# alongside the assembled packages, using the version actually in the base.
+for record in "$base"/dpkg/status "$base"/dpkg/status.d/*; do
+  test -f "$record" || continue
+  awk '/^Package: / { node = ($2 ~ /^nodejs-[0-9]+$/) }
+       node && /^Version: / { print $2 }' "$record"
+done | sort -u | while read -r version; do
+  upstream=${version#*:}
+  upstream=${upstream%-*}
+  mkdir -p "$rootfs/usr/local/share/licenses/nodejs"
+  curl -fsSL "https://raw.githubusercontent.com/nodejs/node/v${upstream}/LICENSE" \
+    -o "$rootfs/usr/local/share/licenses/nodejs/LICENSE"
+done

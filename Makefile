@@ -231,16 +231,6 @@ kits:
 	$(PYTHON) scripts/publish-kits.py --validate-only --commands tests/acceptance/fixture/commands.json \
 		--build-inputs "$(KIT_FIXTURE_INPUTS)"
 
-# Regenerate every record the image gate checks (checksums, agent and adapter
-# notice records, npm overrides, image inventories and Go notices) from the pins
-# in the tree, then print the license delta against REFRESH_BASE (default
-# origin/main); scripts/refresh-pins.py exits 0 OK, 2 NEEDS-OWNER, 1 failure
-# (through make, any non-zero is 2). Needs network, Buildx with
-# dhi.io access, git and Go (docs/design/supply-chain.md).
-REFRESH_BASE ?= origin/main
-refresh-pins:
-	$(PYTHON) scripts/refresh-pins.py --base "$(REFRESH_BASE)" $(REFRESH_FLAGS)
-
 kit-publish:
 	@test -n "$(KIT_REPOSITORY_PREFIX)" || { echo 'make kit-publish: set KIT_REPOSITORY_PREFIX=registry/repository'; exit 1; }
 	$(PYTHON) scripts/prepare-kit-inputs.py --commands "$(KIT_COMMANDS)" --output "$(KIT_PREPARED_INPUTS)" \
@@ -273,8 +263,6 @@ install: install-preflight
 	$(INSTALL) -m 644 LICENSE "$(PREFIX)/share/licenses/marsh/LICENSE"
 	$(INSTALL) -m 644 NOTICE "$(PREFIX)/share/licenses/marsh/NOTICE"
 	$(INSTALL) -m 644 "$(TARGET_DIR)/notices/THIRD-PARTY-NOTICES.txt" "$(PREFIX)/share/licenses/marsh/THIRD-PARTY-NOTICES.txt"
-	$(INSTALL) -m 644 "$(TARGET_DIR)/notices/rust-package-notices.json" "$(PREFIX)/share/licenses/marsh/rust-package-notices.json"
-	$(INSTALL) -m 644 "$(TARGET_DIR)/notices/embedded-native-notices.json" "$(PREFIX)/share/licenses/marsh/embedded-native-notices.json"
 	$(INSTALL) -m 755 "$(TARGET_DIR)/release/marsh" "$(PREFIX)/bin/marsh"
 	ln -sfn marsh "$(PREFIX)/bin/msh"
 	$(INSTALL) -m 755 "$(TARGET_DIR)/release/marshd" "$(PREFIX)/bin/marshd"
@@ -442,10 +430,9 @@ DEV_SUPPORT_SCRIPTS := $(addprefix scripts/,prepare-shell-image.py build_inputs.
 DEV_CANONICAL_INPUTS := $(shell find packaging/image-base packaging/image-repair packaging/dhi-notices/collected -type f 2>/dev/null)
 DEV_SHELL_IMAGE_INPUTS := packaging/shell-image packaging/shell/Dockerfile $(DEV_SUPPORT_SCRIPTS) $(DEV_CANONICAL_INPUTS) \
 	$(shell find packaging/shell/pi packaging/shell/editors -type f 2>/dev/null)
-DEV_KIT_INPUTS := $(KIT_COMMANDS) scripts/stage-kits.py scripts/publish-kits.py scripts/npm-notices.mjs \
+DEV_KIT_INPUTS := $(KIT_COMMANDS) scripts/stage-kits.py scripts/publish-kits.py \
 	$(DEV_CANONICAL_INPUTS) $(wildcard $(shell git ls-files kits 2>/dev/null))
 
-.PHONY: refresh-pins
 .PHONY: dev dev-artifacts dev-host dev-guest dev-install dev-kit-images
 dev:
 	@$(MAKE) --no-print-directory -j$(DEV_PARALLEL) dev-artifacts

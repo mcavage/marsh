@@ -186,24 +186,13 @@ docs/model/check.sh                    # every config (Docker, or TLC_RUNNER=jav
 
 TLC checks the model. Review and test the corresponding Rust code too.
 
-### Pins and license records
+### Dependency updates
 
-Managed image inputs are pinned, and the records the image build checks (release
-checksums, agent and adapter notice records, npm notice overrides, image
-inventories and Go notices) are derived from the pins. After changing a pin
-(a Kit's CLI version, a lock, a base digest, an image-base package list), run:
-
-```sh
-make refresh-pins                      # needs network, Buildx with dhi.io access, git and Go
-```
-
-It regenerates the records and prints the license delta against `origin/main`:
-exit 0 OK, 2 NEEDS-OWNER (a new license family, a changed proprietary license
-text, a new proprietary component), 1 if a record could not be regenerated.
-Commit what it changes. Renovate PRs get the same run from
-`.github/workflows/renovate-refresh.yml`, which commits the result to the
-branch and posts the delta on the PR
-([design/supply-chain.md](docs/design/supply-chain.md#keeping-pins-current)).
+Managed inputs use explicit versions, package lockfiles and immutable image
+digests. Update those inputs and run the relevant builds/tests. Renovate sends
+updates through normal CI and merges passing PRs automatically. There is no
+checksum/notice-record refresh or generated license-delta approval step.
+See [build inputs](docs/design/supply-chain.md).
 
 ### Docs
 

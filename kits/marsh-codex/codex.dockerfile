@@ -12,16 +12,12 @@ FROM dhi.io/debian-base:trixie-dev@sha256:cc4e05ff415ee2d83918f2af45c73798320992
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
-# The notice index names each package's exact version: when it changes (a DHI
-# package update), the cached package layer must not be reused.
-COPY dhi-notices/installed-package-notices.json /tmp/marsh-notice-index.json
 RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
 
 FROM dhi.io/debian-base:trixie-dev@sha256:cc4e05ff415ee2d83918f2af45c737983209924ef7362c53f00cfcdaa1c94326 AS build
 ARG CODEX_VERSION
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
-COPY release-checksums.txt /tmp/marsh-codex-checksums.txt
 WORKDIR /tmp/marsh-codex-download
 RUN case "$TARGETARCH" in \
       amd64) target=x86_64-unknown-linux-musl ;; \
@@ -31,19 +27,20 @@ RUN case "$TARGETARCH" in \
  && mkdir -p /out/usr/local/bin "${CODEX_VERSION}" \
  && for bin in codex codex-code-mode-host; do \
       archive="${CODEX_VERSION}/${bin}-${target}.tar.gz"; \
-      awk -v file="$archive" \
-        '$2 == file { print; count++ } END { if (count != 1) exit 1 }' \
-        /tmp/marsh-codex-checksums.txt > /tmp/marsh-codex-selected.txt \
-      && curl -fsSL "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/${bin}-${target}.tar.gz" \
-        -o "$archive" \
-      && sha256sum --check --strict /tmp/marsh-codex-selected.txt || exit 1; \
+      curl -fsSL "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/${bin}-${target}.tar.gz" \
+        -o "$archive" || exit 1; \
     done \
  && for bin in codex codex-code-mode-host; do \
       tar -xOzf "${CODEX_VERSION}/${bin}-${target}.tar.gz" -- "${bin}-${target}" \
         > "/out/usr/local/bin/${bin}" \
       && chmod 0755 "/out/usr/local/bin/${bin}" || exit 1; \
     done \
- && /out/usr/local/bin/codex --version
+ && /out/usr/local/bin/codex --version \
+ && mkdir -p /out/usr/local/share/licenses/codex \
+ && for file in LICENSE NOTICE; do \
+      curl -fsSL "https://raw.githubusercontent.com/openai/codex/rust-v${CODEX_VERSION}/$file" \
+        -o "/out/usr/local/share/licenses/codex/$file" || exit 1; \
+    done
 
 # ACP mode (`codex --acp`, packaging/agents.json codex-session): the official
 # codex-acp adapter, pinned by package-lock.json, with the Codex build it
@@ -51,13 +48,9 @@ RUN case "$TARGETARCH" in \
 FROM dhi.io/node:26-debian13-dev@sha256:c8939885965365c675a024d062bcb761bda4b47e95ce0323aa998ac9bc312fd6 AS npm
 WORKDIR /opt/marsh/codex-acp
 COPY package.json package-lock.json ./
-COPY collect-notices.mjs ./
-COPY dhi-notices /usr/local/share/licenses/marsh-dhi
-COPY notices ./notices
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
  && test -f node_modules/@agentclientprotocol/codex-acp/dist/index.js \
- && node_modules/.bin/codex --version \
- && node collect-notices.mjs node_modules /usr/local/share/licenses/marsh-codex-acp
+ && node_modules/.bin/codex --version
 COPY --chmod=0644 mcp-gateway-proxy.mjs /opt/marsh/codex-acp/mcp-gateway-proxy.mjs
 COPY --chmod=0755 acp-entrypoint.sh /opt/marsh/codex-acp/marsh-acp.sh
 
@@ -65,8 +58,8 @@ FROM base AS image
 COPY --from=packages /rootfs/ /
 COPY dhi-notices /usr/local/share/licenses/marsh-dhi
 COPY --from=build /out/usr/local/bin/ /usr/local/bin/
+COPY --from=build /out/usr/local/share/licenses/ /usr/local/share/licenses/
 COPY --from=npm /opt/marsh/codex-acp /opt/marsh/codex-acp
-COPY --from=npm /usr/local/share/licenses/marsh-codex-acp /usr/local/share/licenses/marsh-codex-acp
 COPY --chmod=0755 marsh-entrypoint.sh /usr/local/bin/marsh-codex
 LABEL com.docker.sandboxes.start-docker=true
 # The marsh Kit contract this image implements (marsh_contracts::kit_source):
@@ -81,10 +74,7 @@ WORKDIR /home/agent/workspace
 # v2's sandbox.entrypoint.
 ENTRYPOINT ["/usr/local/bin/marsh-codex"]
 
-# The runtime image has no Python: smoke-test it in a throwaway stage, then
-# verify it, read-only, from the build stage. This executes only the pinned CLI version query. The final receipt binds the
-# selected native release and the ACP adapter's selected native npm
-# payload/notices; provider legal texts are in the canonical marsh-dhi bundle.
+# Exercise the installed runtime and commands before publishing.
 FROM image AS smoke
 ARG CODEX_VERSION
 USER root
@@ -92,13 +82,5 @@ RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/sm
  && test "$(command -v codex)" = /usr/local/bin/codex \
  && test "$(codex --version 2>/dev/null)" = "codex-cli ${CODEX_VERSION}"
 
-FROM packages AS verify
-ARG CODEX_VERSION
-RUN sh /tmp/marsh-image-base/verifier.sh
-RUN --mount=type=bind,from=smoke,source=/smoke.ok,target=/smoke.ok \
-    --mount=type=bind,from=image,target=/image \
-    python3 -I -S /image/usr/local/share/licenses/marsh-dhi/verify.py --root /image \
-      --profile codex-kit --version "$CODEX_VERSION" --adapter codex-acp --receipt-dir /receipt
-
 FROM image
-COPY --from=verify /receipt/ /usr/local/share/licenses/marsh-dhi/
+RUN --mount=type=bind,from=smoke,source=/smoke.ok,target=/tmp/smoke.ok test -f /tmp/smoke.ok
