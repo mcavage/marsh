@@ -2056,10 +2056,7 @@ impl DaemonStore {
         // settled as Unknown, until the backend has verified its retirement:
         // any number of restarts in between keep it.
         let orphans_path = journal_home.join("cloud-setup-orphans.json");
-        let mut cloud_setup_orphans: Vec<String> = fs::read(&orphans_path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let mut cloud_setup_orphans = read_orphans(&orphans_path)?;
         let found = jobs
             .values()
             .filter(|receipt| {
@@ -2070,7 +2067,7 @@ impl DaemonStore {
             .collect::<Vec<_>>();
         if !found.is_empty() {
             cloud_setup_orphans.extend(found);
-            write_orphans(&orphans_path, &cloud_setup_orphans)?;
+            split::SplitEngine::write_durable(&orphans_path, &cloud_setup_orphans)?;
         }
         for receipt in jobs.values_mut() {
             if matches!(receipt.state, JobState::Queued | JobState::Running) {
@@ -2511,7 +2508,7 @@ impl DaemonStore {
         state.cloud_setup_orphans.retain(|id| id != sandbox_id);
         // Best effort: a failed write keeps the id on disk, so a later
         // start retries a retirement that is already done (it is idempotent).
-        let _ = write_orphans(&state.orphans_path, &state.cloud_setup_orphans);
+        let _ = split::SplitEngine::write_durable(&state.orphans_path, &state.cloud_setup_orphans);
     }
 
     /// Whether `job` runs in a fork of a cancelled split.
@@ -4225,15 +4222,24 @@ impl Server {
     }
 }
 
-fn write_orphans(path: &Path, ids: &[String]) -> Result<(), DaemonError> {
-    let temporary = path.with_extension("tmp");
-    let mut file = fs::File::create(&temporary)?;
-    file.write_all(
-        &serde_json::to_vec(ids).map_err(|error| DaemonError::InvalidState(error.to_string()))?,
-    )?;
-    file.sync_all()?;
-    fs::rename(&temporary, path)?;
-    Ok(())
+/// The pending setup-orphan ids. A missing file is none; a file that cannot
+/// be read or parsed (or is too large) stops the start rather than being
+/// overwritten with a shorter list.
+fn read_orphans(path: &Path) -> Result<Vec<String>, DaemonError> {
+    use std::io::Read as _;
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut bytes = Vec::new();
+    file.take(1 << 20).read_to_end(&mut bytes)?;
+    serde_json::from_slice(&bytes).map_err(|error| {
+        DaemonError::InvalidState(format!(
+            "{} is unreadable ({error}); it lists cloud sandboxes still owed a delete: fix or remove it",
+            path.display()
+        ))
+    })
 }
 
 /// Detach a host session: what `DetachShell` does, and what a dead client's

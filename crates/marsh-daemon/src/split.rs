@@ -784,7 +784,13 @@ impl SplitEngine {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
-        let written = fs::File::create(&temporary)
+        use std::os::unix::fs::OpenOptionsExt as _;
+        let written = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .open(&temporary)
             .and_then(|mut file| {
                 file.write_all(&bytes)?;
                 file.sync_all()

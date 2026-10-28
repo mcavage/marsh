@@ -1988,6 +1988,20 @@ fn a_cloud_sandbox_of_a_job_still_being_set_up_at_restart_is_left_to_be_retired(
 }
 
 #[test]
+fn an_unreadable_orphan_list_stops_the_start_instead_of_being_overwritten() {
+    let home = home();
+    let path = home.path().join("cloud-setup-orphans.json");
+    fs::write(&path, b"[\"sbx_owed\"").unwrap();
+    assert!(reopen(home.path()).is_err());
+    assert_eq!(fs::read(&path).unwrap(), b"[\"sbx_owed\"");
+    fs::write(&path, b"[\"sbx_owed\"]").unwrap();
+    assert_eq!(
+        reopen(home.path()).unwrap().cloud_setup_orphans(),
+        ["sbx_owed"]
+    );
+}
+
+#[test]
 fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
     let home = home();
     let store = reopen(home.path()).unwrap();
