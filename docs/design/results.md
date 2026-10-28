@@ -60,6 +60,27 @@ Process admission separately retains uncertain jobs' held slots from receipts
 until a successful `marsh workers reset KIT` is recorded. Use that reset to
 retire the affected owned VM; do not delete the journal to recover.
 
+## Change events
+
+`marsh events --json` (host only) streams NDJSON until it is killed: first
+`{"type":"hello","seq":N,"features":[...]}`, where N is the last change
+already made, then one line per change, each with the next `seq`:
+
+- `{"seq","type":"job","job":<the jobs --json summary>}` whenever a receipt
+  is journaled;
+- `{"seq","type":"split",...}` and `{"seq","type":"checkpoint",...}`
+  (`workspaces.md`, s14);
+- `{"type":"heartbeat"}` every 15 s without a change.
+
+The subscription is not an ordinary request: it never holds off `marsh stop`,
+`marsh reset`, or the daemon's exit, and it ends with the daemon. Publishing
+never blocks: each subscriber has a queue of 1024 lines, and one that falls
+that far behind gets `{"type":"resync"}` and its stream ends. A client then
+lists jobs, splits, and checkpoints again and subscribes anew. At most 8
+subscriptions are open at once (each holds one of the daemon's 128
+connections, so the rest stay free); a ninth fails with "marsh events: at
+most 8 subscribers at once", and a closed one frees its place.
+
 ## Scope configuration and job limits
 
 Use `marsh status` to find the host-control directory and inspect the daemon's
@@ -108,9 +129,5 @@ product names. Duplicate JSON keys are rejected. See the
 [shared name rules](../../crates/marsh-contracts/src/command_registry_rules.json)
 and [registry guide](command-registry.md).
 
-Host-control `agents.json` instead **replaces** the complete packaged ACP agent
-list. A missing file uses packaged defaults; `[]` intentionally disables ACP.
-It does not merge individual agents or revive omitted defaults. Malformed or
-unsafe declarations and invalid ACP-to-Kit bindings fail daemon startup, rather
-than silently disabling ACP. Fix the reported host-control or packaged file;
-do not delete state to bypass a configuration failure.
+ACP agents are not configured here: a command is an agent when its Kit
+declares `com.docker.sandbox/acp@1` ([registry guide](command-registry.md#acp-adapters)).

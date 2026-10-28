@@ -30,6 +30,11 @@ provides: ["pi@${{ kit.args.pi }}", "pi-acp@${{ kit.args.piAcp }}"]
 dockerfile: ./Dockerfile
 capabilities:
   - type: com.docker.sandbox/sbx@1
+  # ACP mode: the entrypoint's `--acp` (`acp run pix`, `marsh run --acp pix`).
+  - type: com.docker.sandbox/acp@1
+    config:
+      agent: pix
+      command: ["/usr/local/bin/marsh-pix", "--acp"]
   - type: com.docker.sandbox/network-policy@1
     config:
       runtime:

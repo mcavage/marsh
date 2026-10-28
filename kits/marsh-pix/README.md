@@ -32,10 +32,8 @@ explicitly, e.g. `pix --provider anthropic --model claude-sonnet-5-5`. The Kit
 can use OpenAI, Anthropic and Google keys; SBX inserts them at those providers'
 API hosts, and no key is in the image.
 
-For ACP, add a `pix-session` entry next to packaged Pi's in your marsh
-control directory's `agents.json` (`marsh status --json` shows it), with
-`"command": "pix", "arguments": ["--acp"]` and the installed digest (from
-`commands.json`) as `workload_digest`. It follows Pix's updates.
+The Kit declares its entrypoint's `--acp` mode as its ACP adapter
+(`com.docker.sandbox/acp@1`), so `acp run pix` starts a session.
 
 ## Build it yourself
 

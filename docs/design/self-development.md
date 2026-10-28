@@ -143,7 +143,7 @@ Streams nest one hop per level; mind the relay's 16-connection cap.
 - `make dev-inner` (Linux, inside `--dev`): release gnu build of `marsh marsh-local
   marsh-relay marshd` and static musl `marsh-worker marsh-byte-exec` with a VM-local
   `CARGO_TARGET_DIR`, installed to `S/artifacts/{bin,libexec/marsh}` with `commands.json`
-  (plus `fixture` = `DEV_KIT` when set), `agents.json`, `kits/`, and `shell-image` = the host
+  (plus `fixture` = `DEV_KIT` when set), `kits/`, and `shell-image` = the host
   template. The Mac `target/` is never written.
 - `make dev-inner-run CMD=…` runs the inner client with `MARSH_HOME=S/home`,
   `MARSH_CONTROL_HOME=S/control`, `TMPDIR=S/tmp`, `MARSH_SBX=S/tmp/bin/sbx`, relay variables

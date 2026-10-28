@@ -120,9 +120,8 @@ When unset, control directories are in
 | `CONTROL/HASH/` | Host-only control directory for a scope. `marsh status` prints it. Never mounted into a VM. |
 | `CONTROL/HASH/commands.json` | Your command registry. Overrides packaged entries by name. See [Commands and Kits](kits.md#adding-a-command). |
 | `CONTROL/HASH/kit-updates.json` | When [automatic Kit updates](kits.md#updates) last checked, and what they changed. |
-| `CONTROL/HASH/agents.json` | Your ACP agent list. Replaces the packaged list; `[]` disables ACP. See [ACP](acp.md#adding-agents). |
 | `CONTROL/HASH/state/results.journal` | Structural job receipts, for `marsh results`. |
-| `PREFIX/libexec/marsh/` | Packaged `commands.json`, `agents.json`, `shell-image`, and the Linux binaries. |
+| `PREFIX/libexec/marsh/` | Packaged `commands.json`, `shell-image`, and the Linux binaries. |
 | `~/Library/Application Support/marsh/published-mcp/`, `published-acp/` | Host-only MCP and ACP publication declarations. Under `MARSH_CONTROL_HOME` when it is set. |
 | `~/Library/Application Support/marsh-mcp-scopes/` | Generated scope roots for `marsh mcp install sbx` and `marsh-mcp` broker modes. |
 | `PROJECT/.marsh/split/ID/` | A split's forks and results. Ignored by Git. |
@@ -130,7 +129,7 @@ When unset, control directories are in
 `CONTROL` is `$MARSH_CONTROL_HOME`, or `~/Library/Application Support/marsh/control`
 when unset. `HASH` is the SHA-256 of the canonical `MARSH_HOME` path.
 
-A malformed `commands.json` or `agents.json` stops the daemon from starting.
+A malformed `commands.json` stops the daemon from starting.
 The error names the file. Fix that file; deleting other state does not help.
 
 ## Servers and extra directories

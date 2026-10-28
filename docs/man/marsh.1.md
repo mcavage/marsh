@@ -441,7 +441,7 @@ See https://runmar.sh/docs/acp.html.
 
 *~/Library/Application Support/marsh/control/HASH/*
 : Host-only control directory for a scope: **commands.json**,
-  **agents.json**, the results journal. **marsh status** prints its path.
+  the results journal. **marsh status** prints its path.
 
 *PREFIX/libexec/marsh/*
 : Linux guest binaries, the packaged command registry, and the shell image
@@ -487,8 +487,8 @@ Sample output: https://runmar.sh/docs/split.html.
 
 Talk to one agent across turns, inside the shell:
 
-    id=$(acp reserve pi-session)
-    acp run --reservation "$id" pi-session &
+    id=$(acp reserve pi)
+    acp run --reservation "$id" pi &
     acp list --mine --wait "$id"
     acp ask "$id" 'What project files can you see? Do not change files.'
     acp ask "$id" 'Which of those describe how to run the tests? Do not change files.'

@@ -162,6 +162,16 @@ requests. In a Git project, ignore rules filter the snapshot even for tracked
 files. A root whose `.git` is a gitfile (a linked worktree or submodule checkout)
 is refused; split from the main checkout instead.
 
+`marsh split --open [--from CHECKPOINT] LABEL...` makes lanes: forks with no
+command, in which the split's creator runs any number of registered commands
+(confined to the fork, including `marsh run --acp`) until `marsh split close`
+captures each lane's patch. `marsh checkpoint` snapshots the project the same
+way, with retention (20 per label, 200 per project, 7 days) and a refusal
+below 5 GiB or 5% free; kept splits are removed 7 days after they were kept.
+`marsh storage` reports what they use, and `marsh events --json` streams job,
+split, and checkpoint changes to a host client
+([workspace design](../design/workspaces.md#14-open-lanes-checkpoints-and-storage)).
+
 `marsh results` shows newest-first structural receipts; `marsh jobs` provides
 flat and tree views of the same job records. Neither replaces Brush's
 `history`. The journal is owner-only, bounded, and
@@ -173,7 +183,9 @@ do not resume workloads.
 ## ACP and MCP
 
 An attached shell can start ACP agent sessions (`acp run`, `acp ask`,
-`acp cancel`, `acp stop`) backed by registered ACP Kits. It can publish a
+`acp cancel`, `acp stop`) with any registered command whose Kit declares an ACP
+adapter (`com.docker.sandbox/acp@1`); `marsh run --acp NAME` serves that
+adapter over stdio to a host client. It can publish a
 running session as an MCP control tool; clients that load it can prompt and
 cancel that agent and answer its one-time permission requests. It can also
 publish a fixed project pipeline with `mcp publish NAME -- 'PIPELINE'` and load

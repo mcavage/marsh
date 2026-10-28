@@ -36,9 +36,8 @@ Kit source must live outside the mounted project and guest home.
 4. Declare each model provider as a Kit credential capability backed by
    `sbx secret` (proxy-managed sentinels) with a matching network allowlist.
    No raw key goes into the image, the Kit source or marsh.
-5. For an ACP session, add an entry to the host control scope's `agents.json`
-   ([ACP](../acp.md#adding-agents)) with `"arguments": ["--acp"]`, as
-   `pi-session` does in `packaging/agents.json`.
+5. For an ACP session, declare `com.docker.sandbox/acp@1` in the Kit
+   ([ACP](../acp.md#adding-agents)), as `kits/marsh-pi/pi.yaml` does.
 
 ## Profiles
 

@@ -62,7 +62,7 @@ registry) in its Kit sources policy.
 | Message | Cause and fix |
 |---|---|
 | `install must provide libexec/marsh/shell-image` | `bin/` and `libexec/marsh/` are not under the same prefix. Reinstall with the method you used: `brew reinstall mcavage/tap/marsh`, rerun the install script, or copy the tarball's `bin/` and `libexec/` under one prefix. |
-| A message naming `commands.json` or `agents.json` | That file in the control directory is malformed. Fix it. `marsh status` shows the control directory. |
+| A message naming `commands.json` | That file in the control directory is malformed. Fix it. `marsh status` shows the control directory. |
 
 ### Cannot mount the directory
 
