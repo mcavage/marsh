@@ -16,10 +16,8 @@
   platformAutomerge: false,
   prConcurrentLimit: 6,
   prHourlyLimit: 3,
-  // Refresh pins and CI must use current main: a nonconflicting branch can
-  // still carry obsolete apt pins after another dependency update merges.
-  // Rebase every automerge branch so generated records and checks cover the
-  // combination that will actually land.
+  // Validate against current main so each update includes dependency pins
+  // already merged by another PR.
   rebaseWhen: "behind-base-branch",
   // Avoid just-published releases (a compromised release is usually pulled
   // within days). Security updates ignore this.
