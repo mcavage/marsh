@@ -635,6 +635,17 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
                     marsh::fanout_cli::Place::Session,
                 ));
             }
+            // Host, in a lane's copy: a shell session in the copy would mount
+            // it as a project of its own, overlapping the Kit jobs' mounts and
+            // refused for them, so each branch is a `marsh run` from the copy.
+            if env::current_dir().is_ok_and(|directory| {
+                marsh_daemon::split_confinement::fork_project(&directory).is_some()
+            }) {
+                return Ok(marsh::fanout_cli::fanout(
+                    &arguments[2..],
+                    marsh::fanout_cli::Place::Lane,
+                ));
+            }
             // Host: run the same fanout in a session shell in the shell VM.
             let script = marsh::fanout_cli::host_script(&arguments[2..])
                 .map_err(|message| RunError::new(message, 2))?;

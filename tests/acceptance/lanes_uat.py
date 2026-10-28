@@ -9,6 +9,7 @@ removal it refuses, a restart during a close, storage, and the events stream
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 from pathlib import Path
 import subprocess
@@ -220,6 +221,19 @@ def main() -> int:
         assert b"a job in a lane cannot start a split" in escape.stderr, escape.stderr
         assert b"project only" not in escape.stdout, escape.stdout
         assert not list((project / ".marsh/split").glob("*/x")), "a split was made from a lane job"
+
+        # `marsh fanout` from the lane's copy: its branches are lane jobs
+        # (no shell session in the copy), confined to it; `-b` is refused.
+        fan = host("fanout", ":::", "x", "fixture", "identity", ":::", "y", "fixture", "project-read", "README",
+                   cwd=lane_g, timeout=900)
+        assert fan.returncode == 0, fan.stderr.decode(errors="replace")
+        branches = {row["label"]: row for row in json.loads(fan.stdout)["branches"]}
+        assert branches["x"]["status"] == 0 and branches["y"]["status"] == 0, branches
+        assert b"after the checkpoint" in base64.b64decode(branches["y"]["stdout"]), branches["y"]
+        shell_branch = host("fanout", "-b", "s=true", cwd=lane_g)
+        assert shell_branch.returncode == 2 and b"shell branches" in shell_branch.stderr, shell_branch.stderr
+        fanned = [job for job in json_of("jobs", "--json")["jobs"] if job.get("parent") == f"split:{guarded['id']}/g"]
+        assert sum(job["command"] == "fixture" for job in fanned) >= 2, fanned
 
         # A close that times out on a live lane job keeps the lane uncertain;
         # removal is refused until the job is ended.

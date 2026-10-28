@@ -541,6 +541,19 @@ cancelled.
   a split; split from the host or a session shell"), whatever path it
   passes. A job whose recorded fork's split is gone is refused, never given
   the project.
+- **Several agents in one lane.** Jobs of any Kit run in a lane at once (a
+  checkpoint's copy shared by N agents): every Kit VM mounts the same project
+  root (identical sources are shared, `ForkIsolation` is the container's view)
+  and each job's container sees only the fork. The per-tree Kit VM cap and
+  the same-Kit chain bound a job's descendants, not sibling lane jobs, which
+  are separate trees. A shell session opened in the fork (a terminal whose cwd
+  is the fork) is not a lane job: it mounts the fork as a project of its own,
+  which overlaps the Kit jobs' mount of the project root and is refused while
+  one holds it ("overlaps active grant"); that overlap rule is a safety rule
+  and stays. Host `marsh fanout` in a lane's copy therefore does not open a
+  shell session there: each branch is `marsh run NAME ARG...` from the copy (a
+  confined lane job, counted live like any other), registered names only; a
+  `-b` shell branch is refused, since a shell would see the whole project.
 - **`marsh split close ID [--json]`** (creator, or the host): stops admitting
   lane jobs, waits up to 30 s for the lane's live jobs (and any job whose
   mounts name its fork) to end, then captures each open lane exactly as a
