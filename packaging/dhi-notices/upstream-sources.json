@@ -6,7 +6,9 @@
     "docker-ce": {"repository": "moby/moby", "tag": "docker-v{upstream}", "files": ["LICENSE", "NOTICE"]},
     "docker-ce-cli": {"repository": "docker/cli", "tag": "v{upstream}", "files": ["LICENSE", "NOTICE"]},
     "docker-buildx-plugin": {"repository": "docker/buildx", "tag": "v{upstream}", "files": ["LICENSE"]},
-    "gh": {"repository": "cli/cli", "tag": "v{upstream}", "files": ["LICENSE"]},
-    "nodejs-24": {"repository": "nodejs/node", "tag": "v{upstream}", "files": ["LICENSE"]}
-  }
+    "gh": {"repository": "cli/cli", "tag": "v{upstream}", "files": ["LICENSE"]}
+  },
+  "package_patterns": [
+    {"pattern": "nodejs-[0-9]+", "repository": "nodejs/node", "tag": "v{upstream}", "files": ["LICENSE"]}
+  ]
 }
