@@ -3,20 +3,9 @@
 // CLIs the Kits install (Claude Code, Codex, Pi). Self-hosted: see
 // .github/workflows/renovate.yml and .github/renovate-global.js.
 //
-// Every update merges itself once all of its checks pass, including the
-// "License review" status below; nobody has to click merge. Renovate does the
-// merge (platformAutomerge off) rather than GitHub's auto-merge, because
-// "License review" is a Renovate-only status that can't be a required check
-// for every PR, and Renovate waits for every status on the PR. A red license
-// delta therefore still stops the merge for the owner. Merges land on the next
-// Renovate run after the checks pass: it runs hourly and again whenever CI or
-// Refresh pins succeeds on a renovate/** branch (renovate.yml). The builds still
-// take pinned inputs on purpose (docs/design/supply-chain.md). Renovate only
-// edits the pins: .github/workflows/renovate-refresh.yml then runs `make
-// refresh-pins` on the branch, commits the regenerated records (checksums,
-// notices, inventories) as refresh-pins@users.noreply.github.com, and posts the
-// license delta. CI builds the images on the completed head; the "License
-// review" status is red only when the delta needs the owner.
+// Updates merge when their normal CI checks pass. Builds consume version
+// pins, package lockfiles and immutable image digests directly; there is no
+// separate checksum/notice-record refresh or license-review status gate.
 {
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
   extends: ["config:recommended", "helpers:pinGitHubActionDigests"],
@@ -27,18 +16,13 @@
   platformAutomerge: false,
   prConcurrentLimit: 6,
   prHourlyLimit: 3,
-  // Refresh pins and CI must use current main: a nonconflicting branch can
-  // still carry obsolete apt pins after another dependency update merges.
-  // Rebase every automerge branch so generated records and checks cover the
-  // combination that will actually land.
+  // Validate against current main so each update includes dependency pins
+  // already merged by another PR.
   rebaseWhen: "behind-base-branch",
   // Avoid just-published releases (a compromised release is usually pulled
   // within days). Security updates ignore this.
   minimumReleaseAge: "3 days",
   internalChecksFilter: "strict",
-  // The refresh-pins workflow's commit completes the branch; Renovate keeps
-  // managing (and may rebase) it rather than treating it as edited by a person.
-  gitIgnoredAuthors: ["refresh-pins@users.noreply.github.com"],
   ignorePaths: ["vendor/**", "packaging/dhi-notices/**", "**/node_modules/**", "docs/**"],
   enabledManagers: ["github-actions", "cargo", "npm", "dockerfile", "pip_requirements", "custom.regex"],
   // scripts/requirements-publish.txt is not named requirements.txt.
@@ -63,7 +47,7 @@
     {
       // DHI's own apt repository (public, Debian format): Docker Engine and the
       // shell template's Node.js, npm and Python ship no Debian copyright file,
-      // so they are pinned by version and refresh-pins indexes each version.
+      // so their versions are pinned explicitly.
       description: "DHI-built apt packages pinned by version (Kit VM floor, shell template)",
       customType: "regex",
       managerFilePatterns: ["/^packaging/image-base/[^/]+\\.packages$/", "/^packaging/shell/Dockerfile$/"],
@@ -161,8 +145,6 @@
       schedule: ["at any time"],
     },
     {
-      // refresh-pins regenerates release-checksums.txt and the release's notice
-      // records on the branch.
       description: "Agent CLI releases",
       matchPackageNames: ["@anthropic-ai/claude-code", "openai/codex"],
       // Fast follow: agent CLIs release several times a day, and a merged bump

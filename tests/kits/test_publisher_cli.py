@@ -411,7 +411,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
         self.publisher = self.source / 'scripts/publish-kits.py'
         notices = 'packaging/dhi-notices/collected'
         for relative in ('scripts/publish-kits.py', 'scripts/prepare-kit-inputs.py',
-                         'scripts/build_inputs.py', 'scripts/npm-notices.mjs', '.gitignore',
+                         'scripts/build_inputs.py', '.gitignore',
                          'crates/marsh-contracts/src/command_registry_rules.json',
                          'packaging/commands.json', notices,
                          'packaging/image-base', 'tests/acceptance/fixture',
@@ -446,9 +446,6 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
                 self.assertEqual(actual, expected)
                 self.assertTrue(all(record['file_modes'][name] == 0o644 for name in actual))
                 self.assertTrue(all(mode == 0o755 for mode in record['directories'].values()))
-        collector = hashlib.sha256((self.source / 'scripts/npm-notices.mjs').read_bytes()).hexdigest()
-        self.assertTrue(all(row['files']['collect-notices.mjs'] == collector
-                            for row in records if 'collect-notices.mjs' in row['files']))
 
     def test_real_default4_and_fixture_prepare_compactly_and_validate_at_any_checkout_depth(self):
         # The shipped notices tree: within the publisher's bounds, and its
@@ -497,7 +494,7 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
         self.output.write_bytes(b'previous registry\n')
         prior = self.inputs.read_bytes()
         changed = ['packaging/dhi-notices/collected/README.md',
-                   'packaging/image-base/kit-vm.packages', 'scripts/npm-notices.mjs',
+                   'packaging/image-base/kit-vm.packages',
                    'kits/marsh-shell/shell.yaml', 'kits/marsh-shell/marsh-entrypoint.sh',
                    'scripts/prepare-kit-inputs.py', 'scripts/build_inputs.py',
                    'scripts/publish-kits.py', 'packaging/commands.json',

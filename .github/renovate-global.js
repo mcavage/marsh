@@ -21,6 +21,4 @@ module.exports = {
   onboarding: false,
   requireConfig: 'required',
   hostRules,
-  // Renovate runs no command: .github/workflows/renovate-refresh.yml
-  // regenerates the records on each renovate/** branch.
 };

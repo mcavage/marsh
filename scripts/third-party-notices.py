@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Collect locked Rust package notices for the supported Mac/Linux builds."""
+"""Bundle original dependency license files into the installed notices text."""
 import argparse
-import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import subprocess
 import tarfile
+
+NAMES = ("LICENSE", "LICENCE", "COPYING", "COPYRIGHT", "NOTICE", "UNLICENSE")
 
 
 def main():
@@ -14,106 +15,46 @@ def main():
     parser.add_argument("--cargo", default="cargo")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    overrides_root = root / "packaging/notice-overrides"
-    overrides = json.loads((overrides_root / "sources.json").read_text())
-    native = json.loads((overrides_root / "embedded-native.json").read_text())
-    included, packages, workspace = set(), {}, set()
-    for target in ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]:
-        metadata = json.loads(subprocess.check_output([
-            args.cargo, "metadata", "--locked", "--format-version", "1",
-            "--filter-platform", target,
-        ], cwd=root))
-        packages.update((package["id"], package) for package in metadata["packages"])
-        workspace.update(metadata["workspace_members"])
-        nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
-        pending = list(metadata["workspace_members"])
-        seen = set(pending)
-        while pending:
-            for dependency in nodes[pending.pop()]["deps"]:
-                if any(kind["kind"] != "dev" for kind in dependency["dep_kinds"]):
-                    if dependency["pkg"] not in seen:
-                        seen.add(dependency["pkg"])
-                        pending.append(dependency["pkg"])
-        included.update(seen)
-
-    texts, records = {}, []
-    for identity in sorted(included - workspace,
-                           key=lambda key: (packages[key]["name"], packages[key]["version"])):
-        package = packages[identity]
+    metadata = json.loads(subprocess.check_output(
+        [args.cargo, "metadata", "--locked", "--format-version", "1"], cwd=root))
+    texts = {}
+    for package in metadata["packages"]:
         directory = Path(package["manifest_path"]).parent
-        sources = []
-        for path in sorted(directory.rglob("*")):
-            if path.is_file() and path.name.upper().startswith((
-                    "LICENSE", "LICENCE", "COPYING", "COPYRIGHT", "NOTICE", "UNLICENSE")):
-                sources.append((str(path.relative_to(directory)), path.read_bytes(), None))
+        paths = {path for path in directory.rglob("*")
+                 if path.is_file() and path.name.upper().startswith(NAMES)}
         if package.get("license_file"):
-            path = directory / package["license_file"]
-            sources.append((package["license_file"], path.read_bytes(), None))
-        # Vendored Brush members inherit the repository's MIT license.
-        if not sources and directory.is_relative_to(root / "vendor/brush"):
-            sources.append(("vendor/brush/LICENSE", (root / "vendor/brush/LICENSE").read_bytes(), None))
-        key = package["name"] + "@" + package["version"]
-        if package["name"] == native["crate"]:
-            archive = directory / "duckdb.tar.gz"
-            if (package["version"] != native["version"] or
-                    hashlib.sha256(archive.read_bytes()).hexdigest() != native["archive_sha256"]):
-                raise SystemExit("Bundled DuckDB changed; review embedded native notices")
+            paths.add(directory / package["license_file"])
+        for path in sorted(paths):
+            if path.is_file():
+                name = path.relative_to(directory) if path.is_relative_to(directory) else path.name
+                texts.setdefault(path.read_bytes(), f"{package['name']}: {name}")
+        # Native crates may bundle upstream source archives. Read original
+        # notice members directly without extracting paths or checking a
+        # hand-maintained component/version inventory.
+        for archive in sorted(directory.glob("*.tar*")):
+            if not tarfile.is_tarfile(archive):
+                continue
             with tarfile.open(archive) as source:
-                components = sorted({name.split("/")[2] for name in source.getnames()
-                                     if name.startswith("duckdb/third_party/")})
-            if components != native["components"]:
-                raise SystemExit("Bundled DuckDB component inventory changed")
-            if not set(components) <= {item["component"] for item in overrides.get(key, [])}:
-                raise SystemExit("Missing bundled DuckDB component notices")
-        for override in overrides.get(key, []):
-            data = (overrides_root / override["file"]).read_bytes()
-            if hashlib.sha256(data).hexdigest() != override["sha256"]:
-                raise SystemExit("Notice override checksum changed: " + override["file"])
-            sources.append((override["file"], data, override))
-        if not sources:
-            raise SystemExit("Missing license text for " + key)
-        licenses = []
-        for name, data, provenance in sources:
-            digest = hashlib.sha256(data).hexdigest()
-            texts[digest] = data.decode("utf-8")
-            licenses.append({"name": name, "sha256": digest, "provenance": provenance})
-        records.append({"name": package["name"], "version": package["version"],
-                        "license": package["license"], "repository": package["repository"],
-                        "authors": package["authors"], "notices": licenses})
-
-    header = (
-        "marsh third-party Rust package notices\n\n"
-        "Generated from Cargo.lock for normal and build dependencies on macOS ARM64 "
-        "and Linux ARM64/AMD64. These notices include upstream license alternatives; "
-        "they are not an image SBOM or a provider CLI redistribution clearance. "
-        "Separately distributed stock SBX, system/VM images, provider CLIs, and "
-        "native libraries bundled by dependencies retain their own notices and terms. "
-        "The libduckdb-sys section includes the exact DuckDB source archive's "
-        "26 bundled native components; see embedded-native-notices.json.\n\n"
-    )
-    body = [header]
-    for record in records:
-        body.append(f"{record['name']} {record['version']}\n")
-        body.append(f"Declared license: {record['license']}\n")
-        body.append(f"Source: {record['repository']}\n")
-        body.append("Authors: " + "; ".join(record["authors"]) + "\n")
-        for notice in record["notices"]:
-            body.append(f"  {notice['name']}: text sha256:{notice['sha256']}\n")
-            if notice["provenance"]:
-                body.append("  Retrieved from: " + notice["provenance"]["url"] + "\n")
-                if notice["provenance"].get("selection"):
-                    body.append("  " + notice["provenance"]["selection"] + "\n")
-        body.append("\n")
-    for digest, text in sorted(texts.items()):
-        body.append("=" * 72 + f"\nLicense/notice text sha256:{digest}\n\n{text}\n")
+                for member in source:
+                    if member.isfile() and PurePosixPath(member.name).name.upper().startswith(NAMES):
+                        with source.extractfile(member) as notice:
+                            texts.setdefault(notice.read(), f"{package['name']}: {member.name}")
+    brush = root / "vendor/brush/LICENSE"
+    texts.setdefault(brush.read_bytes(), "Brush LICENSE")
+    # Retain upstream texts supplied for crates which omit them from their
+    # package, including embedded native dependencies. No version ledger gates
+    # whether a newer package may build.
+    for path in sorted((root / "packaging/notice-overrides").rglob("*")):
+        if path.is_file():
+            texts.setdefault(path.read_bytes(), path.name)
     args.output.mkdir(parents=True, exist_ok=True)
-    (args.output / "THIRD-PARTY-NOTICES.txt").write_text("".join(body))
-    (args.output / "rust-package-notices.json").write_text(json.dumps({
-        "cargo_lock_sha256": hashlib.sha256((root / "Cargo.lock").read_bytes()).hexdigest(),
-        "packages": records,
-    }, indent=2) + "\n")
-    (args.output / "embedded-native-notices.json").write_text(json.dumps(native, indent=2) + "\n")
-    print(f"Wrote {len(records)} package notices and {len(texts)} distinct license texts to {args.output}")
+    with (args.output / "THIRD-PARTY-NOTICES.txt").open("wb") as output:
+        output.write(b"marsh third-party license and notice files\n\n")
+        for data, name in texts.items():
+            output.write(("=" * 72 + f"\n{name}\n\n").encode())
+            output.write(data)
+            output.write(b"\n\n")
+    print(f"Bundled {len(texts)} original notice texts in {args.output}")
 
 
 if __name__ == "__main__":

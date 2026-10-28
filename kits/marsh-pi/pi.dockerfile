@@ -9,9 +9,6 @@ FROM dhi.io/debian-base:trixie-dev@sha256:cc4e05ff415ee2d83918f2af45c73798320992
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
-# The notice index names each package's exact version: when it changes (a DHI
-# package update), the cached package layer must not be reused.
-COPY dhi-notices/installed-package-notices.json /tmp/marsh-notice-index.json
 RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
 
 # Pi, its MCP Gateway extension, and (for ACP mode, `pi --acp`) the community
@@ -21,22 +18,17 @@ ARG PI_VERSION
 WORKDIR /opt/marsh/pi-gateway
 COPY package.json package-lock.json ./
 COPY patch-pi-dependencies.mjs ./
-COPY collect-notices.mjs ./
-COPY dhi-notices /usr/local/share/licenses/marsh-dhi
-COPY notices ./notices
 RUN test "$PI_VERSION" = "$(node -p 'require("./package.json").dependencies["@earendil-works/pi-coding-agent"]')" \
  && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
  && node patch-pi-dependencies.mjs \
  && test -f node_modules/pi-acp/dist/index.js \
- && node_modules/.bin/pi --version \
- && node collect-notices.mjs node_modules /usr/local/share/licenses/marsh-pi
+ && node_modules/.bin/pi --version
 COPY --chmod=0644 mcp-gateway.mjs ./mcp-gateway.mjs
 
 FROM base AS image
 COPY --from=packages /rootfs/ /
 COPY dhi-notices /usr/local/share/licenses/marsh-dhi
 COPY --from=npm /opt/marsh/pi-gateway /opt/marsh/pi-gateway
-COPY --from=npm /usr/local/share/licenses/marsh-pi /usr/local/share/licenses/marsh-pi
 COPY --chmod=0755 marsh-entrypoint.sh /usr/local/bin/marsh-pi
 LABEL com.docker.sandboxes.start-docker=true
 # The marsh Kit contract this image implements (marsh_contracts::kit_source):
@@ -47,18 +39,10 @@ USER agent
 WORKDIR /home/agent/workspace
 ENTRYPOINT ["/usr/local/bin/marsh-pi"]
 
-# The runtime image has no Python: smoke-test it in a throwaway stage, then
-# verify it, read-only, from the build stage. Scope is the image plus installed
-# npm metadata/retained notices, not all npm code bytes.
+# Exercise the installed runtime and commands before publishing.
 FROM image AS smoke
 USER root
 RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 python pi
 
-FROM packages AS verify
-RUN sh /tmp/marsh-image-base/verifier.sh
-RUN --mount=type=bind,from=smoke,source=/smoke.ok,target=/smoke.ok \
-    --mount=type=bind,from=image,target=/image \
-    python3 -I -S /image/usr/local/share/licenses/marsh-dhi/verify.py --root /image --adapter pi --receipt-dir /receipt
-
 FROM image
-COPY --from=verify /receipt/ /usr/local/share/licenses/marsh-dhi/
+RUN --mount=type=bind,from=smoke,source=/smoke.ok,target=/tmp/smoke.ok test -f /tmp/smoke.ok

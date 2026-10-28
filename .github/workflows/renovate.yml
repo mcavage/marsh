@@ -1,21 +1,8 @@
 name: Renovate
-# Self-hosted Renovate (free, open source) that keeps every pin current: DHI and
-# Rust base image digests, the Kits' agent CLIs and ACP adapters, npm and Cargo
-# dependencies, and GitHub Actions. What it watches and how it groups updates is
-# .github/renovate.json5; credentials and the one command it may run are
-# .github/renovate-global.js. It opens PRs and merges each one itself once every
-# check on it passes: CI (including the `images` job, which builds every image),
-# Refresh pins, and the "License review" status. A red license review stops the
-# merge for the owner. Renovate merges, not GitHub auto-merge, because "License
-# review" is a Renovate-only status (see renovate.json5).
-#
-# It runs hourly, and again when CI or Refresh pins succeeds on a renovate/**
-# branch, so a PR merges soon after its last check goes green. Which of the two
-# finishes last varies: CI, when Refresh pins pushes regenerated records and CI
-# restarts on that commit; Refresh pins (it posts "License review" at the end of
-# a longer run), when there is nothing to regenerate. A skipped Refresh pins run
-# (the one on the commit it pushed) does not succeed, so it does not trigger.
-# The hourly schedule is only a backstop: GitHub often delays or drops it.
+# Self-hosted dependency discovery and automerge. Repository rules are in
+# .github/renovate.json5. CI builds and tests updated dependencies directly.
+# Runs hourly and after successful CI on a renovate/** branch, so a passing
+# update merges without a manual refresh or merge click.
 #
 # Secrets:
 #   RENOVATE_TOKEN          a token that can open PRs and update workflow files
@@ -36,7 +23,7 @@ on:
   schedule:
     - cron: '23 * * * *'
   workflow_run:
-    workflows: [CI, Refresh pins]
+    workflows: [CI]
     types: [completed]
     branches: ['renovate/**']
   workflow_dispatch:
@@ -53,8 +40,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   renovate:
-    # Only a run that succeeded can lead to a merge; this also drops the skipped
-    # Refresh pins run.
+    # Only successful CI can lead to a merge.
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-26.04
     timeout-minutes: 60

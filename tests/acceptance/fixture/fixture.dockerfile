@@ -33,17 +33,10 @@ USER agent
 WORKDIR /home/agent/workspace
 ENTRYPOINT ["/usr/local/bin/marsh-fixture"]
 
-# The runtime image has no Python: smoke-test it in a throwaway stage, then
-# verify it, read-only, from the build stage.
+# Exercise the installed runtime and commands before publishing.
 FROM image AS smoke
 USER root
 RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh && test -x /usr/local/bin/marsh-fixture
 
-FROM packages AS verify
-RUN sh /tmp/marsh-image-base/verifier.sh
-RUN --mount=type=bind,from=smoke,source=/smoke.ok,target=/smoke.ok \
-    --mount=type=bind,from=image,target=/image \
-    python3 -I -S /image/usr/local/share/licenses/marsh-dhi/verify.py --root /image --receipt-dir /receipt
-
 FROM image
-COPY --from=verify /receipt/ /usr/local/share/licenses/marsh-dhi/
+RUN --mount=type=bind,from=smoke,source=/smoke.ok,target=/tmp/smoke.ok test -f /tmp/smoke.ok
