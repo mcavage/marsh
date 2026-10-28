@@ -67,13 +67,15 @@ def rpc(image, home, commands, mounts=()):
     results['_events']=observed
     return results
 
-def terminal_check(image, home):
+def terminal_check(image, home, exercise=True, mounts=()):
     master,slave=pty.openpty()
     fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',32,120,0,0))
     process=subprocess.Popen(['docker','run','--rm','-it','--user',f'{os.getuid()}:{os.getgid()}',
         '-w','/home/tester','-v',f'{home}:/home/tester',
         '-e','MARSH_SELECTED_HOME=/home/tester','-e','SBX_CRED_ANTHROPIC_MODE=apikey',
-        '-e','TERM=xterm-256color','-e','COLORTERM=truecolor',image,'--offline','--no-session'],
+        '-e','TERM=xterm-256color','-e','COLORTERM=truecolor',
+        *[flag for source,target in mounts for flag in ('-v',f'{source}:{target}:ro')],
+        image,'--offline','--no-session'],
         stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
     os.close(slave);data=bytearray()
     def text():
@@ -97,12 +99,14 @@ def terminal_check(image, home):
             if select.select([master],[],[],0.1)[0]:
                 data.extend(os.read(master,65536))
                 quiet_until=time.monotonic()+0.5
-        # Exercise editing, arrows/backspace and bracketed paste, without sending
-        # an ordinary user prompt (which would call a provider).
-        os.write(master,b'drafX\x7ft\x1b[D\x1b[C\x15')
-        os.write(master,b'\x1b[200~paste-probe\x1b[201~\x15')
-        os.write(master,b'/pix-status\r')
-        until('Execution: marsh owns')
+        if exercise:
+            # Exercise editing, arrows/backspace and bracketed paste, without sending
+            # an ordinary user prompt (which would call a provider).
+            os.write(master,b'drafX\x7ft\x1b[D\x1b[C\x15')
+            os.write(master,b'\x1b[200~paste-probe\x1b[201~\x15')
+            os.write(master,b'/pix-status\r')
+            until('Execution: marsh owns')
+        startup=text()
         os.write(master,b'\x03\x04') # clear any draft, then native empty-editor exit
         deadline=time.monotonic()+15
         # Keep draining while Pi restores the terminal. Waiting without reading
@@ -115,10 +119,40 @@ def terminal_check(image, home):
                 if chunk:data.extend(chunk)
                 else:process.wait(timeout=5)
         assert process.returncode==0,(process.returncode,text()[-2000:])
-        print('PASS: real PTY startup, edit/paste/status UI and clean exit; no model prompt sent.')
+        if exercise:
+            print('PASS: real PTY startup, edit/paste/status UI and clean exit; no model prompt sent.')
+        return startup
     finally:
         os.close(master)
         if process.poll() is None:process.terminate();process.wait(timeout=20)
+
+def dev_skills_check(image, temp):
+    """A folder in Pix's `skills` setting (a dev checkout) replaces a Kit skill
+    and a built-in skill of the same name, silently; a stray copy in
+    ~/.agents/skills still produces Pi's collision warning."""
+    def skill(folder, name, description):
+        (folder/name).mkdir(parents=True)
+        (folder/name/'SKILL.md').write_text(f'---\nname: {name}\ndescription: {description}\n---\nProbe.\n')
+    team=temp/'dev-team';skill(team,'hello','Team probe skill.')
+    kit=temp/'dev-kit-skills';kit.mkdir();(kit/'hello').symlink_to('/opt/team-skills/hello')
+    mounts=[(team,'/opt/team-skills'),(kit,'/opt/pix/kit-skills')]
+    home=temp/'dev-home';dev=home/'work/skills'
+    skill(dev,'hello','Dev copy of the Kit skill.');skill(dev,'analyze','Dev copy of a built-in skill.')
+    (home/'.pix-agent/agent').mkdir(parents=True)
+    (home/'.pix-agent/agent/settings.json').write_text(json.dumps({'skills':['/home/tester/work/skills']})+'\n')
+    listed={c['name']:c for c in rpc(image,home,[{'type':'get_commands'}],mounts=mounts)['0']['commands']
+            if c.get('name','').startswith('skill:')}
+    assert len(listed)==38,sorted(listed)
+    assert listed['skill:hello'].get('description')=='Dev copy of the Kit skill.',listed['skill:hello']
+    assert listed['skill:analyze'].get('description')=='Dev copy of a built-in skill.',listed['skill:analyze']
+    startup=terminal_check(image,home,exercise=False,mounts=mounts)
+    assert 'Skill conflicts' not in startup,startup[-3000:]
+    # Negative control: the same name in ~/.agents/skills is a stray copy.
+    skill(home/'.agents/skills','hello','Stray personal copy.')
+    startup=terminal_check(image,home,exercise=False,mounts=mounts)
+    assert 'Skill conflicts' in startup and '"hello" collision' in startup,startup[-3000:]
+    print('PASS: a configured dev skills folder replaces Kit and built-in skills of the same name without a '
+          'collision warning; a stray ~/.agents/skills copy still warns.')
 
 def main():
     image='pix-public-test:'+uuid.uuid4().hex[:12]
@@ -157,6 +191,7 @@ def main():
                   mounts=[(temp/'team','/opt/team-skills'),(temp/'kit-skills','/opt/pix/kit-skills')])
         skills=[c['name'] for c in mixed['0']['commands'] if c.get('name','').startswith('skill:')]
         assert len(skills)==38 and 'skill:hello' in skills,skills
+        dev_skills_check(image,temp)
         settings=home/'.pix-agent/agent/settings.json';snapshot=settings.read_bytes()
         assert (home/'.pi/agent/settings.json').read_text()==original
         assert json.loads(snapshot)['theme']=='kanagawa'
@@ -192,7 +227,7 @@ def main():
             'printf tampered >> /opt/pix/package/instructions.md; python3 /usr/local/share/licenses/pix/verify-public.py'],
             capture_output=True,text=True)
         assert tampered.returncode!=0 and 'differs' in tampered.stderr,tampered.stderr
-        print('PASS: actual derivative notice/public-payload checks and tampered-payload negative control.')
+        print('PASS: public-payload check and tampered-payload negative control.')
         print('PASS: 37 public skills plus mixin skills from /opt/pix/kit-skills, UI/output-style loaded by upstream Pi; separate home, explicit default, settings preservation and stock-Pi isolation. Zero model/MCP calls.')
     print('Built test image retained for inspection:',image)
 

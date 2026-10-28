@@ -115,7 +115,7 @@ jobs:
       - name: Public export boundary and preservation checks
         if: ${{ steps.plan.outputs.build == 'true' }}
         run: python3 -m unittest discover -s kits/marsh-pix/tests -v
-      - name: Real upstream Pi, payload/notice verifier and model-free PTY checks
+      - name: Real upstream Pi, payload verifier and model-free PTY checks
         if: ${{ steps.plan.outputs.build == 'true' }}
         env:
           PIX_MARSH_PI_BASE: ${{ steps.plan.outputs.base }}
