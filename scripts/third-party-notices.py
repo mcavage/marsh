@@ -26,7 +26,8 @@ def main():
             paths.add(directory / package["license_file"])
         for path in sorted(paths):
             if path.is_file():
-                texts.setdefault(path.read_bytes(), f"{package['name']}: {path.relative_to(directory)}")
+                name = path.relative_to(directory) if path.is_relative_to(directory) else path.name
+                texts.setdefault(path.read_bytes(), f"{package['name']}: {name}")
         # Native crates may bundle upstream source archives. Read original
         # notice members directly without extracting paths or checking a
         # hand-maintained component/version inventory.
