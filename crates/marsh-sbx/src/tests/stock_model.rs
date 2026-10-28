@@ -983,6 +983,23 @@ impl StockModel {
         failure(&message.replace("\"HOST\"", &quoted(&host)))
     }
 
+    /// "If the sandbox is stopped, it is started first." Stock v0.50.0
+    /// refuses one whose saved mount's host path is gone.
+    fn start(guest: &mut Vm) -> Option<CommandOutput> {
+        if !guest.running
+            && let Some((target, (host, _))) =
+                guest.mounts.iter().find(|(_, (host, _))| !host.exists())
+        {
+            let (host, target) = (host.display(), target.display());
+            return Some(failure(&format!(
+                "error: cannot start sandbox: start runtime: request failed: 422 Unprocessable Entity: cannot restore mount \"{host}\" at \"{target}\": stat {host}: no such file or directory; restore the host path or remove the saved mount with sbx umount while the sandbox is stopped"
+            )));
+        }
+        guest.running = true;
+        None
+    }
+
+    #[allow(clippy::too_many_lines)] // One table of the guest commands marsh runs.
     fn exec(state: &mut State, parsed: &Parsed) -> CommandOutput {
         let Some((vm, command)) = parsed.positionals.split_first() else {
             return failure("Error: requires at least 2 arg(s)");
@@ -991,8 +1008,9 @@ impl StockModel {
         let Some(guest) = state.vms.get_mut(vm) else {
             return Self::missing(vm);
         };
-        // "If the sandbox is stopped, it is started first."
-        guest.running = true;
+        if let Some(refused) = Self::start(guest) {
+            return refused;
+        }
         let environment = parsed
             .values("env")
             .into_iter()

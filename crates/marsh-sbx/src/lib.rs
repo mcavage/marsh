@@ -99,6 +99,8 @@ const KIT_RESOLUTION_TIMEOUT: Duration = Duration::from_mins(2);
 const KEEPALIVE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const LOCAL_SCRATCH_STALE_AFTER: Duration = Duration::from_hours(1);
 const PREPARATION_SBX_TIMEOUT: Duration = Duration::from_mins(5);
+/// Saved grant mounts of deleted projects dropped while starting one VM.
+const MAX_LOST_GRANT_MOUNTS: usize = 64;
 const PREPARATION_BUILD_TIMEOUT: Duration = Duration::from_mins(20);
 const PREPARATION_LOAD_TIMEOUT: Duration = Duration::from_mins(10);
 const PREPARATION_DOCKER_TIMEOUT: Duration = Duration::from_mins(2);
@@ -5639,22 +5641,71 @@ impl StockSbx {
     }
 
     fn read_owned_marker(&self, vm: &str) -> Result<OwnedWorkerMarker, SbxError> {
-        let output = self.run_bounded_os(
-            "read worker ownership marker",
-            self.preparation_timeouts.sbx,
-            [
-                "exec",
-                "-u",
-                "root",
-                vm,
-                "cat",
-                "/var/lib/marsh/worker.json",
-            ],
-        )?;
-        if !output.succeeded() {
-            return Err(SbxError::ForeignVm(vm.to_owned()));
+        // This read is what starts a stopped VM. Stock SBX refuses to start
+        // one whose saved mount's host path is gone; a grant this daemon (or
+        // an earlier one) mounted for a since-deleted project is dropped, so
+        // the VM starts instead of reading as foreign until a reset.
+        let mut dropped = 0;
+        loop {
+            let output = self.run_bounded_os(
+                "read worker ownership marker",
+                self.preparation_timeouts.sbx,
+                [
+                    "exec",
+                    "-u",
+                    "root",
+                    vm,
+                    "cat",
+                    "/var/lib/marsh/worker.json",
+                ],
+            )?;
+            if output.succeeded() {
+                return serde_json::from_slice(&output.stdout)
+                    .map_err(|_| SbxError::ForeignVm(vm.to_owned()));
+            }
+            match lost_grant_mount(&output) {
+                Some((host, target)) if dropped < MAX_LOST_GRANT_MOUNTS => {
+                    self.drop_lost_grant_mount(vm, &host, &target)?;
+                    dropped += 1;
+                }
+                _ => return Err(SbxError::ForeignVm(vm.to_owned())),
+            }
         }
-        serde_json::from_slice(&output.stdout).map_err(|_| SbxError::ForeignVm(vm.to_owned()))
+    }
+
+    /// Remove the saved grant mount `host` at `target` from this daemon's
+    /// own stopped VM `vm`. Only a mount under `GRANT_ROOT` whose host path
+    /// no longer exists, and only by exact UUID-fenced name.
+    fn drop_lost_grant_mount(&self, vm: &str, host: &Path, target: &Path) -> Result<(), SbxError> {
+        match fs::symlink_metadata(host) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            _ => return Err(SbxError::ForeignVm(vm.to_owned())),
+        }
+        match self.classify_vm(vm, true)? {
+            VmClass::Owned { running: false, .. } => {}
+            _ => return Err(SbxError::ForeignVm(vm.to_owned())),
+        }
+        self.ownership.invalidate();
+        let mut spec = host.as_os_str().to_owned();
+        spec.push(":");
+        spec.push(target);
+        let (operation, _cleanup) =
+            weak_mutex_transition_lock(&self.grant_stock_operation_locks, vm.to_owned());
+        let _operation = operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // The host path is absolute and gone: run from `/`, never from it.
+        let output = self
+            .runner
+            .run_bounded(
+                &self.invocation_in(
+                    Path::new("/"),
+                    [OsStr::new("umount"), OsStr::new(vm), spec.as_os_str()],
+                ),
+                self.preparation_timeouts.sbx,
+            )
+            .map_err(SbxError::from)?;
+        Self::require_unmounted("remove a lost grant mount", output)
     }
 
     fn is_owned_stale_local_vm(
@@ -7005,6 +7056,26 @@ fn parse_sbx_semver(value: &str) -> Option<(u64, u64, u64)> {
 
 const fn is_lower_hex_digit(byte: u8) -> bool {
     byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')
+}
+
+/// Stock SBX's refusal to start a sandbox whose saved mount's host path is
+/// gone: `cannot restore mount "HOST" at "TARGET": stat HOST: no such file or
+/// directory`. Only marsh's own grant mounts (under `GRANT_ROOT`), with
+/// absolute colon-free paths, are reported.
+fn lost_grant_mount(output: &CommandOutput) -> Option<(PathBuf, PathBuf)> {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let rest = stderr.split_once("cannot restore mount \"")?.1;
+    let (host, rest) = rest.split_once("\" at \"")?;
+    let (target, rest) = rest.split_once('"')?;
+    let grants = Path::new(GRANT_ROOT);
+    let (host, target) = (PathBuf::from(host), PathBuf::from(target));
+    (rest.contains("no such file or directory")
+        && host.is_absolute()
+        && target.starts_with(grants)
+        && target != grants
+        && !host.as_os_str().as_encoded_bytes().contains(&b':')
+        && !target.as_os_str().as_encoded_bytes().contains(&b':'))
+    .then_some((host, target))
 }
 
 fn stale_shared_mount_error(error: &SbxError) -> bool {

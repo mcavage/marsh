@@ -466,3 +466,66 @@ fn retained_worker_teardown_is_bounded_when_termination_wedges() {
     assert!(!adapter.revalidate_cached_kit(&kit.spec, &ready).unwrap());
     wedge.release();
 }
+
+/// A Kit VM keeps a grant mount for every project it worked in. Once one is
+/// deleted, stock refuses to start the stopped VM; the next daemon (an
+/// upgrade, a restart) drops that saved mount and reuses the VM, instead of
+/// calling it foreign until a reset. A lost mount marsh did not make stays.
+#[test]
+fn a_stopped_kit_vm_whose_project_was_deleted_starts_again_for_the_next_daemon() {
+    let model = StockModel::new();
+    let (adapter, kit, ready) = warm_kit(&model, KIT);
+    let root = scratch();
+    let kept = directory(root.path(), "kept");
+    let gone = directory(root.path(), "gone");
+    for (attempt, source) in [("a1", &kept), ("a2", &gone)] {
+        let job = adapter
+            .prepare_grants(
+                &ready,
+                attempt,
+                &[grant(
+                    source.clone(),
+                    "/Users/alice/project",
+                    MountAccess::ReadWrite,
+                )],
+            )
+            .unwrap();
+        adapter.revoke_grants(&job).unwrap();
+    }
+    drop(adapter);
+    fs::remove_dir_all(&gone).unwrap();
+    model.with_vm(KIT, |vm| vm.running = false);
+    let id = model.vm(KIT).unwrap().id;
+
+    let next = model.adapter();
+    next.ownership.record(KIT, &id).unwrap();
+    let warm = next.ensure_kit_vm(&kit.spec).unwrap();
+    assert!(!warm.cold_started);
+    assert_eq!(model.vm(KIT).unwrap().id, id);
+    let mounts = model.vm(KIT).unwrap().mounts;
+    assert_eq!(mounts.len(), 1, "{mounts:?}");
+    assert!(mounts.values().all(|(host, _)| host == &kept));
+
+    // Control: a lost mount outside marsh's grant root is never removed.
+    drop(next);
+    let other = directory(root.path(), "other");
+    model.with_vm(KIT, |vm| {
+        vm.mounts
+            .insert("/opt/user-mount".into(), (other.clone(), "rw".into()));
+        vm.running = false;
+    });
+    fs::remove_dir_all(&other).unwrap();
+    let last = model.adapter();
+    last.ownership.record(KIT, &id).unwrap();
+    assert!(matches!(
+        last.ensure_kit_vm(&kit.spec),
+        Err(SbxError::ForeignVm(_))
+    ));
+    assert!(
+        model
+            .vm(KIT)
+            .unwrap()
+            .mounts
+            .contains_key(Path::new("/opt/user-mount"))
+    );
+}
