@@ -230,17 +230,6 @@ def upstream_version(version):
     return version.split(":", 1)[-1].rsplit("-", 1)[0]
 
 
-def upstream_source(package, sources):
-    """Exact package rules win; reviewed families cover versioned package names."""
-    if package in sources["packages"]:
-        return sources["packages"][package]
-    matches = [rule for rule in sources.get("package_patterns", [])
-               if re.fullmatch(rule["pattern"], package)]
-    if len(matches) > 1:
-        raise ValueError(f"{package}: ambiguous upstream source rules")
-    return matches[0] if matches else None
-
-
 def acquire_upstream(source, version):
     commit = tag_commit(source["repository"], source["tag"].format(upstream=upstream_version(version)))
     notices = []
@@ -290,7 +279,7 @@ def main():
     args = parser.parse_args()
     previous = json.loads(args.previous.read_text())
     seeds = {(row["package"], row["version"]): row for row in previous["packages"]}
-    sources = json.loads((HERE / "upstream-sources.json").read_text())
+    sources = json.loads((HERE / "upstream-sources.json").read_text())["packages"]
     components_path = COLLECTED / "main-component-notices.json"
     components = json.loads(components_path.read_text())
     rows, binaries, modules, legal, catalog, names = {}, {}, {}, [], {}, []
@@ -336,12 +325,11 @@ def main():
                         notices = own_notices(sibling)[0]
                         if notices:
                             break
-            upstream_rule = upstream_source(package, sources)
             seed = seeds.get((package, version))
             if seed is not None and seed["upstream_notices"]:
                 upstream = seed["upstream_notices"]
-            elif not notices and not archived and upstream_rule is not None:
-                upstream = acquire_upstream(upstream_rule, version)
+            elif not notices and not archived and package in sources:
+                upstream = acquire_upstream(sources[package], version)
             else:
                 upstream = []
             if not notices and not archived and not upstream:

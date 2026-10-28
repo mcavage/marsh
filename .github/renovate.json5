@@ -9,11 +9,11 @@
 // "License review" is a Renovate-only status that can't be a required check
 // for every PR, and Renovate waits for every status on the PR. A red license
 // delta therefore still stops the merge for the owner. Merges land on the next
-// Renovate run after the checks pass: it runs hourly and again whenever CI
-// succeeds on a renovate/** branch (renovate.yml). The builds still
+// Renovate run after the checks pass: it runs hourly and again whenever CI or
+// Refresh pins succeeds on a renovate/** branch (renovate.yml). The builds still
 // take pinned inputs on purpose (docs/design/supply-chain.md). Renovate only
-// edits the pins: CI first calls .github/workflows/renovate-refresh.yml to run
-// `make refresh-pins` and commit the regenerated records (checksums,
+// edits the pins: .github/workflows/renovate-refresh.yml then runs `make
+// refresh-pins` on the branch, commits the regenerated records (checksums,
 // notices, inventories) as refresh-pins@users.noreply.github.com, and posts the
 // license delta. CI builds the images on the completed head; the "License
 // review" status is red only when the delta needs the owner.
