@@ -97,6 +97,18 @@ instructions with `agent-context@1`. Pix loads those skills from
 That needs marsh 0.1.8 or later. Keep organization-specific material out of
 this repository.
 
+To work on a Kit's skills from inside Pix, mount a checkout of them (an
+`additionalWorkspaces` entry in `~/.marsh/sbxenvs/pix.yaml`) and list its
+skills folder in Pix's settings (`~/.marsh/home/.pix-agent/agent/settings.json`):
+
+```json
+{ "skills": ["/Users/you/dev/team-pix/skills"] }
+```
+
+A skill there replaces the Kit's or Pix's skill of the same name, without a
+collision warning; edit it and run `/reload` to use the change. A copy of a
+Kit skill anywhere else, such as `~/.agents/skills`, still warns.
+
 ## Tests
 
 ```sh

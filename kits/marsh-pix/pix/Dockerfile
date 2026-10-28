@@ -9,7 +9,7 @@ COPY --chmod=0644 LICENSE /usr/local/share/licenses/pix/LICENSE
 COPY --chmod=0644 PUBLIC-SOURCES.json /usr/local/share/licenses/pix/inputs.json
 COPY --chmod=0644 verify-public.py /usr/local/share/licenses/pix/verify-public.py
 USER root
-# Verify the public Pix files added by this image.
+# Check this image's added public payload.
 RUN chmod 0755 /usr/local/share/licenses/pix \
  && python3 /usr/local/share/licenses/pix/verify-public.py \
       --receipt /usr/local/share/licenses/pix/public-check.json \
