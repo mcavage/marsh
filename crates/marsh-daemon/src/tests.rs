@@ -2060,9 +2060,13 @@ fn a_pid_is_a_process_only_with_its_start_time() {
     // The same pid with another start time: the pid was reused, the
     // attached process is gone, and the session is released.
     store.lock().shells.get_mut(&ours).unwrap().process_started =
-        Some("Mon Jan  1 00:00:00 2001".into());
+        Some("utc:Mon Jan  1 00:00:00 2001".into());
     assert_eq!(id(&ours), ProcessIdentity::Gone);
     assert!(store.dead_host_sessions().contains(&ours));
+    // A start time recorded before they were read in UTC is never compared.
+    store.lock().shells.get_mut(&ours).unwrap().process_started =
+        Some("Mon Jan  1 00:00:00 2001".into());
+    assert_eq!(id(&ours), ProcessIdentity::Unverified);
     // No recorded start time (an older daemon's session): a live pid is
     // neither called gone nor named for a kill.
     store.lock().shells.get_mut(&ours).unwrap().process_started = None;
@@ -2071,6 +2075,26 @@ fn a_pid_is_a_process_only_with_its_start_time() {
     let blockers = store.lifecycle_blockers().join("\n");
     assert!(blockers.contains("cannot be identified") && blockers.contains("ps -p"));
     assert!(!blockers.contains("kill"));
+}
+
+#[test]
+fn the_start_time_is_read_in_one_zone_whatever_the_environment_says() {
+    let command = ps_command("lstart=", std::process::id());
+    let envs = command
+        .get_envs()
+        .map(|(name, value)| (name.to_owned(), value.map(ToOwned::to_owned)))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        envs.get(std::ffi::OsStr::new("TZ")),
+        Some(&Some("UTC".into()))
+    );
+    assert_eq!(
+        envs.get(std::ffi::OsStr::new("LC_ALL")),
+        Some(&Some("C".into()))
+    );
+    let first = process_started(std::process::id()).unwrap();
+    assert!(first.starts_with("utc:"));
+    assert_eq!(process_started(std::process::id()).unwrap(), first);
 }
 
 #[test]

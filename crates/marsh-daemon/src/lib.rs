@@ -2012,13 +2012,23 @@ fn scope_is_idle(state: &State) -> bool {
 /// process (or `ps` cannot say). A pid alone is not a process: it can be
 /// reused, so this goes with it.
 fn process_started(pid: u32) -> Option<String> {
-    let output = std::process::Command::new("ps")
-        .args(["-o", "lstart=", "-p", &pid.to_string()])
-        .env("LC_ALL", "C")
-        .output()
-        .ok()?;
+    let output = ps_command("lstart=", pid).output().ok()?;
     let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    (output.status.success() && !text.is_empty()).then_some(text)
+    // The prefix marks the zone this was read in: a record without it was
+    // made when `ps` printed local time, and is never compared.
+    (output.status.success() && !text.is_empty()).then(|| format!("utc:{text}"))
+}
+
+/// `ps -o FIELD -p PID`, in the one zone and locale its text is compared in:
+/// `lstart` prints local time, which a change of the system zone (or of `TZ`
+/// in the environment) would otherwise move.
+fn ps_command(field: &str, pid: u32) -> std::process::Command {
+    let mut command = std::process::Command::new("ps");
+    command
+        .args(["-o", field, "-p", &pid.to_string()])
+        .env("TZ", "UTC")
+        .env("LC_ALL", "C");
+    command
 }
 
 /// What is known of a client process now.
@@ -2039,6 +2049,8 @@ fn process_identity(pid: u32, recorded: Option<&str>) -> ProcessIdentity {
     if !exists {
         return ProcessIdentity::Gone;
     }
+    // A record from before start times were read in UTC cannot be compared.
+    let recorded = recorded.filter(|recorded| recorded.starts_with("utc:"));
     match (recorded, process_started(pid)) {
         (Some(recorded), Some(now)) if recorded == now => ProcessIdentity::Same,
         (Some(_), Some(_)) => ProcessIdentity::Gone,
@@ -6674,10 +6686,10 @@ impl Client {
             .collect::<Vec<_>>();
         // The daemon answered on this home's socket, so `pid` is it; say
         // `kill` only when `ps` agrees that the pid is a marshd.
-        let is_daemon = std::process::Command::new("ps")
-            .args(["-o", "command=", "-p", &pid.to_string()])
-            .output()
-            .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).contains("marshd"));
+        let is_daemon = ps_command("comm=", pid).output().is_ok_and(|output| {
+            Path::new(String::from_utf8_lossy(&output.stdout).trim()).file_name()
+                == Some(std::ffi::OsStr::new("marshd"))
+        });
         let stop = if is_daemon {
             format!("stop the daemon with `kill {pid}`")
         } else {
