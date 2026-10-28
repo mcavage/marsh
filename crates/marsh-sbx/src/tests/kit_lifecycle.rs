@@ -519,7 +519,7 @@ fn a_stopped_kit_vm_whose_project_was_deleted_starts_again_for_the_next_daemon()
     last.ownership.record(KIT, &id).unwrap();
     assert!(matches!(
         last.ensure_kit_vm(&kit.spec),
-        Err(SbxError::ForeignVm(_))
+        Err(SbxError::UnreadableVm { ref detail, .. }) if detail.contains("/opt/user-mount")
     ));
     assert!(
         model

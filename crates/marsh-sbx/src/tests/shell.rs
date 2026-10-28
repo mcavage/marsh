@@ -587,6 +587,69 @@ fn a_restarted_daemon_with_another_shell_image_replaces_its_owned_shell_vm() {
     assert_eq!(reloaded.ownership.uuid(&shell.spec.name), Some(guest.id));
 }
 
+/// A shell VM keeps the project and home mounts of every session it served at
+/// their natural paths. Once a project is deleted, stock refuses to start the
+/// stopped VM; the next daemon drops that saved mount and reuses the VM (or
+/// replaces it, for another shell image), instead of calling it foreign.
+#[test]
+fn a_stopped_shell_vm_whose_project_was_deleted_starts_again_for_the_next_daemon() {
+    for another_image in [false, true] {
+        let model = StockModel::new();
+        let root = tempfile::tempdir().unwrap();
+        let map = root.path().join("ownership.json");
+        let first = model.adapter().with_vm_ownership(map.clone()).unwrap();
+        let mut shell = ShellFixture::new();
+        shell.spec.name = first.vm_name(VmPurpose::Shell, "shell").unwrap();
+        let name = shell.spec.name.clone();
+        let ready = first.ensure_shell_vm(&shell.spec).unwrap();
+        let project = shell.project();
+        let selected = shell.selected_home();
+        let mounts = first
+            .prepare_shell_mounts(&ready, &shell_grants(&project, &selected))
+            .unwrap();
+        first.revoke_shell_mounts(&mounts).unwrap();
+        let id = model.vm(&name).unwrap().id;
+        drop(first);
+        fs::remove_dir_all(&project).unwrap();
+        model.with_vm(&name, |vm| vm.running = false);
+
+        let next = model.adapter().with_vm_ownership(map).unwrap();
+        if another_image {
+            shell.spec.image =
+                OciImage::parse(format!("dhi.example/shell@sha256:{}", "d".repeat(64))).unwrap();
+        }
+        let vm = next.ensure_shell_vm(&shell.spec).unwrap();
+        assert_eq!(vm.cold_started, another_image);
+        assert_eq!(model.vm(&name).unwrap().id == id, !another_image);
+        let mounts = model.vm(&name).unwrap().mounts;
+        assert!(!mounts.contains_key(&project), "{mounts:?}");
+        assert_eq!(
+            mounts.contains_key(Path::new("/Users/alice")),
+            !another_image
+        );
+    }
+}
+
+#[test]
+fn a_lost_shell_mount_held_by_a_session_is_never_dropped() {
+    let model = StockModel::new();
+    let adapter = model.adapter();
+    let shell = ShellFixture::new();
+    let ready = adapter.ensure_shell_vm(&shell.spec).unwrap();
+    let project = shell.project();
+    let _held = adapter
+        .prepare_shell_mounts(&ready, &shell_grants(&project, &shell.selected_home()))
+        .unwrap();
+    fs::remove_dir_all(&project).unwrap();
+    model.with_vm(SHELL, |vm| vm.running = false);
+    let mounts = model.vm(SHELL).unwrap().mounts.len();
+    assert!(matches!(
+        adapter.drop_lost_shell_mount(SHELL, &project, &project),
+        Err(SbxError::ForeignVm(_))
+    ));
+    assert_eq!(model.vm(SHELL).unwrap().mounts.len(), mounts);
+}
+
 #[test]
 fn an_owned_shell_vm_without_its_own_marker_still_fails_closed() {
     let model = StockModel::new();

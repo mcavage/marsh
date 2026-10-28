@@ -2068,12 +2068,11 @@ impl StockSbx {
         let cold_started = match self.classify_vm(&spec.name, false)? {
             VmClass::Foreign => return Err(SbxError::ForeignVm(spec.name.clone())),
             VmClass::Owned { .. } => {
-                if self.verify_owned_marker(&spec.name, &marker).is_ok() {
-                    false
-                } else {
+                if let Err(error) = self.verify_owned_marker(&spec.name, &marker) {
                     self.ownership.invalidate();
-                    return Err(SbxError::ForeignVm(spec.name.clone()));
+                    return Err(error);
                 }
+                false
             }
             VmClass::Absent => {
                 if let Err(error) = self.create_published_vm_with_grant(spec, &lifecycle_grant) {
@@ -5671,12 +5670,29 @@ impl StockSbx {
                 return serde_json::from_slice(&output.stdout)
                     .map_err(|_| SbxError::ForeignVm(vm.to_owned()));
             }
-            match lost_grant_mount(&output) {
+            let shell = self.ownership.is_owned_shell(vm);
+            match lost_saved_mount(&output, shell) {
                 Some((host, target)) if dropped < MAX_LOST_GRANT_MOUNTS => {
-                    self.drop_lost_grant_mount(vm, &host, &target)?;
+                    if shell {
+                        self.drop_lost_shell_mount(vm, &host, &target)?;
+                    } else {
+                        self.drop_lost_grant_mount(vm, &host, &target)?;
+                    }
                     dropped += 1;
                 }
-                _ => return Err(SbxError::ForeignVm(vm.to_owned())),
+                _ => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    // `cat` ran and found no marker: not a marsh worker VM.
+                    // Anything else is stock SBX failing before `cat`.
+                    return Err(if stderr.starts_with("cat: ") {
+                        SbxError::ForeignVm(vm.to_owned())
+                    } else {
+                        SbxError::UnreadableVm {
+                            vm: vm.to_owned(),
+                            detail: stderr.trim().to_owned(),
+                        }
+                    });
+                }
             }
         }
     }
@@ -5744,6 +5760,71 @@ impl StockSbx {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&key);
+        Ok(())
+    }
+
+    /// Remove the saved mount `host` at `target` from this daemon's own
+    /// stopped shell VM `vm`: a project or selected home mounted at its
+    /// natural path that has since been deleted. The shell VM's write fence
+    /// is held by the caller (no mount is being added or removed), the host
+    /// path must still be gone, and no session may hold the mount. Idle
+    /// retained references go with it, so a project recreated at that path is
+    /// mounted again.
+    fn drop_lost_shell_mount(&self, vm: &str, host: &Path, target: &Path) -> Result<(), SbxError> {
+        let (operation, _operation_cleanup) =
+            weak_mutex_transition_lock(&self.grant_stock_operation_locks, vm.to_owned());
+        let _operation = operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let in_use = self
+            .shell_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|((name, _, mounted), reference)| {
+                let state = reference
+                    .state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                name == vm
+                    && mounted == target
+                    && (!state.owners.is_empty()
+                        || !matches!(
+                            state.phase,
+                            ShellMountPhase::Mounted | ShellMountPhase::Dormant
+                        ))
+            });
+        let gone = matches!(
+            fs::symlink_metadata(host),
+            Err(error) if error.kind() == io::ErrorKind::NotFound
+        );
+        if in_use || !gone {
+            return Err(SbxError::ForeignVm(vm.to_owned()));
+        }
+        match self.classify_vm(vm, true)? {
+            VmClass::Owned { running: false, .. } => {}
+            _ => return Err(SbxError::ForeignVm(vm.to_owned())),
+        }
+        self.ownership.invalidate();
+        let mut spec = host.as_os_str().to_owned();
+        spec.push(":");
+        spec.push(target);
+        // The host path is absolute and gone: run from `/`, never from it.
+        let output = self
+            .runner
+            .run_bounded(
+                &self.invocation_in(
+                    Path::new("/"),
+                    [OsStr::new("umount"), OsStr::new(vm), spec.as_os_str()],
+                ),
+                self.preparation_timeouts.sbx,
+            )
+            .map_err(SbxError::from)?;
+        Self::require_unmounted("remove a lost shell mount", output)?;
+        self.shell_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(name, _, mounted), _| name != vm || mounted != target);
         Ok(())
     }
 
@@ -7099,9 +7180,10 @@ const fn is_lower_hex_digit(byte: u8) -> bool {
 
 /// Stock SBX's refusal to start a sandbox whose saved mount's host path is
 /// gone: `cannot restore mount "HOST" at "TARGET": stat HOST: no such file or
-/// directory`. Only marsh's own grant mounts (under `GRANT_ROOT`), with
-/// absolute colon-free paths, are reported.
-fn lost_grant_mount(output: &CommandOutput) -> Option<(PathBuf, PathBuf)> {
+/// directory`. A Kit VM's marsh grant mounts (under `GRANT_ROOT`) are reported;
+/// so is any mount of a shell VM, whose project and home mounts sit at their
+/// natural paths. Paths are absolute and colon-free.
+fn lost_saved_mount(output: &CommandOutput, shell: bool) -> Option<(PathBuf, PathBuf)> {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let rest = stderr.split_once("cannot restore mount \"")?.1;
     let (host, rest) = rest.split_once("\" at \"")?;
@@ -7110,8 +7192,8 @@ fn lost_grant_mount(output: &CommandOutput) -> Option<(PathBuf, PathBuf)> {
     let (host, target) = (PathBuf::from(host), PathBuf::from(target));
     (rest.contains("no such file or directory")
         && host.is_absolute()
-        && target.starts_with(grants)
-        && target != grants
+        && target.is_absolute()
+        && (shell || (target.starts_with(grants) && target != grants))
         && !host.as_os_str().as_encoded_bytes().contains(&b':')
         && !target.as_os_str().as_encoded_bytes().contains(&b':'))
     .then_some((host, target))
@@ -7298,6 +7380,10 @@ pub enum SbxError {
     MissingCapability(&'static str),
     #[error("existing sandbox name is not an owned compatible kit VM: {0}")]
     ForeignVm(String),
+    #[error(
+        "owned sandbox {vm} could not be read (stock SBX could not start or exec in it): {detail}"
+    )]
+    UnreadableVm { vm: String, detail: String },
     #[error("invalid SBX identifier: {0}")]
     InvalidIdentifier(String),
     #[error("Kit tag resolution failed: {0}")]
