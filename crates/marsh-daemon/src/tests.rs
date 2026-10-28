@@ -2044,6 +2044,36 @@ fn a_reset_names_what_blocks_it_and_asks_a_gone_clients_jobs_to_end() {
 }
 
 #[test]
+fn a_pid_is_a_process_only_with_its_start_time() {
+    let home = home();
+    let store = reopen(home.path()).unwrap();
+    let id = |session: &String| {
+        let state = store.lock();
+        let shell = state.shells.get(session).unwrap();
+        process_identity(shell.pid, shell.process_started.as_deref())
+    };
+    let ours = store.attach_shell(
+        std::process::id(),
+        authority("/Users/example/project", home.path()),
+    );
+    assert_eq!(id(&ours), ProcessIdentity::Same);
+    // The same pid with another start time: the pid was reused, the
+    // attached process is gone, and the session is released.
+    store.lock().shells.get_mut(&ours).unwrap().process_started =
+        Some("Mon Jan  1 00:00:00 2001".into());
+    assert_eq!(id(&ours), ProcessIdentity::Gone);
+    assert!(store.dead_host_sessions().contains(&ours));
+    // No recorded start time (an older daemon's session): a live pid is
+    // neither called gone nor named for a kill.
+    store.lock().shells.get_mut(&ours).unwrap().process_started = None;
+    assert_eq!(id(&ours), ProcessIdentity::Unverified);
+    assert!(!store.dead_host_sessions().contains(&ours));
+    let blockers = store.lifecycle_blockers().join("\n");
+    assert!(blockers.contains("cannot be identified") && blockers.contains("ps -p"));
+    assert!(!blockers.contains("kill"));
+}
+
+#[test]
 fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
     let home = home();
     let store = reopen(home.path()).unwrap();

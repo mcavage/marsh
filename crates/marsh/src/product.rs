@@ -144,6 +144,10 @@ pub fn prepare(
         }
         ProductCommand::ResultsHelp => return write_help(&mut stdout, RESULTS_HELP),
         ProductCommand::WorkersHelp => return write_help(&mut stdout, WORKERS_HELP),
+        ProductCommand::WorkersForgetCloud { name } => {
+            writeln!(stdout, "{}", client.forget_cloud_create(&name)?)?;
+            return Ok(ProductOutcome::Complete(0));
+        }
         ProductCommand::WorkersReset { selection } => {
             return workers_reset(client.as_ref(), &selection, &mut stdout, &mut stderr);
         }

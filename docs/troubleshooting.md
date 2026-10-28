@@ -228,16 +228,19 @@ were not affected.
   start, or a running job. A daemon of an older marsh build cannot release a
   session whose client was killed; `marsh reset`, `marsh stop`, and
   `marsh status` against it say so with the daemon's pid and the sessions it
-  holds. Then `kill PID` (the daemon, not your work: its sessions are already
-  lost), run `marsh status` (it starts a daemon of this build), and `marsh reset`
+  holds. Then stop the daemon process (`kill PID`, after checking with
+  `ps -p PID -o command` that it is a `marshd`; the message says which pids it
+  could not identify), run `marsh status` (it starts a daemon of this build), and `marsh reset`
   or `marsh stop`: the VMs this home owns are removed. `marsh status --json`
   prints `{"error": ...}` on stdout when it cannot reach the daemon.
-- **`marsh stop` says a cloud create is still unresolved.** A create whose
-  outcome was never learned (a timeout or a crash mid-create) is kept as owned
-  until it shows in the cloud inventory or is surely not there: once it is more
-  than 10 minutes old (or of unknown age, after a daemon restart) and absent
-  from a fresh inventory, `marsh reset` and `marsh stop` drop it. Before then,
-  retry later.
+- **`marsh reset` or `marsh stop` says a cloud create never reported an
+  outcome.** A create that timed out or was cut off by a crash is kept as owned,
+  and nothing drops it by itself: Docker Cloud may still hold, and bill, a
+  sandbox for it, and a listing that lacks it does not prove otherwise (another
+  Docker account, a listing that is late). Check `sbx --cloud ls` first. If a
+  sandbox belongs to it, delete that sandbox yourself. If none does, run
+  `marsh workers forget cloud NAME` (the name the refusal gives): marsh drops its
+  record, and the reset or stop goes on. It refuses a name that is listed.
 
 - A `marsh`, `marsh run`, or app that was killed (SIGKILL, a force-quit) cannot
   detach its session. The daemon notices that the client process is gone and

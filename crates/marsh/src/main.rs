@@ -53,6 +53,7 @@ Usage:
   marsh results [--json]
   marsh results show CURSOR|JOB [--json]
   marsh workers reset KIT[,KIT...]|all
+  marsh workers forget cloud NAME
   marsh split [-n] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]...
   marsh join [--json] [--keep] [-- CMD [ARG...]]
   marsh splits [--json] [ID] | cancel ID | rm ID
@@ -219,7 +220,7 @@ fn version_text() -> String {
 const STATUS_HELP: &str = "Usage: marsh status [--json]\n\nShow scoped daemon, host control directory, effective per-job limits, shells, and workers.\nJob limits are a snapshot of the first daemon launch environment, not per-shell flags.\nUse the printed control directory for commands.json.\n";
 const JOBS_HELP: &str = "Usage: marsh jobs [--all] [--json]\n       marsh jobs --tree [--all] [--json]\n       marsh jobs show JOB [--json]\n\nList Kit jobs, running first, then newest: short id, start, state, exit,\nRUN time (in the ready Kit VM; `marsh results` WALL adds VM preparation),\nand command. Inside a session only its jobs are listed; from a\nhost terminal, running trees, trees started in the last hour, and the five\nnewest trees. --all lists every recorded job. --tree draws child\njobs under their parent. JOB may be an id prefix. --json prints the full,\nunscoped document.\n";
 const RESULTS_HELP: &str = "Usage: marsh results [--json]\n       marsh results show CURSOR|JOB [--json]\n\nList durable Kit results or inspect one result.\n";
-const WORKERS_HELP: &str = "Usage: marsh workers reset KIT[,KIT...]|all [--detached]\n\nStop and recreate selected Kit workers on their next use. `cloud` deletes this\ndaemon's cloud sandboxes, except detached runs' (--detached discards those too).\n";
+const WORKERS_HELP: &str = "Usage: marsh workers reset KIT[,KIT...]|all [--detached]\n       marsh workers forget cloud NAME\n\nStop and recreate selected Kit workers on their next use. `cloud` deletes this\ndaemon's cloud sandboxes, except detached runs' (--detached discards those too).\n`forget cloud NAME` drops the record of a cloud create that never reported an\noutcome, when `sbx --cloud ls` shows no sandbox for it (a reset names it).\n";
 const KIT_HELP: &str = "Usage: marsh kit install NAME [REPOSITORY:TAG|REPOSITORY@sha256:DIGEST]
        marsh kit uninstall NAME
 

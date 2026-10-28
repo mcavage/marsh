@@ -198,6 +198,18 @@ impl CloudPlacement {
         )
     }
 
+    /// `marsh workers forget cloud NAME`: drop the ownership record of an
+    /// unresolved create, on the operator's word that nothing was created.
+    pub(crate) fn forget(
+        &self,
+        backend: &StockDaemonBackend,
+        name: &str,
+    ) -> Result<(), DaemonError> {
+        self.adapter(backend)?
+            .forget_unresolved(name)
+            .map_err(backend_error)
+    }
+
     /// `marsh workers reset cloud`, `stop`, `reset`: delete every owned
     /// cloud sandbox of an attached run (or an unresolved create) and
     /// observe its absence; the names deleted. A detached run's sandbox is
@@ -206,8 +218,6 @@ impl CloudPlacement {
         let adapter = self.adapter(backend)?;
         let mut failures = Vec::new();
         let mut removed = Vec::new();
-        // A create that never happened must not block a reset for ever.
-        let _ = adapter.forget_expired_unresolved();
         for record in adapter.reconcile().map_err(backend_error)? {
             if record.detached {
                 continue;
@@ -218,7 +228,7 @@ impl CloudPlacement {
                     Err(error) => failures.push(error.to_string()),
                 },
                 None => failures.push(format!(
-                    "{}: create outcome still unresolved (a create that left no sandbox is dropped once it is 10 minutes old and absent from the inventory); retry later",
+                    "cloud sandbox {0}: its create never reported an outcome. Docker Cloud may still hold, and bill, a sandbox for it: check `sbx --cloud ls`. If none belongs to it, tell marsh to forget it with `marsh workers forget cloud {0}`; otherwise delete that sandbox yourself",
                     record.name
                 )),
             }

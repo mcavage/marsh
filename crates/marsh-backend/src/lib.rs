@@ -1141,6 +1141,10 @@ impl DaemonBackend for StockDaemonBackend {
             .collect()
     }
 
+    fn forget_cloud_create(&self, name: &str) -> Result<(), DaemonError> {
+        self.cloud.forget(self, name)
+    }
+
     fn reset_workers(
         &self,
         selection: &LoadSelection,

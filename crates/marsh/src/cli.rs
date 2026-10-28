@@ -38,6 +38,10 @@ pub enum ProductCommand {
     WorkersReset {
         selection: LoadSelection,
     },
+    /// `marsh workers forget cloud NAME`.
+    WorkersForgetCloud {
+        name: String,
+    },
     WorkersHelp,
     /// `marsh reset`: remove the selected home's VMs; keep the daemon.
     Reset {
@@ -373,6 +377,13 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         [name, help] if name == "workers" && matches!(help.as_str(), "-h" | "--help") => {
             ProductCommand::WorkersHelp
         }
+        [name, forget, cloud, create]
+            if name == "workers" && forget == "forget" && cloud == "cloud" =>
+        {
+            ProductCommand::WorkersForgetCloud {
+                name: create.clone(),
+            }
+        }
         [name, reset, selection] if name == "workers" && reset == "reset" => {
             ProductCommand::WorkersReset {
                 selection: parse_load_selection(selection, "worker reset")?,
@@ -446,7 +457,8 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         }
         [name, ..] if name == "workers" => {
             return Err(CliError(
-                "usage: marsh workers reset KIT[,KIT...]|all".into(),
+                "usage: marsh workers reset KIT[,KIT...]|all | marsh workers forget cloud NAME"
+                    .into(),
             ));
         }
         [name, ..] if name == "kit" => {
@@ -692,6 +704,25 @@ mod tests {
             assert_eq!(parsed.brush_args, arguments);
             assert_eq!(parsed.command, ProductCommand::Shell);
         }
+    }
+
+    #[test]
+    fn forgetting_a_cloud_create_names_it() {
+        assert_eq!(
+            parse(strings(&[
+                "marsh",
+                "workers",
+                "forget",
+                "cloud",
+                "marsh-s-abcd1234"
+            ]))
+            .unwrap()
+            .command,
+            ProductCommand::WorkersForgetCloud {
+                name: "marsh-s-abcd1234".into()
+            }
+        );
+        assert!(parse(strings(&["marsh", "workers", "forget", "cloud"])).is_err());
     }
 
     #[test]

@@ -574,6 +574,11 @@ pub enum PublicRequest {
     ResetWorkers {
         selection: LoadSelection,
     },
+    /// Forget the ownership record of one unresolved cloud create, on the
+    /// operator's word that nothing was created (`marsh workers forget cloud`).
+    ForgetCloudCreate {
+        name: String,
+    },
     ResetScope,
     StopScope,
     Prepare {
@@ -1280,6 +1285,9 @@ pub trait DaemonBackend: Send + Sync + 'static {
     ) -> Result<Vec<String>, DaemonError> {
         Err(DaemonError::BackendUnavailable)
     }
+    fn forget_cloud_create(&self, _name: &str) -> Result<(), DaemonError> {
+        Err(DaemonError::BackendUnavailable)
+    }
     fn teardown_scope(
         &self,
         action: ScopeLifecycleAction,
@@ -1391,6 +1399,10 @@ pub struct ShellStatus {
     pub pid: u32,
     pub project: PathBuf,
     pub state: ShellState,
+    /// When the client process started (`ps -o lstart=`), read when it
+    /// attached: with its pid, the process's identity. None: unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_started: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1900,6 +1912,7 @@ impl PublicRequest {
             | Self::AttachEphemeralShell { .. }
             | Self::Shutdown
             | Self::ResetWorkers { .. }
+            | Self::ForgetCloudCreate { .. }
             | Self::UninstallKit { .. }
             | Self::ResetScope
             | Self::StopScope => RequestAuthority::HostLifecycle,
@@ -1995,11 +2008,42 @@ fn scope_is_idle(state: &State) -> bool {
             .all(|shell| shell.state == ShellState::Detached)
 }
 
-/// Whether the process still exists (EPERM counts as existing; an unusable
-/// pid is treated as existing, never as gone).
-fn process_alive(pid: u32) -> bool {
-    rustix::process::Pid::from_raw(i32::try_from(pid).unwrap_or(0))
-        .is_none_or(|pid| rustix::process::test_kill_process(pid) != Err(rustix::io::Errno::SRCH))
+/// When `pid` started, as `ps` prints it, or None when there is no such
+/// process (or `ps` cannot say). A pid alone is not a process: it can be
+/// reused, so this goes with it.
+fn process_started(pid: u32) -> Option<String> {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .env("LC_ALL", "C")
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (output.status.success() && !text.is_empty()).then_some(text)
+}
+
+/// What is known of a client process now.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProcessIdentity {
+    /// The process that attached is still running.
+    Same,
+    /// There is no such process, or the pid belongs to another one now.
+    Gone,
+    /// Something runs at the pid, and which process it is cannot be told (no
+    /// start time was recorded): never called gone, never named for a kill.
+    Unverified,
+}
+
+fn process_identity(pid: u32, recorded: Option<&str>) -> ProcessIdentity {
+    let exists = rustix::process::Pid::from_raw(i32::try_from(pid).unwrap_or(0))
+        .is_none_or(|pid| rustix::process::test_kill_process(pid) != Err(rustix::io::Errno::SRCH));
+    if !exists {
+        return ProcessIdentity::Gone;
+    }
+    match (recorded, process_started(pid)) {
+        (Some(recorded), Some(now)) if recorded == now => ProcessIdentity::Same,
+        (Some(_), Some(_)) => ProcessIdentity::Gone,
+        (Some(_), None) | (None, _) => ProcessIdentity::Unverified,
+    }
 }
 
 fn scope_can_recover(state: &State) -> bool {
@@ -2362,6 +2406,7 @@ impl DaemonStore {
                 pid,
                 project: authority.launch_directory.clone(),
                 state: shell_state,
+                process_started: process_started(pid),
             },
         );
         state
@@ -2456,7 +2501,8 @@ impl DaemonStore {
             .filter(|shell| {
                 shell.state == ShellState::Attached
                     && !state.shell_attachments.contains_key(&shell.session_id)
-                    && !process_alive(shell.pid)
+                    && process_identity(shell.pid, shell.process_started.as_deref())
+                        == ProcessIdentity::Gone
                     && !state.jobs.values().any(|job| {
                         job.session_id == shell.session_id
                             && matches!(job.state, JobState::Queued | JobState::Running)
@@ -2484,7 +2530,8 @@ impl DaemonStore {
                 state.shells.get(&job.session_id).is_some_and(|shell| {
                     shell.state == ShellState::Attached
                         && !state.shell_attachments.contains_key(&shell.session_id)
-                        && !process_alive(shell.pid)
+                        && process_identity(shell.pid, shell.process_started.as_deref())
+                            == ProcessIdentity::Gone
                 })
             })
             .map(|job| job.job_id.clone())
@@ -2503,16 +2550,22 @@ impl DaemonStore {
             .values()
             .filter(|shell| shell.state == ShellState::Attached)
         {
+            let identity = process_identity(shell.pid, shell.process_started.as_deref());
             lines.push(format!(
                 "a session of pid {} in {} ({})",
                 shell.pid,
                 shell.project.display(),
-                if process_alive(shell.pid) {
-                    "that process is still running: exit it, or `kill` it"
-                } else if state.shell_attachments.contains_key(&shell.session_id) {
-                    "its shell is still being torn down"
-                } else {
-                    "that process is gone; it is released within seconds"
+                match identity {
+                    ProcessIdentity::Same =>
+                        "that process is still running: exit it, or `kill` it".to_owned(),
+                    ProcessIdentity::Gone if state.shell_attachments.contains_key(&shell.session_id) =>
+                        "its shell is still being torn down".to_owned(),
+                    ProcessIdentity::Gone =>
+                        "that process is gone; it is released within seconds".to_owned(),
+                    ProcessIdentity::Unverified => format!(
+                        "this process cannot be identified: see what runs at that pid with `ps -p {} -o command`",
+                        shell.pid
+                    ),
                 }
             ));
         }
@@ -5955,6 +6008,7 @@ fn authorize_request_session(
         | PublicRequest::RegisteredCommands
         | PublicRequest::RegisteredKits
         | PublicRequest::ResetWorkers { .. }
+        | PublicRequest::ForgetCloudCreate { .. }
         | PublicRequest::UninstallKit { .. }
         | PublicRequest::ResetScope
         | PublicRequest::StopScope
@@ -6036,6 +6090,12 @@ fn dispatch_request(
                 Err(error) => public_error(&error),
             }
         }
+        PublicRequest::ForgetCloudCreate { name } => match backend.forget_cloud_create(&name) {
+            Ok(()) => PublicReply::SplitDone {
+                message: format!("forgot the unresolved cloud create {name}"),
+            },
+            Err(error) => public_error(&error),
+        },
         PublicRequest::Prepare { .. } => PublicReply::Error {
             code: ErrorCode::Internal,
             message: "preparation attachment was not established".into(),
@@ -6601,16 +6661,30 @@ impl Client {
                     "pid {} in {} ({})",
                     shell.pid,
                     shell.project.display(),
-                    if process_alive(shell.pid) {
-                        "running"
-                    } else {
-                        "gone"
+                    match process_identity(shell.pid, shell.process_started.as_deref()) {
+                        ProcessIdentity::Same => "running".to_owned(),
+                        ProcessIdentity::Gone => "gone".to_owned(),
+                        ProcessIdentity::Unverified => format!(
+                            "unverified: `ps -p {} -o command` shows what runs there",
+                            shell.pid
+                        ),
                     }
                 )
             })
             .collect::<Vec<_>>();
+        // The daemon answered on this home's socket, so `pid` is it; say
+        // `kill` only when `ps` agrees that the pid is a marshd.
+        let is_daemon = std::process::Command::new("ps")
+            .args(["-o", "command=", "-p", &pid.to_string()])
+            .output()
+            .is_ok_and(|output| String::from_utf8_lossy(&output.stdout).contains("marshd"));
+        let stop = if is_daemon {
+            format!("stop the daemon with `kill {pid}`")
+        } else {
+            format!("stop the daemon (verify pid {pid} first: `ps -p {pid} -o command`)")
+        };
         format!(
-            "the marsh daemon of this home (pid {pid}) has {} attached and an older build does not release a session whose client is gone. If those clients are gone or can be lost, stop the daemon with `kill {pid}`, then run `marsh status` (it starts a new one) and `marsh reset` or `marsh stop`: the VMs this home owns are removed then. Original refusal: {refusal}",
+            "the marsh daemon of this home (pid {pid}) has {} attached and an older build does not release a session whose client is gone. If those clients are gone or can be lost, {stop}, then run `marsh status` (it starts a new one) and `marsh reset` or `marsh stop`: the VMs this home owns are removed then. Original refusal: {refusal}",
             if sessions.is_empty() {
                 "sessions or jobs".to_owned()
             } else {
@@ -7109,6 +7183,13 @@ impl Client {
         stream.set_read_timeout(None)?;
         match read_frame(&mut stream)? {
             PublicReply::WorkersReset { kits } => Ok(kits),
+            reply => Err(unexpected_reply(reply)),
+        }
+    }
+
+    pub fn forget_cloud_create(&self, name: &str) -> Result<String, DaemonError> {
+        match self.request(PublicRequest::ForgetCloudCreate { name: name.into() })? {
+            PublicReply::SplitDone { message } => Ok(message),
             reply => Err(unexpected_reply(reply)),
         }
     }

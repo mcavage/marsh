@@ -119,6 +119,11 @@ pub trait DaemonClient: Send + Sync + 'static {
         session: &SessionConfig,
     ) -> Result<LoadReport, ClientError>;
     fn reset_workers(&self, selection: &LoadSelection) -> Result<WorkerResetReport, ClientError>;
+    fn forget_cloud_create(&self, _name: &str) -> Result<String, ClientError> {
+        Err(ClientError(
+            "forgetting a cloud create is unavailable".into(),
+        ))
+    }
     fn reset_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
         Err(ClientError("reset is unavailable".into()))
     }
@@ -1544,6 +1549,10 @@ impl DaemonClient for LocalDaemonClient {
             .reset_workers(selection)
             .map(|kits| WorkerResetReport { kits })
             .map_err(map_daemon_error)
+    }
+
+    fn forget_cloud_create(&self, name: &str) -> Result<String, ClientError> {
+        self.0.forget_cloud_create(name).map_err(map_daemon_error)
     }
 
     fn reset_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {

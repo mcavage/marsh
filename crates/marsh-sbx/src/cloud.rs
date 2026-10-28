@@ -240,22 +240,6 @@ pub struct CloudRecord {
     /// [`MAX_DETACHED`], and recovered as `Detached`, not quarantined.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub detached: bool,
-    /// When the intent was recorded (0: unknown, an older record).
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub created_unix_ms: u64,
-}
-
-#[allow(clippy::trivially_copy_pass_by_ref)] // serde's `skip_serializing_if` takes a reference
-fn is_zero(value: &u64) -> bool {
-    *value == 0
-}
-
-fn unix_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
-        })
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -676,18 +660,17 @@ impl CloudSbx {
         self.records()
     }
 
-    /// Drop the intents of creates that can no longer have happened: no id,
-    /// no create of this daemon in flight, the name absent from a fresh
-    /// complete inventory, and older than a create's timeout plus a margin
-    /// for the sandbox to become visible (an intent without a recorded time
-    /// is older than this daemon). Without this a create that never reached
-    /// the service would block `reset` and `stop` for ever. Returns the names
-    /// dropped.
+    /// Forget the ownership record of one unresolved create (no id), on the
+    /// operator's word that no sandbox of that name exists: an inventory that
+    /// lacks it does not prove it (another Docker account, a delayed listing),
+    /// so nothing here drops one by itself. A name that is listed now is not
+    /// forgotten (reconcile adopts it); neither is one with an id, one being
+    /// created, or one that is not owned.
     ///
     /// # Errors
-    /// Fails when the inventory or the ownership file cannot be read or
-    /// written.
-    pub fn forget_expired_unresolved(&self) -> Result<Vec<String>, CloudError> {
+    /// Fails when the name is not an unresolved create of this daemon, is
+    /// visible in the inventory, or ownership cannot be written.
+    pub fn forget_unresolved(&self, name: &str) -> Result<(), CloudError> {
         let view = self.inventory()?;
         let creating = self
             .state
@@ -695,25 +678,20 @@ impl CloudSbx {
             .map_err(|_| CloudError::Invalid("cloud ownership lock poisoned"))?
             .creating
             .clone();
-        let margin = u64::try_from((CREATE_TIMEOUT + Duration::from_mins(5)).as_millis())
-            .unwrap_or(u64::MAX);
-        let now = unix_ms();
-        let mut forgotten = Vec::new();
-        self.update(|file| {
-            file.entries.retain(|name, entry| {
-                let expired = entry.id.is_none()
-                    && !creating.contains(name)
-                    && view.get(name).is_none()
-                    && (entry.created_unix_ms == 0
-                        || now.saturating_sub(entry.created_unix_ms) > margin);
-                if expired {
-                    forgotten.push(name.clone());
-                }
-                !expired
-            });
-            Ok(())
-        })?;
-        Ok(forgotten)
+        if view.get(name).is_some() {
+            return Err(CloudError::Invalid(
+                "that sandbox is listed: `marsh workers reset cloud` deletes it",
+            ));
+        }
+        self.update(|file| match file.entries.get(name) {
+            Some(entry) if entry.id.is_none() && !creating.contains(name) => {
+                file.entries.remove(name);
+                Ok(())
+            }
+            _ => Err(CloudError::Invalid(
+                "not an unresolved cloud create of this home",
+            )),
+        })
     }
 
     /// # Errors
@@ -765,7 +743,6 @@ impl CloudSbx {
                     phase: CloudPhase::Pending,
                     observed: false,
                     detached: false,
-                    created_unix_ms: unix_ms(),
                 },
             );
             Ok(())
@@ -1189,7 +1166,6 @@ impl CloudSbx {
                     phase: CloudPhase::Quarantined,
                     observed: true,
                     detached: false,
-                    created_unix_ms: 0,
                 },
             );
             Ok(())
@@ -1437,7 +1413,6 @@ mod tests {
             phase: CloudPhase::Ready,
             observed: true,
             detached,
-            created_unix_ms: 0,
         }
     }
 
@@ -1481,12 +1456,11 @@ mod tests {
         ));
     }
 
-    /// A create that left nothing behind stops blocking a reset once it is
-    /// old enough (or of unknown age) and its name is absent from the
-    /// inventory; a recent one, one whose name is listed, and a create in
-    /// flight are kept.
+    /// An unresolved create is forgotten only on the operator's word, by its
+    /// name, and never while it is listed or when it is not an unresolved
+    /// create.
     #[test]
-    fn an_old_unresolved_create_absent_from_the_inventory_is_dropped() {
+    fn an_unresolved_create_is_forgotten_only_when_named() {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir(dir.path().join("control")).unwrap();
         let directory = dir.path().join("control").canonicalize().unwrap();
@@ -1507,20 +1481,18 @@ mod tests {
         let runner = marsh_runtime::SystemCommandRunner::new(dir.path())
             .with_stock_environment([("MARSH_TEST_INVENTORY".into(), inventory.into())]);
         let kit = format!("docker.io/docker/codex@sha256:{}", "c".repeat(64));
-        let entry = |name: &str, created: u64| {
+        let entry = |name: &str, id: serde_json::Value| {
             serde_json::json!({
-                "name": name, "id": null, "image": kit, "agent": "codex",
-                "phase": "pending", "observed": false, "created_unix_ms": created
+                "name": name, "id": id, "image": kit, "agent": "codex",
+                "phase": "pending", "observed": false
             })
         };
-        let recent = unix_ms();
         fs::write(
             directory.join("cloud-ownership.json"),
             serde_json::json!({"version": 1, "entries": {
-                "marsh-s-unknown0": entry("marsh-s-unknown0", 0),
-                "marsh-s-old00000": entry("marsh-s-old00000", 1),
-                "marsh-s-recent00": entry("marsh-s-recent00", recent),
-                "marsh-s-listed00": entry("marsh-s-listed00", 1),
+                "marsh-s-lost0000": entry("marsh-s-lost0000", serde_json::Value::Null),
+                "marsh-s-other000": entry("marsh-s-other000", serde_json::Value::Null),
+                "marsh-s-listed00": entry("marsh-s-listed00", serde_json::Value::Null),
             }})
             .to_string(),
         )
@@ -1531,9 +1503,12 @@ mod tests {
         )
         .unwrap();
         let adapter = CloudSbx::open(stock, Arc::new(runner), directory).unwrap();
-        let mut dropped = adapter.forget_expired_unresolved().unwrap();
-        dropped.sort();
-        assert_eq!(dropped, ["marsh-s-old00000", "marsh-s-unknown0"]);
+        // Nothing is dropped by itself, however old.
+        assert_eq!(adapter.records().unwrap().len(), 3);
+        // A listed name, and a name that is not owned, are refused.
+        assert!(adapter.forget_unresolved("marsh-s-listed00").is_err());
+        assert!(adapter.forget_unresolved("marsh-s-nothing0").is_err());
+        adapter.forget_unresolved("marsh-s-lost0000").unwrap();
         let mut kept = adapter
             .records()
             .unwrap()
@@ -1541,7 +1516,7 @@ mod tests {
             .map(|record| record.name)
             .collect::<Vec<_>>();
         kept.sort();
-        assert_eq!(kept, ["marsh-s-listed00", "marsh-s-recent00"]);
+        assert_eq!(kept, ["marsh-s-listed00", "marsh-s-other000"]);
     }
 
     /// A detached run's agent sandbox is adopted (for deletion only) just
