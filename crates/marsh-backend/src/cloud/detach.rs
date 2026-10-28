@@ -461,6 +461,20 @@ fn read_result(path: &Path) -> Result<Vec<(Vec<u8>, Entry)>, String> {
     Ok(entries)
 }
 
+/// The last check and the import, one step under the root's import lock:
+/// `None` (nothing written) when the run's lane split was cancelled first.
+fn import_unless_cancelled<R>(
+    store: &DaemonStore,
+    job: &str,
+    lock: &Mutex<()>,
+    import: impl FnOnce() -> R,
+) -> Option<R> {
+    let _held = lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    (!store.in_cancelled_split(job)).then(import)
+}
+
 struct HashSink<'a>(&'a mut Sha256);
 
 impl io::Write for HashSink<'_> {
@@ -1140,12 +1154,19 @@ impl StockDaemonBackend {
             record.save(paths)?;
             return Ok(record);
         };
-        let applied = {
-            let lock = self.cloud.import_lock(&record.root);
-            let _held = lock
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            cloud_fs::apply_delta(&record.root, record.root_identity, &payload, MAX_ARCHIVE)
+        // The last check and the import are one step under the root's import
+        // lock: a cancel of the run's lane split (marked under the store
+        // lock) that came before this check discards the run instead; one
+        // that comes after it finds the run live (a lane waits for it), so
+        // nothing is written into a copy after its cancel has finished.
+        let applied = import_unless_cancelled(
+            store,
+            &record.job_id,
+            &self.cloud.import_lock(&record.root),
+            || cloud_fs::apply_delta(&record.root, record.root_identity, &payload, MAX_ARCHIVE),
+        );
+        let Some(applied) = applied else {
+            return self.discard_loaded(store, paths, record);
         };
         match applied {
             Ok(report) => {
@@ -1315,6 +1336,28 @@ impl StockDaemonBackend {
     /// The collector's pass: every outstanding run at daemon start, then
     /// every [`COLLECT_INTERVAL`] while any is outstanding.
     pub(crate) fn collect_detached_pass(&self, store: &DaemonStore) {
+        // A cloud job that was still being set up when an earlier daemon went
+        // away left a sandbox (billing since its creation) that no run will
+        // use: retire it.
+        let orphans = store.cloud_setup_orphans();
+        if !orphans.is_empty()
+            && let Ok(adapter) = self.cloud.adapter(self)
+        {
+            for orphan in orphans {
+                let Ok(id) = CloudSandboxId::parse(orphan.clone()) else {
+                    store.cloud_setup_orphan_retired(&orphan);
+                    continue;
+                };
+                let owned = adapter
+                    .records()
+                    .is_ok_and(|records| records.iter().any(|r| r.id.as_ref() == Some(&id)));
+                if !owned || adapter.retire(&id).is_ok() {
+                    store.cloud_setup_orphan_retired(&orphan);
+                } else {
+                    eprintln!("marshd: could not retire the setup sandbox {orphan}; marsh retries");
+                }
+            }
+        }
         let paths = self.detached_paths();
         let records = Record::all(&paths);
         // Settled records (and their output) are kept for the retention period.
@@ -1979,6 +2022,62 @@ fn command_words(script: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cancel_before_the_last_check_stops_the_import_and_one_after_it_does_not_block() {
+        use marsh_daemon::{NewJob, PublicMount, SessionAuthority, process::ProcessLink};
+        let home = tempfile::tempdir().unwrap();
+        let store = DaemonStore::new(home.path());
+        let session = store.attach_shell(
+            1,
+            SessionAuthority {
+                username: "alice".into(),
+                uid: 501,
+                gid: 20,
+                launch_directory: "/Users/example/project".into(),
+                guest_home: "/Users/example".into(),
+                home_backing: home.path().join("home"),
+                ephemeral_home: false,
+            },
+        );
+        let job = |store: &DaemonStore| {
+            store
+                .begin_cloud_job(
+                    NewJob {
+                        label: None,
+                        session_id: session.clone(),
+                        command: "cloud".into(),
+                        kit_ref: "cloud-shell".into(),
+                        workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+                        mounts: vec![PublicMount {
+                            target: "/Users/example/project/.marsh/split/abc123def456/lane".into(),
+                            access: "read_write".into(),
+                        }],
+                    },
+                    &ProcessLink::default(),
+                    &[],
+                )
+                .unwrap()
+                .0
+        };
+        let (first, second) = (job(&store), job(&store));
+        let lock = Mutex::new(());
+        let ran = std::cell::Cell::new(0);
+        // Not cancelled: the import runs.
+        assert!(
+            import_unless_cancelled(&store, &first, &lock, || ran.set(ran.get() + 1)).is_some()
+        );
+        // A cancel that arrives while the import runs is not held up by it
+        // (the lane waits for the run), and the import completes.
+        let during = import_unless_cancelled(&store, &second, &lock, || {
+            store.cancel_split("abc123def456");
+            ran.set(ran.get() + 1);
+        });
+        assert!(during.is_some() && ran.get() == 2);
+        // A cancel that came first: nothing is imported, for any run of it.
+        assert!(import_unless_cancelled(&store, &first, &lock, || ran.set(99)).is_none());
+        assert_eq!(ran.get(), 2);
+    }
 
     #[test]
     fn command_positions_find_agent_calls_but_not_arguments() {

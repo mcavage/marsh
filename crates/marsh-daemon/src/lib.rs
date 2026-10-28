@@ -1857,6 +1857,9 @@ struct State {
     fenced_splits: std::collections::BTreeSet<String>,
     /// Splits `marsh splits cancel` reached (journaled with the split).
     cancelled_splits: std::collections::BTreeSet<String>,
+    /// Sandbox ids of cloud jobs that were still being set up at the last
+    /// restart, until each is retired.
+    cloud_setup_orphans: Vec<String>,
     /// Terminal sessions, their terminal job trees, and recent opens.
     links: open_url::Links,
 }
@@ -2046,6 +2049,16 @@ impl DaemonStore {
         let scope_id = hex(&Sha256::digest(canonical.as_os_str().as_encoded_bytes()));
         let (mut journal, mut jobs) = receipt_journal::ReceiptJournal::open(journal_home)?;
         let mut repaired = false;
+        // A cloud job still being set up when the daemon went away has a
+        // sandbox (billing since its creation) that nothing will use: the
+        // backend retires it (`cloud_setup_orphans`).
+        let cloud_setup_orphans = jobs
+            .values()
+            .filter(|receipt| {
+                receipt.state == JobState::Queued && receipt.placement == Placement::Cloud
+            })
+            .filter_map(|receipt| receipt.vm_id.clone())
+            .collect::<Vec<_>>();
         for receipt in jobs.values_mut() {
             if matches!(receipt.state, JobState::Queued | JobState::Running) {
                 receipt.state = JobState::Unknown;
@@ -2112,6 +2125,7 @@ impl DaemonStore {
             branch_sessions: BTreeMap::new(),
             fenced_splits: std::collections::BTreeSet::new(),
             cancelled_splits: std::collections::BTreeSet::new(),
+            cloud_setup_orphans,
             links: open_url::Links::default(),
         }))))
     }
@@ -2468,6 +2482,20 @@ impl DaemonStore {
     /// discarded, never collected into the copy.
     pub fn cancel_split(&self, split: &str) {
         self.lock().cancelled_splits.insert(split.to_owned());
+    }
+
+    /// Sandboxes of cloud jobs that were being set up when the daemon last
+    /// went away, not yet retired.
+    #[must_use]
+    pub fn cloud_setup_orphans(&self) -> Vec<String> {
+        self.lock().cloud_setup_orphans.clone()
+    }
+
+    /// One of them is retired (or was never owned).
+    pub fn cloud_setup_orphan_retired(&self, sandbox_id: &str) {
+        self.lock()
+            .cloud_setup_orphans
+            .retain(|id| id != sandbox_id);
     }
 
     /// Whether `job` runs in a fork of a cancelled split.

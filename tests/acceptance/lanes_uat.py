@@ -235,6 +235,28 @@ def main() -> int:
         assert code == 0 and outcome["files"] == [odd] and (project / odd).read_text() == "odd\n", outcome
         (project / odd).unlink()
         git("rm", "-q", "--cached", "--ignore-unmatch", "--", odd)
+        # A tracked name that looks like an index record forges nothing.
+        forged = "v\n100644 1111111111111111111111111111111111111111 0\tw.txt"
+        (project / forged).write_text("x\n")
+        git("add", "--", forged)
+        git("commit", "-q", "-m", "odd name")
+        # An import that cannot write the project's objects fails the apply
+        # and leaves the index as it was (the objects dir is read-only here).
+        unwritable_id, _ = lane_split({"notes.txt": "l1\nLANE2\nl3\nl4\n"})
+        (project / "notes.txt").write_text("l1\nROOT2\nl3\nl4\n")
+        git("commit", "-q", "-am", "root edit 2")
+        index_before = (project / ".git/index").read_bytes()
+        objects = project / ".git/objects"
+        objects.chmod(0o555)
+        try:
+            code, outcome = apply_json(unwritable_id)
+        finally:
+            objects.chmod(0o755)
+        assert outcome["result"] in ("failed", "unknown") and code == 1, outcome
+        assert (project / ".git/index").read_bytes() == index_before, outcome
+        assert (project / "notes.txt").read_text() == "l1\nROOT2\nl3\nl4\n", outcome
+        git("checkout", "-q", "HEAD", "--", "notes.txt")
+        git("reset", "-q", "--hard", "HEAD")
         conflict_id, _ = lane_split({"notes.txt": "l1\nLANE\nl3\nl4\n"})
         (project / "notes.txt").write_text("l1\nROOT\nl3\nl4\n")
         git("commit", "-q", "-am", "root edit")

@@ -260,3 +260,26 @@ fn ownership_mirror_holds_every_intent_before_create_and_tracks_removal() {
         Err(SbxError::HostGrantFence(_))
     ));
 }
+
+#[test]
+fn a_malformed_inventory_row_never_makes_an_owned_vm_absent() {
+    let model = StockModel::new();
+    let home = tempfile::tempdir().unwrap();
+    let adapter = model
+        .adapter()
+        .with_vm_ownership(home.path().join("vm-ownership.json"))
+        .unwrap();
+    let created = model.seed_vm("mine");
+    adapter.adopt_created("mine").unwrap();
+    model.drop_name_from_inventory("mine");
+    adapter.ownership.invalidate();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    assert!(adapter.remove_owned_vm("mine", deadline).is_err());
+    assert!(adapter.classify_vm("mine", true).is_err());
+    // Ownership is kept, and nothing was removed.
+    assert_eq!(
+        adapter.ownership.uuid("mine").as_deref(),
+        Some(created.as_str())
+    );
+    assert_eq!(model.mutations(), 0);
+}

@@ -1944,6 +1944,36 @@ fn only_a_session_whose_client_process_is_gone_and_idle_is_reaped() {
 }
 
 #[test]
+fn a_cloud_sandbox_of_a_job_still_being_set_up_at_restart_is_left_to_be_retired() {
+    let home = home();
+    let (setting_up, running) = {
+        let store = reopen(home.path()).unwrap();
+        let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
+        let link = process::ProcessLink::default();
+        let new = |session: &String| NewJob {
+            label: None,
+            session_id: session.clone(),
+            command: "cloud".into(),
+            kit_ref: "cloud-shell".into(),
+            workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+            mounts: Vec::new(),
+        };
+        let (first, _, _) = store.begin_cloud_job(new(&session), &link, &[]).unwrap();
+        store.record_cloud_sandbox(&first, "sbx_settingup").unwrap();
+        let (second, _, _) = store.begin_cloud_job(new(&session), &link, &[]).unwrap();
+        store.mark_cloud_running(&second, "sbx_running1").unwrap();
+        let (third, _, _) = store.begin_cloud_job(new(&session), &link, &[]).unwrap();
+        let _ = third;
+        (first, second)
+    };
+    let _ = (setting_up, running);
+    let reopened = reopen(home.path()).unwrap();
+    assert_eq!(reopened.cloud_setup_orphans(), ["sbx_settingup"]);
+    reopened.cloud_setup_orphan_retired("sbx_settingup");
+    assert_eq!(reopened.cloud_setup_orphans(), Vec::<String>::new());
+}
+
+#[test]
 fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
     let home = home();
     let store = reopen(home.path()).unwrap();

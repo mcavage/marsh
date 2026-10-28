@@ -279,3 +279,82 @@ fn a_name_with_a_quote_and_a_newline_is_a_name_not_an_encoding() {
     );
     assert_eq!(fs::read_to_string(root.join(name)).unwrap(), "odd\n");
 }
+
+/// A root, a lane whose objects live only in an alternate "store", and a
+/// patch that needs the 3-way path (the root edited the line it changes).
+fn three_way_case(extra_root_file: Option<&str>) -> (PathBuf, PathBuf, PathBuf) {
+    let scratch = tempfile::tempdir().unwrap().keep();
+    let (root, lane, store) = (
+        scratch.join("root"),
+        scratch.join("lane"),
+        scratch.join("store"),
+    );
+    seed(&root);
+    seed(&lane);
+    if let Some(name) = extra_root_file {
+        fs::write(root.join(name), "x\n").unwrap();
+    }
+    git(&root, &["init", "-q"]);
+    git(&root, &["add", "."]);
+    git(&root, &["commit", "-qm", "i"]);
+    git(&lane, &["init", "-q"]);
+    git(&lane, &["add", "."]);
+    git(&lane, &["commit", "-qm", "i"]);
+    fs::write(lane.join("b.txt"), "k2\n").unwrap();
+    git(&lane, &["add", "b.txt"]);
+    let diff = Command::new("git")
+        .args(["diff", "--cached", "--binary", "--full-index"])
+        .current_dir(&lane)
+        .output()
+        .unwrap();
+    fs::rename(lane.join(".git/objects"), &store).unwrap();
+    fs::write(root.join("b.txt"), "k-root\n").unwrap();
+    git(&root, &["commit", "-qam", "r"]);
+    let patch = scratch.join("p.patch");
+    fs::write(&patch, diff.stdout).unwrap();
+    (root, store, patch)
+}
+
+fn apply_in(root: &Path, store: &Path, patch: &Path, mode: &str) -> String {
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(SCRIPT)
+        .arg("apply")
+        .arg(root)
+        .arg(store)
+        .arg(patch)
+        .arg(mode)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+fn an_import_that_fails_leaves_the_index_untouched_and_the_apply_failed() {
+    use std::os::unix::fs::PermissionsExt;
+    if !have_git() {
+        return;
+    }
+    let (root, store, patch) = three_way_case(None);
+    let index = fs::read(root.join(".git/index")).unwrap();
+    let objects = root.join(".git/objects");
+    fs::set_permissions(&objects, fs::Permissions::from_mode(0o555)).unwrap();
+    let reply = apply_in(&root, &store, &patch, "json");
+    fs::set_permissions(&objects, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(reply.starts_with("R\0failed\0"), "{reply:?}");
+    assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+    assert_eq!(fs::read_to_string(root.join("b.txt")).unwrap(), "k-root\n");
+}
+
+#[test]
+fn a_filename_that_looks_like_an_index_record_forges_nothing() {
+    if !have_git() {
+        return;
+    }
+    let forged = "v\n100644 1111111111111111111111111111111111111111 0\tw.txt";
+    let (root, store, patch) = three_way_case(Some(forged));
+    let reply = apply_in(&root, &store, &patch, "json");
+    assert!(reply.starts_with("R\0conflicts\0"), "{reply:?}");
+    assert!(forged.len() > 40 && root.join(forged).exists());
+}

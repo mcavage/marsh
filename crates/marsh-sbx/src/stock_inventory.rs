@@ -64,50 +64,57 @@ impl StockInventory {
             };
             // Extra keys are ignored: stock adds fields to some rows (a VM
             // with published ports, a cloud or detached one) and marsh reads
-            // only the five below. Only a VM marsh may have made (`marsh-`)
-            // must decode exactly; another tool's row that does not decode
-            // cannot be one of ours and is skipped, not a reason to lose the
-            // whole inventory.
-            let ours = object
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|name| name.starts_with("marsh-"));
-            let decoded = serde_json::from_value::<StockInventoryVm>(row.clone());
-            let mut vm = match decoded {
-                Ok(vm) => vm,
-                Err(_) if !ours => continue,
-                Err(_) => return Err(invalid("incomplete stock inventory row")),
+            // only the five below. Every row must establish an identity, a
+            // name and a valid UUID: a row that cannot is never skipped,
+            // because the VM it describes may be one of ours and a "complete"
+            // inventory without it would call that VM absent. A row of
+            // another tool (a name not starting `marsh-`) is kept for its
+            // identity, but its state and paths are not marsh's to judge.
+            let name = object.get("name").and_then(serde_json::Value::as_str);
+            let id = object.get("id").and_then(serde_json::Value::as_str);
+            let (Some(name), Some(id)) = (name, id) else {
+                return Err(invalid("stock inventory row without a name and id"));
+            };
+            let ours = name.starts_with("marsh-");
+            let mut vm = if ours {
+                serde_json::from_value::<StockInventoryVm>(row.clone())
+                    .map_err(|_| invalid("incomplete stock inventory row"))?
+            } else {
+                StockInventoryVm {
+                    name: name.to_owned(),
+                    id: id.to_owned(),
+                    status: object
+                        .get("status")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|status| {
+                            !status.is_empty()
+                                && status.len() <= 64
+                                && !status.chars().any(char::is_control)
+                        })
+                        .unwrap_or("unknown")
+                        .to_owned(),
+                    agent: None,
+                    workspaces: None,
+                }
             };
             vm.id.make_ascii_lowercase();
-            let sound = valid_name(&vm.name)
-                && valid_uuid(&vm.id)
+            let sound = valid_uuid(&vm.id)
+                && !vm.name.is_empty()
+                && vm.name.len() <= 256
                 && if ours {
-                    matches!(vm.status.as_str(), "running" | "stopped")
+                    valid_name(&vm.name)
+                        && matches!(vm.status.as_str(), "running" | "stopped")
                         && vm
                             .workspaces
                             .as_ref()
                             .is_none_or(|paths| paths.iter().all(|path| metadata_path(path)))
                 } else {
-                    !vm.status.is_empty()
-                        && vm.status.len() <= 64
-                        && !vm.status.chars().any(char::is_control)
+                    true
                 };
-            if !sound {
-                if ours {
-                    return Err(invalid(
-                        "ambiguous, changing or unsupported stock inventory identity/state",
-                    ));
-                }
-                continue;
-            }
-            if !ids.insert(vm.id.clone()) || vms.contains_key(&vm.name) {
+            if !sound || !ids.insert(vm.id.clone()) || vms.contains_key(&vm.name) {
                 return Err(invalid(
                     "ambiguous, changing or unsupported stock inventory identity/state",
                 ));
-            }
-            if !ours {
-                // Another tool's workspace paths are not identity here.
-                vm.workspaces = None;
             }
             vms.insert(vm.name.clone(), vm);
         }
@@ -213,21 +220,30 @@ mod tests {
     }
 
     #[test]
-    fn another_tools_row_that_does_not_decode_is_skipped_but_a_marsh_row_is_not() {
+    fn another_tools_row_is_kept_for_its_identity_and_a_row_without_one_fails_closed() {
         let ours = r#"{"name":"marsh-k-aaaaaaaa","id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"running"}"#;
-        let theirs_odd_state = r#"{"name":"other","id":"1f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"paused","workspaces":["relative"]}"#;
-        let theirs_broken = r#"{"name":"broken","status":7}"#;
-        let decoded = StockInventory::decode(
-            format!("[{ours},{theirs_odd_state},{theirs_broken}]").as_bytes(),
-        )
-        .unwrap();
+        let theirs_odd = r#"{"name":"other","id":"1f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"paused","workspaces":["relative"]}"#;
+        let theirs_no_status = r#"{"name":"quiet","id":"2f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9"}"#;
+        let decoded =
+            StockInventory::decode(format!("[{ours},{theirs_odd},{theirs_no_status}]").as_bytes())
+                .unwrap();
         assert!(decoded.get("marsh-k-aaaaaaaa").is_some());
         assert!(
             decoded
                 .get("other")
                 .is_some_and(|vm| vm.workspaces.is_none())
         );
-        assert!(decoded.get("broken").is_none());
+        assert!(decoded.get("quiet").is_some());
+        // An owned UUID under a missing or non-string name, or no id at all,
+        // is an error, never an absent VM.
+        for broken in [
+            r#"{"id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"running"}"#,
+            r#"{"name":7,"id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"running"}"#,
+            r#"{"name":"broken","status":"running"}"#,
+            r#"{"name":"broken","id":"not-a-uuid","status":"running"}"#,
+        ] {
+            assert!(StockInventory::decode(format!("[{broken}]").as_bytes()).is_err());
+        }
         for ours_bad in [
             ours.replace("running", "paused"),
             ours.replace("\"status\":\"running\"", "\"status\":7"),

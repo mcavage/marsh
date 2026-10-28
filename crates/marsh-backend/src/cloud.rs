@@ -780,6 +780,11 @@ impl StockDaemonBackend {
             job_id: job_id.clone(),
         });
         let relay = Relay::start(&attachment, &store, &job_id);
+        // A cancel reaches this setup two ways: the caller's (the relay) and
+        // the store's (a lane split's cancel, `cancel_tree`): billing starts
+        // at sandbox creation, so both are checked before it, right after
+        // it (the sandbox is then deleted), and around the upload.
+        let stopped = || relay.cancelled() || store.cancel_requested(&job_id);
         for name in omitted {
             settle.note(&format!("omitted exported variable {name}"));
         }
@@ -793,7 +798,7 @@ impl StockDaemonBackend {
             )
         };
 
-        if relay.cancelled() {
+        if stopped() {
             settle.note("cancelled before the command started");
             return settle.finish_reporting(
                 ExecutionOutcome::NotStarted,
@@ -942,6 +947,16 @@ impl StockDaemonBackend {
             stop_on_timeout: options.detach,
             ..spec
         };
+        if stopped() {
+            settle.note("cancelled before the command started");
+            return settle.finish_reporting(
+                ExecutionOutcome::NotStarted,
+                130,
+                "cancelled".into(),
+                CleanupState::NotRequired,
+                Some(130),
+            );
+        }
         let record = match adapter.create(&spec) {
             Ok(record) => record,
             Err(CloudError::CreateUncertain { name, diagnostic }) => {
@@ -1004,7 +1019,7 @@ impl StockDaemonBackend {
             )
         };
 
-        if relay.cancelled() {
+        if stopped() {
             return cancelled_setup(settle);
         }
         // Upload the helper, then create the natural path and unpack into it.
@@ -1037,6 +1052,9 @@ impl StockDaemonBackend {
                 return setup_failed(settle, format!("workspace path: {}", step.diagnostic()));
             }
             Err(message) => return setup_failed(settle, format!("workspace path: {message}")),
+        }
+        if stopped() {
+            return cancelled_setup(settle);
         }
         let git_view = match &confinement {
             Some(confinement) => cloud_fs::GitView::Fork {
@@ -1081,7 +1099,7 @@ impl StockDaemonBackend {
             ));
         }
 
-        if relay.cancelled() {
+        if stopped() {
             return cancelled_setup(settle);
         }
         if let (Some(plan), Some(token)) = (&delegated, &delegate) {

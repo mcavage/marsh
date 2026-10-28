@@ -324,6 +324,8 @@ struct State {
     host_build_digest: String,
     stock_kit_digest: String,
     stock_rebuild_digest: String,
+    /// VMs whose inventory row has lost its `name` (a malformed listing).
+    nameless: Vec<String>,
     /// 0.46-style: re-mounting an existing target fails instead of no-op.
     remount_conflicts: bool,
     active: BTreeMap<(String, String), usize>,
@@ -380,6 +382,7 @@ impl StockModel {
                 host_build_digest: HOST_BUILD_DIGEST.into(),
                 stock_kit_digest: HOST_BUILD_DIGEST.into(),
                 stock_rebuild_digest: HOST_BUILD_DIGEST.into(),
+                nameless: Vec::new(),
                 ..State::default()
             }),
             changed: Condvar::new(),
@@ -392,6 +395,11 @@ impl StockModel {
     }
 
     // ---- scenario setup -------------------------------------------------
+
+    /// From now on the VM's inventory row has no `name`.
+    pub fn drop_name_from_inventory(&self, name: &str) {
+        self.state.lock().unwrap().nameless.push(name.to_owned());
+    }
 
     /// A VM present in stock inventory but not recorded by any adapter.
     pub fn seed_vm(&self, name: &str) -> String {
@@ -849,6 +857,9 @@ impl StockModel {
                 }
                 if self.version.shape == InventoryShape::BareArray && vm.running {
                     row["detached"] = serde_json::json!(false);
+                }
+                if state.nameless.contains(name) {
+                    row.as_object_mut().unwrap().remove("name");
                 }
                 row
             })
