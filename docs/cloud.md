@@ -299,7 +299,12 @@ marsh cloud collect 42      # check on it now
 
 A block that is exactly one call to a registered command runs in that
 command's Kit, so `cloud -d { claude -p "refactor the parser" </dev/null; }`
-always works. Detached runs start from your marsh session or a host
+works, and so does the argv form, `marsh cloud -d -- claude -p "refactor the
+parser"` (a detached run reads no input). The command needs a cloud form: its
+Kit pinned by digest, as in a release install. A dev install builds the
+packaged Kits from source; marsh then refuses the run and says so, and
+`cloud-kits.json` (above) names a published Kit for it. The control home is
+the `control_home` that `marsh status` prints. Detached runs start from your marsh session or a host
 terminal, not from inside a job. Design:
 [detached cloud work](design/cloud-detach.md).
 

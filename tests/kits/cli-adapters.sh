@@ -284,8 +284,8 @@ for subcommand in update upgrade; do
   grep -Fq 'Claude Code is pinned by the Kit image' "$root/acp-update.err"
 done
 
-# Every agent Kit selects ACP mode only from a leading --acp, which
-# packaging/agents.json appends; the CLI path never sees it.
+# Every agent Kit selects ACP mode only from a leading --acp, which its
+# acp@1 adapter declares; the CLI path never sees it.
 for kit in claude codex pi; do
   grep -q '^if \[ "${1:-}" = --acp \]; then$' "kits/marsh-$kit/marsh-entrypoint.sh"
 done

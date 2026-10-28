@@ -147,6 +147,7 @@ impl TestKitBackend {
 fn record_late_decoy(store: &DaemonStore, other_session: String) -> Result<(), DaemonError> {
     let (decoy_id, _) = store
         .begin_job(marsh_daemon::NewJob {
+            label: None,
             session_id: other_session,
             command: "test-report".into(),
             kit_ref: "kit:test".into(),
@@ -255,6 +256,7 @@ impl DaemonBackend for TestKitBackend {
 
         let (job_id, _) = store
             .begin_job(marsh_daemon::NewJob {
+                label: None,
                 session_id: request.session.session_id,
                 command: request.command,
                 kit_ref,
@@ -1063,6 +1065,9 @@ fn run_decoy_job(
     harness: &TestHarness,
 ) {
     let spec = marsh_daemon::ExecuteSpec {
+        label: None,
+        kit: None,
+        acp: false,
         process: None,
         placement: marsh_daemon::Placement::Local,
         environment: std::collections::BTreeMap::new(),

@@ -62,7 +62,7 @@ registry) in its Kit sources policy.
 | Message | Cause and fix |
 |---|---|
 | `install must provide libexec/marsh/shell-image` | `bin/` and `libexec/marsh/` are not under the same prefix. Reinstall with the method you used: `brew reinstall mcavage/tap/marsh`, rerun the install script, or copy the tarball's `bin/` and `libexec/` under one prefix. |
-| A message naming `commands.json` or `agents.json` | That file in the control directory is malformed. Fix it. `marsh status` shows the control directory. |
+| A message naming `commands.json` | That file in the control directory is malformed. Fix it. `marsh status` shows the control directory. |
 
 ### Cannot mount the directory
 
@@ -220,6 +220,38 @@ from your Mac, then start marsh again: the new shell VM adds the CA. Kit jobs
 were not affected.
 
 ## Stale daemon after an upgrade
+
+- **`marsh reset` and `marsh stop` both refuse.** A reset or stop first releases
+  the sessions of clients that are gone (and asks their jobs to end again,
+  waiting up to 15 s). What still blocks it is named in the refusal: a session
+  whose client process is still running (exit it or `kill` that pid), a Kit
+  start, or a running job. A daemon of an older marsh build cannot release a
+  session whose client was killed; `marsh reset`, `marsh stop`, and
+  `marsh status` against it say so with the daemon's pid and the sessions it
+  holds. Then stop the daemon process (`kill PID`, after checking with
+  `ps -p PID -o command` that it is a `marshd`; the message says which pids it
+  could not identify), run `marsh status` (it starts a daemon of this build), and `marsh reset`
+  or `marsh stop`: the VMs this home owns are removed. `marsh status --json`
+  prints `{"error": ...}` on stdout when it cannot reach the daemon.
+- **`marsh reset` or `marsh stop` says a cloud create never reported an
+  outcome.** A create that timed out or was cut off by a crash is kept as owned,
+  and nothing drops it by itself: Docker Cloud may still hold, and bill, a
+  sandbox for it, and a listing that lacks it does not prove otherwise (another
+  Docker account, a listing that is late). Check `sbx --cloud ls` first. If a
+  sandbox belongs to it, delete that sandbox yourself. If none does, run
+  `marsh workers forget cloud NAME` (the name the refusal gives): marsh drops its
+  record, and the reset or stop goes on. It refuses a name that is listed.
+
+- A `marsh`, `marsh run`, or app that was killed (SIGKILL, a force-quit) cannot
+  detach its session. The daemon notices that the client process is gone and
+  detaches the session within seconds once nothing runs in it, so that a reset,
+  a stop, or an upgrade of the daemon is not held up by a session nobody can
+  exit. A detached session also releases the grant pins it held in Kit VMs.
+  When a stopped VM of yours will not start because the folder it mounted was
+  deleted, marsh drops that saved mount; if a live session or job still holds
+  the mount, the error says so (`its saved mount of PATH is gone from the Mac,
+  but a session or job here still holds the mount`) instead of calling the VM
+  foreign.
 
 - Upgrading `sbx`: marsh replaces its daemon on its own once no shell or job
   is running. When the upgrade removed the old `sbx`, an idle daemon stops

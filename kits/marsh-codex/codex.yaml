@@ -136,6 +136,13 @@ capabilities:
           user: agent
           env: [SBX_CRED_OPENAI_MODE, MARSH_SELECTED_HOME]
           description: Seed missing Codex config/auth in selected home
+  # ACP mode: the entrypoint's `--acp` runs the pinned adapter on stdio
+  # (`marsh run --acp codex`, `acp run codex`).
+  - type: com.docker.sandbox/acp@1
+    config:
+      agent: codex
+      command: ["/usr/local/bin/marsh-codex", "--acp"]
+
   # Headless verbs, so a host can drive sessions without the TTY. Verb
   # entries are argv tails appended to the entrypoint's launch command.
   - type: com.docker.sandbox/agent-sessions@1

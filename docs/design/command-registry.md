@@ -145,31 +145,23 @@ retired the same way; the next use creates a new VM with a new random name. It d
 authentication state, or unrelated Docker Sandbox VMs. Guest relay tokens are
 not authorized for this host lifecycle operation.
 
-## ACP adapter configuration
+## ACP adapters
 
-`agents.json` has different overlay semantics: a host-control file
-**replaces** the complete packaged adapter set. An explicit `[]` disables all
-ACP adapters; omitting the file selects packaged defaults. A nonempty replacement
-must list every adapter the user wants to keep. No implicit merge resurrects a
-packaged adapter after an explicit disable. Duplicate adapter names or fields,
-invalid declarations, missing referenced commands, or mismatched Kit generations
-are fatal startup configuration errors, not a silent fallback to disabled ACP.
-The startup diagnostic names the configuration paths without echoing contents.
-These checks happen before stock version/preparation calls. The same regular-file
-and 1 MiB input bounds apply.
-
-Each declaration names a registered `command` and may add a fixed
-`arguments` tail (at most 8 printable values of at most 128 bytes) that the
-daemon appends to that Kit's own entrypoint when the session starts, exactly
-like typed arguments. The packaged agents use it to select ACP mode in the
-one-per-agent Kits:
-
-```json
-{"schema_version":1,"name":"claude-session","protocol":"acp_v1","command":"claude","arguments":["--acp"]}
-```
-
-The tail cannot change the Kit's image, entrypoint, mounts, network, or
-credentials.
+There is no ACP registry. A registered command is an ACP agent when its Kit's
+composed descriptor declares `com.docker.sandbox/acp@1` (`agent`, `command`
+as argv or a `/bin/sh -c` string, optional `env` and `protocolVersion`;
+capability groups, kit sets, and mixins included). The daemon reads the
+descriptor of a published image once per digest (cached under the control
+directory's `kit-agent-v2/`) and of a local source Kit from its last cached
+build, else its source YAML. An adapter's `env` is bounded like any exported
+environment and may not name a variable marsh sets; an `agent-sessions@1`
+config is at most 4 KiB and belongs to the adapter it names (`agent`), or is
+the Kit's only one when it has at most one adapter. An ACP job runs the
+declared command in place of the Kit's entrypoint, from the Kit generation
+the job's VM was prepared from (an ACP session pins the generation it
+resolved); the merged environment is checked before the job is recorded.
+`marsh status` never waits on a registry: a published Kit whose descriptor is
+not cached yet shows `"acp": null` while it is read in the background.
 
 The host-control directory is scoped by the SHA256 of the canonical
 `MARSH_HOME` path under `~/Library/Application Support/marsh/control/`.

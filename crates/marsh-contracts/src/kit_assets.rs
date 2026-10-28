@@ -17,6 +17,8 @@ use std::path::{Component, Path, PathBuf};
 pub const DESCRIPTOR_ANNOTATION: &str = "vnd.docker.sandbox.kit.descriptor";
 
 const MAX_DESTINATIONS: usize = 8;
+/// An `agent-sessions@1` config, serialized (it is shown by `marsh status`).
+const SESSIONS_BYTES: usize = 4 * 1024;
 const MAX_SKILLS: usize = 256;
 const MAX_CONTEXTS: usize = 16;
 /// Bytes of one inline instruction body or file read for `context.md`.
@@ -165,6 +167,170 @@ impl KitAssets {
     }
 }
 
+/// A Kit's `com.docker.sandbox/acp@1` adapter: how to start its agent as an
+/// ACP server on stdio. A string command runs through `/bin/sh -c`.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcpAdapter {
+    pub agent: String,
+    pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub env: std::collections::BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_version: Option<u64>,
+}
+
+/// What a Kit declares about agent sessions: its ACP adapter and its
+/// `agent-sessions@1` verbs, from the composed descriptor (kit sets, mixins,
+/// and capability groups included).
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct KitAgent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acp: Option<AcpAdapter>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sessions: Option<serde_json::Value>,
+}
+
+/// `claude`, `com.docker.kit/claude`, and `claude@2.1.3` name one agent.
+fn agent_name(name: &str) -> String {
+    let name = name.split('@').next().unwrap_or_default();
+    name.strip_prefix("com.docker.kit/")
+        .unwrap_or(name)
+        .to_ascii_lowercase()
+}
+
+impl KitAgent {
+    /// Reads `acp@1` and `agent-sessions@1` from a descriptor (JSON). Entries
+    /// with no agent or no command are not adapters. When a descriptor
+    /// declares several, the one for an agent it `provides` wins.
+    ///
+    /// # Errors
+    /// Returns why the descriptor or an adapter is malformed.
+    pub fn from_descriptor(descriptor: &serde_json::Value) -> Result<Self, String> {
+        fn walk<'a>(capabilities: &'a serde_json::Value, found: &mut Vec<&'a serde_json::Value>) {
+            for capability in capabilities.as_array().into_iter().flatten() {
+                match capability
+                    .get("group")
+                    .and_then(|group| group.get("capabilities"))
+                {
+                    Some(members) => walk(members, found),
+                    None => found.push(capability),
+                }
+            }
+        }
+        let mut capabilities = Vec::new();
+        if let Some(list) = descriptor.get("capabilities") {
+            walk(list, &mut capabilities);
+        }
+        let provided = descriptor
+            .get("provides")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(serde_json::Value::as_str)
+            .map(agent_name)
+            .collect::<Vec<_>>();
+        let mut agent = Self::default();
+        let mut adapters = Vec::new();
+        let mut sessions = Vec::new();
+        for capability in capabilities {
+            let config = capability.get("config").cloned().unwrap_or_default();
+            match capability.get("type").and_then(serde_json::Value::as_str) {
+                Some("com.docker.sandbox/acp@1") => {
+                    if let Some(adapter) = AcpAdapter::from_config(&config)? {
+                        adapters.push(adapter);
+                    }
+                }
+                Some("com.docker.sandbox/agent-sessions@1") => {
+                    if serde_json::to_vec(&config)
+                        .map_or(true, |bytes| bytes.len() > SESSIONS_BYTES)
+                    {
+                        return Err(format!(
+                            "agent-sessions@1: config is over {SESSIONS_BYTES} bytes"
+                        ));
+                    }
+                    sessions.push(config);
+                }
+                _ => {}
+            }
+        }
+        agent.acp = adapters
+            .iter()
+            .find(|adapter| provided.contains(&agent_name(&adapter.agent)))
+            .or_else(|| adapters.first())
+            .cloned();
+        // Session verbs belong to the selected agent: the declaration naming
+        // it (`agent`), or the only one when the Kit has at most one adapter.
+        let selected = agent.acp.as_ref().map(|adapter| agent_name(&adapter.agent));
+        agent.sessions = sessions
+            .iter()
+            .find(|config| {
+                config
+                    .get("agent")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|name| Some(agent_name(name)) == selected)
+            })
+            .or_else(|| (sessions.len() == 1 && adapters.len() <= 1).then(|| &sessions[0]))
+            .cloned();
+        Ok(agent)
+    }
+}
+
+impl AcpAdapter {
+    /// One `acp@1` capability's config; `None` without an agent or command.
+    fn from_config(config: &serde_json::Value) -> Result<Option<Self>, String> {
+        let command = match config.get("command") {
+            Some(serde_json::Value::String(line)) if !line.trim().is_empty() => {
+                vec!["/bin/sh".into(), "-c".into(), line.clone()]
+            }
+            Some(serde_json::Value::Array(words)) if !words.is_empty() => words
+                .iter()
+                .map(|word| word.as_str().map(str::to_owned))
+                .collect::<Option<Vec<_>>>()
+                .ok_or("acp@1: command words must be strings")?,
+            _ => return Ok(None),
+        };
+        let Some(name) = config.get("agent").and_then(serde_json::Value::as_str) else {
+            return Ok(None);
+        };
+        if command.len() > 64
+            || command
+                .iter()
+                .any(|word| word.len() > 4096 || word.contains('\0'))
+        {
+            return Err("acp@1: command is too long or contains NUL".into());
+        }
+        let env: std::collections::BTreeMap<String, String> = match config.get("env") {
+            None => std::collections::BTreeMap::new(),
+            Some(env) => serde_json::from_value(env.clone())
+                .map_err(|_| "acp@1: env must map names to strings")?,
+        };
+        // Bounded like any exported environment (count, names,
+        // bytes), and never one marsh sets itself.
+        let exported = env
+            .iter()
+            .map(|(name, value)| (name.clone(), value.as_bytes().to_vec()))
+            .collect();
+        if crate::validate_exported_environment(&exported).is_err()
+            || env.keys().any(|name| {
+                crate::reserved_exported_environment_name(name)
+                    || crate::placement_bound_environment_name(name)
+            })
+        {
+            return Err("acp@1: env has an invalid, reserved, or oversized entry".into());
+        }
+        Ok(Some(Self {
+            agent: name.to_owned(),
+            command,
+            env,
+            protocol_version: config
+                .get("protocolVersion")
+                .and_then(serde_json::Value::as_u64),
+        }))
+    }
+}
+
 fn canonical_absolute(path: &Path) -> bool {
     path.is_absolute()
         && path != Path::new("/")
@@ -277,6 +443,85 @@ mod tests {
             );
         }
         assert!(KitAssets::from_descriptor("not json").is_err());
+    }
+
+    #[test]
+    fn reads_the_provided_agents_adapter_from_groups_and_mixins() {
+        let descriptor = serde_json::json!({
+            "kind": "workload",
+            "provides": ["com.docker.kit/codex@0.1"],
+            "capabilities": [
+                {"type": "com.docker.sandbox/acp@1", "config": {"agent": "claude", "command": ["claude-agent-acp"]}},
+                {"group": {"capabilities": [
+                    {"type": "com.docker.sandbox/acp@1", "config": {"agent": "com.docker.kit/codex", "command": "codex-acp --x", "env": {"A": "1"}, "protocolVersion": 1}},
+                    {"type": "com.docker.sandbox/agent-sessions@1", "config": {"agent": "claude", "list": "c"}},
+                    {"type": "com.docker.sandbox/agent-sessions@1", "config": {"agent": "codex", "list": "x"}}
+                ]}},
+                {"type": "com.docker.sandbox/acp@1", "config": {"command": ["no-agent"]}}
+            ]
+        });
+        let agent = KitAgent::from_descriptor(&descriptor).unwrap();
+        let acp = agent.acp.unwrap();
+        assert_eq!(acp.command, ["/bin/sh", "-c", "codex-acp --x"]);
+        assert_eq!(acp.env["A"], "1");
+        assert_eq!(acp.protocol_version, Some(1));
+        assert_eq!(
+            agent.sessions,
+            Some(serde_json::json!({"agent": "codex", "list": "x"}))
+        );
+        assert_eq!(
+            KitAgent::from_descriptor(&serde_json::json!({})).unwrap(),
+            KitAgent::default()
+        );
+    }
+
+    #[test]
+    fn session_verbs_belong_to_the_selected_adapter_and_metadata_is_bounded() {
+        let adapter = |agent: &str| serde_json::json!({"type": "com.docker.sandbox/acp@1", "config": {"agent": agent, "command": ["a"]}});
+        let sessions = serde_json::json!({"type": "com.docker.sandbox/agent-sessions@1", "config": {"list": "x"}});
+        // One adapter: its Kit's only sessions declaration is its own.
+        let one = serde_json::json!({"capabilities": [adapter("a"), sessions]});
+        assert!(KitAgent::from_descriptor(&one).unwrap().sessions.is_some());
+        // Two adapters and an unnamed declaration: whose it is is unknown.
+        let two = serde_json::json!({"capabilities": [adapter("a"), adapter("b"), sessions]});
+        assert!(KitAgent::from_descriptor(&two).unwrap().sessions.is_none());
+        let bad = |config: serde_json::Value, kind: &str| {
+            KitAgent::from_descriptor(
+                &serde_json::json!({"capabilities": [{"type": kind, "config": config}]}),
+            )
+        };
+        let acp = "com.docker.sandbox/acp@1";
+        for env in [
+            serde_json::json!({"PATH": "/x"}),
+            serde_json::json!({"MARSH_JOB": "x"}),
+            serde_json::json!({"BAD NAME": "x"}),
+            serde_json::json!({"BIG": "x".repeat(1 << 20)}),
+        ] {
+            assert!(
+                bad(
+                    serde_json::json!({"agent": "a", "command": ["a"], "env": env}),
+                    acp
+                )
+                .is_err()
+            );
+        }
+        let many = (0..300)
+            .map(|index| (format!("V{index}"), serde_json::json!("x")))
+            .collect::<serde_json::Map<_, _>>();
+        assert!(
+            bad(
+                serde_json::json!({"agent": "a", "command": ["a"], "env": many}),
+                acp
+            )
+            .is_err()
+        );
+        assert!(
+            bad(
+                serde_json::json!({"list": "x".repeat(SESSIONS_BYTES)}),
+                "com.docker.sandbox/agent-sessions@1"
+            )
+            .is_err()
+        );
     }
 
     #[test]

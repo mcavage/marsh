@@ -39,6 +39,10 @@ pub enum Place {
     Job,
     /// In the shell VM, attached to a session.
     Session,
+    /// On the Mac, in a lane's copy: each branch is `marsh run NAME ARG...`
+    /// from the copy, so it is a Kit job confined to the copy, as a host
+    /// `marsh run` there is. Registered names only, and no `-b` branches.
+    Lane,
 }
 
 /// How `fanout` writes its result.
@@ -250,7 +254,7 @@ fn signal_group(child: &Child, signal: nix::sys::signal::Signal) {
     }
 }
 
-/// `marsh fanout ARGS` in a job or the shell VM.
+/// `marsh fanout ARGS` in a job, the shell VM, or a lane's copy on the Mac.
 #[must_use]
 pub fn fanout(arguments: &[OsString], place: Place) -> i32 {
     if matches!(
@@ -276,6 +280,18 @@ pub fn fanout(arguments: &[OsString], place: Place) -> i32 {
             branch.label()
         ));
     }
+    if place == Place::Lane
+        && let Some(branch) = plan
+            .branches
+            .iter()
+            .find(|branch| matches!(branch, Branch::Shell { .. }))
+    {
+        return usage(&format!(
+            "fanout: {}: shell branches (-b) do not run in a lane's copy: a shell would see the whole \
+             project, not the copy; use registered commands: ::: LABEL NAME [ARG...]",
+            branch.label()
+        ));
+    }
     let mut input = Vec::new();
     if !plan.no_input && !marsh_contracts::cloud::stdin_is_terminal() {
         let mut stdin = std::io::stdin().lock().take(INPUT_LIMIT + 1);
@@ -288,7 +304,7 @@ pub fn fanout(arguments: &[OsString], place: Place) -> i32 {
     let remaining = Arc::new(AtomicU64::new(OUTPUT_LIMIT));
     let exceeded = Arc::new(AtomicBool::new(false));
     let started = Instant::now();
-    let mut running = match spawn_all(&plan.branches, &input, &remaining, &exceeded) {
+    let mut running = match spawn_all(&plan.branches, place, &input, &remaining, &exceeded) {
         Ok(running) => running,
         Err(status) => return status,
     };
@@ -355,6 +371,7 @@ fn rand_u64() -> u64 {
 /// failure the started ones are killed and the exit status is returned.
 fn spawn_all(
     branches: &[Branch],
+    place: Place,
     input: &Arc<Vec<u8>>,
     remaining: &Arc<AtomicU64>,
     exceeded: &Arc<AtomicBool>,
@@ -365,6 +382,18 @@ fn spawn_all(
     let fanout_id = format!("{:016x}", rand_u64());
     for branch in branches {
         let mut command = match branch {
+            Branch::Argv { argv, .. } if place == Place::Lane => {
+                let executable = match std::env::current_exe() {
+                    Ok(executable) => executable,
+                    Err(error) => {
+                        kill_all(&mut running);
+                        return Err(usage(&format!("fanout: {}: {error}", branch.label())));
+                    }
+                };
+                let mut command = Command::new(executable);
+                command.arg("run").args(argv);
+                command
+            }
             Branch::Argv { argv, .. } => {
                 let mut command = Command::new(&argv[0]);
                 command.args(&argv[1..]);

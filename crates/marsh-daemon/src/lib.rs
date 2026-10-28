@@ -43,8 +43,10 @@ use thiserror::Error;
 use uuid::Uuid;
 
 mod acp_bridge;
+pub mod checkpoint;
 mod client_liveness;
 mod daemon_startup;
+pub mod events;
 mod receipt_journal;
 pub use daemon_startup::{
     DEFAULT_JOB_RESOURCES, JobDefaults, StartupFailure, adopt_startup_lock,
@@ -87,7 +89,18 @@ pub const MAX_FRAME_BYTES: usize = 1024 * 1024;
 /// Maximum shell stdin frames in flight while the guest is not reading.
 pub const SHELL_STDIN_WINDOW: usize = 64;
 pub const SHELL_STDIN_CHUNK: usize = 16 * 1024;
-pub const FEATURES: &[&str] = &["direct-command-acceptance-v1", "durable-results-v1"];
+pub const FEATURES: &[&str] = &[
+    "direct-command-acceptance-v1",
+    "durable-results-v1",
+    "events-v1",
+    "lanes-v1",
+    "checkpoints-v1",
+    "acp-descriptors-v1",
+    "labels-v1",
+    "apply-json-v1",
+    "lane-cloud-v1",
+    "lane-shell-v1",
+];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while
 // still giving its caller one finite aggregate deadline.
@@ -96,6 +109,8 @@ const SCOPE_LIFECYCLE_REPLY_TIMEOUT: Duration = Duration::from_mins(9);
 const RESIDENT_SHUTDOWN_RETRY_TIMEOUT: Duration = Duration::from_millis(250);
 const RESIDENT_SHUTDOWN_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 const BUSY_LIFECYCLE_MESSAGE: &str = "daemon has active shell sessions or jobs, or unrecovered shell cleanup uncertainty; exit active shells and use host `marsh reset` or `marsh stop` to recover";
+/// Start of the busy refusal that names what blocks the daemon.
+const BUSY_BLOCKED: &str = "daemon is busy: ";
 const STOCK_SBX_REMOVED: &str = "stock sbx was removed (upgraded?)";
 /// How often an idle daemon looks for its pinned stock SBX executable.
 const STOCK_SBX_PROBE_INTERVAL: Duration = Duration::from_secs(5);
@@ -118,7 +133,9 @@ fn stock_sbx_removed(path: Option<&Path>) -> bool {
 
 /// A refusal a replacing client waits out briefly before reporting it.
 fn busy_lifecycle_refusal(message: &str) -> bool {
-    message == BUSY_LIFECYCLE_MESSAGE || message.starts_with(STOCK_SBX_REMOVED)
+    message == BUSY_LIFECYCLE_MESSAGE
+        || message.starts_with(BUSY_BLOCKED)
+        || message.starts_with(STOCK_SBX_REMOVED)
 }
 // Leave descriptor headroom for relay socket clones, active attachments,
 // worker transports, and the listener on macOS's default soft FD limit.
@@ -557,6 +574,11 @@ pub enum PublicRequest {
     ResetWorkers {
         selection: LoadSelection,
     },
+    /// Forget the ownership record of one unresolved cloud create, on the
+    /// operator's word that nothing was created (`marsh workers forget cloud`).
+    ForgetCloudCreate {
+        name: String,
+    },
     ResetScope,
     StopScope,
     Prepare {
@@ -728,6 +750,23 @@ pub enum PublicRequest {
     SplitRemove {
         split: String,
     },
+    /// Close an open lane split: capture every lane, keep it.
+    SplitClose {
+        split: String,
+    },
+    /// `marsh checkpoint(s)`; a relay caller's root is its session's project.
+    Checkpoint {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        root: Option<PathBuf>,
+        action: CheckpointAction,
+    },
+    /// `marsh storage`: checkpoints and kept splits per project.
+    Storage {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        root: Option<PathBuf>,
+    },
+    /// `marsh events`: host only, outside request admission; `Event` frames follow.
+    Events,
     /// A job's `cap.sock` child: attachment frames follow, as for `Execute`
     /// (`docs/design/processes.md` s3).
     ProcessRun(ExecuteSpec),
@@ -742,6 +781,14 @@ pub enum PublicRequest {
     OpenUrl {
         url: String,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CheckpointAction {
+    Create { label: Option<String> },
+    List { label: Option<String> },
+    Remove { id: String },
 }
 
 /// Host-approved identity and paths captured before entering the guest VM.
@@ -856,6 +903,19 @@ pub enum PublicReply {
     Splits {
         document: serde_json::Value,
     },
+    /// `split --open`: each lane's fork.
+    SplitOpened {
+        id: String,
+        lanes: BTreeMap<String, PathBuf>,
+    },
+    /// A JSON document (`SplitClose` manifest, checkpoints, storage).
+    Document {
+        document: serde_json::Value,
+    },
+    /// One `marsh events` line.
+    Event {
+        line: String,
+    },
     /// `OpenUrl`: whether the Mac opened it, or why not.
     UrlOpen {
         opened: bool,
@@ -959,6 +1019,16 @@ pub struct ExecuteSpec {
     /// the daemon's own endpoint may name a parent; relays may only narrow.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub process: Option<process::ProcessLink>,
+    /// Run the Kit's declared ACP adapter (`acp@1`) instead of its entrypoint.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub acp: bool,
+    /// `marsh cloud -d --label TEXT`: recorded on the job receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// The exact Kit generation this run must use (an ACP session's, as
+    /// resolved when it started); refused if the command now names another.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kit: Option<String>,
 }
 
 impl ExecuteSpec {
@@ -1006,6 +1076,11 @@ pub struct ShellSpec {
     /// (`marsh_contracts::terminal::identity`); the backend filters again.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub terminal_environment: BTreeMap<String, String>,
+    /// Where the shell starts, when that is not the project: a directory in
+    /// an open lane's copy, whose project is the split's root. The daemon
+    /// checks that it is a fork of the session's project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1155,6 +1230,11 @@ pub trait DaemonBackend: Send + Sync + 'static {
         Err(DaemonError::BackendUnavailable)
     }
 
+    /// A host session ended (detached, or its client died): drop the grant
+    /// pins it held, so the retained mounts it kept busy can be reused or
+    /// evicted. Best effort; the pins also go with the VM.
+    fn session_ended(&self, _session: &str, _store: &DaemonStore) {}
+
     fn registered_commands(&self) -> Result<Vec<String>, DaemonError>;
     fn install_kit(
         &self,
@@ -1190,6 +1270,11 @@ pub trait DaemonBackend: Send + Sync + 'static {
     fn resolve_acp_agent(&self, _name: &str) -> Result<AgentAdapterDeclaration, DaemonError> {
         Err(DaemonError::BackendUnavailable)
     }
+    /// `marsh status` `commands`: each registered command and what its Kit
+    /// declares about agent sessions.
+    fn command_catalog(&self) -> Vec<CommandStatus> {
+        Vec::new()
+    }
     fn registered_kits(&self) -> Result<BTreeMap<String, String>, DaemonError> {
         Ok(BTreeMap::new())
     }
@@ -1198,6 +1283,9 @@ pub trait DaemonBackend: Send + Sync + 'static {
         _selection: &LoadSelection,
         _store: DaemonStore,
     ) -> Result<Vec<String>, DaemonError> {
+        Err(DaemonError::BackendUnavailable)
+    }
+    fn forget_cloud_create(&self, _name: &str) -> Result<(), DaemonError> {
         Err(DaemonError::BackendUnavailable)
     }
     fn teardown_scope(
@@ -1294,6 +1382,8 @@ pub enum ErrorCode {
     InvalidRequest,
     NotFound,
     Internal,
+    /// Too little free disk space (`marsh checkpoint` exits 75).
+    NoSpace,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1309,6 +1399,10 @@ pub struct ShellStatus {
     pub pid: u32,
     pub project: PathBuf,
     pub state: ShellState,
+    /// When the client process started (`ps -o lstart=`), read when it
+    /// attached: with its pid, the process's identity. None: unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_started: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1372,6 +1466,22 @@ pub struct StatusDocument {
     /// no longer reach its VMs (`stock_sbx_removed_message`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stock_sbx_removed: Option<PathBuf>,
+    /// Registered commands (`docs/acp.md`).
+    #[serde(default)]
+    pub commands: Vec<CommandStatus>,
+}
+
+/// One registered command: its Kit reference, whether the Kit declares an ACP
+/// adapter (`com.docker.sandbox/acp@1`), and its `agent-sessions@1` verbs.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct CommandStatus {
+    pub name: String,
+    pub reference: String,
+    /// Whether its Kit declares an ACP adapter; `null` while a published
+    /// Kit's descriptor is still being read (in the background).
+    pub acp: Option<bool>,
+    #[serde(default)]
+    pub sessions: Option<serde_json::Value>,
 }
 
 /// `marsh status` `kit_updates`: the hourly background check of Kits that
@@ -1498,6 +1608,27 @@ pub struct JobSummary {
     pub parent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detached: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl JobSummary {
+    #[must_use]
+    pub fn of(job: &JobReceipt) -> Self {
+        Self {
+            cursor: job.cursor,
+            job_id: job.job_id.clone(),
+            command: job.command.clone(),
+            placement: job.placement,
+            cleanup: job.cleanup,
+            state: job.state,
+            exit_code: job.exit.as_ref().and_then(|exit| exit.code),
+            wall_ms: job.timing.wall_ms,
+            parent: job.lineage.as_ref().map(|lineage| lineage.parent.clone()),
+            detached: job.detached.clone(),
+            label: job.label.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1588,6 +1719,9 @@ pub struct JobReceipt {
     /// `collected`, `kept-as-patch`, `lost`, ...).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detached: Option<String>,
+    /// The caller's label (`marsh cloud -d --label TEXT`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     /// `scheme://host` of each link this job opened on the Mac (`xdg-open`),
     /// at most `open_url::MAX_RECORDED`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1648,7 +1782,7 @@ pub struct JobLineage {
 
 impl JobLineage {
     /// The fork a confined job mounts read-write: `.../.marsh/split/<id>/<label>`.
-    fn split_of(mounts: &[PublicMount]) -> Option<(String, String)> {
+    pub(crate) fn split_of(mounts: &[PublicMount]) -> Option<(String, String)> {
         mounts.iter().find_map(|mount| {
             let parts = mount
                 .target
@@ -1671,6 +1805,19 @@ pub const DISPLAY_ARGS: usize = 16;
 /// Characters kept of each displayed argument.
 pub const DISPLAY_ARG_CHARS: usize = 200;
 
+#[derive(Debug, Default)]
+pub(crate) struct ForkJobs {
+    /// Jobs that may still write the fork: queued or running, and detached
+    /// cloud runs (their collection writes back into the fork).
+    pub live: Vec<String>,
+    /// Of `live`, the detached cloud runs.
+    pub detached: Vec<String>,
+    pub uncertain: usize,
+    /// Of `uncertain`, those whose Kit was not reset since (`process.rs`
+    /// `holds_slot`): they may still write.
+    pub held: usize,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NewJob {
     pub session_id: String,
@@ -1678,6 +1825,14 @@ pub struct NewJob {
     pub kit_ref: String,
     pub workload_image: String,
     pub mounts: Vec<PublicMount>,
+    /// The caller's label (`marsh cloud -d --label TEXT`), validated here.
+    pub label: Option<String>,
+}
+
+/// A split or job label: 1 to 128 bytes, no control characters.
+#[must_use]
+pub fn valid_label(label: &str) -> bool {
+    (1..=128).contains(&label.len()) && !label.chars().any(char::is_control)
 }
 
 #[derive(Debug)]
@@ -1695,9 +1850,6 @@ struct State {
     // Host-only cleanup ownership, retained when development authority is revoked.
     shell_cleanup_vms: BTreeMap<String, String>,
     shell_attachments: BTreeMap<String, String>,
-    /// Host processes that attached a session and that this daemon can
-    /// signal; see `client_liveness.rs`.
-    session_clients: BTreeMap<String, u32>,
     workers: BTreeMap<String, WorkerStatus>,
     starting_kits: BTreeMap<String, ProcessStartingKit>,
     jobs: BTreeMap<String, JobReceipt>,
@@ -1712,6 +1864,16 @@ struct State {
     /// Session of each running split shell branch -> (split, label): a Kit
     /// job it starts is that branch's child (`docs/design/processes.md` s9).
     branch_sessions: BTreeMap<String, (String, String)>,
+    /// Open lane splits being closed or cancelled: no job in their forks is
+    /// recorded or submitted any more (`split.rs` `admit_lane` admits before
+    /// the Kit is prepared; this fence holds at the job's own creation).
+    fenced_splits: std::collections::BTreeSet<String>,
+    /// Splits `marsh splits cancel` reached (journaled with the split).
+    cancelled_splits: std::collections::BTreeSet<String>,
+    /// Sandbox ids of cloud jobs that were still being set up at the last
+    /// restart, until each is retired.
+    cloud_setup_orphans: Vec<String>,
+    orphans_path: PathBuf,
     /// Terminal sessions, their terminal job trees, and recent opens.
     links: open_url::Links,
 }
@@ -1747,6 +1909,7 @@ impl PublicRequest {
             | Self::AttachEphemeralShell { .. }
             | Self::Shutdown
             | Self::ResetWorkers { .. }
+            | Self::ForgetCloudCreate { .. }
             | Self::UninstallKit { .. }
             | Self::ResetScope
             | Self::StopScope => RequestAuthority::HostLifecycle,
@@ -1786,6 +1949,10 @@ impl PublicRequest {
             | Self::SplitShow { .. }
             | Self::SplitCancel { .. }
             | Self::SplitRemove { .. }
+            | Self::SplitClose { .. }
+            | Self::Checkpoint { .. }
+            | Self::Storage { .. }
+            | Self::Events
             | Self::ProcessRun(_)
             | Self::ProcessShow
             | Self::CloudDetached { .. } => RequestAuthority::Shared,
@@ -1836,6 +2003,56 @@ fn scope_is_idle(state: &State) -> bool {
             .shells
             .values()
             .all(|shell| shell.state == ShellState::Detached)
+}
+
+/// When `pid` started, as `ps` prints it, or None when there is no such
+/// process (or `ps` cannot say). A pid alone is not a process: it can be
+/// reused, so this goes with it.
+fn process_started(pid: u32) -> Option<String> {
+    let output = ps_command("lstart=", pid).output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    // The prefix marks the zone this was read in: a record without it was
+    // made when `ps` printed local time, and is never compared.
+    (output.status.success() && !text.is_empty()).then(|| format!("utc:{text}"))
+}
+
+/// `ps -o FIELD -p PID`, in the one zone and locale its text is compared in:
+/// `lstart` prints local time, which a change of the system zone (or of `TZ`
+/// in the environment) would otherwise move.
+fn ps_command(field: &str, pid: u32) -> std::process::Command {
+    let mut command = std::process::Command::new("ps");
+    command
+        .args(["-o", field, "-p", &pid.to_string()])
+        .env("TZ", "UTC")
+        .env("LC_ALL", "C");
+    command
+}
+
+/// What is known of a client process now.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProcessIdentity {
+    /// The process that attached is still running.
+    Same,
+    /// There is no such process, or the pid belongs to another one now.
+    Gone,
+    /// Something runs at the pid, and which process it is cannot be told (no
+    /// start time was recorded): never called gone, never named for a kill.
+    Unverified,
+}
+
+fn process_identity(pid: u32, recorded: Option<&str>) -> ProcessIdentity {
+    let exists = rustix::process::Pid::from_raw(i32::try_from(pid).unwrap_or(0))
+        .is_none_or(|pid| rustix::process::test_kill_process(pid) != Err(rustix::io::Errno::SRCH));
+    if !exists {
+        return ProcessIdentity::Gone;
+    }
+    // A record from before start times were read in UTC cannot be compared.
+    let recorded = recorded.filter(|recorded| recorded.starts_with("utc:"));
+    match (recorded, process_started(pid)) {
+        (Some(recorded), Some(now)) if recorded == now => ProcessIdentity::Same,
+        (Some(_), Some(_)) => ProcessIdentity::Gone,
+        (Some(_), None) | (None, _) => ProcessIdentity::Unverified,
+    }
 }
 
 fn scope_can_recover(state: &State) -> bool {
@@ -1897,6 +2114,25 @@ impl DaemonStore {
         let scope_id = hex(&Sha256::digest(canonical.as_os_str().as_encoded_bytes()));
         let (mut journal, mut jobs) = receipt_journal::ReceiptJournal::open(journal_home)?;
         let mut repaired = false;
+        // A cloud job still being set up when the daemon went away has a
+        // sandbox (billing since its creation) that nothing will use. Its id
+        // is kept in a file of its own, written before the receipt is
+        // settled as Unknown, until the backend has verified its retirement:
+        // any number of restarts in between keep it.
+        let orphans_path = journal_home.join("cloud-setup-orphans.json");
+        let mut cloud_setup_orphans = read_orphans(&orphans_path)?;
+        let found = jobs
+            .values()
+            .filter(|receipt| {
+                receipt.state == JobState::Queued && receipt.placement == Placement::Cloud
+            })
+            .filter_map(|receipt| receipt.vm_id.clone())
+            .filter(|id| !cloud_setup_orphans.contains(id))
+            .collect::<Vec<_>>();
+        if !found.is_empty() {
+            cloud_setup_orphans.extend(found);
+            split::SplitEngine::write_durable(&orphans_path, &cloud_setup_orphans)?;
+        }
         for receipt in jobs.values_mut() {
             if matches!(receipt.state, JobState::Queued | JobState::Running) {
                 receipt.state = JobState::Unknown;
@@ -1948,7 +2184,6 @@ impl DaemonStore {
             ephemeral_home_tokens: BTreeMap::new(),
             shell_cleanup_vms: BTreeMap::new(),
             shell_attachments: BTreeMap::new(),
-            session_clients: BTreeMap::new(),
             workers: BTreeMap::new(),
             starting_kits: BTreeMap::new(),
             jobs,
@@ -1961,6 +2196,10 @@ impl DaemonStore {
             ordinary_requests: 0,
             lifecycle_active: false,
             branch_sessions: BTreeMap::new(),
+            fenced_splits: std::collections::BTreeSet::new(),
+            cancelled_splits: std::collections::BTreeSet::new(),
+            cloud_setup_orphans,
+            orphans_path,
             links: open_url::Links::default(),
         }))))
     }
@@ -2175,6 +2414,7 @@ impl DaemonStore {
                 pid,
                 project: authority.launch_directory.clone(),
                 state: shell_state,
+                process_started: process_started(pid),
             },
         );
         state
@@ -2186,9 +2426,6 @@ impl DaemonStore {
         state
             .session_home_backings
             .insert(session_id.clone(), authority.home_backing);
-        if client_liveness::can_watch(pid) {
-            state.session_clients.insert(session_id.clone(), pid);
-        }
         session_id
     }
 
@@ -2258,6 +2495,76 @@ impl DaemonStore {
         })
     }
 
+    /// Kit jobs still live in attached sessions whose client process is gone
+    /// (the client's loss cancels its jobs; one that did not end is asked to
+    /// again by a reset or stop).
+    #[must_use]
+    pub fn dead_session_live_jobs(&self) -> Vec<String> {
+        let state = self.lock();
+        state
+            .jobs
+            .values()
+            .filter(|job| matches!(job.state, JobState::Queued | JobState::Running))
+            .filter(|job| {
+                state.shells.get(&job.session_id).is_some_and(|shell| {
+                    shell.state == ShellState::Attached
+                        && !state.shell_attachments.contains_key(&shell.session_id)
+                        && process_identity(shell.pid, shell.process_started.as_deref())
+                            == ProcessIdentity::Gone
+                })
+            })
+            .map(|job| job.job_id.clone())
+            .collect()
+    }
+
+    /// What keeps a reset or stop from running, one line each, for the
+    /// refusal: the attached sessions (client pid, project, and whether that
+    /// process still exists), Kit starts, and running jobs.
+    #[must_use]
+    pub fn lifecycle_blockers(&self) -> Vec<String> {
+        let state = self.lock();
+        let mut lines = Vec::new();
+        for shell in state
+            .shells
+            .values()
+            .filter(|shell| shell.state == ShellState::Attached)
+        {
+            let identity = process_identity(shell.pid, shell.process_started.as_deref());
+            lines.push(format!(
+                "a session of pid {} in {} ({})",
+                shell.pid,
+                shell.project.display(),
+                match identity {
+                    ProcessIdentity::Same =>
+                        "that process is still running: exit it, or `kill` it".to_owned(),
+                    ProcessIdentity::Gone if state.shell_attachments.contains_key(&shell.session_id) =>
+                        "its shell is still being torn down".to_owned(),
+                    ProcessIdentity::Gone =>
+                        "that process is gone; it is released within seconds".to_owned(),
+                    ProcessIdentity::Unverified => format!(
+                        "this process cannot be identified: see what runs at that pid with `ps -p {} -o command`",
+                        shell.pid
+                    ),
+                }
+            ));
+        }
+        for kit in state.starting_kits.values() {
+            lines.push(format!("a start of Kit {} is in progress", kit.command));
+        }
+        for job in state
+            .jobs
+            .values()
+            .filter(|job| matches!(job.state, JobState::Queued | JobState::Running))
+        {
+            lines.push(format!(
+                "job {} ({}) is running: end it, or stop the client that started it",
+                &job.job_id[..job.job_id.len().min(8)],
+                job.command
+            ));
+        }
+        lines
+    }
+
     /// Kit jobs of `session` that are queued, starting, or running.
     #[must_use]
     pub fn session_jobs_active(&self, session: &str) -> usize {
@@ -2275,6 +2582,82 @@ impl DaemonStore {
                 .values()
                 .filter(|kit| kit.shell_session_id == session)
                 .count()
+    }
+
+    /// Close or cancel an open lane split: from now on no job in its forks is
+    /// recorded or submitted.
+    pub fn fence_split(&self, split: &str) {
+        self.lock().fenced_splits.insert(split.to_owned());
+    }
+
+    /// A cancel reached this lane split: its detached cloud runs are
+    /// discarded, never collected into the copy.
+    pub fn cancel_split(&self, split: &str) {
+        self.lock().cancelled_splits.insert(split.to_owned());
+    }
+
+    /// Sandboxes of cloud jobs that were being set up when the daemon last
+    /// went away, not yet retired.
+    #[must_use]
+    pub fn cloud_setup_orphans(&self) -> Vec<String> {
+        self.lock().cloud_setup_orphans.clone()
+    }
+
+    /// One of them is retired (or was never owned).
+    pub fn cloud_setup_orphan_retired(&self, sandbox_id: &str) {
+        let mut state = self.lock();
+        state.cloud_setup_orphans.retain(|id| id != sandbox_id);
+        // Best effort: a failed write keeps the id on disk, so a later
+        // start retries a retirement that is already done (it is idempotent).
+        let _ = split::SplitEngine::write_durable(&state.orphans_path, &state.cloud_setup_orphans);
+    }
+
+    /// Whether `job` runs in a fork of a cancelled split.
+    #[must_use]
+    pub fn in_cancelled_split(&self, job: &str) -> bool {
+        let state = self.lock();
+        state.jobs.get(job).is_some_and(|job| {
+            JobLineage::split_of(&job.mounts)
+                .is_some_and(|(split, _)| state.cancelled_splits.contains(&split))
+        })
+    }
+
+    /// Whether `mounts` name a fork of a fenced split.
+    fn fenced(state: &State, mounts: &[PublicMount]) -> Result<(), DaemonError> {
+        match JobLineage::split_of(mounts) {
+            Some((split, _)) if state.fenced_splits.contains(&split) => Err(DaemonError::Refused(
+                format!("lane job refused: split {split} is closed; its lanes admit no more jobs"),
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    /// Jobs that mount a fork of `split` (lane `label`, or any): the live
+    /// ones, and how many ended with unconfirmed cleanup.
+    pub(crate) fn fork_jobs(&self, split: &str, label: Option<&str>) -> ForkJobs {
+        let state = self.lock();
+        let mut found = ForkJobs::default();
+        for job in state.jobs.values() {
+            let Some((id, lane)) = JobLineage::split_of(&job.mounts) else {
+                continue;
+            };
+            if id != split || label.is_some_and(|label| label != lane) {
+                continue;
+            }
+            if matches!(
+                job.state,
+                JobState::Queued | JobState::Running | JobState::Detached
+            ) {
+                found.live.push(job.job_id.clone());
+                if job.state == JobState::Detached {
+                    found.detached.push(job.job_id.clone());
+                }
+            } else if job.cleanup == CleanupState::Uncertain || job.state == JobState::Unknown {
+                found.uncertain += 1;
+                found.held += usize::from(process::holds_slot(&state.process, job));
+            }
+        }
+        found
     }
 
     /// Whether a shell VM is already bound to this session (relay callers).
@@ -2605,6 +2988,15 @@ impl DaemonStore {
         if !state.shells.contains_key(&job.session_id) {
             return Err(DaemonError::NotFound(job.session_id));
         }
+        if job
+            .label
+            .as_deref()
+            .is_some_and(|label| !valid_label(label))
+        {
+            return Err(DaemonError::Refused(
+                "a label is 1 to 128 bytes with no control characters".into(),
+            ));
+        }
         let job_id = Uuid::new_v4().to_string();
         let mut lineage = match admission {
             Some((link, registered)) => {
@@ -2635,6 +3027,7 @@ impl DaemonStore {
         // Only a branch job (or a job confined to a fork without a parent)
         // is marked with its split; a child copies its parent's mounts.
         let parented = admission.is_some_and(|(link, _)| link.parent_job.is_some() && !link.branch);
+        Self::fenced(&state, &job.mounts)?;
         if let Some((split, label)) = JobLineage::split_of(&job.mounts)
             .or_else(|| state.branch_sessions.get(&job.session_id).cloned())
             .filter(|_| !parented)
@@ -2664,6 +3057,7 @@ impl DaemonStore {
             lineage: Some(lineage.clone()),
             children: Vec::new(),
             detached: None,
+            label: job.label,
             opened: Vec::new(),
             cloud_children: Vec::new(),
             mounts: job.mounts,
@@ -2770,6 +3164,12 @@ impl DaemonStore {
                 "job is not awaiting submission".into(),
             ));
         }
+        let mounts = receipt.mounts.clone();
+        Self::fenced(&state, &mounts)?;
+        let receipt = state
+            .jobs
+            .get_mut(job_id)
+            .ok_or_else(|| DaemonError::NotFound(job_id.into()))?;
         receipt.execution = ExecutionOutcome::Unknown;
         Ok(())
     }
@@ -2806,6 +3206,15 @@ impl DaemonStore {
         if receipt.state != JobState::Queued || receipt.placement != Placement::Cloud {
             return Err(DaemonError::InvalidState(
                 "only a queued cloud job may start in a cloud sandbox".into(),
+            ));
+        }
+        // Submission is the one step after which the sandbox bills: a close
+        // or cancel of its lane's split, or a cancel of the job, that came
+        // first stops it here, under the lock they set their marks with.
+        Self::fenced(&state, &receipt.mounts)?;
+        if state.process.cancelling.contains(job_id) {
+            return Err(DaemonError::Refused(
+                "cancelled before the command started".into(),
             ));
         }
         let mut updated = receipt.clone();
@@ -3259,6 +3668,7 @@ impl DaemonStore {
             processes: process::ProcessCounts::default(),
             kit_updates: None,
             stock_sbx_removed: None,
+            commands: Vec::new(),
         }
     }
 
@@ -3431,22 +3841,7 @@ impl DaemonStore {
     #[must_use]
     pub fn jobs(&self) -> JobsDocument {
         let state = self.lock();
-        let mut jobs: Vec<_> = state
-            .jobs
-            .values()
-            .map(|job| JobSummary {
-                cursor: job.cursor,
-                job_id: job.job_id.clone(),
-                command: job.command.clone(),
-                placement: job.placement,
-                cleanup: job.cleanup,
-                state: job.state,
-                exit_code: job.exit.as_ref().and_then(|exit| exit.code),
-                wall_ms: job.timing.wall_ms,
-                parent: job.lineage.as_ref().map(|lineage| lineage.parent.clone()),
-                detached: job.detached.clone(),
-            })
-            .collect();
+        let mut jobs: Vec<_> = state.jobs.values().map(JobSummary::of).collect();
         jobs.sort_by_key(|job| std::cmp::Reverse(job.cursor));
         JobsDocument {
             schema: "marsh.jobs/v1".into(),
@@ -3540,6 +3935,7 @@ pub struct Server {
     protected_guest_roots: Vec<PathBuf>,
     dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
+    events: Arc<events::Bus>,
 }
 
 impl Server {
@@ -3604,14 +4000,20 @@ impl Server {
         let lifecycle = Lifecycle::bind(home)?;
         raise_descriptor_limit();
         let token = read_secret(&lifecycle.paths.token)?;
+        let events = Arc::new(events::Bus::default());
         let splits = split::SplitEngine::open(
             journal_home,
             Client {
                 paths: lifecycle.paths.clone(),
                 token: token.clone(),
             },
+            Arc::clone(&events),
         );
         let store = DaemonStore::with_master_token(home, journal_home, Some(token))?;
+        store.lock().journal.set_events(Arc::clone(&events));
+        for id in splits.cancelled_ids() {
+            store.cancel_split(&id);
+        }
         Ok(Self {
             lifecycle,
             store,
@@ -3626,6 +4028,7 @@ impl Server {
             protected_guest_roots: Vec::new(),
             dev_broker: None,
             splits,
+            events,
         })
     }
 
@@ -3680,6 +4083,13 @@ impl Server {
     #[must_use]
     pub fn with_job_defaults(self, defaults: JobDefaults) -> Self {
         self.store.lock().job_defaults = Some(defaults);
+        self
+    }
+
+    /// How long a kept split is retained before removal (7 days).
+    #[must_use]
+    pub fn with_kept_split_retention(self, retention: Duration) -> Self {
+        self.splits.set_kept_retention(retention);
         self
     }
 
@@ -3744,6 +4154,7 @@ impl Server {
         let updater_stop = Arc::new(AtomicBool::new(false));
         self.spawn_kit_updater(Arc::clone(&updater_stop));
         self.spawn_cloud_collector(Arc::clone(&updater_stop));
+        self.spawn_session_reaper(Arc::clone(&updater_stop));
         let _stop_updater = StopOnDrop(updater_stop);
         let mut next_sbx_probe = Instant::now() + self.stock_sbx_probe_interval;
         while !stop() && !self.shutdown_requested.load(Ordering::Acquire) {
@@ -3822,6 +4233,40 @@ impl Server {
     /// The detached-run collector: a background thread that asks the
     /// backend soon after startup and then every half minute; the backend
     /// decides whether a collection is due (`docs/design/cloud-detach.md` s5).
+    /// A client killed without detaching (an app that was force-quit, a
+    /// `marsh run` that got SIGKILL) leaves its session attached for ever: its
+    /// pins hold Kit mounts busy, and `marsh workers reset` refuses while a
+    /// session that ran in the VM is attached. Detach such a session once
+    /// its client process is gone and nothing runs in it.
+    fn spawn_session_reaper(&self, stop: Arc<AtomicBool>) {
+        let backend = Arc::downgrade(&self.backend);
+        let store = Arc::downgrade(&self.store.0);
+        let acp = Arc::downgrade(&self.acp);
+        let spawned = thread::Builder::new()
+            .name("marsh-session-reaper".into())
+            .spawn(move || {
+                loop {
+                    let until = Instant::now() + SESSION_REAP_INTERVAL;
+                    while Instant::now() < until {
+                        if stop.load(Ordering::Acquire) {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(250));
+                    }
+                    let (Some(backend), Some(store), Some(acp)) =
+                        (backend.upgrade(), store.upgrade(), acp.upgrade())
+                    else {
+                        return;
+                    };
+                    let store = DaemonStore(store);
+                    release_departed(&store, backend.as_ref(), &acp);
+                }
+            });
+        if let Err(error) = spawned {
+            eprintln!("marshd: cannot start the session reaper: {error}");
+        }
+    }
+
     fn spawn_cloud_collector(&self, stop: Arc<AtomicBool>) {
         let backend = Arc::downgrade(&self.backend);
         let store = Arc::downgrade(&self.store.0);
@@ -3871,9 +4316,70 @@ impl Server {
             protected_guest_roots: self.protected_guest_roots.clone(),
             dev_broker: self.dev_broker.clone(),
             splits: Arc::clone(&self.splits),
+            events: Arc::clone(&self.events),
         }
     }
 }
+
+/// The pending setup-orphan ids. A missing file is none; a file that cannot
+/// be read or parsed (or is too large) stops the start rather than being
+/// overwritten with a shorter list.
+fn read_orphans(path: &Path) -> Result<Vec<String>, DaemonError> {
+    use std::io::Read as _;
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut bytes = Vec::new();
+    file.take(1 << 20).read_to_end(&mut bytes)?;
+    serde_json::from_slice(&bytes).map_err(|error| {
+        DaemonError::InvalidState(format!(
+            "{} is unreadable ({error}); it lists cloud sandboxes still owed a delete: fix or remove it",
+            path.display()
+        ))
+    })
+}
+
+/// Detach a host session: what `DetachShell` does, and what a dead client's
+/// session gets from the reaper.
+fn finish_session(
+    store: &DaemonStore,
+    backend: &dyn DaemonBackend,
+    acp: &AcpSessionManager,
+    session_id: &str,
+) -> Result<(), DaemonError> {
+    store.detach_shell(session_id)?;
+    if store.ephemeral_home_token(session_id).is_some()
+        && let Err(error) = backend.close_ephemeral_session(session_id, store)
+    {
+        store.mark_shell_cleanup_uncertain(session_id);
+        return Err(error);
+    }
+    backend.session_ended(session_id, store);
+    acp.detach_shell(session_id);
+    Ok(())
+}
+
+/// Settle sessions whose host caller died without detaching
+/// (`client_liveness.rs`), as its own `DetachShell` would have. One whose shell
+/// VM is still bound becomes cleanup-uncertain instead, which `marsh reset` and
+/// `marsh stop` recover.
+fn release_departed(store: &DaemonStore, backend: &dyn DaemonBackend, acp: &AcpSessionManager) {
+    let Ok(_admission) = store.begin_ordinary_request() else {
+        return;
+    };
+    for departed in store.departed_sessions() {
+        if departed.shell_vm_bound {
+            store.mark_shell_cleanup_uncertain(&departed.session);
+        } else {
+            let _ = finish_session(store, backend, acp, &departed.session);
+        }
+    }
+}
+
+/// How often sessions of dead clients are looked for.
+const SESSION_REAP_INTERVAL: Duration = Duration::from_secs(5);
 
 const KIT_UPDATER_START_DELAY: Duration = Duration::from_secs(1);
 const CLOUD_COLLECTOR_START_DELAY: Duration = Duration::from_secs(2);
@@ -3902,6 +4408,7 @@ struct ConnectionHandler {
     protected_guest_roots: Vec<PathBuf>,
     dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
+    events: Arc<events::Bus>,
 }
 
 /// Reject a guest mount containing, or contained by, a host-owned path.
@@ -4056,6 +4563,42 @@ impl ConnectionHandler {
         reject_guest_mount_overlap(&[&session.launch_directory, &session.home_backing], &roots)
     }
 
+    /// `marsh events`: the hello line, then every change and a heartbeat
+    /// every 15 s; `resync` and the end of the stream when it fell behind.
+    fn serve_events(&self, mut stream: UnixStream) -> Result<(), DaemonError> {
+        let Some(subscription) = self.events.subscribe() else {
+            return write_frame(
+                &mut stream,
+                &PublicReply::Error {
+                    code: ErrorCode::InvalidRequest,
+                    message: format!(
+                        "marsh events: at most {} subscribers at once",
+                        events::SUBSCRIBERS
+                    ),
+                },
+            );
+        };
+        stream.set_read_timeout(None)?;
+        let hello =
+            serde_json::json!({"type": "hello", "seq": subscription.seq, "features": FEATURES});
+        let mut line = hello.to_string();
+        loop {
+            write_frame(&mut stream, &PublicReply::Event { line })?;
+            line = match subscription.receiver.recv_timeout(Duration::from_secs(15)) {
+                Ok(line) => line.to_string(),
+                Err(mpsc::RecvTimeoutError::Timeout) => r#"{"type":"heartbeat"}"#.into(),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return write_frame(
+                        &mut stream,
+                        &PublicReply::Event {
+                            line: r#"{"type":"resync"}"#.into(),
+                        },
+                    );
+                }
+            };
+        }
+    }
+
     fn reject_unauthorized(stream: &mut UnixStream, message: &str) -> Result<(), DaemonError> {
         write_frame(
             stream,
@@ -4071,39 +4614,28 @@ impl ConnectionHandler {
     fn busy_lifecycle_message(&self) -> String {
         match self.stock_sbx.as_deref() {
             Some(path) if stock_sbx_removed(Some(path)) => stock_sbx_removed_message(path),
-            _ => BUSY_LIFECYCLE_MESSAGE.into(),
+            _ => {
+                let blockers = self.store.lifecycle_blockers();
+                if blockers.is_empty() {
+                    // Nothing in view blocks it: the request raced one that
+                    // just ended.
+                    format!("{BUSY_BLOCKED}a request was still being served; retry")
+                } else {
+                    format!(
+                        "{BUSY_BLOCKED}{}; a session whose client is gone is released within seconds, and a reset or stop retries once it is",
+                        blockers.join("; ")
+                    )
+                }
+            }
         }
     }
 
     fn detach_host_session(&self, session_id: &str) -> Result<(), DaemonError> {
-        self.store.detach_shell(session_id)?;
-        if self.store.ephemeral_home_token(session_id).is_some()
-            && let Err(error) = self
-                .backend
-                .close_ephemeral_session(session_id, &self.store)
-        {
-            self.store.mark_shell_cleanup_uncertain(session_id);
-            return Err(error);
-        }
-        self.acp.detach_shell(session_id);
-        Ok(())
+        finish_session(&self.store, self.backend.as_ref(), &self.acp, session_id)
     }
 
-    /// Settle sessions whose host caller died without detaching
-    /// (`client_liveness.rs`), as its own `DetachShell` would have. One whose
-    /// shell VM is still bound becomes cleanup-uncertain instead, which
-    /// `marsh reset` and `marsh stop` recover.
     fn release_departed_clients(&self) {
-        let Ok(_admission) = self.store.begin_ordinary_request() else {
-            return;
-        };
-        for departed in self.store.departed_sessions() {
-            if departed.shell_vm_bound {
-                self.store.mark_shell_cleanup_uncertain(&departed.session);
-            } else {
-                let _ = self.detach_host_session(&departed.session);
-            }
-        }
+        release_departed(&self.store, self.backend.as_ref(), &self.acp);
     }
 
     fn handle_shutdown(&self, stream: &mut UnixStream) -> Result<(), DaemonError> {
@@ -5048,6 +5580,15 @@ impl ConnectionHandler {
                 ),
             };
         }
+        // A subscription is not an ordinary request: it never holds off
+        // `marsh stop`, `marsh reset`, or the daemon's exit.
+        if request.body == PublicRequest::Events {
+            return if authentication_scope == AuthenticationScope::Master {
+                self.serve_events(stream)
+            } else {
+                Self::reject_unauthorized(&mut stream, "marsh events is for the host")
+            };
+        }
         let lifecycle_request = matches!(
             request.body,
             PublicRequest::ResetScope | PublicRequest::StopScope | PublicRequest::Shutdown
@@ -5061,6 +5602,28 @@ impl ConnectionHandler {
             )
         {
             self.release_departed_clients();
+        }
+        if lifecycle_request {
+            // Jobs of departed clients that did not end are asked to again,
+            // and a reset or stop waits briefly for them.
+            let waits = matches!(
+                request.body,
+                PublicRequest::ResetScope | PublicRequest::StopScope
+            );
+            let deadline = Instant::now() + Duration::from_secs(15);
+            loop {
+                let jobs = self.store.dead_session_live_jobs();
+                if !waits || jobs.is_empty() || Instant::now() >= deadline {
+                    break;
+                }
+                for job in jobs {
+                    if !self.store.cancel_requested(&job) {
+                        self.store.cancel_tree(&job, true);
+                    }
+                }
+                thread::sleep(Duration::from_millis(250));
+                self.release_departed_clients();
+            }
         }
         let admission = if lifecycle_request {
             self.store.begin_lifecycle_request()
@@ -5125,7 +5688,145 @@ impl ConnectionHandler {
             AuthenticationScope::Relay(session) => split::Creator::Session(session.clone()),
             AuthenticationScope::Capability(job) => split::Creator::Job(job.clone()),
         };
+        // A job in an open lane's fork is admitted by the split engine and
+        // counted live until it ends (`docs/design/workspaces.md` s14). A
+        // child job was admitted with its parent.
+        let _lane = match &request.body {
+            PublicRequest::Execute(spec)
+                if spec
+                    .process
+                    .as_ref()
+                    .is_none_or(|link| link.parent_job.is_none()) =>
+            {
+                match spec.split_confinement() {
+                    Ok(Some(lane)) => {
+                        match self.splits.admit_lane(&caller, &lane.split, &lane.label) {
+                            Ok(guard) => guard,
+                            Err(message) => {
+                                return write_frame(
+                                    &mut stream,
+                                    &PublicReply::Error {
+                                        code: ErrorCode::InvalidRequest,
+                                        message: format!("lane job refused: {message}"),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let root = |requested: Option<PathBuf>| match &authentication_scope {
+            AuthenticationScope::Relay(session) => self
+                .store
+                .lock()
+                .session_authorities
+                .get(session)
+                .map(|authority| authority.launch_directory.clone()),
+            _ => requested,
+        };
         match request.body {
+            PublicRequest::SplitClose { split } => {
+                // A detached cloud run in a lane's copy settles by collection,
+                // which the background collector does every few minutes: while
+                // the close waits, collect it now, so a run that has finished
+                // writes back before the lane is captured.
+                let (finished, wake) = std::sync::mpsc::channel::<()>();
+                let collector = self.splits.may_close(&caller, &split).then(|| {
+                    let (backend, store, split) =
+                        (Arc::clone(&self.backend), self.store.clone(), split.clone());
+                    thread::spawn(move || {
+                        loop {
+                            for job in store.fork_jobs(&split, None).detached {
+                                let _ = backend.cloud_detached(
+                                    cloud_detached::CloudDetachedRequest::Collect { job },
+                                    store.clone(),
+                                );
+                            }
+                            if !matches!(
+                                wake.recv_timeout(Duration::from_secs(3)),
+                                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                            ) {
+                                break;
+                            }
+                        }
+                    })
+                });
+                let closed = self.splits.close(&caller, &split, &self.store);
+                drop(finished);
+                if let Some(collector) = collector {
+                    let _ = collector.join();
+                }
+                let reply = closed.map_or_else(
+                    |error| public_error(&error),
+                    |document| PublicReply::Document { document },
+                );
+                write_frame(&mut stream, &reply)
+            }
+            PublicRequest::Checkpoint {
+                root: requested,
+                action,
+            } => {
+                let root = root(requested);
+                let checkpoints = &self.splits.checkpoints;
+                let invalid = |message: String| PublicReply::Error {
+                    code: ErrorCode::InvalidRequest,
+                    message,
+                };
+                let reply = match (action, root) {
+                    (CheckpointAction::Create { .. }, None) => {
+                        invalid("checkpoint: no project root".into())
+                    }
+                    (CheckpointAction::Create { .. }, Some(root)) if !root.is_absolute() => {
+                        invalid("checkpoint: the project root must be absolute".into())
+                    }
+                    (CheckpointAction::Create { label }, Some(root)) => {
+                        match self.splits.note_root(&root) {
+                            Err(error) => invalid(format!(
+                                "checkpoint: could not journal the project {}: {error}",
+                                root.display()
+                            )),
+                            Ok(()) => match checkpoints.create(&root, label) {
+                                Ok(checkpoint) => PublicReply::Document {
+                                    document: checkpoint.document(),
+                                },
+                                Err(checkpoint::Refusal::LowDisk(message)) => PublicReply::Error {
+                                    code: ErrorCode::NoSpace,
+                                    message,
+                                },
+                                Err(checkpoint::Refusal::Invalid(message)) => invalid(message),
+                            },
+                        }
+                    }
+                    (CheckpointAction::List { label }, root) => PublicReply::Document {
+                        document: serde_json::json!({
+                            "checkpoints": checkpoints
+                                .list(root.as_deref(), label.as_deref())
+                                .iter()
+                                .map(checkpoint::Checkpoint::document)
+                                .collect::<Vec<_>>(),
+                        }),
+                    },
+                    (CheckpointAction::Remove { id }, root) => {
+                        match checkpoints.remove(root.as_deref(), &id) {
+                            Ok(message) => PublicReply::SplitDone { message },
+                            Err(message) => PublicReply::Error {
+                                code: ErrorCode::NotFound,
+                                message,
+                            },
+                        }
+                    }
+                };
+                write_frame(&mut stream, &reply)
+            }
+            PublicRequest::Storage { root: requested } => write_frame(
+                &mut stream,
+                &PublicReply::Document {
+                    document: self.splits.storage(root(requested).as_deref()),
+                },
+            ),
             PublicRequest::SplitCreate(spec) => {
                 self.splits
                     .create(stream, caller, spec, self.backend.as_ref(), &self.store)
@@ -5145,7 +5846,32 @@ impl ConnectionHandler {
                 write_frame(&mut stream, &reply)
             }
             PublicRequest::SplitCancel { split } => {
-                let reply = self.splits.cancel_request(&caller, &split).map_or_else(
+                let cancelled = self.splits.cancel_request(&caller, &split, &self.store);
+                if cancelled.is_ok() && !self.store.fork_jobs(&split, None).live.is_empty() {
+                    // A detached cloud run in a lane's copy is not a process
+                    // to signal: discarding it drops its sandbox, so nothing
+                    // is ever written back into the copy. One that detaches
+                    // after this pass is discarded by the collector (the
+                    // cancel is journaled with the split).
+                    let (backend, store, split) =
+                        (Arc::clone(&self.backend), self.store.clone(), split.clone());
+                    thread::spawn(move || {
+                        for _ in 0..120 {
+                            let jobs = store.fork_jobs(&split, None);
+                            if jobs.live.is_empty() {
+                                break;
+                            }
+                            for job in jobs.detached {
+                                let _ = backend.cloud_detached(
+                                    cloud_detached::CloudDetachedRequest::Discard { job },
+                                    store.clone(),
+                                );
+                            }
+                            thread::sleep(Duration::from_secs(1));
+                        }
+                    });
+                }
+                let reply = cancelled.map_or_else(
                     |error| public_error(&error),
                     |()| PublicReply::SplitDone {
                         message: format!("cancelled {split}"),
@@ -5154,10 +5880,13 @@ impl ConnectionHandler {
                 write_frame(&mut stream, &reply)
             }
             PublicRequest::SplitRemove { split } => {
-                let reply = self.splits.remove(&caller, &split).map_or_else(
-                    |error| public_error(&error),
-                    |message| PublicReply::SplitDone { message },
-                );
+                let reply = self
+                    .splits
+                    .remove(&caller, &split, &self.store)
+                    .map_or_else(
+                        |error| public_error(&error),
+                        |message| PublicReply::SplitDone { message },
+                    );
                 write_frame(&mut stream, &reply)
             }
             PublicRequest::Status { session_id } => {
@@ -5169,6 +5898,7 @@ impl ConnectionHandler {
                     .stock_sbx
                     .clone()
                     .filter(|path| stock_sbx_removed(Some(path)));
+                status.commands = self.backend.command_catalog();
                 write_frame(&mut stream, &PublicReply::Status(status))
             }
             PublicRequest::ResetWorkers { selection } => {
@@ -5259,6 +5989,7 @@ fn authorize_request_session(
         | PublicRequest::RegisteredCommands
         | PublicRequest::RegisteredKits
         | PublicRequest::ResetWorkers { .. }
+        | PublicRequest::ForgetCloudCreate { .. }
         | PublicRequest::UninstallKit { .. }
         | PublicRequest::ResetScope
         | PublicRequest::StopScope
@@ -5278,6 +6009,10 @@ fn authorize_request_session(
         | PublicRequest::SplitShow { .. }
         | PublicRequest::SplitCancel { .. }
         | PublicRequest::SplitRemove { .. }
+        | PublicRequest::SplitClose { .. }
+        | PublicRequest::Checkpoint { .. }
+        | PublicRequest::Storage { .. }
+        | PublicRequest::Events
         | PublicRequest::ProcessShow
         | PublicRequest::CloudDetached { .. }
         | PublicRequest::OpenUrl { .. }
@@ -5336,6 +6071,12 @@ fn dispatch_request(
                 Err(error) => public_error(&error),
             }
         }
+        PublicRequest::ForgetCloudCreate { name } => match backend.forget_cloud_create(&name) {
+            Ok(()) => PublicReply::SplitDone {
+                message: format!("forgot the unresolved cloud create {name}"),
+            },
+            Err(error) => public_error(&error),
+        },
         PublicRequest::Prepare { .. } => PublicReply::Error {
             code: ErrorCode::Internal,
             message: "preparation attachment was not established".into(),
@@ -5360,7 +6101,11 @@ fn dispatch_request(
         | PublicRequest::SplitJoin { .. }
         | PublicRequest::SplitShow { .. }
         | PublicRequest::SplitCancel { .. }
-        | PublicRequest::SplitRemove { .. } => PublicReply::Error {
+        | PublicRequest::SplitRemove { .. }
+        | PublicRequest::SplitClose { .. }
+        | PublicRequest::Checkpoint { .. }
+        | PublicRequest::Storage { .. }
+        | PublicRequest::Events => PublicReply::Error {
             code: ErrorCode::Internal,
             message: "split request was not handled by the split engine".into(),
         },
@@ -5858,7 +6603,14 @@ impl Client {
                 return Ok(Some(client));
             }
             if build_identity.is_some() {
-                client.shutdown_resident_after_probe()?;
+                client
+                    .shutdown_resident_after_probe()
+                    .map_err(|error| match error {
+                        DaemonError::Remote(message) if message == BUSY_LIFECYCLE_MESSAGE => {
+                            DaemonError::Remote(client.busy_advice(&message))
+                        }
+                        other => other,
+                    })?;
             } else {
                 let owner = verified_legacy_owner(&client, paths, &daemon_id)?;
                 rustix::process::kill_process(owner, rustix::process::Signal::TERM)
@@ -5867,6 +6619,59 @@ impl Client {
             wait_for_owner_release(paths)?;
         }
         Ok(None)
+    }
+
+    /// Why a daemon that refuses to be reset, stopped, or replaced cannot,
+    /// and the recovery that works, for a daemon whose own refusal does not
+    /// say (an older build's names nothing and has no release of the
+    /// sessions of clients that are gone): its pid and the attached
+    /// sessions, from its `Status`.
+    fn busy_advice(&self, refusal: &str) -> String {
+        let Ok(PublicReply::Status(status)) =
+            self.request(PublicRequest::Status { session_id: None })
+        else {
+            return refusal.to_owned();
+        };
+        let pid = status.endpoint_owner.pid;
+        let sessions = status
+            .shells
+            .iter()
+            .filter(|shell| shell.state == ShellState::Attached)
+            .map(|shell| {
+                format!(
+                    "pid {} in {} ({})",
+                    shell.pid,
+                    shell.project.display(),
+                    match process_identity(shell.pid, shell.process_started.as_deref()) {
+                        ProcessIdentity::Same => "running".to_owned(),
+                        ProcessIdentity::Gone => "gone".to_owned(),
+                        ProcessIdentity::Unverified => format!(
+                            "unverified: `ps -p {} -o command` shows what runs there",
+                            shell.pid
+                        ),
+                    }
+                )
+            })
+            .collect::<Vec<_>>();
+        // The daemon answered on this home's socket, so `pid` is it; say
+        // `kill` only when `ps` agrees that the pid is a marshd.
+        let is_daemon = ps_command("comm=", pid).output().is_ok_and(|output| {
+            Path::new(String::from_utf8_lossy(&output.stdout).trim()).file_name()
+                == Some(std::ffi::OsStr::new("marshd"))
+        });
+        let stop = if is_daemon {
+            format!("stop the daemon with `kill {pid}`")
+        } else {
+            format!("stop the daemon (verify pid {pid} first: `ps -p {pid} -o command`)")
+        };
+        format!(
+            "the marsh daemon of this home (pid {pid}) has {} attached and an older build does not release a session whose client is gone. If those clients are gone or can be lost, {stop}, then run `marsh status` (it starts a new one) and `marsh reset` or `marsh stop`: the VMs this home owns are removed then. Original refusal: {refusal}",
+            if sessions.is_empty() {
+                "sessions or jobs".to_owned()
+            } else {
+                sessions.join(", ")
+            }
+        )
     }
 
     fn shutdown_resident_after_probe(&self) -> Result<(), DaemonError> {
@@ -6363,6 +7168,13 @@ impl Client {
         }
     }
 
+    pub fn forget_cloud_create(&self, name: &str) -> Result<String, DaemonError> {
+        match self.request(PublicRequest::ForgetCloudCreate { name: name.into() })? {
+            PublicReply::SplitDone { message } => Ok(message),
+            reply => Err(unexpected_reply(reply)),
+        }
+    }
+
     pub fn reset_scope(&self) -> Result<ScopeLifecycleReport, DaemonError> {
         self.scope_lifecycle(PublicRequest::ResetScope)
     }
@@ -6428,6 +7240,9 @@ impl Client {
         };
         match reply {
             PublicReply::ScopeLifecycle(report) => Ok(report),
+            PublicReply::Error { message, .. } if message == BUSY_LIFECYCLE_MESSAGE => {
+                Err(DaemonError::Remote(self.busy_advice(&message)))
+            }
             reply => Err(unexpected_reply(reply)),
         }
     }

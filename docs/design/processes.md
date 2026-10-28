@@ -678,6 +678,10 @@ rendering itself when its stdout is a terminal.
   job through its link.
 - In the shell VM: `-b` runs STRING with the session shell (a child guest
   marsh attached to the same session, as Brush runs a shebang-less script).
+- On the host with the cwd in a split fork or lane's copy: no session shell
+  (it would mount the copy as a project, `workspaces.md` s14). Each argv
+  branch is `marsh run NAME ARG...` from the copy, so a registered name is a
+  confined lane job; other argv names and `-b` branches fail or are refused.
 - On the host: the same fanout runs in a session shell in the shell VM
   (`marsh -c 'exec marsh fanout …'`); the host picks the output form and
   passes `-n` when its stdin is a terminal.

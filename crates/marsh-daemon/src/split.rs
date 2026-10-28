@@ -19,7 +19,7 @@ use std::fs;
 use std::io::Write as _;
 use std::os::unix::net::UnixStream;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -77,6 +77,16 @@ pub struct SplitCreateSpec {
     /// explicit signal or `marsh splits cancel` cancels it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub detach: bool,
+    /// `split --open`: every branch is a lane (no command); the reply is
+    /// `SplitOpened` and the split stays `run` until `SplitClose`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub open: bool,
+    /// `split --from CHECKPOINT`: the checkpoint's tree is the base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// `split --open --label TEXT`: recorded on the split.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// Sent by the joiner after its consumer ends (`SplitRelease`).
@@ -155,8 +165,17 @@ pub struct BranchRecord {
     pub started_unix_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_unix_ms: Option<u64>,
+    /// Lane jobs admitted and not yet ended (journaled, so a restart knows
+    /// whether a lane job was live).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub live: u32,
     #[serde(skip)]
     spec: Option<BranchSpec>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if signature.
+fn is_zero(value: &u32) -> bool {
+    *value == 0
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -189,6 +208,24 @@ pub struct SplitRecord {
     /// When every branch had ended and been captured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_unix_ms: Option<u64>,
+    /// The checkpoint this split's base was cloned from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    /// When it became `kept`; it is removed 7 days later.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kept_unix_ms: Option<u64>,
+    /// An open lane split being closed or cancelled: journaled, so a restart
+    /// never reopens its lanes or captures one twice.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub closing: bool,
+    /// `marsh splits cancel` reached this split: journaled with `closing`, so
+    /// a restart still discards its detached cloud runs and writes nothing
+    /// back into its copies.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cancelled: bool,
+    /// The creator's label (`split --open --label TEXT`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// What `marsh jobs --tree` keeps of a split, also after it is joined and
@@ -316,6 +353,26 @@ impl SplitRecord {
         split_fs::open_split(&self.root, &self.id, self.identity)
     }
 
+    /// An `--open` split: its branches are lanes.
+    fn lanes(&self) -> bool {
+        self.branches.iter().all(|branch| branch.kind == "lane")
+    }
+
+    /// `marsh events`: `{"id","state","root","branches":[{"label","state","job_id"}]}`.
+    fn event(&self) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.id,
+            "state": self.state,
+            "root": self.root,
+            "label": self.label,
+            "branches": self.branches.iter().map(|branch| serde_json::json!({
+                "label": branch.label,
+                "state": branch.state,
+                "job_id": branch.job_id,
+            })).collect::<Vec<_>>(),
+        })
+    }
+
     fn manifest(&self) -> serde_json::Value {
         let mut value = serde_json::to_value(self).unwrap_or_default();
         value["version"] = 2.into();
@@ -369,6 +426,24 @@ struct Inner {
     uncertain_slots: BTreeMap<String, usize>,
     /// `jobs --tree` lineage of current and recently removed splits.
     lineage: BTreeMap<String, SplitLineage>,
+    /// The last `marsh events` line of each split.
+    published: BTreeMap<String, serde_json::Value>,
+    /// Lane splits a close or cancel is running on now (not journaled). A
+    /// `closing` split not here is one whose close stopped at a journal
+    /// write: a retried close or cancel resumes it.
+    closers: std::collections::BTreeSet<String>,
+}
+
+/// Ends a close's claim on its split (`Inner::closers`), however it ends.
+struct Closer<'a> {
+    engine: &'a SplitEngine,
+    id: &'a str,
+}
+
+impl Drop for Closer<'_> {
+    fn drop(&mut self) {
+        self.engine.lock().closers.remove(self.id);
+    }
 }
 
 /// The split kernel. One per daemon.
@@ -376,13 +451,27 @@ pub struct SplitEngine {
     inner: Mutex<Inner>,
     journal: PathBuf,
     client: Client,
+    events: Arc<crate::events::Bus>,
+    pub checkpoints: crate::checkpoint::Checkpoints,
+    /// How long a kept split is retained (7 days; tests shorten it).
+    kept_retention_ms: AtomicU64,
+    /// Every project that had a `.marsh` area made here, until its
+    /// `.marsh/.trash` is verified empty (`project-roots.json`).
+    roots: Mutex<std::collections::BTreeSet<PathBuf>>,
+    /// Serializes journal snapshots with their commits (`save_checked`).
+    saving: Mutex<()>,
 }
+
+/// Kept splits are removed this long after they were kept.
+const KEPT_RETENTION_MS: u64 = 7 * 24 * 60 * 60 * 1000;
+/// How long `close` waits for live lane jobs.
+const LANE_SETTLE: Duration = Duration::from_secs(30);
 
 fn unix_ms() -> u64 {
     crate::unix_time_ms()
 }
 
-fn new_id() -> String {
+pub(crate) fn new_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()[..12].to_owned()
 }
 
@@ -437,7 +526,7 @@ impl SplitEngine {
     /// Load the journal; every unfinished split becomes `uncertain` and its
     /// launched branches untrusted (`NoReplay`, `WorkspaceRecorded`).
     #[must_use]
-    pub fn open(journal_home: &Path, client: Client) -> Arc<Self> {
+    pub fn open(journal_home: &Path, client: Client, events: Arc<crate::events::Bus>) -> Arc<Self> {
         let journal = journal_home.join("splits.json");
         let mut records: BTreeMap<String, SplitRecord> = fs::read(&journal)
             .ok()
@@ -445,6 +534,25 @@ impl SplitEngine {
             .unwrap_or_default();
         for record in records.values_mut() {
             match record.state {
+                // A close or cancel the restart interrupted: its open lanes are
+                // uncertain (a capture may be half written), nothing deleted.
+                SplitState::Run if record.lanes() && record.closing => {
+                    for branch in &mut record.branches {
+                        if branch.state == BranchState::Running {
+                            branch.state = BranchState::Uncertain;
+                            branch.status =
+                                Some("uncertain: a restart interrupted its close".into());
+                            branch.trust = Some("untrusted".into());
+                        }
+                    }
+                    record.state = SplitState::Kept;
+                    record.closing = false;
+                    record.reason =
+                        Some("daemon restarted while closing; lanes left uncertain".into());
+                }
+                // An open lane split with no live lane job stays open.
+                SplitState::Run
+                    if record.lanes() && record.branches.iter().all(|branch| branch.live == 0) => {}
                 SplitState::Run => {
                     record.state = SplitState::Uncertain;
                     record.reason = Some("daemon restarted mid-split; nothing was resumed".into());
@@ -458,11 +566,24 @@ impl SplitEngine {
                 SplitState::Await | SplitState::Joined => record.state = SplitState::Kept,
                 _ => {}
             }
+            // `live` counts this daemon's lane admissions; a job from before
+            // the restart is an unconfirmed job receipt (`fork_jobs` `held`).
+            for branch in &mut record.branches {
+                branch.live = 0;
+            }
         }
         let lineage = fs::read(journal_home.join("split-lineage.json"))
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .unwrap_or_default();
+        let checkpoints = crate::checkpoint::Checkpoints::open(journal_home, Arc::clone(&events));
+        let roots_path = journal_home.join("project-roots.json");
+        let mut roots: std::collections::BTreeSet<PathBuf> = fs::read(&roots_path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        roots.extend(records.values().map(|record| record.root.clone()));
+        roots.extend(checkpoints.roots());
         let engine = Arc::new(Self {
             inner: Mutex::new(Inner {
                 records,
@@ -471,8 +592,15 @@ impl SplitEngine {
             }),
             journal,
             client,
+            events,
+            checkpoints,
+            kept_retention_ms: AtomicU64::new(KEPT_RETENTION_MS),
+            roots: Mutex::new(roots),
+            saving: Mutex::new(()),
         });
         engine.save();
+        let sweeper = Arc::clone(&engine);
+        thread::spawn(move || sweeper.sweep_trash());
         let lease = Arc::clone(&engine);
         thread::spawn(move || {
             loop {
@@ -481,6 +609,80 @@ impl SplitEngine {
             }
         });
         engine
+    }
+
+    /// Shorten how long kept splits are retained (tests).
+    pub fn set_kept_retention(&self, retention: Duration) {
+        self.kept_retention_ms.store(
+            u64::try_from(retention.as_millis()).unwrap_or(u64::MAX),
+            Ordering::Release,
+        );
+    }
+
+    /// Remember a project that gets a `.marsh` area, durably, before it is
+    /// made (its trash is swept at every start until forgotten).
+    ///
+    /// # Errors
+    /// The project list could not be journaled; nothing may be made there.
+    pub(crate) fn note_root(&self, root: &Path) -> std::io::Result<()> {
+        let mut roots = self
+            .roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if roots.contains(root) {
+            return Ok(());
+        }
+        let mut next = roots.clone();
+        next.insert(root.to_path_buf());
+        Self::write_durable(&self.journal.with_file_name("project-roots.json"), &next)?;
+        *roots = next;
+        Ok(())
+    }
+
+    /// Delete what interrupted removals left in each known project's
+    /// `.marsh/.trash`; forget a project with no splits, no checkpoints, and
+    /// an empty trash.
+    fn sweep_trash(&self) {
+        let roots = self
+            .roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let checkpointed = self.checkpoints.roots();
+        let done = roots
+            .into_iter()
+            .filter(|root| {
+                split_fs::sweep_trash(root)
+                    && !checkpointed.contains(root)
+                    && !self
+                        .lock()
+                        .records
+                        .values()
+                        .any(|record| &record.root == root)
+            })
+            .collect::<Vec<_>>();
+        // Forget under the roots lock, rechecked: a split or checkpoint made
+        // meanwhile keeps its project.
+        let mut roots = self
+            .roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let checkpointed = self.checkpoints.roots();
+        let mut next = roots.clone();
+        for root in done {
+            if !checkpointed.contains(&root)
+                && !self
+                    .lock()
+                    .records
+                    .values()
+                    .any(|record| record.root == root)
+            {
+                next.remove(&root);
+            }
+        }
+        if Self::write_durable(&self.journal.with_file_name("project-roots.json"), &next).is_ok() {
+            *roots = next;
+        }
     }
 
     /// This daemon's own endpoint (master token): splits and `ProcessRun`
@@ -495,11 +697,56 @@ impl SplitEngine {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Durable journal update: write, fsync, rename, fsync the directory.
-    /// The `jobs --tree` lineage follows every record and outlives it.
+    /// Durable journal update (`save_checked`); a failure is reported, and
+    /// the next save writes the then-current state again.
     fn save(&self) {
+        if let Err(error) = self.save_checked() {
+            eprintln!("marshd: could not journal splits: {error}");
+        }
+    }
+
+    /// Durable journal update: write, fsync, rename, fsync the directory.
+    /// Snapshot and commit are one serialized step, so a later state is never
+    /// overwritten by an earlier one. The `jobs --tree` lineage follows every
+    /// record and outlives it.
+    fn save_checked(&self) -> std::io::Result<()> {
+        let _saving = self
+            .saving
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (records, lineage) = {
             let mut inner = self.lock();
+            let now = unix_ms();
+            for record in inner.records.values_mut() {
+                if record.state == SplitState::Kept && record.kept_unix_ms.is_none() {
+                    record.kept_unix_ms = Some(now);
+                }
+            }
+            let mut changed = inner
+                .records
+                .values()
+                .map(|record| (record.id.clone(), record.event()))
+                .filter(|(id, event)| inner.published.get(id) != Some(event))
+                .collect::<Vec<_>>();
+            changed.extend(
+                inner
+                    .published
+                    .iter()
+                    .filter(|(id, _)| !inner.records.contains_key(*id))
+                    .map(|(id, last)| {
+                        let mut gone = last.clone();
+                        gone["state"] = "removed".into();
+                        (id.clone(), gone)
+                    }),
+            );
+            for (id, event) in changed {
+                if event["state"] == "removed" {
+                    inner.published.remove(&id);
+                } else {
+                    inner.published.insert(id, event.clone());
+                }
+                self.events.publish("split", &event);
+            }
             let updated = inner
                 .records
                 .values()
@@ -523,26 +770,40 @@ impl SplitEngine {
             }
             (inner.records.clone(), inner.lineage.clone())
         };
-        Self::write_durable(&self.journal, &records);
-        Self::write_durable(&self.journal.with_file_name("split-lineage.json"), &lineage);
+        Self::write_durable(&self.journal, &records)?;
+        Self::write_durable(&self.journal.with_file_name("split-lineage.json"), &lineage)
     }
 
-    fn write_durable(path: &Path, value: &impl Serialize) {
-        let Ok(bytes) = serde_json::to_vec(value) else {
-            return;
-        };
-        let temporary = path.with_extension("json.tmp");
-        let written = fs::File::create(&temporary).and_then(|mut file| {
-            file.write_all(&bytes)?;
-            file.sync_all()
-        });
-        if written.is_ok()
-            && fs::rename(&temporary, path).is_ok()
-            && let Some(parent) = path.parent()
-            && let Ok(directory) = fs::File::open(parent)
-        {
-            let _ = directory.sync_all();
+    /// Write `value` to `path` durably: a temporary file of its own, fsync,
+    /// rename, fsync the directory.
+    pub(crate) fn write_durable(path: &Path, value: &impl Serialize) -> std::io::Result<()> {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let bytes = serde_json::to_vec(value)?;
+        let temporary = path.with_extension(format!(
+            "json.{}.{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let written = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
+            .open(&temporary)
+            .and_then(|mut file| {
+                file.write_all(&bytes)?;
+                file.sync_all()
+            })
+            .and_then(|()| fs::rename(&temporary, path));
+        if let Err(error) = written {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
         }
+        if let Some(parent) = path.parent() {
+            fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
     }
 
     /// Current and recently removed splits for `jobs --tree`.
@@ -556,6 +817,24 @@ impl SplitEngine {
             change(record);
         }
         self.save();
+    }
+
+    /// Splits `marsh splits cancel` reached, from the journal: a restarted
+    /// daemon fences their copies against detached cloud write-back.
+    pub(crate) fn cancelled_ids(&self) -> Vec<String> {
+        self.lock()
+            .records
+            .values()
+            .filter(|record| record.cancelled || record.state == SplitState::Cancelled)
+            .map(|record| record.id.clone())
+            .collect()
+    }
+
+    /// Whether `caller` may close open lane split `id` (its creator, or the
+    /// host).
+    pub(crate) fn may_close(&self, caller: &Creator, id: &str) -> bool {
+        self.record(id)
+            .is_some_and(|record| caller == &Creator::Host || &record.creator == caller)
     }
 
     fn record(&self, id: &str) -> Option<SplitRecord> {
@@ -583,6 +862,37 @@ impl SplitEngine {
         }
         for id in expired {
             self.update(&id, |record| record.state = SplitState::Kept);
+        }
+        // A kept split past retention is claimed (its record removed) under
+        // the same lock `join` takes it with, so a join either wins first or
+        // never finds it.
+        let now = unix_ms();
+        let retention = self.kept_retention_ms.load(Ordering::Acquire);
+        let old = {
+            let mut inner = self.lock();
+            let ids = inner
+                .records
+                .values()
+                .filter(|record| {
+                    record.state == SplitState::Kept
+                        && record
+                            .kept_unix_ms
+                            .is_some_and(|kept| now.saturating_sub(kept) > retention)
+                        && record.branches.iter().all(|branch| {
+                            branch.state != BranchState::Uncertain && branch.live == 0
+                        })
+                })
+                .map(|record| record.id.clone())
+                .collect::<Vec<_>>();
+            ids.iter()
+                .filter_map(|id| inner.records.remove(id))
+                .collect::<Vec<_>>()
+        };
+        if !old.is_empty() {
+            self.save();
+        }
+        for record in old {
+            Self::remove_files(&record);
         }
     }
 
@@ -612,6 +922,59 @@ impl SplitEngine {
             Creator::Session(session) => &record.session == session || record.creator == *caller,
             Creator::Job(_) => record.creator == *caller,
         }
+    }
+
+    /// `marsh storage`: per project, checkpoints and kept splits (logical
+    /// bytes; APFS clones share blocks) and the volume's free space.
+    #[must_use]
+    pub fn storage(&self, root: Option<&Path>) -> serde_json::Value {
+        let records = self.lock().records.values().cloned().collect::<Vec<_>>();
+        let mut roots = records
+            .iter()
+            .map(|record| record.root.clone())
+            .chain(self.checkpoints.roots())
+            .filter(|candidate| root.is_none_or(|root| candidate == root))
+            .collect::<std::collections::BTreeSet<_>>();
+        if let Some(root) = root {
+            roots.insert(root.to_path_buf());
+        }
+        let projects = roots
+            .iter()
+            .map(|root| {
+                let checkpoints = self.checkpoints.list(Some(root), None);
+                let kept = records
+                    .iter()
+                    .filter(|record| {
+                        &record.root == root
+                            && matches!(record.state, SplitState::Kept | SplitState::Uncertain)
+                    })
+                    .map(|record| {
+                        let bytes = record.open().map_or(0, |dir| split_fs::logical_bytes(&dir));
+                        serde_json::json!({
+                            "id": record.id,
+                            "state": record.state,
+                            "bytes": bytes,
+                            "kept_unix_ms": record.kept_unix_ms,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let (free, total) = split_fs::volume_space(root).unwrap_or_default();
+                serde_json::json!({
+                    "root": root,
+                    "checkpoints": {
+                        "count": checkpoints.len(),
+                        "bytes": checkpoints.iter().map(|c| c.bytes).sum::<u64>(),
+                    },
+                    "kept_splits": {
+                        "count": kept.len(),
+                        "bytes": kept.iter().filter_map(|k| k["bytes"].as_u64()).sum::<u64>(),
+                        "splits": kept,
+                    },
+                    "volume": {"free_bytes": free, "total_bytes": total},
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({ "projects": projects })
     }
 
     /// `SplitShow`.
@@ -649,14 +1012,335 @@ impl SplitEngine {
         Ok(serde_json::json!({ "splits": splits }))
     }
 
-    /// `SplitCancel`: revoke and signal the subtree.
-    pub fn cancel_request(&self, caller: &Creator, id: &str) -> Result<(), DaemonError> {
+    /// `SplitCancel`: revoke and signal the subtree. An open lane split
+    /// admits no more lane jobs, cancels the live ones, and is removed once
+    /// their end is confirmed.
+    pub fn cancel_request(
+        self: &Arc<Self>,
+        caller: &Creator,
+        id: &str,
+        store: &DaemonStore,
+    ) -> Result<(), DaemonError> {
         let record = self
             .record(id)
             .filter(|record| Self::visible(record, caller))
             .ok_or_else(|| DaemonError::NotFound(format!("split {id}")))?;
-        self.cancel(&record.id, "marsh splits cancel");
+        if !record.lanes() {
+            self.cancel(&record.id, "marsh splits cancel");
+            return Ok(());
+        }
+        // An open lane split stops admitting lane jobs (journaled, and fenced
+        // at job creation and submission), then ends the live ones. A kept or
+        // uncertain one only has the lane jobs a close timed out on to end.
+        let open = {
+            let mut inner = self.lock();
+            let Inner {
+                records, closers, ..
+            } = &mut *inner;
+            match records.get_mut(id) {
+                Some(r) if r.state == SplitState::Run && closers.contains(id) => {
+                    return Err(DaemonError::InvalidState(format!(
+                        "split {id} is closing; wait for its close"
+                    )));
+                }
+                Some(r) if r.state == SplitState::Run => {
+                    r.closing = true;
+                    r.cancelled = true;
+                    store.fence_split(id);
+                    store.cancel_split(id);
+                    closers.insert(id.to_owned());
+                    true
+                }
+                found => {
+                    if let Some(r) = found {
+                        r.cancelled = true;
+                    }
+                    store.fence_split(id);
+                    store.cancel_split(id);
+                    false
+                }
+            }
+        };
+        if open {
+            if let Err(error) = self.save_checked() {
+                self.lock().closers.remove(id);
+                return Err(Self::unjournaled(id, &error));
+            }
+        } else {
+            self.save();
+        }
+        Self::cancel_lane_jobs(id, store);
+        if !open {
+            return Ok(());
+        }
+        let engine = Arc::clone(self);
+        let store = store.clone();
+        thread::spawn(move || {
+            let ended = engine.settle_lanes(&record.id, &store, CANCEL_GRACE + LANE_SETTLE, || {
+                Self::cancel_lane_jobs(&record.id, &store);
+            });
+            let reason = if ended.iter().all(|ended| *ended) {
+                format!(
+                    "cancelled; every lane ended; {}",
+                    Self::remove_files(&record)
+                )
+            } else {
+                format!(
+                    "cancelled; kept {} because a lane job did not end; run `marsh workers reset all`, inspect, then: marsh splits rm {}",
+                    record.dir.display(),
+                    record.id
+                )
+            };
+            engine.update(&record.id, |r| {
+                for (branch, ended) in r.branches.iter_mut().zip(&ended) {
+                    branch.finished_unix_ms = Some(unix_ms());
+                    branch.code = Some(130);
+                    if *ended {
+                        branch.state = BranchState::Cancelled;
+                        branch.status = Some("cancelled".into());
+                    } else {
+                        branch.state = BranchState::Uncertain;
+                        branch.status = Some("uncertain: lane jobs did not end".into());
+                        branch.trust = Some("untrusted".into());
+                    }
+                }
+                r.state = SplitState::Cancelled;
+                r.status = Some(130);
+                r.finished_unix_ms = Some(unix_ms());
+                r.reason = Some(reason);
+                r.closing = false;
+            });
+            engine.lock().closers.remove(&record.id);
+        });
         Ok(())
+    }
+
+    /// A close or cancel whose journal write failed. It is not undone: the
+    /// split stays fenced and `closing` in memory, and repeating the request
+    /// resumes it. A restart keeps it (lanes uncertain) only once `closing`
+    /// reached `splits.json`; if the first write failed, disk says open.
+    fn unjournaled(id: &str, error: &std::io::Error) -> DaemonError {
+        DaemonError::InvalidState(format!(
+            "split {id}: could not journal the close ({error}); it admits no more lane jobs; run `marsh split close {id}` or `marsh splits cancel {id}` again"
+        ))
+    }
+
+    /// Cancel every live job in a fork of split `id` not already cancelled
+    /// (a lane job whose Kit was still being prepared appears later).
+    fn cancel_lane_jobs(id: &str, store: &DaemonStore) {
+        for job in store.fork_jobs(id, None).live {
+            if !store.cancel_requested(&job) {
+                store.cancel_tree(&job, true);
+            }
+        }
+    }
+
+    /// Wait up to `limit` until no lane job of split `id` is live; per lane,
+    /// whether its jobs all ended with confirmed cleanup.
+    fn settle_lanes(
+        &self,
+        id: &str,
+        store: &DaemonStore,
+        limit: Duration,
+        tick: impl Fn(),
+    ) -> Vec<bool> {
+        let deadline = Instant::now() + limit;
+        let live = |label: &str| {
+            self.record(id).is_some_and(|record| {
+                record
+                    .branches
+                    .iter()
+                    .any(|branch| branch.label == label && branch.live > 0)
+            }) || !store.fork_jobs(id, Some(label)).live.is_empty()
+        };
+        let labels = self
+            .record(id)
+            .map(|record| {
+                record
+                    .branches
+                    .iter()
+                    .map(|b| b.label.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        while Instant::now() < deadline && labels.iter().any(|label| live(label)) {
+            tick();
+            thread::sleep(Duration::from_millis(100));
+        }
+        labels
+            .iter()
+            .map(|label| !live(label) && store.fork_jobs(id, Some(label)).uncertain == 0)
+            .collect()
+    }
+
+    /// Admit a Kit job whose cwd is in fork `label` of split `id`. For an open
+    /// lane split, only while it is `run`, not closing, and only for its
+    /// creator; the guard counts the job as live until it ends. Other splits'
+    /// forks keep their existing rules (`Ok(None)`).
+    ///
+    /// # Errors
+    /// Returns why the lane does not admit the job.
+    pub fn admit_lane(
+        self: &Arc<Self>,
+        caller: &Creator,
+        id: &str,
+        label: &str,
+    ) -> Result<Option<LaneGuard>, String> {
+        let index = {
+            let mut inner = self.lock();
+            let Some(record) = inner.records.get_mut(id).filter(|record| record.lanes()) else {
+                return Ok(None);
+            };
+            if record.state != SplitState::Run || record.closing {
+                return Err(format!(
+                    "split {id} is closed; its lanes admit no more jobs"
+                ));
+            }
+            if &record.creator != caller {
+                return Err(format!(
+                    "split {id}: only its creator can run jobs in its lanes"
+                ));
+            }
+            let index = record
+                .branches
+                .iter()
+                .position(|branch| branch.label == label && branch.state == BranchState::Running)
+                .ok_or_else(|| format!("split {id} has no open lane {label}"))?;
+            record.branches[index].live += 1;
+            index
+        };
+        self.save();
+        Ok(Some(LaneGuard {
+            engine: Arc::clone(self),
+            split: id.to_owned(),
+            index,
+        }))
+    }
+
+    /// `SplitClose`: stop admitting lane jobs, wait up to 30 s for live ones,
+    /// capture every lane as a branch is captured, and keep the split.
+    ///
+    /// # Errors
+    /// Returns why the split cannot be closed.
+    #[allow(clippy::too_many_lines)] // One close, admission to manifest, in model order.
+    pub fn close(
+        &self,
+        caller: &Creator,
+        id: &str,
+        store: &DaemonStore,
+    ) -> Result<serde_json::Value, DaemonError> {
+        {
+            let mut inner = self.lock();
+            let Inner {
+                records, closers, ..
+            } = &mut *inner;
+            let record = records
+                .get_mut(id)
+                .filter(|record| caller == &Creator::Host || &record.creator == caller)
+                .ok_or_else(|| DaemonError::NotFound(format!("split {id}")))?;
+            if !record.lanes() || record.state != SplitState::Run {
+                return Err(DaemonError::InvalidState(format!(
+                    "split {id} is not an open lane split"
+                )));
+            }
+            if closers.contains(id) {
+                return Err(DaemonError::InvalidState(format!(
+                    "split {id} is already closing"
+                )));
+            }
+            // One admission step: no lane job is admitted (`admit_lane`
+            // checks `closing` under this lock), recorded, or submitted
+            // (the store's fence) once this returns; the journal follows.
+            // Never undone: a close stopped at the journal is resumed by
+            // repeating it.
+            record.closing = true;
+            store.fence_split(id);
+            closers.insert(id.to_owned());
+        }
+        let _closer = Closer { engine: self, id };
+        self.save_checked()
+            .map_err(|error| Self::unjournaled(id, &error))?;
+        let settled = Instant::now();
+        let ended = self.settle_lanes(id, store, LANE_SETTLE, || {});
+        let record = self
+            .record(id)
+            .ok_or_else(|| DaemonError::NotFound(format!("split {id}")))?;
+        let split = record.open();
+        for (index, ended) in ended.iter().enumerate() {
+            let branch = &record.branches[index];
+            // A lane captured by a close that a restart interrupted stays so.
+            if branch.state != BranchState::Running {
+                continue;
+            }
+            let out = split.as_ref().ok().and_then(|split| {
+                split
+                    .open("out")
+                    .and_then(|out| out.open(&branch.label))
+                    .ok()
+            });
+            let captured = Instant::now();
+            let (state, status, code, files) = match &split {
+                Err(why) => (BranchState::Rejected, format!("rejected: {why}"), 125, 0),
+                Ok(_) if !ended => (
+                    BranchState::Uncertain,
+                    "uncertain: lane jobs did not end".to_owned(),
+                    125,
+                    0,
+                ),
+                Ok(split) => match Self::capture(&record, branch, split, out.as_ref()) {
+                    Ok(files) => (BranchState::Captured, "closed".to_owned(), 0, files),
+                    Err(why) => {
+                        let _ = split_fs::remove_verified(split, &branch.label, branch.identity);
+                        if let Ok(admin) = split.open(".admin") {
+                            let _ = admin.remove_tree(&branch.label);
+                        }
+                        (BranchState::Rejected, format!("rejected: {why}"), 125, 0)
+                    }
+                },
+            };
+            if let Some(out) = &out {
+                let _ = out.write_new("status", format!("{status}\n").as_bytes());
+            }
+            let capture_ms = u64::try_from(captured.elapsed().as_millis()).unwrap_or(u64::MAX);
+            self.update(id, |r| {
+                let b = &mut r.branches[index];
+                b.state = state;
+                b.status = Some(status);
+                b.code = Some(code);
+                b.files = files;
+                b.finished_unix_ms = Some(unix_ms());
+                if state == BranchState::Uncertain {
+                    b.trust = Some("untrusted".into());
+                }
+                r.timing_ms
+                    .insert(format!("capture:{}", b.label), capture_ms);
+            });
+        }
+        let run_ms = u64::try_from(settled.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.update(id, |r| {
+            r.timing_ms.insert("close".into(), run_ms);
+            r.status = Some(
+                r.branches
+                    .iter()
+                    .find_map(|branch| branch.code.filter(|code| *code != 0))
+                    .unwrap_or(0),
+            );
+            r.state = SplitState::Kept;
+            r.closing = false;
+            r.finished_unix_ms = Some(unix_ms());
+            if split.is_err() {
+                r.reason = Some("workspace replaced".into());
+            }
+        });
+        let record = self
+            .record(id)
+            .ok_or_else(|| DaemonError::NotFound(format!("split {id}")))?;
+        if let Ok(split) = &split {
+            let _ = split.open("out").and_then(|out| {
+                out.write_new("manifest.json", record.manifest().to_string().as_bytes())
+            });
+        }
+        Ok(record.manifest())
     }
 
     fn children(&self, split: &str, label: Option<&str>) -> Vec<String> {
@@ -728,36 +1412,58 @@ impl SplitEngine {
     }
 
     /// `SplitRemove`: the creator's own non-running split; any for the host.
-    pub fn remove(&self, caller: &Creator, id: &str) -> Result<String, DaemonError> {
-        let record = self
-            .record(id)
-            .filter(|record| caller == &Creator::Host || &record.creator == caller)
-            .ok_or_else(|| DaemonError::NotFound(format!("split {id}")))?;
-        if matches!(record.state, SplitState::Run | SplitState::Joined) {
-            return Err(DaemonError::InvalidState(format!(
-                "split {id} is {:?}; cancel it first",
-                record.state
-            )));
-        }
-        let gone = record.state == SplitState::Cancelled
-            && split_fs::splits_dir(&record.root, false)
-                .and_then(|splits| splits.stat(&record.id))
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound);
-        let message = if gone {
-            format!("forgot cancelled split {id} (its files were already removed)")
-        } else {
-            Self::remove_files(&record)
-        };
-        {
+    pub fn remove(
+        &self,
+        caller: &Creator,
+        id: &str,
+        store: &DaemonStore,
+    ) -> Result<String, DaemonError> {
+        // Never remove a fork a job may still write (`NoRemoveWhileLive`):
+        // a lane job a close timed out on runs until it is cancelled, and
+        // one whose end was never confirmed until its Kit is reset. The
+        // checks and the claim are one step under the lock `join` takes, so
+        // a concurrent join (or `split apply`) either wins or finds it gone.
+        let jobs = store.fork_jobs(id, None);
+        let record = {
             let mut inner = self.lock();
-            inner.records.remove(id);
+            let record = inner
+                .records
+                .get(id)
+                .filter(|record| caller == &Creator::Host || &record.creator == caller)
+                .ok_or_else(|| DaemonError::NotFound(format!("split {id}")))?;
+            if matches!(record.state, SplitState::Run | SplitState::Joined) {
+                return Err(DaemonError::InvalidState(format!(
+                    "split {id} is {:?}; cancel it first",
+                    record.state
+                )));
+            }
+            if record.branches.iter().any(|branch| branch.live > 0) || !jobs.live.is_empty() {
+                return Err(DaemonError::InvalidState(format!(
+                    "split {id} still has a running lane job; end it with `marsh splits cancel {id}`, then remove it"
+                )));
+            }
+            if record.lanes() && jobs.held > 0 {
+                return Err(DaemonError::InvalidState(format!(
+                    "split {id} has a lane job whose end was not confirmed; run `marsh workers reset all`, then remove it"
+                )));
+            }
+            let record = inner.records.remove(id).unwrap_or_else(|| unreachable!());
             // `jobs --tree` keeps the lineage; record that it was removed.
             if let Some(lineage) = inner.lineage.get_mut(id) {
                 lineage.state = "removed".into();
             }
-        }
+            record
+        };
         self.save();
-        Ok(message)
+        let gone = record.state == SplitState::Cancelled
+            && split_fs::splits_dir(&record.root, false)
+                .and_then(|splits| splits.stat(&record.id))
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound);
+        Ok(if gone {
+            format!("forgot cancelled split {id} (its files were already removed)")
+        } else {
+            Self::remove_files(&record)
+        })
     }
 
     fn remove_files(record: &SplitRecord) -> String {
@@ -783,34 +1489,44 @@ impl SplitEngine {
         caller: &Creator,
         id: &str,
     ) -> Result<(), DaemonError> {
-        let Some(record) = self.record(id) else {
-            return error(&mut stream, format!("no split {id}"));
-        };
-        if &record.creator != caller {
-            return error(
-                &mut stream,
-                format!("split {id}: only its creator can join it"),
-            );
-        }
         // A split still running (started with `marsh split -d`): wait for it.
-        let mut record = record;
-        while record.state == SplitState::Run {
-            thread::sleep(Duration::from_millis(500));
-            match self.record(id) {
-                Some(current) => record = current,
-                None => return error(&mut stream, format!("no split {id}")),
+        // The move to `joined` is one locked step, so the kept-split
+        // collector either removed it first or never will while joined.
+        let record = loop {
+            let joined = {
+                let mut inner = self.lock();
+                let Some(record) = inner.records.get_mut(id) else {
+                    return error(&mut stream, format!("no split {id}"));
+                };
+                if &record.creator != caller {
+                    return error(
+                        &mut stream,
+                        format!("split {id}: only its creator can join it"),
+                    );
+                }
+                match record.state {
+                    SplitState::Run => None,
+                    SplitState::Await | SplitState::Kept
+                        if record.reason.as_deref() != Some("workspace replaced") =>
+                    {
+                        let before = record.clone();
+                        record.state = SplitState::Joined;
+                        record.kept_unix_ms = None;
+                        Some(Ok(before))
+                    }
+                    SplitState::Await | SplitState::Kept => {
+                        Some(Err(format!("split {id}: workspace replaced")))
+                    }
+                    state => Some(Err(format!("split {id} is {state:?}; nothing to join"))),
+                }
+            };
+            match joined {
+                Some(Ok(record)) => break record,
+                Some(Err(message)) => return error(&mut stream, message),
+                None => thread::sleep(Duration::from_millis(500)),
             }
-        }
-        if !matches!(record.state, SplitState::Await | SplitState::Kept) {
-            return error(
-                &mut stream,
-                format!("split {id} is {:?}; nothing to join", record.state),
-            );
-        }
-        if record.reason.as_deref() == Some("workspace replaced") {
-            return error(&mut stream, format!("split {id}: workspace replaced"));
-        }
-        self.update(id, |record| record.state = SplitState::Joined);
+        };
+        self.save();
         // One reply frame carries the rendering; `out/` keeps everything.
         let mut rendering = render(&record);
         if rendering.len() > RENDER_REPLY_LIMIT {
@@ -882,7 +1598,7 @@ impl SplitEngine {
         }
         let _detach =
             Detach((caller == Creator::Host).then(|| (store, spec.session.session_id.clone())));
-        let plan = match self.plan(&caller, &spec, backend) {
+        let plan = match self.plan(&caller, &spec, backend, store) {
             Ok(plan) => plan,
             Err(message) => return error(&mut stream, message),
         };
@@ -903,10 +1619,31 @@ impl SplitEngine {
             }
         }
         let id = new_id();
+        if let Err(why) = self.note_root(&plan.project) {
+            return error(
+                &mut stream,
+                format!(
+                    "split: could not journal the project {}: {why}",
+                    plan.project.display()
+                ),
+            );
+        }
         let record = match setup(&id, &caller, &spec, plan) {
             Ok(record) => record,
             Err(message) => return error(&mut stream, format!("split: {message}")),
         };
+        if spec.open {
+            // Lanes run no command: the split stays `run` until `SplitClose`,
+            // with no lease, deadline, or create stream.
+            self.lock().records.insert(id.clone(), record.clone());
+            self.save();
+            let lanes = record
+                .branches
+                .iter()
+                .map(|branch| (branch.label.clone(), branch.fork.clone()))
+                .collect();
+            return write_frame(&mut stream, &PublicReply::SplitOpened { id, lanes });
+        }
         let runtime = Arc::new(Runtime::default());
         {
             let mut inner = self.lock();
@@ -1109,32 +1846,101 @@ impl SplitEngine {
     }
 
     /// Admission before any effect: labels, caps, depth, registered argv.
+    #[allow(clippy::too_many_lines)] // Admission before any effect, in one place.
     fn plan(
         &self,
         caller: &Creator,
         spec: &SplitCreateSpec,
         backend: &dyn DaemonBackend,
-    ) -> Result<Plan, String> {
+        store: &DaemonStore,
+    ) -> Result<Plan<'_>, String> {
         if spec.branches.is_empty() {
             return Err("split: no branches".into());
+        }
+        match &spec.label {
+            Some(_) if !spec.open => return Err("split: --label is for an --open split".into()),
+            Some(label) if !crate::valid_label(label) => {
+                return Err("split: a label is 1 to 128 bytes with no control characters".into());
+            }
+            _ => {}
         }
         if spec.branches.len() > MAX_BRANCHES {
             return Err(format!("split: at most {MAX_BRANCHES} branches"));
         }
-        // Any job may split (`docs/design/processes.md` s7): a branch job's split
-        // nests in its fork; a top-level job's split snapshots its project.
-        let nested = self.creator_branch(caller);
-        let registered = backend.registered_commands().map_err(|e| e.to_string())?;
+        // Any job may split (`docs/design/processes.md` s7). What it may
+        // snapshot is its own view, from its recorded mounts, never its cwd:
+        // a job whose mounts name a fork (a branch job, a lane job, or any
+        // descendant, which copies its parent's mounts) splits only that
+        // fork; a lane job not at all. Only an unconfined job splits its project.
+        let fork = match caller {
+            Creator::Job(job) => store
+                .job(job)
+                .ok()
+                .and_then(|job| crate::JobLineage::split_of(&job.mounts)),
+            Creator::Host | Creator::Session(_) => None,
+        };
+        let nested = match fork {
+            Some((split, label)) => {
+                let record = self
+                    .record(&split)
+                    .ok_or_else(|| format!("split: this job's fork (split {split}) is gone"))?;
+                if record.lanes() {
+                    return Err(
+                        "split: a job in a lane cannot start a split; split from the host or a session shell"
+                            .into(),
+                    );
+                }
+                let index = record
+                    .branches
+                    .iter()
+                    .position(|branch| branch.label == label)
+                    .ok_or_else(|| format!("split: split {split} has no branch {label}"))?;
+                Some((record, index))
+            }
+            None => self.creator_branch(caller),
+        };
+        let registered = if spec.branches.iter().any(|branch| branch.argv.is_some()) {
+            backend.registered_commands().map_err(|e| e.to_string())?
+        } else {
+            Vec::new()
+        };
         // A job's split is nested too: argv branches only. A shell branch is
         // a session shell with the session's full spawn set, so a job (on
         // its capability socket) must never create one (s13 resolution 6).
-        check_branches(
-            &spec.branches,
-            nested.is_some() || matches!(caller, Creator::Job(_)),
-            &registered,
-        )?;
+        let nested_caller = nested.is_some() || matches!(caller, Creator::Job(_));
+        if nested_caller && (spec.open || spec.from.is_some()) {
+            return Err(
+                "split: --open and --from are for the host or a session shell, not a job or a split branch"
+                    .into(),
+            );
+        }
+        check_branches(&spec.branches, nested_caller, spec.open, &registered)?;
         let project = spec.session.launch_directory.clone();
-        let (parent, depth, source, pool, git) = if let Some((parent, index)) = nested {
+        let (parent, depth, source, pool, git) = if let Some(from) = &spec.from {
+            let (checkpoint, lease) = self
+                .checkpoints
+                .lease(&project, from)
+                .ok_or_else(|| format!("split: no checkpoint {from} in {}", project.display()))?;
+            let dir = checkpoint.open()?;
+            let git = checkpoint
+                .git
+                .then(|| {
+                    split_fs::saved_git(&dir.open("git").map_err(|e| e.to_string())?, &project)
+                })
+                .transpose()?;
+            let pool = if *caller == Creator::Host {
+                HOST_POOL.to_owned()
+            } else {
+                spec.session.session_id.clone()
+            };
+            (
+                None,
+                1,
+                Source::Checkpoint(project.clone(), dir, lease),
+                pool,
+                git,
+            )
+        } else if let Some((parent, index)) = nested {
             if parent.depth + 1 > MAX_DEPTH {
                 return Err(format!(
                     "split: depth limit {MAX_DEPTH} reached (this split would be depth {})",
@@ -1425,6 +2231,7 @@ impl SplitEngine {
                 session: session_spec(&session_id, &authority),
                 dev: false,
                 terminal_environment: std::collections::BTreeMap::new(),
+                working_directory: None,
             };
             let result = self
                 .client
@@ -1445,6 +2252,8 @@ impl SplitEngine {
         } else {
             let argv = spec.argv.clone().unwrap_or_default();
             let spec = ExecuteSpec {
+                label: None,
+                kit: None,
                 command: String::from_utf8_lossy(&argv[0]).into_owned(),
                 arguments: argv[1..].to_vec(),
                 placement: crate::Placement::Local,
@@ -1465,6 +2274,7 @@ impl SplitEngine {
                     branch: true,
                     start_env: std::collections::BTreeMap::new(),
                 }),
+                acp: false,
             };
             let execution = self
                 .client
@@ -1551,11 +2361,29 @@ impl SplitEngine {
     }
 }
 
+/// A lane job admitted by [`SplitEngine::admit_lane`]; dropped when it ends.
+pub struct LaneGuard {
+    engine: Arc<SplitEngine>,
+    split: String,
+    index: usize,
+}
+
+impl Drop for LaneGuard {
+    fn drop(&mut self) {
+        self.engine.update(&self.split, |record| {
+            if let Some(branch) = record.branches.get_mut(self.index) {
+                branch.live = branch.live.saturating_sub(1);
+            }
+        });
+    }
+}
+
 /// Reject bad labels, shell branches in nested splits, and unregistered or
 /// `:::`-carrying argv before any effect.
 fn check_branches(
     branches: &[BranchSpec],
     nested: bool,
+    open: bool,
     registered: &[String],
 ) -> Result<(), String> {
     let mut seen = Vec::<String>::new();
@@ -1575,6 +2403,8 @@ fn check_branches(
         }
         seen.push(folded);
         match (&branch.shell, &branch.argv) {
+            (None, None) if open => {}
+            _ if open => return Err("split: --open takes lane labels only".into()),
             (Some(_), None) if nested => {
                 return Err(format!(
                     "split: {}: shell branches (-b, split {{ }}) run only from the session shell; \
@@ -1642,8 +2472,15 @@ pub fn plural(count: usize, one: &str, many: &str) -> String {
 }
 
 /// The caller's tree a split snapshots.
-enum Source {
+enum Source<'a> {
     Project(PathBuf),
+    /// The project, and the checkpoint whose `tree` is cloned as the base.
+    /// The lease keeps retention and `rm` off it until the base is cloned.
+    Checkpoint(
+        PathBuf,
+        Dir,
+        #[allow(dead_code)] crate::checkpoint::CheckpointLease<'a>,
+    ),
     Fork {
         root: PathBuf,
         id: String,
@@ -1653,16 +2490,17 @@ enum Source {
     },
 }
 
-impl Source {
+impl Source<'_> {
     fn path(&self) -> &Path {
         match self {
-            Self::Project(path) | Self::Fork { path, .. } => path,
+            Self::Project(path) | Self::Checkpoint(path, ..) | Self::Fork { path, .. } => path,
         }
     }
 
     fn open(&self) -> Result<Dir, String> {
         match self {
             Self::Project(path) => Dir::open_root(path).map_err(|e| e.to_string()),
+            Self::Checkpoint(_, dir, _) => dir.dup().map_err(|e| e.to_string()),
             Self::Fork {
                 root,
                 id,
@@ -1676,9 +2514,9 @@ impl Source {
     }
 }
 
-struct Plan {
+struct Plan<'a> {
     project: PathBuf,
-    source: Source,
+    source: Source<'a>,
     relative: PathBuf,
     parent: Option<Parent>,
     depth: u32,
@@ -1722,11 +2560,17 @@ fn setup(
     let mut admin_digest = BTreeMap::new();
     let result = (|| -> Result<Vec<BranchRecord>, String> {
         let source = plan.source.open()?;
-        split_fs::snapshot(
-            &source,
-            &split.create("base").map_err(io)?,
-            plan.git.as_ref(),
-        )?;
+        if let Source::Checkpoint(..) = plan.source {
+            source
+                .clone_to("tree".as_ref(), &split, "base".as_ref())
+                .map_err(io)?;
+        } else {
+            split_fs::snapshot(
+                &source,
+                &split.create("base").map_err(io)?,
+                plan.git.as_ref(),
+            )?;
+        }
         lap("snapshot");
         split
             .create("store.git")
@@ -1763,15 +2607,20 @@ fn setup(
                 split_fs::write_admin(git, contents, &admin, &admin_path, &fork).map_err(io)?;
             }
             out.create(label).map_err(io)?;
-            let (kind, placement) = match &branch.argv {
-                Some(argv) => ("argv", format!("kit:{}", String::from_utf8_lossy(&argv[0]))),
-                None => ("shell", "shell-vm".to_owned()),
+            let (kind, placement) = match (&branch.argv, &branch.shell) {
+                (Some(argv), _) => ("argv", format!("kit:{}", String::from_utf8_lossy(&argv[0]))),
+                (None, Some(_)) => ("shell", "shell-vm".to_owned()),
+                (None, None) => ("lane", "lane".to_owned()),
             };
             branches.push(BranchRecord {
                 label: branch.label.clone(),
                 kind: kind.into(),
                 placement,
-                state: BranchState::Pending,
+                state: if spec.open {
+                    BranchState::Running
+                } else {
+                    BranchState::Pending
+                },
                 status: None,
                 code: None,
                 job_id: None,
@@ -1780,8 +2629,9 @@ fn setup(
                 fork: dir.join(label),
                 identity: fork_identity,
                 forked_ns,
-                started_unix_ms: None,
+                started_unix_ms: spec.open.then(unix_ms),
                 finished_unix_ms: None,
+                live: 0,
                 spec: Some(branch.clone()),
             });
         }
@@ -1814,6 +2664,11 @@ fn setup(
         branches,
         timing_ms,
         finished_unix_ms: None,
+        from: spec.from.clone(),
+        kept_unix_ms: None,
+        closing: false,
+        cancelled: false,
+        label: spec.label.clone(),
     })
 }
 
@@ -2093,6 +2948,7 @@ impl LocalSplit {
                     forked_ns,
                     started_unix_ms: Some(unix_ms()),
                     finished_unix_ms: None,
+                    live: 0,
                     spec: None,
                 });
             }
@@ -2125,6 +2981,11 @@ impl LocalSplit {
                 branches,
                 timing_ms: BTreeMap::new(),
                 finished_unix_ms: None,
+                from: None,
+                kept_unix_ms: None,
+                closing: false,
+                cancelled: false,
+                label: None,
             },
         })
     }

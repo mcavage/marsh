@@ -6,8 +6,9 @@ The model is `docs/model/Workspace.tla`.
 
 Sections 1–8 describe the implementation. Section 9 records the model scope,
 section 10 non-goals and v1 limits, section 11 the acceptance requirements,
-section 12 creator identity and JSON shapes, and section 13 implementation
-bounds and process integration.
+section 12 creator identity and JSON shapes, section 13 implementation
+bounds and process integration, and section 14 open lanes, checkpoints, and
+storage.
 
 ## 1. Concepts and trust
 
@@ -129,6 +130,9 @@ stream, and a dropped stream cancels the split, unless it was created with
 | `SplitCancel` | relay | `split` -> ack once the subtree is revoked and signalled. The session may cancel any of its splits; a shell branch may cancel splits below it |
 | `SplitShow` | relay | `split?` -> manifest + subtree, or every split in scope |
 | `SplitRemove` | relay | `split` -> removes a kept split (creator or operator) |
+| `SplitClose` | relay, socket | `split` -> closes an open lane split: manifest (s14) |
+| `Checkpoint` | relay, socket | `root?` (a relay's is its session project), `create {label}` / `list {label}` / `remove {id}` (s14) |
+| `Storage` | relay, socket | `root?` -> per-project checkpoints, kept splits, free space (s14) |
 
 For splits, the job capability socket admits `SplitCreate` and `SplitJoin`,
 not show, cancel, or remove. Every Kit job now has the socket; the complete
@@ -278,6 +282,11 @@ public state strings.
   and never `HEAD`. Capture also rejects any admin entry outside Git's own
   state files (`commondir`, `gitdir`, `config.worktree`, `hooks`, ...). An
   ordinary (unconfined) Kit job gets `<root>/.marsh` as a read-only bind.
+  A Kit job whose project root itself lies inside a `.marsh` directory (a
+  shell opened in a fork) is refused: it would mount the fork as a project
+  without its Git metadata and with a writable gitfile. A host command run
+  in a fork (`marsh run`, `split`) instead takes the split's root as its
+  project and the fork as its working directory, so it is confined.
 - **Capture verification**: the gitfile and admin files must be
   byte-identical to what the daemon wrote, and the fork may contain no
   nested `.git` entry at any depth. If either check fails, the branch is
@@ -302,9 +311,11 @@ ones argv-only), snapshots from the caller's tree, trusted shell branches
 (C1) and adversarial Kit branches (they write anything mounted, including
 a nested `.git`), the session pool, creator-only join, ancestor and
 session cancel, exit cascade, capture after confirmed exit with
-verification, the lease with kept-and-joinable, and one daemon crash
-between any two steps. It checks 16 invariants plus `EventuallySettled`,
-split across four positive configs to stay tractable (`model/README.md`).
+verification, the lease with kept-and-joinable, open lanes (any number of
+Kit jobs per lane, admitted only while open, close before capture), a
+checkpoint as an immutable snapshot source, and one daemon crash between
+any two steps. It checks 17 invariants plus `EventuallySettled`, split
+across five positive configs to stay tractable (`model/README.md`).
 Each negative control removes one guard in a real action. Not modeled: C1
 itself, Git, bytes, and dir identity.
 
@@ -430,6 +441,11 @@ is 130. `split` exits with the first nonzero code in declaration order.
    - placement-bound or host-only variables;
    - credential-shaped names (`*KEY*`, `*SECRET*`, `*PASS*`, `*TOKEN*`,
     `*CREDENTIAL*`, `*COOKIE*`, `AWS_*`, `*_PAT`).
+   The match is deliberately by substring, ignoring case: it also drops
+   ordinary names such as `KEYMAP` or `BYPASS_PROXY`. A dropped variable is
+   one the branch must be given another way; a credential that slipped
+   through would sit in an agent's VM. Host-only values (`TMPDIR`, `PWD`,
+   `SHELL`, ...) name Mac paths and are wrong in a VM.
 - **Capability socket.**
   - It admits at most 12 open connections per attempt, including idle ones;
     an excess connection receives a refusal frame.
@@ -447,8 +463,211 @@ is 130. `split` exits with the first nonzero code in declaration order.
   `.marsh/.trash` through descriptors, after the identity check, and
   deleted in the background. Bare `join` escapes control bytes when its
   stdout is a terminal.
-- **Retention.** Kept splits are not collected automatically. `marsh
-  splits` lists them with their state and creation time, and `marsh splits
-  rm ID` removes one (the host can remove any).
+- **Retention.** A kept split is removed 7 days after it was kept
+  (`kept_unix_ms`), unless a branch is uncertain. `marsh splits` lists kept
+  splits with their state and times, and `marsh splits rm ID` removes one
+  now (the host can remove any). Removals go through `.marsh/.trash`, which
+  the daemon sweeps at startup for every project it has journaled.
 - **Kit VM limit.** Splits add no Kit VM cap of their own. Process admission
   caps distinct live Kit VMs per job tree (`processes.md`, section 6).
+
+## 14. Open lanes, checkpoints, and storage
+
+**Checkpoints.** `marsh checkpoint [--label TEXT] [--json]` snapshots the
+project exactly as a split's `base/` is made (section 8) into
+`<root>/.marsh/checkpoints/<id>/tree`, and saves the Git metadata a fork needs
+(resolved `HEAD`, `index`, `packed-refs`, `info/exclude`) in `<id>/git`. The
+daemon journals each checkpoint (`checkpoints.json` in the control directory,
+with the directory's identity) and reaches its files only by descriptor.
+
+- Retention runs on every create and at daemon start: the newest 20 per
+  label (unlabeled checkpoints are one label), none older than 7 days, at
+  most 200 per project. A retired checkpoint goes to `.marsh/.trash`.
+- A create is refused with exit 75 when the volume has less than 5 GiB or
+  less than 5% free.
+- Creating anything under `.marsh` marks it excluded from Time Machine (the
+  sticky `com.apple.metadata:com_apple_backup_excludeItem` attribute) and
+  adds `.metadata_never_index`.
+- A checkpoint is immutable: no job mounts it (`CheckpointImmutable`), and a
+  Kit job whose cwd is in one is refused like any non-fork path under
+  `.marsh`.
+- `marsh checkpoints [--json] [--label TEXT]` lists them newest first
+  (`{"checkpoints":[{"checkpoint","label","created_unix_ms","root","dir","bytes"}]}`);
+  `marsh checkpoints rm ID` removes one.
+- A split being made `--from` a checkpoint leases it until its `base/` is
+  cloned: retention passes over a leased checkpoint (the next pass retires
+  it), and `rm` of one fails with "in use by a split being made from it;
+  retry".
+- Every project that gets a `.marsh` area is journaled
+  (`project-roots.json`) before the area is made; at daemon start each
+  one's `.marsh/.trash` is emptied, and a project with no splits, no
+  checkpoints, and an empty trash is forgotten.
+
+**`--from CHECKPOINT`.** A root split may start from a checkpoint of its
+project: the daemon clones the checkpoint's `tree` into `base/` and builds
+every fork's `.admin` from the checkpoint's saved Git metadata, with the
+project's `.git/objects` as alternates. The manifest records `from`.
+
+**Open lanes.** `marsh split --open [--from C] LABEL...` (host or session
+shell only; not from a job or a branch) makes a split whose branches have no
+command: each is a lane (`kind` and `placement` `lane`, state `running`). It
+replies at once with `{"marsh_split":1,"id":ID,"lanes":{LABEL:FORK}}`. The
+split stays `run`, with no lease and no deadline, until it is closed or
+cancelled.
+
+- **Lane jobs.** A Kit job whose cwd is in a lane's fork is confined to it
+  (section 8). The daemon admits it only while the split is `run`, not
+  closing, the lane is still open, and the caller is the split's creator
+  (`host` for a host split, the session for a session split); otherwise it
+  is refused (exit 125) before any effect. The admitted job is counted live
+  in the journal (`live` on the lane) until its `Execute` ends, and recorded
+  with lineage `split:<id>/<label>`. A lane runs any number of jobs, long and
+  interactive ones included (`marsh run --acp NAME`). Their children are
+  admitted with them. Admission comes before the Kit is prepared, so a close
+  or cancel, in the same locked step that sets `closing`, also fences the
+  split: from then on no job whose mounts name one of its forks is recorded
+  or submitted. The step is then journaled. It is never undone: if that
+  write fails, the split stays fenced and `closing` in memory, the error
+  says so, and repeating `marsh split close ID` or `marsh splits cancel ID`
+  resumes it and writes the journal again. A restart before that retry
+  depends on what reached disk: once `closing` is in `splits.json` (the
+  second journal file, the lineage, failed) the split is `kept` and its
+  lanes `uncertain`; if the first write failed before its rename, disk still
+  says open and the split is preserved as open. A close or cancel already running refuses a second one.
+- **No split from a lane job.** A job's split is planned from the job's
+  recorded mounts, never its cwd: a job (or any descendant, which inherits
+  its parent's mounts) whose mounts name a branch fork nests in that fork,
+  and one whose mounts name a lane is refused ("a job in a lane cannot start
+  a split; split from the host or a session shell"), whatever path it
+  passes. A job whose recorded fork's split is gone is refused, never given
+  the project.
+- **Several agents in one lane.** Jobs of any Kit run in a lane at once (a
+  checkpoint's copy shared by N agents): every Kit VM mounts the same project
+  root (identical sources are shared) and each job's container sees only the
+  fork. The per-tree Kit VM cap and the same-Kit chain bound a job's
+  descendants, not sibling lane jobs, which are separate trees. Host
+  `marsh fanout` in a lane's copy runs each branch as `marsh run NAME ARG...`
+  from the copy (a confined lane job, counted live like any other),
+  registered names only; a `-b` shell branch is refused, since a shell would
+  see the whole project.
+- **A shell in a lane's copy.** An interactive `marsh` (or `marsh -c`) started
+  from the host with its cwd in a lane's copy takes the split's root as its
+  project and starts in the copy, as a host `marsh run` there does (a shell
+  project of the fork itself would overlap the Kit jobs' mounts of the root,
+  which the overlap rule refuses and keeps refusing). It is trusted user code
+  in the shell VM, which mounts the whole root, as a split's shell branches
+  are. It is not a lane job: it is not counted live, close does not wait for
+  it or fence it (so the capture's stability, `CaptureStable`, holds for lane
+  jobs only; `docs/model/README.md`), and Kit commands started from it are
+  refused for a host split ("only its creator"). An interactive one prints
+  "changes you make here are captured only if made before Finish" when it
+  starts.
+- **Cloud lane jobs.** `marsh cloud [-d [--label L] [--json]] -c SCRIPT | --
+  PROGRAM ARGS` with its cwd in a lane's copy is a lane job: it is admitted
+  and fenced as above (refused after a close or cancel, exit 125), recorded
+  with lineage `split:<id>/<label>` and the copy as its mount, uploads the
+  copy (its Git view is the fork's), and writes its changes back into the
+  copy, never the live project, so the lane's capture and `apply` include
+  them. Submission is fenced: the store marks the job running (the step after
+  which the sandbox bills) under the lock a close or cancel sets the split's
+  fence with, so a job still uploading when either begins never starts, and
+  its sandbox is retired. The setup observes a cancel (the caller's or a lane
+  split's, through the store) before the sandbox is created, right after
+  (the sandbox is then deleted), and around the upload, so a cancelled lane
+  does not provision. The sandbox id is journaled on the job as soon as the
+  create returns; a sandbox whose job was still being set up when the daemon
+  went away is retired by the next collector pass; its id is kept in `cloud-setup-orphans.json` across any number of restarts until the retirement is verified (an ownership read that fails is retried, never taken as "not owned"). A detached run stays live for its lane until
+  collection settles it (kept as a patch, collected, failed, lost, or
+  discarded): `close` collects it every 3 s while it waits (30 s), so a run
+  that has finished writes back before capture; one still running makes the
+  lane `uncertain`. `splits cancel` is journaled with the split (`cancelled`)
+  and discards every detached run of the split: at once, and again on every
+  collector pass and after a restart until its sandbox is verified gone, and
+  collection of such a run discards it instead of writing back (the last
+  cancel check and the import are one step under the root's import lock). `splits rm`
+  refuses while one is live.
+- **`marsh split close ID [--json]`** (creator, or the host): stops admitting
+  lane jobs, waits up to 30 s for the lane's live jobs (and any job whose
+  mounts name its fork) to end, then captures each open lane exactly as a
+  branch is captured. A lane whose jobs did not end, or ended with cleanup
+  uncertain, is `uncertain` and `untrusted`, never verified or removed. A
+  captured lane's status is `closed` (code 0). The split becomes `kept` and
+  the reply is the manifest; `out/<label>/{diff.patch,files,status}` hold the
+  results.
+- **`marsh split apply ID LABEL [--3way] [--json]`** (the split's creator) applies a
+  captured lane's `diff.patch` to the project with `git apply` inside the
+  shell VM (from the host, through `marsh -c`), with the split's
+  `store.git/objects` as `GIT_ALTERNATE_OBJECT_DIRECTORIES`. It is a join
+  that keeps the split: while it runs the split is `joined`, so neither
+  `splits rm` nor the collector removes the patch under it, and the release
+  keeps it with a fresh 7 days. A lane with no changes applies nothing.
+  **`--json`** prints one object, `{"result":"clean"|"conflicts"|"failed"|"unknown",
+  "files":[paths],"conflicts":[paths],"message":TEXT}`, and decides the
+  outcome from git and the project's index, never from git's text. git alone
+  does the apply, and marsh never rolls anything back (a rollback would
+  overwrite an editor's save or a `git add` made meanwhile): `git apply
+  --check`, then a plain `git apply` (git checks the whole patch before it writes, so a patch that does not apply writes nothing; a filesystem error while writing can still leave it partial, which is `unknown`); a patch that does not
+  check is retried with `--3way` (which writes nothing when it fails; its
+  merged changes are staged). `clean`: applied. `conflicts`: some paths
+  merged with conflict markers and unmerged index entries (`conflicts` are the
+  unmerged paths). `failed`: git wrote nothing (`files` is empty), including
+  a project whose index already has unresolved conflicts. `unknown`: marsh
+  cannot tell what was written (the shell VM's reply was lost after the apply
+  began, git ended abnormally, or the 3-way result could not be made
+  self-contained); `files` lists the paths the patch touches, and the user
+  checks with `git status`. `files` for the other results are the paths the
+  patch changes, from `git apply --numstat -z` (NUL-delimited, never the
+  quoted `files` listing), so names with quotes, backslashes, or newlines are
+  exact. A 3-way merge stages blobs read from the split's object store: the ones the
+  patch names are copied into the project's own, each id verified, BEFORE the
+  index is touched (a failed copy is `failed`, the index as it was), and the
+  index is checked to resolve without the split's store before `clean` or
+  `conflicts` is reported. A root that is not a Git repository gets the plain apply only
+  (`clean` or `failed`). Exit status 0 for `clean`, else 1; a split or lane
+  that cannot be applied is `failed` with status 1 (2: no captured lane).
+- **Cancel.** `marsh splits cancel ID` on an open split stops admission
+  (journaled `closing`, and the fence), cancels every live lane job tree
+  (INT, then KILL after 10 s). A job marked cancelled before it could be
+  signalled (its Kit still being prepared) keeps the cancel: it is
+  delivered (INT, then KILL after 10 s) the moment the job's container
+  registers, and the split waits for that job too. Once every lane job's end
+  is confirmed, removes the split's files; otherwise the split is kept with
+  the unconfirmed lanes `uncertain`. A closing split cannot be cancelled. On
+  a kept or uncertain lane split, cancel ends the lane jobs a close timed
+  out on; the lanes stay `uncertain`.
+- **Removal.** `marsh splits rm ID` (and the 7-day kept-split collector)
+  never removes a lane split while a lane job may still write: it refuses
+  while a lane job runs ("still has a running lane job; end it with `marsh
+  splits cancel ID`") or while one's end is unconfirmed and its Kit was not
+  reset since ("run `marsh workers reset all`"). `splits rm` and the
+  collector check and claim the split (taking its record) in one step under
+  the lock `join` takes it with, so a join or `split apply` either wins (the
+  split is `joined` and the removal is refused; if kept again its 7 days
+  restart) or finds it gone.
+- **Restart.** `closing` is journaled. An open lane split whose lanes had
+  no live job and no close under way stays open; one with a live lane job
+  becomes `uncertain` (section 6). A close or cancel the restart
+  interrupted leaves the split `kept`, its still-open lanes `uncertain`
+  ("daemon restarted while closing"), forks in place; it never reopens.
+
+**Storage.** `marsh storage [--json] [--all]` reports, for the current
+project (every journaled project with `--all`):
+`{"projects":[{"root","checkpoints":{"count","bytes"},"kept_splits":{"count","bytes","splits":[{"id","state","bytes","kept_unix_ms"}]},"volume":{"free_bytes","total_bytes"}}]}`.
+Bytes are logical (APFS clones share blocks until they diverge).
+
+**Events.** Split changes are published to `marsh events` (`results.md`) as
+`{"seq","type":"split","split":{"id","state","root","branches":[{"label","state","job_id"}]}}`
+(state `removed` when the record is gone), checkpoint changes as
+`{"seq","type":"checkpoint","checkpoint":{"id","root","label","removed"}}`.
+At most 8 subscribers are connected at once (each holds one of the
+daemon's 128 connections); a ninth is refused with "marsh events: at most 8
+subscribers at once", and ordinary requests are never held off.
+
+The model covers lanes (many jobs per lane, admission only while open, close
+before capture, restart, restart during close, cancel and removal of a kept
+lane split), lane jobs never splitting, and the checkpoint as an immutable
+source: `Workspace_lanes_pass.cfg`, and the controls `laneAfterClose`,
+`captureLiveLane`, `laneRestartLive`, `checkpointMounted`, `laneSplit`,
+`restartReopens`, and `removeLiveLane`. The checkpoint lease, the event
+subscriber cap, and the collector/join race are checked in code tests
+(`checkpoint.rs`, `crates/marsh/tests/workspace_cli.rs`).

@@ -41,6 +41,13 @@ capabilities:
         inject:
           - {domain: api.anthropic.com, header: x-api-key, format: "%s"}
 
+  # ACP mode: the entrypoint's `--acp` runs the pinned adapter on stdio
+  # (`marsh run --acp pi`, `acp run pi`).
+  - type: com.docker.sandbox/acp@1
+    config:
+      agent: pi
+      command: ["/usr/local/bin/marsh-pi", "--acp"]
+
   - type: com.docker.sandbox/agent-context@1
     config:
       filename: AGENTS.md

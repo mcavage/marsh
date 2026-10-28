@@ -1135,6 +1135,7 @@ fn store_exposes_safe_versioned_documents() {
         .unwrap();
     let (job, attempt) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -1205,6 +1206,7 @@ fn uncertain_cleanup_quarantines_worker_and_releases_capacity() {
         .unwrap();
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -1298,6 +1300,7 @@ fn pre_runtime_failures_stay_auditable_without_blocking_a_fresh_vm() {
             .unwrap();
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -1489,6 +1492,7 @@ fn capacity_is_reserved_before_container_identity_and_abort_releases_it() {
         })
         .unwrap();
     let new_job = || NewJob {
+        label: None,
         session_id: session.clone(),
         command: "fixture".into(),
         kit_ref: "fixture".into(),
@@ -1525,6 +1529,7 @@ fn worker_repair_claim_is_atomic_with_admission_and_live_work() {
         })
         .unwrap();
     let new_job = || NewJob {
+        label: None,
         session_id: session.clone(),
         command: "fixture".into(),
         kit_ref: "fixture".into(),
@@ -1601,6 +1606,7 @@ fn worker_reset_refuses_active_selection_atomically_and_preserves_other_state() 
     }
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session.clone(),
             command: "first".into(),
             kit_ref: "first".into(),
@@ -1636,6 +1642,7 @@ fn abort_receipt_is_explicitly_failed() {
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -1672,6 +1679,7 @@ fn incomplete_output_makes_terminal_receipt_failed() {
         })
         .unwrap();
     let new_job = || NewJob {
+        label: None,
         session_id: session.clone(),
         command: "fixture".into(),
         kit_ref: "fixture".into(),
@@ -1706,6 +1714,7 @@ fn receipts_survive_restart_and_active_work_becomes_unknown() {
         let store = reopen(home.path()).unwrap();
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let create = |command: &str| NewJob {
+            label: None,
             session_id: session.clone(),
             command: command.into(),
             kit_ref: "fixture".into(),
@@ -1750,6 +1759,7 @@ fn a_detached_cloud_job_survives_restart_outside_the_pool_and_settles_once() {
         let (job, _, _) = store
             .begin_cloud_job(
                 NewJob {
+                    label: None,
                     session_id: session,
                     command: "cloud".into(),
                     kit_ref: "cloud-shell".into(),
@@ -1799,12 +1809,310 @@ fn a_detached_cloud_job_survives_restart_outside_the_pool_and_settles_once() {
 }
 
 #[test]
+fn a_detached_cloud_run_in_a_lane_stays_live_for_its_split_until_it_settles() {
+    let home = home();
+    let store = reopen(home.path()).unwrap();
+    let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
+    let fork = "/Users/example/project/.marsh/split/abc123def456/lane";
+    let (job, _, lineage) = store
+        .begin_cloud_job(
+            NewJob {
+                label: None,
+                session_id: session,
+                command: "cloud".into(),
+                kit_ref: "cloud-shell".into(),
+                workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+                mounts: vec![PublicMount {
+                    target: fork.into(),
+                    access: "read_write".into(),
+                }],
+            },
+            &process::ProcessLink::default(),
+            &[],
+        )
+        .unwrap();
+    assert_eq!(lineage.split.as_deref(), Some("abc123def456"));
+    store.mark_cloud_running(&job, "sbx_abc123").unwrap();
+    store
+        .detach_cloud_job(&job, TimingReport::default())
+        .unwrap();
+    let jobs = store.fork_jobs("abc123def456", Some("lane"));
+    assert_eq!(
+        (jobs.live, jobs.detached),
+        (vec![job.clone()], vec![job.clone()])
+    );
+    assert_eq!(
+        store.fork_jobs("abc123def456", Some("other")).live,
+        Vec::<String>::new()
+    );
+    store
+        .finish_detached_job(
+            &job,
+            ExecutionOutcome::Exited { code: 0 },
+            ExitStatus {
+                code: Some(0),
+                cause: "collected".into(),
+            },
+            true,
+            CleanupState::Verified,
+            TimingReport::default(),
+            "collected",
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        store.fork_jobs("abc123def456", None).live,
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_cloud_lane_job_is_not_submitted_after_its_split_is_fenced_or_cancelled() {
+    let home = home();
+    let store = reopen(home.path()).unwrap();
+    let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
+    let fork = "/Users/example/project/.marsh/split/abc123def456/lane";
+    let new = |session: String| NewJob {
+        label: None,
+        session_id: session,
+        command: "cloud".into(),
+        kit_ref: "cloud-shell".into(),
+        workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+        mounts: vec![PublicMount {
+            target: fork.into(),
+            access: "read_write".into(),
+        }],
+    };
+    let link = process::ProcessLink::default();
+    let (fenced, _, _) = store
+        .begin_cloud_job(new(session.clone()), &link, &[])
+        .unwrap();
+    let (cancelled, _, _) = store.begin_cloud_job(new(session), &link, &[]).unwrap();
+    assert!(!store.in_cancelled_split(&cancelled));
+    store.cancel_tree(&cancelled, true);
+    assert!(matches!(
+        store.mark_cloud_running(&cancelled, "sbx_a"),
+        Err(DaemonError::Refused(_))
+    ));
+    store.fence_split("abc123def456");
+    assert!(matches!(
+        store.mark_cloud_running(&fenced, "sbx_b"),
+        Err(DaemonError::Refused(_))
+    ));
+    assert!(!store.in_cancelled_split(&fenced));
+    store.cancel_split("abc123def456");
+    assert!(store.in_cancelled_split(&fenced));
+}
+
+fn departed(store: &DaemonStore) -> Vec<String> {
+    store
+        .departed_sessions()
+        .into_iter()
+        .map(|departed| departed.session)
+        .collect()
+}
+
+#[test]
+fn only_a_session_whose_client_process_is_gone_and_idle_is_reaped() {
+    let home = home();
+    let store = reopen(home.path()).unwrap();
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let dead_pid = child.id();
+    child.wait().unwrap();
+    let dead = store.attach_shell(dead_pid, authority("/Users/example/project", home.path()));
+    let live = store.attach_shell(
+        std::process::id(),
+        authority("/Users/example/project", home.path()),
+    );
+    let busy_pid = {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        pid
+    };
+    let busy = store.attach_shell(busy_pid, authority("/Users/example/project", home.path()));
+    store
+        .begin_job(NewJob {
+            label: None,
+            session_id: busy.clone(),
+            command: "fixture".into(),
+            kit_ref: "fixture".into(),
+            workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+            mounts: Vec::new(),
+        })
+        .unwrap();
+    let reaped = departed(&store);
+    assert!(reaped.contains(&dead), "{reaped:?}");
+    assert!(
+        !reaped.contains(&live) && !reaped.contains(&busy),
+        "{reaped:?}"
+    );
+    store.detach_shell(&dead).unwrap();
+    assert!(!departed(&store).contains(&dead));
+}
+
+#[test]
+fn a_cloud_sandbox_of_a_job_still_being_set_up_at_restart_is_left_to_be_retired() {
+    let home = home();
+    let (setting_up, running) = {
+        let store = reopen(home.path()).unwrap();
+        let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
+        let link = process::ProcessLink::default();
+        let new = |session: &String| NewJob {
+            label: None,
+            session_id: session.clone(),
+            command: "cloud".into(),
+            kit_ref: "cloud-shell".into(),
+            workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+            mounts: Vec::new(),
+        };
+        let (first, _, _) = store.begin_cloud_job(new(&session), &link, &[]).unwrap();
+        store.record_cloud_sandbox(&first, "sbx_settingup").unwrap();
+        let (second, _, _) = store.begin_cloud_job(new(&session), &link, &[]).unwrap();
+        store.mark_cloud_running(&second, "sbx_running1").unwrap();
+        let (third, _, _) = store.begin_cloud_job(new(&session), &link, &[]).unwrap();
+        let _ = third;
+        (first, second)
+    };
+    let _ = (setting_up, running);
+    // First restart: found. Its retirement fails (offline): nothing is
+    // reported retired. Second restart: the receipt is long Unknown, the id
+    // is still owed. The third pass retires it, and a fourth start is clean.
+    let first = reopen(home.path()).unwrap();
+    assert_eq!(first.cloud_setup_orphans(), ["sbx_settingup"]);
+    drop(first);
+    let second = reopen(home.path()).unwrap();
+    assert_eq!(second.cloud_setup_orphans(), ["sbx_settingup"]);
+    drop(second);
+    let third = reopen(home.path()).unwrap();
+    assert_eq!(third.cloud_setup_orphans(), ["sbx_settingup"]);
+    third.cloud_setup_orphan_retired("sbx_settingup");
+    assert_eq!(third.cloud_setup_orphans(), Vec::<String>::new());
+    drop(third);
+    assert_eq!(
+        reopen(home.path()).unwrap().cloud_setup_orphans(),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn an_unreadable_orphan_list_stops_the_start_instead_of_being_overwritten() {
+    let home = home();
+    let path = home.path().join("cloud-setup-orphans.json");
+    fs::write(&path, b"[\"sbx_owed\"").unwrap();
+    assert!(reopen(home.path()).is_err());
+    assert_eq!(fs::read(&path).unwrap(), b"[\"sbx_owed\"");
+    fs::write(&path, b"[\"sbx_owed\"]").unwrap();
+    assert_eq!(
+        reopen(home.path()).unwrap().cloud_setup_orphans(),
+        ["sbx_owed"]
+    );
+}
+
+#[test]
+fn a_reset_names_what_blocks_it_and_asks_a_gone_clients_jobs_to_end() {
+    let home = home();
+    let store = reopen(home.path()).unwrap();
+    let gone_pid = {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        pid
+    };
+    let gone = store.attach_shell(gone_pid, authority("/Users/example/gone", home.path()));
+    let live = store.attach_shell(
+        std::process::id(),
+        authority("/Users/example/live", home.path()),
+    );
+    let job = |session: &String| {
+        store
+            .begin_job(NewJob {
+                label: None,
+                session_id: session.clone(),
+                command: "fixture".into(),
+                kit_ref: "fixture".into(),
+                workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+                mounts: Vec::new(),
+            })
+            .unwrap()
+            .0
+    };
+    let (gone_job, live_job) = (job(&gone), job(&live));
+    // Only the gone client's job is asked to end again; its session waits for
+    // the job (it is reaped once nothing runs in it).
+    assert_eq!(
+        store.dead_session_live_jobs(),
+        std::slice::from_ref(&gone_job)
+    );
+    assert_eq!(departed(&store), Vec::<String>::new());
+    let blockers = store.lifecycle_blockers().join("\n");
+    assert!(blockers.contains(&format!("pid {gone_pid}")) && blockers.contains("is gone"));
+    assert!(blockers.contains("/Users/example/live") && blockers.contains("still running"));
+    assert!(blockers.contains(&gone_job[..8]) && blockers.contains(&live_job[..8]));
+}
+
+#[test]
+fn a_pid_is_a_process_only_with_its_start_time() {
+    let home = home();
+    let store = reopen(home.path()).unwrap();
+    let id = |session: &String| {
+        let state = store.lock();
+        let shell = state.shells.get(session).unwrap();
+        process_identity(shell.pid, shell.process_started.as_deref())
+    };
+    let ours = store.attach_shell(
+        std::process::id(),
+        authority("/Users/example/project", home.path()),
+    );
+    assert_eq!(id(&ours), ProcessIdentity::Same);
+    // The same pid with another start time: the pid was reused, the
+    // attached process is gone, and the session is released.
+    store.lock().shells.get_mut(&ours).unwrap().process_started =
+        Some("utc:Mon Jan  1 00:00:00 2001".into());
+    assert_eq!(id(&ours), ProcessIdentity::Gone);
+    assert!(departed(&store).contains(&ours));
+    // A start time recorded before they were read in UTC is never compared.
+    store.lock().shells.get_mut(&ours).unwrap().process_started =
+        Some("Mon Jan  1 00:00:00 2001".into());
+    assert_eq!(id(&ours), ProcessIdentity::Unverified);
+    // No recorded start time (an older daemon's session): a live pid is
+    // neither called gone nor named for a kill.
+    store.lock().shells.get_mut(&ours).unwrap().process_started = None;
+    assert_eq!(id(&ours), ProcessIdentity::Unverified);
+    assert!(!departed(&store).contains(&ours));
+    let blockers = store.lifecycle_blockers().join("\n");
+    assert!(blockers.contains("cannot be identified") && blockers.contains("ps -p"));
+    assert!(!blockers.contains("kill"));
+}
+
+#[test]
+fn the_start_time_is_read_in_one_zone_whatever_the_environment_says() {
+    let command = ps_command("lstart=", std::process::id());
+    let envs = command
+        .get_envs()
+        .map(|(name, value)| (name.to_owned(), value.map(ToOwned::to_owned)))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(
+        envs.get(std::ffi::OsStr::new("TZ")),
+        Some(&Some("UTC".into()))
+    );
+    assert_eq!(
+        envs.get(std::ffi::OsStr::new("LC_ALL")),
+        Some(&Some("C".into()))
+    );
+    let first = process_started(std::process::id()).unwrap();
+    assert!(first.starts_with("utc:"));
+    assert_eq!(process_started(std::process::id()).unwrap(), first);
+}
+
+#[test]
 fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
     let home = home();
     let store = reopen(home.path()).unwrap();
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -1875,6 +2183,7 @@ fn production_receipts_ignore_guest_written_legacy_journal() {
         legacy.attach_shell(1, authority("/Users/example/project", selected.path()));
     legacy
         .begin_job(NewJob {
+            label: None,
             session_id: legacy_session,
             command: "guest-forged".into(),
             kit_ref: "fixture".into(),
@@ -1901,6 +2210,7 @@ fn production_receipts_ignore_guest_written_legacy_journal() {
     server
         .store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "host-owned".into(),
             kit_ref: "fixture".into(),
@@ -2015,6 +2325,7 @@ fn daemon_endpoint_cross_tmpdir_child() {
             server
                 .store
                 .begin_job(NewJob {
+                    label: None,
                     session_id: session,
                     command: "retained".into(),
                     kit_ref: "fixture".into(),
@@ -2100,6 +2411,7 @@ fn ordinary_terminal_transition_appends_without_compacting() {
     let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -2131,6 +2443,7 @@ fn receipt_retention_compacts_an_overfull_journal_on_restart() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -2196,6 +2509,7 @@ fn receipt_journal_compacts_and_replays_a_reserved_queued_receipt() {
         .unwrap();
     let (job, _) = store
         .begin_job(NewJob {
+            label: None,
             session_id: session,
             command: "fixture".into(),
             kit_ref: "fixture".into(),
@@ -2234,6 +2548,7 @@ fn receipt_journal_rejects_a_half_assigned_queued_receipt() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -2260,6 +2575,7 @@ fn receipt_journal_truncates_only_a_corrupt_tail() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -2292,6 +2608,7 @@ fn receipt_journal_fails_closed_on_interior_corruption() {
         for command in ["first", "second"] {
             store
                 .begin_job(NewJob {
+                    label: None,
                     session_id: session.clone(),
                     command: command.into(),
                     kit_ref: "fixture".into(),
@@ -2319,6 +2636,7 @@ fn receipt_journal_fails_closed_on_complete_corrupt_final_record() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "only-record".into(),
                 kit_ref: "fixture".into(),
@@ -2347,6 +2665,7 @@ fn receipt_journal_rejects_inconsistent_terminal_state_evidence() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -2398,6 +2717,7 @@ fn receipt_journal_accepts_coherent_terminal_placement_and_cleanup_states() {
             let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
             let (job, _) = store
                 .begin_job(NewJob {
+                    label: None,
                     session_id: session,
                     command: "fixture".into(),
                     kit_ref: "fixture".into(),
@@ -2441,6 +2761,7 @@ fn receipt_journal_rejects_terminal_container_without_worker_placement() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -2475,6 +2796,7 @@ fn receipt_journal_rejects_success_with_uncertain_cleanup() {
         let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
         let (job, _) = store
             .begin_job(NewJob {
+                label: None,
                 session_id: session,
                 command: "fixture".into(),
                 kit_ref: "fixture".into(),
@@ -2519,7 +2841,7 @@ fn public_client_authenticates_and_shares_daemon() {
     let client = Client::connect(home.path()).unwrap();
     let first = match client
         .request(PublicRequest::AttachShell {
-            pid: 1,
+            pid: std::process::id(),
             session: authority(one.to_str().unwrap(), home.path()),
         })
         .unwrap()
@@ -2529,7 +2851,7 @@ fn public_client_authenticates_and_shares_daemon() {
     };
     let second = match client
         .request(PublicRequest::AttachShell {
-            pid: 2,
+            pid: std::process::id(),
             session: authority(two.to_str().unwrap(), home.path()),
         })
         .unwrap()
@@ -2647,7 +2969,7 @@ fn resident_replacement_retries_the_bounded_post_probe_admission_race() {
     let admission = server.store.begin_ordinary_request().unwrap();
     assert!(matches!(
         client.shutdown_resident_after_probe_within(Duration::ZERO),
-        Err(DaemonError::Remote(message)) if message == BUSY_LIFECYCLE_MESSAGE
+        Err(DaemonError::Remote(message)) if busy_lifecycle_refusal(&message)
     ));
     assert!(!server.shutdown_requested.load(Ordering::Acquire));
 
@@ -2682,7 +3004,7 @@ fn changed_stock_sbx_refuses_to_replace_a_daemon_with_an_attached_shell() {
     assert!(matches!(
         error,
         DaemonError::Remote(ref message)
-            if message == BUSY_LIFECYCLE_MESSAGE
+            if busy_lifecycle_refusal(message)
     ));
     assert!(!server.shutdown_requested.load(Ordering::Acquire));
 
@@ -2714,11 +3036,14 @@ fn a_daemon_whose_stock_sbx_was_removed_can_be_replaced_unless_work_is_attached(
     // While its SBX exists, the old daemon keeps the record and refuses.
     assert!(matches!(
         Client::reconcile_resident(home.path(), &paths, &expected),
-        Err(DaemonError::Remote(ref message)) if message == BUSY_LIFECYCLE_MESSAGE
+        Err(DaemonError::Remote(ref message)) if busy_lifecycle_refusal(message)
     ));
     // An attached shell is live work: still refused after SBX is removed,
     // and the refusal says why.
-    let attached = store.attach_shell(2, authority("/Users/example/project", home.path()));
+    let attached = store.attach_shell(
+        std::process::id(),
+        authority("/Users/example/project", home.path()),
+    );
     let old_path = old_sbx.path().to_owned();
     old_sbx.close().unwrap();
     assert!(!old_path.exists());
@@ -3097,6 +3422,7 @@ fn failed_shell_setup_and_preparation_detach_their_sessions() {
                 session: session(&shell_session, home.path()),
                 arguments: Vec::new(),
                 terminal_environment: std::collections::BTreeMap::new(),
+                working_directory: None,
             })
             .is_err()
     );
@@ -3177,6 +3503,9 @@ fn execution_attachment_preserves_bytes_and_exit_status() {
     let status = client
         .execute_with_io(
             ExecuteSpec {
+                label: None,
+                kit: None,
+                acp: false,
                 command: "fixture".into(),
                 arguments: vec![b"invalid:\xff".to_vec()],
                 working_directory: None,
@@ -3201,6 +3530,7 @@ fn execution_attachment_preserves_bytes_and_exit_status() {
                     arguments: vec![b"-c".to_vec(), b"printf ok".to_vec()],
                     session: selected,
                     terminal_environment: std::collections::BTreeMap::new(),
+                    working_directory: None,
                 },
                 File::open("/dev/null").unwrap(),
                 Vec::new(),
@@ -3526,6 +3856,7 @@ fn attached_open_shell_refuses_lifecycle_immediately_without_blocking_status() {
             arguments: Vec::new(),
             session: session(&session_id, home.path()),
             terminal_environment: std::collections::BTreeMap::new(),
+            working_directory: None,
         })
         .unwrap();
 
@@ -3583,6 +3914,9 @@ fn active_execute_refuses_lifecycle_immediately_without_blocking_status() {
     };
     let execution = client
         .start_execution(ExecuteSpec {
+            label: None,
+            kit: None,
+            acp: false,
             working_directory: None,
             command: "fixture".into(),
             arguments: Vec::new(),
@@ -3977,7 +4311,6 @@ impl DaemonBackend for FakeAcpKit {
             command: "agent-kit".into(),
             workload_digest: "test-kit-identity".into(),
             required_capabilities: vec![],
-            arguments: vec![],
             description: None,
         })
     }
@@ -4000,6 +4333,7 @@ impl DaemonBackend for FakeAcpKit {
     ) -> Result<(), DaemonError> {
         assert_eq!(request.command, "agent-kit");
         let (job_id, _) = store.begin_job(NewJob {
+            label: None,
             session_id: request.session.session_id,
             command: request.command,
             kit_ref: "kit:fake-acp".into(),
@@ -4842,6 +5176,7 @@ fn ended_shell_releases_acp_controller_without_explicit_detach() {
             arguments: vec![],
             session: acp.first.clone(),
             terminal_environment: std::collections::BTreeMap::new(),
+            working_directory: None,
         })),
         Ok(PublicReply::ShellAccepted)
     ));
@@ -4950,6 +5285,7 @@ impl DaemonBackend for StdinEchoBackend {
         store: DaemonStore,
     ) -> Result<(), DaemonError> {
         let (job_id, _) = store.begin_job(NewJob {
+            label: None,
             session_id: request.session.session_id,
             command: request.command,
             kit_ref: "kit:fixture".into(),
@@ -5060,6 +5396,9 @@ fn receipt_journal_is_owner_only_and_keeps_no_job_or_prompt_content() {
     let code = client
         .execute_with_io(
             ExecuteSpec {
+                label: None,
+                kit: None,
+                acp: false,
                 placement: Placement::Local,
                 environment: BTreeMap::new(),
                 command: "fixture".into(),

@@ -324,6 +324,8 @@ struct State {
     host_build_digest: String,
     stock_kit_digest: String,
     stock_rebuild_digest: String,
+    /// VMs whose inventory row has lost its `name` (a malformed listing).
+    nameless: Vec<String>,
     /// 0.46-style: re-mounting an existing target fails instead of no-op.
     remount_conflicts: bool,
     active: BTreeMap<(String, String), usize>,
@@ -380,6 +382,7 @@ impl StockModel {
                 host_build_digest: HOST_BUILD_DIGEST.into(),
                 stock_kit_digest: HOST_BUILD_DIGEST.into(),
                 stock_rebuild_digest: HOST_BUILD_DIGEST.into(),
+                nameless: Vec::new(),
                 ..State::default()
             }),
             changed: Condvar::new(),
@@ -392,6 +395,11 @@ impl StockModel {
     }
 
     // ---- scenario setup -------------------------------------------------
+
+    /// From now on the VM's inventory row has no `name`.
+    pub fn drop_name_from_inventory(&self, name: &str) {
+        self.state.lock().unwrap().nameless.push(name.to_owned());
+    }
 
     /// A VM present in stock inventory but not recorded by any adapter.
     pub fn seed_vm(&self, name: &str) -> String {
@@ -850,6 +858,9 @@ impl StockModel {
                 if self.version.shape == InventoryShape::BareArray && vm.running {
                     row["detached"] = serde_json::json!(false);
                 }
+                if state.nameless.contains(name) {
+                    row.as_object_mut().unwrap().remove("name");
+                }
                 row
             })
             .collect::<Vec<_>>();
@@ -983,6 +994,23 @@ impl StockModel {
         failure(&message.replace("\"HOST\"", &quoted(&host)))
     }
 
+    /// "If the sandbox is stopped, it is started first." Stock v0.50.0
+    /// refuses one whose saved mount's host path is gone.
+    fn start(guest: &mut Vm) -> Option<CommandOutput> {
+        if !guest.running
+            && let Some((target, (host, _))) =
+                guest.mounts.iter().find(|(_, (host, _))| !host.exists())
+        {
+            let (host, target) = (host.display(), target.display());
+            return Some(failure(&format!(
+                "error: cannot start sandbox: start runtime: request failed: 422 Unprocessable Entity: cannot restore mount \"{host}\" at \"{target}\": stat {host}: no such file or directory; restore the host path or remove the saved mount with sbx umount while the sandbox is stopped"
+            )));
+        }
+        guest.running = true;
+        None
+    }
+
+    #[allow(clippy::too_many_lines)] // One table of the guest commands marsh runs.
     fn exec(state: &mut State, parsed: &Parsed) -> CommandOutput {
         let Some((vm, command)) = parsed.positionals.split_first() else {
             return failure("Error: requires at least 2 arg(s)");
@@ -991,8 +1019,9 @@ impl StockModel {
         let Some(guest) = state.vms.get_mut(vm) else {
             return Self::missing(vm);
         };
-        // "If the sandbox is stopped, it is started first."
-        guest.running = true;
+        if let Some(refused) = Self::start(guest) {
+            return refused;
+        }
         let environment = parsed
             .values("env")
             .into_iter()

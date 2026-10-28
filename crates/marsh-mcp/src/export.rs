@@ -1148,7 +1148,10 @@ impl ExportMcp {
         let mut session_guard = SessionGuard::new(&client, session_id.clone());
 
         let spec = ExecuteSpec {
+            label: None,
+            kit: None,
             process: None,
+            acp: false,
             // Protocol-created jobs retain the admitted publishing project root.
             working_directory: None,
             placement: marsh_daemon::Placement::Local,

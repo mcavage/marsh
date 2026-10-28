@@ -227,7 +227,10 @@ jobs:
     # cold (the pull request's cache is not visible there) and takes ~30 min.
     name: TLA+ model (${{ matrix.shard }})
     runs-on: ubuntu-26.04
-    timeout-minutes: 90
+    # Workspace_depth3_pass is 237M distinct states since open lanes and
+    # checkpoints joined the Workspace spec (35 min on 12 cores; the 90-minute
+    # limit cancelled it twice on the 4-core runner).
+    timeout-minutes: 300
     strategy:
       fail-fast: false
       matrix:

@@ -5,8 +5,8 @@ ask a follow-up without starting over. In your marsh shell, from a project
 with a README that describes its tests:
 
 ```sh
-id=$(acp reserve claude-session)
-acp run --reservation "$id" claude-session &
+id=$(acp reserve claude)
+acp run --reservation "$id" claude &
 acp list --mine --wait "$id"
 acp ask "$id" 'Read the README and tell me how to run the tests. Do not change files.'
 acp ask "$id" 'Check that command against the project configuration. What needs to be installed first? Do not change files.'
@@ -42,15 +42,10 @@ agent's own login flow.
 
 ## Agents
 
-A session starts from an agent name, not a Kit name.
-
-| Agent | Registered command |
-|---|---|
-| `claude-session` | `claude` |
-| `codex-session` | `codex` |
-| `pi-session` | `pi` |
-
-To change the list, see [Adding agents](#adding-agents).
+A session starts from a registered command whose Kit declares an ACP adapter
+(`com.docker.sandbox/acp@1`): `claude`, `codex`, and `pi` do. `marsh status
+--json` lists every command with `"acp": true` or `false`. See
+[Adding agents](#adding-agents).
 
 ## Commands
 
@@ -155,24 +150,33 @@ Codex registration alone does not revoke other clients. See [MCP](mcp.md) and
 
 ## Adding agents
 
-The agent list comes from `agents.json`. A file of that name in the host
-control directory replaces the packaged list entirely. `[]` turns ACP off.
+An agent is any registered command whose Kit declares
+`com.docker.sandbox/acp@1` in its descriptor, directly or through a kit set,
+mixin, or capability group:
 
-To add an agent and keep the packaged ones, start from a copy of the packaged
-list (`libexec/marsh/agents.json` in your marsh installation) and append your
-entry. Each entry names a registered command, the extra arguments that put its
-Kit in ACP mode, and the image digest the command runs (from `commands.json`;
-empty for a Kit run from a source directory):
-
-```json
-{"schema_version":1,"name":"mytool-session","protocol":"acp_v1","command":"mytool",
- "arguments":["--acp"],"workload_digest":"registry.example.com/me/mytool@sha256:…"}
+```yaml
+capabilities:
+  - type: com.docker.sandbox/acp@1
+    config:
+      agent: mytool                   # the agent the Kit provides
+      command: ["mytool-acp"]         # argv, or a string run with /bin/sh -c
+      env: {MYTOOL_MODE: acp}         # optional
 ```
 
-Copied packaged entries keep working when you upgrade marsh or a command
-updates itself: an entry for a packaged
-command follows that command. So
-does an entry for a command installed from a tag.
+marsh runs that command in place of the Kit's entrypoint, in a fresh job
+container like any other, with the Kit's image, mounts, network policy, and
+credentials. When a descriptor declares several adapters, the one for an
+agent the Kit `provides` wins. Register the Kit (`marsh kit install mytool
+REF`), and `acp run mytool` starts a session. A published Kit's descriptor is
+read once per digest; a local source Kit's comes from its last build (before
+the first build, from its source YAML).
+
+## ACP over stdio
+
+`marsh run --acp NAME` runs NAME's adapter as an ACP server on stdin and
+stdout, for an ACP client on the Mac (an editor or app). stdout carries only
+the agent's JSON-RPC; marsh's own messages go to stderr. Started in a split
+lane's fork, it is a lane job confined to that fork ([split](split.md)).
 
 [Configuration](configuration.md) says where the control directory is.
 

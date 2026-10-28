@@ -198,6 +198,18 @@ impl CloudPlacement {
         )
     }
 
+    /// `marsh workers forget cloud NAME`: drop the ownership record of an
+    /// unresolved create, on the operator's word that nothing was created.
+    pub(crate) fn forget(
+        &self,
+        backend: &StockDaemonBackend,
+        name: &str,
+    ) -> Result<(), DaemonError> {
+        self.adapter(backend)?
+            .forget_unresolved(name)
+            .map_err(backend_error)
+    }
+
     /// `marsh workers reset cloud`, `stop`, `reset`: delete every owned
     /// cloud sandbox of an attached run (or an unresolved create) and
     /// observe its absence; the names deleted. A detached run's sandbox is
@@ -216,7 +228,7 @@ impl CloudPlacement {
                     Err(error) => failures.push(error.to_string()),
                 },
                 None => failures.push(format!(
-                    "{}: create outcome still unresolved; retry later",
+                    "cloud sandbox {0}: its create never reported an outcome. Docker Cloud may still hold, and bill, a sandbox for it: check `sbx --cloud ls`. If none belongs to it, tell marsh to forget it with `marsh workers forget cloud {0}`; otherwise delete that sandbox yourself",
                     record.name
                 )),
             }
@@ -621,6 +633,24 @@ impl StockDaemonBackend {
             }),
             _ => None,
         };
+        if let (None, None, Some(call), None) = (&direct, &origin, &options.direct, &options.image)
+            && let Some(name) = call.first().and_then(|name| std::str::from_utf8(name).ok())
+            && self.command_names().iter().any(|known| known == name)
+            && !self.cloud_bindings().contains_key(name)
+            && request
+                .process
+                .as_ref()
+                .and_then(|link| link.spawn.as_ref())
+                .is_none_or(|spawn| spawn.iter().any(|allowed| allowed == name))
+        {
+            return Err(DaemonError::Refused(format!(
+                "cloud: {name} is a registered command with no cloud form: its Kit is built from a \
+                 source directory or named by a tag, not pinned by digest, so Docker Cloud cannot \
+                 run it. Name a published Kit for it in cloud-kits.json in the control home that \
+                 `marsh status` prints: \
+                 {{\"{name}\": {{\"kit\": \"REPOSITORY@sha256:DIGEST\"}}}}"
+            )));
+        }
         // A detached block has no laptop relay. With cloud-delegate on, its
         // supervisor starts agent sandboxes itself, signed in with the token
         // from the Keychain (read now: a missing token refuses the run, and
@@ -713,6 +743,7 @@ impl StockDaemonBackend {
         let link = request.process.clone().unwrap_or_default();
         let (job_id, _attempt, lineage) = store.begin_cloud_job(
             NewJob {
+                label: request.label.clone(),
                 session_id: request.session.session_id.clone(),
                 command: direct
                     .as_ref()
@@ -761,6 +792,11 @@ impl StockDaemonBackend {
             job_id: job_id.clone(),
         });
         let relay = Relay::start(&attachment, &store, &job_id);
+        // A cancel reaches this setup two ways: the caller's (the relay) and
+        // the store's (a lane split's cancel, `cancel_tree`): billing starts
+        // at sandbox creation, so both are checked before it, right after
+        // it (the sandbox is then deleted), and around the upload.
+        let stopped = || relay.cancelled() || store.cancel_requested(&job_id);
         for name in omitted {
             settle.note(&format!("omitted exported variable {name}"));
         }
@@ -774,7 +810,7 @@ impl StockDaemonBackend {
             )
         };
 
-        if relay.cancelled() {
+        if stopped() {
             settle.note("cancelled before the command started");
             return settle.finish_reporting(
                 ExecutionOutcome::NotStarted,
@@ -923,6 +959,16 @@ impl StockDaemonBackend {
             stop_on_timeout: options.detach,
             ..spec
         };
+        if stopped() {
+            settle.note("cancelled before the command started");
+            return settle.finish_reporting(
+                ExecutionOutcome::NotStarted,
+                130,
+                "cancelled".into(),
+                CleanupState::NotRequired,
+                Some(130),
+            );
+        }
         let record = match adapter.create(&spec) {
             Ok(record) => record,
             Err(CloudError::CreateUncertain { name, diagnostic }) => {
@@ -985,7 +1031,7 @@ impl StockDaemonBackend {
             )
         };
 
-        if relay.cancelled() {
+        if stopped() {
             return cancelled_setup(settle);
         }
         // Upload the helper, then create the natural path and unpack into it.
@@ -1018,6 +1064,9 @@ impl StockDaemonBackend {
                 return setup_failed(settle, format!("workspace path: {}", step.diagnostic()));
             }
             Err(message) => return setup_failed(settle, format!("workspace path: {message}")),
+        }
+        if stopped() {
+            return cancelled_setup(settle);
         }
         let git_view = match &confinement {
             Some(confinement) => cloud_fs::GitView::Fork {
@@ -1062,7 +1111,7 @@ impl StockDaemonBackend {
             ));
         }
 
-        if relay.cancelled() {
+        if stopped() {
             return cancelled_setup(settle);
         }
         if let (Some(plan), Some(token)) = (&delegated, &delegate) {
@@ -1685,6 +1734,7 @@ impl AgentCalls {
         };
         let job = match self.store.begin_cloud_job(
             NewJob {
+                label: None,
                 session_id: self.session_id.clone(),
                 command: name.clone(),
                 kit_ref: binding.identity.clone(),

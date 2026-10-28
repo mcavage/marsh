@@ -292,8 +292,8 @@ permissions:
 - Pi has no OS-level sandbox of its own. It runs with `--approve` so project
   resources load without a trust prompt.
 
-ACP sessions (`acp run claude-session`, `codex-session`, `pi-session`) run the
-same Kit in its ACP mode and keep these defaults:
+ACP sessions (`acp run claude`, `codex`, `pi`) run the same Kit through its
+declared ACP adapter and keep these defaults:
 
 - Claude's ACP adapter runs Claude Code with `sandbox.enabled` forced off. The
   setting is merged into any settings the adapter passes.

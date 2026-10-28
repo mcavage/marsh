@@ -140,6 +140,7 @@ impl Fixture {
                 terminal_size: None,
             },
             terminal_environment: std::collections::BTreeMap::new(),
+            working_directory: None,
         };
         Self {
             _home: home,

@@ -892,6 +892,7 @@ fn worker(runtime: Arc<dyn JobRuntime>, supervisor: Arc<dyn Supervisor>) -> Work
 
 pub(super) fn job() -> JobSpec {
     JobSpec {
+        entrypoint: None,
         image: OciImage::parse(format!("sha256:{}", "b".repeat(64))).unwrap(),
         argv: vec![b"/usr/bin/agent".to_vec()],
         identity: JobIdentity { uid: 501, gid: 20 },

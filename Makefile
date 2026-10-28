@@ -128,7 +128,6 @@ build-linux:
 		--target export --output "type=local,dest=$(GUEST_ARTIFACTS)" \
 		-f packaging/linux-arm64/Dockerfile .
 	$(INSTALL) -m 644 "$(KIT_COMMANDS)" "$(GUEST_ARTIFACTS)/commands.json"
-	$(INSTALL) -m 644 packaging/agents.json "$(GUEST_ARTIFACTS)/agents.json"
 	$(MAKE) prepare-shell-image
 	$(PYTHON) scripts/stage-kits.py --commands "$(KIT_COMMANDS)" --output "$(GUEST_ARTIFACTS)"
 
@@ -274,7 +273,6 @@ install: install-preflight
 	$(INSTALL) -m 755 "$(GUEST_ARTIFACTS)/marsh-relay-linux-arm64" "$(PREFIX)/libexec/marsh/marsh-relay-linux-arm64"
 	$(INSTALL) -m 755 "$(GUEST_ARTIFACTS)/marshd-linux-arm64" "$(PREFIX)/libexec/marsh/marshd-linux-arm64"
 	$(INSTALL) -m 644 "$(GUEST_ARTIFACTS)/commands.json" "$(PREFIX)/libexec/marsh/commands.json"
-	$(INSTALL) -m 644 "$(GUEST_ARTIFACTS)/agents.json" "$(PREFIX)/libexec/marsh/agents.json"
 	$(INSTALL) -m 644 "$(GUEST_ARTIFACTS)/shell-image" "$(PREFIX)/libexec/marsh/shell-image"
 	$(INSTALL) -m 644 "$(GUEST_ARTIFACTS)/shell-image.build.json" "$(PREFIX)/libexec/marsh/shell-image.build.json"
 	rm -rf "$(PREFIX)/libexec/marsh/licenses"
@@ -453,7 +451,6 @@ dev-guest:
 		--target export --output "type=local,dest=$(DEV_GUEST)" \
 		-f packaging/linux-arm64/Dockerfile .
 	$(INSTALL) -m 644 "$(KIT_COMMANDS)" "$(DEV_GUEST)/commands.json"
-	$(INSTALL) -m 644 packaging/agents.json "$(DEV_GUEST)/agents.json"
 	@rm -f "$(DEV_GUEST)"/dev-shell-image*; : > "$(DEV_GUEST)/dev-enabled"
 
 # Image targets rebuild only when their inputs change; delete the file to force
@@ -555,7 +552,6 @@ dev-inner:
 	install -m 755 "$$musl/marsh-byte-exec" "$$out/libexec/marsh/marsh-byte-exec-linux-arm64"; \
 	python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); k=sys.argv[2]; c.update({"fixture": k} if k else {}); json.dump(c, open(sys.argv[3],"w"), indent=2)' \
 		"$(KIT_COMMANDS)" "$(DEV_KIT)" "$$out/libexec/marsh/commands.json"; \
-	install -m 644 packaging/agents.json "$$out/libexec/marsh/agents.json"; \
 	python3 scripts/stage-kits.py --commands "$(KIT_COMMANDS)" --output "$$out/libexec/marsh"; \
 	printf '%s\n' "$$MARSH_DEV_SHELL_TEMPLATE" > "$$out/libexec/marsh/shell-image"; \
 	echo "dev-inner: candidate in $$out (prefix $$MARSH_VM_PREFIX)"

@@ -11,6 +11,7 @@ use super::{
     CloudRequest, delta, helper_path, kill_workload, link_dir, prepare_links, privileged,
     record_status, run_user, state_dir, state_path, workload_command,
 };
+use marsh_contracts::cloud::CloudMode;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead as _, BufReader, Read as _, Seek as _, SeekFrom, Write as _};
 use std::os::unix::ffi::OsStrExt as _;
@@ -128,6 +129,27 @@ fn finish(state: &Path, root: Option<&Path>) {
     let _ = fs::write(state.join("done"), b"");
 }
 
+/// Why the workload's program could not start, naming it: the bare OS error
+/// ("No such file or directory") does not say what was missing.
+fn start_failure(request: &CloudRequest, error: &io::Error) -> io::Error {
+    let name = match request.mode {
+        CloudMode::Argv => request
+            .argv
+            .first()
+            .map(|word| String::from_utf8_lossy(word).into_owned()),
+        CloudMode::Shell => None,
+    };
+    match name {
+        Some(name) if error.kind() == io::ErrorKind::NotFound => io::Error::other(format!(
+            "`{name}` was not found in the cloud sandbox ({error}). The sandbox is the plain \
+             cloud shell image, which has only the base system; a registered command such as \
+             claude runs in its own Kit sandbox, which needs a Kit pinned by digest"
+        )),
+        Some(name) => io::Error::other(format!("cannot run `{name}`: {error}")),
+        None => io::Error::other(format!("cannot start the command: {error}")),
+    }
+}
+
 /// A started workload: its process, group, user, output pumps, and root.
 type Supervised = (
     std::process::Child,
@@ -196,7 +218,9 @@ pub(super) fn supervise() -> i32 {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .process_group(0);
-        let mut child = command.spawn()?;
+        let mut child = command
+            .spawn()
+            .map_err(|error| start_failure(&request, &error))?;
         let group = i32::try_from(child.id()).unwrap_or(i32::MAX);
         if let Err(error) = fs::write(state.join("pgid"), group.to_string()) {
             eprintln!("marsh cloud: {error}");

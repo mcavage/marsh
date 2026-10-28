@@ -33,7 +33,7 @@ Registered names in /run/marsh/bin are links: calling one starts a child job.
 See /run/marsh/context.md.
 ";
 
-pub const RUN_HELP: &str = "Usage: marsh run [--spawn NAME,...|--no-spawn] NAME [ARG...]\n\nRun registered command NAME as a new job (from a job: a child job). stdin,\nstdout, stderr, and the exit status are relayed; a refusal exits 125.\n--spawn and --no-spawn (or MARSH_SPAWN) narrow what NAME may start;\nnothing widens it.\n";
+pub const RUN_HELP: &str = "Usage: marsh run [--spawn NAME,...|--no-spawn] [--acp] NAME [ARG...]\n\nRun registered command NAME as a new job (from a job: a child job). stdin,\nstdout, stderr, and the exit status are relayed; a refusal exits 125.\n--spawn and --no-spawn (or MARSH_SPAWN) narrow what NAME may start;\nnothing widens it. --acp runs NAME's ACP adapter (its Kit's acp@1) as an\nACP server on stdin and stdout (not from inside a job).\n";
 
 /// The artifact's entry: a shebang link, or (invoked directly) Brush.
 #[must_use]
@@ -246,6 +246,8 @@ fn child_at(
     });
     let (environment, start_env) = offered(&document);
     let spec = ExecuteSpec {
+        label: None,
+        kit: None,
         command: name.to_owned(),
         arguments: arguments
             .iter()
@@ -264,6 +266,7 @@ fn child_at(
             start_env,
             ..marsh_daemon::process::ProcessLink::default()
         }),
+        acp: false,
     };
     let client = marsh_daemon::Client::capability(Path::new(SOCKET));
     // The connection cap is transient: a refused connection read nothing
@@ -357,7 +360,11 @@ fn cli(arguments: &[OsString]) -> i32 {
                 print!("{RUN_HELP}");
                 0
             }
-            Ok(Some((spawn, name, arguments))) => child(&name, &arguments, spawn, false),
+            Ok(Some(run)) if run.acp => {
+                eprintln!("marsh: run --acp is for the host or the shell, not a job");
+                125
+            }
+            Ok(Some(run)) => child(&run.name, &run.arguments, run.spawn, false),
             Err(message) => {
                 eprintln!("marsh: {message}");
                 2
@@ -403,14 +410,14 @@ fn open(arguments: &[OsString]) -> i32 {
 /// # Errors
 /// Returns a usage message.
 #[allow(clippy::type_complexity)]
-pub fn parse_run(
-    arguments: &[OsString],
-) -> Result<Option<(Option<Vec<String>>, String, Vec<OsString>)>, String> {
+pub fn parse_run(arguments: &[OsString]) -> Result<Option<RunArguments>, String> {
     let mut spawn = None;
+    let mut acp = false;
     let mut index = 0;
     while let Some(argument) = arguments.get(index).and_then(|argument| argument.to_str()) {
         match argument {
             "-h" | "--help" => return Ok(None),
+            "--acp" => acp = true,
             "--no-spawn" => spawn = Some(Vec::new()),
             "--spawn" => {
                 index += 1;
@@ -431,12 +438,21 @@ pub fn parse_run(
         .get(index)
         .and_then(|name| name.to_str())
         .filter(|name| !name.starts_with('-'))
-        .ok_or("run: usage: marsh run [--spawn NAME,...|--no-spawn] NAME [ARG...]")?;
-    Ok(Some((
+        .ok_or("run: usage: marsh run [--spawn NAME,...|--no-spawn] [--acp] NAME [ARG...]")?;
+    Ok(Some(RunArguments {
         spawn,
-        name.to_owned(),
-        arguments[index + 1..].to_vec(),
-    )))
+        name: name.to_owned(),
+        arguments: arguments[index + 1..].to_vec(),
+        acp,
+    }))
+}
+
+/// `marsh run`'s parsed options.
+pub struct RunArguments {
+    pub spawn: Option<Vec<String>>,
+    pub name: String,
+    pub arguments: Vec<OsString>,
+    pub acp: bool,
 }
 
 /// Which job trees `marsh jobs` text shows (`docs/design/processes.md` s9).

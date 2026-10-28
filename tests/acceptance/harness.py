@@ -1233,15 +1233,6 @@ class AcpScope(IsolatedScope):
         (self.control_home / "commands.json").write_text(
             json.dumps({"fixture-acp": str(kit)}) + "\n", encoding="utf-8"
         )
-        (self.control_home / "agents.json").write_text(
-            json.dumps([{
-                "schema_version": 1,
-                "name": "fixture-session",
-                "protocol": "acp_v1",
-                "command": "fixture-acp",
-                "required_capabilities": [],
-            }]) + "\n", encoding="utf-8"
-        )
         self.environment = clean_environment()
         shell_history = self.project / ".marsh-uat-history"
         shell_history.touch(mode=0o600, exist_ok=False)

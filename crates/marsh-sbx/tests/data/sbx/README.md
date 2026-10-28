@@ -19,11 +19,22 @@ with read-only commands only. All exited 0 except where noted.
 | `inspect-missing.stderr` | `sbx inspect --json marsh-nonexistent-zz9` (exit 1, empty stdout) |
 
 Edits: in `ls-json.stdout` the host user's home directory was replaced by
-`/Users/alice`; nothing else changed. `template-ls-json.stdout` keeps 6 of the
+`/Users/user`; nothing else changed. `template-ls-json.stdout` keeps 6 of the
 104 rows, verbatim.
 
 The model takes each verb's accepted flags from these help texts, so a flag
 stock does not accept fails in tests as it would for real.
+
+## `v0.50.0/` — captured
+
+`ls-json.stdout` is a trimmed `sbx ls --json` (`sbx version: v0.50.0
+30d023cb`, macOS arm64, 2026-10-28): four of 70 rows, namely a running
+and a stopped marsh VM, another tool's sandbox, and one with
+`workspace_missing`. Their values are placeholders (names, ids, control-directory hashes, temp
+paths, the home `/Users/user`); keys, status values, and path shapes are
+the real ones. A row the
+decoder once rejected as an "unknown row schema" came from a listing with an
+extra key; the decoder now ignores extra keys (see `stock_inventory.rs`).
 
 ## `v0.46.0/` — derived
 

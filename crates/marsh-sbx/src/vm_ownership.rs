@@ -363,6 +363,14 @@ impl VmOwnership {
             .collect()
     }
 
+    /// Whether `name` is a shell VM with a recorded UUID.
+    pub(crate) fn is_owned_shell(&self, name: &str) -> bool {
+        self.lock()
+            .entries
+            .get(name)
+            .is_some_and(|entry| entry.uuid.is_some() && entry.purpose == VmPurpose::Shell.label())
+    }
+
     /// Persisted shell generations, including older environment selectors.
     pub(crate) fn owned_shell_names(&self) -> Vec<String> {
         self.lock()

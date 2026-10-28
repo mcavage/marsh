@@ -33,6 +33,7 @@ pub(crate) struct ReceiptJournal {
     _owner_lock: File,
     length: u64,
     healthy: bool,
+    events: Option<std::sync::Arc<crate::events::Bus>>,
 }
 
 impl ReceiptJournal {
@@ -63,6 +64,7 @@ impl ReceiptJournal {
                 _owner_lock: owner_lock,
                 length,
                 healthy: true,
+                events: None,
             },
             receipts,
         ))
@@ -113,7 +115,15 @@ impl ReceiptJournal {
             return Err(error.into());
         }
         self.length = start.saturating_add(u64::try_from(frame.len()).unwrap_or(u64::MAX));
+        if let Some(events) = &self.events {
+            events.publish("job", &serde_json::json!(crate::JobSummary::of(receipt)));
+        }
         Ok(())
+    }
+
+    /// Publish every appended receipt to `marsh events` subscribers.
+    pub(crate) fn set_events(&mut self, events: std::sync::Arc<crate::events::Bus>) {
+        self.events = Some(events);
     }
 
     pub(crate) fn compact(

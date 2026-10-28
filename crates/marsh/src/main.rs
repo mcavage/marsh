@@ -53,6 +53,7 @@ Usage:
   marsh results [--json]
   marsh results show CURSOR|JOB [--json]
   marsh workers reset KIT[,KIT...]|all
+  marsh workers forget cloud NAME
   marsh split [-n] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]...
   marsh join [--json] [--keep] [-- CMD [ARG...]]
   marsh splits [--json] [ID] | cancel ID | rm ID
@@ -88,7 +89,7 @@ Inside the project shell:
   mcp load NAME --kit KIT | --sandbox SANDBOX
                            Load an existing publication without republishing
   mcp unpublish NAME       Revoke a published pipeline
-  acp run AGENT &          Start a registered ACP agent (e.g. claude-session) as a Brush background job
+  acp run AGENT &          Start a command's ACP agent (e.g. claude) as a Brush background job
   acp reserve AGENT        Reserve a session id; then acp run --reservation ID AGENT &
   acp list [--mine] [--wait [ID]] [--json]
                            Find sessions, including agents still starting
@@ -219,7 +220,7 @@ fn version_text() -> String {
 const STATUS_HELP: &str = "Usage: marsh status [--json]\n\nShow scoped daemon, host control directory, effective per-job limits, shells, and workers.\nJob limits are a snapshot of the first daemon launch environment, not per-shell flags.\nUse the printed control directory for commands.json.\n";
 const JOBS_HELP: &str = "Usage: marsh jobs [--all] [--json]\n       marsh jobs --tree [--all] [--json]\n       marsh jobs show JOB [--json]\n\nList Kit jobs, running first, then newest: short id, start, state, exit,\nRUN time (in the ready Kit VM; `marsh results` WALL adds VM preparation),\nand command. Inside a session only its jobs are listed; from a\nhost terminal, running trees, trees started in the last hour, and the five\nnewest trees. --all lists every recorded job. --tree draws child\njobs under their parent. JOB may be an id prefix. --json prints the full,\nunscoped document.\n";
 const RESULTS_HELP: &str = "Usage: marsh results [--json]\n       marsh results show CURSOR|JOB [--json]\n\nList durable Kit results or inspect one result.\n";
-const WORKERS_HELP: &str = "Usage: marsh workers reset KIT[,KIT...]|all [--detached]\n\nStop and recreate selected Kit workers on their next use. `cloud` deletes this\ndaemon's cloud sandboxes, except detached runs' (--detached discards those too).\n";
+const WORKERS_HELP: &str = "Usage: marsh workers reset KIT[,KIT...]|all [--detached]\n       marsh workers forget cloud NAME\n\nStop and recreate selected Kit workers on their next use. `cloud` deletes this\ndaemon's cloud sandboxes, except detached runs' (--detached discards those too).\n`forget cloud NAME` drops the record of a cloud create that never reported an\noutcome, when `sbx --cloud ls` shows no sandbox for it (a reset names it).\n";
 const KIT_HELP: &str = "Usage: marsh kit install NAME [REPOSITORY:TAG|REPOSITORY@sha256:DIGEST]
        marsh kit uninstall NAME
 
@@ -603,7 +604,12 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
     if let Some(verb) = arguments
         .get(1)
         .and_then(|value| value.to_str())
-        .filter(|verb| matches!(*verb, "split" | "join" | "splits"))
+        .filter(|verb| {
+            matches!(
+                *verb,
+                "split" | "join" | "splits" | "checkpoint" | "checkpoints" | "events" | "storage"
+            )
+        })
     {
         let verb = verb.to_owned();
         if let Some(help) = marsh::split_cli::help(&verb, &arguments[2..]) {
@@ -628,6 +634,17 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
                 return Ok(marsh::fanout_cli::fanout(
                     &arguments[2..],
                     marsh::fanout_cli::Place::Session,
+                ));
+            }
+            // Host, in a lane's copy: a shell session in the copy would mount
+            // it as a project of its own, overlapping the Kit jobs' mounts and
+            // refused for them, so each branch is a `marsh run` from the copy.
+            if env::current_dir().is_ok_and(|directory| {
+                marsh_daemon::split_confinement::fork_project(&directory).is_some()
+            }) {
+                return Ok(marsh::fanout_cli::fanout(
+                    &arguments[2..],
+                    marsh::fanout_cli::Place::Lane,
                 ));
             }
             // Host: run the same fanout in a session shell in the shell VM.
@@ -765,6 +782,16 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
         })?;
         inherit_guest_project_root(&mut session, session_id, &context)?;
     }
+    // In a lane's copy an interactive shell takes the split's root as its
+    // project and starts in the copy, as a host `marsh run` there does; a
+    // shell of the copy's own would overlap the Kit jobs' mounts.
+    if !parsed.guest
+        && matches!(parsed.command, cli::ProductCommand::Shell)
+        && let Some(project) =
+            marsh_daemon::split_confinement::fork_project(&session.launch_directory)
+    {
+        session.launch_directory = project;
+    }
     let expected_project_identity = if parsed.guest {
         None
     } else {
@@ -840,7 +867,14 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
             } else {
                 let shell_delivery =
                     !parsed.guest && matches!(parsed.command, cli::ProductCommand::Shell);
+                let json_status =
+                    matches!(parsed.command, cli::ProductCommand::Status { json: true });
                 let fail = |message: String| {
+                    // `status --json` is read by programs: the failure is a
+                    // JSON object on stdout as well as the message on stderr.
+                    if json_status {
+                        println!("{}", serde_json::json!({ "error": message }));
+                    }
                     let error = if shell_delivery {
                         product::ProductError::ShellDelivery(message)
                     } else {
@@ -949,8 +983,8 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
 /// `marsh run` from the host or the shell VM: a session-root job through
 /// `Execute` (`docs/design/processes.md` s3), narrowed by `--spawn`/`MARSH_SPAWN`.
 fn run_command(arguments: &[OsString]) -> i32 {
-    let (spawn, name, rest) = match marsh::job::parse_run(arguments) {
-        Ok(Some(parsed)) => parsed,
+    let (spawn, name, rest, acp) = match marsh::job::parse_run(arguments) {
+        Ok(Some(run)) => (run.spawn, run.name, run.arguments, run.acp),
         Ok(None) => {
             print!("{}", marsh::job::RUN_HELP);
             return 0;
@@ -976,8 +1010,16 @@ fn run_command(arguments: &[OsString]) -> i32 {
         eprintln!("marsh: run: no session");
         return 125;
     };
-    let (environment, _) = marsh::registered_commands::collect_exported_environment(env::vars_os());
+    let (mut environment, _) =
+        marsh::registered_commands::collect_exported_environment(env::vars_os());
+    // From a Mac terminal or app, host-only values (TMPDIR, credentials) stay
+    // on the Mac, as for a split's branches.
+    if channel.detach.is_some() {
+        environment.retain(|name, _| marsh_daemon::split::forwardable(name));
+    }
     let spec = marsh_daemon::ExecuteSpec {
+        label: None,
+        kit: None,
         command: name,
         arguments: rest
             .iter()
@@ -993,6 +1035,7 @@ fn run_command(arguments: &[OsString]) -> i32 {
             branch: false,
             start_env: std::collections::BTreeMap::new(),
         }),
+        acp,
     };
     let status = match channel.client.execute_with_io(
         spec,
@@ -1034,6 +1077,9 @@ Options (defaults from MARSH_CLOUD_CPUS, MARSH_CLOUD_TTL, MARSH_CLOUD_IMAGE):
   --image REF     sandbox image pinned by digest (REPOSITORY@sha256:...)
   -d, --detach    run detached: print the job number and return at once; the
                   run goes on with the laptop closed (`cloud -d { ... }`)
+  --json          with -d: print {\"job_id\":...,\"cursor\":...} on stdout
+  --label TEXT    with -d: record TEXT (1 to 128 bytes, no control characters)
+                  on the job (`marsh jobs --json`, `jobs show`, `marsh events`)
 
 Run a shell script or one program in a new Docker Cloud sandbox. The current
 project (or split fork) is uploaded as a snapshot, Git-ignored files excluded;
@@ -1220,6 +1266,29 @@ fn single_call(source: &str) -> Option<(Vec<String>, bool)> {
     (!words.is_empty()).then_some((words, stdin_null))
 }
 
+/// A detached `-- PROGRAM [ARG...]`, offered to the daemon as one call: it
+/// reads no input, so it is the same as `-c 'PROGRAM ARG...'`, and runs
+/// straight in the program's own Kit when PROGRAM is a registered command
+/// with a cloud form. Any other program runs in the cloud shell as before.
+fn detached_argv_call(arguments: &[OsString]) -> Option<(Vec<String>, bool)> {
+    let mut index = 0;
+    let mut detach = false;
+    loop {
+        match arguments.get(index)?.to_str()? {
+            "--detach" => detach = true,
+            "--cpus" | "--ttl" => index += 1,
+            "--" => break,
+            _ => return None,
+        }
+        index += 1;
+    }
+    let argv = arguments[index + 1..]
+        .iter()
+        .map(|word| word.to_str().map(str::to_owned))
+        .collect::<Option<Vec<_>>>()?;
+    (detach && !argv.is_empty()).then_some((argv, true))
+}
+
 /// The daemon's words for a `cloud` call: the caller's arguments, after the
 /// client's internal `--stdin-terminal` and `--direct N WORD...`; and
 /// whether the one call reads `/dev/null`.
@@ -1232,7 +1301,8 @@ fn cloud_words(arguments: &[OsString], interactive: bool) -> (Vec<Vec<u8>>, bool
         .filter(|index| arguments.len() == index + 2)
         .filter(|_| !arguments.iter().any(|word| word == "--image"))
         .and_then(|index| arguments[index + 1].to_str())
-        .and_then(single_call);
+        .and_then(single_call)
+        .or_else(|| detached_argv_call(arguments));
     let stdin_null = call.as_ref().is_some_and(|(_, null)| *null);
     let stdin_terminal =
         !interactive && !stdin_null && std::io::IsTerminal::is_terminal(&std::io::stdin());
@@ -1274,7 +1344,40 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
     {
         return detached_command(action, &arguments[1..]);
     }
-    let (arguments, interactive) = match cloud_arguments(arguments) {
+    // `--json` and `--label TEXT` among the options (before `-c`/`--`), in
+    // order: an option's value (`--label`, `--cpus`, `--ttl`, `--image`) is
+    // taken as text, never read as an option.
+    let (mut json, mut label, mut rest) = (false, None, Vec::new());
+    let mut index = 0;
+    while let Some(word) = arguments.get(index) {
+        match word.to_str() {
+            Some("-c" | "--") => {
+                rest.extend_from_slice(&arguments[index..]);
+                break;
+            }
+            Some("--json") => json = true,
+            Some("--label") => {
+                index += 1;
+                match arguments.get(index).and_then(|text| text.to_str()) {
+                    Some(text) if marsh_daemon::valid_label(text) => label = Some(text.to_owned()),
+                    _ => {
+                        eprint!(
+                            "marsh: cloud: --label needs 1 to 128 bytes of text with no control characters\n{CLOUD_HELP}"
+                        );
+                        return 2;
+                    }
+                }
+            }
+            Some("--cpus" | "--ttl" | "--image") => {
+                rest.extend(arguments[index..].iter().take(2).cloned());
+                index += 1;
+            }
+            _ => rest.push(word.clone()),
+        }
+        index += 1;
+    }
+    let arguments = rest;
+    let (arguments, interactive) = match cloud_arguments(&arguments) {
         Ok(parsed) => parsed,
         Err(message) => {
             eprint!("marsh: cloud: {message}\n{CLOUD_HELP}");
@@ -1282,6 +1385,14 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
         }
     };
     let detach = arguments.iter().any(|word| word == "--detach");
+    if json && !detach {
+        eprint!("marsh: cloud: --json is for a detached run (-d)\n{CLOUD_HELP}");
+        return 2;
+    }
+    if label.is_some() && !detach {
+        eprint!("marsh: cloud: --label is for a detached run (-d)\n{CLOUD_HELP}");
+        return 2;
+    }
     if detach && interactive {
         eprint!(
             "marsh: cloud: a detached run has no terminal; give it -c SCRIPT or -- PROGRAM\n{CLOUD_HELP}"
@@ -1319,6 +1430,8 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
     // A detached run reads nothing: its stdin is /dev/null.
     let stdin_null = stdin_null || detach;
     let spec = marsh_daemon::ExecuteSpec {
+        label,
+        kit: None,
         command: "cloud".into(),
         arguments: words,
         placement: marsh_daemon::Placement::Cloud,
@@ -1334,13 +1447,16 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
                 branch: false,
                 start_env: std::collections::BTreeMap::new(),
             }),
+        acp: false,
     };
     let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let stdout = ClosedPipeStdout {
         inner: std::io::stdout(),
         closed: std::sync::Arc::clone(&closed),
     };
-    let result = if interactive {
+    let result = if json {
+        detached_json(&channel.client, spec)
+    } else if interactive {
         // Raw terminal, initial size, and resizes, as for a local terminal job.
         channel.client.execute(spec)
     } else {
@@ -1378,6 +1494,46 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
             });
     }
     status
+}
+
+/// `marsh cloud -d --json`: the run's messages go to stderr and one
+/// `{"job_id","cursor"}` line to stdout once it is detached.
+fn detached_json(
+    client: &marsh_daemon::Client,
+    spec: marsh_daemon::ExecuteSpec,
+) -> Result<i32, marsh_daemon::DaemonError> {
+    use marsh_daemon::AttachmentFrame as Frame;
+    let execution = client.start_execution(spec)?;
+    execution.send(&Frame::StdinEof)?;
+    let mut job = None;
+    loop {
+        match execution.receive()? {
+            Frame::Stdout { bytes } | Frame::Stderr { bytes } => {
+                let _ = std::io::stderr().write_all(&bytes);
+            }
+            Frame::Notice { message } => eprintln!("{message}"),
+            Frame::JobStarted { job_id } => job = Some(job_id),
+            Frame::Exited { code } => {
+                if code == 0
+                    && let Some(job_id) = job
+                {
+                    let cursor = match client.request(marsh_daemon::PublicRequest::ShowJob {
+                        job_id: job_id.clone(),
+                    })? {
+                        marsh_daemon::PublicReply::Job(job) => job.cursor,
+                        _ => 0,
+                    };
+                    println!(
+                        "{}",
+                        serde_json::json!({"job_id": job_id, "cursor": cursor})
+                    );
+                }
+                return Ok(code);
+            }
+            Frame::Failed { message } => return Err(marsh_daemon::DaemonError::Remote(message)),
+            _ => {}
+        }
+    }
 }
 
 /// Finish notices of detached cloud runs (each shown once).
@@ -1568,6 +1724,12 @@ fn split_channel(create: bool) -> Result<marsh::split_cli::Channel, String> {
         });
     }
     let mut session = SessionConfig::from_environment(false).map_err(|error| error.to_string())?;
+    // In a lane (a split fork), the project is the split's root and the fork
+    // is only the working directory, so a job there is confined to the fork.
+    if let Some(project) = marsh_daemon::split_confinement::fork_project(&session.launch_directory)
+    {
+        session.launch_directory = project;
+    }
     let daemon_home = session
         .home_backing
         .parent()
@@ -3883,6 +4045,24 @@ mod tests {
             &output("WARN: x\n"),
             "tool"
         ));
+    }
+
+    #[test]
+    fn detached_argv_is_one_call() {
+        let words = |list: &[&str]| -> Vec<std::ffi::OsString> {
+            list.iter().map(std::ffi::OsString::from).collect()
+        };
+        let call = |list: &[&str]| super::detached_argv_call(&words(list));
+        assert_eq!(
+            call(&["--detach", "--ttl", "1h", "--", "claude", "-p", "a b"]),
+            Some((vec!["claude".into(), "-p".into(), "a b".into()], true))
+        );
+        assert_eq!(call(&["--", "claude", "-p", "x"]), None);
+        assert_eq!(
+            call(&["--detach", "--image", "r@sha256:1", "--", "claude"]),
+            None
+        );
+        assert_eq!(call(&["--detach", "-c", "claude -p x"]), None);
     }
 
     #[test]

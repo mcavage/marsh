@@ -1,6 +1,6 @@
 #!/bin/sh
-# ACP mode of the codex Kit: `codex --acp` (packaging/agents.json
-# codex-session) runs the official codex-acp adapter on stdio.
+# ACP mode of the codex Kit (its acp@1 adapter, `--acp`) runs the official
+# codex-acp adapter on stdio.
 set -eu
 umask 077
 temporary=

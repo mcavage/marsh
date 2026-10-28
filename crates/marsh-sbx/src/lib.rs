@@ -99,6 +99,8 @@ const KIT_RESOLUTION_TIMEOUT: Duration = Duration::from_mins(2);
 const KEEPALIVE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const LOCAL_SCRATCH_STALE_AFTER: Duration = Duration::from_hours(1);
 const PREPARATION_SBX_TIMEOUT: Duration = Duration::from_mins(5);
+/// Saved grant mounts of deleted projects dropped while starting one VM.
+const MAX_LOST_GRANT_MOUNTS: usize = 64;
 const PREPARATION_BUILD_TIMEOUT: Duration = Duration::from_mins(20);
 const PREPARATION_LOAD_TIMEOUT: Duration = Duration::from_mins(10);
 const PREPARATION_DOCKER_TIMEOUT: Duration = Duration::from_mins(2);
@@ -1560,6 +1562,89 @@ impl StockSbx {
         }
     }
 
+    /// A Kit's composed descriptor (the `vnd.docker.sandbox.kit.descriptor`
+    /// annotation): from the registry for a published Kit; for a local
+    /// source, from its last cached build, else from its source YAML (a
+    /// local Kit set or mixin is composed only by a build). The flag says
+    /// whether it is final (not the source YAML of a Kit not yet built).
+    ///
+    /// # Errors
+    /// Fails when Docker cannot read the manifests or a descriptor is invalid.
+    pub fn kit_descriptor(
+        &self,
+        kit: &NativeKitRef,
+    ) -> Result<(serde_json::Value, bool), SbxError> {
+        let manifest = match &kit.location {
+            NativeKitLocation::ImmutableOci(image) => self.arm64_manifest(image)?,
+            NativeKitLocation::LocalV3Source(source) => {
+                // The captured generation's own build (content-addressed by
+                // its fingerprint), never whatever the source is now.
+                let fingerprint = kit.expected_local_fingerprint(source)?;
+                let cached = self
+                    .kit_image_cache
+                    .as_deref()
+                    .and_then(|cache| cached_local_build(cache, &fingerprint));
+                if let Some(build) = cached {
+                    Some(self.archived_manifest(&build)?)
+                } else {
+                    // Not built yet: its source YAML, only while the source
+                    // still is that generation (before and after the read).
+                    kit.validate_captured_source(source)?;
+                    let path = local_v3_descriptor(source)?;
+                    if path.extension().is_none_or(|extension| extension != "yaml") {
+                        return Ok((serde_json::Value::Null, false));
+                    }
+                    let yaml: serde_json::Value =
+                        serde_yaml::from_slice(&fs::read(&path).map_err(|source| {
+                            SbxError::Metadata {
+                                path: path.clone(),
+                                source,
+                            }
+                        })?)
+                        .map_err(|source| SbxError::InvalidLocalKitDescriptor { path, source })?;
+                    kit.validate_captured_source(source)?;
+                    return Ok((yaml, false));
+                }
+            }
+        };
+        let Some(manifest) = manifest else {
+            return Ok((serde_json::Value::Null, true));
+        };
+        let value: serde_json::Value = serde_json::from_slice(&manifest)?;
+        match value
+            .get("annotations")
+            .and_then(|annotations| annotations.get(DESCRIPTOR_ANNOTATION))
+            .and_then(serde_json::Value::as_str)
+        {
+            Some(descriptor) => Ok((serde_json::from_str(descriptor)?, true)),
+            None => Ok((serde_json::Value::Null, true)),
+        }
+    }
+
+    /// A cached local build's image manifest, read from its OCI archive.
+    fn archived_manifest(&self, build: &LocalBuild) -> Result<Vec<u8>, SbxError> {
+        let blob = format!(
+            "blobs/sha256/{}",
+            build
+                .manifest_digest
+                .as_str()
+                .strip_prefix("sha256:")
+                .unwrap_or_default()
+        );
+        let output = self.run_program_bounded_os(
+            "read local Kit descriptor",
+            Path::new("/usr/bin/tar"),
+            KIT_RESOLUTION_TIMEOUT,
+            [
+                OsStr::new("-xOf"),
+                build.docker_archive.as_os_str(),
+                OsStr::new(&blob),
+            ],
+        )?;
+        Self::require_success("read local Kit descriptor", output.clone())?;
+        Ok(output.stdout)
+    }
+
     /// The version a published Kit image names for display: its
     /// `org.opencontainers.image.version` annotation, else the version of the
     /// first non-package entry its descriptor `provides` (`claude@2.1.307`).
@@ -1983,12 +2068,11 @@ impl StockSbx {
         let cold_started = match self.classify_vm(&spec.name, false)? {
             VmClass::Foreign => return Err(SbxError::ForeignVm(spec.name.clone())),
             VmClass::Owned { .. } => {
-                if self.verify_owned_marker(&spec.name, &marker).is_ok() {
-                    false
-                } else {
+                if let Err(error) = self.verify_owned_marker(&spec.name, &marker) {
                     self.ownership.invalidate();
-                    return Err(SbxError::ForeignVm(spec.name.clone()));
+                    return Err(error);
                 }
+                false
             }
             VmClass::Absent => {
                 if let Err(error) = self.create_published_vm_with_grant(spec, &lifecycle_grant) {
@@ -5564,22 +5648,204 @@ impl StockSbx {
     }
 
     fn read_owned_marker(&self, vm: &str) -> Result<OwnedWorkerMarker, SbxError> {
-        let output = self.run_bounded_os(
-            "read worker ownership marker",
-            self.preparation_timeouts.sbx,
-            [
-                "exec",
-                "-u",
-                "root",
-                vm,
-                "cat",
-                "/var/lib/marsh/worker.json",
-            ],
-        )?;
-        if !output.succeeded() {
-            return Err(SbxError::ForeignVm(vm.to_owned()));
+        // This read is what starts a stopped VM. Stock SBX refuses to start
+        // one whose saved mount's host path is gone; a grant this daemon (or
+        // an earlier one) mounted for a since-deleted project is dropped, so
+        // the VM starts instead of reading as foreign until a reset.
+        let mut dropped = 0;
+        loop {
+            let output = self.run_bounded_os(
+                "read worker ownership marker",
+                self.preparation_timeouts.sbx,
+                [
+                    "exec",
+                    "-u",
+                    "root",
+                    vm,
+                    "cat",
+                    "/var/lib/marsh/worker.json",
+                ],
+            )?;
+            if output.succeeded() {
+                return serde_json::from_slice(&output.stdout)
+                    .map_err(|_| SbxError::ForeignVm(vm.to_owned()));
+            }
+            let shell = self.ownership.is_owned_shell(vm);
+            match lost_saved_mount(&output, shell) {
+                Some((host, target)) if dropped < MAX_LOST_GRANT_MOUNTS => {
+                    if shell {
+                        self.drop_lost_shell_mount(vm, &host, &target)?;
+                    } else {
+                        self.drop_lost_grant_mount(vm, &host, &target)?;
+                    }
+                    dropped += 1;
+                }
+                _ => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    // `cat` ran and found no marker: not a marsh worker VM.
+                    // Anything else is stock SBX failing before `cat`.
+                    return Err(if stderr.starts_with("cat: ") {
+                        SbxError::ForeignVm(vm.to_owned())
+                    } else {
+                        SbxError::UnreadableVm {
+                            vm: vm.to_owned(),
+                            detail: stderr.trim().to_owned(),
+                        }
+                    });
+                }
+            }
         }
-        serde_json::from_slice(&output.stdout).map_err(|_| SbxError::ForeignVm(vm.to_owned()))
+    }
+
+    /// An owned VM that will not start because the host path of a saved
+    /// mount is gone, while something still holds that mount: say so (it is
+    /// this daemon's own VM, not a foreign one).
+    fn lost_mount_blocked(vm: &str, host: &Path, held: bool) -> SbxError {
+        SbxError::UnreadableVm {
+            vm: vm.to_owned(),
+            detail: if held {
+                format!(
+                    "its saved mount of {} is gone from the Mac, but a session or job here still holds the mount; exit it, or run `marsh stop`",
+                    host.display()
+                )
+            } else {
+                format!(
+                    "stock SBX reports its saved mount of {} missing, but the path exists",
+                    host.display()
+                )
+            },
+        }
+    }
+
+    /// Remove the saved grant mount `host` at `target` from this daemon's
+    /// own stopped VM `vm`, and the reference this daemon held for it (a
+    /// project recreated at that path is mounted afresh). Only a mount under
+    /// `GRANT_ROOT` whose host path is still gone once the grant's and the
+    /// VM's stock locks are held, and only by exact UUID-fenced name.
+    fn drop_lost_grant_mount(&self, vm: &str, host: &Path, target: &Path) -> Result<(), SbxError> {
+        let key = self
+            .grant_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .find(|((name, _), reference)| name == vm && reference.vm_source == target)
+            .map_or_else(|| (vm.to_owned(), host.to_owned()), |(key, _)| key.clone());
+        let (transition, _transition_cleanup) =
+            weak_mutex_transition_lock(&self.grant_transition_locks, key.clone());
+        let _transition = transition
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (operation, _operation_cleanup) =
+            weak_mutex_transition_lock(&self.grant_stock_operation_locks, vm.to_owned());
+        let _operation = operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // A job this daemon still counts on that mount ends (and revokes it)
+        // first. Session pins go with the mount: the stopped VM no longer
+        // has it, and the session's next job mounts its project again.
+        let in_use = self
+            .grant_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&key)
+            .is_some_and(|reference| reference.active_jobs > 0);
+        let gone = matches!(
+            fs::symlink_metadata(host),
+            Err(error) if error.kind() == io::ErrorKind::NotFound
+        );
+        if in_use || !gone {
+            return Err(Self::lost_mount_blocked(vm, host, in_use));
+        }
+        match self.classify_vm(vm, true)? {
+            VmClass::Owned { running: false, .. } => {}
+            _ => return Err(SbxError::ForeignVm(vm.to_owned())),
+        }
+        self.ownership.invalidate();
+        let mut spec = host.as_os_str().to_owned();
+        spec.push(":");
+        spec.push(target);
+        // The host path is absolute and gone: run from `/`, never from it.
+        let output = self
+            .runner
+            .run_bounded(
+                &self.invocation_in(
+                    Path::new("/"),
+                    [OsStr::new("umount"), OsStr::new(vm), spec.as_os_str()],
+                ),
+                self.preparation_timeouts.sbx,
+            )
+            .map_err(SbxError::from)?;
+        Self::require_unmounted("remove a lost grant mount", output)?;
+        self.grant_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&key);
+        Ok(())
+    }
+
+    /// Remove the saved mount `host` at `target` from this daemon's own
+    /// stopped shell VM `vm`: a project or selected home mounted at its
+    /// natural path that has since been deleted. The shell VM's write fence
+    /// is held by the caller (no mount is being added or removed), the host
+    /// path must still be gone, and no session may hold the mount. Idle
+    /// retained references go with it, so a project recreated at that path is
+    /// mounted again.
+    fn drop_lost_shell_mount(&self, vm: &str, host: &Path, target: &Path) -> Result<(), SbxError> {
+        let (operation, _operation_cleanup) =
+            weak_mutex_transition_lock(&self.grant_stock_operation_locks, vm.to_owned());
+        let _operation = operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let in_use = self
+            .shell_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|((name, _, mounted), reference)| {
+                let state = reference
+                    .state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                name == vm
+                    && mounted == target
+                    && (!state.owners.is_empty()
+                        || !matches!(
+                            state.phase,
+                            ShellMountPhase::Mounted | ShellMountPhase::Dormant
+                        ))
+            });
+        let gone = matches!(
+            fs::symlink_metadata(host),
+            Err(error) if error.kind() == io::ErrorKind::NotFound
+        );
+        if in_use || !gone {
+            return Err(Self::lost_mount_blocked(vm, host, in_use));
+        }
+        match self.classify_vm(vm, true)? {
+            VmClass::Owned { running: false, .. } => {}
+            _ => return Err(SbxError::ForeignVm(vm.to_owned())),
+        }
+        self.ownership.invalidate();
+        let mut spec = host.as_os_str().to_owned();
+        spec.push(":");
+        spec.push(target);
+        // The host path is absolute and gone: run from `/`, never from it.
+        let output = self
+            .runner
+            .run_bounded(
+                &self.invocation_in(
+                    Path::new("/"),
+                    [OsStr::new("umount"), OsStr::new(vm), spec.as_os_str()],
+                ),
+                self.preparation_timeouts.sbx,
+            )
+            .map_err(SbxError::from)?;
+        Self::require_unmounted("remove a lost shell mount", output)?;
+        self.shell_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(name, _, mounted), _| name != vm || mounted != target);
+        Ok(())
     }
 
     fn is_owned_stale_local_vm(
@@ -6932,6 +7198,27 @@ const fn is_lower_hex_digit(byte: u8) -> bool {
     byte.is_ascii_digit() || matches!(byte, b'a'..=b'f')
 }
 
+/// Stock SBX's refusal to start a sandbox whose saved mount's host path is
+/// gone: `cannot restore mount "HOST" at "TARGET": stat HOST: no such file or
+/// directory`. A Kit VM's marsh grant mounts (under `GRANT_ROOT`) are reported;
+/// so is any mount of a shell VM, whose project and home mounts sit at their
+/// natural paths. Paths are absolute and colon-free.
+fn lost_saved_mount(output: &CommandOutput, shell: bool) -> Option<(PathBuf, PathBuf)> {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let rest = stderr.split_once("cannot restore mount \"")?.1;
+    let (host, rest) = rest.split_once("\" at \"")?;
+    let (target, rest) = rest.split_once('"')?;
+    let grants = Path::new(GRANT_ROOT);
+    let (host, target) = (PathBuf::from(host), PathBuf::from(target));
+    (rest.contains("no such file or directory")
+        && host.is_absolute()
+        && target.is_absolute()
+        && (shell || (target.starts_with(grants) && target != grants))
+        && !host.as_os_str().as_encoded_bytes().contains(&b':')
+        && !target.as_os_str().as_encoded_bytes().contains(&b':'))
+    .then_some((host, target))
+}
+
 fn stale_shared_mount_error(error: &SbxError) -> bool {
     let SbxError::CommandFailed { stderr, .. } = error else {
         return false;
@@ -7113,6 +7400,10 @@ pub enum SbxError {
     MissingCapability(&'static str),
     #[error("existing sandbox name is not an owned compatible kit VM: {0}")]
     ForeignVm(String),
+    #[error(
+        "owned sandbox {vm} could not be read (stock SBX could not start or exec in it): {detail}"
+    )]
+    UnreadableVm { vm: String, detail: String },
     #[error("invalid SBX identifier: {0}")]
     InvalidIdentifier(String),
     #[error("Kit tag resolution failed: {0}")]

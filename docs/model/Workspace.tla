@@ -16,9 +16,17 @@
 (* still joinable. A daemon restart makes unfinished splits uncertain;  *)
 (* nothing is replayed.                                                  *)
 (*                                                                       *)
+(* Open lanes (split --open, splits in Lanes, created by the session):   *)
+(* each branch is a lane with no command; any number of Kit lane jobs     *)
+(* run in its fork while the lane is open. Close stops admission, waits   *)
+(* for the lane's jobs, and captures; a lane whose jobs do not end is     *)
+(* uncertain. A root split may start from a checkpoint (Ckpt), an        *)
+(* immutable snapshot no job mounts.                                      *)
+(*                                                                       *)
 (* Split:  none -> run -> await -> done | kept -> done                   *)
 (*         run -> cancel -> done ; run/await/cancel -> uncertain         *)
 (* Branch: none -> ready -> running -> exited -> captured | rejected     *)
+(*         ready -> open -> captured | rejected | uncertain (a lane)      *)
 (*         ready -> captured (refused: pool full, fails visibly)         *)
 (*         running/exited -> cancelling -> reaped | unreaped             *)
 (*         running/exited/cancelling -> uncertain (daemon restart)       *)
@@ -30,15 +38,18 @@
 (* outliving their branch, a daemon crash between any two daemon steps. *)
 EXTENDS Naturals, FiniteSets
 
-CONSTANTS Splits, Labels, KitLabels, MaxDepth, MaxConc, MaxVer, MaxRestarts, Bug
+CONSTANTS Splits, Labels, KitLabels, MaxDepth, MaxConc, MaxVer, MaxRestarts, Bug,
+          Lanes, MaxJobs
 
 Bugs == {"none", "objectsRW", "adminRW", "noCaptureCheck", "liveFork",
          "childFromUser", "nestedFork", "wholeProject", "ancestorJoin",
          "captureEarly", "noDepth", "freeOnRevoke", "orphanChildren",
          "noPropagate", "unscopedCancel", "removeLive", "replay", "noIntent",
-         "noLease", "forgetUncertain"}
+         "noLease", "forgetUncertain", "laneAfterClose", "captureLiveLane",
+         "laneRestartLive", "checkpointMounted", "laneSplit", "restartReopens",
+         "removeLiveLane"}
 ASSUME Bug \in Bugs
-ASSUME Splits \subseteq (Nat \ {0}) /\ KitLabels \subseteq Labels
+ASSUME Splits \subseteq (Nat \ {0}) /\ KitLabels \subseteq Labels /\ Lanes \subseteq Splits
 
 Branches == Splits \X Labels
 None == <<0, "none">>
@@ -46,11 +57,12 @@ Root == <<0, "root">>
 Callers == {Root} \cup Branches
 \* Locations (3-tuples so TLC can compare them) and actors.
 UserTree == <<"user", 0, "u">>
+Ckpt == <<"ckpt", 0, "c">>               \* a checkpoint's tree
 Fork(b) == <<"fork", b[1], b[2]>>
 ForkGit(b) == <<"forkgit", b[1], b[2]>>  \* a `.git` entry created inside the fork
 Admin(b) == <<"admin", b[1], b[2]>>      \* gitfile, config, HEAD, info, packed-refs
 Objs(s) == <<"objs", s, "o">>            \* the split's store.git
-Locs == {UserTree} \cup {Objs(s) : s \in Splits}
+Locs == {UserTree, Ckpt} \cup {Objs(s) : s \in Splits}
         \cup {Fork(b) : b \in Branches} \cup {ForkGit(b) : b \in Branches}
         \cup {Admin(b) : b \in Branches}
 UserA == <<"user", 0, "u">>
@@ -77,10 +89,12 @@ VARIABLES
   cap,      \* [Branches -> "none" | "live" | "revoked"]
   ver,      \* [Locs -> Nat] versions of trees
   W,        \* [Locs -> SUBSET actors] ghost: who wrote each location
+  jobs,     \* [Branches -> Nat] live lane jobs of a lane
+  closing,  \* [Splits -> BOOLEAN] a lane split admits no more lane jobs
   restarts
 
 vars == <<sst, par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches, runs,
-          wrote, base, res, ws, cap, ver, W, restarts>>
+          wrote, base, res, ws, cap, ver, W, jobs, closing, restarts>>
 
 Init ==
   /\ sst = [s \in Splits |-> "none"]
@@ -100,6 +114,8 @@ Init ==
   /\ cap = [b \in Branches |-> "none"]
   /\ ver = [l \in Locs |-> 0]
   /\ W = [l \in Locs |-> {}]
+  /\ jobs = [b \in Branches |-> 0]
+  /\ closing = [s \in Splits |-> FALSE]
   /\ restarts = 0
 
 ---------------------------------------------------------------------------
@@ -107,7 +123,7 @@ Init ==
 
 BOf(s) == {s} \X Labels
 \* Argv (Kit) branch: by label for root splits; every branch of a nested split.
-Kit(b) == b[2] \in KitLabels \/ par[b[1]] \in Branches
+Kit(b) == b[2] \in KitLabels \/ par[b[1]] \in Branches \/ b[1] \in Lanes
 RECURSIVE AncB(_, _)
 \* Ancestor branches of split s (its creator branch, that split's creator, ...).
 AncB(s, n) == IF n = 0 \/ par[s] \notin Branches THEN {}
@@ -133,6 +149,7 @@ Mounts(b) == {Fork(b), ForkGit(b)}
              \cup (IF Bug = "wholeProject" THEN {UserTree} ELSE {})
              \cup (IF Bug = "nestedFork" THEN {Fork(c) : c \in ChildBranches(b)} ELSE {})
              \cup (IF Bug = "objectsRW" THEN {Objs(b[1])} ELSE {})
+             \cup (IF Bug = "checkpointMounted" THEN {Ckpt} ELSE {})
 \* A trusted shell branch writes below its cwd (C1).
 ShellWrites(b) == {Fork(b), ForkGit(b)}
 
@@ -152,11 +169,12 @@ CancelSet(T) ==
   /\ cap' = [b \in Branches |-> IF b \in B /\ cap[b] = "live" THEN "revoked" ELSE cap[b]]
   /\ bst' = [b \in Branches |->
                IF b \notin B \/ sst[b[1]] # "run" THEN bst[b]
-               ELSE IF bst[b] = "running" \/ (bst[b] = "exited" /\ alive[b]) THEN "cancelling"
-               ELSE IF bst[b] \in {"none", "ready", "exited"} THEN "reaped"
+               ELSE IF bst[b] = "running" \/ (bst[b] \in {"exited", "open"} /\ alive[b]) THEN "cancelling"
+               ELSE IF bst[b] \in {"none", "ready", "exited", "open"} THEN "reaped"
                ELSE bst[b]]
   /\ ws' = [b \in Branches |-> IF b[1] \in T /\ sst[b[1]] = "await" /\ ws[b] = "alloc"
                                  THEN "retained" ELSE ws[b]]
+  /\ closing' = [t \in Splits |-> closing[t] \/ t \in T]
 
 Settled(b) == ws[b] \in {"none", "removed", "retained"}
 
@@ -167,14 +185,15 @@ UserEdit ==
   /\ UserA \notin W[UserTree]
   /\ WriteLoc(UserTree, UserA)
   /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches,
-                 runs, wrote, base, res, ws, cap, restarts>>
+                 runs, wrote, base, res, ws, cap, jobs, closing, restarts>>
 
 \* A leftover process (background job, unreaped or uncertain container) ends.
 ProcDie(b) ==
   /\ alive[b] /\ bst[b] \in {"exited", "unreaped", "uncertain"}
   /\ alive' = [alive EXCEPT ![b] = FALSE]
+  /\ jobs' = [jobs EXCEPT ![b] = 0]
   /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, bst, launches, runs,
-                 wrote, base, res, ws, cap, ver, W, restarts>>
+                 wrote, base, res, ws, cap, ver, W, closing, restarts>>
 
 Write(b, l) ==
   /\ alive[b] /\ ~wrote[b]
@@ -182,7 +201,7 @@ Write(b, l) ==
   /\ wrote' = [wrote EXCEPT ![b] = TRUE]
   /\ WriteLoc(l, Br(b))
   /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches,
-                 runs, base, res, ws, cap, restarts>>
+                 runs, base, res, ws, cap, jobs, closing, restarts>>
 
 ---------------------------------------------------------------------------
 (* Daemon *)
@@ -190,23 +209,30 @@ Write(b, l) ==
 \* SplitCreate by the session or a running branch. Journal record,
 \* snapshot of the caller's tree, capabilities, in one journaled step.
 \* Bug noIntent: forks may exist before the record. Bug childFromUser: a
-\* nested snapshot reads the user's tree.
+\* nested snapshot reads the user's tree. A lane job never splits (the
+\* daemon resolves its fork from its recorded mounts, not its cwd); Bug
+\* laneSplit: it does, from the project its cwd names.
 Create(s, p) ==
   /\ sst[s] = "none"
   /\ \A t \in Splits : t < s => par[t] # None          \* ids in creation order
+  /\ s \in Lanes => p = Root
   /\ IF p = Root THEN TRUE
+     ELSE IF p[1] \in Lanes THEN Bug = "laneSplit" /\ p[1] # s /\ bst[p] = "open" /\ jobs[p] > 0
      ELSE /\ p[1] # s /\ bst[p] = "running" /\ alive[p] /\ cap[p] = "live"
           /\ (Bug = "noDepth" \/ Depth(p[1]) + 1 <= MaxDepth)
   /\ par' = [par EXCEPT ![s] = p]
   /\ sst' = [sst EXCEPT ![s] = "run"]
   /\ rec' = [rec EXCEPT ![s] = (Bug # "noIntent")]
-  /\ LET src == IF p = Root \/ Bug = "childFromUser" THEN UserTree ELSE Fork(p) IN
+  \* A root split snapshots the user's tree or clones a checkpoint (--from).
+  /\ \E src \in IF p = Root THEN {UserTree, Ckpt}
+                ELSE IF p[1] \in Lanes THEN {UserTree}
+                ELSE {IF Bug = "childFromUser" THEN UserTree ELSE Fork(p)} :
      /\ srcLoc' = [srcLoc EXCEPT ![s] = src]
      /\ snapVer' = [snapVer EXCEPT ![s] = ver[src]]
   /\ cap' = [b \in Branches |-> IF b[1] = s THEN "live" ELSE cap[b]]
   /\ bst' = [b \in Branches |-> IF b[1] = s THEN "ready" ELSE bst[b]]
   /\ UNCHANGED <<cancelBy, alive, launches, runs, wrote, base, res, ws, ver, W,
-                 restarts>>
+                 jobs, closing, restarts>>
 
 \* clonefile one fork from the frozen base. Requires the journal record.
 \* Bug liveFork: clone from the live source tree.
@@ -217,36 +243,36 @@ Alloc(b) ==
                                  ELSE snapVer[b[1]]]
   /\ ws' = [ws EXCEPT ![b] = "alloc"]
   /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches,
-                 runs, wrote, res, cap, ver, W, restarts>>
+                 runs, wrote, res, cap, ver, W, jobs, closing, restarts>>
 
 \* Journal "running" and hand the start to the supervisor or worker, if
 \* the session pool has a slot.
 Launch(b) ==
-  /\ sst[b[1]] = "run" /\ bst[b] = "ready" /\ cap[b] = "live"
+  /\ b[1] \notin Lanes /\ sst[b[1]] = "run" /\ bst[b] = "ready" /\ cap[b] = "live"
   /\ \A c \in BOf(b[1]) : ws[c] = "alloc"
   /\ PoolUse < MaxConc
   /\ bst' = [bst EXCEPT ![b] = "running"]
   /\ launches' = [launches EXCEPT ![b] = @ + 1]
   /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, alive, runs, wrote,
-                 base, res, ws, cap, ver, W, restarts>>
+                 base, res, ws, cap, ver, W, jobs, closing, restarts>>
 
 \* Pool full: the branch fails visibly without running (capacity).
 Refuse(b) ==
-  /\ sst[b[1]] = "run" /\ bst[b] = "ready" /\ cap[b] = "live"
+  /\ b[1] \notin Lanes /\ sst[b[1]] = "run" /\ bst[b] = "ready" /\ cap[b] = "live"
   /\ \A c \in BOf(b[1]) : ws[c] = "alloc"
   /\ PoolUse >= MaxConc
   /\ bst' = [bst EXCEPT ![b] = "captured"]
   /\ res' = [res EXCEPT ![b] = ver[Fork(b)]]
   /\ cap' = [cap EXCEPT ![b] = "revoked"]
   /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, alive, launches, runs,
-                 wrote, base, ws, ver, W, restarts>>
+                 wrote, base, ws, ver, W, jobs, closing, restarts>>
 
 Start(b) ==
   /\ bst[b] = "running" /\ runs[b] < launches[b]
   /\ alive' = [alive EXCEPT ![b] = TRUE]
   /\ runs' = [runs EXCEPT ![b] = @ + 1]
   /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, bst, launches, wrote,
-                 base, res, ws, cap, ver, W, restarts>>
+                 base, res, ws, cap, ver, W, jobs, closing, restarts>>
 
 \* The branch's main process exits or crashes: its capability is revoked
 \* and everything below it is cancelled. A shell branch may leave
@@ -272,7 +298,7 @@ Exit(b) ==
      /\ ws' = [c \in Branches |-> IF c[1] \in T /\ sst[c[1]] = "await" /\ ws[c] = "alloc"
                                     THEN "retained" ELSE ws[c]]
   /\ UNCHANGED <<par, rec, srcLoc, snapVer, cancelBy, launches, runs, wrote, base,
-                 res, ver, W, restarts>>
+                 res, ver, W, jobs, closing, restarts>>
 
 \* Capture once every writer is confirmed gone (container deleted, cgroup
 \* empty, jobs cleaned). It verifies the gitfile and admin files are
@@ -290,13 +316,13 @@ Capture(b) ==
             /\ res' = [res EXCEPT ![b] = ver[Fork(b)]]
             /\ UNCHANGED ws
   /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, alive, launches, runs,
-                 wrote, base, cap, ver, W, restarts>>
+                 wrote, base, cap, ver, W, jobs, closing, restarts>>
 
 Await(s) ==
-  /\ sst[s] = "run" /\ \A b \in BOf(s) : bst[b] \in {"captured", "rejected"}
+  /\ s \notin Lanes /\ sst[s] = "run" /\ \A b \in BOf(s) : bst[b] \in {"captured", "rejected"}
   /\ sst' = [sst EXCEPT ![s] = "await"]
   /\ UNCHANGED <<par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches, runs,
-                 wrote, base, res, ws, cap, ver, W, restarts>>
+                 wrote, base, res, ws, cap, ver, W, jobs, closing, restarts>>
 
 \* SplitJoin + SplitRelease from actor a, accepted only from the creator's
 \* connection (the session for a root split, the running creator branch
@@ -310,12 +336,12 @@ Consume(s, a) ==
           /\ (par[s] = a \/ (Bug = "ancestorJoin" /\ a \in Anc(s)))
   /\ WriteLoc(IF a = Root THEN UserTree ELSE Fork(a), Join(s))
   /\ sst' = [sst EXCEPT ![s] = "done"]
-  /\ \E keep \in BOOLEAN :
+  /\ \E keep \in IF \E b \in BOf(s) : bst[b] = "uncertain" THEN {TRUE} ELSE BOOLEAN :
        ws' = [b \in Branches |-> IF b[1] = s /\ ws[b] \in {"alloc", "retained"}
                                    THEN (IF keep THEN "retained" ELSE "removed")
                                    ELSE ws[b]]
   /\ UNCHANGED <<par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches, runs,
-                 wrote, base, res, cap, restarts>>
+                 wrote, base, res, cap, jobs, closing, restarts>>
 
 \* Lease expires without release: kept (forks retained), still joinable by
 \* the creator. Bug noLease: never.
@@ -324,34 +350,36 @@ LeaseExpire(s) ==
   /\ sst' = [sst EXCEPT ![s] = "kept"]
   /\ ws' = [b \in Branches |-> IF b[1] = s /\ ws[b] = "alloc" THEN "retained" ELSE ws[b]]
   /\ UNCHANGED <<par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches, runs,
-                 wrote, base, res, cap, ver, W, restarts>>
+                 wrote, base, res, cap, ver, W, jobs, closing, restarts>>
 
 \* SplitCancel: from the session (any split), or from a running branch for
 \* splits below it (the creator dropping its stream, or `marsh splits
 \* cancel` from a trusted shell branch). Bug unscopedCancel: a Kit job may
-\* cancel any split. Bug noPropagate: only the named split.
+\* cancel any split. Bug noPropagate: only the named split. An open lane
+\* split's cancel also ends its lane jobs (CancelSet), and admits no more.
 Cancel(s, a) ==
-  /\ sst[s] = "run"
+  /\ sst[s] = "run" /\ ~closing[s]     \* a closing lane split finishes its close
   /\ \/ a = Root
      \/ /\ a \in Branches /\ bst[a] = "running" /\ alive[a] /\ cap[a] = "live"
         /\ (a \in Anc(s) \/ (Bug = "unscopedCancel" /\ Kit(a)))
   /\ cancelBy' = [cancelBy EXCEPT ![s] = a]
   /\ CancelSet(IF Bug = "noPropagate" THEN {s} ELSE Below(s))
   /\ UNCHANGED <<par, rec, srcLoc, snapVer, alive, launches, runs, wrote, base,
-                 res, ver, W, restarts>>
+                 res, ver, W, jobs, restarts>>
 
 Reap(b) ==
   /\ bst[b] = "cancelling"
   /\ bst' = [bst EXCEPT ![b] = "reaped"]
   /\ alive' = [alive EXCEPT ![b] = FALSE]
+  /\ jobs' = [jobs EXCEPT ![b] = 0]
   /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, launches, runs, wrote,
-                 base, res, ws, cap, ver, W, restarts>>
+                 base, res, ws, cap, ver, W, closing, restarts>>
 
 GraceExpire(b) ==
   /\ bst[b] = "cancelling"
   /\ bst' = [bst EXCEPT ![b] = "unreaped"]
   /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, alive, launches, runs,
-                 wrote, base, res, ws, cap, ver, W, restarts>>
+                 wrote, base, res, ws, cap, ver, W, jobs, closing, restarts>>
 
 \* A cancelled split settles: reaped forks removed, unreaped retained
 \* (flagged untrusted). Bug removeLive: unreaped forks removed too.
@@ -364,30 +392,47 @@ CancelEnd(s) ==
                 THEN IF bst[b] = "unreaped" /\ Bug # "removeLive" THEN "retained" ELSE "removed"
                 ELSE ws[b]]
   /\ UNCHANGED <<par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches, runs,
-                 wrote, base, res, cap, ver, W, restarts>>
+                 wrote, base, res, cap, ver, W, jobs, closing, restarts>>
 
 \* Daemon crash + restart between any two daemon steps. The journal
 \* survives: recorded unfinished splits become uncertain, launched
 \* branches uncertain, unlaunched never start, capabilities revoked;
-\* unrecorded splits are lost. Bug replay: resume, treating journaled but
-\* unconfirmed launches as not started.
+\* unrecorded splits are lost. An open lane split whose lanes had no live
+\* job (the journal counts them) and no close under way stays open. One
+\* being closed (closing is journaled) is kept, its open lanes uncertain
+\* and forks retained. Bug replay: resume, treating journaled but
+\* unconfirmed launches as not started. Bug laneRestartLive: an open lane
+\* split stays open, forgetting its live lane jobs. Bug restartReopens:
+\* closing is forgotten and the split reopens.
 Restart ==
   /\ restarts < MaxRestarts
   /\ restarts' = restarts + 1
   /\ IF Bug = "replay"
        THEN /\ bst' = [b \in Branches |-> IF bst[b] = "running" THEN "ready" ELSE bst[b]]
-            /\ UNCHANGED <<sst, cap>>
-       ELSE /\ sst' = [s \in Splits |-> IF sst[s] \in SplitActive
+            /\ closing' = [s \in Splits |-> FALSE]
+            /\ UNCHANGED <<sst, cap, jobs, ws>>
+       ELSE LET Closing(s) == s \in Lanes /\ sst[s] = "run" /\ closing[s]
+                                /\ Bug # "restartReopens"
+                Open(s) == s \in Lanes /\ sst[s] = "run" /\ ~Closing(s)
+                           /\ (Bug = "laneRestartLive" \/ \A b \in BOf(s) : jobs[b] = 0) IN
+            /\ sst' = [s \in Splits |-> IF Open(s) THEN "run"
+                                        ELSE IF Closing(s) THEN "kept"
+                                        ELSE IF sst[s] \in SplitActive
                                           THEN IF rec[s] THEN "uncertain" ELSE "lost"
-                                          ELSE sst[s]]
+                                        ELSE sst[s]]
             /\ bst' = [b \in Branches |->
-                         IF sst[b[1]] \notin SplitActive THEN bst[b]
-                         ELSE IF bst[b] \in {"running", "exited", "cancelling"} THEN "uncertain"
-                         ELSE IF bst[b] \in {"none", "ready"} THEN "reaped"
+                         IF Open(b[1]) \/ sst[b[1]] \notin SplitActive THEN bst[b]
+                         ELSE IF Closing(b[1]) THEN IF bst[b] = "open" THEN "uncertain" ELSE bst[b]
+                         ELSE IF bst[b] \in {"running", "exited", "cancelling"}
+                                 \/ (bst[b] = "open" /\ jobs[b] > 0) THEN "uncertain"
+                         ELSE IF bst[b] \in {"none", "ready", "open"} THEN "reaped"
                          ELSE bst[b]]
+            /\ ws' = [b \in Branches |-> IF Closing(b[1]) /\ ws[b] = "alloc" THEN "retained" ELSE ws[b]]
             /\ cap' = [b \in Branches |-> IF cap[b] = "live" THEN "revoked" ELSE cap[b]]
+            /\ jobs' = [b \in Branches |-> IF Open(b[1]) THEN 0 ELSE jobs[b]]
+            /\ closing' = [s \in Splits |-> FALSE]
   /\ UNCHANGED <<par, rec, srcLoc, snapVer, cancelBy, alive, launches, runs, wrote,
-                 base, res, ws, ver, W>>
+                 base, res, ver, W>>
 
 \* After restart, recorded forks of uncertain splits are retained and
 \* reported (untrusted). Bug forgetUncertain: never.
@@ -395,16 +440,108 @@ Recover(b) ==
   /\ sst[b[1]] = "uncertain" /\ ws[b] = "alloc" /\ Bug # "forgetUncertain"
   /\ ws' = [ws EXCEPT ![b] = "retained"]
   /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches,
-                 runs, wrote, base, res, cap, ver, W, restarts>>
+                 runs, wrote, base, res, cap, ver, W, jobs, closing, restarts>>
+
+\* Open lanes (split --open). Once every fork exists, each lane opens.
+OpenLane(b) ==
+  /\ b[1] \in Lanes /\ sst[b[1]] = "run" /\ bst[b] = "ready"
+  /\ \A c \in BOf(b[1]) : ws[c] = "alloc"
+  /\ bst' = [bst EXCEPT ![b] = "open"]
+  /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, alive, launches, runs,
+                 wrote, base, res, ws, cap, ver, W, jobs, closing, restarts>>
+
+\* The creator starts a Kit job in a lane: admitted only while the lane is
+\* open and the split is running and not closing. Bug laneAfterClose: a
+\* closed or captured lane admits it.
+LaneJob(b) ==
+  /\ jobs[b] < MaxJobs
+  /\ IF Bug = "laneAfterClose"
+       THEN b[1] \in Lanes /\ bst[b] \in {"open", "captured"} /\ sst[b[1]] \in {"run", "kept"}
+       ELSE bst[b] = "open" /\ sst[b[1]] = "run" /\ ~closing[b[1]]
+  /\ jobs' = [jobs EXCEPT ![b] = @ + 1]
+  /\ alive' = [alive EXCEPT ![b] = TRUE]
+  /\ wrote' = [wrote EXCEPT ![b] = FALSE]
+  /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, bst, launches, runs,
+                 base, res, ws, cap, ver, W, closing, restarts>>
+
+\* A lane job ends, its container confirmed gone.
+LaneJobEnd(b) ==
+  /\ b[1] \in Lanes /\ jobs[b] > 0 /\ bst[b] \notin {"cancelling", "unreaped", "uncertain"}
+  /\ jobs' = [jobs EXCEPT ![b] = @ - 1]
+  /\ alive' = [alive EXCEPT ![b] = jobs[b] > 1]
+  /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, bst, launches, runs,
+                 wrote, base, res, ws, cap, ver, W, closing, restarts>>
+
+\* SplitClose: no more lane jobs.
+Close(s) ==
+  /\ s \in Lanes /\ sst[s] = "run" /\ ~closing[s]
+  /\ closing' = [closing EXCEPT ![s] = TRUE]
+  /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches,
+                 runs, wrote, base, res, ws, cap, ver, W, jobs, restarts>>
+
+\* After close, a lane whose jobs have all ended is captured as a branch
+\* is. Bug captureLiveLane: captured while a lane job runs.
+LaneCapture(b) ==
+  /\ bst[b] = "open" /\ closing[b[1]] /\ sst[b[1]] = "run"
+  /\ jobs[b] = 0 \/ Bug = "captureLiveLane"
+  /\ IF Tampered(b) /\ Bug # "noCaptureCheck"
+       THEN /\ bst' = [bst EXCEPT ![b] = "rejected"]
+            /\ ws' = [ws EXCEPT ![b] = "removed"]
+            /\ UNCHANGED res
+       ELSE /\ bst' = [bst EXCEPT ![b] = "captured"]
+            /\ res' = [res EXCEPT ![b] = ver[Fork(b)]]
+            /\ UNCHANGED ws
+  /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, alive, launches, runs,
+                 wrote, base, cap, ver, W, jobs, closing, restarts>>
+
+\* Close's 30 s wait ends with lane jobs still live: the lane is uncertain.
+LaneTimeout(b) ==
+  /\ bst[b] = "open" /\ closing[b[1]] /\ sst[b[1]] = "run" /\ jobs[b] > 0
+  /\ bst' = [bst EXCEPT ![b] = "uncertain"]
+  /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, alive, launches, runs,
+                 wrote, base, res, ws, cap, ver, W, jobs, closing, restarts>>
+
+\* Every lane settled: the split is kept (no lease), its forks retained.
+LaneKeep(s) ==
+  /\ s \in Lanes /\ sst[s] = "run" /\ closing[s]
+  /\ \A b \in BOf(s) : bst[b] \in {"captured", "rejected", "uncertain"}
+  /\ sst' = [sst EXCEPT ![s] = "kept"]
+  /\ ws' = [b \in Branches |-> IF b[1] = s /\ ws[b] = "alloc" THEN "retained" ELSE ws[b]]
+  /\ closing' = [closing EXCEPT ![s] = FALSE]
+  /\ UNCHANGED <<par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches, runs,
+                 wrote, base, res, cap, ver, W, jobs, restarts>>
+
+\* `marsh splits cancel` of a kept lane split ends the jobs of a lane a
+\* close timed out on, once their end is confirmed. The lane stays
+\* uncertain (its capture never happened), so a join keeps it.
+CancelKept(b) ==
+  /\ b[1] \in Lanes /\ sst[b[1]] = "kept" /\ bst[b] = "uncertain" /\ jobs[b] > 0
+  /\ jobs' = [jobs EXCEPT ![b] = 0]
+  /\ alive' = [alive EXCEPT ![b] = FALSE]
+  /\ UNCHANGED <<sst, par, rec, srcLoc, snapVer, cancelBy, bst, launches, runs,
+                 wrote, base, res, ws, cap, ver, W, closing, restarts>>
+
+\* `marsh splits rm` (or retention) removes a kept lane split only once no
+\* lane job runs in it. Bug removeLiveLane: regardless.
+RemoveKept(s) ==
+  /\ s \in Lanes /\ sst[s] = "kept"
+  /\ Bug = "removeLiveLane" \/ \A b \in BOf(s) : jobs[b] = 0
+  /\ sst' = [sst EXCEPT ![s] = "done"]
+  /\ ws' = [b \in Branches |-> IF b[1] = s /\ ws[b] = "retained" THEN "removed" ELSE ws[b]]
+  /\ UNCHANGED <<par, rec, srcLoc, snapVer, cancelBy, bst, alive, launches, runs,
+                 wrote, base, res, cap, ver, W, jobs, closing, restarts>>
 
 Next ==
   \/ UserEdit \/ Restart
   \/ \E s \in Splits : \/ \E p \in Callers : Create(s, p)
                        \/ Await(s) \/ LeaseExpire(s) \/ CancelEnd(s)
                        \/ \E a \in Callers : Cancel(s, a) \/ Consume(s, a)
+                       \/ Close(s) \/ LaneKeep(s) \/ RemoveKept(s)
   \/ \E b \in Branches : \/ ProcDie(b) \/ Alloc(b) \/ Launch(b) \/ Refuse(b) \/ Start(b)
                          \/ Exit(b) \/ Capture(b) \/ Reap(b) \/ GraceExpire(b)
                          \/ Recover(b) \/ \E l \in Locs : Write(b, l)
+                         \/ OpenLane(b) \/ LaneJob(b) \/ LaneJobEnd(b) \/ LaneCapture(b)
+                         \/ LaneTimeout(b) \/ CancelKept(b)
 
 Fairness ==
   /\ \A b \in Branches : /\ WF_vars(Alloc(b)) /\ WF_vars(Launch(b) \/ Refuse(b))
@@ -421,12 +558,15 @@ Spec == Init /\ [][Next]_vars /\ Fairness
 TypeOK ==
   /\ sst \in [Splits -> {"none", "run", "await", "kept", "done", "cancel", "uncertain", "lost"}]
   /\ bst \in [Branches -> {"none", "ready", "running", "exited", "captured", "rejected",
-                           "cancelling", "reaped", "unreaped", "uncertain"}]
+                           "cancelling", "reaped", "unreaped", "uncertain", "open"}]
   /\ ws \in [Branches -> {"none", "alloc", "removed", "retained"}]
   /\ cap \in [Branches -> {"none", "live", "revoked"}]
 
 \* Snapshot objects (store.git) are never written by a branch.
 SnapshotImmutable == \A s \in Splits : W[Objs(s)] = {}
+
+\* A checkpoint is never written by a branch or a lane job.
+CheckpointImmutable == W[Ckpt] = {}
 
 \* Git admin files (gitfile, config, HEAD, info, packed-refs) are never
 \* written by a branch.
@@ -446,6 +586,11 @@ ForkIsolation == \A b \in Branches :
 NoWriteToUserTree ==
   W[UserTree] \subseteq {UserA} \cup {Join(s) : s \in {t \in Splits : par[t] = Root}}
 
+\* Writers the model does not have: a shell the user starts in a lane's copy
+\* (trusted code in the shell VM, which mounts the whole project root, so it
+\* may also write elsewhere) is not a lane job, is not counted live and is not
+\* fenced by a close. CaptureStable covers lane jobs only; the shell prints a
+\* notice when it starts (docs/design/workspaces.md s14).
 CaptureStable == \A b \in Branches : bst[b] = "captured" => res[b] = ver[Fork(b)]
 
 LineageWF == \A s \in Splits : par[s] # None =>
@@ -453,7 +598,7 @@ LineageWF == \A s \in Splits : par[s] # None =>
   /\ par[s] \in Branches => par[s][1] # s /\ par[par[s][1]] # None
 
 \* Processes that actually exist stay within the session pool.
-BudgetBound == Cardinality({b \in Branches : alive[b]}) <= MaxConc
+BudgetBound == Cardinality({b \in Branches : alive[b] /\ b[1] \notin Lanes}) <= MaxConc
 
 LiveUnderLive == \A b \in Branches :
   (cap[b] = "live" /\ par[b[1]] \in Branches) => cap[par[b[1]]] = "live"
@@ -464,6 +609,11 @@ CancelPropagates == \A s \in Splits : sst[s] = "cancel" =>
 CancelScoped == \A s \in Splits : cancelBy[s] \in Branches => cancelBy[s] \in Anc(s)
 
 NoRemoveWhileLive == \A b \in Branches : ws[b] = "removed" => ~alive[b]
+
+\* A lane split with a settled lane is closed: a restart never reopens it.
+ClosedStaysClosed == \A s \in Lanes :
+  (sst[s] = "run" /\ \E b \in BOf(s) : bst[b] \in {"captured", "rejected", "uncertain"})
+    => closing[s]
 
 NoReplay == \A b \in Branches : runs[b] <= 1
 

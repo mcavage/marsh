@@ -357,7 +357,8 @@ Other commands:
 | `marsh join --timing` | prints a timing breakdown on stderr |
 
 A split waiting for `join` that no process has held open for 60 seconds is kept. Its
-creator can still join it.
+creator can still join it. A kept split is removed 7 days after it was kept;
+`marsh storage` shows what kept splits and checkpoints take up.
 
 `--timing` reports these phases:
 
@@ -372,6 +373,38 @@ splits snapshot the calling branch's fork and accept only argv branches.
 Branches share a 16-slot session pool, while registered commands also
 count against the daemon's [job limits](agents.md#limits-and-messages).
 Only the creator may join a split, including one retained after lease expiry.
+
+## Checkpoints and open lanes
+
+A checkpoint freezes the project as a split would snapshot it, so a split can
+start from it later:
+
+```sh
+c=$(marsh checkpoint --label before-refactor)   # prints its ID
+marsh checkpoints                               # newest first
+```
+
+An open split makes forks ("lanes") with no command and returns at once. You
+then run agents in them yourself, for as long as you like, and close the split
+to collect each lane's patch:
+
+```sh
+marsh split --open --from "$c" a b     # {"marsh_split":1,"id":ID,"lanes":{"a":FORK,"b":FORK}}
+(cd FORK_A && marsh run claude -p 'fix the flaky test')
+(cd FORK_B && marsh run --acp codex)   # an ACP client drives the agent over stdio
+marsh split close ID                   # captures every lane; the split is kept
+marsh split apply ID a --3way          # applies lane a's patch to the project
+marsh split apply ID a --json          # tries a plain apply, then --3way; one JSON outcome
+```
+
+A command run in a lane is confined to its fork, like a `:::` branch. Only the
+split's creator can start one, and only until the split is closed. `close`
+waits up to 30 seconds for running lane jobs; a lane whose jobs are still
+running is kept as uncertain. `marsh splits cancel ID` stops the lane jobs and
+removes the split. Agents of different kinds can share one lane; `marsh fanout`
+from a lane's copy runs its branches as lane jobs; `marsh cloud -d -- PROGRAM`
+there writes its results back into the copy (never the project); and a
+`marsh` shell started in the copy starts in it. See [design: workspaces](design/workspaces.md#14-open-lanes-checkpoints-and-storage).
 
 ## Seeing a split in `marsh jobs --tree`
 

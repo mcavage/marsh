@@ -98,12 +98,21 @@ impl ImageCommand {
             ));
         }
         let config = image.get("Config").ok_or_else(invalid)?;
-        let mut argv = image_words(config.get("Entrypoint"))?;
+        let declared = spec.entrypoint.as_ref().map(|words| {
+            words
+                .iter()
+                .map(|word| word.as_bytes().to_vec())
+                .collect::<Vec<_>>()
+        });
+        let mut argv = match &declared {
+            Some(words) => words.clone(),
+            None => image_words(config.get("Entrypoint"))?,
+        };
         // Docker treats the one-empty-word entrypoint as an explicit reset.
         if argv.len() == 1 && argv[0].is_empty() {
             argv.clear();
         }
-        let tail = if spec.argv.is_empty() {
+        let tail = if spec.argv.is_empty() && declared.is_none() {
             image_words(config.get("Cmd"))?
         } else {
             spec.argv.clone()

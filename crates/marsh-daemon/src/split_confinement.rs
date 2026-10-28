@@ -61,6 +61,28 @@ fn real_directories(project: &Path, path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The project whose fork holds `path` (`<root>/.marsh/split/<id>/<label>/...`),
+/// so a command started in a lane runs with that project as its root.
+#[must_use]
+pub fn fork_project(path: &Path) -> Option<PathBuf> {
+    let parts = path.components().collect::<Vec<_>>();
+    let at = parts.windows(4).position(|window| match window {
+        [
+            Component::Normal(marsh),
+            Component::Normal(split),
+            Component::Normal(id),
+            Component::Normal(label),
+        ] => {
+            *marsh == ".marsh"
+                && *split == "split"
+                && id.to_str().is_some_and(split_id)
+                && label.to_str().is_some_and(split_label)
+        }
+        _ => false,
+    })?;
+    Some(parts[..at].iter().collect())
+}
+
 /// Resolves the split branch confinement for one job: `Ok(None)` for an
 /// ordinary job whose cwd is outside `<project>/.marsh`.
 ///
@@ -68,6 +90,17 @@ fn real_directories(project: &Path, path: &Path) -> Result<(), String> {
 /// Returns a one-line reason when the job runs inside `.marsh` but not
 /// inside a well-formed fork.
 pub fn branch_confinement(project: &Path, cwd: &Path) -> Result<Option<BranchConfinement>, String> {
+    // A project root inside `.marsh` (a shell opened in a fork) would mount
+    // the fork without its Git metadata and with a writable gitfile.
+    if project
+        .components()
+        .any(|component| component == Component::Normal(".marsh".as_ref()))
+    {
+        return Err(format!(
+            "{} is inside .marsh; run marsh from the project root",
+            project.display()
+        ));
+    }
     let Ok(relative) = cwd.strip_prefix(project) else {
         return Ok(None);
     };

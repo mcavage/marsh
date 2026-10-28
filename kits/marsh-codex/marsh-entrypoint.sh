@@ -8,7 +8,7 @@ case "$selected" in
   *) echo "codex kit: MARSH_SELECTED_HOME must be absolute" >&2; exit 125 ;;
 esac
 export HOME=$selected
-# ACP mode: packaging/agents.json starts codex-session as `codex --acp`.
+# ACP mode (`--acp`): the Kit's acp@1 adapter, `marsh run --acp codex`.
 if [ "${1:-}" = --acp ]; then
   shift
   exec /opt/marsh/codex-acp/marsh-acp.sh "$@"

@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import unittest
 import uuid
@@ -54,6 +55,35 @@ class Preparation(unittest.TestCase):
                 self.assertIn("marsh-orchestration", (target / "package/skills/deliver/SKILL.md").read_text())
         finally:
             for canary in canaries: canary.unlink()
+
+    def test_public_verifier_works_without_removed_base_license_records(self):
+        with tempfile.TemporaryDirectory(prefix="pix-public-check-") as temporary:
+            root = Path(temporary)
+            snapshot = root / "snapshot"
+            prepared = self.prepare(snapshot)
+            self.assertEqual(prepared.returncode, 0, prepared.stderr)
+            image = root / "image"
+            package = image / "opt/pix/package"
+            shutil.copytree(snapshot / "package", package)
+            notices = image / "usr/local/share/licenses/pix"
+            notices.mkdir(parents=True)
+            for source, target in (("LICENSE", "LICENSE"), ("PUBLIC-SOURCES.json", "inputs.json"),
+                                   ("verify-public.py", "verify-public.py")):
+                shutil.copy2(snapshot / source, notices / target)
+            entrypoint = image / "usr/local/bin/marsh-pix"
+            entrypoint.parent.mkdir(parents=True)
+            shutil.copy2(snapshot / "entrypoint.sh", entrypoint)
+            entrypoint.chmod(0o755)
+            command = ["python3", str(notices / "verify-public.py"), "--root", str(image)]
+            checked = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            self.assertFalse((notices / "base-check").exists())
+            self.assertNotIn("base_receipt_sha256", json.loads(checked.stdout))
+            with (package / "instructions.md").open("a") as changed:
+                changed.write("\ntampered\n")
+            rejected = subprocess.run(command, capture_output=True, text=True)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("differs", rejected.stderr)
 
     def test_existing_destination_is_preserved(self):
         with tempfile.TemporaryDirectory(prefix="pix-public-") as temp:

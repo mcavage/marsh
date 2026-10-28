@@ -119,6 +119,11 @@ pub trait DaemonClient: Send + Sync + 'static {
         session: &SessionConfig,
     ) -> Result<LoadReport, ClientError>;
     fn reset_workers(&self, selection: &LoadSelection) -> Result<WorkerResetReport, ClientError>;
+    fn forget_cloud_create(&self, _name: &str) -> Result<String, ClientError> {
+        Err(ClientError(
+            "forgetting a cloud create is unavailable".into(),
+        ))
+    }
     fn reset_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
         Err(ClientError("reset is unavailable".into()))
     }
@@ -1142,7 +1147,7 @@ fn acp_prompt_text(text: &[&str]) -> Result<String, ClientError> {
 fn print_acp_help(command: Option<&str>, error: bool) {
     let help = match command {
         None => {
-            "ACP agent sessions\n\nStart an agent as a shell background job, then use its session ID to talk to it.\n\n  acp run AGENT &                  Start a registered ACP agent\n  acp list [--mine] [--wait [ID]] [--json] Find sessions; use an exact ID when multiple exist\n  acp ask ID TEXT                 Send a turn and print its answer\n  acp status ID [CURSOR]           Show session state and updates\n  acp stop ID                      End a session\n\nExample:\n  id=$(acp reserve claude-session)\n  acp run --reservation \"$id\" claude-session &\n  acp list --mine --wait \"$id\"\n  acp ask \"$id\" 'Say hi'\n\nOther commands: prompt, permissions, respond, cancel, attach, release, publish, unpublish.\nRun `acp COMMAND --help` for details."
+            "ACP agent sessions\n\nStart an agent as a shell background job, then use its session ID to talk to it.\n\n  acp run AGENT &                  Start a registered ACP agent\n  acp list [--mine] [--wait [ID]] [--json] Find sessions; use an exact ID when multiple exist\n  acp ask ID TEXT                 Send a turn and print its answer\n  acp status ID [CURSOR]           Show session state and updates\n  acp stop ID                      End a session\n\nExample:\n  id=$(acp reserve claude)\n  acp run --reservation \"$id\" claude &\n  acp list --mine --wait \"$id\"\n  acp ask \"$id\" 'Say hi'\n\nOther commands: prompt, permissions, respond, cancel, attach, release, publish, unpublish.\nRun `acp COMMAND --help` for details."
         }
         Some("run") => {
             "Usage: acp run [--reservation ID] AGENT &\n\nStart an ACP agent as a Brush background job. Prints session and Kit job IDs to stderr when ready. For race-free composition, including quoted agent names: id=$(acp reserve AGENT); acp run --reservation \"$id\" AGENT & acp list --mine --wait \"$id\". Reservations expire after 15 seconds if not started."
@@ -1467,6 +1472,18 @@ impl DaemonClient for LocalDaemonClient {
         } else {
             std::collections::BTreeMap::new()
         };
+        // In a lane's copy the project is the split's root and the copy is
+        // only where the shell starts (as for a host `marsh run` there).
+        let working_directory = std::env::current_dir().ok().filter(|cwd| {
+            cwd != &session.launch_directory
+                && marsh_daemon::split_confinement::fork_project(cwd).as_deref()
+                    == Some(session.launch_directory.as_path())
+        });
+        if working_directory.is_some() && session.terminal {
+            eprintln!(
+                "marsh: a lane's copy: changes you make here are captured only if made before Finish"
+            );
+        }
         self.0
             .open_shell(marsh_daemon::ShellSpec {
                 arguments: brush_args
@@ -1477,6 +1494,7 @@ impl DaemonClient for LocalDaemonClient {
                 session,
                 dev: crate::cli::DEV_SESSION.load(std::sync::atomic::Ordering::Relaxed),
                 terminal_environment,
+                working_directory,
             })
             .map_err(map_daemon_error)
     }
@@ -1533,6 +1551,10 @@ impl DaemonClient for LocalDaemonClient {
             .map_err(map_daemon_error)
     }
 
+    fn forget_cloud_create(&self, name: &str) -> Result<String, ClientError> {
+        self.0.forget_cloud_create(name).map_err(map_daemon_error)
+    }
+
     fn reset_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
         self.0.reset_scope().map_err(map_daemon_error)
     }
@@ -1575,11 +1597,14 @@ impl DaemonClient for LocalDaemonClient {
     fn execute(&self, request: ExecuteRequest) -> Result<i32, ClientError> {
         self.0
             .execute(marsh_daemon::ExecuteSpec {
+                label: None,
+                kit: None,
                 command: request.command,
                 arguments: request.args,
                 placement: request.placement,
                 environment: request.environment,
                 working_directory: request.working_directory,
+                acp: false,
                 session: daemon_session(&request.session)?,
                 process: request
                     .spawn

@@ -1,7 +1,5 @@
-use marsh_acp::AgentRegistry;
 use marsh_backend::{
-    BackendConfig, RegisteredKit, StockDaemonBackend, command_registry::load_commands,
-    config::EnvironmentConfig,
+    BackendConfig, StockDaemonBackend, command_registry::load_commands, config::EnvironmentConfig,
 };
 #[cfg(test)]
 use marsh_contracts::JobResources;
@@ -84,10 +82,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let commands = load_commands(
         &guest_artifacts.join("commands.json"),
         &control_home.join("commands.json"),
-    )?;
-    let agents = load_agents(
-        &guest_artifacts.join("agents.json"),
-        &control_home.join("agents.json"),
     )?;
     // The Kits this marsh shipped, before host overrides: automatic updates
     // follow their release channel and `uninstall` reverts to them.
@@ -191,20 +185,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         resources: defaults.resources,
         env: EnvironmentConfig::default(),
     };
-    let backend = backend_with_agents(
-        Arc::clone(&stock),
-        commands,
-        config,
-        &agents,
-        Some((packaged, channel)),
-    )
-    .map_err(|error| {
-        format!(
-            "invalid ACP Kit binding ({error}); check {} and {} against commands.json",
-            control_home.join("agents.json").display(),
-            guest_artifacts.join("agents.json").display(),
-        )
-    })?;
+    let backend = StockDaemonBackend::new(Arc::clone(&stock), commands, config)
+        .with_packaged(packaged, channel);
     let backend = backend
         .with_sbxenvs()?
         .with_auto_update(env::var_os("MARSH_AUTO_UPDATE"), home.clone());
@@ -241,7 +223,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// `marshd --check-config [DIR]`: validate an install's packaged configuration
-/// (`commands.json`, `agents.json`, `shell-image`; DIR defaults to this
+/// (`commands.json`, `shell-image`; DIR defaults to this
 /// binary's `libexec/marsh`) with the same loaders and ACP Kit binding startup
 /// uses. It never touches `sbx`, VMs, the network or the control home, so a
 /// release can be checked before publishing. Registries a user adds under
@@ -261,10 +243,9 @@ fn check_config(arguments: &[std::ffi::OsString]) -> Result<String, Box<dyn std:
     };
     let no_user = guest_artifacts.join(".check-config-no-user-registry");
     let commands = load_commands(&guest_artifacts.join("commands.json"), &no_user)?;
-    let agents = load_agents(&guest_artifacts.join("agents.json"), &no_user)?;
     let shell_image = fs::read_to_string(guest_artifacts.join("shell-image"))
         .map_err(|_| "cannot read shell-image")?;
-    let shell_image = OciImage::parse(shell_image.trim().to_owned())?;
+    OciImage::parse(shell_image.trim().to_owned())?;
     let local = guest_artifacts.join("local-build").exists();
     if !local
         && commands
@@ -273,43 +254,8 @@ fn check_config(arguments: &[std::ffi::OsString]) -> Result<String, Box<dyn std:
     {
         return Err("a release install must pin every Kit by digest (found a source Kit)".into());
     }
-    let scratch = guest_artifacts.clone();
-    let config = BackendConfig {
-        worker_binary: guest_artifacts.join("marsh-worker-linux-arm64"),
-        relay_binary: guest_artifacts.join("marsh-relay-linux-arm64"),
-        daemon_home: scratch.clone(),
-        control_home: scratch.clone(),
-        protected_guest_roots: Vec::new(),
-        shell: ShellVmSpec {
-            name: "check-config".into(),
-            image: shell_image,
-            shell_binary: guest_artifacts.join("marsh-linux-arm64"),
-            user: ShellUser {
-                name: "check".into(),
-                uid: 0,
-                gid: 0,
-                home: scratch,
-            },
-        },
-        resources: JobDefaults::from_environment(|_| None)?.resources,
-        env: EnvironmentConfig::default(),
-    };
-    // StockSbx is built but never invoked: binding reads only the registry.
-    let stock = Arc::new(StockSbx::new(
-        guest_artifacts.join("unused-sbx"),
-        Arc::new(SystemCommandRunner::new(
-            guest_artifacts.as_os_str().to_os_string(),
-        )),
-    ));
-    let declared = agents.declarations().count();
-    backend_with_agents(stock, commands.clone(), config, &agents, None).map_err(|error| {
-        format!(
-            "invalid ACP Kit binding ({error}); {} against commands.json",
-            guest_artifacts.join("agents.json").display()
-        )
-    })?;
     Ok(format!(
-        "marshd: configuration ok ({} commands, {declared} ACP agents) in {}",
+        "marshd: configuration ok ({} commands) in {}",
         commands.len(),
         guest_artifacts.display()
     ))
@@ -576,63 +522,6 @@ fn verify_host_directory(
     })
 }
 
-fn load_agents(packaged: &Path, user: &Path) -> Result<AgentRegistry, Box<dyn std::error::Error>> {
-    use std::{io::Read as _, os::unix::fs::OpenOptionsExt as _};
-    const MAX_AGENT_REGISTRY_BYTES: u64 = 1024 * 1024;
-    // Preserve explicit replacement semantics, including [] to disable ACP.
-    // Only a missing user file permits packaged defaults; malformed/unsafe
-    // configuration is fatal, never an implicit disable.
-    for path in [user, packaged] {
-        let flags = nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK;
-        let file = match fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(flags)
-            .open(path)
-        {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(_) => return Err(format!("cannot read ACP registry: {}", path.display()).into()),
-        };
-        if !file
-            .metadata()
-            .map_err(|_| format!("cannot inspect ACP registry: {}", path.display()))?
-            .is_file()
-        {
-            return Err(format!("ACP registry must be a regular file: {}", path.display()).into());
-        }
-        let mut json = String::new();
-        file.take(MAX_AGENT_REGISTRY_BYTES + 1)
-            .read_to_string(&mut json)
-            .map_err(|_| format!("cannot read ACP registry: {}", path.display()))?;
-        if u64::try_from(json.len()).unwrap_or(u64::MAX) > MAX_AGENT_REGISTRY_BYTES {
-            return Err(format!("ACP registry is too large: {}", path.display()).into());
-        }
-        return AgentRegistry::from_json_str(&json).map_err(|_| {
-            format!(
-                "invalid ACP registry: {}; check declarations and duplicate names",
-                path.display()
-            )
-            .into()
-        });
-    }
-    Ok(AgentRegistry::new())
-}
-
-fn backend_with_agents(
-    stock: Arc<StockSbx>,
-    commands: BTreeMap<String, RegisteredKit>,
-    config: BackendConfig,
-    agents: &AgentRegistry,
-    packaged: Option<(BTreeMap<String, RegisteredKit>, Option<String>)>,
-) -> Result<StockDaemonBackend, marsh_daemon::DaemonError> {
-    let backend = StockDaemonBackend::new(stock, commands, config);
-    match packaged {
-        Some((packaged, channel)) => backend.with_packaged(packaged, channel),
-        None => backend,
-    }
-    .with_agents(agents)
-}
-
 /// The image tag packaged Kits follow on automatic updates: releases push
 /// `:latest`, nightlies `:nightly`. A local or dev build follows none.
 fn release_channel(version: &str, local: bool) -> Option<String> {
@@ -648,7 +537,6 @@ fn release_channel(version: &str, local: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use marsh_sbx::NativeKitRef;
     use std::{ffi::OsString, os::unix::fs::PermissionsExt};
 
     #[test]
@@ -679,7 +567,6 @@ mod tests {
 
         let reference = format!("example/kit@sha256:{}", "a".repeat(64));
         fs::write(selected.join("commands.json"), "{bad legacy registry").unwrap();
-        fs::write(selected.join("agents.json"), "[bad legacy registry").unwrap();
         fs::write(
             control.join("commands.json"),
             format!("{{\"kit\":\"{reference}\"}}"),
@@ -693,13 +580,6 @@ mod tests {
                 .cloned()
                 .collect::<Vec<_>>(),
             vec!["kit"]
-        );
-        assert!(
-            load_agents(&missing, &control.join("agents.json"))
-                .unwrap()
-                .declarations()
-                .next()
-                .is_none()
         );
     }
 
@@ -815,180 +695,6 @@ mod tests {
     }
 
     #[test]
-    fn invalid_acp_configuration_is_fatal_not_a_silent_disable() {
-        let root = tempfile::tempdir().unwrap();
-        let packaged = root.path().join("agents.json");
-        let user = root.path().join("missing.json");
-        let identity = format!("example/agent@sha256:{}", "a".repeat(64));
-        let commands = BTreeMap::from([(
-            "agent-kit".into(),
-            RegisteredKit {
-                workload: NativeKitRef::immutable_oci(identity.clone()).unwrap(),
-            },
-        )]);
-        let config = BackendConfig {
-            worker_binary: root.path().join("worker"),
-            relay_binary: root.path().join("relay"),
-            daemon_home: root.path().to_path_buf(),
-            control_home: root.path().join("control"),
-            protected_guest_roots: Vec::new(),
-            shell: ShellVmSpec {
-                name: "fixture-shell".into(),
-                image: OciImage::parse(format!("example/shell@sha256:{}", "b".repeat(64))).unwrap(),
-                shell_binary: root.path().join("shell"),
-                user: ShellUser {
-                    name: "fixture".into(),
-                    uid: 501,
-                    gid: 20,
-                    home: root.path().to_path_buf(),
-                },
-            },
-            resources: DEFAULT_JOB_RESOURCES,
-            env: EnvironmentConfig::default(),
-        };
-        let stock = Arc::new(StockSbx::new(
-            root.path().join("unused-sbx"),
-            Arc::new(SystemCommandRunner::new(root.path())),
-        ));
-
-        fs::write(&packaged, "[").unwrap();
-        assert!(load_agents(&packaged, &user).is_err());
-
-        fs::write(
-            &packaged,
-            format!(
-                "[{{\"schema_version\":1,\"name\":\"agent-session\",\"protocol\":\"acp_v1\",\"command\":\"agent-kit\",\"workload_digest\":\"example/agent@sha256:{}\"}}]",
-                "c".repeat(64)
-            ),
-        )
-        .unwrap();
-        let mismatched = load_agents(&packaged, &user).unwrap();
-        assert!(mismatched.resolve_acp("agent-session").is_ok());
-        assert!(
-            backend_with_agents(
-                Arc::clone(&stock),
-                commands.clone(),
-                config.clone(),
-                &mismatched,
-                None
-            )
-            .is_err()
-        );
-
-        // An automatic update moved agent-kit from its packaged digest (c…) to
-        // a…: the packaged declaration follows the command instead of failing.
-        let shipped = BTreeMap::from([(
-            "agent-kit".into(),
-            RegisteredKit {
-                workload: NativeKitRef::immutable_oci(format!(
-                    "example/agent@sha256:{}",
-                    "c".repeat(64)
-                ))
-                .unwrap(),
-            },
-        )]);
-        assert!(
-            backend_with_agents(
-                Arc::clone(&stock),
-                commands.clone(),
-                config.clone(),
-                &mismatched,
-                Some((shipped, Some("latest".into())))
-            )
-            .is_ok()
-        );
-        // A declaration pinned to another repository than the packaged
-        // command's stays strict. (One pinned to an earlier release of the
-        // same repository follows it, like the exact digest above.)
-        let other = BTreeMap::from([(
-            "agent-kit".into(),
-            RegisteredKit {
-                workload: NativeKitRef::immutable_oci(format!(
-                    "example/other-agent@sha256:{}",
-                    "d".repeat(64)
-                ))
-                .unwrap(),
-            },
-        )]);
-        assert!(
-            backend_with_agents(
-                stock,
-                commands,
-                config,
-                &mismatched,
-                Some((other, Some("latest".into())))
-            )
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn acp_declarations_follow_commands_installed_from_a_tag() {
-        let root = tempfile::tempdir().unwrap();
-        let control = root.path().join("control");
-        fs::create_dir(&control).unwrap();
-        let current = format!("docker.io/example/pix@sha256:{}", "a".repeat(64));
-        let earlier = format!("docker.io/example/pix@sha256:{}", "b".repeat(64));
-        let commands = BTreeMap::from([(
-            "pix".into(),
-            RegisteredKit {
-                workload: NativeKitRef::immutable_oci(current).unwrap(),
-            },
-        )]);
-        let agents_file = root.path().join("agents.json");
-        fs::write(
-            &agents_file,
-            format!(
-                "[{{\"schema_version\":1,\"name\":\"pix-session\",\"protocol\":\"acp_v1\",\"command\":\"pix\",\"workload_digest\":\"{earlier}\"}}]"
-            ),
-        )
-        .unwrap();
-        let agents = load_agents(&agents_file, &root.path().join("missing.json")).unwrap();
-        let config = BackendConfig {
-            worker_binary: root.path().join("worker"),
-            relay_binary: root.path().join("relay"),
-            daemon_home: root.path().to_path_buf(),
-            control_home: control.clone(),
-            protected_guest_roots: Vec::new(),
-            shell: ShellVmSpec {
-                name: "fixture-shell".into(),
-                image: OciImage::parse(format!("example/shell@sha256:{}", "c".repeat(64))).unwrap(),
-                shell_binary: root.path().join("shell"),
-                user: ShellUser {
-                    name: "fixture".into(),
-                    uid: 501,
-                    gid: 20,
-                    home: root.path().to_path_buf(),
-                },
-            },
-            resources: DEFAULT_JOB_RESOURCES,
-            env: EnvironmentConfig::default(),
-        };
-        let stock = Arc::new(StockSbx::new(
-            root.path().join("unused-sbx"),
-            Arc::new(SystemCommandRunner::new(root.path())),
-        ));
-        // Installed by digest: the stale pin is an error.
-        assert!(
-            backend_with_agents(
-                Arc::clone(&stock),
-                commands.clone(),
-                config.clone(),
-                &agents,
-                None
-            )
-            .is_err()
-        );
-        // Installed from a tag: the declaration follows its updates.
-        fs::write(
-            control.join("kit-sources.json"),
-            r#"{"pix":"docker.io/example/pix:stable"}"#,
-        )
-        .unwrap();
-        assert!(backend_with_agents(stock, commands, config, &agents, None).is_ok());
-    }
-
-    #[test]
     fn release_channels_follow_the_build() {
         assert_eq!(release_channel("0.1.6", false).as_deref(), Some("latest"));
         assert_eq!(
@@ -999,47 +705,6 @@ mod tests {
     }
 
     #[test]
-    fn check_config_requires_agent_digests_to_match_pinned_kits() {
-        let root = tempfile::tempdir().unwrap();
-        let dir = root.path();
-        let kit = format!("example/agent@sha256:{}", "a".repeat(64));
-        fs::write(
-            dir.join("commands.json"),
-            format!("{{\"agent-kit\":\"{kit}\"}}"),
-        )
-        .unwrap();
-        fs::write(
-            dir.join("shell-image"),
-            format!("example/shell@sha256:{}\n", "b".repeat(64)),
-        )
-        .unwrap();
-        let agents = |digest: &str| {
-            format!(
-                "[{{\"schema_version\":1,\"name\":\"agent-session\",\"protocol\":\"acp_v1\",\"command\":\"agent-kit\"{digest}}}]"
-            )
-        };
-        let arguments = [dir.as_os_str().to_os_string()];
-        // The release-0.1.0 defect: an OCI Kit with no workload digest.
-        fs::write(dir.join("agents.json"), agents("")).unwrap();
-        assert!(check_config(&arguments).is_err());
-        fs::write(
-            dir.join("agents.json"),
-            agents(&format!(
-                ",\"workload_digest\":\"example/agent@sha256:{}\"",
-                "c".repeat(64)
-            )),
-        )
-        .unwrap();
-        assert!(check_config(&arguments).is_err());
-        fs::write(
-            dir.join("agents.json"),
-            agents(&format!(",\"workload_digest\":\"{kit}\"")),
-        )
-        .unwrap();
-        assert!(check_config(&arguments).unwrap().contains("1 ACP agents"));
-    }
-
-    #[test]
     fn duplicate_registry_keys_are_rejected_before_a_map_can_drop_them() {
         let error = serde_json::from_str::<marsh_contracts::command_registry::CommandRegistry>(
             r#"{"claude":"one@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","claude":"two@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}"#,
@@ -1047,86 +712,6 @@ mod tests {
         .err()
         .unwrap();
         assert!(error.to_string().contains("duplicate command registry key"));
-    }
-
-    #[test]
-    fn agent_registry_rejects_duplicate_names_and_requires_explicit_acp_name() {
-        let root = tempfile::tempdir().unwrap();
-        let user = root.path().join("agents.json");
-        let missing = root.path().join("missing.json");
-        let declaration = r#"{"schema_version":1,"name":"agent-session","protocol":"acp_v1","command":"agent-kit","workload_digest":"test-identity"}"#;
-        fs::write(&user, format!("[{declaration},{declaration}]")).unwrap();
-        assert!(load_agents(&missing, &user).is_err());
-        fs::write(&user, format!("[{declaration}]")).unwrap();
-        assert_eq!(
-            load_agents(&missing, &user)
-                .unwrap()
-                .resolve_acp("agent-session")
-                .unwrap()
-                .command,
-            "agent-kit"
-        );
-        assert!(
-            load_agents(&missing, &user)
-                .unwrap()
-                .resolve_acp("claude")
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn explicit_agent_replacement_and_disable_do_not_resurrect_packaged_agents() {
-        let root = tempfile::tempdir().unwrap();
-        let packaged = root.path().join("packaged.json");
-        let user = root.path().join("user.json");
-        fs::write(&packaged, include_str!("../../../../packaging/agents.json")).unwrap();
-        assert!(
-            load_agents(&packaged, &user)
-                .unwrap()
-                .declarations()
-                .next()
-                .is_some()
-        );
-        fs::write(&user, "[]").unwrap();
-        assert_eq!(
-            load_agents(&packaged, &user)
-                .unwrap()
-                .declarations()
-                .count(),
-            0
-        );
-        fs::write(
-            &user,
-            r#"[{"schema_version":1,"name":"mine","protocol":"acp_v1","command":"mykit"}]"#,
-        )
-        .unwrap();
-        let registry = load_agents(&packaged, &user).unwrap();
-        assert_eq!(registry.declarations().count(), 1);
-        assert!(registry.get("mine").is_some());
-        fs::write(&user, "[invalid-secret-canary").unwrap();
-        let error = load_agents(&packaged, &user).unwrap_err().to_string();
-        assert!(error.contains(user.to_str().unwrap()));
-        assert!(!error.contains("secret-canary"));
-    }
-
-    #[test]
-    fn packaged_agent_without_generation_loads_for_startup_binding() {
-        let root = tempfile::tempdir().unwrap();
-        let packaged = root.path().join("agents.json");
-        let user = root.path().join("missing.json");
-        fs::write(
-            &packaged,
-            r#"[{"schema_version":1,"name":"claude-session","protocol":"acp_v1","command":"claude-acp","required_capabilities":[]}]"#,
-        )
-        .unwrap();
-        let registry = load_agents(&packaged, &user).unwrap();
-        assert_eq!(
-            registry
-                .resolve_acp("claude-session")
-                .unwrap()
-                .workload_digest,
-            ""
-        );
     }
 
     #[test]

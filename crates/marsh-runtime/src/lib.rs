@@ -1295,12 +1295,19 @@ impl<R: CommandRunner> DockerCliRuntime<R> {
             ]);
             Some(attempt)
         } else {
+            // A Kit-declared program (its ACP adapter) replaces the image's
+            // entrypoint, and with it the image's command, as in Docker.
+            let declared = spec.entrypoint.as_deref().unwrap_or_default();
+            if let Some(program) = declared.first() {
+                arguments.extend(["--entrypoint".into(), program.into()]);
+            }
             arguments.extend([
                 "--platform".into(),
                 image.platform.into(),
                 "--".into(),
                 image.id.into(),
             ]);
+            arguments.extend(declared.iter().skip(1).map(OsString::from));
             arguments.extend(spec.argv.iter().cloned().map(OsString::from_vec));
             None
         };

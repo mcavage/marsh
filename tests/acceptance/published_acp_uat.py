@@ -119,8 +119,8 @@ def main() -> int:
         assert created.returncode == 0, created.stderr.decode(errors="replace")
         sandbox_created = True
         scope.extra_owned_names.add(sandbox)  # created directly by this harness
-        script = f'''id=$(acp reserve fixture-session) || exit 31
-acp run --reservation "$id" fixture-session > .acp-run.out 2> .acp-run.err &
+        script = f'''id=$(acp reserve fixture-acp) || exit 31
+acp run --reservation "$id" fixture-acp > .acp-run.out 2> .acp-run.err &
 run_pid=$!
 acp list --wait "$id" --mine || exit 31
 acp ask "$id" before-publication || exit 31

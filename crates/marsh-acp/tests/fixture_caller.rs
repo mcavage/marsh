@@ -56,7 +56,6 @@ impl DaemonBackend for Fixture {
             command: "fixture".into(),
             workload_digest: "fixture-process".into(),
             required_capabilities: vec![],
-            arguments: vec![],
             description: None,
         })
     }
@@ -126,6 +125,7 @@ impl DaemonBackend for Fixture {
         let mut input = child.stdin.take().unwrap();
         let mut output = child.stdout.take().unwrap();
         let (job, _) = store.begin_job(NewJob {
+            label: None,
             session_id: request.session.session_id,
             command: request.command,
             kit_ref: "fixture-process".into(),

@@ -94,6 +94,7 @@ impl Fixture {
         self.store
             .begin_job_at(
                 NewJob {
+                    label: None,
                     session_id: self.session_id.clone(),
                     command: "receipt-fixture".into(),
                     kit_ref: "fixture-only-no-vm".into(),
@@ -192,4 +193,49 @@ fn human_results_preserve_copyable_ids_placement_and_uncertain_cleanup() {
     assert_eq!(receipt["exit"]["code"], 125);
     assert_eq!(receipt["cleanup"], "uncertain");
     assert!(row.contains("local") && row.contains("uncertain"), "{text}");
+}
+
+#[test]
+fn a_job_label_is_listed_shown_and_validated() {
+    let fixture = Fixture::new();
+    let new_job = |label: &str| NewJob {
+        label: Some(label.into()),
+        session_id: fixture.session_id.clone(),
+        command: "receipt-fixture".into(),
+        kit_ref: "fixture-only-no-vm".into(),
+        workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+        mounts: vec![],
+    };
+    let (id, _) = fixture
+        .store
+        .begin_job_at(new_job("narwhal-run:r-42"), Placement::Cloud)
+        .unwrap();
+    let listed: serde_json::Value =
+        serde_json::from_slice(&fixture.results(&["--json"]).stdout).unwrap();
+    let row = listed["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|job| job["job_id"] == id.as_str())
+        .expect("the labelled job is listed");
+    assert_eq!(row["label"], "narwhal-run:r-42");
+    let shown: serde_json::Value =
+        serde_json::from_slice(&fixture.results(&["show", &id, "--json"]).stdout).unwrap();
+    assert_eq!(shown["label"], "narwhal-run:r-42");
+    for bad in ["", "tab\there", &"x".repeat(129)] {
+        assert!(
+            fixture
+                .store
+                .begin_job_at(new_job(bad), Placement::Cloud)
+                .is_err(),
+            "{bad:?}"
+        );
+    }
+    assert!(
+        fixture
+            .store
+            .begin_job_at(new_job(&"é".repeat(64)), Placement::Cloud)
+            .is_ok(),
+        "128 bytes"
+    );
 }

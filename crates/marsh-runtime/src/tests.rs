@@ -460,6 +460,7 @@ fn a_create_that_times_out_stays_uncertain_and_is_not_cleaned_up() {
 
 fn job() -> JobSpec {
     JobSpec {
+        entrypoint: None,
         image: OciImage::parse(format!("registry.example/agent@sha256:{}", "a".repeat(64)))
             .unwrap(),
         argv: vec![b"$(touch /tmp/must-not-execute)".to_vec()],

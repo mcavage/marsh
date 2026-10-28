@@ -660,6 +660,40 @@ impl CloudSbx {
         self.records()
     }
 
+    /// Forget the ownership record of one unresolved create (no id), on the
+    /// operator's word that no sandbox of that name exists: an inventory that
+    /// lacks it does not prove it (another Docker account, a delayed listing),
+    /// so nothing here drops one by itself. A name that is listed now is not
+    /// forgotten (reconcile adopts it); neither is one with an id, one being
+    /// created, or one that is not owned.
+    ///
+    /// # Errors
+    /// Fails when the name is not an unresolved create of this daemon, is
+    /// visible in the inventory, or ownership cannot be written.
+    pub fn forget_unresolved(&self, name: &str) -> Result<(), CloudError> {
+        let view = self.inventory()?;
+        let creating = self
+            .state
+            .lock()
+            .map_err(|_| CloudError::Invalid("cloud ownership lock poisoned"))?
+            .creating
+            .clone();
+        if view.get(name).is_some() {
+            return Err(CloudError::Invalid(
+                "that sandbox is listed: `marsh workers reset cloud` deletes it",
+            ));
+        }
+        self.update(|file| match file.entries.get(name) {
+            Some(entry) if entry.id.is_none() && !creating.contains(name) => {
+                file.entries.remove(name);
+                Ok(())
+            }
+            _ => Err(CloudError::Invalid(
+                "not an unresolved cloud create of this home",
+            )),
+        })
+    }
+
     /// # Errors
     /// Rejects invalid specs/capacity before creation. Ambiguous creates retain
     /// their persisted intent and are never automatically repeated.
@@ -1420,6 +1454,69 @@ mod tests {
             adapter.spawn(&id, "/bin/true", &[]),
             Err(CloudError::NotReady(_))
         ));
+    }
+
+    /// An unresolved create is forgotten only on the operator's word, by its
+    /// name, and never while it is listed or when it is not an unresolved
+    /// create.
+    #[test]
+    fn an_unresolved_create_is_forgotten_only_when_named() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("control")).unwrap();
+        let directory = dir.path().join("control").canonicalize().unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let inventory = dir.path().join("inventory.json");
+        fs::write(
+            &inventory,
+            r#"[{"name":"marsh-s-listed00","id":"sbx_listed","status":"running","agent":"codex"}]"#,
+        )
+        .unwrap();
+        let stock = dir.path().join("sbx");
+        fs::write(
+            &stock,
+            "#!/bin/sh\n[ \"$2\" = ls ] && exec cat \"$MARSH_TEST_INVENTORY\"\nexit 1\n",
+        )
+        .unwrap();
+        fs::set_permissions(&stock, fs::Permissions::from_mode(0o755)).unwrap();
+        let runner = marsh_runtime::SystemCommandRunner::new(dir.path())
+            .with_stock_environment([("MARSH_TEST_INVENTORY".into(), inventory.into())]);
+        let kit = format!("docker.io/docker/codex@sha256:{}", "c".repeat(64));
+        let entry = |name: &str, id: serde_json::Value| {
+            serde_json::json!({
+                "name": name, "id": id, "image": kit, "agent": "codex",
+                "phase": "pending", "observed": false
+            })
+        };
+        fs::write(
+            directory.join("cloud-ownership.json"),
+            serde_json::json!({"version": 1, "entries": {
+                "marsh-s-lost0000": entry("marsh-s-lost0000", serde_json::Value::Null),
+                "marsh-s-other000": entry("marsh-s-other000", serde_json::Value::Null),
+                "marsh-s-listed00": entry("marsh-s-listed00", serde_json::Value::Null),
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        fs::set_permissions(
+            directory.join("cloud-ownership.json"),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        let adapter = CloudSbx::open(stock, Arc::new(runner), directory).unwrap();
+        // Nothing is dropped by itself, however old.
+        assert_eq!(adapter.records().unwrap().len(), 3);
+        // A listed name, and a name that is not owned, are refused.
+        assert!(adapter.forget_unresolved("marsh-s-listed00").is_err());
+        assert!(adapter.forget_unresolved("marsh-s-nothing0").is_err());
+        adapter.forget_unresolved("marsh-s-lost0000").unwrap();
+        let mut kept = adapter
+            .records()
+            .unwrap()
+            .into_iter()
+            .map(|record| record.name)
+            .collect::<Vec<_>>();
+        kept.sort();
+        assert_eq!(kept, ["marsh-s-listed00", "marsh-s-other000"]);
     }
 
     /// A detached run's agent sandbox is adopted (for deletion only) just

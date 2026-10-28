@@ -36,22 +36,6 @@ impl StockInventory {
     /// Rejects unknown shapes, duplicate name/UUID, unsafe names, unsupported
     /// states, malformed paths/UUIDs and oversized/incomplete inventories.
     pub fn decode(bytes: &[u8]) -> Result<Self, SbxError> {
-        const KEYS: &[&str] = &[
-            "name",
-            "id",
-            "agent",
-            "status",
-            "workspaces",
-            // sbx 0.46 marks a VM whose workspace path no longer exists.
-            "workspace_missing",
-            // sbx after v0.47.0 adds a boolean `detached` to some rows; marsh ignores it.
-            "detached",
-            "last_used_at",
-            "created_at",
-            "cpus",
-            "memory",
-            "memory_mib",
-        ];
         if bytes.len() > MAX_DOCUMENT {
             return Err(invalid("stock inventory exceeds its byte bound"));
         }
@@ -75,25 +59,59 @@ impl StockInventory {
         let mut vms = BTreeMap::new();
         let mut ids = BTreeSet::new();
         for row in rows {
-            if row
-                .as_object()
-                .is_none_or(|row| row.keys().any(|key| !KEYS.contains(&key.as_str())))
-            {
+            let Some(object) = row.as_object() else {
                 return Err(invalid("unknown stock inventory row schema"));
-            }
-            let mut vm: StockInventoryVm = serde_json::from_value(row.clone())
-                .map_err(|_| invalid("incomplete stock inventory row"))?;
+            };
+            // Extra keys are ignored: stock adds fields to some rows (a VM
+            // with published ports, a cloud or detached one) and marsh reads
+            // only the five below. Every row must establish an identity, a
+            // name and a valid UUID: a row that cannot is never skipped,
+            // because the VM it describes may be one of ours and a "complete"
+            // inventory without it would call that VM absent. A row of
+            // another tool (a name not starting `marsh-`) is kept for its
+            // identity, but its state and paths are not marsh's to judge.
+            let name = object.get("name").and_then(serde_json::Value::as_str);
+            let id = object.get("id").and_then(serde_json::Value::as_str);
+            let (Some(name), Some(id)) = (name, id) else {
+                return Err(invalid("stock inventory row without a name and id"));
+            };
+            let ours = name.starts_with("marsh-");
+            let mut vm = if ours {
+                serde_json::from_value::<StockInventoryVm>(row.clone())
+                    .map_err(|_| invalid("incomplete stock inventory row"))?
+            } else {
+                StockInventoryVm {
+                    name: name.to_owned(),
+                    id: id.to_owned(),
+                    status: object
+                        .get("status")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|status| {
+                            !status.is_empty()
+                                && status.len() <= 64
+                                && !status.chars().any(char::is_control)
+                        })
+                        .unwrap_or("unknown")
+                        .to_owned(),
+                    agent: None,
+                    workspaces: None,
+                }
+            };
             vm.id.make_ascii_lowercase();
-            if !valid_name(&vm.name)
-                || !valid_uuid(&vm.id)
-                || !matches!(vm.status.as_str(), "running" | "stopped")
-                || vm
-                    .workspaces
-                    .as_ref()
-                    .is_some_and(|paths| paths.iter().any(|path| !metadata_path(path)))
-                || !ids.insert(vm.id.clone())
-                || vms.contains_key(&vm.name)
-            {
+            let sound = valid_uuid(&vm.id)
+                && !vm.name.is_empty()
+                && vm.name.len() <= 256
+                && if ours {
+                    valid_name(&vm.name)
+                        && matches!(vm.status.as_str(), "running" | "stopped")
+                        && vm
+                            .workspaces
+                            .as_ref()
+                            .is_none_or(|paths| paths.iter().all(|path| metadata_path(path)))
+                } else {
+                    true
+                };
+            if !sound || !ids.insert(vm.id.clone()) || vms.contains_key(&vm.name) {
                 return Err(invalid(
                     "ambiguous, changing or unsupported stock inventory identity/state",
                 ));
@@ -166,22 +184,72 @@ mod tests {
         "/tests/data/sbx/v0.47-dev/ls-json.stdout"
     ));
 
-    /// The first row of a real listing with one unknown key added.
-    fn with_unknown_key(listing: &[u8]) -> Vec<u8> {
+    const V050: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/sbx/v0.50.0/ls-json.stdout"
+    ));
+
+    /// The first row of a real listing with one key added.
+    fn with_key(listing: &[u8], key: &str, value: serde_json::Value) -> Vec<u8> {
         let mut document: serde_json::Value = serde_json::from_slice(listing).unwrap();
         let rows = match document.get_mut("sandboxes") {
             Some(rows) => rows,
             None => &mut document,
         };
-        rows[0]["surprise"] = serde_json::json!(1);
+        rows[0][key] = value;
         serde_json::to_vec(&document).unwrap()
     }
 
     #[test]
-    fn a_row_with_an_unknown_key_is_rejected_in_either_envelope() {
-        for listing in [V047, V047_DEV] {
+    fn real_listings_decode_and_a_row_with_an_extra_key_still_does() {
+        // v0.50.0: a trimmed real `sbx ls --json` (a running and a stopped
+        // marsh VM, another tool's sandbox, one whose workspace is missing).
+        for listing in [V047, V047_DEV, V050] {
             assert!(StockInventory::decode(listing).is_ok());
-            assert!(StockInventory::decode(&with_unknown_key(listing)).is_err());
+            for (key, value) in [
+                (
+                    "ports",
+                    serde_json::json!([{"host_port": 8080, "sandbox_port": 80}]),
+                ),
+                ("surprise", serde_json::json!({"nested": true})),
+            ] {
+                let decoded = StockInventory::decode(&with_key(listing, key, value)).unwrap();
+                assert!(decoded.get("marsh-k-aaaaaaaa").is_some() || listing != V050);
+            }
+        }
+    }
+
+    #[test]
+    fn another_tools_row_is_kept_for_its_identity_and_a_row_without_one_fails_closed() {
+        let ours = r#"{"name":"marsh-k-aaaaaaaa","id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"running"}"#;
+        let theirs_odd = r#"{"name":"other","id":"1f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"paused","workspaces":["relative"]}"#;
+        let theirs_no_status = r#"{"name":"quiet","id":"2f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9"}"#;
+        let decoded =
+            StockInventory::decode(format!("[{ours},{theirs_odd},{theirs_no_status}]").as_bytes())
+                .unwrap();
+        assert!(decoded.get("marsh-k-aaaaaaaa").is_some());
+        assert!(
+            decoded
+                .get("other")
+                .is_some_and(|vm| vm.workspaces.is_none())
+        );
+        assert!(decoded.get("quiet").is_some());
+        // An owned UUID under a missing or non-string name, or no id at all,
+        // is an error, never an absent VM.
+        for broken in [
+            r#"{"id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"running"}"#,
+            r#"{"name":7,"id":"0f1e2d3c-4b5a-4978-8695-a4b3c2d1e0f9","status":"running"}"#,
+            r#"{"name":"broken","status":"running"}"#,
+            r#"{"name":"broken","id":"not-a-uuid","status":"running"}"#,
+        ] {
+            assert!(StockInventory::decode(format!("[{broken}]").as_bytes()).is_err());
+        }
+        for ours_bad in [
+            ours.replace("running", "paused"),
+            ours.replace("\"status\":\"running\"", "\"status\":7"),
+            ours.replace("running\"", "running\",\"workspaces\":[\"relative\"]"),
+        ] {
+            assert!(StockInventory::decode(format!("[{ours_bad}]").as_bytes()).is_err());
         }
     }
 

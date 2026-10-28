@@ -209,6 +209,7 @@ fn shell_grants(project: &Path, selected_home: &Path) -> Vec<AdmittedHostGrant> 
 
 fn job_spec() -> marsh_contracts::JobSpec {
     marsh_contracts::JobSpec {
+        entrypoint: None,
         image: marsh_contracts::OciImage::parse(format!(
             "registry.example/job@sha256:{}",
             "d".repeat(64)

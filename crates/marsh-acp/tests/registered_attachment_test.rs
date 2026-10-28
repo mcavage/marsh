@@ -1,6 +1,5 @@
 use marsh_acp::{
     AcpClient, AcpClientConfig, AcpError, AgentAdapterDeclaration, AgentError, AgentProtocol,
-    AgentRegistry,
 };
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, split};
@@ -13,25 +12,8 @@ fn declaration(required_capabilities: &[&str]) -> AgentAdapterDeclaration {
         command: "verified-kit-command".into(),
         workload_digest: "sha256:verified-by-caller".into(),
         required_capabilities: required_capabilities.iter().map(|s| (*s).into()).collect(),
-        arguments: vec![],
         description: None,
     }
-}
-
-#[test]
-fn duplicate_registry_names_cannot_override_first_declaration() {
-    let mut registry = AgentRegistry::new();
-    registry.register(declaration(&[])).unwrap();
-    let mut second = declaration(&[]);
-    second.command = "different-kit-command".into();
-    assert!(matches!(
-        registry.register(second),
-        Err(AgentError::DuplicateName(_))
-    ));
-    assert_eq!(
-        registry.get("agent-session").unwrap().command,
-        "verified-kit-command"
-    );
 }
 
 #[test]

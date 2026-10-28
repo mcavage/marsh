@@ -17,7 +17,7 @@ case "${SBX_CRED_ANTHROPIC_MODE:-none}" in
   apikey|oauth) export ANTHROPIC_API_KEY=proxy-managed ;;
 esac
 
-# ACP mode: packaging/agents.json starts pi-session as `pi --acp`. The
+# ACP mode (`--acp`, the Kit's acp@1 adapter: `marsh run --acp pi`). The
 # community pi-acp adapter speaks ACP v1 on stdio and starts Pi in RPC mode
 # through this same entrypoint (without --acp), so both modes load the same
 # trusted project resources and MCP Gateway extension. Pi has no OS-level

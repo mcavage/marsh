@@ -122,6 +122,7 @@ fn a_killed_caller_with_work_in_flight_or_a_bound_shell_vm_is_not_simply_detache
     let (job, _) = server
         .store
         .begin_job(NewJob {
+            label: None,
             session_id: running_session.clone(),
             command: "fixture".into(),
             kit_ref: "fixture".into(),

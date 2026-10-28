@@ -149,6 +149,11 @@ pub struct JobSpec {
     /// Caller-supplied argument tail. The workload image's OCI entrypoint and
     /// command remain authoritative, and Unix arguments need not be UTF-8.
     pub argv: Vec<Vec<u8>>,
+    /// The program the Kit itself declares for this job instead of its
+    /// entrypoint: its ACP adapter (`com.docker.sandbox/acp@1`). Never a
+    /// caller's choice; `argv` follows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entrypoint: Option<Vec<String>>,
     /// Explicit shell-session identity; it does not change the image's
     /// entrypoint, command, or static environment.
     pub identity: JobIdentity,
@@ -174,6 +179,14 @@ pub struct JobSpec {
     pub capability: Option<process::JobCapability>,
 }
 
+fn invalid_entrypoint(words: &[String]) -> bool {
+    words.first().is_none_or(String::is_empty)
+        || words.len() > 64
+        || words
+            .iter()
+            .any(|word| word.len() > 4096 || word.contains('\0'))
+}
+
 /// A read-only subpath bind may cover part of the same grant mounted whole
 /// (`.marsh` for an ordinary job).
 fn read_only_overlay(whole: &JobMount, part: &JobMount) -> bool {
@@ -195,6 +208,7 @@ impl JobSpec {
     pub fn validate(&self) -> Result<(), JobSpecError> {
         OciImage::parse(self.image.as_str())?;
         if self.argv.len() > 256
+            || self.entrypoint.as_deref().is_some_and(invalid_entrypoint)
             || self
                 .argv
                 .iter()
@@ -499,6 +513,7 @@ mod tests {
 
     fn job() -> JobSpec {
         JobSpec {
+            entrypoint: None,
             image: OciImage::parse(format!("registry.example/kit@sha256:{}", "a".repeat(64)))
                 .unwrap(),
             argv: vec![b"/usr/local/bin/agent".to_vec()],

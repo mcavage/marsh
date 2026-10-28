@@ -1715,6 +1715,9 @@ mod tests {
                 client
                     .execute_with_io(
                         ExecuteSpec {
+                            label: None,
+                            kit: None,
+                            acp: false,
                             command: "fixture".into(),
                             placement: crate::Placement::Local,
                             arguments: Vec::new(),
@@ -1741,6 +1744,7 @@ mod tests {
                         arguments: Vec::new(),
                         session: session(&session_id, home.path()),
                         terminal_environment: std::collections::BTreeMap::new(),
+                        working_directory: None,
                     },
                     std::fs::File::open("/dev/null").unwrap(),
                     &mut shell_output,
