@@ -12,8 +12,7 @@ import re
 import stat
 
 HOST_NAMES = ("marsh", "marshd", "marsh-mcp", "marsh-local")
-LICENSE_NAMES = ("LICENSE", "THIRD-PARTY-NOTICES.txt", "rust-package-notices.json",
-                 "embedded-native-notices.json")
+LICENSE_NAMES = ("LICENSE", "THIRD-PARTY-NOTICES.txt")
 GUEST_NAMES = ("marsh-linux-arm64", "marsh-worker-linux-arm64",
                "marsh-relay-linux-arm64", "marshd-linux-arm64", "marsh-local-linux-arm64", "marsh-byte-exec-linux-arm64",
                "commands.json", "agents.json", "shell-image", "shell-image.build.json")

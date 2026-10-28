@@ -266,10 +266,6 @@ PREPARED_SCHEMA = "marsh.prepared-kit-inputs/v2"
 BUNDLED = frozenset("kits/" + name for name in (
     "marsh-shell", "marsh-claude", "marsh-codex", "marsh-pi"))
 FIXTURE = "tests/acceptance/fixture"
-# One Kit per agent; each carries its ACP adapter's npm lock and notices.
-COLLECTORS = frozenset("kits/" + name for name in (
-    "marsh-claude", "marsh-codex", "marsh-pi"))
-
 
 def admitted_inventory(source, budget=None):
     records = {}
@@ -295,9 +291,6 @@ def canonical_inputs(root, selected, configs):
             if not inventory["files"]:
                 raise ValueError(f"canonical tree is empty: {origin}")
             canonical[destination] = {"origin": str(origin), "inventory": inventory}
-    if any(name in COLLECTORS for name in sources.values()):
-        origin = root / "scripts/npm-notices.mjs"
-        canonical["collect-notices.mjs"] = {"origin": str(origin), "file": file_record(origin)}
     expanded = {}
     for source, name in sources.items():
         config = configs.get(source, {"args": {}, "files": {}})
@@ -305,8 +298,6 @@ def canonical_inputs(root, selected, configs):
         reserved = []
         if name in BUNDLED or name == FIXTURE:
             reserved = ["dhi-notices", "image-base"]
-            if name in COLLECTORS:
-                reserved.append("collect-notices.mjs")
         # Reserve entire namespaces (NFKC/case variants too), not only known files.
         for path in [*git_files(source), *files]:
             first = unicodedata.normalize("NFKC", parts(path)[0]).casefold()

@@ -51,8 +51,7 @@ than packaging them in the image.
 A local-only Kit does not go through marsh's publication gate. Before
 redistributing one built on the DHI base, follow [Kit publication](../design/kit-publication.md) and
 [supply chain](../design/supply-chain.md): pinned inputs, the image repair
-step, collected license notices for every added package, and a final
-`verify.py` gate.
+step, preserved upstream notice files, and runtime smoke tests.
 
 ## Risks
 

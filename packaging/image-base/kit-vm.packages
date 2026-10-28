@@ -6,8 +6,8 @@
 # (openssl comes with ca-certificates); libc-bin for the C.UTF-8 locale
 # agents' shells select and getent; and the git, curl and CA store Docker
 # Sandboxes expects of a workload image. The DHI-built Engine packages carry
-# no Debian copyright file: their notices are indexed by exact version in
-# dhi-notices, so they are pinned here.
+# no Debian copyright file. Retained upstream notices accompany the images;
+# package versions are pinned here.
 docker-ce=5:29.9.2-0
 docker-ce-cli=5:29.9.2-0
 containerd.io=2.4.2-1

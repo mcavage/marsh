@@ -2,8 +2,7 @@
 """Stage the registry's source Kits into an install's kits/ directory.
 
 A packaged source Kit is its ignore-aware Git files plus the canonical inputs
-publish-kits.py adds (repaired-image inputs, DHI notices, the npm notice
-collector). Stock SBX builds the staged directory as is, so local dev installs
+publish-kits.py adds (image build support and retained upstream notices). Stock SBX builds the staged directory as is, so local dev installs
 use the same expansion as publication. The replacement is atomic.
 """
 from __future__ import annotations

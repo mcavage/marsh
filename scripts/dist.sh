@@ -124,7 +124,7 @@ for page in "$MAN_DIR"/*.1; do
 done
 
 install -m 644 LICENSE NOTICE THIRD_PARTY.md "$root/share/licenses/marsh/"
-for notice in THIRD-PARTY-NOTICES.txt rust-package-notices.json embedded-native-notices.json; do
+for notice in THIRD-PARTY-NOTICES.txt; do
   test -f "$NOTICES_DIR/$notice" || die "missing $NOTICES_DIR/$notice (scripts/third-party-notices.py)"
   install -m 644 "$NOTICES_DIR/$notice" "$root/share/licenses/marsh/$notice"
 done

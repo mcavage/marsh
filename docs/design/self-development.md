@@ -23,7 +23,7 @@ To work on marsh with Pi, after `make dev`, from the Mac checkout:
 `make dev` incrementally builds the host binaries, Linux arm64 guest, shell
 template with dev tools, and packaged source Kits in parallel. The Kit staging
 script (`scripts/stage-kits.py`) combines each Kit's Git files with the
-canonical `image-base/`, `dhi-notices/`, and `collect-notices.mjs` inputs used by
+canonical `image-base/` support and retained `dhi-notices/` files used by
 the publisher, so stock SBX can build the staged sources. Installation writes
 `bin/` and `libexec/marsh/` under `DEV_PREFIX` (default `~/.marsh-dev`).
 

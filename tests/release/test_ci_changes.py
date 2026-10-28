@@ -29,7 +29,7 @@ class CiChanges(unittest.TestCase):
     def test_kits_and_packaging_run_linux_but_not_the_mac_host_tests(self):
         self.check(["kits/marsh-claude/claude.yaml"], "true", "false")
         self.check(["packaging/shell/Dockerfile", "kits/marsh-pi/package-lock.json"], "true", "false")
-        self.check(["scripts/license-delta.py"], "true", "false")
+        self.check(["scripts/third-party-notices.py"], "true", "false")
 
     def test_host_paths_run_the_mac_host_tests(self):
         for path in ("crates/marsh-sbx/src/lib.rs", "Cargo.lock", "Cargo.toml", "rust-toolchain.toml",

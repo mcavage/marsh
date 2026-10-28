@@ -42,10 +42,9 @@ Every default Kit and the acceptance fixture receives:
 - `packaging/image-base` as `image-base/` (the package assembler that builds
   each image on its DHI runtime base, and the smoke test).
 
-The npm-based Kits receive `scripts/npm-notices.mjs` as
-`collect-notices.mjs`. Provider legal texts are indexed in the canonical DHI
-bundle. There are no independent Kit-local assembler, collector, or
-Claude/Codex notice copies to keep synchronized.
+Original notices are ordinary copied files; npm packages keep the license
+files shipped in their installed package trees. No collector or per-version
+notice index is staged or regenerated.
 
 The publisher expands these sources once by their bundled source identity. It
 reserves their **entire destination namespaces**, including case/Unicode variants:
