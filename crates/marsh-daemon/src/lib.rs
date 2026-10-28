@@ -43,6 +43,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 mod acp_bridge;
+mod client_liveness;
 mod daemon_startup;
 mod receipt_journal;
 pub use daemon_startup::{
@@ -1694,6 +1695,9 @@ struct State {
     // Host-only cleanup ownership, retained when development authority is revoked.
     shell_cleanup_vms: BTreeMap<String, String>,
     shell_attachments: BTreeMap<String, String>,
+    /// Host processes that attached a session and that this daemon can
+    /// signal; see `client_liveness.rs`.
+    session_clients: BTreeMap<String, u32>,
     workers: BTreeMap<String, WorkerStatus>,
     starting_kits: BTreeMap<String, ProcessStartingKit>,
     jobs: BTreeMap<String, JobReceipt>,
@@ -1944,6 +1948,7 @@ impl DaemonStore {
             ephemeral_home_tokens: BTreeMap::new(),
             shell_cleanup_vms: BTreeMap::new(),
             shell_attachments: BTreeMap::new(),
+            session_clients: BTreeMap::new(),
             workers: BTreeMap::new(),
             starting_kits: BTreeMap::new(),
             jobs,
@@ -2181,6 +2186,9 @@ impl DaemonStore {
         state
             .session_home_backings
             .insert(session_id.clone(), authority.home_backing);
+        if client_liveness::can_watch(pid) {
+            state.session_clients.insert(session_id.clone(), pid);
+        }
         session_id
     }
 
@@ -4067,6 +4075,37 @@ impl ConnectionHandler {
         }
     }
 
+    fn detach_host_session(&self, session_id: &str) -> Result<(), DaemonError> {
+        self.store.detach_shell(session_id)?;
+        if self.store.ephemeral_home_token(session_id).is_some()
+            && let Err(error) = self
+                .backend
+                .close_ephemeral_session(session_id, &self.store)
+        {
+            self.store.mark_shell_cleanup_uncertain(session_id);
+            return Err(error);
+        }
+        self.acp.detach_shell(session_id);
+        Ok(())
+    }
+
+    /// Settle sessions whose host caller died without detaching
+    /// (`client_liveness.rs`), as its own `DetachShell` would have. One whose
+    /// shell VM is still bound becomes cleanup-uncertain instead, which
+    /// `marsh reset` and `marsh stop` recover.
+    fn release_departed_clients(&self) {
+        let Ok(_admission) = self.store.begin_ordinary_request() else {
+            return;
+        };
+        for departed in self.store.departed_sessions() {
+            if departed.shell_vm_bound {
+                self.store.mark_shell_cleanup_uncertain(&departed.session);
+            } else {
+                let _ = self.detach_host_session(&departed.session);
+            }
+        }
+    }
+
     fn handle_shutdown(&self, stream: &mut UnixStream) -> Result<(), DaemonError> {
         // The pinned stock SBX was removed: this daemon can no longer reach a
         // VM, so it can neither clean up nor serve, and only a new daemon can
@@ -4883,21 +4922,9 @@ impl ConnectionHandler {
                 write_frame(&mut stream, &acp_publication_reply(reply))
             }
             PublicRequest::DetachShell { session_id } => {
-                let reply = match self.store.detach_shell(&session_id) {
-                    Ok(()) => {
-                        if self.store.ephemeral_home_token(&session_id).is_some()
-                            && let Err(error) = self
-                                .backend
-                                .close_ephemeral_session(&session_id, &self.store)
-                        {
-                            self.store.mark_shell_cleanup_uncertain(&session_id);
-                            return write_frame(&mut stream, &public_error(&error));
-                        }
-                        self.acp.detach_shell(&session_id);
-                        PublicReply::Detached
-                    }
-                    Err(error) => public_error(&error),
-                };
+                let reply = self
+                    .detach_host_session(&session_id)
+                    .map_or_else(|error| public_error(&error), |()| PublicReply::Detached);
                 write_frame(&mut stream, &reply)
             }
             PublicRequest::Prepare {
@@ -5025,6 +5052,16 @@ impl ConnectionHandler {
             request.body,
             PublicRequest::ResetScope | PublicRequest::StopScope | PublicRequest::Shutdown
         );
+        if lifecycle_request
+            || matches!(
+                request.body,
+                PublicRequest::ResetWorkers { .. }
+                    | PublicRequest::UninstallKit { .. }
+                    | PublicRequest::Status { .. }
+            )
+        {
+            self.release_departed_clients();
+        }
         let admission = if lifecycle_request {
             self.store.begin_lifecycle_request()
         } else {
