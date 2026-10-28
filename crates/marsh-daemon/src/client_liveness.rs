@@ -4,26 +4,11 @@
 //! requests) would otherwise leave its session attached until the daemon
 //! restarts, refusing `marsh stop`, `marsh reset` and `marsh workers reset`.
 //!
-//! The daemon records the pid only when it can signal it at attach, so it is
-//! a live process of this user. A later `ESRCH` therefore proves that caller
-//! is gone; a reused pid can only delay the release, never release a live
-//! caller's session.
-use crate::{DaemonStore, JobState, ShellState};
-
-/// Whether `pid` is a live process this daemon may signal.
-pub(crate) fn can_watch(pid: u32) -> bool {
-    i32::try_from(pid)
-        .ok()
-        .and_then(rustix::process::Pid::from_raw)
-        .is_some_and(|pid| rustix::process::test_kill_process(pid).is_ok())
-}
-
-fn gone(pid: u32) -> bool {
-    i32::try_from(pid)
-        .ok()
-        .and_then(rustix::process::Pid::from_raw)
-        .is_some_and(|pid| rustix::process::test_kill_process(pid) == Err(rustix::io::Errno::SRCH))
-}
+//! The daemon records the pid and its start time at attach (`process_identity`):
+//! the caller is gone when the pid no longer exists or now belongs to a
+//! process that started at another time. A pid it cannot identify is never
+//! called gone, so a live caller's session is never released.
+use crate::{DaemonStore, JobState, ProcessIdentity, ShellState, process_identity};
 
 /// A session whose attaching host process is gone.
 pub(crate) struct Departed {
@@ -37,32 +22,27 @@ impl DaemonStore {
     /// flight: no open shell attachment, no queued, starting or running job.
     /// A session with work in flight is reconsidered once that work ends.
     pub(crate) fn departed_sessions(&self) -> Vec<Departed> {
-        let mut guard = self.lock();
-        let state = &mut *guard;
-        let shells = &state.shells;
-        state.session_clients.retain(|session, _| {
-            shells
-                .get(session)
-                .is_some_and(|shell| shell.state == ShellState::Attached)
-        });
+        let state = self.lock();
         state
-            .session_clients
-            .iter()
-            .filter(|(session, pid)| {
-                gone(**pid)
-                    && !state.shell_attachments.contains_key(*session)
+            .shells
+            .values()
+            .filter(|shell| {
+                shell.state == ShellState::Attached
+                    && !state.shell_attachments.contains_key(&shell.session_id)
+                    && process_identity(shell.pid, shell.process_started.as_deref())
+                        == ProcessIdentity::Gone
                     && !state.jobs.values().any(|job| {
-                        job.session_id == **session
+                        job.session_id == shell.session_id
                             && matches!(job.state, JobState::Queued | JobState::Running)
                     })
                     && !state
                         .starting_kits
                         .values()
-                        .any(|kit| kit.shell_session_id == **session)
+                        .any(|kit| kit.shell_session_id == shell.session_id)
             })
-            .map(|(session, _)| Departed {
-                session: session.clone(),
-                shell_vm_bound: state.shell_cleanup_vms.contains_key(session),
+            .map(|shell| Departed {
+                session: shell.session_id.clone(),
+                shell_vm_bound: state.shell_cleanup_vms.contains_key(&shell.session_id),
             })
             .collect()
     }

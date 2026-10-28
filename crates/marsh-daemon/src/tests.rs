@@ -1904,6 +1904,14 @@ fn a_cloud_lane_job_is_not_submitted_after_its_split_is_fenced_or_cancelled() {
     assert!(store.in_cancelled_split(&fenced));
 }
 
+fn departed(store: &DaemonStore) -> Vec<String> {
+    store
+        .departed_sessions()
+        .into_iter()
+        .map(|departed| departed.session)
+        .collect()
+}
+
 #[test]
 fn only_a_session_whose_client_process_is_gone_and_idle_is_reaped() {
     let home = home();
@@ -1933,14 +1941,14 @@ fn only_a_session_whose_client_process_is_gone_and_idle_is_reaped() {
             mounts: Vec::new(),
         })
         .unwrap();
-    let reaped = store.dead_host_sessions();
+    let reaped = departed(&store);
     assert!(reaped.contains(&dead), "{reaped:?}");
     assert!(
         !reaped.contains(&live) && !reaped.contains(&busy),
         "{reaped:?}"
     );
     store.detach_shell(&dead).unwrap();
-    assert!(!store.dead_host_sessions().contains(&dead));
+    assert!(!departed(&store).contains(&dead));
 }
 
 #[test]
@@ -2036,7 +2044,7 @@ fn a_reset_names_what_blocks_it_and_asks_a_gone_clients_jobs_to_end() {
         store.dead_session_live_jobs(),
         std::slice::from_ref(&gone_job)
     );
-    assert_eq!(store.dead_host_sessions(), Vec::<String>::new());
+    assert_eq!(departed(&store), Vec::<String>::new());
     let blockers = store.lifecycle_blockers().join("\n");
     assert!(blockers.contains(&format!("pid {gone_pid}")) && blockers.contains("is gone"));
     assert!(blockers.contains("/Users/example/live") && blockers.contains("still running"));
@@ -2062,7 +2070,7 @@ fn a_pid_is_a_process_only_with_its_start_time() {
     store.lock().shells.get_mut(&ours).unwrap().process_started =
         Some("utc:Mon Jan  1 00:00:00 2001".into());
     assert_eq!(id(&ours), ProcessIdentity::Gone);
-    assert!(store.dead_host_sessions().contains(&ours));
+    assert!(departed(&store).contains(&ours));
     // A start time recorded before they were read in UTC is never compared.
     store.lock().shells.get_mut(&ours).unwrap().process_started =
         Some("Mon Jan  1 00:00:00 2001".into());
@@ -2071,7 +2079,7 @@ fn a_pid_is_a_process_only_with_its_start_time() {
     // neither called gone nor named for a kill.
     store.lock().shells.get_mut(&ours).unwrap().process_started = None;
     assert_eq!(id(&ours), ProcessIdentity::Unverified);
-    assert!(!store.dead_host_sessions().contains(&ours));
+    assert!(!departed(&store).contains(&ours));
     let blockers = store.lifecycle_blockers().join("\n");
     assert!(blockers.contains("cannot be identified") && blockers.contains("ps -p"));
     assert!(!blockers.contains("kill"));
@@ -2833,7 +2841,7 @@ fn public_client_authenticates_and_shares_daemon() {
     let client = Client::connect(home.path()).unwrap();
     let first = match client
         .request(PublicRequest::AttachShell {
-            pid: 1,
+            pid: std::process::id(),
             session: authority(one.to_str().unwrap(), home.path()),
         })
         .unwrap()
@@ -2843,7 +2851,7 @@ fn public_client_authenticates_and_shares_daemon() {
     };
     let second = match client
         .request(PublicRequest::AttachShell {
-            pid: 2,
+            pid: std::process::id(),
             session: authority(two.to_str().unwrap(), home.path()),
         })
         .unwrap()

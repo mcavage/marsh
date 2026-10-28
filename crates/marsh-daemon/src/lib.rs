@@ -1850,9 +1850,6 @@ struct State {
     // Host-only cleanup ownership, retained when development authority is revoked.
     shell_cleanup_vms: BTreeMap<String, String>,
     shell_attachments: BTreeMap<String, String>,
-    /// Host processes that attached a session and that this daemon can
-    /// signal; see `client_liveness.rs`.
-    session_clients: BTreeMap<String, u32>,
     workers: BTreeMap<String, WorkerStatus>,
     starting_kits: BTreeMap<String, ProcessStartingKit>,
     jobs: BTreeMap<String, JobReceipt>,
@@ -2187,7 +2184,6 @@ impl DaemonStore {
             ephemeral_home_tokens: BTreeMap::new(),
             shell_cleanup_vms: BTreeMap::new(),
             shell_attachments: BTreeMap::new(),
-            session_clients: BTreeMap::new(),
             workers: BTreeMap::new(),
             starting_kits: BTreeMap::new(),
             jobs,
@@ -2430,9 +2426,6 @@ impl DaemonStore {
         state
             .session_home_backings
             .insert(session_id.clone(), authority.home_backing);
-        if client_liveness::can_watch(pid) {
-            state.session_clients.insert(session_id.clone(), pid);
-        }
         session_id
     }
 
@@ -2500,32 +2493,6 @@ impl DaemonStore {
             terminal: requested.terminal,
             terminal_size: requested.terminal_size,
         })
-    }
-
-    /// Attached sessions whose client process is gone, with no attachment in
-    /// progress and no Kit job or Kit start left in them.
-    #[must_use]
-    pub fn dead_host_sessions(&self) -> Vec<String> {
-        let state = self.lock();
-        state
-            .shells
-            .values()
-            .filter(|shell| {
-                shell.state == ShellState::Attached
-                    && !state.shell_attachments.contains_key(&shell.session_id)
-                    && process_identity(shell.pid, shell.process_started.as_deref())
-                        == ProcessIdentity::Gone
-                    && !state.jobs.values().any(|job| {
-                        job.session_id == shell.session_id
-                            && matches!(job.state, JobState::Queued | JobState::Running)
-                    })
-                    && !state
-                        .starting_kits
-                        .values()
-                        .any(|kit| kit.shell_session_id == shell.session_id)
-            })
-            .map(|shell| shell.session_id.clone())
-            .collect()
     }
 
     /// Kit jobs still live in attached sessions whose client process is gone
@@ -4292,9 +4259,7 @@ impl Server {
                         return;
                     };
                     let store = DaemonStore(store);
-                    for session in store.dead_host_sessions() {
-                        let _ = finish_session(&store, backend.as_ref(), &acp, &session);
-                    }
+                    release_departed(&store, backend.as_ref(), &acp);
                 }
             });
         if let Err(error) = spawned {
@@ -4394,6 +4359,23 @@ fn finish_session(
     backend.session_ended(session_id, store);
     acp.detach_shell(session_id);
     Ok(())
+}
+
+/// Settle sessions whose host caller died without detaching
+/// (`client_liveness.rs`), as its own `DetachShell` would have. One whose shell
+/// VM is still bound becomes cleanup-uncertain instead, which `marsh reset` and
+/// `marsh stop` recover.
+fn release_departed(store: &DaemonStore, backend: &dyn DaemonBackend, acp: &AcpSessionManager) {
+    let Ok(_admission) = store.begin_ordinary_request() else {
+        return;
+    };
+    for departed in store.departed_sessions() {
+        if departed.shell_vm_bound {
+            store.mark_shell_cleanup_uncertain(&departed.session);
+        } else {
+            let _ = finish_session(store, backend, acp, &departed.session);
+        }
+    }
 }
 
 /// How often sessions of dead clients are looked for.
@@ -4652,21 +4634,8 @@ impl ConnectionHandler {
         finish_session(&self.store, self.backend.as_ref(), &self.acp, session_id)
     }
 
-    /// Settle sessions whose host caller died without detaching
-    /// (`client_liveness.rs`), as its own `DetachShell` would have. One whose
-    /// shell VM is still bound becomes cleanup-uncertain instead, which
-    /// `marsh reset` and `marsh stop` recover.
     fn release_departed_clients(&self) {
-        let Ok(_admission) = self.store.begin_ordinary_request() else {
-            return;
-        };
-        for departed in self.store.departed_sessions() {
-            if departed.shell_vm_bound {
-                self.store.mark_shell_cleanup_uncertain(&departed.session);
-            } else {
-                let _ = self.detach_host_session(&departed.session);
-            }
-        }
+        release_departed(&self.store, self.backend.as_ref(), &self.acp);
     }
 
     fn handle_shutdown(&self, stream: &mut UnixStream) -> Result<(), DaemonError> {

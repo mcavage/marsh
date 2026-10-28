@@ -106,7 +106,6 @@ pub(super) fn detach_locked(state: &mut State, session: &str) -> Result<(), Daem
         return Err(DaemonError::ShellCleanupUncertain(session.into()));
     }
     shell.state = ShellState::Detached;
-    state.session_clients.remove(session);
     state
         .authentication_tokens
         .retain(|_, owner| owner.as_deref() != Some(session));
