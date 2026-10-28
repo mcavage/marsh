@@ -146,13 +146,14 @@ jobs:
           if [ "$channel" = stable ]; then
             # A release tag comes from `make release` on the Mac, which runs the
             # full regression (CI cannot start a microVM) and records it in an
-            # annotated tag. Refuse any other tag before anything is built.
+            # annotated tag, or records that it was waived (WAIVE_REGRESSION,
+            # with a reason). Refuse any other tag before anything is built.
             if [ "$GITHUB_EVENT_NAME" = push ]; then
               git fetch --quiet --force origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME" || true
               [ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME" 2>/dev/null)" = tag ] || {
                 echo "::error::$GITHUB_REF_NAME is not an annotated tag: cut releases with 'make release VERSION=X.Y.Z' on the Mac"; exit 1; }
-              git tag --list --format='%(contents)' "$GITHUB_REF_NAME" | grep -Eq "^Regression: passed on ${sha:0:7} \(" || {
-                echo "::error::$GITHUB_REF_NAME does not record a passing regression on ${sha:0:7}: cut releases with 'make release VERSION=X.Y.Z' on the Mac"; exit 1; }
+              git tag --list --format='%(contents)' "$GITHUB_REF_NAME" | grep -Eq "^Regression: (passed|waived) on ${sha:0:7} \(" || {
+                echo "::error::$GITHUB_REF_NAME does not record a passing (or explicitly waived) regression on ${sha:0:7}: cut releases with 'make release VERSION=X.Y.Z' on the Mac"; exit 1; }
             fi
             echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "bad version: $version"; exit 1; }
             if [ "$draft" = false ]; then

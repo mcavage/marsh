@@ -16,6 +16,10 @@ other way does not publish.
              leave one suite out of the regression (repeat with commas), for a
              known failure that is not this release's. The reason is required
              and goes into the tag message next to the result.
+  WAIVE_REGRESSION="..."
+             release without running the regression at all (every other check
+             still applies). The tag says `Regression: waived on SHA (reason)`
+             instead of `passed`, so the release records that it was not run.
 """
 from __future__ import annotations
 
@@ -138,6 +142,13 @@ def message(version: str, sha: str, summary: dict, skip: tuple[str, ...] = (), r
             f"Host: macOS {platform.mac_ver()[0]} {platform.machine()}, sbx {sbx[0] if sbx else 'unknown'}\n")
 
 
+def waived_message(version: str, sha: str, reason: str) -> str:
+    when = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    return (f"marsh {version}\n\n"
+            f"Regression: waived on {sha[:7]} ({reason})\n"
+            f"Run: {when}\n")
+
+
 def release(argv: list[str], *, machine=check_machine, ci=check_ci, run_regress=regress, ask=input) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("version", help="X.Y.Z")
@@ -145,10 +156,17 @@ def release(argv: list[str], *, machine=check_machine, ci=check_ci, run_regress=
     parser.add_argument("--yes", action="store_true", help="push the tag without asking")
     parser.add_argument("--skip", default="", help="comma-separated suites to leave out (needs --skip-reason)")
     parser.add_argument("--skip-reason", default="", help="why; recorded in the tag message")
+    parser.add_argument("--waive-regression", default=None, metavar="REASON",
+                        help="do not run the regression; the tag records it as waived, with REASON")
     args = parser.parse_args(argv)
     skip = tuple(name for name in args.skip.replace(",", " ").split() if name)
     reason = " ".join(args.skip_reason.split())
+    waiver = None if args.waive_regression is None else " ".join(args.waive_regression.split())
     try:
+        if waiver is not None and not waiver:
+            raise Refusal("WAIVE_REGRESSION needs a reason: it goes into the tag message")
+        if waiver and skip:
+            raise Refusal("WAIVE_REGRESSION skips the whole regression; do not also pass SKIP")
         if skip and not reason:
             raise Refusal("SKIP needs SKIP_REASON: say why the suite is left out; it goes into the tag message")
         if any(not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) for name in skip):
@@ -156,18 +174,23 @@ def release(argv: list[str], *, machine=check_machine, ci=check_ci, run_regress=
         sha = check_git(args.version)
         machine()
         ci(sha)
-        print(f"release {args.version}: {sha[:7]} is clean, on main, and passed CI. Running the full regression.",
-              flush=True)
-        summary = run_regress(skip) if skip else run_regress()
-        verify(summary, sha, skip)
-        # The regression takes a long time: the commit must still be the tip of main.
-        if check_git(args.version) != sha:
-            raise Refusal("main moved during the regression")
-        note = message(args.version, sha, summary, skip, reason)
+        if waiver:
+            print(f"release {args.version}: {sha[:7]} is clean, on main, and passed CI. "
+                  f"Regression waived: {waiver}", flush=True)
+            note = waived_message(args.version, sha, waiver)
+        else:
+            print(f"release {args.version}: {sha[:7]} is clean, on main, and passed CI. Running the full regression.",
+                  flush=True)
+            summary = run_regress(skip) if skip else run_regress()
+            verify(summary, sha, skip)
+            # The regression takes a long time: the commit must still be the tip of main.
+            if check_git(args.version) != sha:
+                raise Refusal("main moved during the regression")
+            note = message(args.version, sha, summary, skip, reason)
     except Refusal as refusal:
         print(f"release: {refusal}", file=sys.stderr)
         return 1
-    print(f"\nregression passed. Tag v{args.version}:\n\n{note}")
+    print(f"\n{'regression waived' if waiver else 'regression passed'}. Tag v{args.version}:\n\n{note}")
     if args.dry_run:
         print("dry run: not tagging.")
         return 0
