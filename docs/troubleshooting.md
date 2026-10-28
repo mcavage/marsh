@@ -221,6 +221,17 @@ were not affected.
 
 ## Stale daemon after an upgrade
 
+- A `marsh`, `marsh run`, or app that was killed (SIGKILL, a force-quit) cannot
+  detach its session. The daemon notices that the client process is gone and
+  detaches the session within seconds once nothing runs in it, so that a reset,
+  a stop, or an upgrade of the daemon is not held up by a session nobody can
+  exit. A detached session also releases the grant pins it held in Kit VMs.
+  When a stopped VM of yours will not start because the folder it mounted was
+  deleted, marsh drops that saved mount; if a live session or job still holds
+  the mount, the error says so (`its saved mount of PATH is gone from the Mac,
+  but a session or job here still holds the mount`) instead of calling the VM
+  foreign.
+
 - Upgrading `sbx`: marsh replaces its daemon on its own once no shell or job
   is running. When the upgrade removed the old `sbx`, an idle daemon stops
   within seconds and the next `marsh` call starts one with the new `sbx`.

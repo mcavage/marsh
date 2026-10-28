@@ -207,7 +207,7 @@ mod tests {
                 ("surprise", serde_json::json!({"nested": true})),
             ] {
                 let decoded = StockInventory::decode(&with_key(listing, key, value)).unwrap();
-                assert!(decoded.get("marsh-k-0uy6jw73").is_some() || listing != V050);
+                assert!(decoded.get("marsh-k-aaaaaaaa").is_some() || listing != V050);
             }
         }
     }

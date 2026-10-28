@@ -5697,6 +5697,26 @@ impl StockSbx {
         }
     }
 
+    /// An owned VM that will not start because the host path of a saved
+    /// mount is gone, while something still holds that mount: say so (it is
+    /// this daemon's own VM, not a foreign one).
+    fn lost_mount_blocked(vm: &str, host: &Path, held: bool) -> SbxError {
+        SbxError::UnreadableVm {
+            vm: vm.to_owned(),
+            detail: if held {
+                format!(
+                    "its saved mount of {} is gone from the Mac, but a session or job here still holds the mount; exit it, or run `marsh stop`",
+                    host.display()
+                )
+            } else {
+                format!(
+                    "stock SBX reports its saved mount of {} missing, but the path exists",
+                    host.display()
+                )
+            },
+        }
+    }
+
     /// Remove the saved grant mount `host` at `target` from this daemon's
     /// own stopped VM `vm`, and the reference this daemon held for it (a
     /// project recreated at that path is mounted afresh). Only a mount under
@@ -5734,7 +5754,7 @@ impl StockSbx {
             Err(error) if error.kind() == io::ErrorKind::NotFound
         );
         if in_use || !gone {
-            return Err(SbxError::ForeignVm(vm.to_owned()));
+            return Err(Self::lost_mount_blocked(vm, host, in_use));
         }
         match self.classify_vm(vm, true)? {
             VmClass::Owned { running: false, .. } => {}
@@ -5799,7 +5819,7 @@ impl StockSbx {
             Err(error) if error.kind() == io::ErrorKind::NotFound
         );
         if in_use || !gone {
-            return Err(SbxError::ForeignVm(vm.to_owned()));
+            return Err(Self::lost_mount_blocked(vm, host, in_use));
         }
         match self.classify_vm(vm, true)? {
             VmClass::Owned { running: false, .. } => {}

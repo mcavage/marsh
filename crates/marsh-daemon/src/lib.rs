@@ -1221,6 +1221,11 @@ pub trait DaemonBackend: Send + Sync + 'static {
         Err(DaemonError::BackendUnavailable)
     }
 
+    /// A host session ended (detached, or its client died): drop the grant
+    /// pins it held, so the retained mounts it kept busy can be reused or
+    /// evicted. Best effort; the pins also go with the VM.
+    fn session_ended(&self, _session: &str, _store: &DaemonStore) {}
+
     fn registered_commands(&self) -> Result<Vec<String>, DaemonError>;
     fn install_kit(
         &self,
@@ -2402,6 +2407,36 @@ impl DaemonStore {
             terminal: requested.terminal,
             terminal_size: requested.terminal_size,
         })
+    }
+
+    /// Attached sessions whose client process is gone, with no attachment in
+    /// progress and no Kit job or Kit start left in them.
+    #[must_use]
+    pub fn dead_host_sessions(&self) -> Vec<String> {
+        let alive = |pid: u32| {
+            rustix::process::Pid::from_raw(i32::try_from(pid).unwrap_or(0)).is_none_or(|pid| {
+                rustix::process::test_kill_process(pid) != Err(rustix::io::Errno::SRCH)
+            })
+        };
+        let state = self.lock();
+        state
+            .shells
+            .values()
+            .filter(|shell| {
+                shell.state == ShellState::Attached
+                    && !state.shell_attachments.contains_key(&shell.session_id)
+                    && !alive(shell.pid)
+                    && !state.jobs.values().any(|job| {
+                        job.session_id == shell.session_id
+                            && matches!(job.state, JobState::Queued | JobState::Running)
+                    })
+                    && !state
+                        .starting_kits
+                        .values()
+                        .any(|kit| kit.shell_session_id == shell.session_id)
+            })
+            .map(|shell| shell.session_id.clone())
+            .collect()
     }
 
     /// Kit jobs of `session` that are queued, starting, or running.
@@ -3977,6 +4012,7 @@ impl Server {
         let updater_stop = Arc::new(AtomicBool::new(false));
         self.spawn_kit_updater(Arc::clone(&updater_stop));
         self.spawn_cloud_collector(Arc::clone(&updater_stop));
+        self.spawn_session_reaper(Arc::clone(&updater_stop));
         let _stop_updater = StopOnDrop(updater_stop);
         let mut next_sbx_probe = Instant::now() + self.stock_sbx_probe_interval;
         while !stop() && !self.shutdown_requested.load(Ordering::Acquire) {
@@ -4055,6 +4091,42 @@ impl Server {
     /// The detached-run collector: a background thread that asks the
     /// backend soon after startup and then every half minute; the backend
     /// decides whether a collection is due (`docs/design/cloud-detach.md` s5).
+    /// A client killed without detaching (an app that was force-quit, a
+    /// `marsh run` that got SIGKILL) leaves its session attached for ever: its
+    /// pins hold Kit mounts busy, and `marsh workers reset` refuses while a
+    /// session that ran in the VM is attached. Detach such a session once
+    /// its client process is gone and nothing runs in it.
+    fn spawn_session_reaper(&self, stop: Arc<AtomicBool>) {
+        let backend = Arc::downgrade(&self.backend);
+        let store = Arc::downgrade(&self.store.0);
+        let acp = Arc::downgrade(&self.acp);
+        let spawned = thread::Builder::new()
+            .name("marsh-session-reaper".into())
+            .spawn(move || {
+                loop {
+                    let until = Instant::now() + SESSION_REAP_INTERVAL;
+                    while Instant::now() < until {
+                        if stop.load(Ordering::Acquire) {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(250));
+                    }
+                    let (Some(backend), Some(store), Some(acp)) =
+                        (backend.upgrade(), store.upgrade(), acp.upgrade())
+                    else {
+                        return;
+                    };
+                    let store = DaemonStore(store);
+                    for session in store.dead_host_sessions() {
+                        let _ = finish_session(&store, backend.as_ref(), &acp, &session);
+                    }
+                }
+            });
+        if let Err(error) = spawned {
+            eprintln!("marshd: cannot start the session reaper: {error}");
+        }
+    }
+
     fn spawn_cloud_collector(&self, stop: Arc<AtomicBool>) {
         let backend = Arc::downgrade(&self.backend);
         let store = Arc::downgrade(&self.store.0);
@@ -4108,6 +4180,29 @@ impl Server {
         }
     }
 }
+
+/// Detach a host session: what `DetachShell` does, and what a dead client's
+/// session gets from the reaper.
+fn finish_session(
+    store: &DaemonStore,
+    backend: &dyn DaemonBackend,
+    acp: &AcpSessionManager,
+    session_id: &str,
+) -> Result<(), DaemonError> {
+    store.detach_shell(session_id)?;
+    if store.ephemeral_home_token(session_id).is_some()
+        && let Err(error) = backend.close_ephemeral_session(session_id, store)
+    {
+        store.mark_shell_cleanup_uncertain(session_id);
+        return Err(error);
+    }
+    backend.session_ended(session_id, store);
+    acp.detach_shell(session_id);
+    Ok(())
+}
+
+/// How often sessions of dead clients are looked for.
+const SESSION_REAP_INTERVAL: Duration = Duration::from_secs(5);
 
 const KIT_UPDATER_START_DELAY: Duration = Duration::from_secs(1);
 const CLOUD_COLLECTOR_START_DELAY: Duration = Duration::from_secs(2);
@@ -4347,17 +4442,7 @@ impl ConnectionHandler {
     }
 
     fn detach_host_session(&self, session_id: &str) -> Result<(), DaemonError> {
-        self.store.detach_shell(session_id)?;
-        if self.store.ephemeral_home_token(session_id).is_some()
-            && let Err(error) = self
-                .backend
-                .close_ephemeral_session(session_id, &self.store)
-        {
-            self.store.mark_shell_cleanup_uncertain(session_id);
-            return Err(error);
-        }
-        self.acp.detach_shell(session_id);
-        Ok(())
+        finish_session(&self.store, self.backend.as_ref(), &self.acp, session_id)
     }
 
     /// Settle sessions whose host caller died without detaching

@@ -288,12 +288,12 @@ impl LoadFixture {
         };
         fs::create_dir(&authority.guest_home).unwrap();
         let store = server.store();
-        let id = store.attach_shell(7, authority.clone());
-        let other = store.attach_shell(8, authority.clone());
+        let id = store.attach_shell(std::process::id(), authority.clone());
+        let other = store.attach_shell(std::process::id(), authority.clone());
         let foreign_home = temp.path().join("foreign-home");
         fs::create_dir(&foreign_home).unwrap();
         let foreign_id = store.attach_shell(
-            9,
+            std::process::id(),
             SessionAuthority {
                 home_backing: foreign_home,
                 ..authority.clone()

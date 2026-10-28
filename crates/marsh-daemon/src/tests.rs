@@ -1905,6 +1905,45 @@ fn a_cloud_lane_job_is_not_submitted_after_its_split_is_fenced_or_cancelled() {
 }
 
 #[test]
+fn only_a_session_whose_client_process_is_gone_and_idle_is_reaped() {
+    let home = home();
+    let store = reopen(home.path()).unwrap();
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let dead_pid = child.id();
+    child.wait().unwrap();
+    let dead = store.attach_shell(dead_pid, authority("/Users/example/project", home.path()));
+    let live = store.attach_shell(
+        std::process::id(),
+        authority("/Users/example/project", home.path()),
+    );
+    let busy_pid = {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        pid
+    };
+    let busy = store.attach_shell(busy_pid, authority("/Users/example/project", home.path()));
+    store
+        .begin_job(NewJob {
+            label: None,
+            session_id: busy.clone(),
+            command: "fixture".into(),
+            kit_ref: "fixture".into(),
+            workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+            mounts: Vec::new(),
+        })
+        .unwrap();
+    let reaped = store.dead_host_sessions();
+    assert!(reaped.contains(&dead), "{reaped:?}");
+    assert!(
+        !reaped.contains(&live) && !reaped.contains(&busy),
+        "{reaped:?}"
+    );
+    store.detach_shell(&dead).unwrap();
+    assert!(!store.dead_host_sessions().contains(&dead));
+}
+
+#[test]
 fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
     let home = home();
     let store = reopen(home.path()).unwrap();

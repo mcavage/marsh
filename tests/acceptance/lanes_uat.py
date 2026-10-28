@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 from pathlib import Path
+import signal
 import subprocess
 import threading
 import time
@@ -160,6 +162,19 @@ def main() -> int:
         assert "fixture:wrote" in second.prompt(second.session(lane_a), "write lane2.txt second")
         assert second.finish() == 0
         assert not (project / "escape.txt").exists()
+
+        # A client killed without detaching (an app force-quit) leaves nothing
+        # attached: its session is reaped, so a reset or upgrade is never
+        # blocked by it.
+        killed = Acp(scope, lane_a)
+        killed.session(lane_a)
+        assert scope.public_status()["shells"], "the lane job's session is attached"
+        os.killpg(killed.process.pid, signal.SIGKILL)
+        killed.process.wait(timeout=60)
+        deadline = time.monotonic() + 60
+        while scope.public_status()["shells"]:
+            assert time.monotonic() < deadline, scope.public_status()["shells"]
+            time.sleep(1)
 
         # A shell started from the host in the copy, after lane jobs ran: the
         # split's root is its project and the copy is where it starts.

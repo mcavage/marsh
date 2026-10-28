@@ -645,7 +645,7 @@ fn a_lost_shell_mount_held_by_a_session_is_never_dropped() {
     let mounts = model.vm(SHELL).unwrap().mounts.len();
     assert!(matches!(
         adapter.drop_lost_shell_mount(SHELL, &project, &project),
-        Err(SbxError::ForeignVm(_))
+        Err(SbxError::UnreadableVm { detail, .. }) if detail.contains("still holds the mount")
     ));
     assert_eq!(model.vm(SHELL).unwrap().mounts.len(), mounts);
 }

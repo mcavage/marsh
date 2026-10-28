@@ -965,6 +965,12 @@ impl DaemonBackend for StockDaemonBackend {
         self.release_session_grants(session, store)
     }
 
+    fn session_ended(&self, session: &str, _store: &DaemonStore) {
+        // Pins only: a busy fence leaves them (they also go with the VM),
+        // it is not a reason to quarantine a shared worker.
+        let _ = self.sbx.close_shell_session_grants(session);
+    }
+
     fn registered_commands(&self) -> Result<Vec<String>, DaemonError> {
         Ok(self.command_names())
     }
