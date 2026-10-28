@@ -777,6 +777,7 @@ impl SplitEngine {
     /// Write `value` to `path` durably: a temporary file of its own, fsync,
     /// rename, fsync the directory.
     pub(crate) fn write_durable(path: &Path, value: &impl Serialize) -> std::io::Result<()> {
+        use std::os::unix::fs::OpenOptionsExt as _;
         static NEXT: AtomicU64 = AtomicU64::new(0);
         let bytes = serde_json::to_vec(value)?;
         let temporary = path.with_extension(format!(
@@ -784,12 +785,11 @@ impl SplitEngine {
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
-        use std::os::unix::fs::OpenOptionsExt as _;
         let written = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits().cast_signed())
             .open(&temporary)
             .and_then(|mut file| {
                 file.write_all(&bytes)?;
