@@ -1716,6 +1716,7 @@ mod tests {
                     .execute_with_io(
                         ExecuteSpec {
                             label: None,
+                            kit: None,
                             acp: false,
                             command: "fixture".into(),
                             placement: crate::Placement::Local,

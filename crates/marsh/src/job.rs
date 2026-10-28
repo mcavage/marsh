@@ -247,6 +247,7 @@ fn child_at(
     let (environment, start_env) = offered(&document);
     let spec = ExecuteSpec {
         label: None,
+        kit: None,
         command: name.to_owned(),
         arguments: arguments
             .iter()

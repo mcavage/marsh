@@ -988,29 +988,63 @@ fn apply(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
         Ok(channel) => channel,
         Err(message) => return usage(&format!("split apply: {message}")),
     };
-    let split = match channel.client.request(PublicRequest::SplitShow {
-        split: Some(id.into()),
-    }) {
-        Ok(PublicReply::Splits { document }) => document["splits"][0].clone(),
-        reply => return failed("split apply", reply),
+    // Applying is a join that keeps the split: while it runs the split is
+    // `joined`, so neither `splits rm` nor the kept-split collector removes
+    // the patch under it; the release keeps it (with fresh retention).
+    let mut stream = match channel
+        .client
+        .open_request(PublicRequest::SplitJoin { split: id.into() })
+    {
+        Ok(stream) => stream,
+        Err(error) => return usage(&format!("split apply: {error}")),
     };
+    let (manifest, out, objects) = match read_frame::<PublicReply>(&mut stream) {
+        Ok(PublicReply::SplitJoined {
+            manifest,
+            dir,
+            objects,
+            ..
+        }) => (manifest, dir, objects),
+        Ok(PublicReply::Error { message, .. }) => {
+            eprintln!("marsh: split apply: {message}");
+            return 1;
+        }
+        Ok(reply) => return usage(&format!("split apply: unexpected reply {reply:?}")),
+        Err(error) => return usage(&format!("split apply: {error}")),
+    };
+    let release = |stream: &mut std::os::unix::net::UnixStream, status: i32| {
+        let _ = write_frame(
+            stream,
+            &SplitRelease {
+                status,
+                keep: true,
+                consumer: Some("split apply".into()),
+            },
+        );
+        let _ = read_frame::<PublicReply>(stream);
+        status
+    };
+    let split = serde_json::from_str::<serde_json::Value>(&manifest).unwrap_or_default();
     let lane = split["branches"]
         .as_array()
         .into_iter()
         .flatten()
         .find(|branch| branch["label"] == label);
     if lane.is_none_or(|lane| lane["state"] != "captured") || split["root"].as_str().is_none() {
+        release(&mut stream, 2);
         return usage(&format!("split apply: {id} has no captured lane {label}"));
     }
     let root = Path::new(split["root"].as_str().unwrap_or_default());
-    let patch = Path::new(split["out"].as_str().unwrap_or_default())
-        .join(label)
-        .join("diff.patch");
+    let patch = out.join(label).join("diff.patch");
     if !patch.is_file() {
         eprintln!("marsh: split apply: lane {label} changed nothing");
-        return 0;
+        return release(&mut stream, 0);
     }
-    let objects = split["objects"].as_str().unwrap_or_default();
+    let objects = objects
+        .as_deref()
+        .map(Path::as_os_str)
+        .unwrap_or_default()
+        .to_owned();
     let git = if three_way {
         "git apply --3way"
     } else {
@@ -1038,12 +1072,13 @@ fn apply(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
         .arg(&patch)
         .current_dir(root)
         .stdin(std::process::Stdio::null());
-    match command.status() {
+    let status = match command.status() {
         Ok(status) => status
             .code()
             .unwrap_or_else(|| 128 + status.signal().unwrap_or(0)),
         Err(error) => usage(&format!("split apply: {error}")),
-    }
+    };
+    release(&mut stream, status)
 }
 
 fn checkpoint(

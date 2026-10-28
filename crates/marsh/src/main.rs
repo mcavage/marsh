@@ -990,6 +990,7 @@ fn run_command(arguments: &[OsString]) -> i32 {
     }
     let spec = marsh_daemon::ExecuteSpec {
         label: None,
+        kit: None,
         command: name,
         arguments: rest
             .iter()
@@ -1377,6 +1378,7 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
     let stdin_null = stdin_null || detach;
     let spec = marsh_daemon::ExecuteSpec {
         label,
+        kit: None,
         command: "cloud".into(),
         arguments: words,
         placement: marsh_daemon::Placement::Cloud,

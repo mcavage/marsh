@@ -152,9 +152,16 @@ composed descriptor declares `com.docker.sandbox/acp@1` (`agent`, `command`
 as argv or a `/bin/sh -c` string, optional `env` and `protocolVersion`;
 capability groups, kit sets, and mixins included). The daemon reads the
 descriptor of a published image once per digest (cached under the control
-directory's `kit-agent/`) and of a local source Kit from its last cached
-build, else its source YAML. An ACP job runs the declared command in place of
-the Kit's entrypoint; nothing else about the Kit changes (`docs/acp.md`).
+directory's `kit-agent-v2/`) and of a local source Kit from its last cached
+build, else its source YAML. An adapter's `env` is bounded like any exported
+environment and may not name a variable marsh sets; an `agent-sessions@1`
+config is at most 4 KiB and belongs to the adapter it names (`agent`), or is
+the Kit's only one when it has at most one adapter. An ACP job runs the
+declared command in place of the Kit's entrypoint, from the Kit generation
+the job's VM was prepared from (an ACP session pins the generation it
+resolved); the merged environment is checked before the job is recorded.
+`marsh status` never waits on a registry: a published Kit whose descriptor is
+not cached yet shows `"acp": null` while it is read in the background.
 
 The host-control directory is scoped by the SHA256 of the canonical
 `MARSH_HOME` path under `~/Library/Application Support/marsh/control/`.

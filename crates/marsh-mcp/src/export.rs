@@ -1149,6 +1149,7 @@ impl ExportMcp {
 
         let spec = ExecuteSpec {
             label: None,
+            kit: None,
             process: None,
             acp: false,
             // Protocol-created jobs retain the admitted publishing project root.

@@ -218,6 +218,7 @@ fn checkpoints_keep_the_tree_and_git_state_and_retain_twenty_per_label() {
         "lanes-v1",
         "checkpoints-v1",
         "acp-descriptors-v1",
+        "labels-v1",
     ] {
         assert!(
             hello["features"]
@@ -572,4 +573,69 @@ fn an_open_split_label_is_recorded_listed_and_published() {
         let refused = fixture.run_in(&fixture.project, bad);
         assert_eq!(refused.status.code(), Some(2), "{bad:?}: {refused:?}");
     }
+}
+
+#[test]
+fn a_close_that_cannot_be_journaled_leaves_the_split_open() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let fixture = Fixture::new();
+    let opened = fixture.json(&["split", "--open", "a"]);
+    let id = opened["id"].as_str().unwrap().to_owned();
+    assert!(fixture.home.join("splits.json").is_file());
+    fs::set_permissions(&fixture.home, fs::Permissions::from_mode(0o500)).unwrap();
+    let refused = fixture.run_in(&fixture.project, &["split", "close", &id, "--json"]);
+    fs::set_permissions(&fixture.home, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_ne!(refused.status.code(), Some(0), "{refused:?}");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("could not journal the close"),
+        "{refused:?}"
+    );
+    let shown = fixture.json(&["splits", "--json", &id]);
+    assert_eq!(shown["splits"][0]["state"], "run", "{shown}");
+    assert!(shown["splits"][0].get("closing").is_none(), "{shown}");
+    let closed = fixture.json(&["split", "close", &id, "--json"]);
+    assert_eq!(closed["state"], "kept", "{closed}");
+}
+
+#[test]
+fn apply_holds_the_split_as_a_join_and_rm_never_takes_a_joined_split() {
+    let fixture = Fixture::new();
+    let opened = fixture.json(&["split", "--open", "a"]);
+    let id = opened["id"].as_str().unwrap().to_owned();
+    let lane = PathBuf::from(opened["lanes"]["a"].as_str().unwrap());
+    fs::write(lane.join("applied.txt"), "from the lane\n").unwrap();
+    fixture.json(&["split", "close", &id, "--json"]);
+    let kept = fixture.json(&["splits", "--json", &id])["splits"][0]["kept_unix_ms"].clone();
+    thread::sleep(Duration::from_millis(20));
+    let applied = fixture.run_in(&fixture.project, &["split", "apply", &id, "a"]);
+    assert_eq!(applied.status.code(), Some(0), "{applied:?}");
+    assert_eq!(
+        fs::read_to_string(fixture.project.join("applied.txt")).unwrap(),
+        "from the lane\n"
+    );
+    // The apply's release keeps the split, with a fresh retention clock.
+    let shown = fixture.json(&["splits", "--json", &id])["splits"][0].clone();
+    assert_eq!(shown["state"], "kept", "{shown}");
+    assert_ne!(shown["kept_unix_ms"], kept, "{shown}");
+
+    // While a join holds it, `splits rm` is refused and deletes nothing.
+    let mut joined = fixture
+        .command(&fixture.project, &["join", "--", "sh", "-c", "sleep 3"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write as _;
+        writeln!(joined.stdin.as_ref().unwrap(), "{opened}").unwrap();
+    }
+    drop(joined.stdin.take());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while fixture.json(&["splits", "--json", &id])["splits"][0]["state"] != "joined" {
+        assert!(Instant::now() < deadline, "never joined");
+        thread::sleep(Duration::from_millis(50));
+    }
+    let refused = fixture.run_in(&fixture.project, &["splits", "rm", &id]);
+    assert_ne!(refused.status.code(), Some(0), "{refused:?}");
+    assert!(fixture.project.join(".marsh/split").join(&id).exists());
+    joined.wait().unwrap();
 }

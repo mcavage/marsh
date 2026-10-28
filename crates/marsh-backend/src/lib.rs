@@ -99,6 +99,8 @@ pub struct StockDaemonBackend {
     /// a local or dev build.
     packaged_channel: Option<String>,
     registry_install: Mutex<()>,
+    /// Published Kits whose descriptor `marsh status` is fetching.
+    agent_fetches: Arc<Mutex<BTreeSet<String>>>,
     config: BackendConfig,
     registered_workers: Mutex<BTreeSet<String>>,
     ready_kits: Mutex<BTreeMap<String, ReadyKitVm>>,
@@ -367,6 +369,7 @@ impl StockDaemonBackend {
             packaged: BTreeMap::new(),
             packaged_channel: None,
             registry_install: Mutex::new(()),
+            agent_fetches: Arc::new(Mutex::new(BTreeSet::new())),
             config,
             registered_workers: Mutex::new(BTreeSet::new()),
             ready_kits: Mutex::new(BTreeMap::new()),
@@ -565,58 +568,50 @@ impl StockDaemonBackend {
     }
 
     /// The ACP adapter and session verbs a command's Kit declares; kept under
-    /// the control home (`kit-agent/`) once read from a published image or a
+    /// the control home (`kit-agent-v2/`) once read from a published image or a
     /// local build, so `marsh status` stays offline and fast.
-    fn kit_agent(&self, command: &str) -> Result<KitAgent, DaemonError> {
-        let kit = self
-            .registered_kit(command)?
-            .workload
-            .capture_generation()
-            .map_err(backend_error)?;
-        let path = self
-            .config
-            .control_home
-            .join("kit-agent")
-            .join(format!("{}.json", identity_digest(kit.identity())));
-        let cached = fs::read(&path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<KitAgent>(&bytes).ok());
-        let mut agent = if let Some(agent) = cached {
-            agent
-        } else {
-            let (descriptor, done) = self.sbx.kit_descriptor(&kit).map_err(backend_error)?;
-            let agent =
-                KitAgent::from_descriptor(&descriptor).map_err(DaemonError::InvalidState)?;
-            if done {
-                let store = || -> std::io::Result<()> {
-                    let directory = path.parent().unwrap_or(&path);
-                    fs::create_dir_all(directory)?;
-                    fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
-                    let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-                    serde_json::to_writer(&mut temporary, &agent)?;
-                    temporary.persist(&path).map_err(|error| error.error)?;
-                    Ok(())
-                };
-                let _ = store();
-            }
-            agent
+    /// The agent (ACP adapter, session verbs) of one captured Kit generation,
+    /// cached by its identity: the adapter always matches the image prepared
+    /// from that same generation.
+    fn kit_agent_for(&self, kit: &NativeKitRef) -> Result<KitAgent, DaemonError> {
+        let agent = match cached_kit_agent(&self.config.control_home, kit) {
+            Some(agent) => agent,
+            None => fetch_kit_agent(&self.sbx, &self.config.control_home, kit)?,
         };
-        // marsh's own agent Kits published before they declared acp@1 have
-        // the same `--acp` entrypoint mode (kits/README.md).
-        if agent.acp.is_none()
-            && let Some(name) = ["claude", "codex", "pi"].into_iter().find(|name| {
-                kit.identity()
-                    .starts_with(&format!("docker.io/mcavage/marsh-{name}@sha256:"))
-            })
+        Ok(with_published_acp(kit, agent))
+    }
+
+    /// For `marsh status`, never waiting on a registry: the cached agent, a
+    /// local Kit's (read from disk), or `None` while a published Kit's
+    /// descriptor is fetched in the background (once at a time).
+    fn status_kit_agent(&self, kit: &NativeKitRef) -> Option<KitAgent> {
+        if let Some(agent) = cached_kit_agent(&self.config.control_home, kit) {
+            return Some(with_published_acp(kit, agent));
+        }
+        if kit.source_dir().is_some() {
+            return self.kit_agent_for(kit).ok();
+        }
+        if self
+            .agent_fetches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(kit.identity().to_owned())
         {
-            agent.acp = Some(marsh_contracts::kit_assets::AcpAdapter {
-                agent: name.into(),
-                command: vec![format!("/usr/local/bin/marsh-{name}"), "--acp".into()],
-                env: BTreeMap::new(),
-                protocol_version: None,
+            let (sbx, control_home, kit) = (
+                Arc::clone(&self.sbx),
+                self.config.control_home.clone(),
+                kit.clone(),
+            );
+            let fetches = Arc::clone(&self.agent_fetches);
+            thread::spawn(move || {
+                let _ = fetch_kit_agent(&sbx, &control_home, &kit);
+                fetches
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .remove(kit.identity());
             });
         }
-        Ok(agent)
+        None
     }
 
     fn kit_spec_for_environment(
@@ -1094,7 +1089,7 @@ impl DaemonBackend for StockDaemonBackend {
     fn resolve_acp_agent(&self, name: &str) -> Result<AgentAdapterDeclaration, DaemonError> {
         let kit = self.registered_kit(name)?;
         let exact = kit.workload.capture_generation().map_err(backend_error)?;
-        if self.kit_agent(name)?.acp.is_none() {
+        if self.kit_agent_for(&exact)?.acp.is_none() {
             return Err(DaemonError::InvalidState(format!(
                 "{name}: its Kit declares no ACP adapter (com.docker.sandbox/acp@1)"
             )));
@@ -1115,11 +1110,15 @@ impl DaemonBackend for StockDaemonBackend {
             .into_iter()
             .filter_map(|name| {
                 let kit = self.registered_kit(&name).ok()?;
-                let agent = self.kit_agent(&name).unwrap_or_default();
+                let agent = kit
+                    .workload
+                    .capture_generation()
+                    .ok()
+                    .and_then(|exact| self.status_kit_agent(&exact));
                 Some(marsh_daemon::CommandStatus {
                     reference: kit.workload.identity().to_owned(),
-                    acp: agent.acp.is_some(),
-                    sessions: agent.sessions,
+                    acp: agent.as_ref().map(|agent| agent.acp.is_some()),
+                    sessions: agent.and_then(|agent| agent.sessions),
                     name,
                 })
             })
@@ -1556,6 +1555,16 @@ impl DaemonBackend for StockDaemonBackend {
             }
         };
         let spec = self.kit_spec_for_session(&request.command, &request.session, &store)?;
+        // A run pinned to one Kit generation (an ACP session's) never gets
+        // another the command was updated to meanwhile.
+        if let Some(kit) = &request.kit
+            && kit != spec.workload_kit.identity()
+        {
+            return Err(DaemonError::Refused(format!(
+                "{}: its Kit changed while this run started; retry",
+                request.command
+            )));
+        }
         let mut admitted_grants = self.admitted_session_grants_with_home(
             &request.session,
             &request.session.guest_home,
@@ -1587,12 +1596,28 @@ impl DaemonBackend for StockDaemonBackend {
         // `run --acp` and ACP sessions run the adapter the Kit declares,
         // read once the Kit is prepared (a local Kit's build is cached then).
         let acp = if request.acp {
-            Some(self.kit_agent(&request.command)?.acp.ok_or_else(|| {
+            let acp = self.kit_agent_for(&spec.workload_kit)?.acp.ok_or_else(|| {
                 DaemonError::Refused(format!(
                     "{}: its Kit declares no ACP adapter (com.docker.sandbox/acp@1)",
                     request.command
                 ))
-            })?)
+            })?;
+            // The adapter's variables join the job's: the whole must still be
+            // a valid environment, checked before the job is recorded.
+            let (mut merged, _) =
+                merge_exported_environment(&request.environment, &self.config.env)?;
+            merged.extend(
+                acp.env
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.as_bytes().to_vec())),
+            );
+            marsh_contracts::validate_exported_environment(&merged).map_err(|_| {
+                DaemonError::Refused(format!(
+                    "{}: the ACP adapter's environment with this job's is too large",
+                    request.command
+                ))
+            })?;
+            Some(acp)
         } else {
             None
         };
@@ -4070,6 +4095,63 @@ impl StockDaemonBackend {
 
 #[cfg(test)]
 mod typed_receipt_callers;
+
+fn kit_agent_path(control_home: &Path, kit: &NativeKitRef) -> PathBuf {
+    control_home
+        // v2: bounded adapters and session verbs (entries of earlier builds
+        // were never checked against those bounds).
+        .join("kit-agent-v2")
+        .join(format!("{}.json", identity_digest(kit.identity())))
+}
+
+fn cached_kit_agent(control_home: &Path, kit: &NativeKitRef) -> Option<KitAgent> {
+    fs::read(kit_agent_path(control_home, kit))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<KitAgent>(&bytes).ok())
+}
+
+/// Read the Kit's descriptor and cache its agent once it is final.
+fn fetch_kit_agent(
+    sbx: &StockSbx,
+    control_home: &Path,
+    kit: &NativeKitRef,
+) -> Result<KitAgent, DaemonError> {
+    let (descriptor, done) = sbx.kit_descriptor(kit).map_err(backend_error)?;
+    let agent = KitAgent::from_descriptor(&descriptor).map_err(DaemonError::InvalidState)?;
+    if done {
+        let path = kit_agent_path(control_home, kit);
+        let store = || -> std::io::Result<()> {
+            let directory = path.parent().unwrap_or(&path);
+            fs::create_dir_all(directory)?;
+            fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
+            let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+            serde_json::to_writer(&mut temporary, &agent)?;
+            temporary.persist(&path).map_err(|error| error.error)?;
+            Ok(())
+        };
+        let _ = store();
+    }
+    Ok(agent)
+}
+
+/// marsh's own agent Kits published before they declared acp@1 have the same
+/// `--acp` entrypoint mode (kits/README.md).
+fn with_published_acp(kit: &NativeKitRef, mut agent: KitAgent) -> KitAgent {
+    if agent.acp.is_none()
+        && let Some(name) = ["claude", "codex", "pi"].into_iter().find(|name| {
+            kit.identity()
+                .starts_with(&format!("docker.io/mcavage/marsh-{name}@sha256:"))
+        })
+    {
+        agent.acp = Some(marsh_contracts::kit_assets::AcpAdapter {
+            agent: name.into(),
+            command: vec![format!("/usr/local/bin/marsh-{name}"), "--acp".into()],
+            env: BTreeMap::new(),
+            protocol_version: None,
+        });
+    }
+    agent
+}
 
 #[cfg(test)]
 mod tests {

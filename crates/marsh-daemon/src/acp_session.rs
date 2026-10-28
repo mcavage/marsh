@@ -967,6 +967,8 @@ impl AcpSessionManager {
         let (server, client) = ServerAttachment::pair()?;
         startup.bind(client.clone());
         let command = declaration.command.clone();
+        // Run exactly the generation resolved here (its adapter included).
+        let kit = Some(declaration.workload_digest.clone()).filter(|kit| !kit.is_empty());
         // ACP speaks over pipes: never a terminal job (`open_url`).
         let execution_caller = SessionSpec {
             terminal: false,
@@ -978,6 +980,7 @@ impl AcpSessionManager {
             let result = backend.execute(
                 ExecuteSpec {
                     label: None,
+                    kit,
                     command,
                     arguments: Vec::new(),
                     session: execution_caller,

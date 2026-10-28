@@ -96,6 +96,7 @@ pub const FEATURES: &[&str] = &[
     "lanes-v1",
     "checkpoints-v1",
     "acp-descriptors-v1",
+    "labels-v1",
 ];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while
@@ -1012,6 +1013,10 @@ pub struct ExecuteSpec {
     /// `marsh cloud -d --label TEXT`: recorded on the job receipt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// The exact Kit generation this run must use (an ACP session's, as
+    /// resolved when it started); refused if the command now names another.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kit: Option<String>,
 }
 
 impl ExecuteSpec {
@@ -1443,7 +1448,9 @@ pub struct StatusDocument {
 pub struct CommandStatus {
     pub name: String,
     pub reference: String,
-    pub acp: bool,
+    /// Whether its Kit declares an ACP adapter; `null` while a published
+    /// Kit's descriptor is still being read (in the background).
+    pub acp: Option<bool>,
     #[serde(default)]
     pub sessions: Option<serde_json::Value>,
 }
@@ -2405,6 +2412,11 @@ impl DaemonStore {
     /// recorded or submitted.
     pub fn fence_split(&self, split: &str) {
         self.lock().fenced_splits.insert(split.to_owned());
+    }
+
+    /// Undo `fence_split` for a close or cancel that was never journaled.
+    pub(crate) fn unfence_split(&self, split: &str) {
+        self.lock().fenced_splits.remove(split);
     }
 
     /// Whether `mounts` name a fork of a fenced split.
@@ -5414,16 +5426,21 @@ impl ConnectionHandler {
                         invalid("checkpoint: the project root must be absolute".into())
                     }
                     (CheckpointAction::Create { label }, Some(root)) => {
-                        self.splits.note_root(&root);
-                        match checkpoints.create(&root, label) {
-                            Ok(checkpoint) => PublicReply::Document {
-                                document: checkpoint.document(),
+                        match self.splits.note_root(&root) {
+                            Err(error) => invalid(format!(
+                                "checkpoint: could not journal the project {}: {error}",
+                                root.display()
+                            )),
+                            Ok(()) => match checkpoints.create(&root, label) {
+                                Ok(checkpoint) => PublicReply::Document {
+                                    document: checkpoint.document(),
+                                },
+                                Err(checkpoint::Refusal::LowDisk(message)) => PublicReply::Error {
+                                    code: ErrorCode::NoSpace,
+                                    message,
+                                },
+                                Err(checkpoint::Refusal::Invalid(message)) => invalid(message),
                             },
-                            Err(checkpoint::Refusal::LowDisk(message)) => PublicReply::Error {
-                                code: ErrorCode::NoSpace,
-                                message,
-                            },
-                            Err(checkpoint::Refusal::Invalid(message)) => invalid(message),
                         }
                     }
                     (CheckpointAction::List { label }, root) => PublicReply::Document {

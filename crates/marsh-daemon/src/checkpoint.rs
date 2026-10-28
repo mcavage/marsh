@@ -114,9 +114,14 @@ impl Checkpoints {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// Journal the records; under the state lock, so a later state is never
+    /// overwritten by an earlier one.
     fn save(&self) {
-        let records = self.lock().records.clone();
-        crate::split::SplitEngine::write_durable(&self.journal, &records);
+        let state = self.lock();
+        if let Err(error) = crate::split::SplitEngine::write_durable(&self.journal, &state.records)
+        {
+            eprintln!("marshd: could not journal checkpoints: {error}");
+        }
     }
 
     /// Every project with a recorded checkpoint.

@@ -109,10 +109,18 @@ def main() -> int:
                                *words], cwd=project, check=True, capture_output=True, text=True).stdout
 
     try:
-        status = scope.public_status()
-        listed = {command["name"]: command for command in status["commands"]}
+        # A published Kit's descriptor is read in the background: `acp` is
+        # null until then, and `status` never waits on the registry.
+        deadline = time.monotonic() + 120
+        while True:
+            status = scope.public_status()
+            listed = {command["name"]: command for command in status["commands"]}
+            if listed["fixture"]["acp"] is not None:
+                break
+            assert time.monotonic() < deadline, status["commands"]
+            time.sleep(1)
         assert listed["fixture-acp"]["acp"] is True and listed["fixture"]["acp"] is False, status["commands"]
-        assert {"events-v1", "lanes-v1", "checkpoints-v1", "acp-descriptors-v1"} <= set(status["features"])
+        assert {"events-v1", "lanes-v1", "checkpoints-v1", "acp-descriptors-v1", "labels-v1"} <= set(status["features"])
         subscriber = subprocess.Popen([scope.marsh, "events", "--json"], cwd=project, env=scope.environment,
                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, start_new_session=True)
         threading.Thread(target=lambda: events.extend(json.loads(line) for line in subscriber.stdout),
@@ -124,8 +132,10 @@ def main() -> int:
         git("commit", "-q", "-m", "init")
         checkpoint = json_of("checkpoint", "--label", "turn-1", "--json")["checkpoint"]
         (project / "README").write_text("after the checkpoint\n")
-        opened = json_of("split", "--open", "--from", checkpoint, "a", "b")
+        opened = json_of("split", "--open", "--from", checkpoint, "--label", "narwhal-run:uat", "a", "b")
         split = opened["id"]
+        labelled = [row for row in json_of("splits", "--json")["splits"] if row.get("label") == "narwhal-run:uat"]
+        assert [row["id"] for row in labelled] == [split], labelled
         lane_a, lane_b = Path(opened["lanes"]["a"]), Path(opened["lanes"]["b"])
         assert (lane_a / "README").read_text() == "before\n"
 
@@ -152,6 +162,7 @@ def main() -> int:
 
         closed = json_of("split", "close", split, "--json")
         assert closed["state"] == "kept" and closed["from"] == checkpoint, closed
+        assert closed["label"] == "narwhal-run:uat", closed
         lanes = {lane["label"]: lane for lane in closed["branches"]}
         assert lanes["a"]["state"] == "captured" and lanes["a"]["files"] == 2, lanes
         assert lanes["b"]["state"] == "captured" and lanes["b"]["files"] == 0, lanes
@@ -265,6 +276,9 @@ def main() -> int:
         storage = json_of("storage", "--json")["projects"][0]
         assert storage["checkpoints"]["count"] == 1 and storage["kept_splits"]["count"] == 1, storage
         assert storage["volume"]["free_bytes"] > 0
+        split_events = [event["split"] for event in events
+                        if event["type"] == "split" and event["split"]["id"] == split]
+        assert split_events and all(event["label"] == "narwhal-run:uat" for event in split_events), split_events
         seqs = [event["seq"] for event in events if "seq" in event]
         assert seqs == sorted(seqs) and events[0]["type"] == "hello", events[:3]
         kinds = {event["type"] for event in events}

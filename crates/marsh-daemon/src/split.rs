@@ -437,6 +437,8 @@ pub struct SplitEngine {
     /// Every project that had a `.marsh` area made here, until its
     /// `.marsh/.trash` is verified empty (`project-roots.json`).
     roots: Mutex<std::collections::BTreeSet<PathBuf>>,
+    /// Serializes journal snapshots with their commits (`save_checked`).
+    saving: Mutex<()>,
 }
 
 /// Kept splits are removed this long after they were kept.
@@ -573,6 +575,7 @@ impl SplitEngine {
             checkpoints,
             kept_retention_ms: AtomicU64::new(KEPT_RETENTION_MS),
             roots: Mutex::new(roots),
+            saving: Mutex::new(()),
         });
         engine.save();
         let sweeper = Arc::clone(&engine);
@@ -595,19 +598,24 @@ impl SplitEngine {
         );
     }
 
-    /// Remember a project that gets a `.marsh` area, before it is made.
-    pub(crate) fn note_root(&self, root: &Path) {
-        let roots = {
-            let mut roots = self
-                .roots
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !roots.insert(root.to_path_buf()) {
-                return;
-            }
-            roots.clone()
-        };
-        Self::write_durable(&self.journal.with_file_name("project-roots.json"), &roots);
+    /// Remember a project that gets a `.marsh` area, durably, before it is
+    /// made (its trash is swept at every start until forgotten).
+    ///
+    /// # Errors
+    /// The project list could not be journaled; nothing may be made there.
+    pub(crate) fn note_root(&self, root: &Path) -> std::io::Result<()> {
+        let mut roots = self
+            .roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if roots.contains(root) {
+            return Ok(());
+        }
+        let mut next = roots.clone();
+        next.insert(root.to_path_buf());
+        Self::write_durable(&self.journal.with_file_name("project-roots.json"), &next)?;
+        *roots = next;
+        Ok(())
     }
 
     /// Delete what interrupted removals left in each known project's
@@ -632,17 +640,28 @@ impl SplitEngine {
                         .any(|record| &record.root == root)
             })
             .collect::<Vec<_>>();
-        let roots = {
-            let mut roots = self
-                .roots
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            for root in done {
-                roots.remove(&root);
+        // Forget under the roots lock, rechecked: a split or checkpoint made
+        // meanwhile keeps its project.
+        let mut roots = self
+            .roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let checkpointed = self.checkpoints.roots();
+        let mut next = roots.clone();
+        for root in done {
+            if !checkpointed.contains(&root)
+                && !self
+                    .lock()
+                    .records
+                    .values()
+                    .any(|record| record.root == root)
+            {
+                next.remove(&root);
             }
-            roots.clone()
-        };
-        Self::write_durable(&self.journal.with_file_name("project-roots.json"), &roots);
+        }
+        if Self::write_durable(&self.journal.with_file_name("project-roots.json"), &next).is_ok() {
+            *roots = next;
+        }
     }
 
     /// This daemon's own endpoint (master token): splits and `ProcessRun`
@@ -657,9 +676,23 @@ impl SplitEngine {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Durable journal update: write, fsync, rename, fsync the directory.
-    /// The `jobs --tree` lineage follows every record and outlives it.
+    /// Durable journal update (`save_checked`); a failure is reported, and
+    /// the next save writes the then-current state again.
     fn save(&self) {
+        if let Err(error) = self.save_checked() {
+            eprintln!("marshd: could not journal splits: {error}");
+        }
+    }
+
+    /// Durable journal update: write, fsync, rename, fsync the directory.
+    /// Snapshot and commit are one serialized step, so a later state is never
+    /// overwritten by an earlier one. The `jobs --tree` lineage follows every
+    /// record and outlives it.
+    fn save_checked(&self) -> std::io::Result<()> {
+        let _saving = self
+            .saving
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let (records, lineage) = {
             let mut inner = self.lock();
             let now = unix_ms();
@@ -716,26 +749,34 @@ impl SplitEngine {
             }
             (inner.records.clone(), inner.lineage.clone())
         };
-        Self::write_durable(&self.journal, &records);
-        Self::write_durable(&self.journal.with_file_name("split-lineage.json"), &lineage);
+        Self::write_durable(&self.journal, &records)?;
+        Self::write_durable(&self.journal.with_file_name("split-lineage.json"), &lineage)
     }
 
-    pub(crate) fn write_durable(path: &Path, value: &impl Serialize) {
-        let Ok(bytes) = serde_json::to_vec(value) else {
-            return;
-        };
-        let temporary = path.with_extension("json.tmp");
-        let written = fs::File::create(&temporary).and_then(|mut file| {
-            file.write_all(&bytes)?;
-            file.sync_all()
-        });
-        if written.is_ok()
-            && fs::rename(&temporary, path).is_ok()
-            && let Some(parent) = path.parent()
-            && let Ok(directory) = fs::File::open(parent)
-        {
-            let _ = directory.sync_all();
+    /// Write `value` to `path` durably: a temporary file of its own, fsync,
+    /// rename, fsync the directory.
+    pub(crate) fn write_durable(path: &Path, value: &impl Serialize) -> std::io::Result<()> {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let bytes = serde_json::to_vec(value)?;
+        let temporary = path.with_extension(format!(
+            "json.{}.{}.tmp",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let written = fs::File::create(&temporary)
+            .and_then(|mut file| {
+                file.write_all(&bytes)?;
+                file.sync_all()
+            })
+            .and_then(|()| fs::rename(&temporary, path));
+        if let Err(error) = written {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
         }
+        if let Some(parent) = path.parent() {
+            fs::File::open(parent)?.sync_all()?;
+        }
+        Ok(())
     }
 
     /// Current and recently removed splits for `jobs --tree`.
@@ -956,17 +997,22 @@ impl SplitEngine {
                 }
                 Some(r) if r.state == SplitState::Run => {
                     r.closing = true;
+                    store.fence_split(id);
                     true
                 }
-                _ => false,
+                _ => {
+                    store.fence_split(id);
+                    false
+                }
             }
         };
-        store.fence_split(id);
+        if open {
+            self.commit_closing(id, store)?;
+        }
         Self::cancel_lane_jobs(id, store);
         if !open {
             return Ok(());
         }
-        self.save();
         let engine = Arc::clone(self);
         let store = store.clone();
         thread::spawn(move || {
@@ -1006,6 +1052,22 @@ impl SplitEngine {
             });
         });
         Ok(())
+    }
+
+    /// Journal a close or cancel just begun. It happened only once durable:
+    /// otherwise a restart would reopen the lanes, so the split stays open
+    /// (unfenced) and the caller is told.
+    fn commit_closing(&self, id: &str, store: &DaemonStore) -> Result<(), DaemonError> {
+        let Err(error) = self.save_checked() else {
+            return Ok(());
+        };
+        if let Some(record) = self.lock().records.get_mut(id) {
+            record.closing = false;
+        }
+        store.unfence_split(id);
+        Err(DaemonError::InvalidState(format!(
+            "split {id}: could not journal the close ({error}); it is still open"
+        )))
     }
 
     /// Cancel every live job in a fork of split `id` not already cancelled
@@ -1129,10 +1191,13 @@ impl SplitEngine {
                     "split {id} is already closing"
                 )));
             }
+            // One admission step: no lane job is admitted (`admit_lane`
+            // checks `closing` under this lock), recorded, or submitted
+            // (the store's fence) once this returns; the journal follows.
             record.closing = true;
+            store.fence_split(id);
         }
-        self.save();
-        store.fence_split(id);
+        self.commit_closing(id, store)?;
         let settled = Instant::now();
         let ended = self.settle_lanes(id, store, LANE_SETTLE, || {});
         let record = self
@@ -1291,49 +1356,52 @@ impl SplitEngine {
         id: &str,
         store: &DaemonStore,
     ) -> Result<String, DaemonError> {
-        let record = self
-            .record(id)
-            .filter(|record| caller == &Creator::Host || &record.creator == caller)
-            .ok_or_else(|| DaemonError::NotFound(format!("split {id}")))?;
-        if matches!(record.state, SplitState::Run | SplitState::Joined) {
-            return Err(DaemonError::InvalidState(format!(
-                "split {id} is {:?}; cancel it first",
-                record.state
-            )));
-        }
         // Never remove a fork a job may still write (`NoRemoveWhileLive`):
         // a lane job a close timed out on runs until it is cancelled, and
-        // one whose end was never confirmed until its Kit is reset.
+        // one whose end was never confirmed until its Kit is reset. The
+        // checks and the claim are one step under the lock `join` takes, so
+        // a concurrent join (or `split apply`) either wins or finds it gone.
         let jobs = store.fork_jobs(id, None);
-        if record.branches.iter().any(|branch| branch.live > 0) || !jobs.live.is_empty() {
-            return Err(DaemonError::InvalidState(format!(
-                "split {id} still has a running lane job; end it with `marsh splits cancel {id}`, then remove it"
-            )));
-        }
-        if record.lanes() && jobs.held > 0 {
-            return Err(DaemonError::InvalidState(format!(
-                "split {id} has a lane job whose end was not confirmed; run `marsh workers reset all`, then remove it"
-            )));
-        }
-        let gone = record.state == SplitState::Cancelled
-            && split_fs::splits_dir(&record.root, false)
-                .and_then(|splits| splits.stat(&record.id))
-                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound);
-        let message = if gone {
-            format!("forgot cancelled split {id} (its files were already removed)")
-        } else {
-            Self::remove_files(&record)
-        };
-        {
+        let record = {
             let mut inner = self.lock();
-            inner.records.remove(id);
+            let record = inner
+                .records
+                .get(id)
+                .filter(|record| caller == &Creator::Host || &record.creator == caller)
+                .ok_or_else(|| DaemonError::NotFound(format!("split {id}")))?;
+            if matches!(record.state, SplitState::Run | SplitState::Joined) {
+                return Err(DaemonError::InvalidState(format!(
+                    "split {id} is {:?}; cancel it first",
+                    record.state
+                )));
+            }
+            if record.branches.iter().any(|branch| branch.live > 0) || !jobs.live.is_empty() {
+                return Err(DaemonError::InvalidState(format!(
+                    "split {id} still has a running lane job; end it with `marsh splits cancel {id}`, then remove it"
+                )));
+            }
+            if record.lanes() && jobs.held > 0 {
+                return Err(DaemonError::InvalidState(format!(
+                    "split {id} has a lane job whose end was not confirmed; run `marsh workers reset all`, then remove it"
+                )));
+            }
+            let record = inner.records.remove(id).unwrap_or_else(|| unreachable!());
             // `jobs --tree` keeps the lineage; record that it was removed.
             if let Some(lineage) = inner.lineage.get_mut(id) {
                 lineage.state = "removed".into();
             }
-        }
+            record
+        };
         self.save();
-        Ok(message)
+        let gone = record.state == SplitState::Cancelled
+            && split_fs::splits_dir(&record.root, false)
+                .and_then(|splits| splits.stat(&record.id))
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound);
+        Ok(if gone {
+            format!("forgot cancelled split {id} (its files were already removed)")
+        } else {
+            Self::remove_files(&record)
+        })
     }
 
     fn remove_files(record: &SplitRecord) -> String {
@@ -1489,7 +1557,15 @@ impl SplitEngine {
             }
         }
         let id = new_id();
-        self.note_root(&plan.project);
+        if let Err(why) = self.note_root(&plan.project) {
+            return error(
+                &mut stream,
+                format!(
+                    "split: could not journal the project {}: {why}",
+                    plan.project.display()
+                ),
+            );
+        }
         let record = match setup(&id, &caller, &spec, plan) {
             Ok(record) => record,
             Err(message) => return error(&mut stream, format!("split: {message}")),
@@ -2114,6 +2190,7 @@ impl SplitEngine {
             let argv = spec.argv.clone().unwrap_or_default();
             let spec = ExecuteSpec {
                 label: None,
+                kit: None,
                 command: String::from_utf8_lossy(&argv[0]).into_owned(),
                 arguments: argv[1..].to_vec(),
                 placement: crate::Placement::Local,

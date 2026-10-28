@@ -270,6 +270,7 @@ fn a_relay_cannot_name_a_parent_job() {
     let request = |parent: &str| {
         PublicRequest::Execute(ExecuteSpec {
             label: None,
+            kit: None,
             acp: false,
             command: "fixture".into(),
             arguments: Vec::new(),
@@ -788,4 +789,26 @@ fn the_terminal_identity_reaches_child_jobs_and_branches() {
     assert!(crate::split::forwardable("BROWSER"));
     // Apple Terminal's per-window id names a Mac window, not the terminal.
     assert!(!crate::split::forwardable("TERM_SESSION_ID"));
+}
+
+#[test]
+fn a_job_cancelled_before_it_can_be_signalled_gets_the_cancel_at_registration() {
+    // A lane job still being started when its split is cancelled has no
+    // control yet: the cancel is kept and delivered once it registers.
+    let home = tempfile::tempdir().unwrap();
+    let store = reopen(home.path()).unwrap();
+    let session = session(&store, home.path());
+    let job = launch(&store, &session, None, "fixture", view(), false).unwrap();
+    store.cancel_tree(&job, true);
+    let signals = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let seen = Arc::clone(&signals);
+    store.register_job_control(
+        &job,
+        JobControl(Arc::new(move |signal: &str| {
+            seen.lock().unwrap().push(signal.to_owned());
+        })),
+    );
+    assert_eq!(*signals.lock().unwrap(), ["INT"]);
+    end(&store, &job, CleanupState::Verified);
+    assert_eq!(store.job(&job).unwrap().state, JobState::Cancelled);
 }

@@ -441,6 +441,11 @@ is 130. `split` exits with the first nonzero code in declaration order.
    - placement-bound or host-only variables;
    - credential-shaped names (`*KEY*`, `*SECRET*`, `*PASS*`, `*TOKEN*`,
     `*CREDENTIAL*`, `*COOKIE*`, `AWS_*`, `*_PAT`).
+   The match is deliberately by substring, ignoring case: it also drops
+   ordinary names such as `KEYMAP` or `BYPASS_PROXY`. A dropped variable is
+   one the branch must be given another way; a credential that slipped
+   through would sit in an agent's VM. Host-only values (`TMPDIR`, `PWD`,
+   `SHELL`, ...) name Mac paths and are wrong in a VM.
 - **Capability socket.**
   - It admits at most 12 open connections per attempt, including idle ones;
     an excess connection receives a refusal frame.
@@ -519,8 +524,11 @@ cancelled.
   with lineage `split:<id>/<label>`. A lane runs any number of jobs, long and
   interactive ones included (`marsh run --acp NAME`). Their children are
   admitted with them. Admission comes before the Kit is prepared, so a close
-  or cancel also fences the split: from then on no job whose mounts name one
-  of its forks is recorded or submitted.
+  or cancel, in the same locked step that sets `closing`, also fences the
+  split: from then on no job whose mounts name one of its forks is recorded
+  or submitted. The step is then journaled; if that write fails, the close
+  or cancel is undone (fence lifted, split still open) and reported, so a
+  restart never reopens lanes a close was told about.
 - **No split from a lane job.** A job's split is planned from the job's
   recorded mounts, never its cwd: a job (or any descendant, which inherits
   its parent's mounts) whose mounts name a branch fork nests in that fork,
@@ -536,14 +544,19 @@ cancelled.
   captured lane's status is `closed` (code 0). The split becomes `kept` and
   the reply is the manifest; `out/<label>/{diff.patch,files,status}` hold the
   results.
-- **`marsh split apply ID LABEL [--3way]`** applies a captured lane's
-  `diff.patch` to the project with `git apply` inside the shell VM (from the
-  host, through `marsh -c`), with the split's `store.git/objects` as
-  `GIT_ALTERNATE_OBJECT_DIRECTORIES`. A lane with no changes applies nothing.
+- **`marsh split apply ID LABEL [--3way]`** (the split's creator) applies a
+  captured lane's `diff.patch` to the project with `git apply` inside the
+  shell VM (from the host, through `marsh -c`), with the split's
+  `store.git/objects` as `GIT_ALTERNATE_OBJECT_DIRECTORIES`. It is a join
+  that keeps the split: while it runs the split is `joined`, so neither
+  `splits rm` nor the collector removes the patch under it, and the release
+  keeps it with a fresh 7 days. A lane with no changes applies nothing.
 - **Cancel.** `marsh splits cancel ID` on an open split stops admission
   (journaled `closing`, and the fence), cancels every live lane job tree
-  (INT, then KILL after 10 s), re-signals any lane job that becomes live
-  meanwhile (one whose Kit was still being prepared), and, once their end
+  (INT, then KILL after 10 s). A job marked cancelled before it could be
+  signalled (its Kit still being prepared) keeps the cancel: it is
+  delivered (INT, then KILL after 10 s) the moment the job's container
+  registers, and the split waits for that job too. Once every lane job's end
   is confirmed, removes the split's files; otherwise the split is kept with
   the unconfirmed lanes `uncertain`. A closing split cannot be cancelled. On
   a kept or uncertain lane split, cancel ends the lane jobs a close timed
@@ -552,10 +565,11 @@ cancelled.
   never removes a lane split while a lane job may still write: it refuses
   while a lane job runs ("still has a running lane job; end it with `marsh
   splits cancel ID`") or while one's end is unconfirmed and its Kit was not
-  reset since ("run `marsh workers reset all`"). The collector claims an
-  expired split under the same lock `join` takes it with, so a join either
-  wins (the split is `joined`; if kept again its 7 days restart) or finds
-  it gone.
+  reset since ("run `marsh workers reset all`"). `splits rm` and the
+  collector check and claim the split (taking its record) in one step under
+  the lock `join` takes it with, so a join or `split apply` either wins (the
+  split is `joined` and the removal is refused; if kept again its 7 days
+  restart) or finds it gone.
 - **Restart.** `closing` is journaled. An open lane split whose lanes had
   no live job and no close under way stays open; one with a live lane job
   becomes `uncertain` (section 6). A close or cancel the restart

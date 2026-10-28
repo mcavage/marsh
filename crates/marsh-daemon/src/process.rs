@@ -510,8 +510,36 @@ impl DaemonStore {
     }
 
     /// Register how to signal a running job (the backend, once launched).
+    /// A job whose tree was cancelled before it could be signalled gets the
+    /// cancel now: `INT`, then `KILL` after the grace while it still runs.
     pub fn register_job_control(&self, job: &str, control: JobControl) {
-        self.lock().process.controls.insert(job.to_owned(), control);
+        let signal = Arc::clone(&control.0);
+        let cancelled = {
+            let mut state = self.lock();
+            state.process.controls.insert(job.to_owned(), control);
+            state.process.cancelling.contains(job)
+        };
+        if !cancelled {
+            return;
+        }
+        signal("INT");
+        let store = self.clone();
+        let job = job.to_owned();
+        thread::spawn(move || {
+            thread::sleep(CANCEL_GRACE);
+            let still = {
+                let state = store.lock();
+                state
+                    .jobs
+                    .get(&job)
+                    .is_some_and(live)
+                    .then(|| state.process.controls.get(&job).cloned())
+                    .flatten()
+            };
+            if let Some(control) = still {
+                (control.0)("KILL");
+            }
+        });
     }
 
     /// The job's container is gone: nothing more to signal.
