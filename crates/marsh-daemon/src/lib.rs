@@ -109,6 +109,8 @@ const SCOPE_LIFECYCLE_REPLY_TIMEOUT: Duration = Duration::from_mins(9);
 const RESIDENT_SHUTDOWN_RETRY_TIMEOUT: Duration = Duration::from_millis(250);
 const RESIDENT_SHUTDOWN_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 const BUSY_LIFECYCLE_MESSAGE: &str = "daemon has active shell sessions or jobs, or unrecovered shell cleanup uncertainty; exit active shells and use host `marsh reset` or `marsh stop` to recover";
+/// Start of the busy refusal that names what blocks the daemon.
+const BUSY_BLOCKED: &str = "daemon is busy: ";
 const STOCK_SBX_REMOVED: &str = "stock sbx was removed (upgraded?)";
 /// How often an idle daemon looks for its pinned stock SBX executable.
 const STOCK_SBX_PROBE_INTERVAL: Duration = Duration::from_secs(5);
@@ -131,7 +133,9 @@ fn stock_sbx_removed(path: Option<&Path>) -> bool {
 
 /// A refusal a replacing client waits out briefly before reporting it.
 fn busy_lifecycle_refusal(message: &str) -> bool {
-    message == BUSY_LIFECYCLE_MESSAGE || message.starts_with(STOCK_SBX_REMOVED)
+    message == BUSY_LIFECYCLE_MESSAGE
+        || message.starts_with(BUSY_BLOCKED)
+        || message.starts_with(STOCK_SBX_REMOVED)
 }
 // Leave descriptor headroom for relay socket clones, active attachments,
 // worker transports, and the listener on macOS's default soft FD limit.
@@ -1991,6 +1995,13 @@ fn scope_is_idle(state: &State) -> bool {
             .all(|shell| shell.state == ShellState::Detached)
 }
 
+/// Whether the process still exists (EPERM counts as existing; an unusable
+/// pid is treated as existing, never as gone).
+fn process_alive(pid: u32) -> bool {
+    rustix::process::Pid::from_raw(i32::try_from(pid).unwrap_or(0))
+        .is_none_or(|pid| rustix::process::test_kill_process(pid) != Err(rustix::io::Errno::SRCH))
+}
+
 fn scope_can_recover(state: &State) -> bool {
     state
         .shells
@@ -2438,11 +2449,6 @@ impl DaemonStore {
     /// progress and no Kit job or Kit start left in them.
     #[must_use]
     pub fn dead_host_sessions(&self) -> Vec<String> {
-        let alive = |pid: u32| {
-            rustix::process::Pid::from_raw(i32::try_from(pid).unwrap_or(0)).is_none_or(|pid| {
-                rustix::process::test_kill_process(pid) != Err(rustix::io::Errno::SRCH)
-            })
-        };
         let state = self.lock();
         state
             .shells
@@ -2450,7 +2456,7 @@ impl DaemonStore {
             .filter(|shell| {
                 shell.state == ShellState::Attached
                     && !state.shell_attachments.contains_key(&shell.session_id)
-                    && !alive(shell.pid)
+                    && !process_alive(shell.pid)
                     && !state.jobs.values().any(|job| {
                         job.session_id == shell.session_id
                             && matches!(job.state, JobState::Queued | JobState::Running)
@@ -2462,6 +2468,69 @@ impl DaemonStore {
             })
             .map(|shell| shell.session_id.clone())
             .collect()
+    }
+
+    /// Kit jobs still live in attached sessions whose client process is gone
+    /// (the client's loss cancels its jobs; one that did not end is asked to
+    /// again by a reset or stop).
+    #[must_use]
+    pub fn dead_session_live_jobs(&self) -> Vec<String> {
+        let state = self.lock();
+        state
+            .jobs
+            .values()
+            .filter(|job| matches!(job.state, JobState::Queued | JobState::Running))
+            .filter(|job| {
+                state.shells.get(&job.session_id).is_some_and(|shell| {
+                    shell.state == ShellState::Attached
+                        && !state.shell_attachments.contains_key(&shell.session_id)
+                        && !process_alive(shell.pid)
+                })
+            })
+            .map(|job| job.job_id.clone())
+            .collect()
+    }
+
+    /// What keeps a reset or stop from running, one line each, for the
+    /// refusal: the attached sessions (client pid, project, and whether that
+    /// process still exists), Kit starts, and running jobs.
+    #[must_use]
+    pub fn lifecycle_blockers(&self) -> Vec<String> {
+        let state = self.lock();
+        let mut lines = Vec::new();
+        for shell in state
+            .shells
+            .values()
+            .filter(|shell| shell.state == ShellState::Attached)
+        {
+            lines.push(format!(
+                "a session of pid {} in {} ({})",
+                shell.pid,
+                shell.project.display(),
+                if process_alive(shell.pid) {
+                    "that process is still running: exit it, or `kill` it"
+                } else if state.shell_attachments.contains_key(&shell.session_id) {
+                    "its shell is still being torn down"
+                } else {
+                    "that process is gone; it is released within seconds"
+                }
+            ));
+        }
+        for kit in state.starting_kits.values() {
+            lines.push(format!("a start of Kit {} is in progress", kit.command));
+        }
+        for job in state
+            .jobs
+            .values()
+            .filter(|job| matches!(job.state, JobState::Queued | JobState::Running))
+        {
+            lines.push(format!(
+                "job {} ({}) is running: end it, or stop the client that started it",
+                &job.job_id[..job.job_id.len().min(8)],
+                job.command
+            ));
+        }
+        lines
     }
 
     /// Kit jobs of `session` that are queued, starting, or running.
@@ -4498,7 +4567,19 @@ impl ConnectionHandler {
     fn busy_lifecycle_message(&self) -> String {
         match self.stock_sbx.as_deref() {
             Some(path) if stock_sbx_removed(Some(path)) => stock_sbx_removed_message(path),
-            _ => BUSY_LIFECYCLE_MESSAGE.into(),
+            _ => {
+                let blockers = self.store.lifecycle_blockers();
+                if blockers.is_empty() {
+                    // Nothing in view blocks it: the request raced one that
+                    // just ended.
+                    format!("{BUSY_BLOCKED}a request was still being served; retry")
+                } else {
+                    format!(
+                        "{BUSY_BLOCKED}{}; a session whose client is gone is released within seconds, and a reset or stop retries once it is",
+                        blockers.join("; ")
+                    )
+                }
+            }
         }
     }
 
@@ -5488,6 +5569,28 @@ impl ConnectionHandler {
         {
             self.release_departed_clients();
         }
+        if lifecycle_request {
+            // Jobs of departed clients that did not end are asked to again,
+            // and a reset or stop waits briefly for them.
+            let waits = matches!(
+                request.body,
+                PublicRequest::ResetScope | PublicRequest::StopScope
+            );
+            let deadline = Instant::now() + Duration::from_secs(15);
+            loop {
+                let jobs = self.store.dead_session_live_jobs();
+                if !waits || jobs.is_empty() || Instant::now() >= deadline {
+                    break;
+                }
+                for job in jobs {
+                    if !self.store.cancel_requested(&job) {
+                        self.store.cancel_tree(&job, true);
+                    }
+                }
+                thread::sleep(Duration::from_millis(250));
+                self.release_departed_clients();
+            }
+        }
         let admission = if lifecycle_request {
             self.store.begin_lifecycle_request()
         } else {
@@ -6459,7 +6562,14 @@ impl Client {
                 return Ok(Some(client));
             }
             if build_identity.is_some() {
-                client.shutdown_resident_after_probe()?;
+                client
+                    .shutdown_resident_after_probe()
+                    .map_err(|error| match error {
+                        DaemonError::Remote(message) if message == BUSY_LIFECYCLE_MESSAGE => {
+                            DaemonError::Remote(client.busy_advice(&message))
+                        }
+                        other => other,
+                    })?;
             } else {
                 let owner = verified_legacy_owner(&client, paths, &daemon_id)?;
                 rustix::process::kill_process(owner, rustix::process::Signal::TERM)
@@ -6468,6 +6578,45 @@ impl Client {
             wait_for_owner_release(paths)?;
         }
         Ok(None)
+    }
+
+    /// Why a daemon that refuses to be reset, stopped, or replaced cannot,
+    /// and the recovery that works, for a daemon whose own refusal does not
+    /// say (an older build's names nothing and has no release of the
+    /// sessions of clients that are gone): its pid and the attached
+    /// sessions, from its `Status`.
+    fn busy_advice(&self, refusal: &str) -> String {
+        let Ok(PublicReply::Status(status)) =
+            self.request(PublicRequest::Status { session_id: None })
+        else {
+            return refusal.to_owned();
+        };
+        let pid = status.endpoint_owner.pid;
+        let sessions = status
+            .shells
+            .iter()
+            .filter(|shell| shell.state == ShellState::Attached)
+            .map(|shell| {
+                format!(
+                    "pid {} in {} ({})",
+                    shell.pid,
+                    shell.project.display(),
+                    if process_alive(shell.pid) {
+                        "running"
+                    } else {
+                        "gone"
+                    }
+                )
+            })
+            .collect::<Vec<_>>();
+        format!(
+            "the marsh daemon of this home (pid {pid}) has {} attached and an older build does not release a session whose client is gone. If those clients are gone or can be lost, stop the daemon with `kill {pid}`, then run `marsh status` (it starts a new one) and `marsh reset` or `marsh stop`: the VMs this home owns are removed then. Original refusal: {refusal}",
+            if sessions.is_empty() {
+                "sessions or jobs".to_owned()
+            } else {
+                sessions.join(", ")
+            }
+        )
     }
 
     fn shutdown_resident_after_probe(&self) -> Result<(), DaemonError> {
@@ -7029,6 +7178,9 @@ impl Client {
         };
         match reply {
             PublicReply::ScopeLifecycle(report) => Ok(report),
+            PublicReply::Error { message, .. } if message == BUSY_LIFECYCLE_MESSAGE => {
+                Err(DaemonError::Remote(self.busy_advice(&message)))
+            }
             reply => Err(unexpected_reply(reply)),
         }
     }

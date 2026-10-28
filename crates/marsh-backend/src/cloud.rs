@@ -206,6 +206,8 @@ impl CloudPlacement {
         let adapter = self.adapter(backend)?;
         let mut failures = Vec::new();
         let mut removed = Vec::new();
+        // A create that never happened must not block a reset for ever.
+        let _ = adapter.forget_expired_unresolved();
         for record in adapter.reconcile().map_err(backend_error)? {
             if record.detached {
                 continue;
@@ -216,7 +218,7 @@ impl CloudPlacement {
                     Err(error) => failures.push(error.to_string()),
                 },
                 None => failures.push(format!(
-                    "{}: create outcome still unresolved; retry later",
+                    "{}: create outcome still unresolved (a create that left no sandbox is dropped once it is 10 minutes old and absent from the inventory); retry later",
                     record.name
                 )),
             }

@@ -221,6 +221,24 @@ were not affected.
 
 ## Stale daemon after an upgrade
 
+- **`marsh reset` and `marsh stop` both refuse.** A reset or stop first releases
+  the sessions of clients that are gone (and asks their jobs to end again,
+  waiting up to 15 s). What still blocks it is named in the refusal: a session
+  whose client process is still running (exit it or `kill` that pid), a Kit
+  start, or a running job. A daemon of an older marsh build cannot release a
+  session whose client was killed; `marsh reset`, `marsh stop`, and
+  `marsh status` against it say so with the daemon's pid and the sessions it
+  holds. Then `kill PID` (the daemon, not your work: its sessions are already
+  lost), run `marsh status` (it starts a daemon of this build), and `marsh reset`
+  or `marsh stop`: the VMs this home owns are removed. `marsh status --json`
+  prints `{"error": ...}` on stdout when it cannot reach the daemon.
+- **`marsh stop` says a cloud create is still unresolved.** A create whose
+  outcome was never learned (a timeout or a crash mid-create) is kept as owned
+  until it shows in the cloud inventory or is surely not there: once it is more
+  than 10 minutes old (or of unknown age, after a daemon restart) and absent
+  from a fresh inventory, `marsh reset` and `marsh stop` drop it. Before then,
+  retry later.
+
 - A `marsh`, `marsh run`, or app that was killed (SIGKILL, a force-quit) cannot
   detach its session. The daemon notices that the client process is gone and
   detaches the session within seconds once nothing runs in it, so that a reset,

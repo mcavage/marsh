@@ -240,6 +240,22 @@ pub struct CloudRecord {
     /// [`MAX_DETACHED`], and recovered as `Detached`, not quarantined.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub detached: bool,
+    /// When the intent was recorded (0: unknown, an older record).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub created_unix_ms: u64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's `skip_serializing_if` takes a reference
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
+fn unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -660,6 +676,46 @@ impl CloudSbx {
         self.records()
     }
 
+    /// Drop the intents of creates that can no longer have happened: no id,
+    /// no create of this daemon in flight, the name absent from a fresh
+    /// complete inventory, and older than a create's timeout plus a margin
+    /// for the sandbox to become visible (an intent without a recorded time
+    /// is older than this daemon). Without this a create that never reached
+    /// the service would block `reset` and `stop` for ever. Returns the names
+    /// dropped.
+    ///
+    /// # Errors
+    /// Fails when the inventory or the ownership file cannot be read or
+    /// written.
+    pub fn forget_expired_unresolved(&self) -> Result<Vec<String>, CloudError> {
+        let view = self.inventory()?;
+        let creating = self
+            .state
+            .lock()
+            .map_err(|_| CloudError::Invalid("cloud ownership lock poisoned"))?
+            .creating
+            .clone();
+        let margin = u64::try_from((CREATE_TIMEOUT + Duration::from_mins(5)).as_millis())
+            .unwrap_or(u64::MAX);
+        let now = unix_ms();
+        let mut forgotten = Vec::new();
+        self.update(|file| {
+            file.entries.retain(|name, entry| {
+                let expired = entry.id.is_none()
+                    && !creating.contains(name)
+                    && view.get(name).is_none()
+                    && (entry.created_unix_ms == 0
+                        || now.saturating_sub(entry.created_unix_ms) > margin);
+                if expired {
+                    forgotten.push(name.clone());
+                }
+                !expired
+            });
+            Ok(())
+        })?;
+        Ok(forgotten)
+    }
+
     /// # Errors
     /// Rejects invalid specs/capacity before creation. Ambiguous creates retain
     /// their persisted intent and are never automatically repeated.
@@ -709,6 +765,7 @@ impl CloudSbx {
                     phase: CloudPhase::Pending,
                     observed: false,
                     detached: false,
+                    created_unix_ms: unix_ms(),
                 },
             );
             Ok(())
@@ -1132,6 +1189,7 @@ impl CloudSbx {
                     phase: CloudPhase::Quarantined,
                     observed: true,
                     detached: false,
+                    created_unix_ms: 0,
                 },
             );
             Ok(())
@@ -1379,6 +1437,7 @@ mod tests {
             phase: CloudPhase::Ready,
             observed: true,
             detached,
+            created_unix_ms: 0,
         }
     }
 
@@ -1420,6 +1479,69 @@ mod tests {
             adapter.spawn(&id, "/bin/true", &[]),
             Err(CloudError::NotReady(_))
         ));
+    }
+
+    /// A create that left nothing behind stops blocking a reset once it is
+    /// old enough (or of unknown age) and its name is absent from the
+    /// inventory; a recent one, one whose name is listed, and a create in
+    /// flight are kept.
+    #[test]
+    fn an_old_unresolved_create_absent_from_the_inventory_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("control")).unwrap();
+        let directory = dir.path().join("control").canonicalize().unwrap();
+        fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
+        let inventory = dir.path().join("inventory.json");
+        fs::write(
+            &inventory,
+            r#"[{"name":"marsh-s-listed00","id":"sbx_listed","status":"running","agent":"codex"}]"#,
+        )
+        .unwrap();
+        let stock = dir.path().join("sbx");
+        fs::write(
+            &stock,
+            "#!/bin/sh\n[ \"$2\" = ls ] && exec cat \"$MARSH_TEST_INVENTORY\"\nexit 1\n",
+        )
+        .unwrap();
+        fs::set_permissions(&stock, fs::Permissions::from_mode(0o755)).unwrap();
+        let runner = marsh_runtime::SystemCommandRunner::new(dir.path())
+            .with_stock_environment([("MARSH_TEST_INVENTORY".into(), inventory.into())]);
+        let kit = format!("docker.io/docker/codex@sha256:{}", "c".repeat(64));
+        let entry = |name: &str, created: u64| {
+            serde_json::json!({
+                "name": name, "id": null, "image": kit, "agent": "codex",
+                "phase": "pending", "observed": false, "created_unix_ms": created
+            })
+        };
+        let recent = unix_ms();
+        fs::write(
+            directory.join("cloud-ownership.json"),
+            serde_json::json!({"version": 1, "entries": {
+                "marsh-s-unknown0": entry("marsh-s-unknown0", 0),
+                "marsh-s-old00000": entry("marsh-s-old00000", 1),
+                "marsh-s-recent00": entry("marsh-s-recent00", recent),
+                "marsh-s-listed00": entry("marsh-s-listed00", 1),
+            }})
+            .to_string(),
+        )
+        .unwrap();
+        fs::set_permissions(
+            directory.join("cloud-ownership.json"),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        let adapter = CloudSbx::open(stock, Arc::new(runner), directory).unwrap();
+        let mut dropped = adapter.forget_expired_unresolved().unwrap();
+        dropped.sort();
+        assert_eq!(dropped, ["marsh-s-old00000", "marsh-s-unknown0"]);
+        let mut kept = adapter
+            .records()
+            .unwrap()
+            .into_iter()
+            .map(|record| record.name)
+            .collect::<Vec<_>>();
+        kept.sort();
+        assert_eq!(kept, ["marsh-s-listed00", "marsh-s-recent00"]);
     }
 
     /// A detached run's agent sandbox is adopted (for deletion only) just

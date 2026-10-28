@@ -866,7 +866,14 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
             } else {
                 let shell_delivery =
                     !parsed.guest && matches!(parsed.command, cli::ProductCommand::Shell);
+                let json_status =
+                    matches!(parsed.command, cli::ProductCommand::Status { json: true });
                 let fail = |message: String| {
+                    // `status --json` is read by programs: the failure is a
+                    // JSON object on stdout as well as the message on stderr.
+                    if json_status {
+                        println!("{}", serde_json::json!({ "error": message }));
+                    }
                     let error = if shell_delivery {
                         product::ProductError::ShellDelivery(message)
                     } else {

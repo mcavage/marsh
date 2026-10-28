@@ -2002,6 +2002,48 @@ fn an_unreadable_orphan_list_stops_the_start_instead_of_being_overwritten() {
 }
 
 #[test]
+fn a_reset_names_what_blocks_it_and_asks_a_gone_clients_jobs_to_end() {
+    let home = home();
+    let store = reopen(home.path()).unwrap();
+    let gone_pid = {
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        pid
+    };
+    let gone = store.attach_shell(gone_pid, authority("/Users/example/gone", home.path()));
+    let live = store.attach_shell(
+        std::process::id(),
+        authority("/Users/example/live", home.path()),
+    );
+    let job = |session: &String| {
+        store
+            .begin_job(NewJob {
+                label: None,
+                session_id: session.clone(),
+                command: "fixture".into(),
+                kit_ref: "fixture".into(),
+                workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+                mounts: Vec::new(),
+            })
+            .unwrap()
+            .0
+    };
+    let (gone_job, live_job) = (job(&gone), job(&live));
+    // Only the gone client's job is asked to end again; its session waits for
+    // the job (it is reaped once nothing runs in it).
+    assert_eq!(
+        store.dead_session_live_jobs(),
+        std::slice::from_ref(&gone_job)
+    );
+    assert_eq!(store.dead_host_sessions(), Vec::<String>::new());
+    let blockers = store.lifecycle_blockers().join("\n");
+    assert!(blockers.contains(&format!("pid {gone_pid}")) && blockers.contains("is gone"));
+    assert!(blockers.contains("/Users/example/live") && blockers.contains("still running"));
+    assert!(blockers.contains(&gone_job[..8]) && blockers.contains(&live_job[..8]));
+}
+
+#[test]
 fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
     let home = home();
     let store = reopen(home.path()).unwrap();
@@ -2865,7 +2907,7 @@ fn resident_replacement_retries_the_bounded_post_probe_admission_race() {
     let admission = server.store.begin_ordinary_request().unwrap();
     assert!(matches!(
         client.shutdown_resident_after_probe_within(Duration::ZERO),
-        Err(DaemonError::Remote(message)) if message == BUSY_LIFECYCLE_MESSAGE
+        Err(DaemonError::Remote(message)) if busy_lifecycle_refusal(&message)
     ));
     assert!(!server.shutdown_requested.load(Ordering::Acquire));
 
@@ -2900,7 +2942,7 @@ fn changed_stock_sbx_refuses_to_replace_a_daemon_with_an_attached_shell() {
     assert!(matches!(
         error,
         DaemonError::Remote(ref message)
-            if message == BUSY_LIFECYCLE_MESSAGE
+            if busy_lifecycle_refusal(message)
     ));
     assert!(!server.shutdown_requested.load(Ordering::Acquire));
 
@@ -2932,11 +2974,14 @@ fn a_daemon_whose_stock_sbx_was_removed_can_be_replaced_unless_work_is_attached(
     // While its SBX exists, the old daemon keeps the record and refuses.
     assert!(matches!(
         Client::reconcile_resident(home.path(), &paths, &expected),
-        Err(DaemonError::Remote(ref message)) if message == BUSY_LIFECYCLE_MESSAGE
+        Err(DaemonError::Remote(ref message)) if busy_lifecycle_refusal(message)
     ));
     // An attached shell is live work: still refused after SBX is removed,
     // and the refusal says why.
-    let attached = store.attach_shell(2, authority("/Users/example/project", home.path()));
+    let attached = store.attach_shell(
+        std::process::id(),
+        authority("/Users/example/project", home.path()),
+    );
     let old_path = old_sbx.path().to_owned();
     old_sbx.close().unwrap();
     assert!(!old_path.exists());
