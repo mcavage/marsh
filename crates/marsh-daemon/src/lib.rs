@@ -97,6 +97,9 @@ pub const FEATURES: &[&str] = &[
     "checkpoints-v1",
     "acp-descriptors-v1",
     "labels-v1",
+    "apply-json-v1",
+    "lane-cloud-v1",
+    "lane-shell-v1",
 ];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while
@@ -1064,6 +1067,11 @@ pub struct ShellSpec {
     /// (`marsh_contracts::terminal::identity`); the backend filters again.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub terminal_environment: BTreeMap<String, String>,
+    /// Where the shell starts, when that is not the project: a directory in
+    /// an open lane's copy, whose project is the split's root. The daemon
+    /// checks that it is a fork of the session's project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_directory: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1778,7 +1786,11 @@ pub const DISPLAY_ARG_CHARS: usize = 200;
 
 #[derive(Debug, Default)]
 pub(crate) struct ForkJobs {
+    /// Jobs that may still write the fork: queued or running, and detached
+    /// cloud runs (their collection writes back into the fork).
     pub live: Vec<String>,
+    /// Of `live`, the detached cloud runs.
+    pub detached: Vec<String>,
     pub uncertain: usize,
     /// Of `uncertain`, those whose Kit was not reset since (`process.rs`
     /// `holds_slot`): they may still write.
@@ -2436,8 +2448,14 @@ impl DaemonStore {
             if id != split || label.is_some_and(|label| label != lane) {
                 continue;
             }
-            if matches!(job.state, JobState::Queued | JobState::Running) {
+            if matches!(
+                job.state,
+                JobState::Queued | JobState::Running | JobState::Detached
+            ) {
                 found.live.push(job.job_id.clone());
+                if job.state == JobState::Detached {
+                    found.detached.push(job.job_id.clone());
+                }
             } else if job.cleanup == CleanupState::Uncertain || job.state == JobState::Unknown {
                 found.uncertain += 1;
                 found.held += usize::from(process::holds_slot(&state.process, job));
@@ -5397,7 +5415,37 @@ impl ConnectionHandler {
         };
         match request.body {
             PublicRequest::SplitClose { split } => {
-                let reply = self.splits.close(&caller, &split, &self.store).map_or_else(
+                // A detached cloud run in a lane's copy settles by collection,
+                // which the background collector does every few minutes: while
+                // the close waits, collect it now, so a run that has finished
+                // writes back before the lane is captured.
+                let (finished, wake) = std::sync::mpsc::channel::<()>();
+                let collector = self.splits.may_close(&caller, &split).then(|| {
+                    let (backend, store, split) =
+                        (Arc::clone(&self.backend), self.store.clone(), split.clone());
+                    thread::spawn(move || {
+                        loop {
+                            for job in store.fork_jobs(&split, None).detached {
+                                let _ = backend.cloud_detached(
+                                    cloud_detached::CloudDetachedRequest::Collect { job },
+                                    store.clone(),
+                                );
+                            }
+                            if !matches!(
+                                wake.recv_timeout(Duration::from_secs(3)),
+                                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                            ) {
+                                break;
+                            }
+                        }
+                    })
+                });
+                let closed = self.splits.close(&caller, &split, &self.store);
+                drop(finished);
+                if let Some(collector) = collector {
+                    let _ = collector.join();
+                }
+                let reply = closed.map_or_else(
                     |error| public_error(&error),
                     |document| PublicReply::Document { document },
                 );
@@ -5484,15 +5532,35 @@ impl ConnectionHandler {
                 write_frame(&mut stream, &reply)
             }
             PublicRequest::SplitCancel { split } => {
-                let reply = self
-                    .splits
-                    .cancel_request(&caller, &split, &self.store)
-                    .map_or_else(
-                        |error| public_error(&error),
-                        |()| PublicReply::SplitDone {
-                            message: format!("cancelled {split}"),
-                        },
-                    );
+                let cancelled = self.splits.cancel_request(&caller, &split, &self.store);
+                if cancelled.is_ok() && !self.store.fork_jobs(&split, None).detached.is_empty() {
+                    // A detached cloud run in a lane's copy is not a process
+                    // to signal: discarding it drops its sandbox, so nothing
+                    // is ever written back into the copy.
+                    let (backend, store, split) =
+                        (Arc::clone(&self.backend), self.store.clone(), split.clone());
+                    thread::spawn(move || {
+                        for _ in 0..120 {
+                            let jobs = store.fork_jobs(&split, None).detached;
+                            if jobs.is_empty() {
+                                break;
+                            }
+                            for job in jobs {
+                                let _ = backend.cloud_detached(
+                                    cloud_detached::CloudDetachedRequest::Discard { job },
+                                    store.clone(),
+                                );
+                            }
+                            thread::sleep(Duration::from_secs(1));
+                        }
+                    });
+                }
+                let reply = cancelled.map_or_else(
+                    |error| public_error(&error),
+                    |()| PublicReply::SplitDone {
+                        message: format!("cancelled {split}"),
+                    },
+                );
                 write_frame(&mut stream, &reply)
             }
             PublicRequest::SplitRemove { split } => {

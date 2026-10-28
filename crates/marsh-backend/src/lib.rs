@@ -2197,6 +2197,16 @@ impl DaemonBackend for StockDaemonBackend {
             None
         };
         let outcome = (|| {
+            if let Some(directory) = &request.working_directory
+                && marsh_daemon::split_confinement::fork_project(directory).as_deref()
+                    != Some(request.session.launch_directory.as_path())
+            {
+                return Err(DaemonError::InvalidState(format!(
+                    "{} is not in a split fork of {}",
+                    directory.display(),
+                    request.session.launch_directory.display()
+                )));
+            }
             store.bind_shell_cleanup_vm(&session_id, &shell.name)?;
             let _shell_session = self
                 .sbx
@@ -2375,9 +2385,13 @@ impl DaemonBackend for StockDaemonBackend {
             if let Err(error) = shell_attachment::require_controller(&attachment) {
                 return Err(rollback(relay, error));
             }
+            let shell_directory = request
+                .working_directory
+                .as_deref()
+                .unwrap_or(&request.session.launch_directory);
             let process = match self.sbx.attach_shell_with_relay(
                 &vm,
-                &request.session.launch_directory,
+                shell_directory,
                 request.session.terminal,
                 request.session.terminal_size,
                 &arguments,
@@ -4651,6 +4665,7 @@ mod tests {
             },
             arguments: vec![b"-c".to_vec(), b"true".to_vec()],
             terminal_environment: std::collections::BTreeMap::new(),
+            working_directory: None,
         };
         let (server, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
         let error = backend
@@ -4720,6 +4735,7 @@ mod tests {
                     session,
                     arguments: vec![],
                     terminal_environment: std::collections::BTreeMap::new(),
+                    working_directory: None,
                 },
                 ServerAttachment::new(server).unwrap(),
                 store.clone(),

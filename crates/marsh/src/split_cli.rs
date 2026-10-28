@@ -16,7 +16,7 @@ pub const SPLIT_HELP: &str =
     "Usage: marsh split [-n] [-d] [--from CHECKPOINT] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]...
        marsh split --open [--from CHECKPOINT] [--label TEXT] LABEL...
        marsh split close ID [--json]
-       marsh split apply ID LABEL [--3way]
+       marsh split apply ID LABEL [--3way] [--json]
 
 Run each branch in a private fork of the current tree. `-b` runs STRING with
 the session shell in the shell VM (trusted, your own commands); `:::` runs one
@@ -972,17 +972,78 @@ fn close(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
     }
 }
 
-/// `split apply ID LABEL [--3way]`: `git apply` the lane's patch to the
-/// project inside the shell VM, with the split's objects for 3-way merges.
+/// The script `split apply --json` runs in the shell VM.
+const APPLY_SCRIPT: &str = include_str!("split_apply.sh");
+
+/// What the apply script found in the tree and the index.
+#[derive(Debug, Eq, PartialEq)]
+struct ApplyOutcome {
+    result: String,
+    message: String,
+    conflicts: Vec<String>,
+}
+
+/// Parse the script's NUL-separated reply (`R` RESULT `M` MESSAGE `C` PATH...).
+fn parse_apply_reply(bytes: &[u8]) -> Option<ApplyOutcome> {
+    let mut words = bytes
+        .split(|byte| *byte == 0)
+        .map(|word| String::from_utf8_lossy(word).into_owned());
+    let mut outcome = ApplyOutcome {
+        result: String::new(),
+        message: String::new(),
+        conflicts: Vec::new(),
+    };
+    while let Some(tag) = words.next() {
+        match tag.as_str() {
+            "R" => outcome.result = words.next()?,
+            "M" => outcome.message = words.next()?,
+            "C" => outcome.conflicts.push(words.next()?),
+            "" => {}
+            _ => return None,
+        }
+    }
+    matches!(outcome.result.as_str(), "clean" | "conflicts" | "failed").then_some(outcome)
+}
+
+/// `split apply --json` prints this one object.
+fn apply_document(result: &str, files: &[String], conflicts: &[String], message: &str) -> String {
+    serde_json::json!({
+        "result": result,
+        "files": files,
+        "conflicts": conflicts,
+        "message": message,
+    })
+    .to_string()
+}
+
+/// `split apply ID LABEL [--3way] [--json]`: `git apply` the lane's patch to
+/// the project inside the shell VM, with the split's objects for 3-way
+/// merges. With `--json` a patch that does not apply cleanly is retried with
+/// `--3way`, and the outcome is read from the tree and the index.
+#[allow(clippy::too_many_lines)] // One join: open, apply, release.
 fn apply(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, String>) -> i32 {
     let words = arguments
         .iter()
         .map(|a| text(a).unwrap_or(""))
         .collect::<Vec<_>>();
     let three_way = words.contains(&"--3way");
-    let (id, label) = match words.iter().filter(|w| **w != "--3way").collect::<Vec<_>>()[..] {
+    let json = words.contains(&"--json");
+    let (id, label) = match words
+        .iter()
+        .filter(|w| !matches!(**w, "--3way" | "--json"))
+        .collect::<Vec<_>>()[..]
+    {
         [id, label] => (*id, *label),
-        _ => return usage("usage: marsh split apply ID LABEL [--3way]"),
+        _ => return usage("usage: marsh split apply ID LABEL [--3way] [--json]"),
+    };
+    // Every refusal is also a `failed` document for `--json`.
+    let refuse = |message: &str, status: i32| {
+        if json {
+            println!("{}", apply_document("failed", &[], &[], message));
+        } else {
+            eprintln!("marsh: split apply: {message}");
+        }
+        status
     };
     let channel = match channel(false) {
         Ok(channel) => channel,
@@ -996,7 +1057,7 @@ fn apply(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
         .open_request(PublicRequest::SplitJoin { split: id.into() })
     {
         Ok(stream) => stream,
-        Err(error) => return usage(&format!("split apply: {error}")),
+        Err(error) => return refuse(&error.to_string(), 1),
     };
     let (manifest, out, objects) = match read_frame::<PublicReply>(&mut stream) {
         Ok(PublicReply::SplitJoined {
@@ -1005,12 +1066,9 @@ fn apply(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
             objects,
             ..
         }) => (manifest, dir, objects),
-        Ok(PublicReply::Error { message, .. }) => {
-            eprintln!("marsh: split apply: {message}");
-            return 1;
-        }
-        Ok(reply) => return usage(&format!("split apply: unexpected reply {reply:?}")),
-        Err(error) => return usage(&format!("split apply: {error}")),
+        Ok(PublicReply::Error { message, .. }) => return refuse(&message, 1),
+        Ok(reply) => return refuse(&format!("unexpected reply {reply:?}"), 1),
+        Err(error) => return refuse(&error.to_string(), 1),
     };
     let release = |stream: &mut std::os::unix::net::UnixStream, status: i32| {
         let _ = write_frame(
@@ -1031,13 +1089,20 @@ fn apply(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
         .flatten()
         .find(|branch| branch["label"] == label);
     if lane.is_none_or(|lane| lane["state"] != "captured") || split["root"].as_str().is_none() {
-        release(&mut stream, 2);
-        return usage(&format!("split apply: {id} has no captured lane {label}"));
+        let status = refuse(&format!("{id} has no captured lane {label}"), 2);
+        return release(&mut stream, status);
     }
     let root = Path::new(split["root"].as_str().unwrap_or_default());
     let patch = out.join(label).join("diff.patch");
     if !patch.is_file() {
-        eprintln!("marsh: split apply: lane {label} changed nothing");
+        if json {
+            println!(
+                "{}",
+                apply_document("clean", &[], &[], &format!("lane {label} changed nothing"))
+            );
+        } else {
+            eprintln!("marsh: split apply: lane {label} changed nothing");
+        }
         return release(&mut stream, 0);
     }
     let objects = objects
@@ -1045,12 +1110,12 @@ fn apply(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
         .map(Path::as_os_str)
         .unwrap_or_default()
         .to_owned();
-    let git = if three_way {
-        "git apply --3way"
+    let listing = out.join(label).join("files");
+    let script = if json || three_way {
+        APPLY_SCRIPT.to_owned()
     } else {
-        "git apply"
+        "cd -- \"$1\" && GIT_ALTERNATE_OBJECT_DIRECTORIES=\"$2\" git apply -- \"$3\"".to_owned()
     };
-    let script = format!("cd -- \"$1\" && GIT_ALTERNATE_OBJECT_DIRECTORIES=\"$2\" {git} -- \"$3\"");
     // In the shell VM, the session shell is already there; from the host,
     // `marsh -c` runs the same script in it.
     let mut command = if std::env::var_os("MARSH_DAEMON_SOCKET").is_some() {
@@ -1072,11 +1137,56 @@ fn apply(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
         .arg(&patch)
         .current_dir(root)
         .stdin(std::process::Stdio::null());
-    let status = match command.status() {
-        Ok(status) => status
-            .code()
-            .unwrap_or_else(|| 128 + status.signal().unwrap_or(0)),
-        Err(error) => usage(&format!("split apply: {error}")),
+    if !json {
+        if three_way {
+            command.arg(&listing).arg("raw3way");
+        }
+        let status = match command.status() {
+            Ok(status) => status
+                .code()
+                .unwrap_or_else(|| 128 + status.signal().unwrap_or(0)),
+            Err(error) => usage(&format!("split apply: {error}")),
+        };
+        return release(&mut stream, status);
+    }
+    command.arg(&listing).stderr(std::process::Stdio::inherit());
+    let outcome = command
+        .output()
+        .ok()
+        .and_then(|output| parse_apply_reply(&output.stdout));
+    let status = if let Some(outcome) = outcome {
+        let files = if outcome.result == "failed" {
+            Vec::new()
+        } else {
+            std::fs::read_to_string(&listing)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| line.split_once('\t').map(|(_, path)| path.to_owned()))
+                .collect()
+        };
+        println!(
+            "{}",
+            apply_document(
+                &outcome.result,
+                &files,
+                &outcome.conflicts,
+                &outcome.message
+            )
+        );
+        i32::from(outcome.result != "clean")
+    } else {
+        // The script could not run (no shell VM, no reply): nothing is known
+        // to have been written, but nothing is claimed either.
+        println!(
+            "{}",
+            apply_document(
+                "failed",
+                &[],
+                &[],
+                "the apply did not report an outcome; check the project with `git status`"
+            )
+        );
+        1
     };
     release(&mut stream, status)
 }

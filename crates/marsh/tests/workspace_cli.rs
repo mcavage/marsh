@@ -258,6 +258,9 @@ fn checkpoints_keep_the_tree_and_git_state_and_retain_twenty_per_label() {
         "checkpoints-v1",
         "acp-descriptors-v1",
         "labels-v1",
+        "apply-json-v1",
+        "lane-cloud-v1",
+        "lane-shell-v1",
     ] {
         assert!(
             hello["features"]

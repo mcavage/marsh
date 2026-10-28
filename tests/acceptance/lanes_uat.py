@@ -3,7 +3,8 @@
 confined to their forks (also through the job capability socket),
 creator-only admission, close and capture, apply, cancel (also of a lane job
 still being started), a close that times out on a live lane job and the
-removal it refuses, a restart during a close, storage, and the events stream
+removal it refuses, a restart during a close, `split apply --json` (clean, conflicts,
+failed, non-Git), a shell started in a copy, storage, and the events stream
 (`docs/design/workspaces.md` s14)."""
 
 from __future__ import annotations
@@ -106,8 +107,10 @@ def main() -> int:
             time.sleep(1)
 
     def git(*words: str) -> str:
-        return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@x", "-c", "commit.gpgsign=false",
-                               *words], cwd=project, check=True, capture_output=True, text=True).stdout
+        done = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@x", "-c", "commit.gpgsign=false",
+                               *words], cwd=project, capture_output=True, text=True)
+        assert done.returncode == 0, (words, done.stdout, done.stderr)
+        return done.stdout
 
     try:
         # A published Kit's descriptor is read in the background: `acp` is
@@ -121,7 +124,8 @@ def main() -> int:
             assert time.monotonic() < deadline, status["commands"]
             time.sleep(1)
         assert listed["fixture-acp"]["acp"] is True and listed["fixture"]["acp"] is False, status["commands"]
-        assert {"events-v1", "lanes-v1", "checkpoints-v1", "acp-descriptors-v1", "labels-v1"} <= set(status["features"])
+        assert {"events-v1", "lanes-v1", "checkpoints-v1", "acp-descriptors-v1", "labels-v1",
+                "apply-json-v1", "lane-cloud-v1", "lane-shell-v1"} <= set(status["features"])
         subscriber = subprocess.Popen([scope.marsh, "events", "--json"], cwd=project, env=scope.environment,
                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, start_new_session=True)
         threading.Thread(target=lambda: events.extend(json.loads(line) for line in subscriber.stdout),
@@ -157,6 +161,14 @@ def main() -> int:
         assert second.finish() == 0
         assert not (project / "escape.txt").exists()
 
+        # A shell started from the host in the copy, after lane jobs ran: the
+        # split's root is its project and the copy is where it starts.
+        terminal = host("-c", "pwd; cat lane.txt; echo shell > shell.txt", cwd=lane_a, timeout=900)
+        assert terminal.returncode == 0, terminal.stderr.decode(errors="replace")
+        assert terminal.stdout.decode().splitlines() == [str(lane_a), "from-a"], terminal.stdout
+        assert (lane_a / "shell.txt").read_text() == "shell\n"
+        (lane_a / "shell.txt").unlink()
+
         # Only the creator (the host) starts lane jobs: a shell session cannot.
         refused = host("-c", f"cd {lane_b} && marsh run fixture-acp </dev/null", timeout=900)
         assert refused.returncode != 0 and b"only its creator" in refused.stderr, refused.stderr
@@ -172,10 +184,65 @@ def main() -> int:
         late = Acp(scope, lane_a)
         assert late.process.wait(timeout=600) == 125
         assert b"closed" in late.process.stderr.read()
+        cloud = host("cloud", "-d", "--", "sh", "-c", "true", cwd=lane_a)
+        assert cloud.returncode == 125 and b"lane job refused" in cloud.stderr, cloud.stderr
         applied = host("split", "apply", split, "a", "--3way", timeout=900)
         assert applied.returncode == 0, applied.stderr.decode(errors="replace")
         assert (project / "lane.txt").read_text() == "from-a"
         assert (project / "README").read_text() == "after the checkpoint\n"
+
+        # `split apply --json`: the outcome is read from the tree and index.
+        def lane_split(files: dict[str, str], cwd: Path = project) -> tuple[str, dict]:
+            opened = json_of("split", "--open", "x", cwd=cwd)
+            for name, text in files.items():
+                (Path(opened["lanes"]["x"]) / name).write_text(text)
+            closed = json_of("split", "close", opened["id"], "--json", cwd=cwd)
+            assert closed["branches"][0]["state"] == "captured", closed
+            return opened["id"], closed
+
+        def apply_json(split: str, cwd: Path = project) -> tuple[int, dict]:
+            result = host("split", "apply", split, "x", "--json", cwd=cwd, timeout=900)
+            removed = host("splits", "rm", split, cwd=cwd)
+            assert removed.returncode == 0, removed.stderr
+            return result.returncode, json.loads(result.stdout)
+
+        (project / "notes.txt").write_text("l1\nl2\nl3\nl4\n")
+        (project / "gone.txt").write_text("gone\n")
+        git("add", "notes.txt", "gone.txt")
+        git("commit", "-q", "-m", "notes")
+        clean_id, _ = lane_split({"clean.txt": "c\n"})
+        code, outcome = apply_json(clean_id)
+        assert code == 0 and outcome["result"] == "clean" and outcome["files"] == ["clean.txt"], outcome
+        assert outcome["conflicts"] == [] and (project / "clean.txt").read_text() == "c\n", outcome
+        conflict_id, _ = lane_split({"notes.txt": "l1\nLANE\nl3\nl4\n"})
+        (project / "notes.txt").write_text("l1\nROOT\nl3\nl4\n")
+        git("commit", "-q", "-am", "root edit")
+        code, outcome = apply_json(conflict_id)
+        assert code == 1 and outcome["result"] == "conflicts", outcome
+        assert outcome["conflicts"] == ["notes.txt"] and outcome["files"] == ["notes.txt"], outcome
+        merged = (project / "notes.txt").read_text()
+        assert "<<<<<<<" in merged and "ROOT" in merged and "LANE" in merged, merged
+        git("checkout", "-q", "HEAD", "--", "notes.txt")
+        failing_id, _ = lane_split({"gone.txt": "lane edit\n", "notes.txt": "l1\nl2\nl3\nl4\nlane\n"})
+        git("rm", "-q", "gone.txt")
+        git("commit", "-q", "-m", "delete gone")
+        before = git("status", "--porcelain=v1"), (project / "notes.txt").read_text()
+        code, outcome = apply_json(failing_id)
+        assert code == 1 and outcome["result"] == "failed" and outcome["files"] == [], outcome
+        assert (git("status", "--porcelain=v1"), (project / "notes.txt").read_text()) == before, outcome
+        assert not (project / "gone.txt").exists()
+        plain = scope.root / "plain"
+        plain.mkdir()
+        (plain / "p.txt").write_text("one\n")
+        plain_id, _ = lane_split({"p.txt": "two\n"}, cwd=plain)
+        (plain / "p.txt").write_text("one\n")
+        code, outcome = apply_json(plain_id, cwd=plain)
+        assert code == 0 and outcome["result"] == "clean" and (plain / "p.txt").read_text() == "two\n", outcome
+        plain_id, _ = lane_split({"p.txt": "three\n"}, cwd=plain)
+        (plain / "p.txt").write_text("other\n")
+        code, outcome = apply_json(plain_id, cwd=plain)
+        assert code == 1 and outcome["result"] == "failed", outcome
+        assert (plain / "p.txt").read_text() == "other\n", outcome
 
         # Cancelling an open split ends its live lane jobs and removes it.
         open_c = json_of("split", "--open", "c")

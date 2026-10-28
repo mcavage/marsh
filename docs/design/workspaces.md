@@ -543,17 +543,34 @@ cancelled.
   the project.
 - **Several agents in one lane.** Jobs of any Kit run in a lane at once (a
   checkpoint's copy shared by N agents): every Kit VM mounts the same project
-  root (identical sources are shared, `ForkIsolation` is the container's view)
-  and each job's container sees only the fork. The per-tree Kit VM cap and
-  the same-Kit chain bound a job's descendants, not sibling lane jobs, which
-  are separate trees. A shell session opened in the fork (a terminal whose cwd
-  is the fork) is not a lane job: it mounts the fork as a project of its own,
-  which overlaps the Kit jobs' mount of the project root and is refused while
-  one holds it ("overlaps active grant"); that overlap rule is a safety rule
-  and stays. Host `marsh fanout` in a lane's copy therefore does not open a
-  shell session there: each branch is `marsh run NAME ARG...` from the copy (a
-  confined lane job, counted live like any other), registered names only; a
-  `-b` shell branch is refused, since a shell would see the whole project.
+  root (identical sources are shared) and each job's container sees only the
+  fork. The per-tree Kit VM cap and the same-Kit chain bound a job's
+  descendants, not sibling lane jobs, which are separate trees. Host
+  `marsh fanout` in a lane's copy runs each branch as `marsh run NAME ARG...`
+  from the copy (a confined lane job, counted live like any other),
+  registered names only; a `-b` shell branch is refused, since a shell would
+  see the whole project.
+- **A shell in a lane's copy.** An interactive `marsh` (or `marsh -c`) started
+  from the host with its cwd in a lane's copy takes the split's root as its
+  project and starts in the copy, as a host `marsh run` there does (a shell
+  project of the fork itself would overlap the Kit jobs' mounts of the root,
+  which the overlap rule refuses and keeps refusing). It is trusted user code
+  in the shell VM, which mounts the whole root, as a split's shell branches
+  are. It is not a lane job: it is not counted live, close does not wait for
+  it or fence it, and Kit commands started from it are refused for a host
+  split ("only its creator").
+- **Cloud lane jobs.** `marsh cloud [-d [--label L] [--json]] -c SCRIPT | --
+  PROGRAM ARGS` with its cwd in a lane's copy is a lane job: it is admitted
+  and fenced as above (refused after a close or cancel, exit 125), recorded
+  with lineage `split:<id>/<label>` and the copy as its mount, uploads the
+  copy (its Git view is the fork's), and writes its changes back into the
+  copy, never the live project, so the lane's capture and `apply` include
+  them. A detached run stays live for its lane until collection settles it
+  (kept as a patch, collected, failed, lost, or discarded): `close` collects
+  it every 3 s while it waits (30 s), so a run that has finished writes back
+  before capture; one still running makes the lane `uncertain`. `splits
+  cancel` discards it (its sandbox is dropped and nothing is written back),
+  and `splits rm` refuses while it is live.
 - **`marsh split close ID [--json]`** (creator, or the host): stops admitting
   lane jobs, waits up to 30 s for the lane's live jobs (and any job whose
   mounts name its fork) to end, then captures each open lane exactly as a
@@ -562,13 +579,25 @@ cancelled.
   captured lane's status is `closed` (code 0). The split becomes `kept` and
   the reply is the manifest; `out/<label>/{diff.patch,files,status}` hold the
   results.
-- **`marsh split apply ID LABEL [--3way]`** (the split's creator) applies a
+- **`marsh split apply ID LABEL [--3way] [--json]`** (the split's creator) applies a
   captured lane's `diff.patch` to the project with `git apply` inside the
   shell VM (from the host, through `marsh -c`), with the split's
   `store.git/objects` as `GIT_ALTERNATE_OBJECT_DIRECTORIES`. It is a join
   that keeps the split: while it runs the split is `joined`, so neither
   `splits rm` nor the collector removes the patch under it, and the release
   keeps it with a fresh 7 days. A lane with no changes applies nothing.
+  **`--json`** prints one object, `{"result":"clean"|"conflicts"|"failed",
+  "files":[paths],"conflicts":[paths],"message":TEXT}`, and decides the
+  outcome from the project's tree and index, never from git's text. It tries
+  a plain `git apply`; one that does not apply is retried with `--3way`
+  (the changes of a 3-way merge are staged). `clean`: applied (`files` are
+  the lane's changed paths). `conflicts`: some paths merged with conflict
+  markers (`conflicts` are the unmerged paths, `files` all changed paths).
+  `failed`: nothing was written (the tree and index are compared with a
+  snapshot of the patch's paths and restored if git wrote any; `files` is
+  empty). A root that is not a Git repository gets the plain apply only
+  (`clean` or `failed`). Exit status 0 for `clean`, else 1; a split or lane
+  that cannot be applied is `failed` with status 1 (2: no captured lane).
 - **Cancel.** `marsh splits cancel ID` on an open split stops admission
   (journaled `closing`, and the fence), cancels every live lane job tree
   (INT, then KILL after 10 s). A job marked cancelled before it could be

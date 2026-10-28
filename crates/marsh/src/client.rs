@@ -1467,6 +1467,13 @@ impl DaemonClient for LocalDaemonClient {
         } else {
             std::collections::BTreeMap::new()
         };
+        // In a lane's copy the project is the split's root and the copy is
+        // only where the shell starts (as for a host `marsh run` there).
+        let working_directory = std::env::current_dir().ok().filter(|cwd| {
+            cwd != &session.launch_directory
+                && marsh_daemon::split_confinement::fork_project(cwd).as_deref()
+                    == Some(session.launch_directory.as_path())
+        });
         self.0
             .open_shell(marsh_daemon::ShellSpec {
                 arguments: brush_args
@@ -1477,6 +1484,7 @@ impl DaemonClient for LocalDaemonClient {
                 session,
                 dev: crate::cli::DEV_SESSION.load(std::sync::atomic::Ordering::Relaxed),
                 terminal_environment,
+                working_directory,
             })
             .map_err(map_daemon_error)
     }

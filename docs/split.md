@@ -394,13 +394,17 @@ marsh split --open --from "$c" a b     # {"marsh_split":1,"id":ID,"lanes":{"a":F
 (cd FORK_B && marsh run --acp codex)   # an ACP client drives the agent over stdio
 marsh split close ID                   # captures every lane; the split is kept
 marsh split apply ID a --3way          # applies lane a's patch to the project
+marsh split apply ID a --json          # tries a plain apply, then --3way; one JSON outcome
 ```
 
 A command run in a lane is confined to its fork, like a `:::` branch. Only the
 split's creator can start one, and only until the split is closed. `close`
 waits up to 30 seconds for running lane jobs; a lane whose jobs are still
 running is kept as uncertain. `marsh splits cancel ID` stops the lane jobs and
-removes the split. See [design: workspaces](design/workspaces.md#14-open-lanes-checkpoints-and-storage).
+removes the split. Agents of different kinds can share one lane; `marsh fanout`
+from a lane's copy runs its branches as lane jobs; `marsh cloud -d -- PROGRAM`
+there writes its results back into the copy (never the project); and a
+`marsh` shell started in the copy starts in it. See [design: workspaces](design/workspaces.md#14-open-lanes-checkpoints-and-storage).
 
 ## Seeing a split in `marsh jobs --tree`
 

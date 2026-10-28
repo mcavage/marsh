@@ -781,6 +781,16 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
         })?;
         inherit_guest_project_root(&mut session, session_id, &context)?;
     }
+    // In a lane's copy an interactive shell takes the split's root as its
+    // project and starts in the copy, as a host `marsh run` there does; a
+    // shell of the copy's own would overlap the Kit jobs' mounts.
+    if !parsed.guest
+        && matches!(parsed.command, cli::ProductCommand::Shell)
+        && let Some(project) =
+            marsh_daemon::split_confinement::fork_project(&session.launch_directory)
+    {
+        session.launch_directory = project;
+    }
     let expected_project_identity = if parsed.guest {
         None
     } else {

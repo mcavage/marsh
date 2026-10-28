@@ -808,6 +808,13 @@ impl SplitEngine {
         self.save();
     }
 
+    /// Whether `caller` may close open lane split `id` (its creator, or the
+    /// host).
+    pub(crate) fn may_close(&self, caller: &Creator, id: &str) -> bool {
+        self.record(id)
+            .is_some_and(|record| caller == &Creator::Host || &record.creator == caller)
+    }
+
     fn record(&self, id: &str) -> Option<SplitRecord> {
         self.lock().records.get(id).cloned()
     }
@@ -2192,6 +2199,7 @@ impl SplitEngine {
                 session: session_spec(&session_id, &authority),
                 dev: false,
                 terminal_environment: std::collections::BTreeMap::new(),
+                working_directory: None,
             };
             let result = self
                 .client

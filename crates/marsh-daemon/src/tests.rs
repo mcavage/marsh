@@ -1809,6 +1809,64 @@ fn a_detached_cloud_job_survives_restart_outside_the_pool_and_settles_once() {
 }
 
 #[test]
+fn a_detached_cloud_run_in_a_lane_stays_live_for_its_split_until_it_settles() {
+    let home = home();
+    let store = reopen(home.path()).unwrap();
+    let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
+    let fork = "/Users/example/project/.marsh/split/abc123def456/lane";
+    let (job, _, lineage) = store
+        .begin_cloud_job(
+            NewJob {
+                label: None,
+                session_id: session,
+                command: "cloud".into(),
+                kit_ref: "cloud-shell".into(),
+                workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+                mounts: vec![PublicMount {
+                    target: fork.into(),
+                    access: "read_write".into(),
+                }],
+            },
+            &process::ProcessLink::default(),
+            &[],
+        )
+        .unwrap();
+    assert_eq!(lineage.split.as_deref(), Some("abc123def456"));
+    store.mark_cloud_running(&job, "sbx_abc123").unwrap();
+    store
+        .detach_cloud_job(&job, TimingReport::default())
+        .unwrap();
+    let jobs = store.fork_jobs("abc123def456", Some("lane"));
+    assert_eq!(
+        (jobs.live, jobs.detached),
+        (vec![job.clone()], vec![job.clone()])
+    );
+    assert_eq!(
+        store.fork_jobs("abc123def456", Some("other")).live,
+        Vec::<String>::new()
+    );
+    store
+        .finish_detached_job(
+            &job,
+            ExecutionOutcome::Exited { code: 0 },
+            ExitStatus {
+                code: Some(0),
+                cause: "collected".into(),
+            },
+            true,
+            CleanupState::Verified,
+            TimingReport::default(),
+            "collected",
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        store.fork_jobs("abc123def456", None).live,
+        Vec::<String>::new()
+    );
+}
+
+#[test]
 fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
     let home = home();
     let store = reopen(home.path()).unwrap();
@@ -3122,6 +3180,7 @@ fn failed_shell_setup_and_preparation_detach_their_sessions() {
                 session: session(&shell_session, home.path()),
                 arguments: Vec::new(),
                 terminal_environment: std::collections::BTreeMap::new(),
+                working_directory: None,
             })
             .is_err()
     );
@@ -3229,6 +3288,7 @@ fn execution_attachment_preserves_bytes_and_exit_status() {
                     arguments: vec![b"-c".to_vec(), b"printf ok".to_vec()],
                     session: selected,
                     terminal_environment: std::collections::BTreeMap::new(),
+                    working_directory: None,
                 },
                 File::open("/dev/null").unwrap(),
                 Vec::new(),
@@ -3554,6 +3614,7 @@ fn attached_open_shell_refuses_lifecycle_immediately_without_blocking_status() {
             arguments: Vec::new(),
             session: session(&session_id, home.path()),
             terminal_environment: std::collections::BTreeMap::new(),
+            working_directory: None,
         })
         .unwrap();
 
@@ -4873,6 +4934,7 @@ fn ended_shell_releases_acp_controller_without_explicit_detach() {
             arguments: vec![],
             session: acp.first.clone(),
             terminal_environment: std::collections::BTreeMap::new(),
+            working_directory: None,
         })),
         Ok(PublicReply::ShellAccepted)
     ));
