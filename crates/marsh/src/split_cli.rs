@@ -983,7 +983,8 @@ struct ApplyOutcome {
     conflicts: Vec<String>,
 }
 
-/// Parse the script's NUL-separated reply (`R` RESULT `M` MESSAGE `C` PATH...).
+/// Parse the script's NUL-separated reply (`R` RESULT `M` MESSAGE, then `U`
+/// and the unmerged paths).
 fn parse_apply_reply(bytes: &[u8]) -> Option<ApplyOutcome> {
     let mut words = bytes
         .split(|byte| *byte == 0)
@@ -997,12 +998,49 @@ fn parse_apply_reply(bytes: &[u8]) -> Option<ApplyOutcome> {
         match tag.as_str() {
             "R" => outcome.result = words.next()?,
             "M" => outcome.message = words.next()?,
-            "C" => outcome.conflicts.push(words.next()?),
+            "U" => {
+                outcome.conflicts = words.filter(|path| !path.is_empty()).collect();
+                break;
+            }
             "" => {}
             _ => return None,
         }
     }
-    matches!(outcome.result.as_str(), "clean" | "conflicts" | "failed").then_some(outcome)
+    matches!(
+        outcome.result.as_str(),
+        "clean" | "conflicts" | "failed" | "unknown"
+    )
+    .then_some(outcome)
+}
+
+/// The paths a patch changes, from `git apply --numstat -z`: records are
+/// `ADDED TAB DELETED TAB PATH NUL`, or, for a rename or copy,
+/// `ADDED TAB DELETED TAB NUL SOURCE NUL DESTINATION NUL`.
+fn parse_numstat(bytes: &[u8]) -> Vec<String> {
+    let mut fields = bytes.split(|byte| *byte == 0);
+    let mut paths: Vec<String> = Vec::new();
+    let mut add = |bytes: &[u8]| {
+        let path = String::from_utf8_lossy(bytes).into_owned();
+        if !path.is_empty() && !paths.contains(&path) {
+            paths.push(path);
+        }
+    };
+    while let Some(record) = fields.next() {
+        let mut parts = record.splitn(3, |byte| *byte == b'\t');
+        let (Some(_), Some(_), Some(path)) = (parts.next(), parts.next(), parts.next()) else {
+            continue;
+        };
+        if path.is_empty() {
+            for _ in 0..2 {
+                if let Some(path) = fields.next() {
+                    add(path);
+                }
+            }
+        } else {
+            add(path);
+        }
+    }
+    paths
 }
 
 /// `split apply --json` prints this one object.
@@ -1110,37 +1148,44 @@ fn apply(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
         .map(Path::as_os_str)
         .unwrap_or_default()
         .to_owned();
-    let listing = out.join(label).join("files");
-    let script = if json || three_way {
-        APPLY_SCRIPT.to_owned()
-    } else {
-        "cd -- \"$1\" && GIT_ALTERNATE_OBJECT_DIRECTORIES=\"$2\" git apply -- \"$3\"".to_owned()
-    };
     // In the shell VM, the session shell is already there; from the host,
     // `marsh -c` runs the same script in it.
-    let mut command = if std::env::var_os("MARSH_DAEMON_SOCKET").is_some() {
-        let mut command = std::process::Command::new("sh");
-        command.arg("-c").arg(&script);
+    let vm = |script: &str, mode: Option<&str>| {
+        let mut command = if std::env::var_os("MARSH_DAEMON_SOCKET").is_some() {
+            let mut command = std::process::Command::new("sh");
+            command.arg("-c").arg(script);
+            Some(command)
+        } else {
+            std::env::current_exe().ok().map(|marsh| {
+                let mut command = std::process::Command::new(marsh);
+                command.arg("-c").arg(script);
+                command
+            })
+        }?;
         command
-    } else {
-        let Ok(marsh) = std::env::current_exe() else {
+            .arg("apply")
+            .arg(root)
+            .arg(&objects)
+            .arg(&patch)
+            .current_dir(root)
+            .stdin(std::process::Stdio::null());
+        if let Some(mode) = mode {
+            command.arg(mode);
+        }
+        Some(command)
+    };
+    if !json {
+        let (script, mode) = if three_way {
+            (APPLY_SCRIPT, Some("raw3way"))
+        } else {
+            (
+                "cd -- \"$1\" && GIT_ALTERNATE_OBJECT_DIRECTORIES=\"$2\" git apply -- \"$3\"",
+                None,
+            )
+        };
+        let Some(mut command) = vm(script, mode) else {
             return usage("split apply: cannot find the marsh executable");
         };
-        let mut command = std::process::Command::new(marsh);
-        command.arg("-c").arg(&script);
-        command
-    };
-    command
-        .arg("apply")
-        .arg(root)
-        .arg(objects)
-        .arg(&patch)
-        .current_dir(root)
-        .stdin(std::process::Stdio::null());
-    if !json {
-        if three_way {
-            command.arg(&listing).arg("raw3way");
-        }
         let status = match command.status() {
             Ok(status) => status
                 .code()
@@ -1149,20 +1194,34 @@ fn apply(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
         };
         return release(&mut stream, status);
     }
-    command.arg(&listing).stderr(std::process::Stdio::inherit());
-    let outcome = command
-        .output()
-        .ok()
+    // What the patch changes (read-only), then the apply, which git alone
+    // does. A reply that cannot be read after the apply began is `unknown`.
+    let files = vm(APPLY_SCRIPT, Some("numstat"))
+        .and_then(|mut command| command.stderr(std::process::Stdio::inherit()).output().ok())
+        .filter(|output| output.status.success())
+        .map(|output| parse_numstat(&output.stdout));
+    let Some(files) = files else {
+        println!(
+            "{}",
+            apply_document(
+                "failed",
+                &[],
+                &[],
+                "the patch could not be read in the shell VM; nothing was applied"
+            )
+        );
+        return release(&mut stream, 1);
+    };
+    let outcome = vm(APPLY_SCRIPT, Some("json"))
+        .and_then(|mut command| command.stderr(std::process::Stdio::inherit()).output().ok())
         .and_then(|output| parse_apply_reply(&output.stdout));
     let status = if let Some(outcome) = outcome {
+        // `files` is what the patch changes (for `unknown`, what it may have
+        // changed); `failed` means git wrote nothing.
         let files = if outcome.result == "failed" {
             Vec::new()
         } else {
-            std::fs::read_to_string(&listing)
-                .unwrap_or_default()
-                .lines()
-                .filter_map(|line| line.split_once('\t').map(|(_, path)| path.to_owned()))
-                .collect()
+            files
         };
         println!(
             "{}",
@@ -1175,15 +1234,13 @@ fn apply(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel, S
         );
         i32::from(outcome.result != "clean")
     } else {
-        // The script could not run (no shell VM, no reply): nothing is known
-        // to have been written, but nothing is claimed either.
         println!(
             "{}",
             apply_document(
-                "failed",
+                "unknown",
+                &files,
                 &[],
-                &[],
-                "the apply did not report an outcome; check the project with `git status`"
+                "the shell VM did not report the outcome; check the project with git status"
             )
         );
         1
@@ -1365,5 +1422,34 @@ fn storage(arguments: &[OsString], channel: impl FnOnce(bool) -> Result<Channel,
             0
         }
         reply => failed("storage", reply),
+    }
+}
+
+#[cfg(test)]
+mod apply_tests {
+    use super::*;
+
+    #[test]
+    fn numstat_records_give_every_path_raw() {
+        let bytes = b"1\t1\ta.txt\0-\t-\tbin\0 0\t0\t\0old name\0new\nname\0".to_vec();
+        assert_eq!(
+            parse_numstat(&bytes),
+            ["a.txt", "bin", "old name", "new\nname"]
+        );
+    }
+
+    #[test]
+    fn a_reply_is_a_result_a_message_and_the_unmerged_paths() {
+        let reply = b"R\0conflicts\0M\0merged\0U\0a b\0c\nd\0";
+        assert_eq!(
+            parse_apply_reply(reply),
+            Some(ApplyOutcome {
+                result: "conflicts".into(),
+                message: "merged".into(),
+                conflicts: vec!["a b".into(), "c\nd".into()],
+            })
+        );
+        assert_eq!(parse_apply_reply(b"R\0done\0"), None);
+        assert_eq!(parse_apply_reply(b""), None);
     }
 }

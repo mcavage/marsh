@@ -1867,6 +1867,44 @@ fn a_detached_cloud_run_in_a_lane_stays_live_for_its_split_until_it_settles() {
 }
 
 #[test]
+fn a_cloud_lane_job_is_not_submitted_after_its_split_is_fenced_or_cancelled() {
+    let home = home();
+    let store = reopen(home.path()).unwrap();
+    let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
+    let fork = "/Users/example/project/.marsh/split/abc123def456/lane";
+    let new = |session: String| NewJob {
+        label: None,
+        session_id: session,
+        command: "cloud".into(),
+        kit_ref: "cloud-shell".into(),
+        workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+        mounts: vec![PublicMount {
+            target: fork.into(),
+            access: "read_write".into(),
+        }],
+    };
+    let link = process::ProcessLink::default();
+    let (fenced, _, _) = store
+        .begin_cloud_job(new(session.clone()), &link, &[])
+        .unwrap();
+    let (cancelled, _, _) = store.begin_cloud_job(new(session), &link, &[]).unwrap();
+    assert!(!store.in_cancelled_split(&cancelled));
+    store.cancel_tree(&cancelled, true);
+    assert!(matches!(
+        store.mark_cloud_running(&cancelled, "sbx_a"),
+        Err(DaemonError::Refused(_))
+    ));
+    store.fence_split("abc123def456");
+    assert!(matches!(
+        store.mark_cloud_running(&fenced, "sbx_b"),
+        Err(DaemonError::Refused(_))
+    ));
+    assert!(!store.in_cancelled_split(&fenced));
+    store.cancel_split("abc123def456");
+    assert!(store.in_cancelled_split(&fenced));
+}
+
+#[test]
 fn result_selectors_accept_cursor_full_id_and_unique_prefix() {
     let home = home();
     let store = reopen(home.path()).unwrap();

@@ -61,8 +61,6 @@ fn run(repo: bool, prepare: impl FnOnce(&Path)) -> (Vec<String>, PathBuf) {
         .unwrap();
     let patch = scratch.join("p.patch");
     fs::write(&patch, diff.stdout).unwrap();
-    let files = scratch.join("files");
-    fs::write(&files, "M\ta.txt\nM\tb.txt\nM\tgone.txt\n").unwrap();
     prepare(&root);
     let output = Command::new("sh")
         .arg("-c")
@@ -71,7 +69,7 @@ fn run(repo: bool, prepare: impl FnOnce(&Path)) -> (Vec<String>, PathBuf) {
         .arg(&root)
         .arg("")
         .arg(&patch)
-        .arg(&files)
+        .arg("json")
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
@@ -106,7 +104,7 @@ fn a_root_edit_of_the_same_lines_is_conflicts_with_markers_and_paths() {
     });
     assert_eq!(&words[..2], ["R", "conflicts"], "{words:?}");
     assert!(
-        words.windows(2).any(|pair| pair == ["C", "a.txt"]),
+        words.windows(2).any(|pair| pair == ["U", "a.txt"]),
         "{words:?}"
     );
     let merged = fs::read_to_string(root.join("a.txt")).unwrap();
@@ -180,8 +178,6 @@ fn a_three_way_apply_leaves_no_index_entry_that_needs_the_split_objects() {
     git(&root, &["commit", "-qam", "r"]);
     let patch = scratch.join("p.patch");
     fs::write(&patch, diff.stdout).unwrap();
-    let files = scratch.join("files");
-    fs::write(&files, "M\tb.txt\n").unwrap();
     let output = Command::new("sh")
         .arg("-c")
         .arg(SCRIPT)
@@ -189,7 +185,7 @@ fn a_three_way_apply_leaves_no_index_entry_that_needs_the_split_objects() {
         .arg(&root)
         .arg(&store)
         .arg(&patch)
-        .arg(&files)
+        .arg("json")
         .output()
         .unwrap();
     assert!(output.status.success(), "{output:?}");
@@ -206,4 +202,80 @@ fn a_three_way_apply_leaves_no_index_entry_that_needs_the_split_objects() {
         fsck.status.success() && !String::from_utf8_lossy(&fsck.stderr).contains("missing"),
         "{fsck:?}"
     );
+}
+
+#[test]
+fn a_failed_apply_leaves_a_user_edit_of_a_touched_file_and_the_index_alone() {
+    if !have_git() {
+        return;
+    }
+    let (words, root) = run(true, |root| {
+        fs::remove_file(root.join("gone.txt")).unwrap();
+        git(root, &["commit", "-qam", "r"]);
+        // An unrelated edit the user saved, and a file they staged.
+        fs::write(root.join("b.txt"), "k\nuser line\n").unwrap();
+        fs::write(root.join("staged.txt"), "s\n").unwrap();
+        git(root, &["add", "staged.txt"]);
+    });
+    assert_eq!(&words[..2], ["R", "failed"], "{words:?}");
+    assert_eq!(
+        fs::read_to_string(root.join("b.txt")).unwrap(),
+        "k\nuser line\n"
+    );
+    let staged = Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&staged.stdout), "staged.txt\n");
+}
+
+#[test]
+fn a_name_with_a_quote_and_a_newline_is_a_name_not_an_encoding() {
+    if !have_git() {
+        return;
+    }
+    let scratch = tempfile::tempdir().unwrap().keep();
+    let (root, lane) = (scratch.join("root"), scratch.join("lane"));
+    seed(&root);
+    seed(&lane);
+    git(&lane, &["init", "-q"]);
+    git(&lane, &["add", "."]);
+    git(&lane, &["commit", "-qm", "i"]);
+    let name = "we\"ird\nname\\.txt";
+    fs::write(lane.join(name), "odd\n").unwrap();
+    git(&lane, &["add", "."]);
+    let diff = Command::new("git")
+        .args(["diff", "--cached", "--binary"])
+        .current_dir(&lane)
+        .output()
+        .unwrap();
+    let patch = scratch.join("p.patch");
+    fs::write(&patch, diff.stdout).unwrap();
+    let apply = |mode: &str| {
+        Command::new("sh")
+            .arg("-c")
+            .arg(SCRIPT)
+            .arg("apply")
+            .arg(&root)
+            .arg("")
+            .arg(&patch)
+            .arg(mode)
+            .output()
+            .unwrap()
+    };
+    let listed = apply("numstat");
+    assert!(
+        listed
+            .stdout
+            .split(|byte| *byte == 0)
+            .any(|field| field.ends_with(name.as_bytes())),
+        "{listed:?}"
+    );
+    let applied = apply("json");
+    assert!(
+        String::from_utf8_lossy(&applied.stdout).starts_with("R\0clean\0"),
+        "{applied:?}"
+    );
+    assert_eq!(fs::read_to_string(root.join(name)).unwrap(), "odd\n");
 }

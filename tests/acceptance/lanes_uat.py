@@ -214,6 +214,12 @@ def main() -> int:
         code, outcome = apply_json(clean_id)
         assert code == 0 and outcome["result"] == "clean" and outcome["files"] == ["clean.txt"], outcome
         assert outcome["conflicts"] == [] and (project / "clean.txt").read_text() == "c\n", outcome
+        odd = 'we"ird\nname\\.txt'
+        odd_id, _ = lane_split({odd: "odd\n"})
+        code, outcome = apply_json(odd_id)
+        assert code == 0 and outcome["files"] == [odd] and (project / odd).read_text() == "odd\n", outcome
+        (project / odd).unlink()
+        git("rm", "-q", "--cached", "--ignore-unmatch", "--", odd)
         conflict_id, _ = lane_split({"notes.txt": "l1\nLANE\nl3\nl4\n"})
         (project / "notes.txt").write_text("l1\nROOT\nl3\nl4\n")
         git("commit", "-q", "-am", "root edit")
@@ -226,10 +232,29 @@ def main() -> int:
         failing_id, _ = lane_split({"gone.txt": "lane edit\n", "notes.txt": "l1\nl2\nl3\nl4\nlane\n"})
         git("rm", "-q", "gone.txt")
         git("commit", "-q", "-m", "delete gone")
-        before = git("status", "--porcelain=v1"), (project / "notes.txt").read_text()
-        code, outcome = apply_json(failing_id)
+        # An editor saves a file the patch touches while the apply runs: git
+        # wrote nothing, and marsh restores nothing, so the save stands.
+        saving, saved = threading.Event(), []
+
+        def editor() -> None:
+            count = 0
+            while not saving.is_set():
+                count += 1
+                text = f"l1\nl2\nl3\nl4\nsaved {count}\n"
+                (project / "notes.txt").write_text(text)
+                saved.append(text)
+                time.sleep(0.02)
+
+        thread = threading.Thread(target=editor)
+        thread.start()
+        try:
+            code, outcome = apply_json(failing_id)
+        finally:
+            saving.set()
+            thread.join()
         assert code == 1 and outcome["result"] == "failed" and outcome["files"] == [], outcome
-        assert (git("status", "--porcelain=v1"), (project / "notes.txt").read_text()) == before, outcome
+        assert saved and (project / "notes.txt").read_text() == saved[-1], outcome
+        git("checkout", "-q", "HEAD", "--", "notes.txt")
         assert not (project / "gone.txt").exists()
         plain = scope.root / "plain"
         plain.mkdir()

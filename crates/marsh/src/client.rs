@@ -1474,6 +1474,11 @@ impl DaemonClient for LocalDaemonClient {
                 && marsh_daemon::split_confinement::fork_project(cwd).as_deref()
                     == Some(session.launch_directory.as_path())
         });
+        if working_directory.is_some() && session.terminal {
+            eprintln!(
+                "marsh: a lane's copy: changes you make here are captured only if made before Finish"
+            );
+        }
         self.0
             .open_shell(marsh_daemon::ShellSpec {
                 arguments: brush_args

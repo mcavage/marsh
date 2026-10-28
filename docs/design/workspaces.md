@@ -557,20 +557,29 @@ cancelled.
   which the overlap rule refuses and keeps refusing). It is trusted user code
   in the shell VM, which mounts the whole root, as a split's shell branches
   are. It is not a lane job: it is not counted live, close does not wait for
-  it or fence it, and Kit commands started from it are refused for a host
-  split ("only its creator").
+  it or fence it (so the capture's stability, `CaptureStable`, holds for lane
+  jobs only; `docs/model/README.md`), and Kit commands started from it are
+  refused for a host split ("only its creator"). An interactive one prints
+  "changes you make here are captured only if made before Finish" when it
+  starts.
 - **Cloud lane jobs.** `marsh cloud [-d [--label L] [--json]] -c SCRIPT | --
   PROGRAM ARGS` with its cwd in a lane's copy is a lane job: it is admitted
   and fenced as above (refused after a close or cancel, exit 125), recorded
   with lineage `split:<id>/<label>` and the copy as its mount, uploads the
   copy (its Git view is the fork's), and writes its changes back into the
   copy, never the live project, so the lane's capture and `apply` include
-  them. A detached run stays live for its lane until collection settles it
-  (kept as a patch, collected, failed, lost, or discarded): `close` collects
-  it every 3 s while it waits (30 s), so a run that has finished writes back
-  before capture; one still running makes the lane `uncertain`. `splits
-  cancel` discards it (its sandbox is dropped and nothing is written back),
-  and `splits rm` refuses while it is live.
+  them. Submission is fenced: the store marks the job running (the step after
+  which the sandbox bills) under the lock a close or cancel sets the split's
+  fence with, so a job still uploading when either begins never starts, and
+  its sandbox is retired. A detached run stays live for its lane until
+  collection settles it (kept as a patch, collected, failed, lost, or
+  discarded): `close` collects it every 3 s while it waits (30 s), so a run
+  that has finished writes back before capture; one still running makes the
+  lane `uncertain`. `splits cancel` is journaled with the split (`cancelled`)
+  and discards every detached run of the split: at once, and again on every
+  collector pass and after a restart until its sandbox is verified gone, and
+  collection of such a run discards it instead of writing back. `splits rm`
+  refuses while one is live.
 - **`marsh split close ID [--json]`** (creator, or the host): stops admitting
   lane jobs, waits up to 30 s for the lane's live jobs (and any job whose
   mounts name its fork) to end, then captures each open lane exactly as a
@@ -586,16 +595,27 @@ cancelled.
   that keeps the split: while it runs the split is `joined`, so neither
   `splits rm` nor the collector removes the patch under it, and the release
   keeps it with a fresh 7 days. A lane with no changes applies nothing.
-  **`--json`** prints one object, `{"result":"clean"|"conflicts"|"failed",
+  **`--json`** prints one object, `{"result":"clean"|"conflicts"|"failed"|"unknown",
   "files":[paths],"conflicts":[paths],"message":TEXT}`, and decides the
-  outcome from the project's tree and index, never from git's text. It tries
-  a plain `git apply`; one that does not apply is retried with `--3way`
-  (the changes of a 3-way merge are staged). `clean`: applied (`files` are
-  the lane's changed paths). `conflicts`: some paths merged with conflict
-  markers (`conflicts` are the unmerged paths, `files` all changed paths).
-  `failed`: nothing was written (the tree and index are compared with a
-  snapshot of the patch's paths and restored if git wrote any; `files` is
-  empty). A root that is not a Git repository gets the plain apply only
+  outcome from git and the project's index, never from git's text. git alone
+  does the apply, and marsh never rolls anything back (a rollback would
+  overwrite an editor's save or a `git add` made meanwhile): `git apply
+  --check`, then a plain `git apply` (all or nothing); a patch that does not
+  check is retried with `--3way` (which writes nothing when it fails; its
+  merged changes are staged). `clean`: applied. `conflicts`: some paths
+  merged with conflict markers and unmerged index entries (`conflicts` are the
+  unmerged paths). `failed`: git wrote nothing (`files` is empty), including
+  a project whose index already has unresolved conflicts. `unknown`: marsh
+  cannot tell what was written (the shell VM's reply was lost after the apply
+  began, git ended abnormally, or the 3-way result could not be made
+  self-contained); `files` lists the paths the patch touches, and the user
+  checks with `git status`. `files` for the other results are the paths the
+  patch changes, from `git apply --numstat -z` (NUL-delimited, never the
+  quoted `files` listing), so names with quotes, backslashes, or newlines are
+  exact. A 3-way merge stages blobs read from the split's object store: they
+  are copied into the project's own, each id verified, and the index is
+  checked to resolve without the split's store before `clean` or `conflicts`
+  is reported. A root that is not a Git repository gets the plain apply only
   (`clean` or `failed`). Exit status 0 for `clean`, else 1; a split or lane
   that cannot be applied is `failed` with status 1 (2: no captured lane).
 - **Cancel.** `marsh splits cancel ID` on an open split stops admission

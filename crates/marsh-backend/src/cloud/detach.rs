@@ -749,6 +749,12 @@ impl StockDaemonBackend {
         if record.settled {
             return Ok(record);
         }
+        // A cancel of the run's lane split outlives this daemon (it is
+        // journaled with the split): the run is discarded on every pass until
+        // its sandbox is verified gone, and nothing is written back.
+        if store.in_cancelled_split(job) {
+            return self.discard_loaded(store, &paths, record);
+        }
         if record.sandbox_gone {
             // Fetched and the sandbox is deleted: only the write-back is left.
             return self.write_back(store, &paths, record);
@@ -1584,7 +1590,19 @@ impl StockDaemonBackend {
         let _held = lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut record = Record::load(paths, job)?;
+        let record = Record::load(paths, job)?;
+        self.discard_loaded(store, paths, record)
+    }
+
+    /// `discard` with the collector lock held and the record loaded.
+    fn discard_loaded(
+        &self,
+        store: &DaemonStore,
+        paths: &Paths,
+        mut record: Record,
+    ) -> Result<Record, DaemonError> {
+        let job = record.job_id.clone();
+        let job = job.as_str();
         let _ = fs::remove_file(paths.payload(job));
         let _ = fs::remove_file(paths.diff(job));
         if record.settled {

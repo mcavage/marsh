@@ -218,6 +218,11 @@ pub struct SplitRecord {
     /// never reopens its lanes or captures one twice.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub closing: bool,
+    /// `marsh splits cancel` reached this split: journaled with `closing`, so
+    /// a restart still discards its detached cloud runs and writes nothing
+    /// back into its copies.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cancelled: bool,
     /// The creator's label (`split --open --label TEXT`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -808,6 +813,17 @@ impl SplitEngine {
         self.save();
     }
 
+    /// Splits `marsh splits cancel` reached, from the journal: a restarted
+    /// daemon fences their copies against detached cloud write-back.
+    pub(crate) fn cancelled_ids(&self) -> Vec<String> {
+        self.lock()
+            .records
+            .values()
+            .filter(|record| record.cancelled || record.state == SplitState::Cancelled)
+            .map(|record| record.id.clone())
+            .collect()
+    }
+
     /// Whether `caller` may close open lane split `id` (its creator, or the
     /// host).
     pub(crate) fn may_close(&self, caller: &Creator, id: &str) -> bool {
@@ -1023,19 +1039,29 @@ impl SplitEngine {
                 }
                 Some(r) if r.state == SplitState::Run => {
                     r.closing = true;
+                    r.cancelled = true;
                     store.fence_split(id);
+                    store.cancel_split(id);
                     closers.insert(id.to_owned());
                     true
                 }
-                _ => {
+                found => {
+                    if let Some(r) = found {
+                        r.cancelled = true;
+                    }
                     store.fence_split(id);
+                    store.cancel_split(id);
                     false
                 }
             }
         };
-        if open && let Err(error) = self.save_checked() {
-            self.lock().closers.remove(id);
-            return Err(Self::unjournaled(id, &error));
+        if open {
+            if let Err(error) = self.save_checked() {
+                self.lock().closers.remove(id);
+                return Err(Self::unjournaled(id, &error));
+            }
+        } else {
+            self.save();
         }
         Self::cancel_lane_jobs(id, store);
         if !open {
@@ -2635,6 +2661,7 @@ fn setup(
         from: spec.from.clone(),
         kept_unix_ms: None,
         closing: false,
+        cancelled: false,
         label: spec.label.clone(),
     })
 }
@@ -2951,6 +2978,7 @@ impl LocalSplit {
                 from: None,
                 kept_unix_ms: None,
                 closing: false,
+                cancelled: false,
                 label: None,
             },
         })

@@ -586,6 +586,11 @@ ForkIsolation == \A b \in Branches :
 NoWriteToUserTree ==
   W[UserTree] \subseteq {UserA} \cup {Join(s) : s \in {t \in Splits : par[t] = Root}}
 
+\* Writers the model does not have: a shell the user starts in a lane's copy
+\* (trusted code in the shell VM, which mounts the whole project root, so it
+\* may also write elsewhere) is not a lane job, is not counted live and is not
+\* fenced by a close. CaptureStable covers lane jobs only; the shell prints a
+\* notice when it starts (docs/design/workspaces.md s14).
 CaptureStable == \A b \in Branches : bst[b] = "captured" => res[b] = ver[Fork(b)]
 
 LineageWF == \A s \in Splits : par[s] # None =>

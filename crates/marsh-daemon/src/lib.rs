@@ -1850,6 +1850,8 @@ struct State {
     /// recorded or submitted any more (`split.rs` `admit_lane` admits before
     /// the Kit is prepared; this fence holds at the job's own creation).
     fenced_splits: std::collections::BTreeSet<String>,
+    /// Splits `marsh splits cancel` reached (journaled with the split).
+    cancelled_splits: std::collections::BTreeSet<String>,
     /// Terminal sessions, their terminal job trees, and recent opens.
     links: open_url::Links,
 }
@@ -2104,6 +2106,7 @@ impl DaemonStore {
             lifecycle_active: false,
             branch_sessions: BTreeMap::new(),
             fenced_splits: std::collections::BTreeSet::new(),
+            cancelled_splits: std::collections::BTreeSet::new(),
             links: open_url::Links::default(),
         }))))
     }
@@ -2424,6 +2427,22 @@ impl DaemonStore {
     /// recorded or submitted.
     pub fn fence_split(&self, split: &str) {
         self.lock().fenced_splits.insert(split.to_owned());
+    }
+
+    /// A cancel reached this lane split: its detached cloud runs are
+    /// discarded, never collected into the copy.
+    pub fn cancel_split(&self, split: &str) {
+        self.lock().cancelled_splits.insert(split.to_owned());
+    }
+
+    /// Whether `job` runs in a fork of a cancelled split.
+    #[must_use]
+    pub fn in_cancelled_split(&self, job: &str) -> bool {
+        let state = self.lock();
+        state.jobs.get(job).is_some_and(|job| {
+            JobLineage::split_of(&job.mounts)
+                .is_some_and(|(split, _)| state.cancelled_splits.contains(&split))
+        })
     }
 
     /// Whether `mounts` name a fork of a fenced split.
@@ -3010,6 +3029,15 @@ impl DaemonStore {
         if receipt.state != JobState::Queued || receipt.placement != Placement::Cloud {
             return Err(DaemonError::InvalidState(
                 "only a queued cloud job may start in a cloud sandbox".into(),
+            ));
+        }
+        // Submission is the one step after which the sandbox bills: a close
+        // or cancel of its lane's split, or a cancel of the job, that came
+        // first stops it here, under the lock they set their marks with.
+        Self::fenced(&state, &receipt.mounts)?;
+        if state.process.cancelling.contains(job_id) {
+            return Err(DaemonError::Refused(
+                "cancelled before the command started".into(),
             ));
         }
         let mut updated = receipt.clone();
@@ -3806,6 +3834,9 @@ impl Server {
         );
         let store = DaemonStore::with_master_token(home, journal_home, Some(token))?;
         store.lock().journal.set_events(Arc::clone(&events));
+        for id in splits.cancelled_ids() {
+            store.cancel_split(&id);
+        }
         Ok(Self {
             lifecycle,
             store,
@@ -5533,19 +5564,21 @@ impl ConnectionHandler {
             }
             PublicRequest::SplitCancel { split } => {
                 let cancelled = self.splits.cancel_request(&caller, &split, &self.store);
-                if cancelled.is_ok() && !self.store.fork_jobs(&split, None).detached.is_empty() {
+                if cancelled.is_ok() && !self.store.fork_jobs(&split, None).live.is_empty() {
                     // A detached cloud run in a lane's copy is not a process
                     // to signal: discarding it drops its sandbox, so nothing
-                    // is ever written back into the copy.
+                    // is ever written back into the copy. One that detaches
+                    // after this pass is discarded by the collector (the
+                    // cancel is journaled with the split).
                     let (backend, store, split) =
                         (Arc::clone(&self.backend), self.store.clone(), split.clone());
                     thread::spawn(move || {
                         for _ in 0..120 {
-                            let jobs = store.fork_jobs(&split, None).detached;
-                            if jobs.is_empty() {
+                            let jobs = store.fork_jobs(&split, None);
+                            if jobs.live.is_empty() {
                                 break;
                             }
-                            for job in jobs {
+                            for job in jobs.detached {
                                 let _ = backend.cloud_detached(
                                     cloud_detached::CloudDetachedRequest::Discard { job },
                                     store.clone(),

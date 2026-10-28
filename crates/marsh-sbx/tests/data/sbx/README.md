@@ -25,6 +25,15 @@ Edits: in `ls-json.stdout` the host user's home directory was replaced by
 The model takes each verb's accepted flags from these help texts, so a flag
 stock does not accept fails in tests as it would for real.
 
+## `v0.50.0/` — captured
+
+`ls-json.stdout` is a trimmed `sbx ls --json` (`sbx version: v0.50.0
+30d023cb`, macOS arm64, 2026-10-28): four of 70 rows, verbatim, namely a running
+and a stopped marsh VM, another tool's sandbox, and one with
+`workspace_missing`. The host user's home became `/Users/alice`. A row the
+decoder once rejected as an "unknown row schema" came from a listing with an
+extra key; the decoder now ignores extra keys (see `stock_inventory.rs`).
+
 ## `v0.46.0/` — derived
 
 No 0.46 binary was available. `ls-json.stdout` is the row a human captured
