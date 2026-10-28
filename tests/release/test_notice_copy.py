@@ -24,10 +24,13 @@ class NoticeCopy(unittest.TestCase):
                 member = tarfile.TarInfo("native/third_party/lib/LICENSE")
                 member.size = len(native_notice)
                 archive.addfile(member, io.BytesIO(native_notice))
+            shared_notice = root / "SHARED-LICENSE"
+            shared_notice.write_bytes(b"Shared workspace license\n")
             unknown = root / "new-crate"
             unknown.mkdir()
             metadata = {"packages": [
-                {"name": "example", "version": "99.0.0", "manifest_path": str(package / "Cargo.toml")},
+                {"name": "example", "version": "99.0.0", "manifest_path": str(package / "Cargo.toml"),
+                 "license_file": str(shared_notice)},
                 {"name": "new-dependency", "version": "1.0.0", "manifest_path": str(unknown / "Cargo.toml")}]}
             cargo = root / "cargo"
             cargo.write_text("#!/bin/sh\ncat <<'JSON'\n" + json.dumps(metadata) + "\nJSON\n")
@@ -40,6 +43,7 @@ class NoticeCopy(unittest.TestCase):
             bundled = (output / "THIRD-PARTY-NOTICES.txt").read_bytes()
             self.assertIn(license_text, bundled)
             self.assertIn(native_notice, bundled)
+            self.assertIn(shared_notice.read_bytes(), bundled)
 
 
 if __name__ == "__main__":
