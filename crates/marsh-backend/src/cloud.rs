@@ -621,6 +621,24 @@ impl StockDaemonBackend {
             }),
             _ => None,
         };
+        if let (None, None, Some(call), None) = (&direct, &origin, &options.direct, &options.image)
+            && let Some(name) = call.first().and_then(|name| std::str::from_utf8(name).ok())
+            && self.command_names().iter().any(|known| known == name)
+            && !self.cloud_bindings().contains_key(name)
+            && request
+                .process
+                .as_ref()
+                .and_then(|link| link.spawn.as_ref())
+                .is_none_or(|spawn| spawn.iter().any(|allowed| allowed == name))
+        {
+            return Err(DaemonError::Refused(format!(
+                "cloud: {name} is a registered command with no cloud form: its Kit is built from a \
+                 source directory or named by a tag, not pinned by digest, so Docker Cloud cannot \
+                 run it. Name a published Kit for it in cloud-kits.json in the control home that \
+                 `marsh status` prints: \
+                 {{\"{name}\": {{\"kit\": \"REPOSITORY@sha256:DIGEST\"}}}}"
+            )));
+        }
         // A detached block has no laptop relay. With cloud-delegate on, its
         // supervisor starts agent sandboxes itself, signed in with the token
         // from the Keychain (read now: a missing token refuses the run, and

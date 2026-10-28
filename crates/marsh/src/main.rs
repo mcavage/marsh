@@ -1258,6 +1258,29 @@ fn single_call(source: &str) -> Option<(Vec<String>, bool)> {
     (!words.is_empty()).then_some((words, stdin_null))
 }
 
+/// A detached `-- PROGRAM [ARG...]`, offered to the daemon as one call: it
+/// reads no input, so it is the same as `-c 'PROGRAM ARG...'`, and runs
+/// straight in the program's own Kit when PROGRAM is a registered command
+/// with a cloud form. Any other program runs in the cloud shell as before.
+fn detached_argv_call(arguments: &[OsString]) -> Option<(Vec<String>, bool)> {
+    let mut index = 0;
+    let mut detach = false;
+    loop {
+        match arguments.get(index)?.to_str()? {
+            "--detach" => detach = true,
+            "--cpus" | "--ttl" => index += 1,
+            "--" => break,
+            _ => return None,
+        }
+        index += 1;
+    }
+    let argv = arguments[index + 1..]
+        .iter()
+        .map(|word| word.to_str().map(str::to_owned))
+        .collect::<Option<Vec<_>>>()?;
+    (detach && !argv.is_empty()).then_some((argv, true))
+}
+
 /// The daemon's words for a `cloud` call: the caller's arguments, after the
 /// client's internal `--stdin-terminal` and `--direct N WORD...`; and
 /// whether the one call reads `/dev/null`.
@@ -1270,7 +1293,8 @@ fn cloud_words(arguments: &[OsString], interactive: bool) -> (Vec<Vec<u8>>, bool
         .filter(|index| arguments.len() == index + 2)
         .filter(|_| !arguments.iter().any(|word| word == "--image"))
         .and_then(|index| arguments[index + 1].to_str())
-        .and_then(single_call);
+        .and_then(single_call)
+        .or_else(|| detached_argv_call(arguments));
     let stdin_null = call.as_ref().is_some_and(|(_, null)| *null);
     let stdin_terminal =
         !interactive && !stdin_null && std::io::IsTerminal::is_terminal(&std::io::stdin());
@@ -4013,6 +4037,24 @@ mod tests {
             &output("WARN: x\n"),
             "tool"
         ));
+    }
+
+    #[test]
+    fn detached_argv_is_one_call() {
+        let words = |list: &[&str]| -> Vec<std::ffi::OsString> {
+            list.iter().map(std::ffi::OsString::from).collect()
+        };
+        let call = |list: &[&str]| super::detached_argv_call(&words(list));
+        assert_eq!(
+            call(&["--detach", "--ttl", "1h", "--", "claude", "-p", "a b"]),
+            Some((vec!["claude".into(), "-p".into(), "a b".into()], true))
+        );
+        assert_eq!(call(&["--", "claude", "-p", "x"]), None);
+        assert_eq!(
+            call(&["--detach", "--image", "r@sha256:1", "--", "claude"]),
+            None
+        );
+        assert_eq!(call(&["--detach", "-c", "claude -p x"]), None);
     }
 
     #[test]
