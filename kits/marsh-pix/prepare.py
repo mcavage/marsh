@@ -21,6 +21,7 @@ KIT_FILES = ["pix.yaml", "Dockerfile", "entrypoint.sh"]
 PACKAGE_FILES = [
     "package.json", "instructions.md", "defaults/settings.json",
     "extensions/ui.mjs", "extensions/output-style.ts", "lib/output-style.ts",
+    "lib/skill-sources.mjs",
     "skills/marsh-orchestration/SKILL.md", "skills/delegation-guide/SKILL.md",
     "skills/capability-routing/SKILL.md",
     "skills/analyze/SKILL.md", "skills/architecture-audit/SKILL.md",

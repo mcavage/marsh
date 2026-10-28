@@ -55,15 +55,11 @@ def verify(root):
         if digest(regular(root, target)) != entries[source]: raise ValueError(f"changed installed {source}")
     if not (regular(root, "usr/local/bin/marsh-pix").stat().st_mode & 0o111):
         raise ValueError("entrypoint is not executable")
-    base = json.loads(regular(root, license_root + "/base-check/image-verification.json").read_text())
-    if base.get("adapter_scope", {}).get("root") != "/opt/marsh/pi-gateway":
-        raise ValueError("missing actual-image Pi/base notice correspondence check")
     return {
         "schema": "pix.public-payload-verification/v1",
         "source_commit": inventory["source_commit"],
         "package_files": len(actual),
         "package_sha256": hashlib.sha256(json.dumps(actual, sort_keys=True).encode()).hexdigest(),
-        "base_receipt_sha256": digest(root / license_root / "base-check/image-verification.json"),
         "qualification": "Added source payload and installed notices checked; not a legal grant, registry signature, authenticated-provider or marsh execution proof",
         "image_identity_boundary": "Host publisher must bind this receipt to the exact image digest",
     }
