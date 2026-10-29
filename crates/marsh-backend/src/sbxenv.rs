@@ -632,6 +632,10 @@ impl StockDaemonBackend {
             .collect::<Vec<_>>();
         let mut pending = false;
         for vm in vms {
+            // Recovery owns quarantined VMs; a reload must not configure them.
+            if self.vm_quarantined(store, &vm.name) {
+                continue;
+            }
             match self.configure_prepared_mcp(&vm, false, store) {
                 Ok(deferred) => pending |= deferred,
                 Err(error) => eprintln!("marshd: sbxenv: {}: {error}", vm.name),
