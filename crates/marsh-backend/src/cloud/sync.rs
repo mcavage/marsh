@@ -62,7 +62,7 @@ fn control(
     args: &[&str],
     input: Option<Vec<u8>>,
     sink: Box<dyn io::Write + Send>,
-) -> Result<(), String> {
+) -> Result<Vec<u8>, String> {
     let (program, words) = target.ctl.step(args);
     let attachment: Attachment = target
         .adapter
@@ -71,7 +71,7 @@ fn control(
     let input = input.map(|bytes| Box::new(io::Cursor::new(bytes)) as Box<dyn Read + Send>);
     let result = step(attachment, input, sink, MAX_ARCHIVE, STEP_TIMEOUT)?;
     if result.ok() {
-        Ok(())
+        Ok(result.stderr)
     } else {
         Err(result.diagnostic())
     }
@@ -243,6 +243,7 @@ pub(crate) fn conflict_note(conflicts: &[String]) -> String {
 }
 
 /// One sync of a running block. Errors are reported in the result.
+#[allow(clippy::too_many_lines)] // One ordered fetch, check, apply, rebase sequence.
 pub(crate) fn sync(target: &SyncTarget) -> SyncReport {
     let mut state = target
         .state
@@ -271,6 +272,7 @@ pub(crate) fn sync(target: &SyncTarget) -> SyncReport {
         return failed(report, error.to_string());
     }
     let payload = target.results.join(format!("{}.sync.delta", target.job_id));
+    let mut ignored = 0;
     let outcome = (|| -> Result<Checked, String> {
         let base = fetch_base(target)?;
         let file = OpenOptions::new()
@@ -280,13 +282,14 @@ pub(crate) fn sync(target: &SyncTarget) -> SyncReport {
             .mode(0o600)
             .open(&payload)
             .map_err(|e| e.to_string())?;
-        control(
+        let stderr = control(
             target,
             &["--internal-cloud", "sync", &target.root_text],
             None,
             Box::new(BufWriter::new(file)),
         )
         .map_err(|message| format!("reading the sandbox's changes: {message}"))?;
+        ignored = marsh_contracts::cloud::ignored_count(&stderr);
         // From the first sync on, the final write-back is base-checked.
         state.synced = true;
         checked_apply(
@@ -303,8 +306,12 @@ pub(crate) fn sync(target: &SyncTarget) -> SyncReport {
         Err(message) => return failed(report, message),
     };
     report.conflicts = checked.conflicts;
+    report.ignored = ignored;
     let applied = match checked.report {
-        Ok(applied) => applied,
+        Ok(mut applied) => {
+            applied.ignored = ignored;
+            applied
+        }
         Err(error) => {
             // Not rebased: the next sync carries these paths again (those
             // already written here match and are not conflicts).

@@ -469,6 +469,7 @@ mod tests {
             stdin_terminal: false,
             detached: true,
             delegate: Some(plan.clone()),
+            ignore: None,
         };
         let mut receipt_calls = vec![marsh_daemon::CloudChildCall {
             kit: "codex".into(),
@@ -881,6 +882,8 @@ impl StockDaemonBackend {
                 .as_ref()
                 .filter(|_| !bindings.is_empty())
                 .map(|token| delegate_plan(token, &bindings, options.ttl, options.cpus)),
+            // Set by the snapshot when it applies ignore rules.
+            ignore: None,
         };
 
         // Provision.
@@ -1310,6 +1313,7 @@ impl StockDaemonBackend {
         let payload = results.join(format!("{job_id}.delta"));
         let captured = capture_delta(&adapter, &id, ctl, &root_text, &results, &payload);
         settle.phase("capture");
+        let ignored = *captured.as_ref().unwrap_or(&0);
         if let Err(message) = captured {
             // The sandbox holds the only copy of the results: keep it
             // (quarantined, owned) instead of deleting it.
@@ -1423,7 +1427,8 @@ impl StockDaemonBackend {
             }
         };
         match applied {
-            Ok(report) => {
+            Ok(mut report) => {
+                report.ignored = ignored;
                 if conflicts.is_empty() {
                     let _ = fs::remove_file(&payload);
                 }
@@ -1449,7 +1454,7 @@ impl StockDaemonBackend {
                         sync::conflict_note(&conflicts),
                         payload.display()
                     ));
-                } else if report.total() > 0 || !report.kept.is_empty() {
+                } else if report.total() > 0 || !report.kept.is_empty() || report.ignored > 0 {
                     settle.note(&summary(&report));
                 }
                 let cause = if store.cancel_requested(&job_id) {

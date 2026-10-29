@@ -421,6 +421,14 @@ pub fn summary(report: &ApplyReport) -> String {
             }
         );
     }
+    if report.ignored > 0 {
+        let _ = write!(
+            text,
+            "; {} ignored file{} left in the cloud",
+            report.ignored,
+            plural(report.ignored)
+        );
+    }
     text
 }
 
@@ -854,7 +862,7 @@ pub fn capture_delta(
     root: &str,
     results: &Path,
     payload: &Path,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -878,7 +886,7 @@ pub fn capture_delta(
         STEP_TIMEOUT,
     )?;
     if step.ok() {
-        Ok(())
+        Ok(marsh_contracts::cloud::ignored_count(&step.stderr))
     } else {
         Err(step.diagnostic())
     }
@@ -1081,6 +1089,7 @@ pub fn run_child(
         stdin_terminal: false,
         detached: false,
         delegate: None,
+        ignore: None,
     };
     if let Err(message) = copy_view(adapter, &id, call.root, parent, &child_request) {
         return setup_failed(format!("copying the block's files: {message}"));
@@ -1232,6 +1241,7 @@ pub fn apply_report(stdout: &[u8], ok: bool, diagnostic: &str) -> Result<String,
                     .collect()
             })
             .unwrap_or_default(),
+        ignored: 0,
         listings: std::collections::BTreeSet::new(),
     };
     match report["error"].as_str() {
