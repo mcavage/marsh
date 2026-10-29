@@ -3,6 +3,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The huge TLA+ configs (Workspace_depth3_pass) run here, not per push.
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -47,8 +51,14 @@ jobs:
         id: classify
         env:
           BASE_REF: ${{ github.base_ref }}
+          SHARD: ${{ matrix.shard }}
         run: |
           set -euo pipefail
+          # The huge shard (237M states, hours on a 4-core runner) runs nightly and
+          # on demand only: per push it serialized every run on main behind it.
+          if [ "$SHARD" = depth3 ] && [ "$GITHUB_EVENT_NAME" != schedule ] && [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"; echo "Huge configs run nightly and on demand, not per push or pull request."; exit 0
+          fi
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
             printf 'code=true\nhost=true\n' >> "$GITHUB_OUTPUT"; exit 0
           fi
