@@ -659,7 +659,7 @@ fn an_owned_shell_vm_without_its_own_marker_still_fails_closed() {
     // No marker at all: never replaced.
     assert!(matches!(
         adapter.ensure_shell_vm(&shell.spec),
-        Err(SbxError::ForeignVm(_))
+        Err(SbxError::IncompatibleVm { .. })
     ));
     // Another name's shell marker: never replaced either.
     let other = serde_json::json!({
@@ -675,7 +675,7 @@ fn an_owned_shell_vm_without_its_own_marker_still_fails_closed() {
     });
     assert!(matches!(
         adapter.ensure_shell_vm(&shell.spec),
-        Err(SbxError::ForeignVm(_))
+        Err(SbxError::IncompatibleVm { .. })
     ));
     assert_eq!(model.vm(SHELL).unwrap().id, id);
     assert_eq!(model.count("rm"), 0);

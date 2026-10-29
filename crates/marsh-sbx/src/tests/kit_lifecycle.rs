@@ -98,13 +98,92 @@ fn an_existing_vm_that_is_not_provably_ours_is_never_touched() {
             model.seed_vm(KIT);
         }
 
-        assert!(matches!(
-            adapter.ensure_kit_vm(&kit.spec),
-            Err(SbxError::ForeignVm(_))
-        ));
+        let error = adapter.ensure_kit_vm(&kit.spec).unwrap_err();
+        if recorded {
+            assert!(
+                matches!(&error, SbxError::IncompatibleVm { detail, .. } if detail.contains("not a marsh marker")),
+                "{error}"
+            );
+        } else {
+            assert!(matches!(error, SbxError::ForeignVm(_)), "{error}");
+        }
         assert_eq!(model.mutations(), 0, "recorded={recorded}");
         assert!(model.vm(KIT).is_some());
     }
+}
+
+fn set_marker(model: &StockModel, profile: &str) {
+    let marker = serde_json::to_vec(&StockSbx::marker(profile)).unwrap();
+    model.with_vm(KIT, |vm| {
+        vm.files.insert("/var/lib/marsh/worker.json".into(), marker);
+    });
+}
+
+#[test]
+fn an_owned_vm_from_another_lifecycle_identity_is_replaced_not_refused() {
+    // The identity of the lifecycle workspace changes (macOS reassigns device
+    // numbers on reboot; a directory can be recreated): the VM is still the
+    // daemon's own, recorded by UUID, and its Kit is the same.
+    let model = StockModel::new();
+    let (adapter, kit, _) = warm_kit(&model, KIT);
+    let first = model.vm(KIT).unwrap().id;
+    let identity = kit.spec.workload_kit.identity();
+    set_marker(&model, &format!("kit:{identity}:sha256:{}", "7".repeat(64)));
+
+    assert!(!adapter.kit_vm_exists(&kit.spec).unwrap());
+    let ready = adapter.ensure_kit_vm(&kit.spec).unwrap();
+    assert!(ready.cold_started);
+    let vm = model.vm(KIT).unwrap();
+    assert_ne!(vm.id, first);
+    assert_eq!(adapter.ownership.uuid(KIT), Some(vm.id.clone()));
+    assert_eq!(
+        vm.files["/var/lib/marsh/worker.json"],
+        kit.published_marker()
+    );
+    assert_eq!(model.count("rm"), 1);
+}
+
+#[test]
+fn a_marker_from_the_device_number_identity_still_verifies_and_is_rewritten() {
+    let model = StockModel::new();
+    let (adapter, kit, _) = warm_kit(&model, KIT);
+    let first = model.vm(KIT).unwrap().id;
+    let legacy = legacy_home_identity(kit.home()).unwrap();
+    set_marker(
+        &model,
+        &format!("kit:{}:{legacy}", kit.spec.workload_kit.identity()),
+    );
+
+    assert!(adapter.kit_vm_exists(&kit.spec).unwrap());
+    let ready = adapter.ensure_kit_vm(&kit.spec).unwrap();
+    assert!(!ready.cold_started);
+    let vm = model.vm(KIT).unwrap();
+    assert_eq!(vm.id, first);
+    assert_eq!(
+        vm.files["/var/lib/marsh/worker.json"],
+        kit.published_marker()
+    );
+    assert_eq!(model.count("rm"), 0);
+}
+
+#[test]
+fn another_kits_marker_on_an_owned_vm_names_the_failed_check() {
+    let model = StockModel::new();
+    let (adapter, kit, _) = warm_kit(&model, KIT);
+    set_marker(
+        &model,
+        &format!(
+            "kit:registry.example/other@sha256:{}:sha256:{}",
+            "a".repeat(64),
+            "7".repeat(64)
+        ),
+    );
+    let error = adapter.ensure_kit_vm(&kit.spec).unwrap_err();
+    assert!(
+        matches!(&error, SbxError::IncompatibleVm { vm, detail } if vm == KIT && detail.contains("worker marker profile")),
+        "{error}"
+    );
+    assert_eq!(model.count("rm"), 0);
 }
 
 #[test]
