@@ -87,8 +87,46 @@ marsh cloud --cpus 4
 
 It has a real terminal of your window's size, follows resizes, and supports
 line editing. When you exit, its file changes are written back, as for a
-block, and `marsh cloud` exits with the shell's status. Ctrl-C is sent to the
+block, and `marsh cloud` exits with the shell's status; `marsh cloud sync`
+from another terminal brings them back sooner
+([sync while it runs](#sync-while-it-runs)). Ctrl-C is sent to the
 remote program, as in any terminal; closing your terminal ends the session.
+
+## Sync while it runs
+
+A long-lived block, such as an interactive cloud shell or an agent that
+never exits by itself (`marsh cloud -- claude --acp`), writes its changes
+back only when it ends. To bring them back sooner, sync it:
+
+```sh
+marsh cloud sync 42          # one block
+marsh cloud sync --all       # every running attached block
+marsh cloud sync --json 42   # {"synced": [{"cursor": 42, "created": 1, ...}]} on stdout
+```
+
+Each attached block names its job on stderr when its command starts:
+`` marsh: cloud: job 42 running (JOB_ID); `marsh cloud sync 42` writes its changes back now ``.
+`marsh jobs --json` lists it too (`placement` `cloud`, `state` `running`).
+
+- The block keeps running in the same sandbox; sync only reads its files.
+  It is one-way: local edits are not uploaded.
+- Each changed path is checked as a detached run's are: a path also changed
+  here since it was uploaded (or last synced) is skipped, your local file
+  kept, and reported as a conflict. The rest is written as at the end of a
+  block, with the same rules for directories and names.
+- What a sync wrote becomes the new base: a later sync, and the final
+  write-back, carry only newer changes. A path skipped as a conflict is
+  checked again each time.
+- Once a block has synced, its final write-back is checked the same way:
+  conflicting paths are skipped and reported, and the full change set is kept
+  under `cloud/results/JOB.delta` in your control home.
+- stderr reports each sync, for example
+  `marsh: cloud: job 42: synced 3 changes (1 created, 2 modified, 0 deleted); 1 conflict (changed here too, kept local): notes.txt`.
+  `marsh cloud sync` exits 1 when a sync failed (its message says why and
+  what was already written); a later sync or the final write-back retries.
+- Sync is for attached blocks started from your session or a host terminal.
+  A detached run's changes come back when it is collected. `marsh status
+  --json` lists the `cloud-sync-v1` feature.
 
 ## File changes come back automatically
 
@@ -104,8 +142,8 @@ cloud { ./generate-assets; } && make test   # make sees the generated files
   directories return; symlinks return as links and are never followed.
 - Unchanged files do not, so your local edits to other files survive.
 - **A returned change overwrites your local edit to the same path.** There is
-  no merge or conflict check. Concurrent cloud calls that write the same file:
-  the last one applied wins.
+  no merge or conflict check (unless the block [synced](#sync-while-it-runs)).
+  Concurrent cloud calls that write the same file: the last one applied wins.
 - A command that exits nonzero still returns its changes, as a local command
   would have made them.
 - New files whose names match ignore rules (build outputs, logs) return too:

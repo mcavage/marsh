@@ -39,6 +39,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod detach;
+mod sync;
 
 /// The pinned cloud shell image (`docs/plan/cloud-feasibility.md`).
 pub const DEFAULT_CLOUD_IMAGE: &str = "docker.io/docker/sandbox-templates:shell-docker@sha256:b2c007bbb5dcdb60a29f3019c7160ebe0c50c968e08854fbba6093834f8f6a1b";
@@ -51,6 +52,8 @@ pub(crate) struct CloudPlacement {
     adapter: Mutex<Option<Arc<CloudSbx>>>,
     imports: Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>,
     collector: detach::Collector,
+    /// Running attached blocks `marsh cloud sync` can reach, by job.
+    syncs: Mutex<BTreeMap<String, Arc<sync::SyncTarget>>>,
 }
 
 /// The caller's `--image`, else the daemon's `MARSH_CLOUD_IMAGE`, else the
@@ -186,6 +189,23 @@ impl CloudPlacement {
         // `marsh workers reset cloud` or their TTL; nothing is deleted here.
         *slot = Some(Arc::clone(&adapter));
         Ok(adapter)
+    }
+
+    /// Stop syncs of `job` (waiting for one in progress): whether any ran.
+    fn close_sync(&self, job: &str) -> bool {
+        let target = self
+            .syncs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(job);
+        target.is_some_and(|target| {
+            let mut state = target
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.closed = true;
+            state.synced
+        })
     }
 
     fn import_lock(&self, root: &Path) -> Arc<Mutex<()>> {
@@ -1189,6 +1209,37 @@ impl StockDaemonBackend {
             // Cancelled between the last setup check and control registration.
             store.cancel_tree(&job_id, true);
         }
+        // A block from the session can sync while it runs (`marsh cloud sync`).
+        let cursor = store.job(&job_id).map(|job| job.cursor).unwrap_or_default();
+        let sync_target = origin.is_none().then(|| {
+            Arc::new(sync::SyncTarget {
+                job_id: job_id.clone(),
+                cursor,
+                adapter: Arc::clone(&adapter),
+                id: id.clone(),
+                ctl,
+                root: root.clone(),
+                root_text: root_text.clone(),
+                identity,
+                attachment: attachment.clone(),
+                results: self.config.control_home.join("cloud").join("results"),
+                import: self.cloud.import_lock(&root),
+                state: Mutex::new(sync::SyncState::default()),
+            })
+        });
+        if let Some(target) = &sync_target {
+            self.cloud
+                .syncs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(job_id.clone(), Arc::clone(target));
+            let _ = attachment.send(&AttachmentFrame::Stderr {
+                bytes: format!(
+                    "marsh: cloud: job {cursor} running ({job_id}); `marsh cloud sync {cursor}` writes its changes back now\n"
+                )
+                .into_bytes(),
+            });
+        }
         let calls = mixin.map(|mixin| {
             Arc::new(AgentCalls {
                 adapter: Arc::clone(&adapter),
@@ -1226,6 +1277,7 @@ impl StockDaemonBackend {
         if let Some(calls) = &calls {
             calls.settle();
         }
+        let synced = self.cloud.close_sync(&job_id);
         let carrier_code = delivered.code;
         if !delivered.output_complete {
             settle.output_complete = false;
@@ -1277,6 +1329,26 @@ impl StockDaemonBackend {
                 CleanupState::Uncertain,
             );
         }
+        // After a sync, the base check needs the sandbox's baseline.
+        let base = match sync_target.as_ref().filter(|_| synced) {
+            Some(target) => match sync::fetch_base(target) {
+                Ok(base) => Some(base),
+                Err(message) => {
+                    let cleanup = retire(&adapter);
+                    settle.note(&format!(
+                        "{message}; nothing was written back; the changes are kept at {}",
+                        payload.display()
+                    ));
+                    return settle.finish(
+                        ExecutionOutcome::Exited { code: exit_code },
+                        125,
+                        format!("write_back_skipped: {message}"),
+                        cleanup,
+                    );
+                }
+            },
+            None => None,
+        };
         // The payload is retained on the host; the sandbox can go now.
         let cleanup = retire(&adapter);
         settle.phase("cleanup");
@@ -1294,8 +1366,14 @@ impl StockDaemonBackend {
                 cleanup,
             );
         }
-        let applied = {
-            let lock = self.cloud.import_lock(&root);
+        let lock = self.cloud.import_lock(&root);
+        let applied = if let Some(base) = base {
+            // Only a block from the session syncs: no calling job to check.
+            Some(
+                sync::checked_apply(&root, identity, &lock, base, &payload)
+                    .map(|checked| (checked.report, checked.conflicts)),
+            )
+        } else {
             let _held = lock
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1309,7 +1387,12 @@ impl StockDaemonBackend {
                     )
                 })
             });
-            parent_live.then(|| cloud_fs::apply_delta(&root, identity, &payload, MAX_ARCHIVE))
+            parent_live.then(|| {
+                Ok((
+                    cloud_fs::apply_delta(&root, identity, &payload, MAX_ARCHIVE),
+                    Vec::new(),
+                ))
+            })
         };
         settle.phase("apply");
         let Some(applied) = applied else {
@@ -1324,9 +1407,26 @@ impl StockDaemonBackend {
                 cleanup,
             );
         };
+        let (applied, conflicts) = match applied {
+            Ok(applied) => applied,
+            Err(message) => {
+                settle.note(&format!(
+                    "write-back stopped: {message}; nothing was written; the full delta is kept at {}",
+                    payload.display()
+                ));
+                return settle.finish(
+                    ExecutionOutcome::Exited { code: exit_code },
+                    125,
+                    format!("write_back_failed: {message}"),
+                    cleanup,
+                );
+            }
+        };
         match applied {
             Ok(report) => {
-                let _ = fs::remove_file(&payload);
+                if conflicts.is_empty() {
+                    let _ = fs::remove_file(&payload);
+                }
                 if !report.listings.is_empty() {
                     // Before the exit status: the caller's next command
                     // (in a VM with a cached file share) lists the changes.
@@ -1342,7 +1442,14 @@ impl StockDaemonBackend {
                             .collect(),
                     });
                 }
-                if report.total() > 0 || !report.kept.is_empty() {
+                if !conflicts.is_empty() {
+                    settle.note(&format!(
+                        "{}{}; the full delta is kept at {}",
+                        summary(&report),
+                        sync::conflict_note(&conflicts),
+                        payload.display()
+                    ));
+                } else if report.total() > 0 || !report.kept.is_empty() {
                     settle.note(&summary(&report));
                 }
                 let cause = if store.cancel_requested(&job_id) {

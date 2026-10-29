@@ -395,7 +395,7 @@ fn small_control(
 
 /// An entry's contents as the base check compares them.
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum Entry {
+pub(super) enum Entry {
     Absent,
     Directory(u32),
     File(u32, Vec<u8>),
@@ -423,6 +423,11 @@ fn read_base(path: &Path, expected: &str) -> Result<BTreeMap<Vec<u8>, Entry>, St
     if super::hex(&Sha256::digest(&bytes)) != expected {
         return Err("base manifest changed since the run started".into());
     }
+    parse_base(bytes)
+}
+
+/// A remote baseline (`--internal-cloud baseline`) as the base check reads it.
+pub(super) fn parse_base(bytes: Vec<u8>) -> Result<BTreeMap<Vec<u8>, Entry>, String> {
     let mut reader = Reader::new(io::Cursor::new(bytes), u64::MAX).map_err(|e| e.to_string())?;
     let mut entries = BTreeMap::new();
     while let Some(header) = reader.next_header().map_err(|e| e.to_string())? {
@@ -438,7 +443,7 @@ fn read_base(path: &Path, expected: &str) -> Result<BTreeMap<Vec<u8>, Entry>, St
 }
 
 /// The delta's resulting entries (verifies the whole archive).
-fn read_result(path: &Path) -> Result<Vec<(Vec<u8>, Entry)>, String> {
+pub(super) fn read_result(path: &Path) -> Result<Vec<(Vec<u8>, Entry)>, String> {
     let file = File::open(path).map_err(|e| e.to_string())?;
     let mut reader = Reader::new(BufReader::new(file), MAX_ARCHIVE).map_err(|e| e.to_string())?;
     let mut entries = Vec::new();
@@ -531,6 +536,18 @@ fn conflicts(
     base: &BTreeMap<Vec<u8>, Entry>,
     result: &[(Vec<u8>, Entry)],
 ) -> Vec<String> {
+    conflicting(root, base, result)
+        .iter()
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect()
+}
+
+/// [`conflicts`], as the paths' bytes.
+pub(super) fn conflicting(
+    root: &Dir,
+    base: &BTreeMap<Vec<u8>, Entry>,
+    result: &[(Vec<u8>, Entry)],
+) -> Vec<Vec<u8>> {
     result
         .iter()
         .filter(|(path, after)| {
@@ -543,7 +560,7 @@ fn conflicts(
             };
             !(same(&local, &before) || same(&local, after))
         })
-        .map(|(path, _)| String::from_utf8_lossy(path).into_owned())
+        .map(|(path, _)| path.clone())
         .collect()
 }
 
@@ -1495,6 +1512,41 @@ impl StockDaemonBackend {
             CloudDetachedRequest::Stop { job } => {
                 let job = resolve(&job)?;
                 self.stop_detached(store, &paths, &job)
+            }
+            CloudDetachedRequest::Sync { job } => {
+                let targets = {
+                    let syncs = self
+                        .cloud
+                        .syncs
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    match &job {
+                        None => syncs.values().cloned().collect::<Vec<_>>(),
+                        Some(selector) => {
+                            let job = store.job(selector)?;
+                            vec![syncs.get(&job.job_id).cloned().ok_or_else(|| {
+                                DaemonError::Refused(format!(
+                                    "cloud: job {} is not a running attached cloud block from a session; \
+                                     only those sync (a detached run's changes come back when it is collected)",
+                                    job.cursor
+                                ))
+                            })?]
+                        }
+                    }
+                };
+                let synced = targets
+                    .iter()
+                    .map(|target| super::sync::sync(target))
+                    .collect::<Vec<_>>();
+                Ok(CloudDetachedReply {
+                    message: if synced.is_empty() {
+                        "no running attached cloud blocks to sync".into()
+                    } else {
+                        String::new()
+                    },
+                    synced,
+                    ..CloudDetachedReply::default()
+                })
             }
             CloudDetachedRequest::DiscardAll => {
                 let mut discarded = 0_u64;

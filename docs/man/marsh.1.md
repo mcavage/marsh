@@ -178,6 +178,16 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   **discard** deletes its sandbox and drops any kept patch; **stop** sends INT,
   then KILL after 10 seconds.
 
+**cloud sync** [**--json**] *JOB*|**--all**
+: Write a running attached cloud block's file changes so far back now; the
+  block keeps running in the same sandbox. A path also changed here since it
+  was uploaded or last synced is skipped and reported as a conflict, the local
+  file kept. Synced changes become the new base, so later syncs and the final
+  write-back carry only newer changes. The block names *JOB* on stderr when it
+  starts (**marsh: cloud: job** *N* **running** ...). Prints **marsh: cloud:
+  job** *N*: **synced** ... on stderr, or with **--json** a
+  **{"synced": [...]}** document on stdout; exits 1 when a sync failed.
+
 **config shell** [**bash**|**zsh**|**marsh**]
 : Set, or with no name print, the default shell for this **MARSH_HOME**.
 

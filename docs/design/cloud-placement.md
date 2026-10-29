@@ -684,6 +684,19 @@ With the live-sharing gate (section 7, item 3) still open, the user chose:
   parent's view, the parent's limits (section 4's job-origin bullet).
 - Cloud -> laptop crossings and `marsh run --place` are v2 work.
 
+### Decisions of 2026-10-29
+
+- **Sync while running** (`marsh cloud sync JOB|--all`, owner-approved): an
+  attached block from the session can write back its changes so far without
+  ending; it is one-way and the block keeps its sandbox. Unlike the final
+  last-writer-wins return, each synced path gets the detached write-back's
+  base check: a path also changed locally since it was uploaded or last
+  synced is skipped and reported. The sandbox's baseline then takes the
+  written entries, so later syncs and the final return carry only newer
+  changes; after a sync the final return is base-checked too, since skipped
+  paths still differ from that baseline. A sync is not a capture of a
+  settled view (section 6's phases are unchanged for the final return).
+
 ### Review disposition
 
 The independent adversarial pass returned REVISE: destination name aliases and
