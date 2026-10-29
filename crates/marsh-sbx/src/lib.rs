@@ -113,6 +113,10 @@ const RETAINED_RESPONSE_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 static NEXT_LOCAL_SCRATCH: AtomicU64 = AtomicU64::new(1);
 static NEXT_SHELL_MOUNT: AtomicU64 = AtomicU64::new(1);
 const SHELL_MOUNT_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long an opener is blocked on another's shell VM setup before it
+/// reports that it is waiting, and how often it checks afterwards.
+const SHELL_WAIT_NOTICE_AFTER: Duration = Duration::from_secs(1);
+const SHELL_WAIT_POLL: Duration = Duration::from_millis(200);
 /// Bound on waiting for a concurrent grant transition while closing a shell.
 const SHELL_CLOSE_TRANSITION_WAIT: Duration = Duration::from_secs(10);
 #[derive(Clone, Copy, Debug)]
@@ -309,6 +313,16 @@ pub struct ShellUser {
     pub uid: u32,
     pub gid: u32,
     pub home: PathBuf,
+}
+
+/// What `ensure_shell_vm_with` reports while it works.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShellVmProgress {
+    /// About to create the shell VM; `replacing` removes a VM of another
+    /// shell image first, `download` means the template will probably be pulled.
+    Creating { replacing: bool, download: bool },
+    /// Another opener holds the shell VM's setup; still waiting.
+    Waiting,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2321,12 +2335,27 @@ impl StockSbx {
     /// # Errors
     /// Rejects quarantined VMs and bounded lifecycle admission contention.
     pub fn admit_shell_session(&self, name: &str) -> Result<ShellVmSession, SbxError> {
+        self.admit_shell_session_with(name, &mut |_| true)
+    }
+
+    /// [`Self::admit_shell_session`], reporting [`ShellVmProgress::Waiting`]
+    /// while another opener's setup of this VM holds admission.
+    ///
+    /// # Errors
+    /// As [`Self::admit_shell_session`]; `false` from `progress` stops the
+    /// wait as admission-busy.
+    pub fn admit_shell_session_with(
+        &self,
+        name: &str,
+        progress: &mut dyn FnMut(ShellVmProgress) -> bool,
+    ) -> Result<ShellVmSession, SbxError> {
         validate_name(name)?;
         let (transition, _cleanup) =
             weak_rw_transition_lock(&self.grant_vm_transition_locks, name.to_owned());
-        let _guard = shell_admission_before(
+        let _guard = shell_admission_before_with(
             || transition.try_read(),
             Instant::now() + SHELL_MOUNT_TIMEOUT,
+            |blocked| blocked < SHELL_WAIT_NOTICE_AFTER || progress(ShellVmProgress::Waiting),
         )?;
         self.reject_quarantined_shell(name)?;
         let counter = self
@@ -2372,15 +2401,33 @@ impl StockSbx {
     /// Fails closed on a foreign name, mutable image, unsafe artifact, or
     /// guest-user mismatch.
     pub fn ensure_shell_vm(&self, spec: &ShellVmSpec) -> Result<ReadyShellVm, SbxError> {
+        self.ensure_shell_vm_with(spec, &mut |_| true)
+    }
+
+    /// [`Self::ensure_shell_vm`], reporting progress to the caller: once
+    /// before a create or replacement starts, and repeatedly while waiting
+    /// for another opener that holds the VM's setup. The callback returns
+    /// `false` to stop waiting (the call then fails as admission-busy).
+    ///
+    /// # Errors
+    /// As [`Self::ensure_shell_vm`]; waiting past the admission window or
+    /// being told to stop is [`SbxError::ShellMountAdmissionBusy`], with no
+    /// stock operation submitted.
+    pub fn ensure_shell_vm_with(
+        &self,
+        spec: &ShellVmSpec,
+        progress: &mut dyn FnMut(ShellVmProgress) -> bool,
+    ) -> Result<ReadyShellVm, SbxError> {
         let (transition, _cleanup) =
             weak_rw_transition_lock(&self.grant_vm_transition_locks, spec.name.clone());
-        let _guard = shell_admission_before(
+        let _guard = shell_admission_before_with(
             || transition.try_write(),
             Instant::now() + SHELL_MOUNT_TIMEOUT,
+            |blocked| blocked < SHELL_WAIT_NOTICE_AFTER || progress(ShellVmProgress::Waiting),
         )?;
         self.reject_quarantined_shell(&spec.name)?;
         self.remember_shell_recovery_spec(spec);
-        self.ensure_shell_vm_inner(spec)
+        self.ensure_shell_vm_inner(spec, progress)
     }
 
     fn reject_observed_shell_disappearance(&self, name: &str) -> Result<(), SbxError> {
@@ -2416,7 +2463,11 @@ impl StockSbx {
         Ok(())
     }
 
-    fn ensure_shell_vm_inner(&self, spec: &ShellVmSpec) -> Result<ReadyShellVm, SbxError> {
+    fn ensure_shell_vm_inner(
+        &self,
+        spec: &ShellVmSpec,
+        progress: &mut dyn FnMut(ShellVmProgress) -> bool,
+    ) -> Result<ReadyShellVm, SbxError> {
         validate_name(&spec.name)?;
         validate_token(&spec.user.name)?;
         if spec.user.uid == 0 || spec.user.gid == 0 || !safe_absolute(&spec.user.home) {
@@ -2482,6 +2533,11 @@ impl StockSbx {
                     if !self.is_owned_shell_of_another_image(&spec.name, &marker) {
                         return Err(error);
                     }
+                    self.reject_observed_shell_disappearance(&spec.name)?;
+                    progress(ShellVmProgress::Creating {
+                        replacing: true,
+                        download: self.shell_template_download_needed(&template),
+                    });
                     self.retire_stale_shell(&spec.name)?;
                     self.remember_shell_recovery_spec(spec);
                     create()?;
@@ -2491,6 +2547,10 @@ impl StockSbx {
                 }
             }
             VmClass::Absent => {
+                progress(ShellVmProgress::Creating {
+                    replacing: false,
+                    download: self.shell_template_download_needed(&template),
+                });
                 create()?;
                 true
             }
@@ -3516,9 +3576,16 @@ impl StockSbx {
         let Ok(template) = ShellTemplateReference::parse(spec.image.as_str()) else {
             return false;
         };
-        if template.requires_local_authority()
-            || !matches!(self.classify_vm(&spec.name, false), Ok(VmClass::Absent))
-        {
+        if !matches!(self.classify_vm(&spec.name, false), Ok(VmClass::Absent)) {
+            return false;
+        }
+        self.shell_template_download_needed(&template)
+    }
+
+    /// Whether creating a shell VM from this template will probably download
+    /// it: a registry image whose tag stock SBX's image store does not list.
+    fn shell_template_download_needed(&self, template: &ShellTemplateReference) -> bool {
+        if template.requires_local_authority() {
             return false;
         }
         let digest_tag = template.digest().replace(':', "-");
@@ -6286,9 +6353,21 @@ impl SbxError {
 // VM lifecycle -> per-key phase reservation -> stock-operation admission.
 // The phase mutex and global maps are always released before opaque stock calls.
 fn shell_admission_before<T>(
-    mut attempt: impl FnMut() -> Result<T, std::sync::TryLockError<T>>,
+    attempt: impl FnMut() -> Result<T, std::sync::TryLockError<T>>,
     deadline: Instant,
 ) -> Result<T, SbxError> {
+    shell_admission_before_with(attempt, deadline, |_| true)
+}
+
+/// [`shell_admission_before`] that reports how long it has been blocked, at
+/// most every [`SHELL_WAIT_POLL`]; `false` from `waiting` gives up as busy.
+fn shell_admission_before_with<T>(
+    mut attempt: impl FnMut() -> Result<T, std::sync::TryLockError<T>>,
+    deadline: Instant,
+    mut waiting: impl FnMut(Duration) -> bool,
+) -> Result<T, SbxError> {
+    let started = Instant::now();
+    let mut reported = None::<Instant>;
     loop {
         if Instant::now() >= deadline {
             return Err(SbxError::ShellMountAdmissionBusy);
@@ -6297,6 +6376,12 @@ fn shell_admission_before<T>(
             Ok(guard) => return Ok(guard),
             Err(std::sync::TryLockError::Poisoned(error)) => return Ok(error.into_inner()),
             Err(std::sync::TryLockError::WouldBlock) => {
+                if reported.is_none_or(|last| last.elapsed() >= SHELL_WAIT_POLL) {
+                    reported = Some(Instant::now());
+                    if !waiting(started.elapsed()) {
+                        return Err(SbxError::ShellMountAdmissionBusy);
+                    }
+                }
                 thread::sleep(
                     Duration::from_millis(5)
                         .min(deadline.saturating_duration_since(Instant::now())),
