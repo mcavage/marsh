@@ -374,7 +374,7 @@ def main() -> int:
         ckpts_before = len(json_of("checkpoints", "--json")["checkpoints"])
         from_job = host("run", "fixture", "exec", "sh", "-c",
                         f"cd {project} && marsh checkpoint --lane {lane_name}; echo status=$?", cwd=lane_g)
-        assert b"job capability admits only" in from_job.stderr, from_job.stderr
+        assert b"not available inside a job" in from_job.stderr, from_job.stderr
         from_shell = host("-c", f"cd {project} && marsh checkpoint --lane {lane_name}", timeout=900)
         assert from_shell.returncode != 0 and b"only its creator" in from_shell.stderr, from_shell.stderr
         assert len(json_of("checkpoints", "--json")["checkpoints"]) == ckpts_before, "a refused checkpoint was made"
