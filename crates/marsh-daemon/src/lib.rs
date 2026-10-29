@@ -100,6 +100,7 @@ pub const FEATURES: &[&str] = &[
     "apply-json-v1",
     "lane-cloud-v1",
     "lane-shell-v1",
+    "lane-checkpoints-v1",
 ];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while
@@ -786,9 +787,21 @@ pub enum PublicRequest {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CheckpointAction {
-    Create { label: Option<String> },
-    List { label: Option<String> },
-    Remove { id: String },
+    Create {
+        label: Option<String>,
+    },
+    /// Snapshot an open or kept lane (`SPLIT_ID/LABEL`) of the project:
+    /// the split's creator or the host only (`lane-checkpoints-v1`).
+    CreateLane {
+        lane: String,
+        label: Option<String>,
+    },
+    List {
+        label: Option<String>,
+    },
+    Remove {
+        id: String,
+    },
 }
 
 /// Host-approved identity and paths captured before entering the guest VM.
@@ -5776,11 +5789,36 @@ impl ConnectionHandler {
                     message,
                 };
                 let reply = match (action, root) {
-                    (CheckpointAction::Create { .. }, None) => {
-                        invalid("checkpoint: no project root".into())
-                    }
-                    (CheckpointAction::Create { .. }, Some(root)) if !root.is_absolute() => {
+                    (
+                        CheckpointAction::Create { .. } | CheckpointAction::CreateLane { .. },
+                        None,
+                    ) => invalid("checkpoint: no project root".into()),
+                    (
+                        CheckpointAction::Create { .. } | CheckpointAction::CreateLane { .. },
+                        Some(root),
+                    ) if !root.is_absolute() => {
                         invalid("checkpoint: the project root must be absolute".into())
+                    }
+                    (CheckpointAction::CreateLane { lane, label }, Some(root)) => {
+                        match self.splits.note_root(&root) {
+                            Err(error) => invalid(format!(
+                                "checkpoint: could not journal the project {}: {error}",
+                                root.display()
+                            )),
+                            Ok(()) => match self
+                                .splits
+                                .checkpoint_lane(&caller, &root, &lane, label)
+                            {
+                                Ok(checkpoint) => PublicReply::Document {
+                                    document: checkpoint.document(),
+                                },
+                                Err(checkpoint::Refusal::LowDisk(message)) => PublicReply::Error {
+                                    code: ErrorCode::NoSpace,
+                                    message,
+                                },
+                                Err(checkpoint::Refusal::Invalid(message)) => invalid(message),
+                            },
+                        }
                     }
                     (CheckpointAction::Create { label }, Some(root)) => {
                         match self.splits.note_root(&root) {

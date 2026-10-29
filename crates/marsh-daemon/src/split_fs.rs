@@ -578,6 +578,52 @@ pub fn saved_git(dir: &Dir, root: &Path) -> Result<GitSnapshot, String> {
     Ok(snapshot)
 }
 
+/// A lane's Git state, read from its admin directory as a checkpoint saves it
+/// ([`save_git`]): the resolved `HEAD` of the lane's branch, its index,
+/// `packed-refs`, and `info/exclude`. Its jobs can write the admin directory's
+/// `index`, `objects`, and `refs`, so these are only read as data, through
+/// descriptors. Objects are read from the project's repository, `root`, and
+/// from what [`save_lane_objects`] keeps.
+///
+/// # Errors
+/// Returns why the admin files cannot be read.
+pub fn lane_git(admin: &Dir, root: &Path) -> Result<GitSnapshot, String> {
+    let mut snapshot = read_git_dir(admin)?;
+    snapshot.source.objects.push(root.join(".git/objects"));
+    Ok(snapshot)
+}
+
+/// Keep the objects a lane can reach that the project's repository lacks (its
+/// jobs' commits and the split's `store.git`) in `saved/objects`: regular
+/// files only, one directory deep, never `info/`. A split made `--from` the
+/// checkpoint clones them into its own `store.git/objects`.
+///
+/// # Errors
+/// Returns the first I/O failure other than an object that vanished.
+pub fn save_lane_objects(store: &Dir, admin: &Dir, saved: &Dir) -> io::Result<()> {
+    fn merge(from: &Dir, to: &Dir, top: bool) -> io::Result<()> {
+        for (name, kind) in from.entries()? {
+            if name.as_bytes().starts_with(b"tmp_") || (top && name == "info") {
+                continue;
+            }
+            match kind {
+                FileType::Directory if top => merge(&from.open(&name)?, &to.ensure(&name)?, false)?,
+                FileType::RegularFile if to.stat(&name).is_err() => {
+                    match from.clone_to(&name, to, &name) {
+                        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+    let objects = saved.create("objects")?;
+    merge(store, &objects, true)?;
+    merge(&admin.open("objects")?, &objects, true)
+}
+
 /// A nested split's Git source: the creator branch's admin directory.
 ///
 /// # Errors
