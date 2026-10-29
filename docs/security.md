@@ -12,7 +12,7 @@ and development shells have the explicit grants described below.
 | Read your real home directory | Not implicitly | Only the project, guest home, and explicitly configured extra directories are mounted |
 | Read proxy-managed provider keys | No | The `sbx` proxy holds them; the job sees placeholders |
 | Change or delete project files | Yes | The project is mounted read/write |
-| Read other jobs' logins and history | Yes, when they use the same guest home | The persistent guest home is shared within a scope |
+| Read other jobs' logins and history | Yes, when they use the same guest home, unless the job's Kit takes no home | The persistent guest home is shared within a scope; `org.marsh/home@1` keeps it out of a Kit's VM ([Mounts](kits.md#mounts)) |
 | Start other registered commands | Yes, within limits | The job capability socket; `MARSH_SPAWN` narrows it |
 | Reach the network | As its Kit's policy allows | `sbx` enforces the policy; marsh does not inspect traffic |
 
@@ -78,7 +78,8 @@ work, start marsh with a separate home: `MARSH_HOME=~/.marsh-work marsh`.
 Each registered command runs as a nonroot user in a fresh container, inside a
 VM for its Kit. A job sees:
 
-- the project and the guest home
+- the project and the guest home (no guest home if its Kit declares
+  [`mount: none`](kits.md#mounts))
 - its Kit's network policy
 - placeholders for proxy-managed credentials; the provider keys stay with the
   `sbx` proxy. Saved agent logins live in the shared guest home.
@@ -159,7 +160,8 @@ The guest home
 : Jobs using the same guest home can read and write one another's settings,
   history, and saved logins, even across Kits. Provider credentials bound with
   `sbx secret` stay behind the proxy. An agent's own login flow can instead save
-  credentials here as ordinary files, readable by other jobs.
+  credentials here as ordinary files, readable by other jobs. A Kit that
+  declares [`mount: none`](kits.md#mounts) never gets it.
 
 Agents' own sandboxes
 : The packaged Kits turn off Claude Code's and Codex's own sandboxes and

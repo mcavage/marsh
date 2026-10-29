@@ -180,9 +180,10 @@ pub struct AcpAdapter {
     pub protocol_version: Option<u64>,
 }
 
-/// What a Kit declares about agent sessions: its ACP adapter and its
-/// `agent-sessions@1` verbs, from the composed descriptor (kit sets, mixins,
-/// and capability groups included).
+/// What a Kit declares about agent sessions and its jobs: its ACP adapter,
+/// its `agent-sessions@1` verbs, and whether its jobs get the selected home,
+/// from the composed descriptor (kit sets, mixins, and capability groups
+/// included).
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct KitAgent {
@@ -190,7 +191,14 @@ pub struct KitAgent {
     pub acp: Option<AcpAdapter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sessions: Option<serde_json::Value>,
+    /// `org.marsh/home@1` with `mount: none`: the selected home is never
+    /// mounted into this Kit's VM or its jobs, however they are started.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_home: bool,
 }
+
+/// marsh's own capability: which of the session's mounts a Kit's jobs get.
+pub const HOME_CAPABILITY: &str = "org.marsh/home@1";
 
 /// `claude`, `com.docker.kit/claude`, and `claude@2.1.3` name one agent.
 fn agent_name(name: &str) -> String {
@@ -251,6 +259,18 @@ impl KitAgent {
                         ));
                     }
                     sessions.push(config);
+                }
+                // Any component of a set may narrow; none can widen back.
+                Some(HOME_CAPABILITY) => {
+                    match config.get("mount").and_then(serde_json::Value::as_str) {
+                        Some("none") => agent.no_home = true,
+                        Some("selected") => {}
+                        _ => {
+                            return Err(format!(
+                                "{HOME_CAPABILITY}: mount must be \"none\" or \"selected\""
+                            ));
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -443,6 +463,47 @@ mod tests {
             );
         }
         assert!(KitAssets::from_descriptor("not json").is_err());
+    }
+
+    #[test]
+    fn a_home_declaration_only_narrows_and_is_validated() {
+        let home = |mount: serde_json::Value| {
+            serde_json::json!({"capabilities": [
+                {"type": "com.docker.sandbox/sbx@1"},
+                {"group": {"capabilities": [{"type": HOME_CAPABILITY, "config": {"mount": mount}}]}}
+            ]})
+        };
+        assert!(
+            KitAgent::from_descriptor(&home("none".into()))
+                .unwrap()
+                .no_home
+        );
+        assert!(
+            !KitAgent::from_descriptor(&home("selected".into()))
+                .unwrap()
+                .no_home
+        );
+        assert!(
+            !KitAgent::from_descriptor(&serde_json::json!({}))
+                .unwrap()
+                .no_home
+        );
+        // A set whose components disagree keeps the narrower declaration.
+        let set = serde_json::json!({"capabilities": [
+            {"type": HOME_CAPABILITY, "config": {"mount": "none"}},
+            {"type": HOME_CAPABILITY, "config": {"mount": "selected"}}
+        ]});
+        assert!(KitAgent::from_descriptor(&set).unwrap().no_home);
+        for bad in [
+            serde_json::json!("read_only"),
+            serde_json::json!(false),
+            serde_json::Value::Null,
+        ] {
+            assert!(
+                KitAgent::from_descriptor(&home(bad.clone())).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

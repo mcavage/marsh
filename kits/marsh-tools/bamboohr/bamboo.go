@@ -28,7 +28,7 @@ type directory struct {
 // from the supervisor display name, as the previous server did; no local cache.
 func (s service) loadDirectory(ctx context.Context, company string) (*directory, error) {
 	if !companyName.MatchString(company) {
-		return nil, errors.New("configure the approved BambooHR company name")
+		return nil, errors.New("set BAMBOOHR_COMPANY_DOMAIN to the approved BambooHR company name")
 	}
 	var raw struct {
 		Employees []employee `json:"employees"`

@@ -72,7 +72,8 @@ The code-location table below records the implementation mapping and known gaps.
   the worker's entry marker and parent = docker-init, so every later own-name call (an agent's
   Bash tool calling itself) is a same-Kit child under a chain cap. Any job may spawn any Kit in
   its spawn set (every registered Kit by default; the child runs under its own Kit's egress and
-  credentials); launchers only narrow the set.
+  credentials); launchers only narrow the set. A Kit that declares no home (`org.marsh/home@1`,
+  `NoHomeKits`) never holds the home view, whether the session or a job started it.
   Environment: jobs exit at will, the user cancels any job, transport loss, leftover containers.
 
 Invariants: `NoForeignEffect`, `OwnedAreOurs`, `NoLeak`, `ChildNoLeak`, `ChildConfinement`
@@ -86,7 +87,7 @@ without its session), `ChildCapacity`, `MapsDisjoint` (Ownership); `CapacityBoun
 `CancelScoped`, `NoRemoveWhileLive`, `NoReplay`, `WorkspaceRecorded` (Workspace); `LineageWF`,
 `Attenuation`, `BudgetBound`, `FanOutBound`, `TotalBound`, `LiveUnderLive`, `NoOrphanRunning`,
 `CancelPropagates`, `RevokedAtRestart`, `RestartUncertain`, `NoReplay`, `EntryOnce`,
-`NoEntryRecursion`, `SameKitBound`, `SpawnSetAttenuates`, `KitVMBound` (Process). Liveness: `ChildCleanedAfterRevoke` (strong
+`NoEntryRecursion`, `SameKitBound`, `SpawnSetAttenuates`, `KitVMBound`, `NoHomeKitHome` (Process). Liveness: `ChildCleanedAfterRevoke` (strong
 fairness on host cleanup, which is retried after every restart and inventory),
 `AttemptsTerminate` (weak fairness), and `EventuallySettled` (Workspace; weak fairness on
 daemon steps and process progress, checked in the smaller `Workspace_live_pass.cfg`).
@@ -133,14 +134,16 @@ marker is set, which an ELF entrypoint leaves in place: EntryOnce), `noSameKit` 
 `spawnWiden` (child spawn set reset to every registered Kit: SpawnSetAttenuates), `noKitCap` (a
 child brings one more distinct Kit VM into a full tree: KitVMBound), `noDetachCap` (DetachedBound),
 `detachHolds` (a detached cloud run keeps its pool slot: DetachedOutOfPool), `restartDetached` (a
-restart makes a detached run uncertain: DetachedSurvives). `Detach` takes a started root job with
+restart makes a detached run uncertain: DetachedSurvives), `childKeepsHome` (only a top-level
+launch applies a Kit's no-home declaration, so an agent's tool call inherits the agent's home:
+NoHomeKitHome). `Detach` takes a started root job with
 no children out of the pool (`marsh-daemon` `detach_cloud_job`, `JobState::Detached`, not `live`);
 `Collect` ends it without a second start. Wall time is not modeled:
 a deadline is the environment's `Cancel(j, Session)`, and a child's inherited deadline is an
 admission-time value checked by `process_tests.rs` and P35, not by TLC. Positive Process configs:
 `Process.cfg` (one script Kit, 3 jobs, depth 3, one restart, every invariant; ~40 s),
-`Process_kits_pass.cfg` (a script Kit and an ELF Kit, spawn-set narrowing, same-Kit cap 2,
-no restart; ~1.5 min with 2 workers),
+`Process_kits_pass.cfg` (a script Kit and an ELF Kit that declares no home, spawn-set
+narrowing, same-Kit cap 2, no restart; ~5 min with 2 workers),
 `Process_caps_pass.cfg` (4 jobs, tight pool/fan/total caps, no restart; ~1.5 min),
 `Process_kitvms_pass.cfg` (two ELF Kits, one Kit VM per tree, no restart; ~1.5 min),
 `Process_live_pass.cfg` (`EventuallySettled`).
@@ -227,6 +230,7 @@ positive config fails or a negative control passes or fails for the wrong reason
 | Process: Exit / Cancel / Lose cascade, Reap / GraceExpire | a job's end drops its `CapabilityBridges` (token revoked, connections closed) and the worker's `capability.rs` `Capability` (socket and streams); `process::serve_run` sees the caller stream drop and calls `DaemonStore::cancel_tree` on the child (`process.rs`), which in one step marks the child and every live descendant `cancelling` (admission then refuses their spawns, `child_lineage`), sends each container INT through the `JobControl` the backend registered at launch, and KILLs whatever still runs after 10 s (the one-step `CancelPropagates` cascade; previously one grace per level). A root caller's Ctrl-C (signal frame) or disconnect does the same from `marsh-backend` `forward_multiplexed_input`. A cancelling job ends `cancelled` (`finish_job_as`), exit 130; the backend verifies container deletion; an unconfirmed end holds the slot (`process.rs` `holds_slot`, derived from `cleanup: uncertain` receipts, so it survives restart) until a successful `workers reset` (`release_process_slots`, persisted) |
 | Process: Restart | daemon start: capability tokens are in memory (lost); journal load marks unfinished jobs uncertain; no resubmission; the root client reports `job uncertain` (`marsh/src/client.rs`) |
 | Process: EntryLocal / EntryDispatch / AgentSelfLocal (link decision) | worker/runtime set `MARSH_ENTRY=1`, `MARSH_JOB`, and `PATH=/run/marsh/bin:<image PATH>` for every job (no `bash`/`sh` link and no `SHELL` override: shells are the image's own, `processes.md` s15) (`marsh-runtime` `job_environment`); stubs `#!/run/marsh/marsh --link=NAME` (`marsh-worker/src/capability.rs` `publish`); `marsh/src/job.rs` `link` -> `marsh-contracts` `process::link_decision` (own name + marker + `getppid()` = 1 -> clear marker, exec the image binary by absolute path with PATH intact; another image-provided name -> exec locally; else `ProcessRun`) |
+| Process: Spawn no-home Kits (NoHomeKitHome) | `marsh-contracts/src/kit_assets.rs` `KitAgent::from_descriptor` reads `org.marsh/home@1` (`no_home`; any set component declaring `none` wins); `marsh-backend` `kit_wants_no_home` (fails closed) is applied in `execute` to root and child views alike (drops the home `PublicMount` and its `AdmittedHostGrant`, refuses a cwd inside the home, `HOME`=`MARSH_SELECTED_HOME`=`/tmp`) and in `prepare_for_shell` (`--load` session pins). Real caller: the evidence in the change that added it (`marsh-tools` from a Pi job) |
 | Process: Spawn Kit VM cap (KitVMBound) | `process::kit_vm_cap` (from `child_lineage`, split branches included): distinct `kit_ref` among the tree's live receipts, at most `JobDefaults::tree_kit_vms` (4; `MARSH_TREE_KIT_VMS`), checked in the pre-check and in `begin_job_process` |
 | Process: Spawn spawn-set narrowing, same-Kit cap | `process::admit` (`child_lineage`): same-Kit = consecutive parent→child steps with equal `kit_ref`; `MARSH_SPAWN` / `marsh run --spawn` / `--no-spawn` narrow admission. The capability socket remains available for subtree inspection; disallowed spawn requests are refused. |
 
