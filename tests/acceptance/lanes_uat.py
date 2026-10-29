@@ -127,7 +127,7 @@ def main() -> int:
             time.sleep(1)
         assert listed["fixture-acp"]["acp"] is True and listed["fixture"]["acp"] is False, status["commands"]
         assert {"events-v1", "lanes-v1", "checkpoints-v1", "acp-descriptors-v1", "labels-v1",
-                "apply-json-v1", "lane-cloud-v1", "lane-shell-v1"} <= set(status["features"])
+                "apply-json-v1", "lane-cloud-v1", "lane-shell-v1", "lane-checkpoints-v1"} <= set(status["features"])
         subscriber = subprocess.Popen([scope.marsh, "events", "--json"], cwd=project, env=scope.environment,
                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, start_new_session=True)
         threading.Thread(target=lambda: events.extend(json.loads(line) for line in subscriber.stdout),
@@ -363,6 +363,39 @@ def main() -> int:
         assert shell_branch.returncode == 2 and b"shell branches" in shell_branch.stderr, shell_branch.stderr
         fanned = [job for job in json_of("jobs", "--json")["jobs"] if job.get("parent") == f"split:{guarded['id']}/g"]
         assert sum(job["command"] == "fixture" for job in fanned) >= 2, fanned
+
+        # Lane checkpoints: a lane job edits its fork, the host checkpoints the
+        # lane, and a split from that checkpoint starts from the edit. A job in
+        # a lane cannot checkpoint it (or anything), and a shell session that did
+        # not create the split cannot either.
+        edit = host("run", "fixture", "project-write", "edited-by-job.txt", "from the lane job\n", cwd=lane_g)
+        assert edit.returncode == 0, edit.stderr.decode(errors="replace")
+        lane_name = f"{guarded['id']}/g"
+        ckpts_before = len(json_of("checkpoints", "--json")["checkpoints"])
+        from_job = host("run", "fixture", "exec", "sh", "-c",
+                        f"cd {project} && marsh checkpoint --lane {lane_name}; echo status=$?", cwd=lane_g)
+        assert b"job capability admits only" in from_job.stderr, from_job.stderr
+        from_shell = host("-c", f"cd {project} && marsh checkpoint --lane {lane_name}", timeout=900)
+        assert from_shell.returncode != 0 and b"only its creator" in from_shell.stderr, from_shell.stderr
+        assert len(json_of("checkpoints", "--json")["checkpoints"]) == ckpts_before, "a refused checkpoint was made"
+        (lane_g / ".gitignore").write_text("ignored.log\n")
+        (lane_g / "ignored.log").write_text("ignored\n")
+        lane_ckpt = json_of("checkpoint", "--lane", lane_name, "--label", "lane-g", "--json")
+        assert lane_ckpt["lane"] == lane_name and lane_ckpt["label"] == "lane-g", lane_ckpt
+        ckpt_dir = project / ".marsh/checkpoints" / lane_ckpt["checkpoint"]
+        assert (ckpt_dir / "tree/edited-by-job.txt").read_text() == "from the lane job\n"
+        assert (ckpt_dir / "git/HEAD").is_file() and (ckpt_dir / "git/index").is_file()
+        assert not (ckpt_dir / "tree/ignored.log").exists(), "the project's ignore rules apply to a lane too"
+        assert not (project / "edited-by-job.txt").exists(), "the project is untouched"
+        from_lane = json_of("split", "--open", "--from", lane_ckpt["checkpoint"], "n")
+        lane_n = Path(from_lane["lanes"]["n"])
+        assert (lane_n / "edited-by-job.txt").read_text() == "from the lane job\n"
+        read_back = host("run", "fixture", "project-read", "edited-by-job.txt", cwd=lane_n)
+        assert read_back.returncode == 0 and read_back.stdout == b"from the lane job\n", read_back
+        assert host("splits", "cancel", from_lane["id"]).returncode == 0
+        assert host("checkpoints", "rm", lane_ckpt["checkpoint"]).returncode == 0
+        for leftover in ("ignored.log", ".gitignore", "edited-by-job.txt"):
+            (lane_g / leftover).unlink()
 
         # A close that times out on a live lane job keeps the lane uncertain;
         # removal is refused until the job is ended.
