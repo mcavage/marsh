@@ -101,6 +101,7 @@ pub const FEATURES: &[&str] = &[
     "lane-cloud-v1",
     "lane-shell-v1",
     "lane-checkpoints-v1",
+    "cloud-sync-v1",
 ];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while

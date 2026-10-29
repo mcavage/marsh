@@ -95,9 +95,11 @@ pub fn main(arguments: &[OsString]) -> i32 {
         [op] if *op == "status" => status(),
         [op, name] if *op == "signal" => signal(name),
         [op, root, out] if *op == "delta" => delta(Path::new(root), Path::new(out)),
+        [op, root] if *op == "sync" => sync_delta(Path::new(root)),
+        [op] if *op == "rebase" => rebase(),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "usage: --internal-cloud prepare|unpack|run [--detached]|status|state|tail|fetch|baseline|delegate|signal|delta",
+            "usage: --internal-cloud prepare|unpack|run [--detached]|status|state|tail|fetch|baseline|delegate|signal|delta|sync|rebase",
         )),
     };
     match result {
@@ -1265,6 +1267,89 @@ fn depth(path: &[u8]) -> usize {
 /// Write the exact delta from the baseline: deletions deepest first, then
 /// new or changed directories shallowest first, then files and symlinks.
 fn delta(root: &Path, out: &Path) -> io::Result<()> {
+    if !state_path().join("status").exists() {
+        return Err(io::Error::other("the command has not ended; no capture"));
+    }
+    let output: Box<dyn Write> = if out == Path::new("-") {
+        Box::new(io::stdout().lock())
+    } else {
+        Box::new(File::create(out)?)
+    };
+    write_delta(root, output)
+}
+
+/// `sync ROOT`: the delta so far while the command still runs (`marsh cloud
+/// sync`), on stdout. It is staged first: a file the workload is writing
+/// may change size while it is read, and then the walk is retried.
+fn sync_delta(root: &Path) -> io::Result<()> {
+    let state = state_dir()?;
+    let staged = state.join("sync.delta");
+    let mut last = None;
+    for _ in 0..3 {
+        match write_delta(root, Box::new(File::create(&staged)?)) {
+            Ok(()) => {
+                let mut file = File::open(&staged)?;
+                let mut out = io::stdout().lock();
+                io::copy(&mut file, &mut out)?;
+                let _ = fs::remove_file(&staged);
+                return out.flush();
+            }
+            Err(error) => last = Some(error),
+        }
+    }
+    let _ = fs::remove_file(&staged);
+    Err(last.unwrap_or_else(|| io::Error::other("sync failed")))
+}
+
+/// `rebase`: a synced change set's entries (stdin; files carry their
+/// SHA-256) become the baseline for those paths, so later deltas carry only
+/// newer changes.
+fn rebase() -> io::Result<()> {
+    let mut entries = baseline()?;
+    let mut reader = Reader::new(BufReader::new(io::stdin().lock()), cloud::MAX_ARCHIVE)?;
+    while let Some(header) = reader.next_header()? {
+        if cloud::protected(&header.path) {
+            return Err(io::Error::other("a rebase cannot name protected paths"));
+        }
+        match header.kind {
+            Kind::Delete => {
+                entries.remove(&header.path);
+            }
+            Kind::Directory => {
+                entries.insert(header.path, Entry::Directory(header.mode));
+            }
+            Kind::File => {
+                let digest = reader.data()?;
+                entries.insert(header.path, Entry::File(header.mode, digest));
+            }
+            Kind::Symlink => {
+                let target = reader.data()?;
+                entries.insert(header.path, Entry::Symlink(target));
+            }
+            Kind::Request => return Err(io::Error::other("a rebase carries no request")),
+        }
+    }
+    let state = state_dir()?;
+    let next = state.join("baseline.new");
+    let mut writer = Writer::new(BufWriter::new(File::create(&next)?), u64::MAX)?;
+    for (path, entry) in &entries {
+        match entry {
+            Entry::Directory(mode) => writer.directory(path, *mode)?,
+            Entry::File(mode, digest) => {
+                writer.file(path, *mode, digest.len() as u64, &mut &digest[..])?;
+            }
+            Entry::Symlink(target) => writer.symlink(path, target)?,
+        }
+    }
+    writer
+        .finish()?
+        .into_inner()
+        .map_err(io::Error::other)?
+        .sync_all()?;
+    fs::rename(next, state.join("baseline"))
+}
+
+fn write_delta(root: &Path, output: Box<dyn Write>) -> io::Result<()> {
     absolute(root)?;
     let before = baseline()?;
     let mut after = BTreeMap::new();
@@ -1282,14 +1367,6 @@ fn delta(root: &Path, out: &Path) -> io::Result<()> {
         .iter()
         .filter(|(path, entry)| before.get(*path) != Some(*entry))
         .collect::<Vec<_>>();
-    if !state_path().join("status").exists() {
-        return Err(io::Error::other("the command has not ended; no capture"));
-    }
-    let output: Box<dyn Write> = if out == Path::new("-") {
-        Box::new(io::stdout().lock())
-    } else {
-        Box::new(File::create(out)?)
-    };
     let mut writer = Writer::new(BufWriter::new(output), cloud::MAX_ARCHIVE)?;
     for path in &deletions {
         writer.delete(path)?;

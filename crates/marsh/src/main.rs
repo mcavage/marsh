@@ -1069,6 +1069,7 @@ const CLOUD_HELP: &str = "Usage: marsh cloud [OPTION...] -c SCRIPT [NAME [ARG...
        marsh cloud [OPTION...]          (an interactive cloud shell, from a terminal)
        cloud { LIST; }                 (in the marsh shell)
        marsh cloud attach|collect|diff|apply|discard|stop JOB
+       marsh cloud sync [--json] JOB|--all
 
 Options (defaults from MARSH_CLOUD_CPUS, MARSH_CLOUD_TTL, MARSH_CLOUD_IMAGE):
   --cpus N        1, 2, 4, 8, or 16 CPUs, with 2 GiB of memory per CPU (default 2)
@@ -1097,6 +1098,11 @@ files it changed were edited here meanwhile; otherwise they wait as a patch.
   diff JOB     show a kept patch          apply JOB    apply a kept patch anyway
   discard JOB  delete its sandbox and drop any kept patch
   stop JOB     interrupt it (INT, then KILL after 10 seconds)
+
+`marsh cloud sync JOB` writes a running attached block's changes so far back
+now; the block keeps running in the same sandbox. A path also changed here
+since it was uploaded or last synced is skipped and kept (a conflict). The
+block announces JOB on stderr when it starts; --all syncs every running block.
 ";
 
 /// stdout for `marsh cloud`. When the downstream reader closes the pipe,
@@ -1343,6 +1349,9 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
         })
     {
         return detached_command(action, &arguments[1..]);
+    }
+    if arguments.first().is_some_and(|word| word == "sync") {
+        return sync_command(&arguments[1..]);
     }
     // `--json` and `--label TEXT` among the options (before `-c`/`--`), in
     // order: an option's value (`--label`, `--cpus`, `--ttl`, `--image`) is
@@ -1617,6 +1626,65 @@ fn detached_command(action: &str, arguments: &[OsString]) -> i32 {
         }
         Err(error) => fail(error),
     }
+}
+
+/// `marsh cloud sync [--json] JOB|--all`: one stderr line per block (or one
+/// JSON document on stdout); 1 when a sync failed.
+fn sync_command(arguments: &[OsString]) -> i32 {
+    use marsh_daemon::cloud_detached::CloudDetachedRequest as Request;
+    let mut json = false;
+    let mut job = None;
+    let mut all = false;
+    for word in arguments {
+        match word.to_str() {
+            Some("--json") => json = true,
+            Some("--all") => all = true,
+            Some(selector) if !selector.starts_with('-') && job.is_none() => {
+                job = Some(selector.to_owned());
+            }
+            _ => {
+                eprintln!("marsh: usage: marsh cloud sync [--json] JOB|--all");
+                return 2;
+            }
+        }
+    }
+    if all == job.is_some() {
+        eprintln!("marsh: usage: marsh cloud sync [--json] JOB|--all");
+        return 2;
+    }
+    let channel = match split_channel(false) {
+        Ok(channel) => channel,
+        Err(message) => {
+            eprintln!("marsh: cloud: {message}");
+            return 125;
+        }
+    };
+    let reply = match channel.client.cloud_detached(Request::Sync { job }) {
+        Ok(reply) => reply,
+        Err(error) => {
+            let message = match error {
+                marsh_daemon::DaemonError::Remote(message)
+                | marsh_daemon::DaemonError::Refused(message) => message,
+                other => other.to_string(),
+            };
+            let message = message.strip_prefix("cloud: ").unwrap_or(&message);
+            if json {
+                println!("{}", serde_json::json!({"synced": [], "error": message}));
+            }
+            eprintln!("marsh: cloud: {message}");
+            return 1;
+        }
+    };
+    if json {
+        println!("{}", serde_json::json!({"synced": reply.synced}));
+    }
+    if !reply.message.is_empty() {
+        eprintln!("marsh: cloud: {}", reply.message);
+    }
+    for report in &reply.synced {
+        eprintln!("marsh: cloud: {}", report.message);
+    }
+    i32::from(reply.synced.iter().any(|report| report.error.is_some()))
 }
 
 /// Replay a detached run's output from the start, then follow it until it

@@ -334,6 +334,14 @@ impl<R: Read> Reader<R> {
         Ok(copied)
     }
 
+    /// The current entry's data as a reader, read at most once. A short
+    /// read is not detected here: a [`Writer`] copying it rejects it.
+    pub fn data_reader(&mut self) -> io::Take<&mut R> {
+        let pending = self.pending;
+        self.pending = 0;
+        (&mut self.inner).take(pending)
+    }
+
     /// The current entry's data in memory (symlink targets and requests).
     ///
     /// # Errors

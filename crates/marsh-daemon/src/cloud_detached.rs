@@ -31,6 +31,9 @@ pub enum CloudDetachedRequest {
     Discard { job: String },
     /// INT, then KILL after the grace period.
     Stop { job: String },
+    /// `marsh cloud sync JOB|--all`: write back a running attached block's
+    /// changes so far; it keeps running (`None`: every such block).
+    Sync { job: Option<String> },
     /// `--detached` on `workers reset cloud`, `stop`, `reset`: discard every
     /// outstanding detached run.
     DiscardAll,
@@ -78,4 +81,27 @@ pub struct CloudDetachedReply {
     pub total: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notices: Vec<String>,
+    /// One per block a `Sync` reached.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub synced: Vec<SyncReport>,
+}
+
+/// One `marsh cloud sync` of a running attached block.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SyncReport {
+    pub job_id: String,
+    pub cursor: u64,
+    pub created: u64,
+    pub modified: u64,
+    pub deleted: u64,
+    /// Directories deleted remotely, kept here because they hold local files.
+    pub kept: Vec<String>,
+    /// Paths also changed here since they were uploaded or last synced:
+    /// skipped, the local file kept.
+    pub conflicts: Vec<String>,
+    /// Why this sync stopped (some changes may already be written).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// The stderr line: `synced N changes (...)`.
+    pub message: String,
 }
