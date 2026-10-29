@@ -156,4 +156,31 @@ impl StockSbx {
             )?,
         )
     }
+
+    /// Unload a server from an exactly-owned shell VM.
+    ///
+    /// # Errors
+    /// Rejects invalid names, foreign/quarantined VMs and failed stock unloads.
+    pub fn unload_shell_mcp_server(
+        &self,
+        ready: &ReadyShellVm,
+        server: &str,
+    ) -> Result<(), SbxError> {
+        validate_name(server)?;
+        self.reject_quarantined_shell(&ready.name)?;
+        match self.classify_vm(&ready.name, false)? {
+            VmClass::Owned { .. } => {}
+            VmClass::Absent | VmClass::Foreign => {
+                return Err(SbxError::ForeignVm(ready.name.clone()));
+            }
+        }
+        Self::require_success(
+            "unload shell environment MCP server",
+            self.run_bounded_os(
+                "unload shell environment MCP server",
+                self.preparation_timeouts.sbx,
+                ["mcp", "unload", server, "--sandbox", &ready.name],
+            )?,
+        )
+    }
 }

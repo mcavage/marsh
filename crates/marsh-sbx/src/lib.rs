@@ -2012,6 +2012,40 @@ impl StockSbx {
         )
     }
 
+    /// Stock `sbx mcp unload SERVER --sandbox VM` from an exactly-owned Kit
+    /// VM. The caller owns the policy of when this is allowed (a server left
+    /// out of the environment files, from a VM with no running jobs).
+    ///
+    /// # Errors
+    /// Rejects invalid names, a VM that is not this daemon's recorded VM, and
+    /// a failed or timed-out stock unload.
+    pub fn unload_mcp_server(&self, ready: &ReadyKitVm, server: &str) -> Result<(), SbxError> {
+        validate_name(&ready.name)?;
+        if server.is_empty()
+            || server.len() > 128
+            || !server
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        {
+            return Err(SbxError::InvalidIdentifier(server.into()));
+        }
+        self.reject_quarantined(&ready.name)?;
+        match self.classify_vm(&ready.name, false)? {
+            VmClass::Owned { .. } => {}
+            VmClass::Absent | VmClass::Foreign => {
+                return Err(SbxError::ForeignVm(ready.name.clone()));
+            }
+        }
+        Self::require_success(
+            "unload environment MCP server",
+            self.run_bounded_os(
+                "unload environment MCP server",
+                self.preparation_timeouts.sbx,
+                ["mcp", "unload", server, "--sandbox", ready.name.as_str()],
+            )?,
+        )
+    }
+
     fn ensure_kit_vm_authorized(
         &self,
         spec: &KitVmSpec,

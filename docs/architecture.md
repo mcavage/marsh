@@ -124,10 +124,13 @@ module to the responsible crate before adding a crate or service.
 
 ## Trust boundaries
 
-Optional scope `sbxenv.yaml` and `sbxenvs/COMMAND.yaml` additions are parsed and
-snapshotted before stock effects (`marsh-backend/src/sbxenv.rs`). Only native
+Optional scope `sbxenv.yaml`, `sbxenv.d/*.yaml` and `sbxenvs/COMMAND.yaml`
+additions are parsed and validated as one snapshot before stock effects
+(`marsh-backend/src/sbxenv.rs`), and reloaded live: a valid change replaces the
+snapshot, an invalid one is reported and never replaces it. Only native
 MCP declarations and additional workspaces are admitted. Environment content
-participates in the VM ownership selector; aliases cannot diverge. Added sources
+does not participate in the VM ownership selector (servers are loaded into a
+running VM); aliases cannot diverge. Added sources
 use the existing `AdmittedHostGrant`/mount ledger, appear in receipts, are
 inherited only from a parent's recorded view, and are omitted from split Kit
 jobs. MCP registrations are inspected/reused or added without OAuth prompts,

@@ -116,6 +116,7 @@ When unset, control directories are in
 | `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, whether Kits update themselves, set by `marsh config auto-update on\|off`, whether `xdg-open` opens links on your Mac, set by `marsh config open-urls on\|off`, and whether detached cloud runs may start agent sandboxes, set by `marsh config cloud-delegate on\|off` (default off). Default path `~/.marsh/config.json`. |
 | `$MARSH_HOME/home/` | The guest home. Agent logins and settings (`.claude`, `.codex`) live here. Every job in the scope can read it. Default path `~/.marsh/home/`. |
 | `$MARSH_HOME/sbxenv.yaml` | Shared MCP servers and extra directories for every Kit and the shell. |
+| `$MARSH_HOME/sbxenv.d/*.yaml` | More shared servers and directories, same schema as `sbxenv.yaml`, read in name order after it. |
 | `$MARSH_HOME/sbxenvs/NAME.yaml` | Additional servers and directories for registered command `NAME`; `shell.yaml` also configures the shell VM. |
 | `CONTROL/HASH/` | Host-only control directory for a scope. `marsh status` prints it. Never mounted into a VM. |
 | `CONTROL/HASH/commands.json` | Your command registry. Overrides packaged entries by name. See [Commands and Kits](kits.md#adding-a-command). |
@@ -134,7 +135,7 @@ The error names the file. Fix that file; deleting other state does not help.
 
 ## Servers and extra directories
 
-The optional `sbxenv.yaml` and `sbxenvs/NAME.yaml` files use these fields:
+The optional `sbxenv.yaml`, `sbxenv.d/*.yaml`, and `sbxenvs/NAME.yaml` files use these fields:
 
 | Field | Meaning |
 |---|---|
@@ -149,8 +150,11 @@ Other fields are rejected. For examples, see the [home guide](guides/set-up-your
 ### Files and merging
 
 - Each YAML file must be a regular file owned by your Mac account, not a
-  symlink, and not writable by group or others. The `sbxenvs` directory must
-  also be a real directory, not a symlink.
+  symlink, and not writable by group or others. The `sbxenvs` and `sbxenv.d`
+  directories must also be real directories, not symlinks.
+- `sbxenv.d` holds at most 64 files. Only names ending in `.yaml` are read;
+  names starting with `.` are ignored. They are concatenated in name order
+  after `sbxenv.yaml` and count as shared entries.
 - Shared lists are followed by the command's lists. Entries cannot remove or
   override shared entries. Duplicate server names or overlapping directories
   in the combined lists are errors.
@@ -158,6 +162,38 @@ Other fields are rejected. For examples, see the [home guide](guides/set-up-your
   Kit must have identical combined configuration because they share a VM.
 - Each file is limited to 64 KiB. A combined environment permits at most 32
   MCP servers and 16 extra directories.
+
+### Live reload
+
+The daemon watches these files while it runs; there is nothing to restart.
+It checks file stamps every couple of seconds and before it starts a job or
+prepares a VM, then reads and validates all files together.
+
+- **Valid change:** it replaces the active configuration. New MCP servers are
+  registered with `sbx mcp add` (an existing, matching registration is reused)
+  and loaded into the warm Kit VMs of the affected commands and into every VM
+  created afterwards. A server whose name already exists with a different
+  definition is refused, as before; use a new name. Changed
+  `additionalWorkspaces` apply to jobs started afterwards; running jobs keep
+  their mounts.
+- **Removed server:** not loaded into new VMs. A Kit VM with no running job has
+  it unloaded (`sbx mcp unload`); a busy VM keeps it until idle. The shell VM
+  unloads it when no other shell is attached. The registration is left alone.
+- **Invalid change:** any error the checks above or in
+  [Troubleshooting](troubleshooting.md#environment-files-and-mcp-connections)
+  describe, including a rejected registration, keeps the last good
+  configuration. The error shows in `marsh status`, and each open shell gets a
+  one-line notice at its next command. The file is retried when it changes, and
+  every few seconds otherwise.
+- **At start:** a bad file stops the daemon from starting, because there is no
+  earlier configuration to keep.
+
+`marsh status --json` has a `sbxenv` object: `files` (the files behind the
+active configuration, in load order), `hash` (SHA-256 of their names and bytes),
+`last_reload_unix_ms`, and `last_error` (`message`, `unix_ms`) while the files on
+disk are being rejected. A server unloaded or loaded after a daemon restart is
+not tracked: a VM that outlived the daemon can keep a removed server until it is
+replaced (`marsh workers reset KIT`).
 
 ### Paths and access
 

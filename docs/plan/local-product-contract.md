@@ -112,11 +112,14 @@ and all mounts are released when the VM is retired. The pathname reopen inside
 `sbx mount` is an upstream limitation accepted under the trusted-host
 assumption.
 
-Optional `$MARSH_HOME/sbxenv.yaml` and `$MARSH_HOME/sbxenvs/COMMAND.yaml` files
+Optional `$MARSH_HOME/sbxenv.yaml`, `$MARSH_HOME/sbxenv.d/*.yaml` and
+`$MARSH_HOME/sbxenvs/COMMAND.yaml` files
 add native `mcp.servers` and `additionalWorkspaces` declarations. Shared and
 per-command lists concatenate; unsupported fields and duplicate/overlapping
-additions fail before stock work. Files are snapshotted at daemon startup;
-changing them requires finishing work, `marsh stop`, then a new launch.
+additions fail before stock work. The daemon reloads the files while it runs:
+a valid change reaches warm Kit VMs and later jobs without a restart, and an
+invalid one keeps the last good configuration and is reported in `marsh status`
+(`sbxenv`, including in `--json`).
 Additional sources use the same admission and cleanup as project/home mounts,
 are recorded in receipts, and propagate to nested jobs only through the parent's
 recorded view. Split Kit jobs and ephemeral-home sessions omit extra sources.

@@ -654,7 +654,49 @@ fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
         )?;
     }
     write_kit_updates(writer, status.kit_updates.as_deref())?;
+    write_sbxenv(writer, status.sbxenv.as_deref())?;
     write_job_defaults(writer, job_defaults.as_ref())?;
+    Ok(())
+}
+
+/// The active environment files; silent when there are none and nothing is wrong.
+fn write_sbxenv(
+    writer: &mut impl Write,
+    sbxenv: Option<&marsh_daemon::SbxenvStatus>,
+) -> Result<(), ProductError> {
+    let Some(sbxenv) = sbxenv else {
+        return Ok(());
+    };
+    if sbxenv.files.is_empty() && sbxenv.last_error.is_none() {
+        return Ok(());
+    }
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis()),
+    )
+    .unwrap_or(i64::MAX);
+    let ago = |unix_ms: u64| crate::job::ago(now - i64::try_from(unix_ms).unwrap_or(i64::MAX));
+    let loaded = sbxenv
+        .last_reload_unix_ms
+        .map_or_else(String::new, |unix_ms| format!(", loaded {}", ago(unix_ms)));
+    writeln!(
+        writer,
+        "  sbxenv:       {} file(s), hash {}{loaded}",
+        sbxenv.files.len(),
+        &sbxenv.hash[..sbxenv.hash.len().min(12)]
+    )?;
+    for file in &sbxenv.files {
+        writeln!(writer, "    {}", file.display())?;
+    }
+    if let Some(error) = &sbxenv.last_error {
+        writeln!(
+            writer,
+            "    error:      {} ({}); still using the last good configuration",
+            error.message,
+            ago(error.unix_ms)
+        )?;
+    }
     Ok(())
 }
 

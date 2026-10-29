@@ -411,13 +411,22 @@ load leaves the VM usable without that tool and is logged; it is not a
 preparation failure. `mcp load NAME --kit KIT` is the explicit way to load a
 running Kit VM.
 
-Servers declared in the scope's `sbxenv.yaml` (every Kit and the shell) or
-`sbxenvs/NAME.yaml` (command `NAME`; `shell.yaml` also covers the shell VM)
-are different: they are required. marsh registers or reuses each one through
-stock SBX, without overwriting a different definition, and loads it while
-preparing the VM, including after a worker reset. A failed inspection,
+Servers declared in the scope's `sbxenv.yaml` or `sbxenv.d/*.yaml` (every Kit
+and the shell) or `sbxenvs/NAME.yaml` (command `NAME`; `shell.yaml` also covers
+the shell VM) are different: they are required. marsh registers or reuses each
+one through stock SBX, without overwriting a different definition, and loads it
+while preparing the VM, including after a worker reset. A failed inspection,
 registration, or load fails preparation (`marsh-backend/src/sbxenv.rs`,
 `marsh-sbx/src/mcp_environment.rs`).
+
+The files are reloaded while the daemon runs. A valid change registers its new
+servers first (a refused registration rejects the whole change), then replaces
+the active configuration; `configure_prepared_mcp` loads what a warm Kit VM is
+missing before the next job on it, and the watcher does the same for idle warm
+VMs. A server left out of the files is unloaded (`sbx mcp unload`) from a Kit VM
+with no running job; a busy VM keeps it until a later pass, and VMs are named
+by workload alone, so a change never replaces a VM. An invalid change keeps the
+last good configuration and is reported in `marsh status`.
 
 `--kit codex` (or another registered Kit command) prepares its worker and loads
 the tool into the exact Kit VM selected by preparation, including when the
