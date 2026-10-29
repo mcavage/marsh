@@ -46,3 +46,9 @@ Cloud placement (session-origin slice shipped as a preview; the rest proposed):
 - [Owned cloud lifecycle](../plan/cloud-lifecycle.md): implemented adapter,
   real-caller qualification, and cloud ownership model.
 - [Bring your own agent Kit](../plan/custom-agent-kit.md).
+
+Proposals for other teams (not built):
+
+- [Container-scoped credentials in Docker Sandboxes](sbx-container-scoped-credentials.md):
+  per-container egress and credential rules, so a tool can share its
+  caller's VM without sharing its credential.
