@@ -1708,44 +1708,28 @@ impl StockSbx {
     /// when stock SBX cannot classify the inspection result.
     pub fn kit_vm_exists(&self, spec: &KitVmSpec) -> Result<bool, SbxError> {
         validate_name(&spec.name)?;
-        let lifecycle_identity = selected_home_identity(&spec.lifecycle_workspace)?;
-        let (marker, local_source) = match &spec.workload_kit.location {
-            NativeKitLocation::ImmutableOci(_) => (
-                format!(
-                    "kit:{}:{}",
-                    spec.workload_kit.identity(),
-                    lifecycle_identity
-                ),
-                false,
-            ),
-            NativeKitLocation::LocalV3Source(source) => (
-                local_kit_marker(
-                    spec.workload_kit.identity(),
-                    &spec.workload_kit.validate_captured_source(source)?,
-                    &lifecycle_identity,
-                ),
-                true,
-            ),
+        let (marker, legacy) = match &spec.workload_kit.location {
+            NativeKitLocation::ImmutableOci(_) => Self::published_kit_markers(spec)?,
+            NativeKitLocation::LocalV3Source(source) => {
+                Self::local_kit_markers(spec, &spec.workload_kit.validate_captured_source(source)?)?
+            }
         };
+        let local_source = matches!(
+            &spec.workload_kit.location,
+            NativeKitLocation::LocalV3Source(_)
+        );
         let running = match self.classify_vm(&spec.name, false)? {
             VmClass::Absent => return Ok(false),
             VmClass::Foreign => return Err(SbxError::ForeignVm(spec.name.clone())),
             VmClass::Owned { running, .. } => running,
         };
-        {
-            {
-                if local_source && !running {
-                    return Ok(false);
-                }
-                if let Err(error) = self.verify_owned_marker(&spec.name, &marker) {
-                    if local_source && self.is_owned_stale_local_vm(spec, &lifecycle_identity)? {
-                        return Ok(false);
-                    }
-                    return Err(error);
-                }
-                Ok(true)
-            }
+        if local_source && !running {
+            return Ok(false);
         }
+        Ok(match self.kit_marker_state(spec, &marker, &legacy)? {
+            KitMarkerState::Current | KitMarkerState::Legacy => true,
+            KitMarkerState::Stale => false,
+        })
     }
 
     /// Remove every remaining Kit VM recorded in this daemon's ownership map.
@@ -2059,36 +2043,41 @@ impl StockSbx {
             }
             NativeKitLocation::ImmutableOci(image) => image.clone(),
         };
-        let lifecycle_identity = selected_home_identity(&spec.lifecycle_workspace)?;
-        let marker = format!(
-            "kit:{}:{}",
-            spec.workload_kit.identity(),
-            lifecycle_identity
-        );
-        let cold_started = match self.classify_vm(&spec.name, false)? {
+        let (marker, legacy) = Self::published_kit_markers(spec)?;
+        let create = match self.classify_vm(&spec.name, false)? {
             VmClass::Foreign => return Err(SbxError::ForeignVm(spec.name.clone())),
-            VmClass::Owned { .. } => {
-                if let Err(error) = self.verify_owned_marker(&spec.name, &marker) {
+            VmClass::Owned { .. } => match self.kit_marker_state(spec, &marker, &legacy) {
+                Ok(KitMarkerState::Current | KitMarkerState::Legacy) => false,
+                // Our own VM from another generation of this Kit's workspace:
+                // replace it, as a reset would.
+                Ok(KitMarkerState::Stale) => {
+                    self.ownership.invalidate();
+                    self.retire_stale_kit_vm(spec)?;
+                    true
+                }
+                Err(error) => {
                     self.ownership.invalidate();
                     return Err(error);
                 }
-                false
-            }
-            VmClass::Absent => {
-                if let Err(error) = self.create_published_vm_with_grant(spec, &lifecycle_grant) {
-                    // Submitted Create may complete late; never delete by a
-                    // name alone or discharge its durable pending operation.
-                    if !matches!(&error, SbxError::Io(source) if marsh_runtime::command_not_started(source))
-                    {
-                        self.quarantined_workers
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .insert(spec.name.clone());
-                    }
-                    return Err(error);
+            },
+            VmClass::Absent => true,
+        };
+        let cold_started = if create {
+            if let Err(error) = self.create_published_vm_with_grant(spec, &lifecycle_grant) {
+                // Submitted Create may complete late; never delete by a
+                // name alone or discharge its durable pending operation.
+                if !matches!(&error, SbxError::Io(source) if marsh_runtime::command_not_started(source))
+                {
+                    self.quarantined_workers
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .insert(spec.name.clone());
                 }
-                true
+                return Err(error);
             }
+            true
+        } else {
+            false
         };
         if !cold_started {
             lifecycle_grant.verify_path()?;
@@ -4661,14 +4650,9 @@ impl StockSbx {
         let _resolving = resolution_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let lifecycle_identity = selected_home_identity(&spec.lifecycle_workspace)?;
         let fingerprint = spec.workload_kit.validate_captured_source(source)?;
         let local_tag = format!("marsh-local-v3:{}", &fingerprint[7..]);
-        let marker = local_kit_marker(
-            spec.workload_kit.identity(),
-            &fingerprint,
-            &lifecycle_identity,
-        );
+        let (marker, legacy) = Self::local_kit_markers(spec, &fingerprint)?;
 
         match self.classify_vm(&spec.name, false)? {
             VmClass::Foreign => return Err(SbxError::ForeignVm(spec.name.clone())),
@@ -4685,7 +4669,18 @@ impl StockSbx {
             VmClass::Owned { .. } => {}
         }
         let existing = self.inspect_kit(&spec.name, true)?;
-        if existing.succeeded() && self.verify_owned_marker(&spec.name, &marker).is_ok() {
+        let state = if existing.succeeded() {
+            Some(self.kit_marker_state(spec, &marker, &legacy))
+        } else {
+            None
+        };
+        if matches!(
+            state,
+            Some(Ok(KitMarkerState::Current | KitMarkerState::Legacy))
+        ) {
+            if matches!(state, Some(Ok(KitMarkerState::Legacy))) {
+                self.write_owned_marker(&spec.name, &marker)?;
+            }
             lifecycle_grant.verify_path()?;
             let outer_manifest = Self::public_image_digest(&existing)?;
             self.wait_for_docker(&spec.name)?;
@@ -4716,12 +4711,11 @@ impl StockSbx {
             }
             self.drop_worker_lease(&spec.name)?;
             self.remove_observed_kit(&spec.name, Instant::now() + self.preparation_timeouts.sbx)?;
-        } else if existing.succeeded() {
-            if !self.is_owned_stale_local_vm(spec, &lifecycle_identity)? {
-                return Err(SbxError::ForeignVm(spec.name.clone()));
+        } else if let Some(state) = state {
+            match state? {
+                KitMarkerState::Stale => self.retire_stale_kit_vm(spec)?,
+                KitMarkerState::Current | KitMarkerState::Legacy => unreachable!("handled above"),
             }
-            self.drop_worker_lease(&spec.name)?;
-            self.remove_observed_kit(&spec.name, Instant::now() + self.preparation_timeouts.sbx)?;
         } else if !sandbox_missing(&existing) {
             return Err(command_failed("inspect kit VM", existing));
         }
@@ -5635,16 +5629,117 @@ impl StockSbx {
 
     fn verify_owned_marker(&self, vm: &str, profile: &str) -> Result<(), SbxError> {
         let actual = self.read_owned_marker(vm)?;
-        if actual
-            != (OwnedWorkerMarker {
-                schema: "marsh.worker/v1".into(),
-                profile: profile.to_owned(),
-                basis: KIT_VM_BASIS.into(),
-            })
-        {
-            return Err(SbxError::ForeignVm(vm.to_owned()));
+        if actual.schema != "marsh.worker/v1" || actual.basis != KIT_VM_BASIS {
+            return Err(SbxError::IncompatibleVm {
+                vm: vm.to_owned(),
+                detail: format!(
+                    "its worker marker has schema {:?} and basis {:?}",
+                    actual.schema, actual.basis
+                ),
+            });
+        }
+        if actual.profile != profile {
+            return Err(SbxError::IncompatibleVm {
+                vm: vm.to_owned(),
+                detail: format!(
+                    "its worker marker profile is {:?}, expected {profile:?}",
+                    actual.profile
+                ),
+            });
         }
         Ok(())
+    }
+
+    /// The marker a published Kit's VM carries, and the one builds that
+    /// identified the lifecycle workspace by device number wrote.
+    fn published_kit_markers(spec: &KitVmSpec) -> Result<(String, String), SbxError> {
+        let identity = spec.workload_kit.identity();
+        Ok((
+            format!(
+                "kit:{identity}:{}",
+                selected_home_identity(&spec.lifecycle_workspace)?
+            ),
+            format!(
+                "kit:{identity}:{}",
+                legacy_home_identity(&spec.lifecycle_workspace)?
+            ),
+        ))
+    }
+
+    fn local_kit_markers(
+        spec: &KitVmSpec,
+        fingerprint: &str,
+    ) -> Result<(String, String), SbxError> {
+        let identity = spec.workload_kit.identity();
+        Ok((
+            local_kit_marker(
+                identity,
+                fingerprint,
+                &selected_home_identity(&spec.lifecycle_workspace)?,
+            ),
+            local_kit_marker(
+                identity,
+                fingerprint,
+                &legacy_home_identity(&spec.lifecycle_workspace)?,
+            ),
+        ))
+    }
+
+    /// Compare an owned Kit VM's marker with the markers this daemon would
+    /// write now (`current`) or older builds wrote for the same VM (`legacy`).
+    /// A marker that is another generation of this same Kit's own VM (a
+    /// rebuilt local image, a recreated or remounted lifecycle workspace) is
+    /// `Stale`: marsh made it and may retire it. Anything else fails with the
+    /// check that failed.
+    fn kit_marker_state(
+        &self,
+        spec: &KitVmSpec,
+        current: &str,
+        legacy: &str,
+    ) -> Result<KitMarkerState, SbxError> {
+        let actual = self.read_owned_marker(&spec.name)?;
+        if actual.schema == "marsh.worker/v1" && actual.basis == KIT_VM_BASIS {
+            if actual.profile == current {
+                return Ok(KitMarkerState::Current);
+            }
+            if actual.profile == legacy {
+                return Ok(KitMarkerState::Legacy);
+            }
+            if is_prior_kit_profile(&actual.profile, spec.workload_kit.identity()) {
+                return Ok(KitMarkerState::Stale);
+            }
+        }
+        self.verify_owned_marker(&spec.name, current)
+            .map(|()| KitMarkerState::Current)
+    }
+
+    /// Retire an owned Kit VM whose marker is a prior generation of this
+    /// Kit's own VM, so the caller creates its replacement under the same
+    /// name. The caller holds the VM's read fence. A job or session still
+    /// holding the VM refuses; removal is by exact recorded UUID.
+    fn retire_stale_kit_vm(&self, spec: &KitVmSpec) -> Result<(), SbxError> {
+        {
+            let mut references = self
+                .grant_mount_references
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if references.iter().any(|((vm, _), reference)| {
+                vm == &spec.name
+                    && (reference.active_jobs > 0 || !reference.pinned_sessions.is_empty())
+            }) {
+                return Err(SbxError::ActiveWorkerState(spec.name.clone()));
+            }
+            references.retain(|(vm, _), _| vm != &spec.name);
+        }
+        let deadline = Instant::now() + self.preparation_timeouts.sbx;
+        self.drop_worker_lease_before(&spec.name, deadline)?;
+        self.remove_observed_kit(&spec.name, deadline)?;
+        self.installed_worker_artifacts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&spec.name);
+        // The replacement keeps this name: record it before its create.
+        self.ownership.restore_intent(&spec.name)
     }
 
     fn read_owned_marker(&self, vm: &str) -> Result<OwnedWorkerMarker, SbxError> {
@@ -5667,8 +5762,12 @@ impl StockSbx {
                 ],
             )?;
             if output.succeeded() {
-                return serde_json::from_slice(&output.stdout)
-                    .map_err(|_| SbxError::ForeignVm(vm.to_owned()));
+                return serde_json::from_slice(&output.stdout).map_err(|_| {
+                    SbxError::IncompatibleVm {
+                        vm: vm.to_owned(),
+                        detail: "its worker marker is not a marsh marker".into(),
+                    }
+                });
             }
             let shell = self.ownership.is_owned_shell(vm);
             match lost_saved_mount(&output, shell) {
@@ -5685,7 +5784,10 @@ impl StockSbx {
                     // `cat` ran and found no marker: not a marsh worker VM.
                     // Anything else is stock SBX failing before `cat`.
                     return Err(if stderr.starts_with("cat: ") {
-                        SbxError::ForeignVm(vm.to_owned())
+                        SbxError::IncompatibleVm {
+                            vm: vm.to_owned(),
+                            detail: "it has no marsh worker marker".into(),
+                        }
                     } else {
                         SbxError::UnreadableVm {
                             vm: vm.to_owned(),
@@ -5846,23 +5948,6 @@ impl StockSbx {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .retain(|(name, _, mounted), _| name != vm || mounted != target);
         Ok(())
-    }
-
-    fn is_owned_stale_local_vm(
-        &self,
-        spec: &KitVmSpec,
-        lifecycle_identity: &str,
-    ) -> Result<bool, SbxError> {
-        let actual = self.read_owned_marker(&spec.name)?;
-        let prefix = format!("kit:{}:", spec.workload_kit.identity());
-        let suffix = format!(":{lifecycle_identity}");
-        let prior_image = actual
-            .profile
-            .strip_prefix(&prefix)
-            .and_then(|profile| profile.strip_suffix(&suffix));
-        Ok(actual.schema == "marsh.worker/v1"
-            && actual.basis == KIT_VM_BASIS
-            && prior_image.is_some_and(valid_image_id))
     }
 
     fn install_binary(
@@ -6306,6 +6391,13 @@ struct WorkerMarker<'a> {
     schema: &'static str,
     profile: &'a str,
     basis: &'static str,
+}
+
+enum KitMarkerState {
+    Current,
+    /// Written by an older build with the device-number identity.
+    Legacy,
+    Stale,
 }
 
 #[derive(Deserialize, Eq, PartialEq)]
@@ -7050,15 +7142,48 @@ fn valid_image_id(value: &str) -> bool {
     })
 }
 
+/// Whether `profile` is a marker some build wrote for the Kit `identity`'s own
+/// VM: `kit:IDENTITY:LIFECYCLE` (published) or
+/// `kit:IDENTITY:FINGERPRINT:LIFECYCLE` (local source), each part a sha256.
+fn is_prior_kit_profile(profile: &str, identity: &str) -> bool {
+    let Some(rest) = profile
+        .strip_prefix("kit:")
+        .and_then(|rest| rest.strip_prefix(identity))
+        .and_then(|rest| rest.strip_prefix(':'))
+    else {
+        return false;
+    };
+    valid_image_id(rest)
+        || rest
+            .strip_prefix("sha256:")
+            .and_then(|tail| tail.split_once(':'))
+            .is_some_and(|(fingerprint, lifecycle)| {
+                valid_image_id(&format!("sha256:{fingerprint}")) && valid_image_id(lifecycle)
+            })
+}
+
 /// Stable, non-disclosing identity for a selected home backing.
 ///
 /// # Errors
 /// Rejects unsafe, non-owned, or missing backing directories.
 pub fn selected_home_identity(path: &Path) -> Result<String, SbxError> {
+    home_identity(path, false)
+}
+
+/// The identity older builds recorded in VM markers. It includes the device
+/// number, which macOS reassigns across reboots, so a marker written before a
+/// reboot stops matching. Accepted when verifying, never written.
+fn legacy_home_identity(path: &Path) -> Result<String, SbxError> {
+    home_identity(path, true)
+}
+
+fn home_identity(path: &Path, with_device: bool) -> Result<String, SbxError> {
     let identity = HostIdentity::read(path)?;
     let mut digest = Sha256::new();
     digest.update(path.as_os_str().as_encoded_bytes());
-    digest.update(identity.device.to_be_bytes());
+    if with_device {
+        digest.update(identity.device.to_be_bytes());
+    }
     digest.update(identity.inode.to_be_bytes());
     digest.update(identity.uid.to_be_bytes());
     digest.update(identity.gid.to_be_bytes());
@@ -7400,6 +7525,8 @@ pub enum SbxError {
     MissingCapability(&'static str),
     #[error("existing sandbox name is not an owned compatible kit VM: {0}")]
     ForeignVm(String),
+    #[error("owned sandbox {vm} cannot be reused: {detail}")]
+    IncompatibleVm { vm: String, detail: String },
     #[error(
         "owned sandbox {vm} could not be read (stock SBX could not start or exec in it): {detail}"
     )]
