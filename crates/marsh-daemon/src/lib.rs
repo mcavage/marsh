@@ -1208,6 +1208,7 @@ pub fn cold_boot_notice(kit: &str, download: bool) -> String {
         (_, kit) if kit.starts_with("cloud:") => {
             format!("[starting a Docker Cloud sandbox: {}…]", &kit["cloud:".len()..])
         }
+        (false, "shell") => "[starting shell VM…]".into(),
         (false, _) => format!("[starting {kit} worker VM…]"),
         (true, "shell") => {
             "[starting shell VM… first use may download the shell image, this can take a few minutes]"

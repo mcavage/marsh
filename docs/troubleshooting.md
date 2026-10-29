@@ -33,7 +33,12 @@ marsh results
 Starting with no VMs requires the shell VM to boot and each Kit VM to boot
 and load its image on first use. A foreground call prints
 `[starting NAME worker VM…]` when it boots a Kit VM; background calls suppress
-that notice. Later calls reuse warm VMs.
+that notice. Opening a shell that has to create the shell VM prints
+`[starting shell VM…]`, or `[updating marsh's shell VM to the new shell image…]`
+when an upgrade replaces it; if another `marsh` is already setting the VM up,
+yours prints `[another marsh shell is setting up the shell VM; waiting…]` and
+attaches when it is ready (up to ten minutes; Ctrl-C cancels). Later calls reuse
+warm VMs.
 
 To boot them up front, use `marsh --load all` or `marsh --load claude,codex`.
 

@@ -128,6 +128,73 @@ pub struct StockDaemonBackend {
     kit_updates: Mutex<()>,
 }
 
+/// How long one shell open waits for another opener's shell VM setup (or
+/// mount admission) before giving up with the admission-busy error.
+const SHELL_BUSY_TIMEOUT: Duration = Duration::from_mins(10);
+
+/// One shell open's wait on other openers: a single notice, one deadline.
+struct ShellBusyWait {
+    deadline: Instant,
+    announced: bool,
+}
+
+impl ShellBusyWait {
+    fn new() -> Self {
+        Self {
+            deadline: Instant::now() + SHELL_BUSY_TIMEOUT,
+            announced: false,
+        }
+    }
+
+    fn keep_waiting(&self) -> bool {
+        Instant::now() < self.deadline
+    }
+
+    fn announce(&mut self, attachment: &ServerAttachment) {
+        if !std::mem::replace(&mut self.announced, true) {
+            let _ = attachment.send(&AttachmentFrame::Notice {
+                message: "[another marsh shell is setting up the shell VM; waiting…]".into(),
+            });
+        }
+    }
+}
+
+/// Forward shell VM setup progress to the opening client; `false` stops a
+/// wait once the client is gone (Ctrl-C).
+fn shell_vm_progress(
+    attachment: &ServerAttachment,
+    busy: &mut ShellBusyWait,
+    progress: marsh_sbx::ShellVmProgress,
+) -> bool {
+    match progress {
+        marsh_sbx::ShellVmProgress::Creating {
+            replacing: true, ..
+        } => {
+            let _ = attachment.send(&AttachmentFrame::Notice {
+                message: "[updating marsh's shell VM to the new shell image — first start after an upgrade can take a few minutes…]".into(),
+            });
+            true
+        }
+        marsh_sbx::ShellVmProgress::Creating {
+            replacing: false,
+            download,
+        } => {
+            let _ = attachment.send(&AttachmentFrame::ColdBoot {
+                kit: "shell".into(),
+                download,
+            });
+            true
+        }
+        marsh_sbx::ShellVmProgress::Waiting => {
+            if shell_attachment::require_controller(attachment).is_err() {
+                return false;
+            }
+            busy.announce(attachment);
+            true
+        }
+    }
+}
+
 /// See [`StockDaemonBackend::with_auto_update`].
 struct AutoUpdate {
     /// `MARSH_AUTO_UPDATE` as the daemon was launched.
@@ -2218,10 +2285,25 @@ impl DaemonBackend for StockDaemonBackend {
                 )));
             }
             store.bind_shell_cleanup_vm(&session_id, &shell.name)?;
-            let _shell_session = self
-                .sbx
-                .admit_shell_session(&shell.name)
-                .map_err(backend_error)?;
+            let mut busy = ShellBusyWait::new();
+            let _shell_session = loop {
+                let result = self
+                    .sbx
+                    .admit_shell_session_with(&shell.name, &mut |progress| {
+                        shell_vm_progress(&attachment, &mut busy, progress)
+                    });
+                match result {
+                    Err(marsh_sbx::SbxError::ShellMountAdmissionBusy) => {
+                        shell_attachment::require_controller(&attachment)?;
+                        if !busy.keep_waiting() {
+                            return Err(backend_error(
+                                marsh_sbx::SbxError::ShellMountAdmissionBusy,
+                            ));
+                        }
+                    }
+                    other => break other.map_err(backend_error)?,
+                }
+            };
             let mut admitted_mounts = self.admitted_session_grants_with_home(
                 &request.session,
                 &shell.user.home,
@@ -2251,22 +2333,23 @@ impl DaemonBackend for StockDaemonBackend {
                 self.send_update_notices(None, &attachment);
             }
             self.finish_shell_warmup();
-            // Announce a template download before it starts, not after.
-            let announced = self.sbx.shell_image_download_needed(&shell);
-            if announced {
-                attachment.send(&AttachmentFrame::ColdBoot {
-                    kit: "shell".into(),
-                    download: true,
-                })?;
-            }
-            let vm = self.sbx.ensure_shell_vm(&shell).map_err(backend_error)?;
+            let vm = loop {
+                let result = self.sbx.ensure_shell_vm_with(&shell, &mut |progress| {
+                    shell_vm_progress(&attachment, &mut busy, progress)
+                });
+                match result {
+                    Err(marsh_sbx::SbxError::ShellMountAdmissionBusy) => {
+                        shell_attachment::require_controller(&attachment)?;
+                        if !busy.keep_waiting() {
+                            return Err(backend_error(
+                                marsh_sbx::SbxError::ShellMountAdmissionBusy,
+                            ));
+                        }
+                    }
+                    other => break other.map_err(backend_error)?,
+                }
+            };
             shell_attachment::require_controller(&attachment)?;
-            if vm.cold_started && !announced {
-                attachment.send(&AttachmentFrame::ColdBoot {
-                    kit: "shell".into(),
-                    download: false,
-                })?;
-            }
             // Observe and pin stock's actual UUID BEFORE any grant submission.
             self.sbx.shell_vm_identity(&vm).map_err(backend_error)?;
             self.configure_shell_mcp(&vm, &shell_environment)?;
@@ -2278,20 +2361,28 @@ impl DaemonBackend for StockDaemonBackend {
                     vm.name
                 ))
             };
-            let mounts = self
-                .sbx
-                .prepare_shell_mounts(&vm, &admitted_mounts)
-                .map_err(|error| {
-                    if matches!(
-                        error,
-                        marsh_sbx::SbxError::ShellMountCleanupUncertain(_)
-                            | marsh_sbx::SbxError::QuarantinedShellVm(_)
-                    ) {
-                        quarantine(error.to_string())
-                    } else {
-                        backend_error(error)
+            let mounts = loop {
+                match self.sbx.prepare_shell_mounts(&vm, &admitted_mounts) {
+                    Err(marsh_sbx::SbxError::ShellMountAdmissionBusy)
+                        if shell_attachment::require_controller(&attachment).is_ok()
+                            && busy.keep_waiting() =>
+                    {
+                        busy.announce(&attachment);
                     }
-                })?;
+                    other => break other,
+                }
+            }
+            .map_err(|error| {
+                if matches!(
+                    error,
+                    marsh_sbx::SbxError::ShellMountCleanupUncertain(_)
+                        | marsh_sbx::SbxError::QuarantinedShellVm(_)
+                ) {
+                    quarantine(error.to_string())
+                } else {
+                    backend_error(error)
+                }
+            })?;
             let daemon_socket = match shell_attachment::require_controller(&attachment)
                 .and_then(|()| EndpointPaths::for_home(&self.config.daemon_home))
             {
