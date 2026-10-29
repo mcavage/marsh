@@ -480,10 +480,11 @@ fn cleanup_quarantine_removes_worker_from_warm_ready_admission() {
             health: WorkerHealth::Ready,
             container_capacity: 8,
             active_container_ids: Vec::new(),
+            quarantine: None,
         })
         .unwrap();
 
-    store.quarantine_worker("worker-1").unwrap();
+    store.quarantine_worker("worker-1", "test").unwrap();
 
     let worker = &store.status(None).workers[0];
     assert_eq!(worker.health, WorkerHealth::Quarantined);
@@ -1131,6 +1132,7 @@ fn store_exposes_safe_versioned_documents() {
             health: WorkerHealth::Ready,
             container_capacity: 3,
             active_container_ids: vec![],
+            quarantine: None,
         })
         .unwrap();
     let (job, attempt) = store
@@ -1202,6 +1204,7 @@ fn uncertain_cleanup_quarantines_worker_and_releases_capacity() {
             health: WorkerHealth::Ready,
             container_capacity: 1,
             active_container_ids: vec![],
+            quarantine: None,
         })
         .unwrap();
     let (job, _) = store
@@ -1296,6 +1299,7 @@ fn pre_runtime_failures_stay_auditable_without_blocking_a_fresh_vm() {
                 health: WorkerHealth::Ready,
                 container_capacity: 1,
                 active_container_ids: vec![],
+                quarantine: None,
             })
             .unwrap();
         let (job, _) = store
@@ -1489,6 +1493,7 @@ fn capacity_is_reserved_before_container_identity_and_abort_releases_it() {
             health: WorkerHealth::Ready,
             container_capacity: 1,
             active_container_ids: Vec::new(),
+            quarantine: None,
         })
         .unwrap();
     let new_job = || NewJob {
@@ -1526,6 +1531,7 @@ fn worker_repair_claim_is_atomic_with_admission_and_live_work() {
             health: WorkerHealth::Ready,
             container_capacity: 2,
             active_container_ids: Vec::new(),
+            quarantine: None,
         })
         .unwrap();
     let new_job = || NewJob {
@@ -1557,7 +1563,7 @@ fn worker_repair_claim_is_atomic_with_admission_and_live_work() {
 }
 
 #[test]
-fn failed_worker_repair_quarantines_the_generation() {
+fn failed_worker_repair_forgets_the_idle_worker_without_quarantine() {
     let home = home();
     let store = reopen(home.path()).unwrap();
     let scope = store.status(None).scope_id;
@@ -1572,15 +1578,16 @@ fn failed_worker_repair_quarantines_the_generation() {
             health: WorkerHealth::Ready,
             container_capacity: 1,
             active_container_ids: Vec::new(),
+            quarantine: None,
         })
         .unwrap();
 
     assert!(store.begin_worker_repair("worker", "vm").unwrap());
     store.finish_worker_repair("worker", false).unwrap();
-    let worker = &store.status(None).workers[0];
-    assert_eq!(worker.health, WorkerHealth::Quarantined);
-    assert!(!worker.warm);
-    assert!(store.worker_reuse_blocked("vm"));
+    // The claim proved no job was admitted or running: nothing can be
+    // running there, so the next call prepares the VM again.
+    assert_eq!(store.status(None).workers.len(), 0);
+    assert!(!store.worker_reuse_blocked("vm"));
 }
 
 #[test]
@@ -1601,6 +1608,7 @@ fn worker_reset_refuses_active_selection_atomically_and_preserves_other_state() 
                 health: WorkerHealth::Ready,
                 container_capacity: 1,
                 active_container_ids: Vec::new(),
+                quarantine: None,
             })
             .unwrap();
     }
@@ -1676,6 +1684,7 @@ fn incomplete_output_makes_terminal_receipt_failed() {
             health: WorkerHealth::Ready,
             container_capacity: 1,
             active_container_ids: Vec::new(),
+            quarantine: None,
         })
         .unwrap();
     let new_job = || NewJob {
@@ -2505,6 +2514,7 @@ fn receipt_journal_compacts_and_replays_a_reserved_queued_receipt() {
             health: WorkerHealth::Ready,
             container_capacity: 1,
             active_container_ids: vec![],
+            quarantine: None,
         })
         .unwrap();
     let (job, _) = store
@@ -2865,7 +2875,7 @@ fn public_client_authenticates_and_shares_daemon() {
         })
         .unwrap()
     {
-        PublicReply::Status(status) => status,
+        PublicReply::Status(status) => *status,
         reply => panic!("unexpected reply: {reply:?}"),
     };
     assert_ne!(first, second);

@@ -482,8 +482,27 @@ impl DaemonStore {
         refused(&mut self.lock(), parent);
     }
 
-    /// After a successful `marsh workers reset`: slots held by uncertain
-    /// jobs of the reset Kits are released, durably.
+    /// The commands of cleanup-uncertain jobs that ran on worker VM `vm`.
+    #[must_use]
+    pub fn uncertain_job_commands(&self, vm: &str) -> Vec<String> {
+        let state = self.lock();
+        let mut commands = state
+            .jobs
+            .values()
+            .filter(|job| {
+                job.cleanup == CleanupState::Uncertain
+                    && (job.worker_id.as_deref() == Some(vm) || job.vm_id.as_deref() == Some(vm))
+            })
+            .map(|job| job.command.clone())
+            .collect::<Vec<_>>();
+        commands.sort();
+        commands.dedup();
+        commands
+    }
+
+    /// After a successful `marsh workers reset` (or an automatic retirement
+    /// of a quarantined VM): slots held by uncertain jobs of the reset Kits
+    /// are released, durably.
     pub fn release_process_slots(&self, kits: &[String]) {
         let mut state = self.lock();
         let now = crate::unix_time_ms();

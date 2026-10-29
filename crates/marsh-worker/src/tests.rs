@@ -1161,6 +1161,15 @@ fn only_a_pre_effect_create_rejection_skips_quarantine() {
             CleanupOutcome::Verified,
             false,
         ),
+        // A create that timed out never started its container, and its
+        // label sweep proved none is left: no quarantine either.
+        (
+            RuntimeError::CreateAbandoned {
+                cause: "timed out".into(),
+            },
+            CleanupOutcome::Verified,
+            false,
+        ),
     ] {
         let runtime = Arc::new(FakeRuntime {
             create_error: Mutex::new(Some(error)),

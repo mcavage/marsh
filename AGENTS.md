@@ -88,7 +88,10 @@ journey. Do not grow mock suites or a parallel test framework to claim progress.
   or exec into a VM that is not in that map with its recorded UUID.
 - Keep session, job, attempt, worker, VM, and container identities distinct.
 - Never replay a job after transport loss; mark it cleanup-uncertain and
-  quarantine the VM. `marsh workers reset KIT` retires it.
+  quarantine the VM, with its reason. The daemon retires it once it verified
+  no container can still run there; otherwise `marsh workers reset KIT` does.
+  Failures before any job ran (timeouts, slow pulls, busy bookkeeping) fail
+  the start cleanly instead of quarantining.
 - Jobs get no Docker, containerd, or SBX socket and no raw credentials; their only
   daemon channel is the scoped job capability socket (`/run/marsh/cap.sock`,
   `docs/design/processes.md`).

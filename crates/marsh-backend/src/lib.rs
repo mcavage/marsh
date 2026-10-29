@@ -11,6 +11,7 @@ mod kit_auto_update;
 mod kit_lifecycle;
 mod sbxenv;
 mod shell_attachment;
+mod worker_recovery;
 
 use marsh_contracts::{
     ExecutionOutcome, JobIdentity, JobMount, JobResources, JobSignal, JobSpec, MountAccess,
@@ -46,7 +47,14 @@ use std::{
 };
 
 /// Covers the worker's own create budget (30 s) plus a failed create's cleanup.
-const WORKER_START_PROGRESS_TIMEOUT: Duration = Duration::from_secs(60);
+/// The worker reports `Started` once its container exists. Its own steps are
+/// bounded (image inspect 15 s, create 45 s, an abandoned create's sweep
+/// 30 s), so this only catches a worker that stopped making progress.
+const WORKER_START_PROGRESS_TIMEOUT: Duration = Duration::from_secs(120);
+/// After a start or wall timeout the transport is still up: the worker is
+/// asked to cancel and given this long to report the attempt's verified end
+/// before the attempt counts as lost.
+const WORKER_CANCEL_SETTLE: Duration = Duration::from_secs(60);
 const WORKER_TERMINAL_GRACE: Duration = Duration::from_secs(15);
 const WORKER_CANCEL_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -118,6 +126,8 @@ pub struct StockDaemonBackend {
     sbxenvs: BTreeMap<String, sbxenv::Environment>,
     shared_sbxenv: sbxenv::Environment,
     configured_mcp_vms: Mutex<BTreeSet<String>>,
+    /// Why automatic recovery last left a quarantined Kit VM in place.
+    quarantine_recovery: Mutex<BTreeMap<String, String>>,
     /// The dev broker (`marsh --dev`); dev shells use the one shell image.
     dev: Option<Arc<marsh_daemon::DevBroker>>,
     /// Session-origin cloud placement (`docs/design/cloud-placement.md`).
@@ -293,10 +303,14 @@ impl StockDaemonBackend {
                 let spec = self.kit_spec_for_session(&command, session, store)?;
                 let mut cold_started = false;
                 let token = store.ephemeral_home_token(&session.session_id);
-                let vm = self.prepare_one_authorized(&spec, store, token.as_ref(), |download| {
-                    cold_started = true;
-                    progress.cold_boot(command.clone(), download)
-                })?;
+                let vm = self
+                    .prepare_one_authorized(&spec, store, token.as_ref(), |download| {
+                        cold_started = true;
+                        progress.cold_boot(command.clone(), download)
+                    })
+                    .map_err(|error| {
+                        quarantine_hint(error, &command, self.recovery_note(&spec.name).as_deref())
+                    })?;
                 let mut grants = grants_by_command[&command].clone();
                 if self.kit_wants_no_home(&command, &spec.workload_kit)? {
                     grants.retain(|grant| grant.target() != session.guest_home);
@@ -452,6 +466,7 @@ impl StockDaemonBackend {
             sbxenvs: BTreeMap::new(),
             shared_sbxenv: sbxenv::Environment::default(),
             configured_mcp_vms: Mutex::new(BTreeSet::new()),
+            quarantine_recovery: Mutex::new(BTreeMap::new()),
             dev: None,
             cloud: cloud::CloudPlacement::default(),
             auto_update: None,
@@ -829,6 +844,11 @@ impl StockDaemonBackend {
                 .ephemeral_home_grant(token, &spec.lifecycle_workspace, &spec.lifecycle_workspace)
                 .map_err(backend_error)?;
         }
+        // A quarantined VM is replaced here once that is verifiably safe;
+        // otherwise preparation reports the quarantine and why it stays.
+        if self.vm_quarantined(store, &spec.name) {
+            let _ = self.recover_quarantined_vm(store, &spec.name);
+        }
         let kit_lock = self
             .kit_locks
             .lock()
@@ -906,6 +926,10 @@ impl StockDaemonBackend {
                 Err(error) => {
                     if repair_claimed {
                         store.finish_worker_repair(&spec.name, false)?;
+                        self.registered_workers
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .remove(&spec.name);
                     }
                     return Err(error);
                 }
@@ -987,7 +1011,10 @@ impl StockDaemonBackend {
                 pinned_vms.sort();
                 pinned_vms.dedup();
                 for vm in pinned_vms {
-                    let _ = store.quarantine_worker(&vm);
+                    let _ = store.quarantine_worker(
+                        &vm,
+                        format!("a closed session's mount pins could not be released: {error}"),
+                    );
                 }
                 Err(DaemonError::ShellCleanupUncertain(error.to_string()))
             }
@@ -1002,7 +1029,10 @@ impl StockDaemonBackend {
         let mut failure = None;
         for (vm, pins) in acquired.iter().rev() {
             if let Err(error) = self.sbx.rollback_session_grants(pins) {
-                let _ = store.quarantine_worker(vm);
+                let _ = store.quarantine_worker(
+                    vm,
+                    format!("a session's mount pins could not be rolled back: {error}"),
+                );
                 failure.get_or_insert_with(|| backend_error(error));
             }
         }
@@ -1021,6 +1051,7 @@ fn public_worker_status(store: &DaemonStore, vm: &ReadyKitVm) -> WorkerStatus {
         health: WorkerHealth::Ready,
         container_capacity: WORKER_CONTAINER_CAPACITY,
         active_container_ids: Vec::new(),
+        quarantine: None,
     }
 }
 
@@ -1070,8 +1101,15 @@ impl DaemonBackend for StockDaemonBackend {
         Ok(installed)
     }
 
+    fn annotate_status(&self, status: &mut marsh_daemon::StatusDocument) {
+        let scope_id = status.scope_id.clone();
+        self.annotate_quarantines(&mut status.workers, &scope_id);
+    }
+
     fn auto_update_kits(&self, store: &DaemonStore) {
         self.retire_drained(store);
+        self.sbx.release_deferred_session_pins();
+        self.recover_quarantined(store);
         self.auto_update_pass(store, unix_millis(SystemTime::now()));
     }
 
@@ -1278,6 +1316,9 @@ impl DaemonBackend for StockDaemonBackend {
             .collect::<Vec<_>>();
         let claim = Self::claim_retirement(&store, specs.keys().cloned().collect())?;
         self.retire_claimed(&store, &specs, &claim)?;
+        if matches!(selection, LoadSelection::All) {
+            self.retire_unnamed_quarantined(&store)?;
+        }
         Ok(selected)
     }
 
@@ -1677,6 +1718,16 @@ impl DaemonBackend for StockDaemonBackend {
             store: store.clone(),
         };
         let token = store.ephemeral_home_token(&request.session.session_id);
+        let recovery = self.recover_before_prepare(&spec, &store);
+        if let Some(Ok(recovered)) = &recovery {
+            let _ = attachment.send(&AttachmentFrame::Stderr {
+                bytes: format!(
+                    "marsh: replacing the {} worker VM: it was quarantined because {}; {}, so no job is running there\n",
+                    request.command, recovered.reason, recovered.verified
+                )
+                .into_bytes(),
+            });
+        }
         let vm = self
             .prepare_one_authorized(&spec, &store, token.as_ref(), |download| {
                 attachment.send(&AttachmentFrame::ColdBoot {
@@ -1684,7 +1735,16 @@ impl DaemonBackend for StockDaemonBackend {
                     download,
                 })
             })
-            .map_err(|error| quarantine_hint(error, &request.command))?;
+            .map_err(|error| {
+                quarantine_hint(
+                    error,
+                    &request.command,
+                    recovery
+                        .and_then(Result::err)
+                        .or_else(|| self.recovery_note(&spec.name))
+                        .as_deref(),
+                )
+            })?;
         let vm_ready_at = Instant::now();
         self.register_worker(&store, &vm)?;
         // `run --acp` and ACP sessions run the adapter the Kit declares,
@@ -1786,7 +1846,10 @@ impl DaemonBackend for StockDaemonBackend {
             Err(error) => {
                 let rollback = error.grant_rollback_complete();
                 let cleanup = if rollback == Some(false) {
-                    let _ = self.sbx.stop_quarantined(&vm);
+                    let _ = self.sbx.stop_quarantined_because(
+                        &vm,
+                        format!("a job's mounts could not be rolled back: {error}"),
+                    );
                     CleanupState::Uncertain
                 } else if rollback == Some(true) {
                     CleanupState::Verified
@@ -1805,7 +1868,11 @@ impl DaemonBackend for StockDaemonBackend {
                     TimingReport::default(),
                 )?;
                 job_guard.complete();
-                return Err(backend_error(error));
+                return Err(quarantine_hint(
+                    backend_error(error),
+                    &request.command,
+                    self.recovery_note(&vm.name).as_deref(),
+                ));
             }
         };
         let mut grant_guard = GrantGuard::new(Arc::clone(&self.sbx), vm.clone(), grants.clone());
@@ -1983,7 +2050,11 @@ impl DaemonBackend for StockDaemonBackend {
                     )?;
                     job_guard.complete();
                 }
-                return Err(backend_error(error));
+                return Err(quarantine_hint(
+                    backend_error(error),
+                    &request.command,
+                    self.recovery_note(&vm.name).as_deref(),
+                ));
             }
         };
         grant_guard.complete();
@@ -2034,11 +2105,17 @@ impl DaemonBackend for StockDaemonBackend {
         let mut transport_lost = false;
         // Why the transport was lost, for the receipt and the caller.
         let mut transport_detail = None;
+        // A timeout the worker was asked to cancel for, and until when it
+        // has to report the attempt's end.
+        let mut timeout_detail: Option<String> = None;
+        let mut settle_deadline: Option<Instant> = None;
         let start_progress_deadline = Instant::now() + WORKER_START_PROGRESS_TIMEOUT;
         let report = loop {
             let response = receive_worker_response(
                 &launch.responses,
-                if started_container.is_none() {
+                if let Some(settle) = settle_deadline {
+                    settle
+                } else if started_container.is_none() {
                     start_progress_deadline.min(terminal_deadline)
                 } else {
                     terminal_deadline
@@ -2120,19 +2197,39 @@ impl DaemonBackend for StockDaemonBackend {
                         retained_processes: Vec::new(), // No observed IDs, NOT proof of absence.
                     };
                 }
+                Err(true) if settle_deadline.is_none() => {
+                    // The transport is up; only progress is late. Ask the
+                    // worker to cancel and wait for its verified report
+                    // instead of declaring the attempt lost.
+                    timeout_detail = Some(if started_container.is_none() {
+                        format!(
+                            "start_timeout: no worker progress within {} s of start; cancelled",
+                            WORKER_START_PROGRESS_TIMEOUT.as_secs()
+                        )
+                    } else {
+                        "terminal_timeout: no terminal report by the wall limit plus grace; cancelled"
+                            .into()
+                    });
+                    let _ = control.send_bounded(
+                        &WorkerRequest::Cancel {
+                            attempt: attempt_id.clone(),
+                        },
+                        WORKER_CANCEL_WRITE_TIMEOUT,
+                    );
+                    settle_deadline = Some(Instant::now() + WORKER_CANCEL_SETTLE);
+                }
                 Err(timed_out) => {
-                    transport_detail = Some(if !timed_out {
+                    transport_detail = Some(if timed_out {
+                        format!(
+                            "{}; no report within {} s of the cancel",
+                            timeout_detail.as_deref().unwrap_or("timed out"),
+                            WORKER_CANCEL_SETTLE.as_secs()
+                        )
+                    } else {
                         launch
                             .responses
                             .loss_reason()
                             .unwrap_or_else(|| "worker route closed".into())
-                    } else if started_container.is_none() {
-                        format!(
-                            "no worker progress within {} s of start",
-                            WORKER_START_PROGRESS_TIMEOUT.as_secs()
-                        )
-                    } else {
-                        "no terminal report by the wall limit plus grace".into()
                     });
                     if timed_out {
                         let _ = control.send_bounded(
@@ -2173,7 +2270,7 @@ impl DaemonBackend for StockDaemonBackend {
             started_container.as_ref(),
             &report,
             &grant_cleanup,
-            transport_lost,
+            transport_detail.as_deref().filter(|_| transport_lost),
         )?;
         if cleanup_uncertain {
             let message = if let Err(error) = &grant_cleanup {
@@ -2199,6 +2296,16 @@ impl DaemonBackend for StockDaemonBackend {
                 output_complete = false;
             }
         }
+        if !transport_lost
+            && let Some(detail) = &timeout_detail
+            && attachment
+                .send(&AttachmentFrame::Stderr {
+                    bytes: format!("marsh: {} ({})\n", request.command, detail).into_bytes(),
+                })
+                .is_err()
+        {
+            output_complete = false;
+        }
         let cleanup = if cleanup_uncertain {
             CleanupState::Uncertain
         } else {
@@ -2211,6 +2318,11 @@ impl DaemonBackend for StockDaemonBackend {
         let cleanup_at = Instant::now();
         grant_guard.complete();
         let (mut code, mut cause) = worker_public_exit(&report, cleanup_uncertain, output_complete);
+        if transport_detail.is_none()
+            && let Some(detail) = &timeout_detail
+        {
+            cause = format!("{cause}; {detail}");
+        }
         if let Some(detail) = &transport_detail {
             // Bounded: the reason carries at most a short worker stderr tail.
             let detail = detail.chars().take(768).collect::<String>();
@@ -2669,18 +2781,33 @@ fn reconcile_worker_cleanup(
     started_container: Option<&marsh_contracts::ContainerId>,
     report: &WorkerReport,
     grant_cleanup: &Result<(), marsh_sbx::SbxError>,
-    transport_lost: bool,
+    transport_lost: Option<&str>,
 ) -> Result<bool, DaemonError> {
     if started_container.is_some() && report.container_id.as_ref() != started_container {
-        let _ = sbx.stop_quarantined(vm);
+        let _ = sbx.stop_quarantined_because(
+            vm,
+            "the worker's final report named a different container than it started",
+        );
         return Err(DaemonError::InvalidState(
             "worker final report changed the runtime container identity".into(),
         ));
     }
     let cleanup_uncertain =
         report.cleanup == CleanupOutcome::Uncertain || report.quarantine || grant_cleanup.is_err();
-    if transport_lost || cleanup_uncertain {
-        let _ = sbx.stop_quarantined(vm);
+    if transport_lost.is_some() || cleanup_uncertain {
+        let reason = if let Some(detail) = transport_lost {
+            format!(
+                "the worker transport was lost while a job was active: {}",
+                detail.chars().take(300).collect::<String>()
+            )
+        } else if let Err(error) = grant_cleanup {
+            format!("a job's mount release failed: {error}")
+        } else if !report.retained_processes.is_empty() {
+            "the worker kept processes it could not reap after a job".into()
+        } else {
+            "the worker could not verify that a job's container was deleted".into()
+        };
+        let _ = sbx.stop_quarantined_because(vm, reason);
     }
     Ok(cleanup_uncertain)
 }
@@ -3154,7 +3281,10 @@ impl GrantGuard {
 impl Drop for GrantGuard {
     fn drop(&mut self) {
         if self.armed && self.sbx.revoke_grants(&self.grants).is_err() {
-            let _ = self.sbx.stop_quarantined(&self.vm);
+            let _ = self.sbx.stop_quarantined_because(
+                &self.vm,
+                "an abandoned job's mounts could not be released",
+            );
         }
     }
 }
@@ -3521,11 +3651,22 @@ fn millis(duration: std::time::Duration) -> u64 {
 }
 
 /// Name the exact operator command that retires a quarantined Kit VM.
-fn quarantine_hint(error: DaemonError, command: &str) -> DaemonError {
+fn quarantine_hint(error: DaemonError, command: &str, recovery: Option<&str>) -> DaemonError {
     match error {
         DaemonError::InvalidState(message) if message.contains(QUARANTINED_WORKER_TEXT) => {
+            let vm = message
+                .split_once(QUARANTINED_WORKER_TEXT)
+                .map_or(message.as_str(), |(_, rest)| rest)
+                .trim_start_matches(": ")
+                .split("; retire it with host")
+                .next()
+                .unwrap_or_default();
+            let recovery = recovery.map_or_else(
+                || "marsh replaces it on its own once it verifies no job container still runs there".to_owned(),
+                |why| format!("it was not replaced automatically: {why}"),
+            );
             DaemonError::InvalidState(format!(
-                "Kit {command} worker VM is quarantined after uncertain cleanup ({message}); run `marsh workers reset {command}` to retire it; its uncertain receipts stay uncertain and the next run creates a fresh VM"
+                "Kit {command} worker VM is quarantined: {vm}; {recovery}; to clear it now: marsh workers reset {command} (its uncertain jobs stay uncertain; the next run creates a fresh VM)"
             ))
         }
         other => other,
@@ -5100,7 +5241,7 @@ mod tests {
                 report.container_id.as_ref(),
                 &report,
                 &cleanup,
-                false
+                None
             )
             .unwrap()
         );
@@ -5162,7 +5303,7 @@ mod tests {
         };
 
         assert!(
-            reconcile_worker_cleanup(&sbx, &vm, Some(&started), &report, &Ok(()), false).is_err()
+            reconcile_worker_cleanup(&sbx, &vm, Some(&started), &report, &Ok(()), None).is_err()
         );
         drop(guard);
         assert_eq!(
@@ -5529,6 +5670,7 @@ mod tests {
                 health: WorkerHealth::Quarantined,
                 container_capacity: 16,
                 active_container_ids: Vec::new(),
+                quarantine: None,
             })
             .unwrap();
 
@@ -5536,7 +5678,15 @@ mod tests {
         let error = backend
             .prepare_one_with_progress(&spec, &store, |_| Ok(()))
             .unwrap_err();
-        assert!(error.to_string().contains("cannot be repaired"));
+        // Recovery could not verify the VM (no stock inventory here), so it
+        // stays quarantined, and the refusal says so and how to clear it.
+        let message = error.to_string();
+        assert!(message.contains("is quarantined"), "{message}");
+        assert!(message.contains("marsh workers reset"), "{message}");
+        assert!(
+            store.worker_quarantine(&vm).unwrap().recovery.is_some(),
+            "{message}"
+        );
     }
 
     #[test]
@@ -5581,6 +5731,7 @@ mod tests {
                 health: WorkerHealth::Ready,
                 container_capacity: WORKER_CONTAINER_CAPACITY,
                 active_container_ids: Vec::new(),
+                quarantine: None,
             })
             .unwrap();
         let (job, _) = store
@@ -5630,6 +5781,7 @@ mod tests {
                 health: WorkerHealth::Ready,
                 container_capacity: 1,
                 active_container_ids: Vec::new(),
+                quarantine: None,
             })
             .unwrap();
         let new_job = || NewJob {
@@ -5806,6 +5958,7 @@ mod tests {
                 health: WorkerHealth::Ready,
                 container_capacity: 8,
                 active_container_ids: Vec::new(),
+                quarantine: None,
             })
             .unwrap();
         let (job, _) = store
@@ -6151,6 +6304,7 @@ mod tests {
                 health: WorkerHealth::Ready,
                 container_capacity: 1,
                 active_container_ids: Vec::new(),
+                quarantine: None,
             })
             .unwrap();
         let (job, _) = store
@@ -6500,6 +6654,7 @@ mod kit_lifecycle_callers {
                 health: WorkerHealth::Ready,
                 container_capacity: 4,
                 active_container_ids: Vec::new(),
+                quarantine: None,
             })
             .unwrap();
         let (job, _) = store
@@ -6631,6 +6786,7 @@ mod kit_lifecycle_callers {
                 health: WorkerHealth::Ready,
                 container_capacity: 4,
                 active_container_ids: Vec::new(),
+                quarantine: None,
             })
             .unwrap();
         let (job, _) = store

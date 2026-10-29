@@ -21,7 +21,7 @@ marsh results
 | Error before a shell opens | [marsh will not start](#marsh-will-not-start) |
 | An environment file or MCP connection fails | [Environment files and MCP connections](#environment-files-and-mcp-connections) |
 | A command exits 125 or 126 | [A job was refused](#a-job-was-refused) |
-| `cleanup uncertain` in `jobs --tree` | [Cleanup uncertain and quarantine](#cleanup-uncertain-and-quarantine) |
+| `cleanup uncertain` in `jobs --tree`, or a worker `quarantined` in `marsh status` | [Cleanup uncertain and quarantine](#cleanup-uncertain-and-quarantine) |
 | A VM will not go away | [Removing VMs](#removing-vms) |
 | `join` left a split behind | [A split was kept](#a-split-was-kept) |
 | `ephemeral home capacity exhausted` | [Ephemeral home slots](#ephemeral-home-slots) |
@@ -135,14 +135,45 @@ mid-job. Then marsh:
 
 - does not re-run the job
 - marks the job `cleanup_uncertain` (`cleanup uncertain` in `jobs --tree`)
-- quarantines that Kit VM, so no new jobs go to it
+- quarantines that Kit VM, so no new jobs go to it, and stops it
 
-Run `marsh workers reset KIT`, using the Kit name in the message, or
-`marsh workers reset all` to retire all idle or quarantined Kit VMs.
+`marsh status` says why, since when, and which jobs:
 
-This removes the VM, and the next call creates a new one. Files the job wrote
-to your project stay as they are. Review them with `git status` and
-`git diff`, or your own tools.
+```text
+    claude           VM marsh-k-3fylzyxh  quarantined
+      quarantined 2m ago: the worker transport was lost while a job was active: ... (jobs 1a2b3c4d); marsh retires it on its own once it verifies no job container still runs there; to clear it now: marsh workers reset claude
+```
+
+`marsh status --json` has the same under each worker's `quarantine`:
+`reason`, `since` (unix ms), `jobs`, and `recovery` (why it was not retired
+automatically yet).
+
+marsh then retires the VM on its own, within a minute or at the next call of
+that Kit, once it has verified that no job container can still be running
+there: the VM is stopped (the quarantine stops it) or gone, or its Docker
+lists no running container. The call that finds it prints
+`marsh: replacing the KIT worker VM: ...`, `marsh status` lists the retirement
+under `recovered`, and the next call creates a new VM. If marsh cannot verify
+that (for example a container is still running, or `sbx` cannot reach the VM),
+the VM stays quarantined and the status line says why.
+
+To clear it yourself, run `marsh workers reset KIT`, using the Kit name in the
+message, or `marsh workers reset all` to retire all idle or quarantined Kit
+VMs, including one left by a `marsh kit install` that failed.
+
+Either way the uncertain jobs stay uncertain, and files the job wrote to your
+project stay as they are. Review them with `git status` and `git diff`, or
+your own tools.
+
+These do not quarantine a VM: a slow image download while a VM is created
+(the create waits up to an hour, as long as `sbx` is working on it), a job
+whose start timed out (marsh cancels it and waits for the worker to confirm
+its container is gone; the job fails with `start_timeout`), a `docker create`
+that did not complete (its container never started, and marsh removes it by
+label), a worker that is slow to answer while busy, reinstalling marsh while
+jobs run (they keep the worker they started on), and a closing shell whose
+mount bookkeeping is busy. A VM create that `sbx` did not report on is held
+back for two minutes in case it still lands, then removed or retried.
 
 ## Removing VMs
 

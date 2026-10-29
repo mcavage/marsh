@@ -329,7 +329,9 @@ refused by the spawn set), and is counted in `marsh status`
   quarantined, and its slot stays held. Held slots are derived from the
   receipts (`cleanup: uncertain` after the last successful `workers reset`
   of that Kit, persisted in `process-resets.json`), so they survive a
-  daemon restart and are released only after a reset succeeds.
+  daemon restart and are released only after a reset succeeds: an operator
+  `workers reset`, or the daemon's own retirement of the quarantined VM once
+  it verified no container can still run there (`docs/troubleshooting.md`).
 - **Daemon restart.** All capabilities are revoked. Unfinished jobs become
   uncertain and retain held admission slots until verified reset. Nothing is
   resubmitted (`RevokedAtRestart`, `RestartUncertain`, `NoReplay`). The adapter's
