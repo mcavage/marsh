@@ -11,7 +11,7 @@ import uuid
 
 from harness import ScenarioSuite, require, scenario_parser, suite_main
 from mcp_harness import GATEWAY_PROBE
-from provenance import stock_baseline, stock_vm_inventory
+from provenance import SharedBaseline, stock_baseline, stock_refusal_errors, stock_vm_inventory
 
 SCENARIOS = {
     "E01-per-kit-mounts": "mounts",
@@ -149,18 +149,24 @@ class Environments(ScenarioSuite):
         original = (self.home / "sbxenv.yaml").read_text()
         original_kit = (self.layers / "fixture.yaml").read_text()
         baseline = stock_vm_inventory(self.sbx)
+
+        def unchanged(message):
+            errors = stock_refusal_errors(baseline, stock_vm_inventory(self.sbx), self.owned_stock_names(),
+                                          shared=isinstance(self.stock_before, SharedBaseline))
+            require(not errors, f"{message}: {'; '.join(errors)}")
+
         try:
             for fields in ({"agent": "shell"}, {"additionalWorkspaces": [{"path": str(self.project)}]},
                            {"additionalWorkspaces": [{"path": str(self.guest_home)}]}):
                 self.write(self.home / "sbxenv.yaml", fields)
                 result = self.brush("true", self.project)
                 require(result.returncode != 0, f"unsafe declaration admitted: {fields}")
-                require(stock_vm_inventory(self.sbx) == baseline, "refusal created or changed a VM")
+                unchanged("refusal created or changed a VM")
             (self.home / "sbxenv.yaml").write_text(original)
             self.write(self.layers / "fixture.yaml", {"additionalWorkspaces": [{"path": str(self.project)}]})
             result = self.cli(["--load", "fixture", "-c", "true"], self.project)
             require(result.returncode != 0, "unsafe Kit-only mount admitted during prewarm")
-            require(stock_vm_inventory(self.sbx) == baseline, "bad prewarm mount created a shell or Kit VM")
+            unchanged("bad prewarm mount created a shell or Kit VM")
         finally:
             (self.home / "sbxenv.yaml").write_text(original)
             (self.layers / "fixture.yaml").write_text(original_kit)
