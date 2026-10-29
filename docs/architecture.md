@@ -79,9 +79,12 @@ distinct and are never derived from each other.
    which can include prompt text, but captures no stdin, stdout, or stderr.
 
 Transport loss with active attempts marks them `cleanup_uncertain` and
-quarantines the VM; jobs are never replayed. `marsh workers reset KIT` retires
-a quarantined Kit VM. `marsh reset` and `marsh stop` clean up the whole
-scope once nothing is active.
+quarantines the VM; jobs are never replayed. The daemon retires a quarantined
+Kit VM on its own once it verifies that no container can still run there
+(`marsh-backend/src/worker_recovery.rs`: the VM is stopped or gone, or its
+Docker lists none); otherwise `marsh workers reset KIT` does. `marsh status`
+shows each quarantine's reason. `marsh reset` and `marsh stop` clean up the
+whole scope once nothing is active.
 
 ## VM ownership
 

@@ -38,7 +38,7 @@ fn ownership_map_refuses_foreign_recreates_absent_and_never_removes_foreign() {
         Err(SbxError::ForeignVm(_))
     ));
     assert!(matches!(
-        adapter.stop_quarantined_name("unrecorded"),
+        adapter.stop_quarantined_name("unrecorded", "test".into()),
         Err(SbxError::ForeignVm(_))
     ));
     assert_eq!(model.mutations(), 0, "foreign VMs must never be touched");

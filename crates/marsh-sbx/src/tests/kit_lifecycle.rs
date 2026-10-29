@@ -518,6 +518,16 @@ fn published_kit_create_timeout_is_typed_and_quarantines_the_name() {
         Err(SbxError::QuarantinedVm(_))
     ));
     assert_eq!(model.count("create"), 1);
+    let quarantine = adapter.quarantined_vms()[KIT].clone();
+    assert!(quarantine.create_pending, "{quarantine:?}");
+    assert!(
+        quarantine.reason.contains("create did not complete"),
+        "{quarantine:?}"
+    );
+    // Automatic recovery holds the name back while the create may land.
+    let held = adapter.verify_no_running_containers(KIT).unwrap_err();
+    assert!(held.contains("settle"), "{held}");
+    assert!(adapter.quarantined_vms().contains_key(KIT));
 }
 
 #[test]

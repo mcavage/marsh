@@ -32,7 +32,9 @@ The code-location table below records the implementation mapping and known gaps.
   child maps and intents over a random per-grant name prefix, intent-then-adopt child
   create, revocation on session end and on every daemon restart, and host cleanup.
 - `Worker.tla`: one owned warm kit VM with its single worker transport (generation),
-  up to `CAP` concurrent attempts, quarantine, retire, cancellation, and project/home
+  up to `CAP` concurrent attempts, quarantine, retire (by the operator, or automatically
+  once no started attempt's container can still be running: `AutoRetire`, guarded by the
+  ghost `alive` that `ContainerEnds` clears), cancellation, and project/home
   mounts whose sources the environment may replace at any time. A mount is made on
   first reference and retained while the VM is warm (mounted whenever referenced); an
   idle mount is reused, unmounted only to replace a stale source (`Worker_evictInUse`
@@ -80,7 +82,7 @@ Invariants: `NoForeignEffect`, `OwnedAreOurs`, `NoLeak`, `ChildNoLeak`, `ChildCo
 (a grant only affects VMs it made), `RevokedChildInert` (no grant effect after revoke or
 without its session), `ChildCapacity`, `MapsDisjoint` (Ownership); `CapacityBound`, `NoReplay`,
 `NoStartOnQuarantined`, `LossIsUncertain`, `MountRefcount`, `NoStaleSourceUse`,
-`CancelScoped` (Worker); `RevokedGrantInert`, `GrantTargetBound`, `OneTimePermission`,
+`CancelScoped`, `AutoRetireVerified` (Worker); `RevokedGrantInert`, `GrantTargetBound`, `OneTimePermission`,
 `DefaultSparesRunning`, `DefaultRevokedInert`, `DefaultReachesNewVms` (Grants); `SnapshotImmutable`, `CheckpointImmutable`, `AdminReadOnly`,
 `ExposedClean`, `OneBase`, `ChildFromParent`, `ForkIsolation`, `NoWriteToUserTree`,
 `CaptureStable`, `LineageWF`, `BudgetBound`, `LiveUnderLive`, `CancelPropagates`,
@@ -89,12 +91,13 @@ without its session), `ChildCapacity`, `MapsDisjoint` (Ownership); `CapacityBoun
 `CancelPropagates`, `RevokedAtRestart`, `RestartUncertain`, `NoReplay`, `EntryOnce`,
 `NoEntryRecursion`, `SameKitBound`, `SpawnSetAttenuates`, `KitVMBound`, `NoHomeKitHome` (Process). Liveness: `ChildCleanedAfterRevoke` (strong
 fairness on host cleanup, which is retried after every restart and inventory),
-`AttemptsTerminate` (weak fairness), and `EventuallySettled` (Workspace; weak fairness on
+`AttemptsTerminate` and `QuarantineHeals` (Worker; weak fairness, no operator action), and `EventuallySettled` (Workspace; weak fairness on
 daemon steps and process progress, checked in the smaller `Workspace_live_pass.cfg`).
 
 Each module has a `Bug` constant. `Module.cfg` uses `Bug = "none"` and checks every
 property. Each `Module_<bug>.cfg` turns on one guarded wrong action and checks only the
-property that must catch it. Grant controls: `childTouchHost`, `crossGrant` (broker
+property that must catch it. Worker's `retireUnverified` lets automatic recovery retire
+a quarantined VM while a started attempt's container still runs (AutoRetireVerified). Grant controls: `childTouchHost`, `crossGrant` (broker
 consults another grant's map), `childIgnoreRevoke`, `childOverMax`, `childNoIntent`
 (grant intent kept only in memory), and `restartKeepsGrant` (a persisted grant survives
 the restart that lost its session). Default-publication controls: `loadRunning` (load
@@ -206,7 +209,8 @@ positive config fails or a negative control passes or fails for the wrong reason
 | ChildCreateBegin/Do/Record, ChildOp, ChildRemove | marsh-daemon `dev_broker.rs` (`serve`, `serve_admitted` incl. `Action::Run`: a fresh `run` is a ChildCreate, a reattach a ChildOp; `check_owned`) + `dev_broker/policy.rs`; grant section in marsh-sbx `vm_ownership.rs` (`update_dev_grants`, adoption in `store_view`) |
 | RevokeChild, Restart (revoke all), HostAdoptChild, HostCleanChild | marsh-daemon `dev_broker.rs` (`revoke_session` at session end in marsh-backend `open_shell`, `revoke_all` at `marsh stop`/`marsh reset` and in `marshd` startup, `remove_children`) |
 | Admit / Run / Exit / Cleanup / Cancel | marsh-sbx `StockSbx::launch_worker` (refuses a quarantined VM or a stale worker generation; one `AttemptRoute` per attempt on the VM's retained worker transport); marsh-worker `control.rs` (per-attempt start, exit and cleanup frames) and `transport.rs` (`cancellation`); a `docker create` that Docker refused is Run+Exit+Cleanup only after marsh-runtime `remove_labelled` proves no container with its per-create label remains (`RuntimeError::CreateRefused`); any other create error is uncertain and quarantines. Not implemented as modeled: a per-VM `CAP`; concurrency is bounded by the daemon's session pool (`marsh-daemon/src/process.rs` `admit`) |
-| TransportLoss / ReplaceTransport / Retire | marsh-sbx `ensure_worker_lease` (a dead or unresponsive transport, `ping_worker`, with live attempts quarantines the VM in `quarantined_workers`; an idle one is replaced under a new worker generation), `WorkerLoss` (the loss diagnostic), `stop_quarantined`, `retire_kit_vm_before` (`marsh workers reset KIT`) |
+| TransportLoss / ReplaceTransport / Retire | marsh-sbx `ensure_worker_lease` (a dead transport with live attempts quarantines the VM in `quarantined_workers`, with its reason; a live one that is slow to answer a ping fails only the new start; an idle one is replaced under a new worker generation; a reinstalled worker artifact is not swapped in under running attempts), `WorkerLoss` (the loss diagnostic), `stop_quarantined_because`, `retire_kit_vm_before` (`marsh workers reset KIT`). marsh-backend `execute`: a start or wall timeout with the transport up sends Cancel and waits `WORKER_CANCEL_SETTLE` for the worker's verified report (Cleanup), not TransportLoss |
+| ContainerEnds / AutoRetire | the quarantine stop (`stop_quarantined_name`, `sbx stop`) or the container's own end; marsh-backend `worker_recovery.rs` `recover_quarantined_vm` (background pass each minute, and before a job prepares the VM): no unfinished job record on the VM (`DaemonStore::worker_has_unfinished_jobs`), then marsh-sbx `verify_no_running_containers` (recorded VM absent, stopped, or running with an empty `docker ps`; otherwise it stays quarantined with the reason in `WorkerQuarantine::recovery`), then the same retirement as Retire; held slots are released as after a reset |
 | Shell: Admit / Run / Exit / Cleanup | marsh-sbx `shell_supervisor.rs` (`Supervisor::spawn`, `Control::cleanup_session`); guest `marsh/src/shell_supervisor.rs` |
 | Shell: TransportLoss / ReplaceTransport | marsh-sbx `shell_supervisor.rs` (`lose`, `ping`); `ensure_shell_lease` (replace idle, quarantine with live attempts) |
 | Admit (mount ref) / MountFinish | marsh-sbx `prepare_job_grants` -> `acquire_shared_grant` (mount on first reference, refcounted in `grant_mount_references`; a source whose identity changed is refused, `SourceChanged`) -> `mount_shared_grant`; `revoke_grants` / `release_session_grant` drop references; `evict_idle_grant_locked` unmounts only an idle mount of a replaced source; shell VMs: `acquire_shell_mount` / `evict_idle_shell_mount` |

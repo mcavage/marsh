@@ -639,8 +639,27 @@ fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
         status.processes.running, status.processes.refused, status.processes.held
     )?;
     let job_defaults = status.job_defaults.clone();
+    write_workers(writer, &status)?;
+    write_kit_updates(writer, status.kit_updates.as_deref())?;
+    write_job_defaults(writer, job_defaults.as_ref())?;
+    Ok(())
+}
+
+/// Kit workers, each quarantine with what happened and how to clear it, and
+/// recent automatic retirements of quarantined VMs.
+fn write_workers(
+    writer: &mut impl Write,
+    status: &marsh_daemon::StatusDocument,
+) -> Result<(), ProductError> {
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis()),
+    )
+    .unwrap_or(i64::MAX);
+    let ago = |unix_ms: u64| crate::job::ago(now - i64::try_from(unix_ms).unwrap_or(i64::MAX));
     writeln!(writer, "  workers:      {}", status.workers.len())?;
-    for worker in status.workers {
+    for worker in &status.workers {
         let kit = if worker.kits.is_empty() {
             worker.kit_ref.clone()
         } else {
@@ -652,9 +671,29 @@ fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
             worker.vm_id,
             crate::client::serde_label(&worker.health)
         )?;
+        if let Some(quarantine) = &worker.quarantine {
+            // The reset command takes a registered name; a VM no command
+            // names (a failed install) is cleared by `reset all`.
+            let reset = worker.kits.first().map_or("all", String::as_str);
+            writeln!(
+                writer,
+                "      quarantined {}: {}",
+                ago(quarantine.since),
+                marsh_daemon::quarantine_summary(reset, quarantine)
+            )?;
+        }
     }
-    write_kit_updates(writer, status.kit_updates.as_deref())?;
-    write_job_defaults(writer, job_defaults.as_ref())?;
+    for recovery in status.worker_recoveries.iter().rev().take(3) {
+        writeln!(
+            writer,
+            "    recovered {}: retired quarantined VM {} ({}): {}; verified: {}",
+            ago(recovery.retired),
+            recovery.vm_id,
+            recovery.kits.join(","),
+            recovery.reason,
+            recovery.verified
+        )?;
+    }
     Ok(())
 }
 

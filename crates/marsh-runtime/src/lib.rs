@@ -45,6 +45,17 @@ use std::{
 use thiserror::Error;
 
 const DELETION_VERIFY_ATTEMPTS: usize = 5;
+/// `docker create` of a job container. Under load (a busy VM, a large image's
+/// first layer setup) it takes well over the few seconds it usually does.
+const CREATE_TIMEOUT: Duration = Duration::from_secs(45);
+/// Label sweeps after a failed create: until two in a row, this far apart,
+/// find nothing, at most `CREATE_SETTLE_SWEEPS` of them.
+const CREATE_SETTLE_SWEEPS: usize = 8;
+const CREATE_SETTLE_INTERVAL: Duration = if cfg!(test) {
+    Duration::from_millis(5)
+} else {
+    Duration::from_secs(2)
+};
 const DELETION_VERIFY_DELAY: Duration = Duration::from_millis(50);
 // A just-attached container reports PID 0 while Docker is still starting it.
 // Keep asking (~1 s) while it is `created`; any other PID-0 state ends the
@@ -1316,7 +1327,7 @@ impl<R: CommandRunner> DockerCliRuntime<R> {
                 "create",
                 &self.invocation(arguments),
                 cancel,
-                Some(Duration::from_secs(10)),
+                Some(CREATE_TIMEOUT),
             )
             .and_then(|stdout| {
                 let identity = std::str::from_utf8(&stdout)
@@ -1352,12 +1363,41 @@ impl<R: CommandRunner> DockerCliRuntime<R> {
                     exit_code: Some(code),
                     stderr,
                     ..
-                }) if self.remove_labelled(&create_label).is_ok() => {
+                }) if self.remove_labelled(&create_label).is_ok()
+                    || self.settle_abandoned_create(&create_label).is_ok() =>
+                {
                     Err(RuntimeError::CreateRefused { code, stderr })
                 }
-                result => result,
+                // Timed out, cancelled, or an unreadable reply: `docker start`
+                // never ran, so nothing of this job ran. Whatever dockerd
+                // still finishes is a created, never-started container;
+                // sweep its label until it is proven gone.
+                Err(error) => match self.settle_abandoned_create(&create_label) {
+                    Ok(()) => Err(RuntimeError::CreateAbandoned {
+                        cause: error.to_string(),
+                    }),
+                    Err(_) => Err(error),
+                },
+                Ok(container) => Ok(container),
             }
         }
+    }
+
+    /// Remove a failed create's labelled leftovers until two sweeps
+    /// `CREATE_SETTLE_INTERVAL` apart find none.
+    fn settle_abandoned_create(&self, label: &str) -> Result<(), RuntimeError> {
+        let mut clean = false;
+        for sweep in 0..CREATE_SETTLE_SWEEPS {
+            if sweep > 0 {
+                thread::sleep(CREATE_SETTLE_INTERVAL);
+            }
+            match self.remove_labelled(label) {
+                Ok(()) if clean => return Ok(()),
+                Ok(()) => clean = true,
+                Err(_) => clean = false,
+            }
+        }
+        Err(RuntimeError::DeletionUncertain)
     }
 
     /// Remove every container carrying `label` and verify none remain.
@@ -2597,6 +2637,10 @@ pub enum RuntimeError {
     /// `docker create` exited with an error and no container of it remains.
     #[error("container runtime create failed (exit code {code}): {stderr}")]
     CreateRefused { code: i32, stderr: String },
+    #[error(
+        "docker create did not complete ({cause}); the container never started and none is left"
+    )]
+    CreateAbandoned { cause: String },
     #[error("{0}")]
     ByteBridge(&'static str),
     #[error(
