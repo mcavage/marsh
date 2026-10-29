@@ -11,6 +11,10 @@
 (*          admitted -> rejected (mount check failed, cancel, loss before *)
 (*                                start frame was written)                *)
 (*          running/exited -> uncertain (transport lost)                  *)
+(* A quarantined VM is retired by the operator (Retire) or automatically   *)
+(* (AutoRetire) once no started attempt's container can still be running:  *)
+(* the VM is stopped or its Docker lists no running container. `alive` is  *)
+(* that physical fact; uncertain receipts stay uncertain either way.       *)
 (* Sources can be replaced by the environment at any time (identity       *)
 (* counter). The pathname race inside the stock mount call is outside the *)
 (* model: if the post-mount identity equals the pre-mount identity we     *)
@@ -21,7 +25,7 @@ CONSTANTS Attempts, Sources, CAP, MaxGen, MaxId, Bug
 
 Bugs == {"none", "noCap", "replayOnLoss", "verifyOnLoss", "replaceQuarantined",
          "skipPostCheck", "reuseStaleMount", "earlyUnmount", "cancelAll",
-         "hangOnLoss", "evictInUse"}
+         "hangOnLoss", "evictInUse", "retireUnverified"}
 ASSUME Bug \in Bugs
 
 Active   == {"admitted", "running", "exited"}
@@ -46,10 +50,12 @@ VARIABLES
              \* with ref = 0 is an idle retained mount
   mpre,      \* identity observed before mount
   mid,       \* identity actually mounted
-  srcId      \* environment: current identity at the source path
+  srcId,     \* environment: current identity at the source path
+  alive,     \* ghost: [Attempts -> BOOLEAN] the attempt's container is running
+  autoKill   \* ghost: an automatic retire destroyed a running container
 
 vars == <<ast, asrc, aid, agen, held, runs, lost, why, cancelReq,
-          gen, tstate, quar, ref, mst, mpre, mid, srcId>>
+          gen, tstate, quar, ref, mst, mpre, mid, srcId, alive, autoKill>>
 avars == <<ast, asrc, aid, agen, held, runs, lost, why, cancelReq>>
 mvars == <<ref, mst, mpre, mid>>
 
@@ -71,6 +77,8 @@ Init ==
   /\ mpre = [s \in Sources |-> 0]
   /\ mid = [s \in Sources |-> 0]
   /\ srcId = [s \in Sources |-> 1]
+  /\ alive = [a \in Attempts |-> FALSE]
+  /\ autoKill = FALSE
 
 NActive == Cardinality({a \in Attempts : ast[a] \in Active})
 Holders(h, s) == {a \in Attempts : h[a] /\ asrc[a] = s}
@@ -104,7 +112,7 @@ Admit(a, s) ==
                  ELSE UNCHANGED <<mst, mpre>>
        ELSE /\ ast' = [ast EXCEPT ![a] = "rejected"]     \* fail closed
             /\ UNCHANGED <<aid, agen, held, ref, mst, mpre>>
-  /\ UNCHANGED <<runs, lost, why, cancelReq, gen, tstate, quar, mid, srcId>>
+  /\ UNCHANGED <<runs, lost, why, cancelReq, gen, tstate, quar, mid, srcId, alive, autoKill>>
 
 \* Stock mount call, then post-mount identity check.
 MountFinish(s) ==
@@ -122,7 +130,7 @@ MountFinish(s) ==
                /\ mst' = [mst EXCEPT ![s] = "unmounted"]
                /\ UNCHANGED mid
   /\ UNCHANGED <<asrc, aid, agen, runs, lost, why, cancelReq, gen, tstate, quar,
-                 mpre, srcId>>
+                 mpre, srcId, alive, autoKill>>
 
 \* Start frame written; fresh container created.
 Run(a) ==
@@ -131,15 +139,17 @@ Run(a) ==
   /\ mst[asrc[a]] = "mounted"
   /\ ast' = [ast EXCEPT ![a] = "running"]
   /\ runs' = [runs EXCEPT ![a] = @ + 1]
+  /\ alive' = [alive EXCEPT ![a] = TRUE]
   /\ UNCHANGED <<asrc, aid, agen, held, lost, why, cancelReq, gen, tstate, quar,
-                 ref, mst, mpre, mid, srcId>>
+                 ref, mst, mpre, mid, srcId, autoKill>>
 
 Exit(a) ==
   /\ ast[a] = "running"
   /\ ast' = [ast EXCEPT ![a] = "exited"]
   /\ why' = [why EXCEPT ![a] = "self"]
+  /\ alive' = [alive EXCEPT ![a] = FALSE]
   /\ UNCHANGED <<asrc, aid, agen, held, runs, lost, cancelReq, gen, tstate, quar,
-                 ref, mst, mpre, mid, srcId>>
+                 ref, mst, mpre, mid, srcId, autoKill>>
 
 \* Client of attempt a was killed: cancel only a.
 Cancel(a) ==
@@ -155,7 +165,8 @@ Cancel(a) ==
        ELSE /\ ast' = [b \in Attempts |-> IF b \in victims THEN "exited" ELSE ast[b]]
             /\ why' = [b \in Attempts |-> IF b \in victims THEN "cancel" ELSE why[b]]
             /\ UNCHANGED <<held, ref, mst>>
-  /\ UNCHANGED <<asrc, aid, agen, runs, lost, gen, tstate, quar, mpre, mid, srcId>>
+  /\ alive' = [b \in Attempts |-> IF ast'[b] = "exited" THEN FALSE ELSE alive[b]]
+  /\ UNCHANGED <<asrc, aid, agen, runs, lost, gen, tstate, quar, mpre, mid, srcId, autoKill>>
 
 \* Worker reports container removed; drop the mount reference.
 Cleanup(a) ==
@@ -167,7 +178,7 @@ Cleanup(a) ==
   /\ mst' = IF Bug = "earlyUnmount" THEN [mst EXCEPT ![asrc[a]] = "unmounted"]
             ELSE MstAfter(r2)
   /\ UNCHANGED <<asrc, aid, agen, runs, lost, why, cancelReq, gen, tstate, quar,
-                 mpre, mid, srcId>>
+                 mpre, mid, srcId, alive, autoKill>>
 
 \* Environment: the single `sbx exec -i` worker transport dies.
 TransportLoss ==
@@ -202,7 +213,14 @@ TransportLoss ==
             /\ tstate' = "dead"
             /\ quar' = (quar \/ S # {})
             /\ UNCHANGED <<agen, gen>>
-  /\ UNCHANGED <<asrc, aid, runs, why, cancelReq, mpre, mid, srcId>>
+  /\ UNCHANGED <<asrc, aid, runs, why, cancelReq, mpre, mid, srcId, alive, autoKill>>
+
+\* Environment: an uncertain attempt's container ends on its own, or the
+\* quarantine stop (`sbx stop`) took effect and stopped the whole VM.
+ContainerEnds(a) ==
+  /\ alive[a] /\ ast[a] = "uncertain"
+  /\ alive' = [alive EXCEPT ![a] = FALSE]
+  /\ UNCHANGED <<avars, gen, tstate, quar, mvars, srcId, autoKill>>
 
 \* A dead idle transport may be replaced.
 ReplaceTransport ==
@@ -210,36 +228,48 @@ ReplaceTransport ==
   /\ ~quar \/ Bug = "replaceQuarantined"
   /\ \A a \in Attempts : ast[a] \notin Active
   /\ gen' = gen + 1 /\ tstate' = "live"
-  /\ UNCHANGED <<avars, quar, mvars, srcId>>
+  /\ UNCHANGED <<avars, quar, mvars, srcId, alive, autoKill>>
 
-\* Proposed quarantine release: UUID-conditional remove of the owned VM
-\* (destroys every container and mount), then recreate. Uncertain receipts
-\* stay uncertain; they are never replayed.
-Retire ==
+\* Quarantine release: UUID-conditional remove of the owned VM (destroys
+\* every container and mount), then recreate. Uncertain receipts stay
+\* uncertain; they are never replayed.
+RetireVM ==
   /\ quar /\ tstate = "dead" /\ gen < MaxGen
   /\ held' = [a \in Attempts |-> FALSE]
   /\ ref' = [s \in Sources |-> 0]
   /\ mst' = [s \in Sources |-> "unmounted"]
+  /\ alive' = [a \in Attempts |-> FALSE]
   /\ quar' = FALSE /\ gen' = gen + 1 /\ tstate' = "live"
   /\ UNCHANGED <<ast, asrc, aid, agen, runs, lost, why, cancelReq, mpre, mid, srcId>>
+
+\* Operator: `marsh workers reset KIT` retires it whatever runs there.
+Retire == RetireVM /\ UNCHANGED autoKill
+
+\* Automatic recovery: only once verification shows no container of a
+\* started attempt is still running (worker_recovery.rs).
+AutoRetire ==
+  /\ (\A a \in Attempts : ~alive[a]) \/ Bug = "retireUnverified"
+  /\ RetireVM
+  /\ autoKill' = (autoKill \/ \E a \in Attempts : alive[a])
 
 \* Environment: something replaces the directory at a source path.
 ReplaceSource(s) ==
   /\ srcId[s] < MaxId
   /\ srcId' = [srcId EXCEPT ![s] = @ + 1]
-  /\ UNCHANGED <<avars, gen, tstate, quar, mvars>>
+  /\ UNCHANGED <<avars, gen, tstate, quar, mvars, alive, autoKill>>
 
 ---------------------------------------------------------------------------
 Next ==
   \/ \E a \in Attempts, s \in Sources : Admit(a, s)
   \/ \E s \in Sources : MountFinish(s) \/ ReplaceSource(s)
-  \/ \E a \in Attempts : Run(a) \/ Exit(a) \/ Cancel(a) \/ Cleanup(a)
-  \/ TransportLoss \/ ReplaceTransport \/ Retire
+  \/ \E a \in Attempts : Run(a) \/ Exit(a) \/ Cancel(a) \/ Cleanup(a) \/ ContainerEnds(a)
+  \/ TransportLoss \/ ReplaceTransport \/ Retire \/ AutoRetire
 
 Spec == /\ Init /\ [][Next]_vars
         /\ \A a \in Attempts : WF_vars(Run(a)) /\ WF_vars(Exit(a)) /\ WF_vars(Cleanup(a))
+                                /\ WF_vars(ContainerEnds(a))
         /\ \A s \in Sources : WF_vars(MountFinish(s))
-        /\ WF_vars(ReplaceTransport) /\ WF_vars(Retire)
+        /\ WF_vars(ReplaceTransport) /\ WF_vars(AutoRetire)
 
 ---------------------------------------------------------------------------
 (* Safety *)
@@ -256,9 +286,13 @@ NoStaleSourceUse ==
   \A a \in Attempts : ast[a] \in Started =>
       mst[asrc[a]] = "mounted" /\ mid[asrc[a]] = aid[a]
 CancelScoped == \A a \in Attempts : why[a] = "cancel" => cancelReq[a]
+\* Automatic recovery never destroys a container that may still be running.
+AutoRetireVerified == ~autoKill
 
 (* Liveness: every admitted attempt reaches a terminal state, assuming jobs *)
 (* exit and the daemon keeps acting (weak fairness above).                 *)
 AttemptsTerminate ==
   \A a \in Attempts : (ast[a] \in Active) ~> (ast[a] \in Terminal)
+(* A quarantine lifts without an operator once the containers are gone. *)
+QuarantineHeals == (quar /\ gen < MaxGen) ~> ~quar
 =============================================================================

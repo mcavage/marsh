@@ -528,7 +528,7 @@ fn session_close_waits_for_an_inflight_pin_and_rejects_late_lazy_preparation() {
 }
 
 #[test]
-fn busy_shell_session_close_fails_fast_without_closing_the_session() {
+fn busy_shell_session_close_returns_fast_and_releases_the_pin_later() {
     let root = scratch();
     let source = directory(root.path(), "project");
     let model = StockModel::new();
@@ -545,12 +545,14 @@ fn busy_shell_session_close_fails_fast_without_closing_the_session() {
         let adapter = Arc::clone(&adapter);
         bounded(move || adapter.close_shell_session_grants("session-busy"))
     };
-    assert!(matches!(close, Err(SbxError::LifecycleDeadline { .. })));
+    // A busy close is bookkeeping only: it neither fails nor quarantines.
+    close.unwrap();
     mounting.release();
     preparing.join().unwrap().unwrap();
-    // The refused close did not end the session: its pin completed.
     assert_eq!(adapter.pinned_session_vms("session-busy"), [KIT]);
-    adapter.close_shell_session_grants("session-busy").unwrap();
+    assert!(adapter.quarantined_vms().is_empty());
+    // The deferred release drops the pin once the transition is done.
+    adapter.release_deferred_session_pins();
     assert_eq!(
         adapter.pinned_session_vms("session-busy"),
         [] as [std::string::String; 0]
@@ -558,7 +560,7 @@ fn busy_shell_session_close_fails_fast_without_closing_the_session() {
 }
 
 #[test]
-fn shell_session_close_gives_up_after_its_bounded_wait_for_a_vm_transition() {
+fn shell_session_close_defers_after_its_bounded_wait_for_a_vm_transition() {
     let root = scratch();
     let source = directory(root.path(), "project");
     let model = StockModel::new();
@@ -588,10 +590,16 @@ fn shell_session_close_gives_up_after_its_bounded_wait_for_a_vm_transition() {
         let adapter = Arc::clone(&adapter);
         bounded(move || adapter.close_shell_session_grants("session-one"))
     };
-    assert!(matches!(close, Err(SbxError::LifecycleDeadline { .. })));
+    close.unwrap();
     assert!(started.elapsed() >= wait);
     stopping.release();
     stop.join().unwrap().unwrap();
+    assert_eq!(adapter.pinned_session_vms("session-one"), [KIT]);
+    adapter.release_deferred_session_pins();
+    assert_eq!(
+        adapter.pinned_session_vms("session-one"),
+        [] as [std::string::String; 0]
+    );
 }
 
 #[test]

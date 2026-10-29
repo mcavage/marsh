@@ -79,6 +79,8 @@ struct DockerState {
     /// Listings that keep showing a removed container (`usize::MAX`: forever).
     lingering: usize,
     listing_failure: Option<CommandOutput>,
+    /// Every listing fails (the daemon stays unreachable).
+    listing_always_fails: bool,
 }
 
 impl DockerModel {
@@ -189,6 +191,9 @@ impl DockerModel {
                 filter,
                 ..,
             ] => {
+                if state.listing_always_fails {
+                    return failure_output("daemon unavailable");
+                }
                 if let Some(failure) = state.listing_failure.take() {
                     return failure;
                 }
@@ -422,7 +427,7 @@ fn a_refused_create_whose_leftovers_cannot_be_listed_stays_uncertain() {
     {
         let mut state = model.state.lock().unwrap();
         state.create_failure = Some(failure_output("no space left on device"));
-        state.listing_failure = Some(failure_output("daemon unavailable"));
+        state.listing_always_fails = true;
     }
     let runtime = DockerCliRuntime::new(model, "/trusted/docker");
     let error = runtime.create(&job()).unwrap_err();
@@ -439,8 +444,41 @@ fn a_refused_create_whose_leftovers_cannot_be_listed_stays_uncertain() {
 }
 
 #[test]
-fn a_create_that_times_out_stays_uncertain_and_is_not_cleaned_up() {
-    // A timed-out (I/O error) `docker create` may still complete in dockerd.
+fn a_create_without_a_usable_reply_is_abandoned_once_its_leftover_is_swept() {
+    // The create's reply is unusable (as when the CLI is cut off): dockerd
+    // may have created the container, but nothing started it. The label
+    // sweep removes it and two empty listings prove nothing of it is left.
+    let model = DockerModel::new();
+    {
+        let mut state = model.state.lock().unwrap();
+        state.create_failure = Some(success("not a container id\n"));
+        state.create_failure_leaves_container = true;
+    }
+    let runtime = DockerCliRuntime::new(model, "/trusted/docker");
+    let error = runtime.create(&job()).unwrap_err();
+    assert!(
+        matches!(error, RuntimeError::CreateAbandoned { .. }),
+        "{error:?}"
+    );
+    let model = &runtime.runner;
+    let leftover = model
+        .state
+        .lock()
+        .unwrap()
+        .labels
+        .keys()
+        .next()
+        .cloned()
+        .unwrap();
+    assert!(!model.exists(&leftover));
+    assert_eq!(model.calls_of(&["start"]).len(), 0);
+    assert!(model.calls_of(&["container", "ls"]).len() >= 2);
+}
+
+#[test]
+fn a_create_that_times_out_stays_uncertain_while_its_leftovers_cannot_be_listed() {
+    // A timed-out (I/O error) `docker create` may still complete in dockerd;
+    // only a sweep of its label that finds nothing twice proves otherwise.
     let runner = FakeRunner::with_outputs([byte_bridge_cases::inspected(
         &job(),
         serde_json::json!(["/entry"]),
@@ -453,7 +491,7 @@ fn a_create_that_times_out_stays_uncertain_and_is_not_cleaned_up() {
     assert!(
         calls
             .iter()
-            .all(|call| call.first().map(String::as_str) != Some("container")),
+            .all(|call| call.first().map(String::as_str) != Some("start")),
         "{calls:?}"
     );
 }

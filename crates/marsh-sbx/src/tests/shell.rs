@@ -105,6 +105,62 @@ fn concurrent_cold_shell_initialization_creates_exactly_once() {
     assert_eq!(model.count("create"), 1);
 }
 
+fn shell_progress(adapter: &StockSbx, spec: &ShellVmSpec) -> Vec<ShellVmProgress> {
+    let mut seen = Vec::new();
+    adapter
+        .ensure_shell_vm_with(spec, &mut |progress| {
+            seen.push(progress);
+            true
+        })
+        .unwrap();
+    seen
+}
+
+#[test]
+fn creating_or_replacing_the_shell_vm_reports_progress_but_a_warm_attach_does_not() {
+    let model = StockModel::new();
+    let root = tempfile::tempdir().unwrap();
+    let map = root.path().join("ownership.json");
+    let first = model.adapter().with_vm_ownership(map.clone()).unwrap();
+    let mut shell = ShellFixture::new();
+    shell.spec.name = first.vm_name(VmPurpose::Shell, "shell").unwrap();
+    let creating = |replacing| ShellVmProgress::Creating {
+        replacing,
+        download: true,
+    };
+    assert_eq!(shell_progress(&first, &shell.spec), [creating(false)]);
+    assert_eq!(shell_progress(&first, &shell.spec), []);
+    drop(first);
+
+    let upgraded = model.adapter().with_vm_ownership(map).unwrap();
+    shell.spec.image =
+        OciImage::parse(format!("dhi.example/shell@sha256:{}", "f".repeat(64))).unwrap();
+    assert_eq!(shell_progress(&upgraded, &shell.spec), [creating(true)]);
+}
+
+#[test]
+fn an_opener_blocked_on_another_shell_setup_reports_waiting_and_can_stop() {
+    let model = StockModel::new();
+    let adapter = model.adapter();
+    let shell = ShellFixture::new();
+    let (transition, _cleanup) =
+        weak_rw_transition_lock(&adapter.grant_vm_transition_locks, shell.spec.name.clone());
+    let setup = transition.write().unwrap();
+    let mut waits = 0;
+    let error = adapter
+        .ensure_shell_vm_with(&shell.spec, &mut |progress| {
+            assert_eq!(progress, ShellVmProgress::Waiting);
+            waits += 1;
+            waits < 3
+        })
+        .unwrap_err();
+    assert!(matches!(error, SbxError::ShellMountAdmissionBusy));
+    assert_eq!(waits, 3);
+    assert_eq!(model.count("create"), 0);
+    drop(setup);
+    assert!(adapter.ensure_shell_vm(&shell.spec).unwrap().cold_started);
+}
+
 #[test]
 fn a_lost_idle_supervisor_is_replaced_after_revalidating_the_vm() {
     let model = StockModel::new();

@@ -846,7 +846,7 @@ pub enum PublicReply {
         session_id: String,
     },
     Detached,
-    Status(StatusDocument),
+    Status(Box<StatusDocument>),
     ProcessTree {
         document: serde_json::Value,
     },
@@ -1208,6 +1208,7 @@ pub fn cold_boot_notice(kit: &str, download: bool) -> String {
         (_, kit) if kit.starts_with("cloud:") => {
             format!("[starting a Docker Cloud sandbox: {}…]", &kit["cloud:".len()..])
         }
+        (false, "shell") => "[starting shell VM…]".into(),
         (false, _) => format!("[starting {kit} worker VM…]"),
         (true, "shell") => {
             "[starting shell VM… first use may download the shell image, this can take a few minutes]"
@@ -1293,6 +1294,9 @@ pub trait DaemonBackend: Send + Sync + 'static {
     fn dynamic_protected_guest_roots(&self) -> Vec<PathBuf> {
         Vec::new()
     }
+    /// Add what only the backend knows to `marsh status` (VM quarantines
+    /// held by the stock adapter, and why recovery left them).
+    fn annotate_status(&self, _status: &mut StatusDocument) {}
     fn resolve_acp_agent(&self, _name: &str) -> Result<AgentAdapterDeclaration, DaemonError> {
         Err(DaemonError::BackendUnavailable)
     }
@@ -1454,6 +1458,92 @@ pub struct WorkerStatus {
     pub health: WorkerHealth,
     pub container_capacity: u16,
     pub active_container_ids: Vec<String>,
+    /// Why a quarantined worker takes no new jobs (`marsh status`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quarantine: Option<WorkerQuarantine>,
+}
+
+/// Why a worker VM was quarantined, since when (unix ms), and the jobs whose
+/// end could not be verified. `recovery` says what automatic recovery found
+/// last: why it could not yet retire the VM.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WorkerQuarantine {
+    pub reason: String,
+    pub since: u64,
+    #[serde(default)]
+    pub jobs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery: Option<String>,
+}
+
+/// A quarantined worker VM that marsh retired on its own once it verified
+/// that no job container could still be running there (`marsh status`).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WorkerRecovery {
+    pub vm_id: String,
+    #[serde(default)]
+    pub kits: Vec<String>,
+    pub reason: String,
+    pub since: u64,
+    #[serde(default)]
+    pub jobs: Vec<String>,
+    /// What showed that no job container was running.
+    pub verified: String,
+    pub retired: u64,
+}
+
+/// Why a worker cannot take a job now, in words that say what to do.
+fn worker_refusal(worker: &WorkerStatus, vm_id: &str, reserved: usize) -> String {
+    let kit = worker.kits.first().map_or("KIT", String::as_str);
+    if worker.vm_id != vm_id {
+        format!("worker {} is not VM {vm_id}", worker.worker_id)
+    } else if worker.health == WorkerHealth::Quarantined {
+        format!(
+            "worker VM {} is quarantined: {}",
+            worker.vm_id,
+            quarantine_summary(kit, &worker.quarantine.clone().unwrap_or_default())
+        )
+    } else if worker.health == WorkerHealth::Repairing || !worker.warm {
+        format!(
+            "worker VM {} is being replaced or reset by another call; retry",
+            worker.vm_id
+        )
+    } else {
+        format!(
+            "worker VM {} is at capacity ({} running, {reserved} starting, limit {})",
+            worker.vm_id,
+            worker.active_container_ids.len(),
+            worker.container_capacity
+        )
+    }
+}
+
+/// One line for a quarantined worker: what happened and how to clear it.
+#[must_use]
+pub fn quarantine_summary(kit: &str, quarantine: &WorkerQuarantine) -> String {
+    let jobs = match quarantine.jobs.as_slice() {
+        [] => String::new(),
+        jobs => format!(
+            " (jobs {})",
+            jobs.iter()
+                .map(|job| job.get(..8).unwrap_or(job))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    let recovery = quarantine.recovery.as_deref().map_or_else(
+        || {
+            "marsh retires it on its own once it verifies no job container still runs there"
+                .to_owned()
+        },
+        |why| format!("not retired automatically: {why}"),
+    );
+    let reason = if quarantine.reason.is_empty() {
+        "its cleanup could not be verified"
+    } else {
+        quarantine.reason.as_str()
+    };
+    format!("{reason}{jobs}; {recovery}; to clear it now: marsh workers reset {kit}")
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1499,6 +1589,9 @@ pub struct StatusDocument {
     /// Registered commands (`docs/acp.md`).
     #[serde(default)]
     pub commands: Vec<CommandStatus>,
+    /// Quarantined worker VMs marsh retired on its own, newest last.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub worker_recoveries: Vec<WorkerRecovery>,
 }
 
 /// One registered command: its Kit reference, whether the Kit declares an ACP
@@ -1904,6 +1997,7 @@ struct State {
     shell_cleanup_vms: BTreeMap<String, String>,
     shell_attachments: BTreeMap<String, String>,
     workers: BTreeMap<String, WorkerStatus>,
+    worker_recoveries: Vec<WorkerRecovery>,
     starting_kits: BTreeMap<String, ProcessStartingKit>,
     jobs: BTreeMap<String, JobReceipt>,
     next_cursor: u64,
@@ -2238,6 +2332,7 @@ impl DaemonStore {
             shell_cleanup_vms: BTreeMap::new(),
             shell_attachments: BTreeMap::new(),
             workers: BTreeMap::new(),
+            worker_recoveries: Vec::new(),
             starting_kits: BTreeMap::new(),
             jobs,
             next_cursor,
@@ -2889,6 +2984,11 @@ impl DaemonStore {
         } else if let Some(worker) = state.workers.get_mut(worker_id) {
             worker.health = WorkerHealth::Quarantined;
             worker.warm = false;
+            worker.quarantine.get_or_insert_with(|| WorkerQuarantine {
+                reason: "a reset could not verify that its VM was removed".into(),
+                since: unix_time_ms(),
+                ..WorkerQuarantine::default()
+            });
         }
         Ok(())
     }
@@ -2928,6 +3028,9 @@ impl DaemonStore {
             || reserved
             || !worker.active_container_ids.is_empty()
         {
+            if worker.health == WorkerHealth::Quarantined {
+                return Err(DaemonError::InvalidState(worker_refusal(worker, vm_id, 0)));
+            }
             return Err(DaemonError::InvalidState(format!(
                 "worker {worker_id} cannot be repaired while unhealthy, admitted, or running"
             )));
@@ -2965,12 +3068,17 @@ impl DaemonStore {
                 "worker repair completion has invalid lifecycle state".into(),
             ));
         }
-        worker.health = if succeeded {
-            WorkerHealth::Ready
+        if succeeded {
+            worker.health = WorkerHealth::Ready;
+            worker.warm = true;
         } else {
-            WorkerHealth::Quarantined
-        };
-        worker.warm = succeeded;
+            // No job was admitted to or running on it (the repair claim
+            // proved that), so nothing can be running there: the failed
+            // repair is not a quarantine. Forget the registration; the next
+            // call prepares the VM again. A VM the adapter itself could not
+            // settle (a create that did not report) stays refused there.
+            state.workers.remove(worker_id);
+        }
         Ok(())
     }
 
@@ -2980,7 +3088,11 @@ impl DaemonStore {
     ///
     /// # Errors
     /// Returns an error when the named worker is not registered.
-    pub fn quarantine_worker(&self, worker_id: &str) -> Result<(), DaemonError> {
+    pub fn quarantine_worker(
+        &self,
+        worker_id: &str,
+        reason: impl Into<String>,
+    ) -> Result<(), DaemonError> {
         let mut state = self.lock();
         let worker = state
             .workers
@@ -2988,7 +3100,61 @@ impl DaemonStore {
             .ok_or_else(|| DaemonError::NotFound(worker_id.into()))?;
         worker.health = WorkerHealth::Quarantined;
         worker.warm = false;
+        let reason = reason.into();
+        worker.quarantine.get_or_insert_with(|| WorkerQuarantine {
+            reason,
+            since: unix_time_ms(),
+            ..WorkerQuarantine::default()
+        });
         Ok(())
+    }
+
+    /// The quarantine record of a registered worker, if it is quarantined.
+    #[must_use]
+    pub fn worker_quarantine(&self, worker_id: &str) -> Option<WorkerQuarantine> {
+        let state = self.lock();
+        state
+            .workers
+            .get(worker_id)
+            .filter(|worker| worker.health == WorkerHealth::Quarantined)
+            .map(|worker| worker.quarantine.clone().unwrap_or_default())
+    }
+
+    /// Note why automatic recovery could not retire a quarantined worker yet.
+    pub fn set_quarantine_recovery(&self, worker_id: &str, recovery: Option<String>) {
+        let mut state = self.lock();
+        if let Some(worker) = state
+            .workers
+            .get_mut(worker_id)
+            .filter(|worker| worker.health == WorkerHealth::Quarantined)
+        {
+            worker
+                .quarantine
+                .get_or_insert_with(WorkerQuarantine::default)
+                .recovery = recovery;
+        }
+    }
+
+    /// Whether any job record still runs, or is admitted, on this worker VM:
+    /// its executor has not finished it (so automatic recovery waits).
+    #[must_use]
+    pub fn worker_has_unfinished_jobs(&self, vm_id: &str) -> bool {
+        let state = self.lock();
+        state.reservations.values().any(|worker| worker == vm_id)
+            || state.jobs.values().any(|job| {
+                matches!(job.state, JobState::Queued | JobState::Running)
+                    && (job.worker_id.as_deref() == Some(vm_id)
+                        || job.vm_id.as_deref() == Some(vm_id))
+            })
+    }
+
+    /// Record a quarantined worker VM that was retired automatically.
+    pub fn record_worker_recovery(&self, recovery: WorkerRecovery) {
+        const KEEP: usize = 16;
+        let mut state = self.lock();
+        state.worker_recoveries.push(recovery);
+        let excess = state.worker_recoveries.len().saturating_sub(KEEP);
+        state.worker_recoveries.drain(..excess);
     }
 
     pub fn begin_job(&self, job: NewJob) -> Result<(String, String), DaemonError> {
@@ -3431,9 +3597,7 @@ impl DaemonStore {
             .get(worker_id)
             .ok_or_else(|| DaemonError::NotFound(worker_id.into()))?;
         if worker.vm_id != vm_id || worker.health != WorkerHealth::Ready || !worker.warm {
-            return Err(DaemonError::InvalidState(
-                "worker is incompatible, unhealthy, or at capacity".into(),
-            ));
+            return Err(DaemonError::InvalidState(worker_refusal(worker, vm_id, 0)));
         }
         let receipt = state
             .jobs
@@ -3497,9 +3661,9 @@ impl DaemonStore {
             || worker.active_container_ids.len() + reserved
                 >= usize::from(worker.container_capacity)
         {
-            return Err(DaemonError::InvalidState(
-                "worker is incompatible, unhealthy, or at capacity".into(),
-            ));
+            return Err(DaemonError::InvalidState(worker_refusal(
+                worker, vm_id, reserved,
+            )));
         }
         state.reservations.insert(job_id.into(), worker_id.into());
         let receipt = state.jobs.get_mut(job_id).ok_or_else(|| {
@@ -3681,6 +3845,19 @@ impl DaemonStore {
             if cleanup == CleanupState::Uncertain {
                 worker.health = WorkerHealth::Quarantined;
                 worker.warm = false;
+                let cause = updated.exit.as_ref().map_or("", |exit| exit.cause.as_str());
+                let quarantine = worker.quarantine.get_or_insert_with(|| WorkerQuarantine {
+                    reason: format!(
+                        "the end of job {} could not be verified ({})",
+                        job_id.get(..8).unwrap_or(job_id),
+                        cause.chars().take(300).collect::<String>()
+                    ),
+                    since: unix_time_ms(),
+                    ..WorkerQuarantine::default()
+                });
+                if !quarantine.jobs.iter().any(|job| job == job_id) {
+                    quarantine.jobs.push(job_id.into());
+                }
             }
         }
         state.jobs.insert(job_id.into(), updated.clone());
@@ -3723,6 +3900,7 @@ impl DaemonStore {
             sbxenv: None,
             stock_sbx_removed: None,
             commands: Vec::new(),
+            worker_recoveries: state.worker_recoveries.clone(),
         }
     }
 
@@ -6010,7 +6188,8 @@ impl ConnectionHandler {
                     .clone()
                     .filter(|path| stock_sbx_removed(Some(path)));
                 status.commands = self.backend.command_catalog();
-                write_frame(&mut stream, &PublicReply::Status(status))
+                self.backend.annotate_status(&mut status);
+                write_frame(&mut stream, &PublicReply::Status(Box::new(status)))
             }
             PublicRequest::ResetWorkers { selection } => {
                 let kits = match &selection {
@@ -6275,7 +6454,9 @@ fn dispatch_request(
             Ok(()) => PublicReply::Detached,
             Err(error) => public_error(&error),
         },
-        PublicRequest::Status { session_id } => PublicReply::Status(store.status(session_id)),
+        PublicRequest::Status { session_id } => {
+            PublicReply::Status(Box::new(store.status(session_id)))
+        }
         PublicRequest::Jobs => PublicReply::Jobs(store.jobs()),
         PublicRequest::ShowJob { job_id } => match store.job(&job_id) {
             Ok(mut job) => {
@@ -7405,7 +7586,7 @@ impl Client {
 
     pub fn status(&self, session_id: Option<String>) -> Result<StatusDocument, DaemonError> {
         match self.request(PublicRequest::Status { session_id })? {
-            PublicReply::Status(status) => Ok(status),
+            PublicReply::Status(status) => Ok(*status),
             reply => Err(unexpected_reply(reply)),
         }
     }
@@ -7595,7 +7776,7 @@ fn verified_legacy_owner(
     daemon_id: &str,
 ) -> Result<rustix::process::Pid, DaemonError> {
     let status = match client.request(PublicRequest::Status { session_id: None })? {
-        PublicReply::Status(status) => status,
+        PublicReply::Status(status) => *status,
         reply => return Err(unexpected_reply(reply)),
     };
     let jobs = match client.request(PublicRequest::Jobs)? {

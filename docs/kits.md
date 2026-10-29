@@ -144,7 +144,8 @@ When you invoke a registered command:
    nonroot user with your UID.
 4. Your project is mounted read/write at its Mac path. In a split, the job
    instead mounts its fork at the fork's own host path. Your guest home is
-   mounted read/write as `$HOME` in both cases.
+   mounted read/write as `$HOME` in both cases, unless the Kit declares that
+   it takes no home ([Mounts](#mounts)).
 5. stdin, stdout, stderr, signals, and the exit status pass through as for a
    local program. A child job started by another job gets no terminal
    ([Agents running agents](agents.md#limits-and-messages)).
@@ -282,6 +283,33 @@ packaged marsh workload/base rather than putting host Docker sockets into jobs.
 
 Keep tool state under `$HOME` so it persists between calls. Other jobs in the
 scope can read it.
+
+### Mounts
+
+A Kit that needs only its arguments and the project, like a tool that calls
+one service, can refuse the guest home, which holds other agents' settings
+and saved logins:
+
+```yaml
+capabilities:
+  - type: org.marsh/home@1
+    optional: true       # stock SBX refuses a required capability it doesn't know
+    config:
+      mount: none        # or "selected", the default
+```
+
+marsh then never mounts the guest home into the Kit's VM or its jobs, even
+when a job that has the home, such as an agent, starts the command. `HOME`
+and `MARSH_SELECTED_HOME` are the job's own `/tmp`, deleted with the job, and
+children it starts get no home either. A call from a folder inside the guest
+home is refused. In a Kit set, any component that declares `none` wins.
+
+marsh reads the declaration from the Kit's descriptor the first time the Kit
+runs (from the registry for a published Kit) and keeps it. If it can't read
+it, the command does not start. Mark the capability `optional`: stock Docker
+Sandboxes then skips it (it refuses to create a VM for a required capability
+type it doesn't know), and marsh still applies it. The [`marsh-tools`](https://github.com/mcavage/marsh/tree/main/kits/marsh-tools)
+Kit uses it.
 
 The packaged Kits are in
 [`kits/`](https://github.com/mcavage/marsh/tree/main/kits). They show how the

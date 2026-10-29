@@ -99,6 +99,12 @@ const KIT_RESOLUTION_TIMEOUT: Duration = Duration::from_mins(2);
 const KEEPALIVE_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const LOCAL_SCRATCH_STALE_AFTER: Duration = Duration::from_hours(1);
 const PREPARATION_SBX_TIMEOUT: Duration = Duration::from_mins(5);
+/// `sbx create` pulls the VM's image: on a slow link that alone takes many
+/// minutes, and stock SBX reports success or failure on its own. This only
+/// catches a create that hangs.
+const PREPARATION_CREATE_TIMEOUT: Duration = Duration::from_mins(60);
+/// How long a create that did not report may still land under its name.
+const CREATE_SETTLE: Duration = Duration::from_mins(2);
 /// Saved grant mounts of deleted projects dropped while starting one VM.
 const MAX_LOST_GRANT_MOUNTS: usize = 64;
 const PREPARATION_BUILD_TIMEOUT: Duration = Duration::from_mins(20);
@@ -113,11 +119,39 @@ const RETAINED_RESPONSE_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 static NEXT_LOCAL_SCRATCH: AtomicU64 = AtomicU64::new(1);
 static NEXT_SHELL_MOUNT: AtomicU64 = AtomicU64::new(1);
 const SHELL_MOUNT_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long an opener is blocked on another's shell VM setup before it
+/// reports that it is waiting, and how often it checks afterwards.
+const SHELL_WAIT_NOTICE_AFTER: Duration = Duration::from_secs(1);
+const SHELL_WAIT_POLL: Duration = Duration::from_millis(200);
 /// Bound on waiting for a concurrent grant transition while closing a shell.
 const SHELL_CLOSE_TRANSITION_WAIT: Duration = Duration::from_secs(10);
+/// Why a Kit VM takes no new work, and since when.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VmQuarantine {
+    pub reason: String,
+    pub since_unix_ms: u64,
+    /// A submitted `sbx create` did not report: it may still land.
+    pub create_pending: bool,
+}
+
+/// Whether a failed `sbx create` may still finish later: it timed out or its
+/// reply was lost. A create stock SBX reported as failed is over.
+fn create_may_land(error: &SbxError) -> bool {
+    matches!(error, SbxError::PreparationTimeout { .. } | SbxError::Io(_))
+}
+
+fn unix_millis_now() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        })
+}
+
 #[derive(Clone, Copy, Debug)]
 struct PreparationTimeouts {
     sbx: Duration,
+    create: Duration,
     build: Duration,
     load: Duration,
     docker: Duration,
@@ -127,6 +161,7 @@ impl Default for PreparationTimeouts {
     fn default() -> Self {
         Self {
             sbx: PREPARATION_SBX_TIMEOUT,
+            create: PREPARATION_CREATE_TIMEOUT,
             build: PREPARATION_BUILD_TIMEOUT,
             load: PREPARATION_LOAD_TIMEOUT,
             docker: PREPARATION_DOCKER_TIMEOUT,
@@ -311,6 +346,16 @@ pub struct ShellUser {
     pub home: PathBuf,
 }
 
+/// What `ensure_shell_vm_with` reports while it works.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShellVmProgress {
+    /// About to create the shell VM; `replacing` removes a VM of another
+    /// shell image first, `download` means the template will probably be pulled.
+    Creating { replacing: bool, download: bool },
+    /// Another opener holds the shell VM's setup; still waiting.
+    Waiting,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReadyShellVm {
     pub name: String,
@@ -399,6 +444,12 @@ impl AdmittedHostGrant {
     #[must_use]
     pub const fn source_identity(&self) -> (u64, u64) {
         (self.identity.device, self.identity.inode)
+    }
+
+    /// The guest path this grant is mounted at.
+    #[must_use]
+    pub fn target(&self) -> &Path {
+        &self.target
     }
 
     fn verify_path(&self) -> Result<(), SbxError> {
@@ -867,7 +918,10 @@ pub struct StockSbx {
     published_image_saves: Arc<Mutex<BTreeSet<String>>>,
     worker_artifact_identities: Mutex<BTreeMap<PathBuf, String>>,
     worker_generations: Mutex<BTreeMap<String, u64>>,
-    quarantined_workers: Mutex<BTreeSet<String>>,
+    /// Kit VMs refused to new work, with why and since when (`marsh status`).
+    quarantined_workers: Mutex<BTreeMap<String, VmQuarantine>>,
+    /// Closed sessions whose pins are still to be released.
+    deferred_pin_releases: Mutex<BTreeSet<String>>,
     worker_leases: Mutex<BTreeMap<String, Arc<RetainedWorker>>>,
     shell_leases: Mutex<BTreeMap<String, Arc<shell_supervisor::Supervisor>>>,
     shell_generation: AtomicU64,
@@ -998,7 +1052,8 @@ impl StockSbx {
             published_image_saves: Arc::new(Mutex::new(BTreeSet::new())),
             worker_artifact_identities: Mutex::new(BTreeMap::new()),
             worker_generations: Mutex::new(BTreeMap::new()),
-            quarantined_workers: Mutex::new(BTreeSet::new()),
+            quarantined_workers: Mutex::new(BTreeMap::new()),
+            deferred_pin_releases: Mutex::new(BTreeSet::new()),
             worker_leases: Mutex::new(BTreeMap::new()),
             shell_leases: Mutex::new(BTreeMap::new()),
             shell_generation: AtomicU64::new(1),
@@ -1923,10 +1978,10 @@ impl StockSbx {
                 .remove_observed_kit(&spec.name, Instant::now() + self.preparation_timeouts.sbx)
                 .is_err()
         {
-            self.quarantined_workers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(spec.name.clone());
+            self.quarantine_vm(
+                &spec.name,
+                "a VM created for this Kit could not be removed after its preparation failed",
+            );
         }
     }
 
@@ -2102,10 +2157,11 @@ impl StockSbx {
                 // name alone or discharge its durable pending operation.
                 if !matches!(&error, SbxError::Io(source) if marsh_runtime::command_not_started(source))
                 {
-                    self.quarantined_workers
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .insert(spec.name.clone());
+                    self.quarantine_vm_as(
+                        &spec.name,
+                        format!("its VM create did not complete: {error}"),
+                        create_may_land(&error),
+                    );
                 }
                 return Err(error);
             }
@@ -2188,6 +2244,12 @@ impl StockSbx {
             .get(&spec.name)
             .is_some_and(|installed| installed == &artifact);
         if !installed {
+            // The worker artifact on disk changed (marsh was reinstalled)
+            // while jobs run on the installed one: they keep it, and so does
+            // this job. The worker is replaced once the VM is idle.
+            if self.worker_lease_busy_and_live(&spec.name)? {
+                return Ok(true);
+            }
             self.drop_worker_lease(&spec.name)?;
             return Ok(false);
         }
@@ -2209,10 +2271,10 @@ impl StockSbx {
                 .is_some();
         if dead {
             if lease.active.load(Ordering::Acquire) != 0 {
-                self.quarantined_workers
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(spec.name.clone());
+                self.quarantine_vm(
+                    &spec.name,
+                    "its worker transport ended while jobs were running in it",
+                );
                 return Err(SbxError::WorkerLeaseLost(spec.name.clone()));
             }
             self.drop_worker_lease(&spec.name)?;
@@ -2355,12 +2417,27 @@ impl StockSbx {
     /// # Errors
     /// Rejects quarantined VMs and bounded lifecycle admission contention.
     pub fn admit_shell_session(&self, name: &str) -> Result<ShellVmSession, SbxError> {
+        self.admit_shell_session_with(name, &mut |_| true)
+    }
+
+    /// [`Self::admit_shell_session`], reporting [`ShellVmProgress::Waiting`]
+    /// while another opener's setup of this VM holds admission.
+    ///
+    /// # Errors
+    /// As [`Self::admit_shell_session`]; `false` from `progress` stops the
+    /// wait as admission-busy.
+    pub fn admit_shell_session_with(
+        &self,
+        name: &str,
+        progress: &mut dyn FnMut(ShellVmProgress) -> bool,
+    ) -> Result<ShellVmSession, SbxError> {
         validate_name(name)?;
         let (transition, _cleanup) =
             weak_rw_transition_lock(&self.grant_vm_transition_locks, name.to_owned());
-        let _guard = shell_admission_before(
+        let _guard = shell_admission_before_with(
             || transition.try_read(),
             Instant::now() + SHELL_MOUNT_TIMEOUT,
+            |blocked| blocked < SHELL_WAIT_NOTICE_AFTER || progress(ShellVmProgress::Waiting),
         )?;
         self.reject_quarantined_shell(name)?;
         let counter = self
@@ -2406,15 +2483,33 @@ impl StockSbx {
     /// Fails closed on a foreign name, mutable image, unsafe artifact, or
     /// guest-user mismatch.
     pub fn ensure_shell_vm(&self, spec: &ShellVmSpec) -> Result<ReadyShellVm, SbxError> {
+        self.ensure_shell_vm_with(spec, &mut |_| true)
+    }
+
+    /// [`Self::ensure_shell_vm`], reporting progress to the caller: once
+    /// before a create or replacement starts, and repeatedly while waiting
+    /// for another opener that holds the VM's setup. The callback returns
+    /// `false` to stop waiting (the call then fails as admission-busy).
+    ///
+    /// # Errors
+    /// As [`Self::ensure_shell_vm`]; waiting past the admission window or
+    /// being told to stop is [`SbxError::ShellMountAdmissionBusy`], with no
+    /// stock operation submitted.
+    pub fn ensure_shell_vm_with(
+        &self,
+        spec: &ShellVmSpec,
+        progress: &mut dyn FnMut(ShellVmProgress) -> bool,
+    ) -> Result<ReadyShellVm, SbxError> {
         let (transition, _cleanup) =
             weak_rw_transition_lock(&self.grant_vm_transition_locks, spec.name.clone());
-        let _guard = shell_admission_before(
+        let _guard = shell_admission_before_with(
             || transition.try_write(),
             Instant::now() + SHELL_MOUNT_TIMEOUT,
+            |blocked| blocked < SHELL_WAIT_NOTICE_AFTER || progress(ShellVmProgress::Waiting),
         )?;
         self.reject_quarantined_shell(&spec.name)?;
         self.remember_shell_recovery_spec(spec);
-        self.ensure_shell_vm_inner(spec)
+        self.ensure_shell_vm_inner(spec, progress)
     }
 
     fn reject_observed_shell_disappearance(&self, name: &str) -> Result<(), SbxError> {
@@ -2450,7 +2545,11 @@ impl StockSbx {
         Ok(())
     }
 
-    fn ensure_shell_vm_inner(&self, spec: &ShellVmSpec) -> Result<ReadyShellVm, SbxError> {
+    fn ensure_shell_vm_inner(
+        &self,
+        spec: &ShellVmSpec,
+        progress: &mut dyn FnMut(ShellVmProgress) -> bool,
+    ) -> Result<ReadyShellVm, SbxError> {
         validate_name(&spec.name)?;
         validate_token(&spec.user.name)?;
         if spec.user.uid == 0 || spec.user.gid == 0 || !safe_absolute(&spec.user.home) {
@@ -2516,6 +2615,11 @@ impl StockSbx {
                     if !self.is_owned_shell_of_another_image(&spec.name, &marker) {
                         return Err(error);
                     }
+                    self.reject_observed_shell_disappearance(&spec.name)?;
+                    progress(ShellVmProgress::Creating {
+                        replacing: true,
+                        download: self.shell_template_download_needed(&template),
+                    });
                     self.retire_stale_shell(&spec.name)?;
                     self.remember_shell_recovery_spec(spec);
                     create()?;
@@ -2525,6 +2629,10 @@ impl StockSbx {
                 }
             }
             VmClass::Absent => {
+                progress(ShellVmProgress::Creating {
+                    replacing: false,
+                    download: self.shell_template_download_needed(&template),
+                });
                 create()?;
                 true
             }
@@ -2588,7 +2696,7 @@ impl StockSbx {
         let outcome = self
             .run_bounded_os(
                 "create shell VM",
-                self.preparation_timeouts.sbx,
+                self.preparation_timeouts.create,
                 [
                     "create",
                     "--name",
@@ -3390,10 +3498,7 @@ impl StockSbx {
             )
             .and_then(|output| Self::require_unmounted("evict idle grant", output));
         if let Err(error) = result {
-            self.quarantined_workers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(vm.clone());
+            self.quarantine_vm(vm, format!("an idle mount could not be unmounted: {error}"));
             return Err(error);
         }
         self.grant_mount_references
@@ -3550,9 +3655,16 @@ impl StockSbx {
         let Ok(template) = ShellTemplateReference::parse(spec.image.as_str()) else {
             return false;
         };
-        if template.requires_local_authority()
-            || !matches!(self.classify_vm(&spec.name, false), Ok(VmClass::Absent))
-        {
+        if !matches!(self.classify_vm(&spec.name, false), Ok(VmClass::Absent)) {
+            return false;
+        }
+        self.shell_template_download_needed(&template)
+    }
+
+    /// Whether creating a shell VM from this template will probably download
+    /// it: a registry image whose tag stock SBX's image store does not list.
+    fn shell_template_download_needed(&self, template: &ShellTemplateReference) -> bool {
+        if template.requires_local_authority() {
             return false;
         }
         let digest_tag = template.digest().replace(':', "-");
@@ -3717,33 +3829,44 @@ impl StockSbx {
         failure.map_or(Ok(()), Err)
     }
 
-    /// Bounded shell-only close. Busy transitions or failed stock control retain
-    /// exact pins and quarantine admission; no shared worker is stopped here.
+    /// Bounded shell-only close. A pin whose fences stay busy past the bound is
+    /// released later (`release_deferred_session_pins`): it is bookkeeping
+    /// only, so no worker is quarantined or stopped here.
     ///
     /// # Errors
-    /// Returns cleanup uncertainty when a fence cannot be acquired or revocation
-    /// cannot complete before the aggregate deadline.
+    /// Rejects an invalid session token.
     pub fn close_shell_session_grants(&self, session: &str) -> Result<(), SbxError> {
         validate_token(session)?;
         let busy = || SbxError::LifecycleDeadline {
             operation: "shell session grant cleanup admission",
         };
         let lifecycle = self.session_grant_lifecycle(session);
-        let mut closed = lifecycle.try_lock().map_err(|_| busy())?;
+        let Ok(mut closed) = lifecycle.try_lock() else {
+            // A concurrent preparation for this session holds it: release
+            // the pins later instead of failing a shared worker over it.
+            self.defer_pin_release(session);
+            return Ok(());
+        };
         *closed = true;
         // Another session's mount or pin transition on the same shared Kit VM
         // (for example the same project) holds these fences for one stock
         // call. Wait a bounded moment for it instead of quarantining the
         // shared worker over an ordinary overlap.
         let deadline = Instant::now() + self.shell_close_transition_wait;
-        let keys = shell_admission_before(|| self.grant_mount_references.try_lock(), deadline)
-            .map_err(|_| busy())?
+        let Ok(references) =
+            shell_admission_before(|| self.grant_mount_references.try_lock(), deadline)
+        else {
+            self.defer_pin_release(session);
+            return Ok(());
+        };
+        let keys = references
             .iter()
             .filter(|(_, reference)| reference.pinned_sessions.contains_key(session))
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
+        drop(references);
         for (vm, source) in keys {
-            let release = (|| {
+            let release = (|| -> Result<(), SbxError> {
                 let (transition, _vm_cleanup) =
                     weak_rw_transition_lock(&self.grant_vm_transition_locks, vm.clone());
                 let _vm_guard = shell_admission_before(|| transition.try_read(), deadline)
@@ -3766,15 +3889,39 @@ impl StockSbx {
                 reference.pinned_sessions.remove(session);
                 Ok(())
             })();
-            if let Err(error) = release {
-                self.quarantined_workers
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .insert(vm);
-                return Err(error);
+            if release.is_err() {
+                // Only bookkeeping is left (the mount stays while the VM is
+                // warm): another transition on the VM holds its fences.
+                // Release the pin once it is done; no job is affected.
+                self.defer_pin_release(session);
+                return Ok(());
             }
         }
         Ok(())
+    }
+
+    fn defer_pin_release(&self, session: &str) {
+        self.deferred_pin_releases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(session.to_owned());
+    }
+
+    /// Release the pins of closed sessions whose bounded close found the
+    /// VM's fences busy (`close_shell_session_grants`). Blocking; for a
+    /// background pass.
+    pub fn release_deferred_session_pins(&self) {
+        let sessions = std::mem::take(
+            &mut *self
+                .deferred_pin_releases
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        for session in sessions {
+            if self.close_session_grants(&session).is_err() {
+                self.defer_pin_release(&session);
+            }
+        }
     }
 
     /// Releases one session's exact pins in a worker VM. Active jobs keep their
@@ -3841,7 +3988,8 @@ impl StockSbx {
         if let Err(error) = release {
             // The lifecycle write fence used by stop must be acquired only
             // after the read/key/external transition guards above are gone.
-            let _ = self.stop_quarantined_name(vm);
+            let _ = self
+                .stop_quarantined_name(vm, "a session's mount pin could not be released".into());
             return Err(error);
         }
         Ok(())
@@ -3983,7 +4131,10 @@ impl StockSbx {
                                 .is_ok();
                         }
                         if !rollback_complete && self.reject_quarantined(&vm.name).is_ok() {
-                            let _ = self.stop_quarantined_name(&vm.name);
+                            let _ = self.stop_quarantined_name(
+                                &vm.name,
+                                "a session's mount pins could not be rolled back".into(),
+                            );
                         }
                         return Err(SbxError::GrantPreparationFailed {
                             cause: Box::new(error),
@@ -4345,10 +4496,12 @@ impl StockSbx {
             // accept Start and create a container. Publish quarantine before
             // releasing the shared lifecycle fence, then stop the exact VM
             // after releasing it so stop can acquire the exclusive fence.
-            self.quarantined_workers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(vm.name.clone());
+            self.quarantine_vm(
+                &vm.name,
+                format!(
+                    "a job start could not be confirmed (the start frame write failed: {error})"
+                ),
+            );
             drop(vm_transition_guard);
             let stop = self.stop_quarantined(vm);
             let detail = match stop {
@@ -4414,14 +4567,23 @@ impl StockSbx {
     /// # Errors
     /// Returns an error when stock SBX cannot stop the VM.
     pub fn stop_quarantined(&self, vm: &ReadyKitVm) -> Result<(), SbxError> {
-        self.stop_quarantined_name(&vm.name)
+        self.stop_quarantined_because(vm, "container cleanup could not be verified")
     }
 
-    fn stop_quarantined_name(&self, vm: &str) -> Result<(), SbxError> {
-        self.quarantined_workers
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(vm.to_owned());
+    /// [`Self::stop_quarantined`], recording why (`marsh status`).
+    ///
+    /// # Errors
+    /// Returns an error when stock SBX cannot stop the VM.
+    pub fn stop_quarantined_because(
+        &self,
+        vm: &ReadyKitVm,
+        reason: impl Into<String>,
+    ) -> Result<(), SbxError> {
+        self.stop_quarantined_name(&vm.name, reason.into())
+    }
+
+    fn stop_quarantined_name(&self, vm: &str, reason: String) -> Result<(), SbxError> {
+        self.quarantine_vm(vm, reason.clone());
         let (vm_transition, _vm_cleanup) =
             weak_rw_transition_lock(&self.grant_vm_transition_locks, vm.to_owned());
         let _vm_transition = vm_transition
@@ -4430,10 +4592,7 @@ impl StockSbx {
         // A transition that began before the first publication can finish
         // before this write fence is acquired. Reassert quarantine while the
         // fence excludes every later transition and retained Start.
-        self.quarantined_workers
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(vm.to_owned());
+        self.quarantine_vm(vm, reason);
         let (stock_operation, _stock_cleanup) =
             weak_mutex_transition_lock(&self.grant_stock_operation_locks, vm.to_owned());
         let _stock_operation = stock_operation
@@ -4472,15 +4631,152 @@ impl StockSbx {
     }
 
     fn reject_quarantined(&self, vm: &str) -> Result<(), SbxError> {
-        if self
+        if let Some(quarantine) = self
             .quarantined_workers
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .contains(vm)
+            .get(vm)
         {
-            return Err(SbxError::QuarantinedVm(vm.to_owned()));
+            return Err(SbxError::QuarantinedVm(format!(
+                "{vm} ({})",
+                quarantine.reason
+            )));
         }
         Ok(())
+    }
+
+    /// Refuse new work in `vm`, keeping the first reason and time.
+    fn quarantine_vm(&self, vm: &str, reason: impl Into<String>) {
+        self.quarantine_vm_as(vm, reason.into(), false);
+    }
+
+    fn quarantine_vm_as(&self, vm: &str, reason: String, create_pending: bool) {
+        self.quarantined_workers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(vm.to_owned())
+            .or_insert_with(|| VmQuarantine {
+                reason,
+                since_unix_ms: unix_millis_now(),
+                create_pending,
+            });
+    }
+
+    /// Every Kit VM this adapter refuses, with why and since when.
+    #[must_use]
+    pub fn quarantined_vms(&self) -> BTreeMap<String, VmQuarantine> {
+        self.quarantined_workers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Whether a quarantined Kit VM can have a job container running in it.
+    /// `Ok` names the evidence that none can: the VM is gone, stopped (the
+    /// quarantine stop took effect), or running with no container in its
+    /// Docker. `Err` says why that could not be shown; then the VM stays
+    /// quarantined. Only this daemon's recorded VM is inspected.
+    ///
+    /// # Errors
+    /// Returns the reason verification was impossible or failed.
+    pub fn verify_no_running_containers(&self, vm: &str) -> Result<String, String> {
+        validate_name(vm).map_err(|error| error.to_string())?;
+        let pending = self
+            .quarantined_workers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(vm)
+            .cloned();
+        match self
+            .classify_vm(vm, true)
+            .map_err(|error| format!("cannot list stock sandboxes to check the VM: {error}"))?
+        {
+            VmClass::Foreign => Err("the name is held by a VM this daemon did not record".into()),
+            VmClass::Absent => match pending {
+                // A submitted create may still land under this name: give it
+                // time before the name is reused.
+                Some(quarantine)
+                    if quarantine.create_pending
+                        && unix_millis_now().saturating_sub(quarantine.since_unix_ms)
+                            < u64::try_from(CREATE_SETTLE.as_millis()).unwrap_or(u64::MAX) =>
+                {
+                    Err(format!(
+                        "its create did not report; waiting up to {} s for it to settle",
+                        CREATE_SETTLE.as_secs()
+                    ))
+                }
+                _ => Ok("the VM no longer exists".into()),
+            },
+            VmClass::Owned { running: false, .. } => Ok("the VM is stopped".into()),
+            VmClass::Owned { running: true, .. } => {
+                let output = self
+                    .run_bounded_os(
+                        "list containers in quarantined Kit VM",
+                        PREPARATION_DOCKER_TIMEOUT,
+                        [
+                            "exec",
+                            "-u",
+                            "root",
+                            vm,
+                            "docker",
+                            "ps",
+                            "--quiet",
+                            "--no-trunc",
+                        ],
+                    )
+                    .map_err(|error| format!("cannot list the VM's containers: {error}"))?;
+                if !output.succeeded() {
+                    return Err(format!(
+                        "cannot list the VM's containers: {}",
+                        command_failed("docker ps", output)
+                    ));
+                }
+                let running = String::from_utf8_lossy(&output.stdout)
+                    .split_whitespace()
+                    .count();
+                if running == 0 {
+                    Ok("no container is running in the VM".into())
+                } else {
+                    Err(format!(
+                        "{running} container(s) still running in the VM; a job may still be writing"
+                    ))
+                }
+            }
+        }
+    }
+
+    /// Retire a quarantined Kit VM that no registered command names any more
+    /// (a failed `kit install`, an update's new image): exact recorded UUID
+    /// only. Returns whether a VM was removed.
+    ///
+    /// # Errors
+    /// Fails for a VM that is not quarantined here or not a recorded Kit VM,
+    /// or when removal cannot be verified.
+    pub fn retire_quarantined_vm(&self, vm: &str) -> Result<bool, SbxError> {
+        validate_name(vm)?;
+        if self.reject_quarantined(vm).is_ok() {
+            return Err(SbxError::ActiveWorkerState(vm.to_owned()));
+        }
+        if !self
+            .ownership
+            .owned_kit_names()
+            .iter()
+            .any(|name| name == vm)
+        {
+            // Nothing recorded under the name: it is gone or never adopted.
+            return match self.classify_vm(vm, true)? {
+                VmClass::Absent => {
+                    self.quarantined_workers
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .remove(vm);
+                    Ok(false)
+                }
+                _ => Err(SbxError::ForeignVm(vm.to_owned())),
+            };
+        }
+        self.reset_stale_scope_kit_vm_candidate(vm, Instant::now() + PREPARATION_SBX_TIMEOUT)?;
+        Ok(true)
     }
 
     fn current_worker_generation(&self, vm: &str) -> Result<u64, SbxError> {
@@ -4546,7 +4842,7 @@ impl StockSbx {
                 spec.lifecycle_workspace.as_os_str().to_os_string(),
             ];
             let output =
-                self.run_bounded_os("create kit VM", self.preparation_timeouts.sbx, arguments);
+                self.run_bounded_os("create kit VM", self.preparation_timeouts.create, arguments);
             Self::require_success("create kit VM", output?)?;
             before.verify_path()?;
             self.adopt_created(&spec.name)?;
@@ -4554,11 +4850,12 @@ impl StockSbx {
         })();
         let submitted = !matches!(&outcome, Err(SbxError::Io(error)) if marsh_runtime::command_not_started(error));
         let result = outcome;
-        if submitted && result.is_err() {
-            self.quarantined_workers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(spec.name.clone());
+        if submitted && let Err(error) = &result {
+            self.quarantine_vm_as(
+                &spec.name,
+                format!("its VM create did not complete: {error}"),
+                create_may_land(error),
+            );
         }
         result
     }
@@ -4600,12 +4897,12 @@ impl StockSbx {
             }
             let output = self
                 .runner
-                .run_bounded(&invocation, self.preparation_timeouts.sbx)
+                .run_bounded(&invocation, self.preparation_timeouts.create)
                 .map_err(|error| {
                     if error.kind() == io::ErrorKind::TimedOut {
                         SbxError::PreparationTimeout {
                             operation: "create local kit VM",
-                            timeout: self.preparation_timeouts.sbx,
+                            timeout: self.preparation_timeouts.create,
                         }
                     } else {
                         SbxError::Io(error)
@@ -4629,11 +4926,12 @@ impl StockSbx {
         })();
         let submitted = !matches!(&outcome, Err(SbxError::Io(error)) if marsh_runtime::command_not_started(error));
         let result = outcome;
-        if submitted && result.is_err() {
-            self.quarantined_workers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .insert(spec.name.clone());
+        if submitted && let Err(error) = &result {
+            self.quarantine_vm_as(
+                &spec.name,
+                format!("its VM create did not complete: {error}"),
+                create_may_land(error),
+            );
         }
         result
     }
@@ -5275,33 +5573,46 @@ impl StockSbx {
                 .get(&vm.name)
                 .cloned();
             if let Some(lease) = lease {
-                if lease.alive.load(Ordering::Acquire)
+                let live = lease.alive.load(Ordering::Acquire)
                     && lease
                         .process
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .try_wait()?
-                        .is_none()
-                    && Self::ping_worker(&lease).is_ok()
-                {
-                    return Ok(());
+                        .is_none();
+                match (live, live.then(|| Self::ping_worker(&lease))) {
+                    (true, Some(Ok(()))) => return Ok(()),
+                    // A loaded worker can be slow to answer a ping while its
+                    // jobs run; that is not a lost transport. Fail this start.
+                    (true, Some(Err(error))) if lease.active.load(Ordering::Acquire) != 0 => {
+                        return Err(SbxError::WorkerLeaseLost(format!(
+                            "{}: the worker did not answer a liveness ping while running jobs ({error}); retry",
+                            vm.name
+                        )));
+                    }
+                    _ => {}
                 }
                 if lease.active.load(Ordering::Acquire) != 0 {
-                    self.quarantined_workers
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .insert(vm.name.clone());
+                    self.quarantine_vm(
+                        &vm.name,
+                        "its worker transport ended while jobs were running in it",
+                    );
                     return Err(SbxError::WorkerLeaseLost(vm.name.clone()));
                 }
             }
             self.drop_worker_lease(&vm.name)?;
         } else {
+            // Reinstalled marsh: jobs running on the installed worker keep
+            // it until the VM is idle (`revalidate_cached_kit`).
+            if self.worker_lease_busy_and_live(&vm.name)? {
+                return Ok(());
+            }
             self.drop_worker_lease(&vm.name)?;
         }
 
         self.install_worker(&vm.name, &vm.worker_binary)?;
         if artifact != worker_artifact_identity(&vm.worker_binary)? {
-            return Err(SbxError::SourceChanged(vm.worker_binary.clone()));
+            return Err(SbxError::WorkerArtifactChanged(vm.worker_binary.clone()));
         }
         let generation = self
             .worker_generations
@@ -5527,6 +5838,27 @@ impl StockSbx {
 
     fn drop_worker_lease(&self, vm: &str) -> Result<(), SbxError> {
         self.drop_worker_lease_with_timeout(vm, self.retained_process_teardown_timeout)
+    }
+
+    /// A retained worker that still runs attempts and whose transport is up.
+    fn worker_lease_busy_and_live(&self, vm: &str) -> Result<bool, SbxError> {
+        let Some(lease) = self
+            .worker_leases
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(vm)
+            .cloned()
+        else {
+            return Ok(false);
+        };
+        Ok(lease.active.load(Ordering::Acquire) != 0
+            && lease.alive.load(Ordering::Acquire)
+            && lease
+                .process
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .try_wait()?
+                .is_none())
     }
 
     fn drop_worker_lease_before(&self, vm: &str, deadline: Instant) -> Result<(), SbxError> {
@@ -6320,9 +6652,21 @@ impl SbxError {
 // VM lifecycle -> per-key phase reservation -> stock-operation admission.
 // The phase mutex and global maps are always released before opaque stock calls.
 fn shell_admission_before<T>(
-    mut attempt: impl FnMut() -> Result<T, std::sync::TryLockError<T>>,
+    attempt: impl FnMut() -> Result<T, std::sync::TryLockError<T>>,
     deadline: Instant,
 ) -> Result<T, SbxError> {
+    shell_admission_before_with(attempt, deadline, |_| true)
+}
+
+/// [`shell_admission_before`] that reports how long it has been blocked, at
+/// most every [`SHELL_WAIT_POLL`]; `false` from `waiting` gives up as busy.
+fn shell_admission_before_with<T>(
+    mut attempt: impl FnMut() -> Result<T, std::sync::TryLockError<T>>,
+    deadline: Instant,
+    mut waiting: impl FnMut(Duration) -> bool,
+) -> Result<T, SbxError> {
+    let started = Instant::now();
+    let mut reported = None::<Instant>;
     loop {
         if Instant::now() >= deadline {
             return Err(SbxError::ShellMountAdmissionBusy);
@@ -6331,6 +6675,12 @@ fn shell_admission_before<T>(
             Ok(guard) => return Ok(guard),
             Err(std::sync::TryLockError::Poisoned(error)) => return Ok(error.into_inner()),
             Err(std::sync::TryLockError::WouldBlock) => {
+                if reported.is_none_or(|last| last.elapsed() >= SHELL_WAIT_POLL) {
+                    reported = Some(Instant::now());
+                    if !waiting(started.elapsed()) {
+                        return Err(SbxError::ShellMountAdmissionBusy);
+                    }
+                }
                 thread::sleep(
                     Duration::from_millis(5)
                         .min(deadline.saturating_duration_since(Instant::now())),
@@ -7621,11 +7971,15 @@ pub enum SbxError {
     #[error("trusted worker lease exited before dispatch: {0}")]
     WorkerLeaseLost(String),
     #[error(
+        "marsh was reinstalled while this daemon runs: its worker binary {0} changed on disk, and this daemon cannot start the new one; run `marsh stop` once no job is running (the next marsh call starts the new daemon)"
+    )]
+    WorkerArtifactChanged(PathBuf),
+    #[error(
         "retained worker Start completion is ambiguous for {vm}; cleanup is uncertain and the VM was quarantined: {detail}"
     )]
     AmbiguousWorkerStart { vm: String, detail: String },
     #[error(
-        "worker VM is quarantined and cannot be reused: {0}; retire it with host `marsh workers reset KIT`"
+        "worker VM is quarantined and cannot be reused: {0}; retire it with host `marsh workers reset KIT` (`marsh workers reset all` when no command names it yet)"
     )]
     QuarantinedVm(String),
     #[error(

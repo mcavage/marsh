@@ -1,0 +1,57 @@
+# syntax=docker/sandbox-kit:3
+schemaVersion: "3"
+kind: workload
+displayName: marsh-tools
+description: Work tools for agents in one Kit VM — gog (Google Workspace; never send, share or delete) and bamboohr (read-only directory)
+sourceUrl: https://github.com/mcavage/marsh/tree/main/kits/marsh-tools
+licenses: [MIT]
+# marsh shows this in "gog updated (A → B)". CI stamps it, and provides, with
+# gog's release and the date and commit of bamboohr's last change.
+version: "0.0.0-local"
+provides: ["gogcli@0.46.0", "bamboohr@0.0.0"]
+dockerfile: ./Dockerfile
+capabilities:
+  - type: com.docker.sandbox/sbx@1
+  # The tools need only their arguments and the project; the guest home (other
+  # agents' settings and saved logins) is never mounted into this Kit's VM.
+  # Optional, because stock SBX refuses a required capability it doesn't know.
+  - type: org.marsh/home@1
+    optional: true
+    config:
+      mount: none
+  # One VM, so one network policy and one credential proxy for every tool in
+  # it. Each tool's binary only talks to its own service.
+  - type: com.docker.sandbox/network-policy@1
+    config:
+      runtime:
+        allow:
+          - gmail.googleapis.com:443
+          - www.googleapis.com:443
+          - docs.googleapis.com:443
+          - sheets.googleapis.com:443
+          - slides.googleapis.com:443
+          - api.bamboohr.com:443
+  - type: com.docker.sandbox/credential@1
+    description: Google access token, minted on the Mac (sbx secret set gog --command ...)
+    optional: true
+    config:
+      service: gog
+      phase: runtime
+      apiKey:
+        name: GOG_ACCESS_TOKEN
+        inject:
+          - {domain: gmail.googleapis.com, header: Authorization, format: "Bearer %s"}
+          - {domain: www.googleapis.com, header: Authorization, format: "Bearer %s"}
+          - {domain: docs.googleapis.com, header: Authorization, format: "Bearer %s"}
+          - {domain: sheets.googleapis.com, header: Authorization, format: "Bearer %s"}
+          - {domain: slides.googleapis.com, header: Authorization, format: "Bearer %s"}
+  - type: com.docker.sandbox/credential@1
+    description: BambooHR API key, stored as base64("KEY:x") (sbx secret set bamboohr)
+    optional: true
+    config:
+      service: bamboohr
+      phase: runtime
+      apiKey:
+        name: BAMBOOHR_API_KEY
+        inject:
+          - {domain: api.bamboohr.com, header: Authorization, format: "Basic %s"}

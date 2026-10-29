@@ -502,9 +502,13 @@ impl Worker {
                 // create. Unknown/post-create errors, including carrier binding,
                 // must retain ownership and quarantine even if deterministic.
                 let rejected_before_effect = matches!(error, RuntimeError::ByteBridge(_));
-                // Docker refused the create and the runtime proved nothing
-                // of it remains: this job failed, the VM is fine.
-                let refused_and_removed = matches!(error, RuntimeError::CreateRefused { .. });
+                // Docker refused the create, or it did not complete and its
+                // container never started, and the runtime proved nothing of
+                // it remains: this job failed, the VM is fine.
+                let refused_and_removed = matches!(
+                    error,
+                    RuntimeError::CreateRefused { .. } | RuntimeError::CreateAbandoned { .. }
+                );
                 setup_failure(
                     events,
                     SetupStage::Create,

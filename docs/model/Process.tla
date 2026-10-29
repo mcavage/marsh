@@ -34,6 +34,11 @@
 (* carries the marker; if one does, it runs its own image binary in its  *)
 (* own container (lineage miss, no authority change).                   *)
 (*                                                                       *)
+(* A Kit may declare that it never mounts the selected home              *)
+(* (`org.marsh/home@1`, NoHomeKits): its jobs never hold the home view,  *)
+(* whether the session or a parent job (an agent calling a tool) starts  *)
+(* them. Dropping it only narrows, so Attenuation still holds.           *)
+(*                                                                       *)
 (* A tree uses at most MaxKitVMs distinct Kits (one warm VM each) among  *)
 (* its live jobs at once; a child of a Kit already live in it is free.  *)
 (* Wall time is not modeled: a deadline is the environment's Cancel.     *)
@@ -48,26 +53,27 @@
 (* two daemon steps; jobs exit whenever they like.                       *)
 EXTENDS Naturals, FiniteSets
 
-CONSTANTS Jobs, Kits, ScriptKits, MaxDepth, MaxConc, MaxFan, MaxTotal,
+CONSTANTS Jobs, Kits, ScriptKits, NoHomeKits, MaxDepth, MaxConc, MaxFan, MaxTotal,
           MaxSame, MaxKitVMs, MaxDetached, MaxRestarts, Bug
 
 Bugs == {"none", "noDepth", "widen", "freeOnRevoke", "noFan", "noTotal",
          "orphanChildren", "revokeOnly", "noPropagate", "restartKeepsCap",
          "keepRunning", "replay", "linkIgnoresMarker", "linkIgnoresPpid",
          "noSameKit", "spawnWiden", "noKitCap", "noDetachCap",
-         "restartDetached", "detachHolds"}
+         "restartDetached", "detachHolds", "childKeepsHome"}
 ASSUME Bug \in Bugs
-ASSUME Jobs \subseteq (Nat \ {0}) /\ ScriptKits \subseteq Kits
+ASSUME Jobs \subseteq (Nat \ {0}) /\ ScriptKits \subseteq Kits /\ NoHomeKits \subseteq Kits
 
 Session == 0
-\* Rights: "proj" = the project/home view, "fork" = a split fork view,
-\* and one right per Kit the job may spawn. The session holds all of them.
-AllRights == {"proj", "fork"} \cup Kits
+\* Rights: "proj" = the project view, "home" = the selected home, "fork" =
+\* a split fork view, and one right per Kit the job may spawn. The session
+\* holds all of them.
+AllRights == {"proj", "home", "fork"} \cup Kits
 \* What a launcher may hand a child: the same rights, the fork view only
 \* (a split branch), no spawn at all (`--no-spawn`), or a smaller spawn
 \* set (`--spawn` / MARSH_SPAWN without one Kit).
 Narrowings(R) == {R, R \ {"proj"}, R \ Kits} \cup {R \ {c} : c \in Kits}
-View == {"proj", "fork"}
+View == {"proj", "home", "fork"}
 
 Active == {"launched", "running", "ending", "cancelling"}
 Holding == Active \cup {"unreaped", "uncertain"}
@@ -190,11 +196,15 @@ SpawnFrom(j, p, fromEntry) ==
        \* The child's rights are the launcher's recorded rights, narrowed.
        \* Bug widen: the view is recomputed from the session's grants. Bug
        \* spawnWiden: the spawn set is reset to every registered Kit.
-       /\ rights' = [rights EXCEPT ![j] =
-            IF p = Session THEN N
-            ELSE IF Bug = "widen" THEN View \cup (N \cap Kits)
-            ELSE IF Bug = "spawnWiden" THEN (N \cap View) \cup Kits
-            ELSE N]
+       \* A Kit that declares no home never gets it (`kit_agent`). Bug
+       \* childKeepsHome: only a top-level launch applies the declaration, so
+       \* an agent's tool call inherits the agent's home.
+       /\ LET Base == IF p = Session THEN N
+                     ELSE IF Bug = "widen" THEN View \cup (N \cap Kits)
+                     ELSE IF Bug = "spawnWiden" THEN (N \cap View) \cup Kits
+                     ELSE N
+              Drop == k \in NoHomeKits /\ ~(Bug = "childKeepsHome" /\ p # Session)
+          IN rights' = [rights EXCEPT ![j] = IF Drop THEN Base \ {"home"} ELSE Base]
   /\ par' = [par EXCEPT ![j] = p]
   /\ st' = [st EXCEPT ![j] = "launched"]
   /\ cap' = [cap EXCEPT ![j] = "live"]
@@ -386,6 +396,10 @@ LineageWF == \A j \in Jobs : st[j] # "none" =>
 Attenuation == \A j \in Jobs : st[j] # "none" /\ par[j] # Session =>
   /\ rights[j] \cap View \subseteq rights[par[j]]
   /\ kit[j] \in rights[par[j]]
+
+\* A Kit that declares no home never holds it, however it was started.
+NoHomeKitHome == \A j \in Jobs : st[j] # "none" /\ kit[j] \in NoHomeKits =>
+  "home" \notin rights[j]
 
 \* The spawn set never widens down the tree.
 SpawnSetAttenuates == \A j \in Jobs : st[j] # "none" /\ par[j] # Session =>

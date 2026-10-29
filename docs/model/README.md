@@ -35,7 +35,9 @@ The code-location table below records the implementation mapping and known gaps.
   child maps and intents over a random per-grant name prefix, intent-then-adopt child
   create, revocation on session end and on every daemon restart, and host cleanup.
 - `Worker.tla`: one owned warm kit VM with its single worker transport (generation),
-  up to `CAP` concurrent attempts, quarantine, retire, cancellation, and project/home
+  up to `CAP` concurrent attempts, quarantine, retire (by the operator, or automatically
+  once no started attempt's container can still be running: `AutoRetire`, guarded by the
+  ghost `alive` that `ContainerEnds` clears), cancellation, and project/home
   mounts whose sources the environment may replace at any time. A mount is made on
   first reference and retained while the VM is warm (mounted whenever referenced); an
   idle mount is reused, unmounted only to replace a stale source (`Worker_evictInUse`
@@ -75,28 +77,30 @@ The code-location table below records the implementation mapping and known gaps.
   the worker's entry marker and parent = docker-init, so every later own-name call (an agent's
   Bash tool calling itself) is a same-Kit child under a chain cap. Any job may spawn any Kit in
   its spawn set (every registered Kit by default; the child runs under its own Kit's egress and
-  credentials); launchers only narrow the set.
+  credentials); launchers only narrow the set. A Kit that declares no home (`org.marsh/home@1`,
+  `NoHomeKits`) never holds the home view, whether the session or a job started it.
   Environment: jobs exit at will, the user cancels any job, transport loss, leftover containers.
 
 Invariants: `NoForeignEffect`, `OwnedAreOurs`, `NoLeak`, `ChildNoLeak`, `ChildConfinement`
 (a grant only affects VMs it made), `RevokedChildInert` (no grant effect after revoke or
 without its session), `ChildCapacity`, `MapsDisjoint` (Ownership); `CapacityBound`, `NoReplay`,
 `NoStartOnQuarantined`, `LossIsUncertain`, `MountRefcount`, `NoStaleSourceUse`,
-`CancelScoped` (Worker); `RevokedGrantInert`, `GrantTargetBound`, `OneTimePermission`,
+`CancelScoped`, `AutoRetireVerified` (Worker); `RevokedGrantInert`, `GrantTargetBound`, `OneTimePermission`,
 `DefaultSparesRunning`, `DefaultRevokedInert`, `DefaultReachesNewVms` (Grants); `SnapshotImmutable`, `CheckpointImmutable`, `AdminReadOnly`,
 `ExposedClean`, `OneBase`, `ChildFromParent`, `ForkIsolation`, `NoWriteToUserTree`,
 `CaptureStable`, `LineageWF`, `BudgetBound`, `LiveUnderLive`, `CancelPropagates`,
 `CancelScoped`, `NoRemoveWhileLive`, `NoReplay`, `WorkspaceRecorded` (Workspace); `LineageWF`,
 `Attenuation`, `BudgetBound`, `FanOutBound`, `TotalBound`, `LiveUnderLive`, `NoOrphanRunning`,
 `CancelPropagates`, `RevokedAtRestart`, `RestartUncertain`, `NoReplay`, `EntryOnce`,
-`NoEntryRecursion`, `SameKitBound`, `SpawnSetAttenuates`, `KitVMBound` (Process). Liveness: `ChildCleanedAfterRevoke` (strong
+`NoEntryRecursion`, `SameKitBound`, `SpawnSetAttenuates`, `KitVMBound`, `NoHomeKitHome` (Process). Liveness: `ChildCleanedAfterRevoke` (strong
 fairness on host cleanup, which is retried after every restart and inventory),
-`AttemptsTerminate` (weak fairness), and `EventuallySettled` (Workspace; weak fairness on
+`AttemptsTerminate` and `QuarantineHeals` (Worker; weak fairness, no operator action), and `EventuallySettled` (Workspace; weak fairness on
 daemon steps and process progress, checked in the smaller `Workspace_live_pass.cfg`).
 
 Each module has a `Bug` constant. `Module.cfg` uses `Bug = "none"` and checks every
 property. Each `Module_<bug>.cfg` turns on one guarded wrong action and checks only the
-property that must catch it. Grant controls: `childTouchHost`, `crossGrant` (broker
+property that must catch it. Worker's `retireUnverified` lets automatic recovery retire
+a quarantined VM while a started attempt's container still runs (AutoRetireVerified). Grant controls: `childTouchHost`, `crossGrant` (broker
 consults another grant's map), `childIgnoreRevoke`, `childOverMax`, `childNoIntent`
 (grant intent kept only in memory), and `restartKeepsGrant` (a persisted grant survives
 the restart that lost its session). Default-publication controls: `loadRunning` (load
@@ -136,14 +140,16 @@ marker is set, which an ELF entrypoint leaves in place: EntryOnce), `noSameKit` 
 `spawnWiden` (child spawn set reset to every registered Kit: SpawnSetAttenuates), `noKitCap` (a
 child brings one more distinct Kit VM into a full tree: KitVMBound), `noDetachCap` (DetachedBound),
 `detachHolds` (a detached cloud run keeps its pool slot: DetachedOutOfPool), `restartDetached` (a
-restart makes a detached run uncertain: DetachedSurvives). `Detach` takes a started root job with
+restart makes a detached run uncertain: DetachedSurvives), `childKeepsHome` (only a top-level
+launch applies a Kit's no-home declaration, so an agent's tool call inherits the agent's home:
+NoHomeKitHome). `Detach` takes a started root job with
 no children out of the pool (`marsh-daemon` `detach_cloud_job`, `JobState::Detached`, not `live`);
 `Collect` ends it without a second start. Wall time is not modeled:
 a deadline is the environment's `Cancel(j, Session)`, and a child's inherited deadline is an
 admission-time value checked by `process_tests.rs` and P35, not by TLC. Positive Process configs:
 `Process.cfg` (one script Kit, 3 jobs, depth 3, one restart, every invariant; ~40 s),
-`Process_kits_pass.cfg` (a script Kit and an ELF Kit, spawn-set narrowing, same-Kit cap 2,
-no restart; ~1.5 min with 2 workers),
+`Process_kits_pass.cfg` (a script Kit and an ELF Kit that declares no home, spawn-set
+narrowing, same-Kit cap 2, no restart; ~5 min with 2 workers),
 `Process_caps_pass.cfg` (4 jobs, tight pool/fan/total caps, no restart; ~1.5 min),
 `Process_kitvms_pass.cfg` (two ELF Kits, one Kit VM per tree, no restart; ~1.5 min),
 `Process_live_pass.cfg` (`EventuallySettled`).
@@ -206,7 +212,8 @@ positive config fails or a negative control passes or fails for the wrong reason
 | ChildCreateBegin/Do/Record, ChildOp, ChildRemove | marsh-daemon `dev_broker.rs` (`serve`, `serve_admitted` incl. `Action::Run`: a fresh `run` is a ChildCreate, a reattach a ChildOp; `check_owned`) + `dev_broker/policy.rs`; grant section in marsh-sbx `vm_ownership.rs` (`update_dev_grants`, adoption in `store_view`) |
 | RevokeChild, Restart (revoke all), HostAdoptChild, HostCleanChild | marsh-daemon `dev_broker.rs` (`revoke_session` at session end in marsh-backend `open_shell`, `revoke_all` at `marsh stop`/`marsh reset` and in `marshd` startup, `remove_children`) |
 | Admit / Run / Exit / Cleanup / Cancel | marsh-sbx `StockSbx::launch_worker` (refuses a quarantined VM or a stale worker generation; one `AttemptRoute` per attempt on the VM's retained worker transport); marsh-worker `control.rs` (per-attempt start, exit and cleanup frames) and `transport.rs` (`cancellation`); a `docker create` that Docker refused is Run+Exit+Cleanup only after marsh-runtime `remove_labelled` proves no container with its per-create label remains (`RuntimeError::CreateRefused`); any other create error is uncertain and quarantines. Not implemented as modeled: a per-VM `CAP`; concurrency is bounded by the daemon's session pool (`marsh-daemon/src/process.rs` `admit`) |
-| TransportLoss / ReplaceTransport / Retire | marsh-sbx `ensure_worker_lease` (a dead or unresponsive transport, `ping_worker`, with live attempts quarantines the VM in `quarantined_workers`; an idle one is replaced under a new worker generation), `WorkerLoss` (the loss diagnostic), `stop_quarantined`, `retire_kit_vm_before` (`marsh workers reset KIT`) |
+| TransportLoss / ReplaceTransport / Retire | marsh-sbx `ensure_worker_lease` (a dead transport with live attempts quarantines the VM in `quarantined_workers`, with its reason; a live one that is slow to answer a ping fails only the new start; an idle one is replaced under a new worker generation; a reinstalled worker artifact is not swapped in under running attempts), `WorkerLoss` (the loss diagnostic), `stop_quarantined_because`, `retire_kit_vm_before` (`marsh workers reset KIT`). marsh-backend `execute`: a start or wall timeout with the transport up sends Cancel and waits `WORKER_CANCEL_SETTLE` for the worker's verified report (Cleanup), not TransportLoss |
+| ContainerEnds / AutoRetire | the quarantine stop (`stop_quarantined_name`, `sbx stop`) or the container's own end; marsh-backend `worker_recovery.rs` `recover_quarantined_vm` (background pass each minute, and before a job prepares the VM): no unfinished job record on the VM (`DaemonStore::worker_has_unfinished_jobs`), then marsh-sbx `verify_no_running_containers` (recorded VM absent, stopped, or running with an empty `docker ps`; otherwise it stays quarantined with the reason in `WorkerQuarantine::recovery`), then the same retirement as Retire; held slots are released as after a reset |
 | Shell: Admit / Run / Exit / Cleanup | marsh-sbx `shell_supervisor.rs` (`Supervisor::spawn`, `Control::cleanup_session`); guest `marsh/src/shell_supervisor.rs` |
 | Shell: TransportLoss / ReplaceTransport | marsh-sbx `shell_supervisor.rs` (`lose`, `ping`); `ensure_shell_lease` (replace idle, quarantine with live attempts) |
 | Admit (mount ref) / MountFinish | marsh-sbx `prepare_job_grants` -> `acquire_shared_grant` (mount on first reference, refcounted in `grant_mount_references`; a source whose identity changed is refused, `SourceChanged`) -> `mount_shared_grant`; `revoke_grants` / `release_session_grant` drop references; `evict_idle_grant_locked` unmounts only an idle mount of a replaced source; shell VMs: `acquire_shell_mount` / `evict_idle_shell_mount` |
@@ -230,6 +237,7 @@ positive config fails or a negative control passes or fails for the wrong reason
 | Process: Exit / Cancel / Lose cascade, Reap / GraceExpire | a job's end drops its `CapabilityBridges` (token revoked, connections closed) and the worker's `capability.rs` `Capability` (socket and streams); `process::serve_run` sees the caller stream drop and calls `DaemonStore::cancel_tree` on the child (`process.rs`), which in one step marks the child and every live descendant `cancelling` (admission then refuses their spawns, `child_lineage`), sends each container INT through the `JobControl` the backend registered at launch, and KILLs whatever still runs after 10 s (the one-step `CancelPropagates` cascade; previously one grace per level). A root caller's Ctrl-C (signal frame) or disconnect does the same from `marsh-backend` `forward_multiplexed_input`. A cancelling job ends `cancelled` (`finish_job_as`), exit 130; the backend verifies container deletion; an unconfirmed end holds the slot (`process.rs` `holds_slot`, derived from `cleanup: uncertain` receipts, so it survives restart) until a successful `workers reset` (`release_process_slots`, persisted) |
 | Process: Restart | daemon start: capability tokens are in memory (lost); journal load marks unfinished jobs uncertain; no resubmission; the root client reports `job uncertain` (`marsh/src/client.rs`) |
 | Process: EntryLocal / EntryDispatch / AgentSelfLocal (link decision) | worker/runtime set `MARSH_ENTRY=1`, `MARSH_JOB`, and `PATH=/run/marsh/bin:<image PATH>` for every job (no `bash`/`sh` link and no `SHELL` override: shells are the image's own, `processes.md` s15) (`marsh-runtime` `job_environment`); stubs `#!/run/marsh/marsh --link=NAME` (`marsh-worker/src/capability.rs` `publish`); `marsh/src/job.rs` `link` -> `marsh-contracts` `process::link_decision` (own name + marker + `getppid()` = 1 -> clear marker, exec the image binary by absolute path with PATH intact; another image-provided name -> exec locally; else `ProcessRun`) |
+| Process: Spawn no-home Kits (NoHomeKitHome) | `marsh-contracts/src/kit_assets.rs` `KitAgent::from_descriptor` reads `org.marsh/home@1` (`no_home`; any set component declaring `none` wins); `marsh-backend` `kit_wants_no_home` (fails closed) is applied in `execute` to root and child views alike (drops the home `PublicMount` and its `AdmittedHostGrant`, refuses a cwd inside the home, `HOME`=`MARSH_SELECTED_HOME`=`/tmp`) and in `prepare_for_shell` (`--load` session pins). Real caller: the evidence in the change that added it (`marsh-tools` from a Pi job) |
 | Process: Spawn Kit VM cap (KitVMBound) | `process::kit_vm_cap` (from `child_lineage`, split branches included): distinct `kit_ref` among the tree's live receipts, at most `JobDefaults::tree_kit_vms` (4; `MARSH_TREE_KIT_VMS`), checked in the pre-check and in `begin_job_process` |
 | Process: Spawn spawn-set narrowing, same-Kit cap | `process::admit` (`child_lineage`): same-Kit = consecutive parent→child steps with equal `kit_ref`; `MARSH_SPAWN` / `marsh run --spawn` / `--no-spawn` narrow admission. The capability socket remains available for subtree inspection; disallowed spawn requests are refused. |
 

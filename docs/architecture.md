@@ -79,9 +79,12 @@ distinct and are never derived from each other.
    which can include prompt text, but captures no stdin, stdout, or stderr.
 
 Transport loss with active attempts marks them `cleanup_uncertain` and
-quarantines the VM; jobs are never replayed. `marsh workers reset KIT` retires
-a quarantined Kit VM. `marsh reset` and `marsh stop` clean up the whole
-scope once nothing is active.
+quarantines the VM; jobs are never replayed. The daemon retires a quarantined
+Kit VM on its own once it verifies that no container can still run there
+(`marsh-backend/src/worker_recovery.rs`: the VM is stopped or gone, or its
+Docker lists none); otherwise `marsh workers reset KIT` does. `marsh status`
+shows each quarantine's reason. `marsh reset` and `marsh stop` clean up the
+whole scope once nothing is active.
 
 ## VM ownership
 
@@ -147,7 +150,9 @@ are protected host inputs, not guest-home content.
   Projects sharing a selected home share this VM.
 - **Kit job container**: nonroot, resource-limited, fresh per call, with the
   project, home, and configured extra mounts (a child job: its parent's mounts;
-  a split job: its fork, Git state, and home). It
+  a split job: its fork, Git state, and home). A Kit declaring
+  `org.marsh/home@1` `mount: none` gets no home, at any depth, and its VM never
+  mounts it (`marsh-backend` `kit_wants_no_home`). It
   receives no Docker, containerd, or SBX socket and no proxy-held raw credentials;
   its only daemon channel is the scoped job capability socket. Stock SBX applies the Kit's network
   policy and credential proxy at the VM boundary. Containers in one Kit VM

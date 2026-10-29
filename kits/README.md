@@ -118,6 +118,5 @@ A pull request that touches one builds and tests it and pushes nothing.
 | Directory | Image | Workflow |
 |---|---|---|
 | `marsh-hermes` | `docker.io/mcavage/marsh-hermes:stable` | [kit-hermes.yml](../.github/workflows/kit-hermes.yml): follows Hermes Agent's releases every six hours |
-| `marsh-gog` | `docker.io/mcavage/marsh-gog:stable` | [kit-tools.yml](../.github/workflows/kit-tools.yml): follows gog's releases every six hours |
-| `marsh-bamboohr` | `docker.io/mcavage/marsh-bamboohr:stable` | [kit-tools.yml](../.github/workflows/kit-tools.yml): rebuilt with gog |
+| `marsh-tools` | `docker.io/mcavage/marsh-tools:stable` | [kit-tools.yml](../.github/workflows/kit-tools.yml): `gog` and `bamboohr` in one Kit; follows gog's releases every six hours |
 | `marsh-pix` | `docker.io/mcavage/marsh-pix:stable` | [kit-pix.yml](../.github/workflows/kit-pix.yml): follows `marsh-pi:latest` and the Pix content, which stays in [mcavage/pix](https://github.com/mcavage/pix) and is checked out at every run |
