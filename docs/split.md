@@ -384,6 +384,16 @@ c=$(marsh checkpoint --label before-refactor)   # prints its ID
 marsh checkpoints                               # newest first
 ```
 
+A lane's copy can be checkpointed the same way, from the project's root, by
+the split that made it (the host, for a host split) while it is open or kept; a
+split made `--from` that checkpoint starts from the lane's files, `HEAD`, and index.
+A job running in a lane cannot do this:
+
+```sh
+c=$(marsh checkpoint --lane "$SPLIT_ID/a" --label a-turn-1)   # prints its ID
+marsh split --open --from "$c" a2
+```
+
 An open split makes forks ("lanes") with no command and returns at once. You
 then run agents in them yourself, for as long as you like, and close the split
 to collect each lane's patch:

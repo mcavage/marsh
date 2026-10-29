@@ -39,7 +39,8 @@ patch to the project in the shell VM. --from bases the forks on a checkpoint.
 --label TEXT (1 to 128 bytes, no control characters) is recorded on the split:
 in its manifest, `marsh splits --json`, and its `marsh events` lines.
 ";
-pub const CHECKPOINT_HELP: &str = "Usage: marsh checkpoint [--label TEXT] [--json]
+pub const CHECKPOINT_HELP: &str =
+    "Usage: marsh checkpoint [--lane SPLIT_ID/LABEL] [--label TEXT] [--json]
        marsh checkpoints [--json] [--label TEXT]
        marsh checkpoints rm ID
 
@@ -48,6 +49,12 @@ Snapshot the current project (as a split's base: Git-ignored files, .git, and
 .marsh/checkpoints/ID. marsh keeps the newest 20 per label and 200 per project,
 none older than 7 days. A checkpoint needs 5 GiB and 5% free on the volume
 (exit 75 otherwise). `marsh split --from ID` starts forks from it.
+
+--lane SPLIT_ID/LABEL snapshots an open (or kept) lane's copy instead, the same
+way, with the lane's HEAD, index, and the objects its jobs wrote, so
+`marsh split --open --from ID` starts from that lane's state. Run it from the
+project's root, by the split's creator (the host for a host split); a job in a
+lane cannot.
 ";
 pub const EVENTS_HELP: &str = "Usage: marsh events --json
 
@@ -1252,7 +1259,7 @@ fn checkpoint(
     arguments: &[OsString],
     channel: impl FnOnce(bool) -> Result<Channel, String>,
 ) -> i32 {
-    let (mut json, mut label, mut index) = (false, None, 0);
+    let (mut json, mut label, mut lane, mut index) = (false, None, None, 0);
     while index < arguments.len() {
         match text(&arguments[index]) {
             Some("--json") => json = true,
@@ -1260,7 +1267,15 @@ fn checkpoint(
                 index += 1;
                 label = Some(arguments[index].to_string_lossy().into_owned());
             }
-            _ => return usage("usage: marsh checkpoint [--label TEXT] [--json]"),
+            Some("--lane") if index + 1 < arguments.len() && lane.is_none() => {
+                index += 1;
+                lane = Some(arguments[index].to_string_lossy().into_owned());
+            }
+            _ => {
+                return usage(
+                    "usage: marsh checkpoint [--lane SPLIT_ID/LABEL] [--label TEXT] [--json]",
+                );
+            }
         }
         index += 1;
     }
@@ -1271,7 +1286,10 @@ fn checkpoint(
     match channel.client.request_with_timeout(
         PublicRequest::Checkpoint {
             root: project(),
-            action: marsh_daemon::CheckpointAction::Create { label },
+            action: match lane {
+                Some(lane) => marsh_daemon::CheckpointAction::CreateLane { lane, label },
+                None => marsh_daemon::CheckpointAction::Create { label },
+            },
         },
         LONG_REPLY,
     ) {

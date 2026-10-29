@@ -30,6 +30,21 @@ pub struct Checkpoint {
     /// Whether `git/` holds saved Git metadata.
     pub git: bool,
     pub identity: (u64, u64),
+    /// `SPLIT_ID/LABEL` when this snapshots an open or kept lane's copy
+    /// rather than the project (`Checkpoints::create_lane`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<String>,
+}
+
+/// A lane's copy and Git state, opened by descriptor by the split engine, for
+/// `Checkpoints::create_lane`.
+pub struct LaneSource {
+    /// `SPLIT_ID/LABEL`.
+    pub name: String,
+    pub tree: Dir,
+    /// The lane's `.admin/LABEL` and the split's `store.git/objects`; none
+    /// for a lane of a project that is not a Git repository.
+    pub git: Option<(Dir, Dir)>,
 }
 
 /// Why a checkpoint was not made.
@@ -148,16 +163,13 @@ impl Checkpoints {
         );
     }
 
-    /// `marsh checkpoint`: snapshot `root` now.
-    ///
-    /// # Errors
-    /// Refuses a root inside `.marsh`, a gitfile root, or a nearly full volume.
-    pub fn create(&self, root: &Path, label: Option<String>) -> Result<Checkpoint, Refusal> {
+    /// The checks every checkpoint starts with.
+    fn admit(root: &Path, label: Option<&str>) -> Result<(), Refusal> {
         let invalid = |message: String| Refusal::Invalid(format!("checkpoint: {message}"));
         if inside_marsh(root) {
             return Err(invalid("cannot checkpoint inside .marsh".into()));
         }
-        if label.as_deref().is_some_and(|label| !valid_label(label)) {
+        if label.is_some_and(|label| !valid_label(label)) {
             return Err(invalid("a label is 1 to 128 printable characters".into()));
         }
         let (free, total) = split_fs::volume_space(root).map_err(|e| invalid(e.to_string()))?;
@@ -168,7 +180,72 @@ impl Checkpoints {
                 root.display()
             )));
         }
-        let git = split_fs::git_source(root).map_err(invalid)?;
+        Ok(())
+    }
+
+    /// `marsh checkpoint`: snapshot `root` now.
+    ///
+    /// # Errors
+    /// Refuses a root inside `.marsh`, a gitfile root, or a nearly full volume.
+    pub fn create(&self, root: &Path, label: Option<String>) -> Result<Checkpoint, Refusal> {
+        Self::admit(root, label.as_deref())?;
+        let git =
+            split_fs::git_source(root).map_err(|m| Refusal::Invalid(format!("checkpoint: {m}")))?;
+        self.make(
+            root,
+            label,
+            None,
+            git.as_ref(),
+            &|| Dir::open_root(root).map_err(|e| e.to_string()),
+            &|| Ok(()),
+        )
+    }
+
+    /// `marsh checkpoint --lane`: snapshot a lane's copy as `create` snapshots
+    /// the project, with the lane's Git state (resolved `HEAD`, index) and the
+    /// objects its jobs wrote, so a split `--from` it starts from the lane's
+    /// state. `settled` runs after the copy is made and before the checkpoint
+    /// is recorded: it refuses a lane that was closed, cancelled, or removed
+    /// meanwhile, and the copy is discarded.
+    ///
+    /// # Errors
+    /// As `create`, and when `settled` refuses.
+    pub fn create_lane(
+        &self,
+        root: &Path,
+        label: Option<String>,
+        lane: &LaneSource,
+        settled: &dyn Fn() -> Result<(), String>,
+    ) -> Result<Checkpoint, Refusal> {
+        Self::admit(root, label.as_deref())?;
+        // The admin directory is writable by the lane's jobs: it is read as
+        // data (HEAD resolves only to an object id) and never followed.
+        let git = lane
+            .git
+            .as_ref()
+            .map(|(admin, _)| split_fs::lane_git(admin, root))
+            .transpose()
+            .map_err(|m| Refusal::Invalid(format!("checkpoint: {m}")))?;
+        self.make(
+            root,
+            label,
+            Some(lane),
+            git.as_ref(),
+            &|| lane.tree.dup().map_err(|e| e.to_string()),
+            settled,
+        )
+    }
+
+    fn make(
+        &self,
+        root: &Path,
+        label: Option<String>,
+        lane: Option<&LaneSource>,
+        git: Option<&split_fs::GitSnapshot>,
+        source: &dyn Fn() -> Result<Dir, String>,
+        settled: &dyn Fn() -> Result<(), String>,
+    ) -> Result<Checkpoint, Refusal> {
+        let invalid = |message: String| Refusal::Invalid(format!("checkpoint: {message}"));
         let io = |e: std::io::Error| invalid(e.to_string());
         let area = split_fs::area(root, "checkpoints", true).map_err(io)?;
         let id = crate::split::new_id();
@@ -176,12 +253,15 @@ impl Checkpoints {
         let identity = dir.fstat().map_err(io)?.identity;
         let made = (|| -> Result<u64, String> {
             let tree = dir.create("tree").map_err(|e| e.to_string())?;
-            let source = Dir::open_root(root).map_err(|e| e.to_string())?;
-            split_fs::snapshot(&source, &tree, git.as_ref())?;
-            if let Some(git) = &git {
-                split_fs::save_git(git, &dir.create("git").map_err(|e| e.to_string())?)
-                    .map_err(|e| e.to_string())?;
+            split_fs::snapshot(&source()?, &tree, git)?;
+            if let Some(git) = git {
+                let saved = dir.create("git").map_err(|e| e.to_string())?;
+                split_fs::save_git(git, &saved).map_err(|e| e.to_string())?;
+                if let Some((admin, store)) = lane.and_then(|lane| lane.git.as_ref()) {
+                    split_fs::save_lane_objects(store, admin, &saved).map_err(|e| e.to_string())?;
+                }
             }
+            settled()?;
             Ok(split_fs::logical_bytes(&tree))
         })();
         let bytes = match made {
@@ -200,6 +280,7 @@ impl Checkpoints {
             bytes,
             git: git.is_some(),
             identity,
+            lane: lane.map(|lane| lane.name.clone()),
         };
         self.lock().records.insert(id, checkpoint.clone());
         self.publish(&checkpoint, false);
@@ -353,6 +434,7 @@ impl Checkpoint {
             "root": self.root,
             "dir": self.dir,
             "bytes": self.bytes,
+            "lane": self.lane,
         })
     }
 }

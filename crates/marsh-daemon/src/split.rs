@@ -841,6 +841,117 @@ impl SplitEngine {
         self.lock().records.get(id).cloned()
     }
 
+    /// `marsh checkpoint --lane SPLIT_ID/LABEL`: snapshot an open (or kept)
+    /// lane's copy and Git state as a checkpoint of its project
+    /// (`docs/design/workspaces.md` s14). Only the split's creator or the
+    /// host; never a job, which has no such request.
+    ///
+    /// # Errors
+    /// Returns why the lane is not found, not the caller's, not in a state
+    /// that can be checkpointed, or the checkpoint's own refusal.
+    pub fn checkpoint_lane(
+        &self,
+        caller: &Creator,
+        root: &Path,
+        lane: &str,
+        label: Option<String>,
+    ) -> Result<crate::checkpoint::Checkpoint, crate::checkpoint::Refusal> {
+        use crate::checkpoint::{LaneSource, Refusal};
+        let invalid = |message: String| Refusal::Invalid(format!("checkpoint: {message}"));
+        if matches!(caller, Creator::Job(_)) {
+            return Err(invalid("a job cannot checkpoint a lane".into()));
+        }
+        let (id, name) = lane
+            .split_once('/')
+            .filter(|(id, name)| !id.is_empty() && !name.is_empty())
+            .ok_or_else(|| invalid("--lane takes SPLIT_ID/LABEL".into()))?;
+        let (record, index) = self
+            .lane_for_checkpoint(caller, root, id, name)
+            .map_err(invalid)?;
+        let branch = &record.branches[index];
+        let state = (record.state, record.closing, branch.state);
+        let split = record.open().map_err(invalid)?;
+        let tree = split
+            .open(&branch.label)
+            .map_err(|e| invalid(format!("lane {lane}: {e}")))?;
+        if tree.fstat().map_err(|e| invalid(e.to_string()))?.identity != branch.identity {
+            return Err(invalid(format!("lane {lane} was replaced")));
+        }
+        let git = record
+            .git
+            .is_some()
+            .then(|| {
+                let admin = split.open(".admin")?.open(&branch.label)?;
+                let store = split.open("store.git")?.open("objects")?;
+                Ok((admin, store))
+            })
+            .transpose()
+            .map_err(|e: std::io::Error| invalid(format!("lane {lane} Git state: {e}")))?;
+        let source = LaneSource {
+            name: lane.to_owned(),
+            tree,
+            git,
+        };
+        // Files stay while the record does: a remove or the collector takes
+        // the record before any file, so an unchanged record is a copy of a
+        // lane that was not being removed.
+        let settled = || match self.lane_for_checkpoint(caller, root, id, name) {
+            Ok((record, index))
+                if (record.state, record.closing, record.branches[index].state) == state =>
+            {
+                Ok(())
+            }
+            _ => Err(format!(
+                "lane {lane} changed state during the checkpoint; retry"
+            )),
+        };
+        self.checkpoints.create_lane(root, label, &source, &settled)
+    }
+
+    /// The lane `id/label` of `root` that `caller` may checkpoint, and its
+    /// index: open (the split running, not closing) or captured in a kept
+    /// split. The record's creator, or the host.
+    fn lane_for_checkpoint(
+        &self,
+        caller: &Creator,
+        root: &Path,
+        id: &str,
+        label: &str,
+    ) -> Result<(SplitRecord, usize), String> {
+        let record = self
+            .record(id)
+            .filter(SplitRecord::lanes)
+            .ok_or_else(|| format!("no lane split {id}"))?;
+        if caller != &Creator::Host && &record.creator != caller {
+            return Err(format!(
+                "split {id}: only its creator can checkpoint its lanes"
+            ));
+        }
+        if record.root != root {
+            return Err(format!(
+                "split {id} belongs to {}; run this from that project's root",
+                record.root.display()
+            ));
+        }
+        let index = record
+            .branches
+            .iter()
+            .position(|branch| branch.label == label)
+            .ok_or_else(|| format!("split {id} has no lane {label}"))?;
+        let open = record.state == SplitState::Run
+            && !record.closing
+            && record.branches[index].state == BranchState::Running;
+        let kept = record.state == SplitState::Kept
+            && record.branches[index].state == BranchState::Captured;
+        if !open && !kept {
+            return Err(format!(
+                "lane {id}/{label} is not open or kept (split {:?}, lane {:?}): only an open lane, or a captured lane of a kept split, can be checkpointed",
+                record.state, record.branches[index].state
+            ));
+        }
+        Ok((record, index))
+    }
+
     fn expire_leases(&self) {
         let mut expired = Vec::new();
         {
@@ -2572,10 +2683,25 @@ fn setup(
             )?;
         }
         lap("snapshot");
-        split
-            .create("store.git")
-            .and_then(|store| store.create("objects"))
-            .map_err(io)?;
+        // A checkpoint of a lane keeps the objects the lane's jobs wrote:
+        // this split owns a clone of them, so it never depends on the
+        // checkpoint staying (retention).
+        let store = split.create("store.git").map_err(io)?;
+        let kept = match &plan.source {
+            Source::Checkpoint(_, checkpoint, _) => checkpoint
+                .open("git")
+                .and_then(|git| git.open("objects").map(|_| git))
+                .ok(),
+            _ => None,
+        };
+        match kept {
+            Some(git) => git
+                .clone_to("objects".as_ref(), &store, "objects".as_ref())
+                .map_err(io)?,
+            None => {
+                store.create("objects").map_err(io)?;
+            }
+        }
         let out = split.create("out").map_err(io)?;
         let admin_root = plan
             .git

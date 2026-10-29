@@ -261,6 +261,7 @@ fn checkpoints_keep_the_tree_and_git_state_and_retain_twenty_per_label() {
         "apply-json-v1",
         "lane-cloud-v1",
         "lane-shell-v1",
+        "lane-checkpoints-v1",
     ] {
         assert!(
             hello["features"]
@@ -418,7 +419,7 @@ fn open_lanes_from_a_checkpoint_capture_their_forks_and_admit_only_the_creator()
     );
 
     // What a lane job would do: edit its fork.
-    fs::write(lane_a.join("src/lib.rs"), "fn a() { lane(); }\n").unwrap();
+    fs::write(lane_a.join("src/lib.rs"), "fn a() { staged(); }\n").unwrap();
     fs::write(lane_b.join("new.txt"), "b\n").unwrap();
     let closed = fixture.json(&["split", "close", &id, "--json"]);
     assert_eq!(closed["state"], "kept");
@@ -466,6 +467,238 @@ fn open_lanes_from_a_checkpoint_capture_their_forks_and_admit_only_the_creator()
     let output = fixture.run_in(&fixture.project, &["splits", "rm", &id]);
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     events.next_where(|line| line["type"] == "split" && line["split"]["state"] == "removed");
+}
+
+/// A relay token file for a new shell session in the project, and its context.
+fn other_session(fixture: &Fixture, name: &str) -> (PathBuf, String) {
+    let shell = fixture.store().attach_shell(
+        std::process::id(),
+        SessionAuthority {
+            username: "fixture".into(),
+            uid: nix::unistd::Uid::effective().as_raw(),
+            gid: nix::unistd::Gid::effective().as_raw(),
+            launch_directory: fixture.project.clone(),
+            guest_home: fixture.home.parent().unwrap().to_path_buf(),
+            home_backing: fixture.home.join("home"),
+            ephemeral_home: false,
+        },
+    );
+    let token = fixture.home.parent().unwrap().join(name);
+    fs::write(&token, fixture.store().issue_relay_token(&shell).unwrap()).unwrap();
+    fs::set_permissions(&token, std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+    (token, fixture.context(&shell))
+}
+
+/// A host `marsh split` of its own: the host CLI's session lasts one split.
+fn host_split(fixture: &Fixture, arguments: &[&str]) -> serde_json::Value {
+    let shell = fixture.store().attach_shell(
+        std::process::id(),
+        SessionAuthority {
+            username: "fixture".into(),
+            uid: nix::unistd::Uid::effective().as_raw(),
+            gid: nix::unistd::Gid::effective().as_raw(),
+            launch_directory: fixture.project.clone(),
+            guest_home: fixture.home.parent().unwrap().to_path_buf(),
+            home_backing: fixture.home.join("home"),
+            ephemeral_home: false,
+        },
+    );
+    let output = fixture
+        .command(&fixture.project, arguments)
+        .env("MARSH_EXTERNAL_SESSION", fixture.context(&shell))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // One journey: checkpoint, refuse, start from it.
+fn a_lane_checkpoint_starts_the_next_split_from_the_lanes_state_for_its_creator_only() {
+    let fixture = Fixture::new();
+    let opened = fixture.json(&["split", "--open", "a"]);
+    let id = opened["id"].as_str().unwrap().to_owned();
+    let lane = PathBuf::from(opened["lanes"]["a"].as_str().unwrap());
+    let name = format!("{id}/a");
+    // What a lane job would do: edit its fork and commit with the lane's Git.
+    fs::write(lane.join("src/lib.rs"), "fn a() { lane(); }\n").unwrap();
+    fs::write(lane.join("new.txt"), "from the lane\n").unwrap();
+    fs::create_dir(lane.join("target")).unwrap();
+    fs::write(lane.join("target/ignored"), "x").unwrap();
+    git(&lane, &["add", "src/lib.rs", "new.txt"]);
+    git(&lane, &["commit", "-q", "-m", "lane work"]);
+    fs::write(lane.join("untracked.txt"), "u\n").unwrap();
+    fs::write(lane.join("src/lib.rs"), "fn a() { staged(); }\n").unwrap();
+    git(&lane, &["add", "src/lib.rs"]);
+    let lane_head = git(&lane, &["rev-parse", "HEAD"]);
+    assert_ne!(lane_head, git(&fixture.project, &["rev-parse", "HEAD"]));
+
+    // Only the creator (here the host) may: not another session, not a job.
+    let (other, context) = other_session(&fixture, "other-token");
+    let refused = fixture
+        .command(&fixture.project, &["checkpoint", "--lane", &name])
+        .env("MARSH_DAEMON_TOKEN", &other)
+        .env("MARSH_EXTERNAL_SESSION", &context)
+        .output()
+        .unwrap();
+    assert_ne!(refused.status.code(), Some(0), "{refused:?}");
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("only its creator"),
+        "{refused:?}"
+    );
+    let (job, _) = fixture
+        .store()
+        .begin_job_at(lane_job(&fixture, &lane), Placement::Local)
+        .unwrap();
+    let capability = fixture.home.parent().unwrap().join("job-token");
+    fs::write(
+        &capability,
+        fixture.store().issue_capability_token(&job).unwrap(),
+    )
+    .unwrap();
+    fs::set_permissions(
+        &capability,
+        std::os::unix::fs::PermissionsExt::from_mode(0o600),
+    )
+    .unwrap();
+    let reply = marsh_daemon::Client::connect_relay(&fixture.endpoint.socket, &capability)
+        .unwrap()
+        .request(PublicRequest::Checkpoint {
+            root: Some(fixture.project.clone()),
+            action: marsh_daemon::CheckpointAction::CreateLane {
+                lane: name.clone(),
+                label: None,
+            },
+        });
+    assert!(
+        format!("{reply:?}").contains("job capability admits only"),
+        "{reply:?}"
+    );
+    fixture
+        .store()
+        .finish_job(
+            &job,
+            ExitStatus {
+                code: Some(0),
+                cause: "exited".into(),
+            },
+            true,
+            CleanupState::Verified,
+            TimingReport::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        fixture.json(&["checkpoints", "--json"])["checkpoints"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    // The project root, not another directory; and a lane that exists.
+    let elsewhere = fixture.run_in(&lane, &["checkpoint", "--lane", &name]);
+    assert_ne!(elsewhere.status.code(), Some(0), "{elsewhere:?}");
+    let missing = fixture.run_in(
+        &fixture.project,
+        &["checkpoint", "--lane", &format!("{id}/z")],
+    );
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("no lane z"),
+        "{missing:?}"
+    );
+
+    let made = fixture.json(&["checkpoint", "--lane", &name, "--label", "lane-a", "--json"]);
+    assert_eq!(made["lane"], name.as_str());
+    assert_eq!(made["label"], "lane-a");
+    let checkpoint = made["checkpoint"].as_str().unwrap().to_owned();
+    let dir = fixture.project.join(".marsh/checkpoints").join(&checkpoint);
+    let tree = dir.join("tree");
+    assert_eq!(
+        fs::read_to_string(tree.join("src/lib.rs")).unwrap(),
+        "fn a() { staged(); }\n"
+    );
+    assert_eq!(
+        fs::read_to_string(tree.join("new.txt")).unwrap(),
+        "from the lane\n"
+    );
+    // The same pruning as a project checkpoint: ignored files and `.git` are left out.
+    assert!(!tree.join("target").exists() && !tree.join(".git").exists());
+    assert_eq!(
+        fs::read_to_string(dir.join("git/HEAD")).unwrap().trim(),
+        lane_head.trim()
+    );
+    assert!(dir.join("git/index").is_file() && dir.join("git/objects").is_dir());
+    let listed = fixture.json(&["checkpoints", "--json", "--label", "lane-a"]);
+    assert_eq!(listed["checkpoints"][0]["lane"], name.as_str());
+    // The lane is untouched and still open.
+    assert_eq!(
+        fixture.json(&["splits", "--json", &id])["splits"][0]["state"],
+        "run"
+    );
+
+    // A split from it starts from the lane's state: files, HEAD, and index.
+    fixture.run_in(&fixture.project, &["splits", "cancel", &id]);
+    fixture.run_in(&fixture.project, &["splits", "rm", &id]);
+    let next = host_split(&fixture, &["split", "--open", "--from", &checkpoint, "b"]);
+    let next_lane = PathBuf::from(next["lanes"]["b"].as_str().unwrap());
+    assert_eq!(
+        fs::read_to_string(next_lane.join("src/lib.rs")).unwrap(),
+        "fn a() { staged(); }\n"
+    );
+    assert_eq!(
+        fs::read_to_string(next_lane.join("new.txt")).unwrap(),
+        "from the lane\n"
+    );
+    assert_eq!(git(&next_lane, &["rev-parse", "HEAD"]), lane_head);
+    assert_eq!(
+        git(&next_lane, &["log", "-1", "--format=%s"]).trim(),
+        "lane work"
+    );
+    // The index came along: the staged edit is staged, the new file untracked.
+    assert_eq!(
+        git(&next_lane, &["status", "--porcelain"]),
+        "M  src/lib.rs\n?? untracked.txt\n"
+    );
+    // It does not lean on the checkpoint: the lane's commit survives its removal.
+    let removed = fixture.run_in(&fixture.project, &["checkpoints", "rm", &checkpoint]);
+    assert_eq!(removed.status.code(), Some(0), "{removed:?}");
+    assert_eq!(
+        git(&next_lane, &["cat-file", "-t", lane_head.trim()]).trim(),
+        "commit"
+    );
+
+    // A kept lane can be checkpointed too; a session's own lane by that session.
+    let next_id = next["id"].as_str().unwrap().to_owned();
+    let closed = fixture.json(&["split", "close", &next_id, "--json"]);
+    assert_eq!(closed["state"], "kept");
+    let kept = fixture.json(&["checkpoint", "--lane", &format!("{next_id}/b"), "--json"]);
+    assert!(kept["checkpoint"].is_string());
+    let (own_token, own_context) = other_session(&fixture, "own-token");
+    let as_session = |arguments: &[&str]| {
+        fixture
+            .command(&fixture.project, arguments)
+            .env("MARSH_DAEMON_TOKEN", &own_token)
+            .env("MARSH_EXTERNAL_SESSION", &own_context)
+            .output()
+            .unwrap()
+    };
+    let own = as_session(&["split", "--open", "c"]);
+    assert_eq!(own.status.code(), Some(0), "{own:?}");
+    let own: serde_json::Value = serde_json::from_slice(&own.stdout).unwrap();
+    let own_name = format!("{}/c", own["id"].as_str().unwrap());
+    let by_session = as_session(&["checkpoint", "--lane", &own_name]);
+    assert_eq!(by_session.status.code(), Some(0), "{by_session:?}");
+    // Another session still may not; the host may.
+    let refused = fixture
+        .command(&fixture.project, &["checkpoint", "--lane", &own_name])
+        .env("MARSH_DAEMON_TOKEN", &other)
+        .env("MARSH_EXTERNAL_SESSION", &context)
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("only its creator"),
+        "{refused:?}"
+    );
+    assert!(fixture.json(&["checkpoint", "--lane", &own_name, "--json"])["checkpoint"].is_string());
 }
 
 #[test]
