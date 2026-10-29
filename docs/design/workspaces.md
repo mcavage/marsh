@@ -131,7 +131,7 @@ stream, and a dropped stream cancels the split, unless it was created with
 | `SplitShow` | relay | `split?` -> manifest + subtree, or every split in scope |
 | `SplitRemove` | relay | `split` -> removes a kept split (creator or operator) |
 | `SplitClose` | relay, socket | `split` -> closes an open lane split: manifest (s14) |
-| `Checkpoint` | relay, socket | `root?` (a relay's is its session project), `create {label}` / `list {label}` / `remove {id}` (s14) |
+| `Checkpoint` | relay, socket | `root?` (a relay's is its session project), `create {label}` / `create_lane {lane, label}` (relay or host only: a job's socket never reaches it) / `list {label}` / `remove {id}` (s14) |
 | `Storage` | relay, socket | `root?` -> per-project checkpoints, kept splits, free space (s14) |
 
 For splits, the job capability socket admits `SplitCreate` and `SplitJoin`,
@@ -492,7 +492,7 @@ with the directory's identity) and reaches its files only by descriptor.
   Kit job whose cwd is in one is refused like any non-fork path under
   `.marsh`.
 - `marsh checkpoints [--json] [--label TEXT]` lists them newest first
-  (`{"checkpoints":[{"checkpoint","label","created_unix_ms","root","dir","bytes"}]}`);
+  (`{"checkpoints":[{"checkpoint","label","created_unix_ms","root","dir","bytes","lane"}]}`);
   `marsh checkpoints rm ID` removes one.
 - A split being made `--from` a checkpoint leases it until its `base/` is
   cloned: retention passes over a leased checkpoint (the next pass retires
@@ -502,6 +502,38 @@ with the directory's identity) and reaches its files only by descriptor.
   (`project-roots.json`) before the area is made; at daemon start each
   one's `.marsh/.trash` is emptied, and a project with no splits, no
   checkpoints, and an empty trash is forgotten.
+
+**Lane checkpoints** (feature `lane-checkpoints-v1`). `marsh checkpoint --lane
+SPLIT_ID/LABEL [--label TEXT] [--json]`, run from the project's root, snapshots an
+open lane's copy (or the copy of a captured lane of a kept split) as a checkpoint
+of the project, so a later `marsh split --open --from CKPT` starts from that
+lane's state. It is made exactly like a project checkpoint (section 8's pruning
+and the lane's own ignore rules, `.git` and `.marsh` left out), stored under the
+project's `.marsh/checkpoints`, and listed, retained, leased, labelled and
+removed like any other; `checkpoint` and `checkpoints --json` carry `"lane"`
+(`SPLIT_ID/LABEL`, null for a project checkpoint). Its `git/` holds the lane's
+resolved `HEAD`, `index`, `packed-refs` and `info/exclude`, read from the lane's
+`.admin` directory by descriptor (a lane job can write the admin `index`,
+`objects` and `refs`, so they are data and never followed), and `git/objects`,
+the objects the lane's jobs and the split's `store.git` hold that the project's
+repository lacks. A split `--from` it clones those into its own
+`store.git/objects`, so it does not depend on the checkpoint staying.
+
+- **Authority.** Only the split's creator (the host for a host split, as for
+  `close`) or the host may; another session is refused ("only its creator can
+  checkpoint its lanes"). A job has no way: its capability socket admits only
+  `ProcessRun`, `ProcessShow`, jobs, `SplitCreate`, `SplitJoin` and `OpenUrl`, and the
+  engine refuses a `Job` caller as well. This keeps the rule that a lane job never
+  snapshots outside its copy: the daemon reads the copy, the job asks for nothing.
+- **State.** Open means the split is `run`, not closing, and the lane `running`;
+  kept means the split is `kept` and the lane `captured`. Anything else
+  (closing, `uncertain`, cancelled, joined) is refused. The copy is read while the
+  lane's jobs may still write, as a project checkpoint is of a live project; the
+  daemon rechecks the record before recording the checkpoint, and discards the
+  copy if the lane was closed, cancelled or removed meanwhile (a removal takes
+  the record before any file).
+- The request must name a split of this project (`root`), a lane that exists, and
+  pass the same label and free-space checks as `marsh checkpoint` (exit 75).
 
 **`--from CHECKPOINT`.** A root split may start from a checkpoint of its
 project: the daemon clones the checkpoint's `tree` into `base/` and builds
@@ -668,6 +700,9 @@ before capture, restart, restart during close, cancel and removal of a kept
 lane split), lane jobs never splitting, and the checkpoint as an immutable
 source: `Workspace_lanes_pass.cfg`, and the controls `laneAfterClose`,
 `captureLiveLane`, `laneRestartLive`, `checkpointMounted`, `laneSplit`,
-`restartReopens`, and `removeLiveLane`. The checkpoint lease, the event
+`restartReopens`, and `removeLiveLane`. A lane checkpoint adds no state to the model: its
+`Ckpt` is already an abstract immutable source that no job mounts, whatever tree it was
+copied from, and `checkpoint --lane` is a daemon read of a lane's copy that gives no job
+an authority (the job capability socket does not carry it). The checkpoint lease, the event
 subscriber cap, and the collector/join race are checked in code tests
 (`checkpoint.rs`, `crates/marsh/tests/workspace_cli.rs`).

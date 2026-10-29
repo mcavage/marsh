@@ -167,7 +167,8 @@ command, in which the split's creator runs any number of registered commands
 (confined to the fork, including `marsh run --acp`) until `marsh split close`
 captures each lane's patch. `marsh checkpoint` snapshots the project the same
 way, with retention (20 per label, 200 per project, 7 days) and a refusal
-below 5 GiB or 5% free; kept splits are removed 7 days after they were kept.
+below 5 GiB or 5% free (`marsh checkpoint --lane SPLIT_ID/LABEL` snapshots an
+open or kept lane's copy, for its creator only); kept splits are removed 7 days after they were kept.
 `marsh storage` reports what they use, and `marsh events --json` streams job,
 split, and checkpoint changes to a host client
 ([workspace design](../design/workspaces.md#14-open-lanes-checkpoints-and-storage)).

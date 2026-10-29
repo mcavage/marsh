@@ -513,6 +513,7 @@ fn host_split(fixture: &Fixture, arguments: &[&str]) -> serde_json::Value {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // One journey: checkpoint, refuse, start from it.
 fn a_lane_checkpoint_starts_the_next_split_from_the_lanes_state_for_its_creator_only() {
     let fixture = Fixture::new();
     let opened = fixture.json(&["split", "--open", "a"]);

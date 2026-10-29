@@ -20,7 +20,8 @@ ACP fixture: a checkpoint and `split --open --from` it, `marsh run --acp`
 lane jobs over stdio that write their fork and are refused the project, the
 other lane, the checkpoint, and the gitfile, creator-only admission (a shell
 session is refused), `marsh fanout` from a lane's copy (its branches are
-confined lane jobs; `-b` is refused), `split close` capture, refusal after close, `split
+confined lane jobs; `-b` is refused), a checkpoint of a lane (`checkpoint --lane`) that a split `--from` it starts from, refused
+from a job in the lane and from a shell that did not create the split, `split close` capture, refusal after close, `split
 apply`, cancel ending a live lane job, `marsh storage`, and the `marsh events`
 stream. It is included in `make verify`/`make regress`.
 

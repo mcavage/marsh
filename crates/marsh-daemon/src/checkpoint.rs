@@ -195,7 +195,7 @@ impl Checkpoints {
             root,
             label,
             None,
-            git,
+            git.as_ref(),
             &|| Dir::open_root(root).map_err(|e| e.to_string()),
             &|| Ok(()),
         )
@@ -230,7 +230,7 @@ impl Checkpoints {
             root,
             label,
             Some(lane),
-            git,
+            git.as_ref(),
             &|| lane.tree.dup().map_err(|e| e.to_string()),
             settled,
         )
@@ -241,7 +241,7 @@ impl Checkpoints {
         root: &Path,
         label: Option<String>,
         lane: Option<&LaneSource>,
-        git: Option<split_fs::GitSnapshot>,
+        git: Option<&split_fs::GitSnapshot>,
         source: &dyn Fn() -> Result<Dir, String>,
         settled: &dyn Fn() -> Result<(), String>,
     ) -> Result<Checkpoint, Refusal> {
@@ -253,8 +253,8 @@ impl Checkpoints {
         let identity = dir.fstat().map_err(io)?.identity;
         let made = (|| -> Result<u64, String> {
             let tree = dir.create("tree").map_err(|e| e.to_string())?;
-            split_fs::snapshot(&source()?, &tree, git.as_ref())?;
-            if let Some(git) = &git {
+            split_fs::snapshot(&source()?, &tree, git)?;
+            if let Some(git) = git {
                 let saved = dir.create("git").map_err(|e| e.to_string())?;
                 split_fs::save_git(git, &saved).map_err(|e| e.to_string())?;
                 if let Some((admin, store)) = lane.and_then(|lane| lane.git.as_ref()) {

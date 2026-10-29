@@ -920,7 +920,7 @@ impl SplitEngine {
     ) -> Result<(SplitRecord, usize), String> {
         let record = self
             .record(id)
-            .filter(|record| record.lanes())
+            .filter(SplitRecord::lanes)
             .ok_or_else(|| format!("no lane split {id}"))?;
         if caller != &Creator::Host && &record.creator != caller {
             return Err(format!(
