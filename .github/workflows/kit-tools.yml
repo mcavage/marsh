@@ -1,24 +1,22 @@
-name: Kit marsh-gog and marsh-bamboohr
-# Builds docker.io/mcavage/marsh-gog and docker.io/mcavage/marsh-bamboohr
-# (kits/marsh-gog, kits/marsh-bamboohr), which marsh follows at :stable. Follows
-# gog's releases: every six hours, build the latest gog release into the gog
-# Kit, build the bamboohr Kit, run the offline smoke test, then push :VERSION
-# (gog only) and move :stable. A failed build or smoke test never moves
-# :stable. A change to the Kits (push to main) or a manual run republishes.
-# A pull request builds and smoke-tests the same way and pushes nothing.
-# (Moved here from the standalone mcavage/marsh-tools repository.)
+name: Kit marsh-tools
+# Builds docker.io/mcavage/marsh-tools (kits/marsh-tools: gog and bamboohr in
+# one Kit), which marsh follows at :stable. Follows gog's releases: every six
+# hours, build the latest gog release and the bamboohr tool into the Kit, run
+# the offline smoke test, then push :VERSION (GOG-BAMBOOHR) and move :stable.
+# A failed build or smoke test never moves :stable. A change to the Kit (push
+# to main) or a manual run republishes. A pull request builds and smoke-tests
+# the same way and pushes nothing. The separate marsh-gog and marsh-bamboohr
+# images are no longer built.
 on:
   pull_request:
     paths:
-      - "kits/marsh-gog/**"
-      - "kits/marsh-bamboohr/**"
+      - "kits/marsh-tools/**"
       - "tests/kits/tools-smoke.sh"
       - ".github/workflows/kit-tools.yml"
   push:
     branches: [main]
     paths:
-      - "kits/marsh-gog/**"
-      - "kits/marsh-bamboohr/**"
+      - "kits/marsh-tools/**"
       - "tests/kits/tools-smoke.sh"
       - ".github/workflows/kit-tools.yml"
   schedule:
@@ -30,11 +28,10 @@ concurrency:
   group: kit-tools-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
-  GOG_IMAGE: docker.io/mcavage/marsh-gog
-  BAMBOOHR_IMAGE: docker.io/mcavage/marsh-bamboohr
+  IMAGE: docker.io/mcavage/marsh-tools
 jobs:
   publish:
-    name: build, test and publish marsh-gog and marsh-bamboohr
+    name: build, test and publish marsh-tools
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 30
     steps:
@@ -54,16 +51,21 @@ jobs:
           gh release download "$tag" -R steipete/gogcli -p checksums.txt -O checksums.txt
           sha=$(awk -v f="gogcli_${version}_linux_arm64.tar.gz" '$2==f {print $1}' checksums.txt)
           case "$sha" in *[!0-9a-f]*|'') echo "no linux arm64 checksum for $tag" >&2; exit 1;; esac
+          # bamboohr's version changes only with its own code, so a rebuild
+          # alone doesn't announce an update.
+          bamboo=$(git log -1 --date=format:%Y.%m.%d --format=%cd-%h -- kits/marsh-tools/bamboohr)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
-          echo "gog $version ($sha)"
+          echo "bamboo=$bamboo" >> "$GITHUB_OUTPUT"
+          echo "tag=$version-$bamboo" >> "$GITHUB_OUTPUT"
+          echo "gog $version ($sha), bamboohr $bamboo"
       - name: Already published?
         id: check
         env:
-          VERSION: ${{ steps.gog.outputs.version }}
+          TAG: ${{ steps.gog.outputs.tag }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = schedule ] && docker buildx imagetools inspect "$GOG_IMAGE:$VERSION" >/dev/null 2>&1; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"; echo "gog $VERSION is already published"
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && docker buildx imagetools inspect "$IMAGE:$TAG" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"; echo "marsh-tools $TAG is already published"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
@@ -79,27 +81,25 @@ jobs:
         env:
           VERSION: ${{ steps.gog.outputs.version }}
           SHA: ${{ steps.gog.outputs.sha }}
+          BAMBOO: ${{ steps.gog.outputs.bamboo }}
+          TAG: ${{ steps.gog.outputs.tag }}
         run: |
           set -eu
-          sed -i "s/\"gogcli@[^\"]*\"/\"gogcli@$VERSION\"/" kits/marsh-gog/kit.yaml
-          # bamboohr's version changes only with its own code, so a rebuild alone
-          # doesn't announce an update.
-          bamboo=$(git log -1 --date=format:%Y.%m.%d --format=%cd-%h -- kits/marsh-bamboohr)
-          sed -i "s/\"bamboohr@[^\"]*\"/\"bamboohr@$bamboo\"/" kits/marsh-bamboohr/kit.yaml
-          docker buildx build --platform linux/arm64 --load -f kits/marsh-gog/kit.yaml \
-            --build-arg "GOG_VERSION=$VERSION" --build-arg "GOG_SHA256=$SHA" -t marsh-gog:candidate kits/marsh-gog
-          docker buildx build --platform linux/arm64 --load -f kits/marsh-bamboohr/kit.yaml -t marsh-bamboohr:candidate kits/marsh-bamboohr
-          tests/kits/tools-smoke.sh marsh-gog:candidate marsh-bamboohr:candidate
+          sed -i "s/^version: .*/version: \"$TAG\"/" kits/marsh-tools/kit.yaml
+          sed -i "s/\"gogcli@[^\"]*\"/\"gogcli@$VERSION\"/" kits/marsh-tools/kit.yaml
+          sed -i "s/\"bamboohr@[^\"]*\"/\"bamboohr@$BAMBOO\"/" kits/marsh-tools/kit.yaml
+          docker buildx build --platform linux/arm64 --load -f kits/marsh-tools/kit.yaml \
+            --build-arg "GOG_VERSION=$VERSION" --build-arg "GOG_SHA256=$SHA" -t marsh-tools:candidate kits/marsh-tools
+          tests/kits/tools-smoke.sh marsh-tools:candidate
       - name: Publish
         if: steps.check.outputs.skip == 'false' && github.event_name != 'pull_request'
         # Builds from the version-stamped descriptors of the previous step.
         env:
           VERSION: ${{ steps.gog.outputs.version }}
           SHA: ${{ steps.gog.outputs.sha }}
+          TAG: ${{ steps.gog.outputs.tag }}
         run: |
           set -eu
-          docker buildx build --platform linux/arm64 --push -f kits/marsh-gog/kit.yaml \
+          docker buildx build --platform linux/arm64 --push -f kits/marsh-tools/kit.yaml \
             --build-arg "GOG_VERSION=$VERSION" --build-arg "GOG_SHA256=$SHA" \
-            -t "$GOG_IMAGE:$VERSION" -t "$GOG_IMAGE:stable" kits/marsh-gog
-          docker buildx build --platform linux/arm64 --push -f kits/marsh-bamboohr/kit.yaml \
-            -t "$BAMBOOHR_IMAGE:stable" kits/marsh-bamboohr
+            -t "$IMAGE:$TAG" -t "$IMAGE:stable" kits/marsh-tools

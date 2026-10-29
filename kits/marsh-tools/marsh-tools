@@ -1,0 +1,22 @@
+#!/bin/sh
+# One Kit, several tools. marsh runs every command registered to this image in
+# one Kit VM, and records which name was typed in /run/marsh/job.json (root
+# owned, read-only to the job). Outside marsh, name the tool first:
+# `marsh-tools gog gmail search ...`.
+set -eu
+
+tools="gog bamboohr"
+name=
+if [ -r /run/marsh/job.json ]; then
+  name=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("name", ""))' /run/marsh/job.json)
+fi
+case " $tools " in
+  *" $name "*) ;;
+  *)
+    name=${1:-}
+    case " $tools " in
+      *" $name "*) shift ;;
+      *) echo "marsh-tools: register this Kit under one of: $tools" >&2; exit 2 ;;
+    esac ;;
+esac
+exec "/usr/local/libexec/marsh-tools/$name" "$@"

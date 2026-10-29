@@ -107,7 +107,7 @@ type employeeResult struct {
 
 func (s service) employees(ctx context.Context, company, query string, limit int) (employeeResult, error) {
 	if !companyName.MatchString(company) {
-		return employeeResult{}, errors.New("configure the approved BambooHR company name")
+		return employeeResult{}, errors.New("set BAMBOOHR_COMPANY_DOMAIN to the approved BambooHR company name")
 	}
 	query = strings.TrimSpace(query)
 	if len([]rune(query)) < 2 || len(query) > 200 || strings.ContainsAny(query, "\x00\r\n") || limit < 1 || limit > 20 {
@@ -219,18 +219,11 @@ func run(args []string, out io.Writer, s service) error {
 	return err
 }
 
-// company is the BambooHR subdomain: $BAMBOOHR_COMPANY_DOMAIN, else the first
-// line of ~/.config/bamboohr/company (written once by setup, shared guest home).
+// company is the BambooHR subdomain, from $BAMBOOHR_COMPANY_DOMAIN. The Kit
+// mounts no home folder, so an organization sets it in an image built FROM
+// this one (README.md).
 func company() string {
-	if v := strings.TrimSpace(os.Getenv("BAMBOOHR_COMPANY_DOMAIN")); v != "" {
-		return v
-	}
-	home, _ := os.UserHomeDir()
-	b, err := os.ReadFile(home + "/.config/bamboohr/company")
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
+	return strings.TrimSpace(os.Getenv("BAMBOOHR_COMPANY_DOMAIN"))
 }
 
 func main() {

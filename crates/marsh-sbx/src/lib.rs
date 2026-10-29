@@ -401,6 +401,12 @@ impl AdmittedHostGrant {
         (self.identity.device, self.identity.inode)
     }
 
+    /// The guest path this grant is mounted at.
+    #[must_use]
+    pub fn target(&self) -> &Path {
+        &self.target
+    }
+
     fn verify_path(&self) -> Result<(), SbxError> {
         self.chain.verify(&self.source)?;
         if self.identity != HostIdentity::read(&self.source)? {

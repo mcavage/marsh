@@ -230,9 +230,13 @@ impl StockDaemonBackend {
                     cold_started = true;
                     progress.cold_boot(command.clone(), download)
                 })?;
+                let mut grants = grants_by_command[&command].clone();
+                if self.kit_wants_no_home(&command, &spec.workload_kit)? {
+                    grants.retain(|grant| grant.target() != session.guest_home);
+                }
                 let pins = self
                     .sbx
-                    .prepare_session_grants(&vm, &session.session_id, &grants_by_command[&command])
+                    .prepare_session_grants(&vm, &session.session_id, &grants)
                     .map_err(backend_error)?;
                 acquired.push((vm.name.clone(), pins));
                 self.register_worker(store, &vm)?;
@@ -579,6 +583,19 @@ impl StockDaemonBackend {
             None => fetch_kit_agent(&self.sbx, &self.config.control_home, kit)?,
         };
         Ok(with_published_acp(kit, agent))
+    }
+
+    /// Whether a Kit declares that its jobs never get the selected home
+    /// (`org.marsh/home@1`). Fails closed: a Kit whose declarations can't be
+    /// read doesn't start, rather than start with a home it may refuse.
+    fn kit_wants_no_home(&self, command: &str, kit: &NativeKitRef) -> Result<bool, DaemonError> {
+        self.kit_agent_for(kit)
+            .map(|agent| agent.no_home)
+            .map_err(|error| {
+                DaemonError::Refused(format!(
+                    "{command}: can't read which mounts its Kit allows, so it was not started: {error}"
+                ))
+            })
     }
 
     /// For `marsh status`, never waiting on a registry: the cached agent, a
@@ -1505,7 +1522,7 @@ impl DaemonBackend for StockDaemonBackend {
         };
         // Validate every added source before VM preparation or MCP effects.
         let extra_grants = self.additional_grants(&request.session, &extra_environment)?;
-        let mounts = match child_view {
+        let mut mounts = match child_view {
             None => {
                 let mut mounts = public_mounts(&request.session, confinement.as_ref());
                 mounts.extend(extra_environment.mounts.iter().map(|source| {
@@ -1631,6 +1648,28 @@ impl DaemonBackend for StockDaemonBackend {
         } else {
             None
         };
+        // A Kit that declares no home never gets it: not as a root job, and not
+        // as an agent's child, whose inherited view is narrowed here
+        // (`docs/model/Process.tla` NoHomeKitHome). The grant is dropped too,
+        // so the home is never mounted into this Kit's VM.
+        let guest_home = &request.session.guest_home;
+        if self.kit_wants_no_home(&request.command, &spec.workload_kit)? {
+            if request
+                .effective_working_directory()
+                .starts_with(guest_home)
+            {
+                return Err(DaemonError::Refused(format!(
+                    "{}: its Kit does not mount your home ({}); run it from the project",
+                    request.command,
+                    guest_home.display()
+                )));
+            }
+            mounts.retain(|mount| !mount.target.starts_with(guest_home));
+            admitted_grants.retain(|grant| grant.target() != guest_home.as_path());
+        }
+        let private_home = !mounts
+            .iter()
+            .any(|mount| guest_home.starts_with(&mount.target));
         let image = vm.job_image().clone();
         let (job_id, attempt_id, lineage) = store.begin_job_process(
             NewJob {
@@ -1704,17 +1743,18 @@ impl DaemonBackend for StockDaemonBackend {
         };
         let mut grant_guard = GrantGuard::new(Arc::clone(&self.sbx), vm.clone(), grants.clone());
         let mount_ready_at = Instant::now();
+        // Without the home in its view, a job's HOME (and its selected home)
+        // is its container's own /tmp, deleted with it.
+        let home = if private_home {
+            "/tmp".to_owned()
+        } else {
+            request.session.guest_home.display().to_string()
+        };
         let session_environment = BTreeMap::from([
-            (
-                "HOME".into(),
-                request.session.guest_home.display().to_string(),
-            ),
+            ("HOME".into(), home.clone()),
             ("USER".into(), request.session.username.clone()),
             ("LOGNAME".into(), request.session.username.clone()),
-            (
-                "MARSH_SELECTED_HOME".into(),
-                request.session.guest_home.display().to_string(),
-            ),
+            ("MARSH_SELECTED_HOME".into(), home),
         ]);
         let (mut exported_environment, omitted) =
             merge_exported_environment(&request.environment, &self.config.env)?;
@@ -4123,8 +4163,9 @@ mod typed_receipt_callers;
 fn kit_agent_path(control_home: &Path, kit: &NativeKitRef) -> PathBuf {
     control_home
         // v2: bounded adapters and session verbs (entries of earlier builds
-        // were never checked against those bounds).
-        .join("kit-agent-v2")
+        // were never checked against those bounds). v3: `no_home`; a v2 entry
+        // never read it, so it can't say a Kit wants the home.
+        .join("kit-agent-v3")
         .join(format!("{}.json", identity_digest(kit.identity())))
 }
 
