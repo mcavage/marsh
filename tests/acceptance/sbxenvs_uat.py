@@ -11,7 +11,7 @@ import uuid
 
 from harness import ScenarioSuite, require, scenario_parser, suite_main
 from mcp_harness import GATEWAY_PROBE
-from provenance import stock_baseline, stock_vm_inventory
+from provenance import stock_baseline
 
 SCENARIOS = {
     "E01-per-kit-mounts": "mounts",
@@ -148,19 +148,19 @@ class Environments(ScenarioSuite):
         require(self.cli(["stop"], self.project).returncode == 0, "cannot stop before refusal probes")
         original = (self.home / "sbxenv.yaml").read_text()
         original_kit = (self.layers / "fixture.yaml").read_text()
-        baseline = stock_vm_inventory(self.sbx)
+        baseline = self.owned_stock_inventory()
         try:
             for fields in ({"agent": "shell"}, {"additionalWorkspaces": [{"path": str(self.project)}]},
                            {"additionalWorkspaces": [{"path": str(self.guest_home)}]}):
                 self.write(self.home / "sbxenv.yaml", fields)
                 result = self.brush("true", self.project)
                 require(result.returncode != 0, f"unsafe declaration admitted: {fields}")
-                require(stock_vm_inventory(self.sbx) == baseline, "refusal created or changed a VM")
+                require(self.owned_stock_inventory() == baseline, "refusal created or changed a VM")
             (self.home / "sbxenv.yaml").write_text(original)
             self.write(self.layers / "fixture.yaml", {"additionalWorkspaces": [{"path": str(self.project)}]})
             result = self.cli(["--load", "fixture", "-c", "true"], self.project)
             require(result.returncode != 0, "unsafe Kit-only mount admitted during prewarm")
-            require(stock_vm_inventory(self.sbx) == baseline, "bad prewarm mount created a shell or Kit VM")
+            require(self.owned_stock_inventory() == baseline, "bad prewarm mount created a shell or Kit VM")
         finally:
             (self.home / "sbxenv.yaml").write_text(original)
             (self.layers / "fixture.yaml").write_text(original_kit)

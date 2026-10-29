@@ -10,7 +10,7 @@ import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from provenance import SharedBaseline, stock_cleanup_errors  # noqa: E402
+from provenance import SharedBaseline, owned_inventory, stock_cleanup_errors  # noqa: E402
 
 PIX = {"pix-a": "id-1"}
 
@@ -38,6 +38,17 @@ class StockCleanup(unittest.TestCase):
     def test_shared_baseline_requires_the_suites_own_names(self) -> None:
         with self.assertRaises(ValueError):
             stock_cleanup_errors(SharedBaseline(PIX), dict(PIX))
+
+    def test_owned_inventory_ignores_peers_but_sees_own_changes(self) -> None:
+        owned = {"marsh-k-mine0001", "marsh-s-mine0002"}
+        base = {**PIX, "marsh-k-mine0001": "id-8"}
+        self.assertEqual(owned_inventory(base, owned), {"marsh-k-mine0001": "id-8"})
+        peers = {**base, "marsh-k-peer0001": "id-9"}
+        self.assertEqual(owned_inventory(peers, owned), owned_inventory(base, owned))
+        created = {**peers, "marsh-s-mine0002": "id-7"}
+        self.assertNotEqual(owned_inventory(created, owned), owned_inventory(base, owned))
+        replaced = {**peers, "marsh-k-mine0001": "id-6"}
+        self.assertNotEqual(owned_inventory(replaced, owned), owned_inventory(base, owned))
 
 
 if __name__ == "__main__":

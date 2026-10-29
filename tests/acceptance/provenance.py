@@ -211,6 +211,15 @@ def stock_vm_inventory(sbx: str | Path, *, env: dict | None = None) -> dict[str,
         env=env, stdin=subprocess.DEVNULL))
 
 
+def owned_inventory(inventory: dict[str, str], owned: "set[str] | frozenset[str]") -> dict[str, str]:
+    """The part of a machine-wide stock inventory this scope owns, by name.
+
+    Peer suites and the user's own VMs come and go on a shared Mac; a scenario
+    that asks "did this refusal create or change a VM" compares only its own.
+    """
+    return {name: identifier for name, identifier in inventory.items() if name in owned}
+
+
 # Historical caller name retained; values are stable IDs, not a set of names.
 stock_vm_names = stock_vm_inventory
 

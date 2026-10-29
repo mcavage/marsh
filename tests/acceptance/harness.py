@@ -39,7 +39,7 @@ from typing import Any, Callable
 
 from launch_env import clean_environment
 from provenance import (candidate_environment, host_only_path, remove_owned_stock_vm, source_identity, stock_baseline,
-                        stock_cleanup_errors, stock_vm_inventory, stock_vm_names, verify_candidate)
+                        owned_inventory, stock_cleanup_errors, stock_vm_inventory, stock_vm_names, verify_candidate)
 
 
 IMAGE = re.compile(r"^[a-z0-9._:/][a-z0-9._:/-]*@sha256:[0-9a-f]{64}$")
@@ -290,6 +290,10 @@ class IsolatedScope:
             pass
         self.owned_names_seen = set(names) - set(getattr(self, "extra_owned_names", ()))
         return names
+
+    def owned_stock_inventory(self) -> dict[str, str]:
+        """Live stock inventory restricted to the VMs this scope owns."""
+        return owned_inventory(stock_vm_inventory(self.sbx), self.owned_stock_names())
 
     def stock_leftover_errors(self, after: dict[str, str]) -> list[str]:
         """Pre-existing VMs unchanged and none of this scope's own remaining."""
