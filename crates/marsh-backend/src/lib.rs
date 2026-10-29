@@ -123,9 +123,13 @@ pub struct StockDaemonBackend {
     kit_validation_flights: Mutex<BTreeMap<String, KitFlightCompletion>>,
     /// Ordinary shell VM cold start overlapped with `--load` Kit preparation.
     shell_warmup: Mutex<Option<thread::JoinHandle<()>>>,
-    sbxenvs: BTreeMap<String, sbxenv::Environment>,
-    shared_sbxenv: sbxenv::Environment,
-    configured_mcp_vms: Mutex<BTreeSet<String>>,
+    /// The active environment files (`sbxenv.rs`), reloaded live.
+    sbxenv: std::sync::RwLock<sbxenv::Live>,
+    sbxenv_reload: Mutex<()>,
+    sbxenv_sweep: Mutex<sbxenv::Sweep>,
+    /// Per Kit or shell VM: the environment servers loaded into it, with a
+    /// digest of each definition.
+    configured_mcp_vms: Mutex<BTreeMap<String, BTreeMap<String, String>>>,
     /// Why automatic recovery last left a quarantined Kit VM in place.
     quarantine_recovery: Mutex<BTreeMap<String, String>>,
     /// The dev broker (`marsh --dev`); dev shells use the one shell image.
@@ -264,6 +268,7 @@ impl StockDaemonBackend {
         progress: &PreparationProgress,
         store: &DaemonStore,
     ) -> Result<PreparationResult, DaemonError> {
+        self.refresh_sbxenv();
         let selected: Vec<_> = match selection {
             LoadSelection::All => self.command_names(),
             LoadSelection::Kits(commands) => commands.clone(),
@@ -345,15 +350,9 @@ impl StockDaemonBackend {
     /// build caches survive sessions like the ordinary shell VM.
     fn dev_shell(&self) -> Result<ShellVmSpec, DaemonError> {
         let mut dev = self.config.shell.clone();
-        let environment = self.environment("shell");
-        let selector = if environment.is_empty() {
-            "dev".into()
-        } else {
-            format!("dev:sbxenv:{}", environment.fingerprint())
-        };
         dev.name = self
             .sbx
-            .vm_name(VmPurpose::Shell, &selector)
+            .vm_name(VmPurpose::Shell, "dev")
             .map_err(backend_error)?;
         Ok(dev)
     }
@@ -392,7 +391,7 @@ impl StockDaemonBackend {
             session.home_backing.as_path(),
         ];
         let check = || {
-            marsh_daemon::reject_guest_mount_overlap(&mounts, &self.config.protected_guest_roots)
+            marsh_daemon::reject_guest_mount_overlap(&mounts, &self.protected_roots())
                 .map_err(DaemonError::InvalidState)
         };
         check()?;
@@ -463,9 +462,10 @@ impl StockDaemonBackend {
             kit_locks: Mutex::new(BTreeMap::new()),
             kit_validation_flights: Mutex::new(BTreeMap::new()),
             shell_warmup: Mutex::new(None),
-            sbxenvs: BTreeMap::new(),
-            shared_sbxenv: sbxenv::Environment::default(),
-            configured_mcp_vms: Mutex::new(BTreeSet::new()),
+            sbxenv: std::sync::RwLock::new(sbxenv::Live::default()),
+            sbxenv_reload: Mutex::new(()),
+            sbxenv_sweep: Mutex::new(sbxenv::Sweep::default()),
+            configured_mcp_vms: Mutex::new(BTreeMap::new()),
             quarantine_recovery: Mutex::new(BTreeMap::new()),
             dev: None,
             cloud: cloud::CloudPlacement::default(),
@@ -524,8 +524,7 @@ impl StockDaemonBackend {
             .workload
             .capture_generation()
             .map_err(backend_error)?;
-        let environment = self.environment(command);
-        self.kit_spec_for_environment(workload, &environment)
+        self.kit_spec_for_workload(workload)
     }
 
     fn registered_kit(&self, command: &str) -> Result<RegisteredKit, DaemonError> {
@@ -713,11 +712,9 @@ impl StockDaemonBackend {
         None
     }
 
-    fn kit_spec_for_environment(
-        &self,
-        workload: NativeKitRef,
-        environment: &sbxenv::Environment,
-    ) -> Result<KitVmSpec, DaemonError> {
+    /// The VM does not depend on the environment files: they change while it
+    /// runs, and servers are loaded into it (`sbxenv.rs`).
+    fn kit_spec_for_workload(&self, workload: NativeKitRef) -> Result<KitVmSpec, DaemonError> {
         let kit_digest = identity_digest(workload.identity());
         let lifecycle_root = self.config.control_home.join("kit-lifecycle");
         fs::create_dir_all(&lifecycle_root)?;
@@ -727,19 +724,10 @@ impl StockDaemonBackend {
         fs::create_dir_all(&lifecycle_workspace)?;
         fs::set_permissions(&lifecycle_workspace, fs::Permissions::from_mode(0o700))?;
         selected_home_identity(&lifecycle_workspace).map_err(backend_error)?;
-        let selector = if environment.is_empty() {
-            workload.identity().to_owned()
-        } else {
-            format!(
-                "{}:sbxenv:{}",
-                workload.identity(),
-                environment.fingerprint()
-            )
-        };
         Ok(KitVmSpec {
             name: self
                 .sbx
-                .vm_name(VmPurpose::Kit, &selector)
+                .vm_name(VmPurpose::Kit, workload.identity())
                 .map_err(backend_error)?,
             worker_binary: self.config.worker_binary.clone(),
             workload_kit: workload,
@@ -817,17 +805,15 @@ impl StockDaemonBackend {
     fn kit_flight_key(&self, spec: &KitVmSpec, ephemeral: bool) -> Result<String, DaemonError> {
         let scope_identity =
             selected_home_identity(&self.config.daemon_home).map_err(backend_error)?;
-        Ok(
-            if ephemeral || !self.sbxenvs.values().all(sbxenv::Environment::is_empty) {
-                format!(
-                    "{scope_identity}:{}:{}",
-                    spec.workload_kit.identity(),
-                    spec.name
-                )
-            } else {
-                format!("{scope_identity}:{}", spec.workload_kit.identity())
-            },
-        )
+        Ok(if ephemeral {
+            format!(
+                "{scope_identity}:{}:{}",
+                spec.workload_kit.identity(),
+                spec.name
+            )
+        } else {
+            format!("{scope_identity}:{}", spec.workload_kit.identity())
+        })
     }
 
     #[allow(clippy::too_many_lines)] // One fenced validation/preparation flight.
@@ -894,6 +880,11 @@ impl StockDaemonBackend {
                     .revalidate_cached_kit(spec, &vm)
                     .map_err(backend_error)?
             {
+                // A warm VM picks up environment changes made since it was
+                // prepared; a cached one is never cold.
+                if ephemeral.is_none() {
+                    self.configure_prepared_mcp(&vm, false, store)?;
+                }
                 return Ok(vm);
             }
             let repair_claimed = store.begin_worker_repair(&spec.name, &spec.name)?;
@@ -917,7 +908,7 @@ impl StockDaemonBackend {
                     self.load_default_mcp_publications(&vm);
                 }
                 if ephemeral.is_none() {
-                    self.configure_prepared_mcp(&vm)?;
+                    self.configure_prepared_mcp(&vm, vm.cold_started, store)?;
                 }
                 Ok(vm)
             })();
@@ -1123,6 +1114,19 @@ impl DaemonBackend for StockDaemonBackend {
 
     fn collect_detached(&self, store: &DaemonStore) {
         self.collect_detached_pass(store);
+    }
+
+    fn watch_sbxenv(&self, store: &DaemonStore) {
+        self.watch_sbxenv_pass(store);
+    }
+
+    fn sbxenv_status(&self) -> Option<marsh_daemon::SbxenvStatus> {
+        self.refresh_sbxenv();
+        Some(self.sbxenv_status_document())
+    }
+
+    fn dynamic_protected_guest_roots(&self) -> Vec<PathBuf> {
+        self.dynamic_protected_roots()
     }
 
     fn kit_update_status(&self) -> Option<KitUpdateStatus> {
@@ -1572,6 +1576,7 @@ impl DaemonBackend for StockDaemonBackend {
         if request.placement == marsh_daemon::Placement::Cloud {
             return self.execute_cloud(request, attachment, store);
         }
+        self.refresh_sbxenv();
         let started = Instant::now();
         let started_unix_ms = unix_millis(SystemTime::now());
         // A Kit job started from a split branch mounts only that branch's
@@ -1594,6 +1599,7 @@ impl DaemonBackend for StockDaemonBackend {
         // child job, a split branch, ACP or MCP.
         if request.session.terminal && link.parent_job.is_none() && !link.branch {
             self.send_update_notices(Some(&request.command), &attachment);
+            self.send_sbxenv_notice(&request.session.session_id, &attachment);
         }
         // The Kit identity is known before VM work, so the same-Kit chain is
         // checked here too, not only at record time.
@@ -2395,6 +2401,7 @@ impl DaemonBackend for StockDaemonBackend {
         attachment: ServerAttachment,
         store: DaemonStore,
     ) -> Result<(), DaemonError> {
+        self.refresh_sbxenv();
         let session_id = request.session.session_id.clone();
         // HOME is mounted at one fixed guest path. A disposable backing must
         // never replace another live shell's mount in the shared warm VM.
@@ -2483,6 +2490,7 @@ impl DaemonBackend for StockDaemonBackend {
             shell_attachment::require_controller(&attachment)?;
             if request.session.terminal {
                 self.send_update_notices(None, &attachment);
+                self.send_sbxenv_notice(&request.session.session_id, &attachment);
             }
             self.finish_shell_warmup();
             let vm = loop {
@@ -2504,7 +2512,10 @@ impl DaemonBackend for StockDaemonBackend {
             shell_attachment::require_controller(&attachment)?;
             // Observe and pin stock's actual UUID BEFORE any grant submission.
             self.sbx.shell_vm_identity(&vm).map_err(backend_error)?;
-            self.configure_shell_mcp(&vm, &shell_environment)?;
+            let others_attached = store.status(None).shells.iter().any(|other| {
+                other.session_id != session_id && other.state == marsh_daemon::ShellState::Attached
+            });
+            self.configure_shell_mcp(&vm, &shell_environment, others_attached)?;
             let quarantine = |detail: String| {
                 self.sbx.quarantine_shell(&vm, admitted_mounts.clone());
                 store.mark_shell_cleanup_uncertain(&session_id);
@@ -3871,11 +3882,11 @@ impl StockDaemonBackend {
             if self.registered_kit(name)?.workload.identity() == workload.identity()
                 && self.environment(name).fingerprint() != environment.fingerprint()
             {
-                return Err(DaemonError::InvalidState("aliases of the same Kit must have identical environments; restart after adding the matching sbxenvs file".into()));
+                return Err(DaemonError::InvalidState("aliases of the same Kit must have identical environments; add the matching sbxenvs file".into()));
             }
         }
         if let Some(store) = store {
-            let spec = self.kit_spec_for_environment(workload.clone(), &environment)?;
+            let spec = self.kit_spec_for_workload(workload.clone())?;
             let vm = self.prepare_one_with_progress(&spec, store, |_| Ok(()))?;
             self.register_worker(store, &vm)?;
         }
@@ -4089,7 +4100,7 @@ impl StockDaemonBackend {
         };
         let prepared = (|| {
             let workload = NativeKitRef::immutable_oci(image.as_str()).map_err(backend_error)?;
-            let spec = self.kit_spec_for_environment(workload, &self.environment(command))?;
+            let spec = self.kit_spec_for_workload(workload)?;
             let vm = self.prepare_one_with_progress(&spec, store, |_| Ok(()))?;
             self.register_worker(store, &vm)
         })();
@@ -4224,7 +4235,7 @@ impl StockDaemonBackend {
                 && self.registered_kit(&name)?.workload.identity() == workload.identity()
                 && self.environment(&name).fingerprint() != environment.fingerprint()
             {
-                return Err(DaemonError::InvalidState("aliases of the same Kit must have identical environments; restart after adding the matching sbxenvs file".into()).into());
+                return Err(DaemonError::InvalidState("aliases of the same Kit must have identical environments; add the matching sbxenvs file".into()).into());
             }
         }
         let old_spec = self.kit_spec(command)?;
@@ -4258,7 +4269,7 @@ impl StockDaemonBackend {
         };
         let path = self.config.control_home.join("commands.json");
         let switched = (|| {
-            let spec = self.kit_spec_for_environment(workload.clone(), &environment)?;
+            let spec = self.kit_spec_for_workload(workload.clone())?;
             let vm = self.prepare_one_with_progress(&spec, store, |_| Ok(()))?;
             self.register_worker(store, &vm)?;
             let previous = command_registry::read_declaration(&path).map_err(backend_error)?;

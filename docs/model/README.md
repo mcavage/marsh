@@ -13,14 +13,17 @@ The code-location table below records the implementation mapping and known gaps.
   quarantine, resource capacity and asynchronous deletion. See
   [invariants, controls and implementation mapping](#cloud-ownership-extension).
 
-- `Sbxenv.tla`: snapshotted native MCP/extra-mount additions, required MCP load
-  before VM readiness, registration reuse without overwrite, inherited extra
+- `Sbxenv.tla`: live-reloaded native MCP/extra-mount additions, required MCP load
+  before VM readiness, a reloaded (stale) VM loaded before any job launches on
+  it, registration reuse without overwrite, inherited extra
   mounts without child-Kit widening, and extra-mount omission from split jobs.
-  Its four negative controls are `childKitMount` (ExtraAttenuation),
-  `splitExtraMount` (SplitOmitsExtras), `skipMcpLoad` (McpBeforeReady), and
+  Its five negative controls are `childKitMount` (ExtraAttenuation),
+  `splitExtraMount` (SplitOmitsExtras), `skipMcpLoad` (McpBeforeReady),
+  `skipLiveLoad` (LiveLoadBeforeLaunch), and
   `overwriteRegistration` (NoRegistrationOverwrite). Configuration/file/path
-  parsing, alias equivalence and content-sensitive VM selectors are static code
-  checks, not modeled. It abstracts one declared server per Kit; source identity,
+  parsing, alias equivalence, rejecting an invalid change (the last good
+  configuration stays) and unloading removed servers only from VMs with no
+  running job are static code and acceptance checks, not modeled. It abstracts one declared server per Kit; source identity,
   retained mounts and cleanup remain in Worker/Ownership, and fork paths in Workspace.
   Registration inspection/addition are abstracted as one step: concurrent changes
   by other host-global SBX clients are trusted-host behavior, not an atomic
@@ -201,7 +204,7 @@ positive config fails or a negative control passes or fails for the wrong reason
 
 | Spec action | Code location |
 |---|---|
-| Sbxenv: Create / Register / Load / Ready / Remove | `marsh-backend/src/sbxenv.rs` `with_sbxenvs` (snapshot), `lib.rs` `kit_spec` (environment selector), `prepare_one_authorized` (required setup before ready cache), `configure_kit_mcp`; `marsh-sbx/src/mcp_environment.rs` `ensure_mcp_server` (inspect/reuse or add, no overwrite), `load_mcp_server` / `load_shell_mcp_server` (owned UUID); worker reset and scope teardown |
+| Sbxenv: Create / Register / Load / Ready / Remove / Reload | `marsh-backend/src/sbxenv.rs` `with_sbxenvs` (first snapshot), `refresh_sbxenv` (live reload; `register_new_servers` before a change is accepted; Reload), `watch_sbxenv_pass` (warm VMs), `lib.rs` `kit_spec` (one VM per workload, independent of the files), `prepare_one_authorized` (required setup before ready cache, and again for a cached VM: `configure_prepared_mcp` loads a stale VM before the job), `configure_kit_mcp`/`sync_mcp`; `marsh-sbx/src/mcp_environment.rs` `ensure_mcp_server` (inspect/reuse or add, no overwrite), `load_mcp_server` / `load_shell_mcp_server` (owned UUID); worker reset and scope teardown |
 | Sbxenv: Launch (ExtraAttenuation, SplitOmitsExtras) | `marsh-backend` `execute` selects a root's environment, an ordinary child's inherited receipt view, or no extras for a split; `sbxenv.rs` `additional_grants` applies existing descriptor/overlap admission; `inherited_environment` maps only parent-recorded additions. Rust callers: `sbxenv::tests`, `marsh-sbx/tests/mcp_environment.rs`; real caller: `tests/acceptance/sbxenvs_uat.py` |
 | Inventory, Use, StartVM, Remove | marsh-sbx `lib.rs` `StockSbx::stock_view` (cached `sbx ls --json`, refreshed on demand; `stock_inventory.rs` decodes it) and `classify_vm` -> `vm_ownership.rs` `classify` (owned only with its recorded UUID present, else foreign or absent); `ensure_kit_vm_authorized` / `ensure_shell_vm_inner` (StartVM); `remove_owned_vm` (fresh classification, `sbx rm`, then proves the recorded UUID is gone) |
 | CreateBegin / CreateDo / Record / Restart | marsh-sbx `vm_ownership.rs` (`assign`, `restore_intent` for a replacement under a just-removed name, `store_view` adopt/drop) |

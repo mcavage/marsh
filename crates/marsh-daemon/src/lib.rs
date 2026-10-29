@@ -1281,6 +1281,19 @@ pub trait DaemonBackend: Send + Sync + 'static {
     fn kit_update_status(&self) -> Option<KitUpdateStatus> {
         None
     }
+    /// One pass of the environment-file watcher, from the server's
+    /// background thread: reload `sbxenv` files that changed and apply them
+    /// to warm VMs. Never delays a request.
+    fn watch_sbxenv(&self, _store: &DaemonStore) {}
+    /// What `marsh status` reports about the active `sbxenv` files.
+    fn sbxenv_status(&self) -> Option<SbxenvStatus> {
+        None
+    }
+    /// Host-only paths that appeared after start (a live-reloaded local MCP
+    /// server's executable); added to the guest-mount protection.
+    fn dynamic_protected_guest_roots(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
     /// Add what only the backend knows to `marsh status` (VM quarantines
     /// held by the stock adapter, and why recovery left them).
     fn annotate_status(&self, _status: &mut StatusDocument) {}
@@ -1565,6 +1578,10 @@ pub struct StatusDocument {
     /// The hourly automatic Kit update check (`docs/kits.md`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kit_updates: Option<Box<KitUpdateStatus>>,
+    /// The active `sbxenv.yaml`, `sbxenv.d/*.yaml` and `sbxenvs/*.yaml`
+    /// configuration (`docs/configuration.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sbxenv: Option<Box<SbxenvStatus>>,
     /// The pinned stock SBX executable, when it was removed: this daemon can
     /// no longer reach its VMs (`stock_sbx_removed_message`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1588,6 +1605,29 @@ pub struct CommandStatus {
     pub acp: Option<bool>,
     #[serde(default)]
     pub sessions: Option<serde_json::Value>,
+}
+
+/// `marsh status` `sbxenv`: the environment files the daemon is using now.
+/// A file that fails validation never replaces them; `last_error` says why.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SbxenvStatus {
+    /// The existing files behind the active configuration, in load order.
+    pub files: Vec<PathBuf>,
+    /// SHA-256 over the active files' names and bytes.
+    pub hash: String,
+    /// When the active configuration was loaded (daemon start or last
+    /// accepted change).
+    #[serde(default)]
+    pub last_reload_unix_ms: Option<u64>,
+    /// The current problem with the files on disk, if any.
+    #[serde(default)]
+    pub last_error: Option<SbxenvError>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SbxenvError {
+    pub message: String,
+    pub unix_ms: u64,
 }
 
 /// `marsh status` `kit_updates`: the hourly background check of Kits that
@@ -3857,6 +3897,7 @@ impl DaemonStore {
             splits: split::SplitCounts::default(),
             processes: process::ProcessCounts::default(),
             kit_updates: None,
+            sbxenv: None,
             stock_sbx_removed: None,
             commands: Vec::new(),
             worker_recoveries: state.worker_recoveries.clone(),
@@ -4344,6 +4385,7 @@ impl Server {
         let active_connections = Arc::new(AtomicUsize::new(0));
         let updater_stop = Arc::new(AtomicBool::new(false));
         self.spawn_kit_updater(Arc::clone(&updater_stop));
+        self.spawn_sbxenv_watcher(Arc::clone(&updater_stop));
         self.spawn_cloud_collector(Arc::clone(&updater_stop));
         self.spawn_session_reaper(Arc::clone(&updater_stop));
         let _stop_updater = StopOnDrop(updater_stop);
@@ -4418,6 +4460,34 @@ impl Server {
             });
         if let Err(error) = spawned {
             eprintln!("marshd: cannot start the Kit updater: {error}");
+        }
+    }
+
+    /// The `sbxenv` file watcher: a background thread that asks the backend
+    /// every couple of seconds; the backend compares file stamps and does
+    /// nothing unless something changed.
+    fn spawn_sbxenv_watcher(&self, stop: Arc<AtomicBool>) {
+        let backend = Arc::downgrade(&self.backend);
+        let store = Arc::downgrade(&self.store.0);
+        let spawned = thread::Builder::new()
+            .name("marsh-sbxenv-watch".into())
+            .spawn(move || {
+                loop {
+                    let until = Instant::now() + SBXENV_WATCH_INTERVAL;
+                    while Instant::now() < until {
+                        if stop.load(Ordering::Acquire) {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(250));
+                    }
+                    let (Some(backend), Some(store)) = (backend.upgrade(), store.upgrade()) else {
+                        return;
+                    };
+                    backend.watch_sbxenv(&DaemonStore(store));
+                }
+            });
+        if let Err(error) = spawned {
+            eprintln!("marshd: cannot start the sbxenv watcher: {error}");
         }
     }
 
@@ -4576,6 +4646,7 @@ const KIT_UPDATER_START_DELAY: Duration = Duration::from_secs(1);
 const CLOUD_COLLECTOR_START_DELAY: Duration = Duration::from_secs(2);
 const CLOUD_COLLECTOR_INTERVAL: Duration = Duration::from_secs(30);
 const KIT_UPDATER_INTERVAL: Duration = Duration::from_mins(1);
+const SBXENV_WATCH_INTERVAL: Duration = Duration::from_secs(2);
 
 struct StopOnDrop(Arc<AtomicBool>);
 
@@ -4745,6 +4816,7 @@ mod mount_guard_tests {
 impl ConnectionHandler {
     fn check_attachment_mounts(&self, session: &SessionAuthority) -> Result<(), String> {
         let mut roots = self.protected_guest_roots.clone();
+        roots.extend(self.backend.dynamic_protected_guest_roots());
         roots.push(
             self.runtime_directory
                 .parent()
@@ -6110,6 +6182,7 @@ impl ConnectionHandler {
                 status.splits = self.splits.counts();
                 status.processes = self.store.process_counts();
                 status.kit_updates = self.backend.kit_update_status().map(Box::new);
+                status.sbxenv = self.backend.sbxenv_status().map(Box::new);
                 status.stock_sbx_removed = self
                     .stock_sbx
                     .clone()

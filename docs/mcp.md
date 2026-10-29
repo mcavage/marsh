@@ -241,7 +241,7 @@ agent Kits connect to it. Every job in that Kit's VM then sees servers loaded
 by any of these:
 
 - `sbx mcp load`
-- `sbxenv.yaml` or `sbxenvs/NAME.yaml`
+- `sbxenv.yaml`, `sbxenv.d/*.yaml` or `sbxenvs/NAME.yaml`
 - `mcp publish --kit` or `mcp load --kit`
 - an untargeted `mcp publish`, when the VM is created
 

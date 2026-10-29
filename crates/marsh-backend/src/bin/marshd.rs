@@ -97,7 +97,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut protected_guest_roots =
         vec![product_root, control_home.clone(), guest_artifacts.clone()];
     protected_guest_roots.push(install_prefix.to_path_buf());
-    protected_guest_roots.extend([home.join("sbxenv.yaml"), home.join("sbxenvs")]);
+    protected_guest_roots.extend([
+        home.join("sbxenv.yaml"),
+        home.join("sbxenvs"),
+        home.join("sbxenv.d"),
+    ]);
     let kit_image_cache = kit_image_cache_root(&real_home);
     // Superseded per-daemon cache (archives beside the lifecycle workspaces).
     let _ = fs::remove_dir_all(control_home.join("kit-lifecycle/.marsh-kit-image-cache"));

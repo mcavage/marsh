@@ -93,17 +93,23 @@ exit marsh shells, run `marsh stop`, and start marsh again.
 | Error | Fix |
 |---|---|
 | Unsupported field or schema version | Use `schemaVersion: "1"` and the [supported fields](configuration.md#servers-and-extra-directories). |
-| File ownership, permissions, or symlink | Use a regular YAML file owned by your Mac account; remove group/other write permission. `sbxenvs` must be a real directory too. |
-| Duplicate MCP name or overlapping directory | Remove the duplicate from the shared or per-command file. Lists add together; they do not override each other. |
+| File ownership, permissions, or symlink | Use a regular YAML file owned by your Mac account; remove group/other write permission. `sbxenvs` and `sbxenv.d` must be real directories too. |
+| Duplicate MCP name or overlapping directory | Remove the duplicate from the shared, `sbxenv.d`, or per-command file. Lists add together; they do not override each other. |
 | Aliases have different environments | Give names for the same Kit identical combined configuration. |
 | Server already has a different host-global definition | Choose another server name, or update the existing registration with `sbx mcp` on the Mac. Other sandboxes may use it. |
 | Missing MCP authorization | Run `sbx mcp auth NAME` on the Mac and retry the job. |
 | MCP registration or loading failed | Check the reported `sbx` error and retry after fixing the connection. Declared servers must load before the VM can be used. |
 
-Restart after changing YAML. Authentication changes alone can be retried
-without editing the file. A worker reset uses the daemon's existing YAML
-snapshot. Published pipeline defaults have a different failure policy:
-see [MCP defaults](mcp.md#changing-or-removing-a-default).
+Changes to these files apply live: save, and the daemon picks them up within
+seconds. When a change is rejected, marsh keeps the last good configuration,
+running work continues, and the error appears under `sbxenv` in `marsh status`
+(`last_error` in `--json`) and as a one-line notice in open shells. Fix the
+file and save again. A daemon that is starting has no earlier configuration, so
+it refuses to start on a bad file; the error names the file. A worker reset
+creates the VM from the daemon's current configuration. Authentication changes
+alone can be retried without editing the file. Published pipeline defaults have
+a different failure policy: see
+[MCP defaults](mcp.md#changing-or-removing-a-default).
 
 ## A job was refused
 

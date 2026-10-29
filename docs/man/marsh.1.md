@@ -434,9 +434,10 @@ See https://runmar.sh/docs/acp.html.
   **marsh config auto-update**, **marsh config open-urls** and
   **marsh config cloud-delegate** settings.
 
-*$MARSH_HOME/sbxenv.yaml*, *$MARSH_HOME/sbxenvs/NAME.yaml*
-: Optional shared and per-command MCP servers and extra directories. Read at
-  daemon startup; changes require **marsh stop** and a new launch.
+*$MARSH_HOME/sbxenv.yaml*, *$MARSH_HOME/sbxenv.d/\*.yaml*, *$MARSH_HOME/sbxenvs/NAME.yaml*
+: Optional shared and per-command MCP servers and extra directories. Reloaded
+  while the daemon runs; an invalid change keeps the last good configuration
+  and shows in **marsh status**.
   See https://runmar.sh/docs/configuration.html#servers-and-extra-directories.
 
 *~/Library/Application Support/marsh/control/HASH/*
