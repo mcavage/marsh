@@ -505,6 +505,36 @@ pub struct CloudRequest {
     /// that is uploaded separately into a root-only file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegate: Option<DelegatePlan>,
+    /// The ignore rules that filtered the upload, besides the tree's own
+    /// `.gitignore` files: new paths they match are left in the sandbox,
+    /// never returned. `None` when the upload was not filtered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore: Option<IgnoreRules>,
+}
+
+/// The upload's ignore rules that are not in the tree.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct IgnoreRules {
+    /// The user's global Git excludes file (`core.excludesFile`).
+    #[serde(default)]
+    pub global: Vec<u8>,
+    /// `.git/info/exclude`.
+    #[serde(default)]
+    pub exclude: Vec<u8>,
+}
+
+/// The helper's stderr line naming how many new ignored files a delta left
+/// in the sandbox.
+pub const IGNORED_PREFIX: &str = "marsh-cloud-ignored ";
+
+/// The count from a delta step's stderr ([`IGNORED_PREFIX`]); 0 if absent.
+#[must_use]
+pub fn ignored_count(stderr: &[u8]) -> u64 {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .find_map(|line| line.strip_prefix(IGNORED_PREFIX)?.trim().parse().ok())
+        .unwrap_or(0)
 }
 
 /// One Kit a detached run's coordinator may start, as the laptop resolved

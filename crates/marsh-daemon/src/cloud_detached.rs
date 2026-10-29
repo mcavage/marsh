@@ -99,6 +99,10 @@ pub struct SyncReport {
     /// Paths also changed here since they were uploaded or last synced:
     /// skipped, the local file kept.
     pub conflicts: Vec<String>,
+    /// New files matching the project's ignore rules, left in the cloud
+    /// (never downloaded).
+    #[serde(default)]
+    pub ignored: u64,
     /// Why this sync stopped (some changes may already be written).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,

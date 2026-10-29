@@ -1206,11 +1206,44 @@ fn baseline() -> io::Result<BTreeMap<Vec<u8>, Entry>> {
     Ok(entries)
 }
 
+/// New paths the upload's ignore rules match: never walked or returned,
+/// only counted (files and links).
+struct LeftBehind<'a> {
+    rules: marsh_daemon::cloud_fs::NewPathIgnore,
+    baseline: &'a BTreeMap<Vec<u8>, Entry>,
+    count: u64,
+}
+
+impl LeftBehind<'_> {
+    fn skips(&mut self, path: &[u8], full: &Path, dir: bool) -> bool {
+        if self.baseline.contains_key(path) || !self.rules.ignored(path, dir) {
+            return false;
+        }
+        self.count += if dir { count_entries(full) } else { 1 };
+        true
+    }
+}
+
+/// Files and links under `dir`, never following a link.
+fn count_entries(dir: &Path) -> u64 {
+    fs::read_dir(dir).map_or(0, |entries| {
+        entries
+            .filter_map(Result::ok)
+            .map(|entry| match entry.file_type() {
+                Ok(kind) if kind.is_dir() => count_entries(&entry.path()),
+                Ok(_) => 1,
+                Err(_) => 0,
+            })
+            .sum()
+    })
+}
+
 fn walk(
     root: &Path,
     relative: &[u8],
     owner: u32,
     out: &mut BTreeMap<Vec<u8>, Entry>,
+    left: &mut Option<LeftBehind<'_>>,
 ) -> io::Result<()> {
     let mut children = fs::read_dir(join_dir(root, relative))?
         .map(|entry| entry.map(|entry| entry.file_name()))
@@ -1227,6 +1260,11 @@ fn walk(
         }
         let full = join(root, &path);
         let metadata = fs::symlink_metadata(&full)?;
+        if let Some(left) = left.as_mut()
+            && left.skips(&path, &full, metadata.is_dir())
+        {
+            continue;
+        }
         let mode = metadata.permissions().mode() & 0o777;
         if metadata.file_type().is_symlink() {
             out.insert(
@@ -1235,7 +1273,7 @@ fn walk(
             );
         } else if metadata.is_dir() {
             out.insert(path.clone(), Entry::Directory(mode));
-            walk(root, &path, owner, out)?;
+            walk(root, &path, owner, out, left)?;
         } else if metadata.is_file() {
             // Every workload file belongs to the workload user; another
             // owner means a hard link to a file it may not read.
@@ -1275,7 +1313,16 @@ fn delta(root: &Path, out: &Path) -> io::Result<()> {
     } else {
         Box::new(File::create(out)?)
     };
-    write_delta(root, output)
+    let ignored = write_delta(root, output)?;
+    report_ignored(ignored);
+    Ok(())
+}
+
+/// Tell the host how many new ignored files stayed here (stderr).
+fn report_ignored(count: u64) {
+    if count > 0 {
+        eprintln!("{}{count}", cloud::IGNORED_PREFIX);
+    }
 }
 
 /// `sync ROOT`: the delta so far while the command still runs (`marsh cloud
@@ -1287,12 +1334,14 @@ fn sync_delta(root: &Path) -> io::Result<()> {
     let mut last = None;
     for _ in 0..3 {
         match write_delta(root, Box::new(File::create(&staged)?)) {
-            Ok(()) => {
+            Ok(ignored) => {
                 let mut file = File::open(&staged)?;
                 let mut out = io::stdout().lock();
                 io::copy(&mut file, &mut out)?;
                 let _ = fs::remove_file(&staged);
-                return out.flush();
+                out.flush()?;
+                report_ignored(ignored);
+                return Ok(());
             }
             Err(error) => last = Some(error),
         }
@@ -1349,11 +1398,23 @@ fn rebase() -> io::Result<()> {
     fs::rename(next, state.join("baseline"))
 }
 
-fn write_delta(root: &Path, output: Box<dyn Write>) -> io::Result<()> {
+/// Write the delta; the count of new ignored files left out.
+fn write_delta(root: &Path, output: Box<dyn Write>) -> io::Result<u64> {
     absolute(root)?;
     let before = baseline()?;
+    let request = fs::read(state_path().join("request"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<CloudRequest>(&bytes).ok());
+    let mut left = request
+        .and_then(|request| request.ignore)
+        .map(|rules| LeftBehind {
+            rules: marsh_daemon::cloud_fs::NewPathIgnore::new(root, &rules),
+            baseline: &before,
+            count: 0,
+        });
     let mut after = BTreeMap::new();
-    walk(root, b"", run_user()?.uid.as_raw(), &mut after)?;
+    walk(root, b"", run_user()?.uid.as_raw(), &mut after, &mut left)?;
+    let ignored = left.map_or(0, |left| left.count);
     let mut deletions = before
         .iter()
         .filter(|(path, entry)| match after.get(*path) {
@@ -1403,7 +1464,8 @@ fn write_delta(root: &Path, output: Box<dyn Write>) -> io::Result<()> {
             Entry::Directory(_) => {}
         }
     }
-    writer.finish()?.flush()
+    writer.finish()?.flush()?;
+    Ok(ignored)
 }
 
 /// As root: snapshot the workspace's current files (no ignore filtering: a

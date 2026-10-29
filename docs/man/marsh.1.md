@@ -159,7 +159,8 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   fork) is uploaded without Git-ignored files, **.git**, or **.marsh**; stdin,
   stdout, stderr, and the exit status pass through; file changes are written
   back to it before the command returns, overwriting local edits to the same
-  paths. Needs a Docker sign-in with Docker Cloud sandbox access. Ctrl-C exits
+  paths. New files that match the ignore rules stay in the cloud (counted in
+  the summary). Needs a Docker sign-in with Docker Cloud sandbox access. Ctrl-C exits
   130 after the remote command stops and its changes return. See
   [Docker Cloud](../cloud.md).
 

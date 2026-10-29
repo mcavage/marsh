@@ -205,8 +205,12 @@ parent's current private view, including new objects, not from the laptop's
 original Git directory or stale alternates. Mutable private index/objects/refs
 may return only where that parent view already grants them writable; protected
 split admin/config and original Git state remain immutable to return.
-Generated regular files are included in the result even
-when their names match ignore rules: ignore rules filter inputs, not outputs.
+New paths that match the upload's ignore rules (the tree's current
+`.gitignore` files in the sandbox, plus the uploaded `info/exclude` and
+global excludes) are not in the result: they stay in the sandbox, counted,
+never transferred (decision of 2026-10-29). Paths in the baseline return
+whatever the rules say. An unfiltered crossing (a split fork, a nested call)
+returns generated ignored files.
 
 The baseline is immutable. After every writer in the placement subtree is
 confirmed stopped, compare the final view to that baseline. Return only
@@ -696,6 +700,12 @@ With the live-sharing gate (section 7, item 3) still open, the user chose:
   changes; after a sync the final return is base-checked too, since skipped
   paths still differ from that baseline. A sync is not a capture of a
   settled view (section 6's phases are unchanged for the final return).
+- **Ignored outputs stay in the cloud** (owner-approved): a new path that
+  matches the ignore rules that filtered the upload is left in the sandbox
+  by every return of that block (sync and final), filtered by the helper
+  before transfer, and counted in the summary. Build outputs made on Linux
+  are large and rarely useful on the Mac. No switch restores the old
+  behaviour; run in a split fork (unfiltered) to get them.
 
 ### Review disposition
 

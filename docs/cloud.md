@@ -114,6 +114,8 @@ Each attached block names its job on stderr when its command starts:
   here since it was uploaded (or last synced) is skipped, your local file
   kept, and reported as a conflict. The rest is written as at the end of a
   block, with the same rules for directories and names.
+- New ignored files stay in the cloud, as for the final write-back
+  (`; 214 ignored files left in the cloud`; `ignored` in `--json`).
 - What a sync wrote becomes the new base: a later sync, and the final
   write-back, carry only newer changes. A path skipped as a conflict is
   checked again each time.
@@ -146,8 +148,14 @@ cloud { ./generate-assets; } && make test   # make sees the generated files
   Concurrent cloud calls that write the same file: the last one applied wins.
 - A command that exits nonzero still returns its changes, as a local command
   would have made them.
-- New files whose names match ignore rules (build outputs, logs) return too:
-  ignore rules filter what is uploaded, not what comes back.
+- New files whose names match the ignore rules that filtered the upload
+  (build outputs, `node_modules`, logs) stay in the cloud: they are never
+  downloaded or written back, and the summary counts them
+  (`...; 214 ignored files left in the cloud`). The rules are your
+  `.gitignore` files as they are in the sandbox, `.git/info/exclude`, and
+  your global Git excludes file. Files that were uploaded still return when
+  changed or deleted, whatever the rules say now. A split fork's upload is
+  not filtered, so everything new in it returns.
 - `.marsh` is never uploaded. `.git` is never written back.
 
 ## Git in the cloud

@@ -75,28 +75,34 @@ pub fn write_snapshot<W: Write>(
     limit: u64,
 ) -> Result<(W, SnapshotStats, GitOutcome), String> {
     let mut writer = Writer::new(out, limit).map_err(|e| e.to_string())?;
-    writer.request(request).map_err(|e| e.to_string())?;
     let mut rules = Rules(Vec::new());
     let git = filtered
         && root
             .stat(".git")
             .is_ok_and(|stat| stat.kind == FileType::Directory);
+    let mut request = request.clone();
     if git {
         if let Some(global) =
             Some(ignore::gitignore::Gitignore::global().0).filter(|g| !g.is_empty())
         {
             rules.0.push(global);
         }
-        if let Some(exclude) = root
+        let exclude = root
             .open(".git")
             .and_then(|git| git.open("info"))
             .and_then(|info| info.read("exclude", split_fs::SMALL_LIMIT))
-            .ok()
-            .and_then(|bytes| Rules::parse(Path::new("/"), &bytes))
-        {
+            .unwrap_or_default();
+        if let Some(exclude) = Rules::parse(Path::new("/"), &exclude) {
             rules.0.push(exclude);
         }
+        // The same rules decide which new remote paths stay in the sandbox.
+        let global = ignore::gitignore::gitconfig_excludes_path()
+            .and_then(|path| std::fs::read(path).ok())
+            .filter(|bytes| bytes.len() as u64 <= split_fs::SMALL_LIMIT)
+            .unwrap_or_default();
+        request.ignore = Some(cloud::IgnoreRules { global, exclude });
     }
+    writer.request(&request).map_err(|e| e.to_string())?;
     let mut stats = SnapshotStats::default();
     walk(root, b"", &mut rules, git, &mut writer, &mut stats)?;
     let outcome = write_git(root, git_view, &mut writer)?;
@@ -385,6 +391,77 @@ fn transfer_error(path: &[u8], error: &io::Error) -> String {
     }
 }
 
+/// Which new remote paths the upload's ignore rules match (`docs/cloud.md`:
+/// they stay in the sandbox). Evaluated in the sandbox, against the tree's
+/// current `.gitignore` files, before anything is transferred.
+pub struct NewPathIgnore {
+    root: PathBuf,
+    base: Vec<ignore::gitignore::Gitignore>,
+    levels: BTreeMap<Vec<u8>, Option<ignore::gitignore::Gitignore>>,
+}
+
+impl NewPathIgnore {
+    #[must_use]
+    pub fn new(root: &Path, rules: &cloud::IgnoreRules) -> Self {
+        let base = [&rules.global, &rules.exclude]
+            .into_iter()
+            .filter_map(|bytes| Rules::parse(Path::new("/"), bytes))
+            .collect();
+        Self {
+            root: root.to_path_buf(),
+            base,
+            levels: BTreeMap::new(),
+        }
+    }
+
+    /// The `.gitignore` of directory `relative` (never through a link).
+    fn level(&mut self, relative: &[u8]) -> Option<ignore::gitignore::Gitignore> {
+        let root = &self.root;
+        self.levels
+            .entry(relative.to_vec())
+            .or_insert_with(|| {
+                let dir = if relative.is_empty() {
+                    root.clone()
+                } else {
+                    root.join(OsStr::from_bytes(relative))
+                };
+                let path = dir.join(".gitignore");
+                let metadata = std::fs::symlink_metadata(&path).ok()?;
+                if !metadata.is_file() || metadata.len() > split_fs::SMALL_LIMIT {
+                    return None;
+                }
+                let bytes = std::fs::read(&path).ok()?;
+                Rules::parse(
+                    &split_fs::logical(Path::new(OsStr::from_bytes(relative))),
+                    &bytes,
+                )
+            })
+            .clone()
+    }
+
+    /// `path` (a directory when `dir`), or a directory above it, is ignored.
+    pub fn ignored(&mut self, path: &[u8], dir: bool) -> bool {
+        let mut rules = Rules(self.base.clone());
+        let parts = path.split(|byte| *byte == b'/').collect::<Vec<_>>();
+        let mut current = Vec::new();
+        for (index, part) in parts.iter().enumerate() {
+            if let Some(level) = self.level(&current) {
+                rules.0.push(level);
+            }
+            if !current.is_empty() {
+                current.push(b'/');
+            }
+            current.extend_from_slice(part);
+            let last = index + 1 == parts.len();
+            let logical = split_fs::logical(Path::new(OsStr::from_bytes(&current)));
+            if rules.ignored(&logical, !last || dir) {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 /// Snapshot upload limit.
 pub const SNAPSHOT_LIMIT: u64 = 1 << 30;
 
@@ -485,6 +562,9 @@ pub struct ApplyReport {
     /// Directories deleted remotely but kept here because they still hold
     /// local files that were never uploaded (ignored or created meanwhile).
     pub kept: Vec<String>,
+    /// New files matching the upload's ignore rules, left in the sandbox
+    /// (never transferred).
+    pub ignored: u64,
     /// Directories (relative; empty is the root) whose listing changed: a
     /// caller that caches listings (a VM's file share) refreshes these.
     pub listings: std::collections::BTreeSet<Vec<u8>>,
@@ -1113,12 +1193,37 @@ mod git_tests {
             stdin_terminal: false,
             detached: false,
             delegate: None,
+            ignore: None,
         }
     }
 
     /// The Git copy is an allowlist, its config keeps no remotes or
     /// helpers, and a fork's planted `alternates` (a branch job can write
     /// it) never makes the copy read another directory or follow a link.
+    #[test]
+    fn new_paths_follow_the_trees_and_the_uploads_ignore_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join(".gitignore"), "node_modules/\n").unwrap();
+        std::fs::create_dir(root.join("web")).unwrap();
+        std::fs::write(root.join("web/.gitignore"), "dist\n!keep.log\n").unwrap();
+        let mut rules = NewPathIgnore::new(
+            root,
+            &cloud::IgnoreRules {
+                global: b"*.log\n".to_vec(),
+                exclude: b"/scratch\n".to_vec(),
+            },
+        );
+        assert!(rules.ignored(b"node_modules", true));
+        assert!(rules.ignored(b"web/node_modules/a/b.js", false));
+        assert!(rules.ignored(b"web/dist/app.js", false));
+        assert!(rules.ignored(b"debug.log", false));
+        assert!(rules.ignored(b"scratch", false));
+        assert!(!rules.ignored(b"web/keep.log", false));
+        assert!(!rules.ignored(b"web/scratch", false));
+        assert!(!rules.ignored(b"src/main.rs", false));
+    }
+
     #[test]
     fn git_copy_is_an_allowlist_and_ignores_planted_alternates() {
         let project = tempfile::tempdir().unwrap();
