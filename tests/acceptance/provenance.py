@@ -305,6 +305,28 @@ def stock_cleanup_errors(before: dict[str, str], after: dict[str, str],
     return errors
 
 
+def stock_refusal_errors(before: dict[str, str], after: dict[str, str],
+                         owned: "set[str] | frozenset[str]", *, shared: bool) -> list[str]:
+    """A refused request left the stock VMs it could have touched as they were.
+
+    Alone, nothing else runs, so the whole inventory must be unchanged. Beside
+    peers (tests/regress.py, a SharedBaseline) their VMs come and go while a
+    probe runs, so only a VM this scope owns may not be created, replaced or
+    removed; a peer's VM appearing or vanishing says nothing about the refusal.
+    """
+    if not shared:
+        return [] if before == after else ["stock VM inventory changed"]
+    errors = []
+    created = sorted(name for name in after.keys() - before.keys() if name in owned)
+    removed = sorted(name for name in before.keys() - after.keys() if name in owned)
+    replaced = sorted(name for name in before.keys() & after.keys()
+                      if name in owned and before[name] != after[name])
+    for label, names in (("created", created), ("removed", removed), ("replaced", replaced)):
+        if names:
+            errors.append(f"owned stock VMs {label}: {names}")
+    return errors
+
+
 def candidate_environment(args, receipt: dict | None) -> dict[str, str]:
     """Explicit host launch environment for a verified candidate.
 
