@@ -25,7 +25,7 @@ args:
     buildArg: CODEX_VERSION
 
 # ACP mode (`codex --acp`) ships the pinned official adapter (package.json).
-provides: ["codex@${{ kit.args.version }}", "codex-acp@2.4.0"]
+provides: ["codex@${{ kit.args.version }}", "codex-acp@2.5.0"]
 
 dockerfile: ./codex.dockerfile
 
