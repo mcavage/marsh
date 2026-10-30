@@ -8,13 +8,13 @@
 # for Code Mode and fails that feature closed when it is missing.
 FROM dhi.io/node:26-debian13@sha256:57a27f9e03b0bef98d39da2860fb0bd6b785a72a58f756f88ef2634ac7526343 AS base
 
-FROM dhi.io/debian-base:trixie-dev@sha256:cc4e05ff415ee2d83918f2af45c737983209924ef7362c53f00cfcdaa1c94326 AS packages
+FROM dhi.io/debian-base:trixie-dev@sha256:addf9d8e974b044e4dfc7b4186756d3e0786b573f6a21a53697d03b133f70a77 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
 RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
 
-FROM dhi.io/debian-base:trixie-dev@sha256:cc4e05ff415ee2d83918f2af45c737983209924ef7362c53f00cfcdaa1c94326 AS build
+FROM dhi.io/debian-base:trixie-dev@sha256:addf9d8e974b044e4dfc7b4186756d3e0786b573f6a21a53697d03b133f70a77 AS build
 ARG CODEX_VERSION
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
