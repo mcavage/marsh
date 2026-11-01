@@ -5729,6 +5729,21 @@ impl ConnectionHandler {
                 dev,
             } => {
                 let session_id = session.session_id.clone();
+                if let Some(path) = self
+                    .stock_sbx
+                    .as_deref()
+                    .filter(|path| stock_sbx_removed(Some(path)))
+                {
+                    let detached = self.store.detach_shell(&session_id);
+                    write_frame(
+                        &mut stream,
+                        &PublicReply::Error {
+                            code: ErrorCode::InvalidRequest,
+                            message: stock_sbx_removed_message(path),
+                        },
+                    )?;
+                    return detached;
+                }
                 write_frame(&mut stream, &PublicReply::PreparationAccepted)?;
                 stream.set_read_timeout(None)?;
                 stream.set_write_timeout(None)?;

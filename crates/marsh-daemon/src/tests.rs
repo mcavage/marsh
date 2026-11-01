@@ -3459,6 +3459,57 @@ fn failed_shell_setup_and_preparation_detach_their_sessions() {
 }
 
 #[test]
+fn preparation_reports_a_removed_stock_sbx_and_detaches_the_session() {
+    let home = home();
+    let sbx = stock_sbx(b"stock-sbx-old");
+    let server = Arc::new(
+        Server::bind_with_stock_sbx(home.path(), sbx.path())
+            .unwrap()
+            .with_backend(Arc::new(FailingShellBackend)),
+    );
+    let prepare_session = server
+        .store()
+        .attach_shell(42, authority("/Users/example/prepare", home.path()));
+    let path = sbx.path().to_owned();
+    sbx.close().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let task_server = Arc::clone(&server);
+    let task_stop = Arc::clone(&stop);
+    let task = thread::spawn(move || {
+        task_server
+            .serve_until(|| task_stop.load(Ordering::Relaxed))
+            .unwrap();
+    });
+
+    let error = Client::connect(home.path())
+        .unwrap()
+        .prepare(
+            LoadSelection::Kits(vec!["fixture".into()]),
+            session(&prepare_session, home.path()),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "daemon rejected the request: {}",
+            stock_sbx_removed_message(&path)
+        )
+    );
+    assert!(
+        server
+            .store()
+            .status(None)
+            .shells
+            .iter()
+            .all(|shell| shell.session_id != prepare_session),
+        "failed preparation must release the shell session"
+    );
+
+    stop.store(true, Ordering::Relaxed);
+    task.join().unwrap();
+}
+
+#[test]
 fn execution_attachment_preserves_bytes_and_exit_status() {
     let home = home();
     let project = home.path().join("project");
