@@ -49,8 +49,12 @@ jobs:
       - name: Dry run (manual runs only)
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run != 'none'
         run: echo "RENOVATE_DRY_RUN=${{ inputs.dry_run }}" >> "$GITHUB_ENV"
+      - name: Renovate engine version (also tested by CI)
+        id: renovate-version
+        run: echo "version=$(cat .github/renovate-version)" >> "$GITHUB_OUTPUT"
       - uses: renovatebot/github-action@2804199d260ad00c1fae0e9e842888369391c776 # v46.3.10
         with:
+          renovate-version: ${{ steps.renovate-version.outputs.version }}
           configurationFile: .github/renovate-global.js
           token: ${{ secrets.RENOVATE_TOKEN }}
           additional-env-list: |

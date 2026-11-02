@@ -18,6 +18,10 @@ const { applyPackageRules } = await import(new URL('./util/package-rules/index.j
 const { api: versions } = await import(new URL('./modules/versioning/npm/index.js', validator));
 const { extractPackageFile: extractRegex } = await import(new URL('./modules/manager/custom/regex/index.js', validator));
 const config = JSON5.parse(readFileSync('.github/renovate.json5', 'utf8'));
+const engineFile = '.github/renovate-version';
+const engineManager = config.customManagers.find(manager => manager.depNameTemplate === 'renovate');
+const engine = extractRegex(readFileSync(engineFile, 'utf8'), engineFile, engineManager).deps[0];
+assert.equal(engine.currentValue, require('renovate/package.json').version, 'Policy tests must use the bot\'s exact Renovate version');
 const packageFile = '.github/workflows/ci.yml';
 const extracted = await extractPackageFile(readFileSync(packageFile, 'utf8'), packageFile);
 const python = extracted.deps.find(dep => dep.depName === 'python');

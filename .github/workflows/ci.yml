@@ -369,10 +369,10 @@ jobs:
           node-version: '24'
       - name: Validate the repository and global configs
         if: steps.changes.outputs.run == 'true'
-        # Pin the actual validator, not a moving major that can select a
-        # just-published/unavailable tarball. This version meets the local
-        # three-day npm release-age policy and requires Node 24.
+        # Use the bot's exact engine version, never a floating major. Renovate
+        # updates the shared pin after the normal release-age observation.
         run: |
-          npx --yes --package renovate@44.150.1 renovate-config-validator --strict
-          RENOVATE_CONFIG_FILE=.github/renovate-global.js npx --yes --package renovate@44.150.1 renovate-config-validator --strict
-          npx --yes --package renovate@44.150.1 --call 'node tests/release/renovate-policy.mjs "$(command -v renovate-config-validator)"'
+          version=$(cat .github/renovate-version)
+          npx --yes --package "renovate@$version" renovate-config-validator --strict
+          RENOVATE_CONFIG_FILE=.github/renovate-global.js npx --yes --package "renovate@$version" renovate-config-validator --strict
+          npx --yes --package "renovate@$version" --call 'node tests/release/renovate-policy.mjs "$(command -v renovate-config-validator)"'

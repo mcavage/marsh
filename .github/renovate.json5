@@ -31,6 +31,14 @@
 
   customManagers: [
     {
+      description: "One Renovate version for the self-hosted bot, config validator and policy tests",
+      customType: "regex",
+      managerFilePatterns: ["/^\\.github/renovate-version$/"],
+      matchStrings: ["^(?<currentValue>\\d+\\.\\d+\\.\\d+)\\s*$"],
+      depNameTemplate: "renovate",
+      datasourceTemplate: "npm",
+    },
+    {
       description: "The shell VM template's DHI base (packaging/shell-image), by digest",
       customType: "regex",
       managerFilePatterns: ["/^packaging/shell-image$/"],
@@ -114,6 +122,12 @@
   ],
 
   packageRules: [
+    {
+      description: "Renovate engine updates follow the weekly Actions cadence and run the same policy tests",
+      matchPackageNames: ["renovate"],
+      groupName: "GitHub Actions",
+      schedule: ["before 6am on monday"],
+    },
     {
       description: "Publisher PyYAML wheels support Python through 3.14; raise with requirements-publish.txt",
       matchManagers: ["github-actions"],
