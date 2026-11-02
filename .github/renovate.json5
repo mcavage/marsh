@@ -117,7 +117,7 @@
     {
       description: "Publisher PyYAML wheels support Python through 3.14; raise with requirements-publish.txt",
       matchManagers: ["github-actions"],
-      matchPackageNames: ["python"],
+      matchPackageNames: ["actions/python-versions"],
       matchFileNames: [".github/workflows/ci.yml"],
       allowedVersions: "<3.15",
     },

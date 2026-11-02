@@ -198,7 +198,7 @@ jobs:
       - id: publisher-python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.15'
+          python-version: '3.14'
           update-environment: false
       - name: make test-harness (onboarding, MCP callers, publisher, tool self-tests)
         run: make test-harness PUBLISHER_PYTHON="${{ steps.publisher-python.outputs.python-path }}"
@@ -360,7 +360,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
-             ! git diff --name-only "origin/$BASE_REF...HEAD" | grep -Eq '^\.github/(renovate|workflows/ci\.yml$)'; then
+             ! git diff --name-only "origin/$BASE_REF...HEAD" | grep -Eq '^(\.github/(renovate|workflows/ci\.yml$)|tests/release/renovate-policy\.mjs$)'; then
             echo "run=false" >> "$GITHUB_OUTPUT"; echo "Renovate config unchanged."
           else echo "run=true" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -375,3 +375,4 @@ jobs:
         run: |
           npx --yes --package renovate@44.150.1 renovate-config-validator --strict
           RENOVATE_CONFIG_FILE=.github/renovate-global.js npx --yes --package renovate@44.150.1 renovate-config-validator --strict
+          npx --yes --package renovate@44.150.1 --call 'node tests/release/renovate-policy.mjs "$(command -v renovate-config-validator)"'
