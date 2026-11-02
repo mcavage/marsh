@@ -146,11 +146,15 @@ def dev_skills_check(image, temp):
     assert listed['skill:hello'].get('description')=='Dev copy of the Kit skill.',listed['skill:hello']
     assert listed['skill:analyze'].get('description')=='Dev copy of a built-in skill.',listed['skill:analyze']
     startup=terminal_check(image,home,exercise=False,mounts=mounts)
-    assert 'Skill conflicts' not in startup,startup[-3000:]
+    # Pi 1.5 reports collisions under "[Skill warnings]" (older Pi: "Skill conflicts").
+    assert '"hello" collision' not in startup and 'Skill conflicts' not in startup,startup[-3000:]
     # Negative control: the same name in ~/.agents/skills is a stray copy.
     skill(home/'.agents/skills','hello','Stray personal copy.')
     startup=terminal_check(image,home,exercise=False,mounts=mounts)
-    assert 'Skill conflicts' in startup and '"hello" collision' in startup,startup[-3000:]
+    assert '[Skill warnings]' in startup and '"hello" collision' in startup,startup[-3000:]
+    # The configured dev copy wins; the stray ~/.agents copy is the one skipped.
+    assert '✓ user ~/work/skills/hello/SKILL.md' in startup,startup[-3000:]
+    assert '✗ ~/.agents/skills/hello/SKILL.md (skipped)' in startup,startup[-3000:]
     print('PASS: a configured dev skills folder replaces Kit and built-in skills of the same name without a '
           'collision warning; a stray ~/.agents/skills copy still warns.')
 
