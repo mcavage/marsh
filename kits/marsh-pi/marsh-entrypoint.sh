@@ -38,4 +38,5 @@ fi
 if [ -r /run/marsh/context.md ]; then
   set -- --append-system-prompt /run/marsh/context.md "$@"
 fi
-exec pi --approve -e /opt/marsh/pi-gateway/mcp-gateway.mjs "$@"
+# marsh-task.mjs registers marsh's task tool in a job that has it.
+exec pi --approve -e /opt/marsh/pi-gateway/mcp-gateway.mjs -e /opt/marsh/pi-gateway/marsh-task.mjs "$@"

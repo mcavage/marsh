@@ -11,7 +11,7 @@ COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
 RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
 
-# Pi, its MCP Gateway extension, and (for ACP mode, `pi --acp`) the community
+# Pi, its MCP Gateway and task-tool extensions, and (for ACP mode, `pi --acp`) the community
 # pi-acp adapter, all pinned by package-lock.json.
 FROM dhi.io/node:26-debian13-dev@sha256:a7e7e221f0fda5e998a3b21b000fda21397ee767a0a643f4f8e1433912edbb36 AS npm
 ARG PI_VERSION
@@ -24,6 +24,7 @@ RUN test "$PI_VERSION" = "$(node -p 'require("./package.json").dependencies["@ea
  && test -f node_modules/pi-acp/dist/index.js \
  && node_modules/.bin/pi --version
 COPY --chmod=0644 mcp-gateway.mjs ./mcp-gateway.mjs
+COPY --chmod=0644 marsh-task.mjs ./marsh-task.mjs
 
 FROM base AS image
 COPY --from=packages /rootfs/ /

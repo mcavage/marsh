@@ -222,6 +222,16 @@ case "${2:-}" in
     if [ -r /run/marsh/context.md ]; then
       codex_context=$(node -e 'process.stdout.write(JSON.stringify(require("fs").readFileSync(process.argv[1], "utf8")))' /run/marsh/context.md)
       set -- -c "developer_instructions=$codex_context" "$@"
+      # With the task tool (`marsh task-mcp`, docs/agents.md), Codex's
+      # subagents are marsh agents: the server is registered for this run and
+      # Codex's own multi-agent tools are off (`agents.enabled`). A task can
+      # run as long as the job, so its calls get the job's wall time.
+      if /run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1; then
+        set -- -c agents.enabled=false \
+          -c 'mcp_servers.marsh.command="/run/marsh/bin/marsh"' \
+          -c 'mcp_servers.marsh.args=["task-mcp"]' \
+          -c mcp_servers.marsh.tool_timeout_sec=86400 "$@"
+      fi
     fi
     ;;
 esac

@@ -40,6 +40,19 @@ An agent Kit registers it in its agent's MCP configuration:
 {"mcpServers": {"marsh": {"command": "/run/marsh/bin/marsh", "args": ["task-mcp"]}}}
 ```
 
+The packaged Kits do this for each run, in CLI and ACP sessions, without
+writing to your project or home, and turn off the agent's own subagent tool
+so that delegation goes through marsh:
+
+| Kit | Registers `task-mcp` with | Built-in subagents |
+|---|---|---|
+| `claude` | `--mcp-config` (`alwaysLoad`, so `mcp__marsh__task` is offered every turn) | `Agent` and `Workflow` in `permissions.deny` (`--settings`), and a `PreToolUse` hook that refuses them with "use mcp__marsh__task" |
+| `codex` | `-c mcp_servers.marsh...` (CLI); the ACP session's MCP servers (ACP) | `agents.enabled = false` |
+| `pi`, `pix` | Pi's `registerMcpServer` from a Kit extension, tools declared directly | none to turn off |
+
+Each Kit does this only when the job's marsh has `task-mcp`. `pi` and `pix`
+also declare their prompt verbs (`pi -p`), so the tool can start them.
+
 `task` takes:
 
 | Argument | Meaning |

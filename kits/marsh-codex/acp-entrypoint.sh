@@ -102,9 +102,24 @@ if (process.env.CODEX_CONFIG) {
 if (config.developer_instructions === undefined) {
   config.developer_instructions = fs.readFileSync(process.argv[1], "utf8");
 }
+// With the task tool (`marsh task-mcp`), subagents are marsh agents:
+// Codex'"'"'s own multi-agent tools are off, and the task server (added to
+// each session by mcp-gateway-proxy.mjs) gets the job'"'"'s wall time.
+if (process.argv[2] === "1") {
+  const agents = config.agents !== null && typeof config.agents === "object" &&
+    !Array.isArray(config.agents) ? config.agents : {};
+  config.agents = {...agents, enabled: false};
+  config["mcp_servers.marsh.tool_timeout_sec"] = 86400;
+}
 process.stdout.write(JSON.stringify(config));
-' /run/marsh/context.md)
+' /run/marsh/context.md "$(/run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1 && echo 1)")
   export CODEX_CONFIG
+  # The session's MCP servers come from the ACP request, so the proxy adds
+  # the task server there.
+  if /run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1; then
+    MARSH_TASK_MCP=1
+    export MARSH_TASK_MCP
+  fi
 fi
 
 exec node /opt/marsh/codex-acp/mcp-gateway-proxy.mjs /opt/marsh/codex-acp/node_modules/@agentclientprotocol/codex-acp/dist/index.js "$@"

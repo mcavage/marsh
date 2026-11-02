@@ -58,5 +58,9 @@ set -- -e /opt/pix/package/extensions/output-style.ts \
   --skill "$package_skills" \
   --append-system-prompt /opt/pix/package/instructions.md "$@"
 # Bare `pi` is marsh's separate packaged command, not this image's executable.
+# marsh's task tool, from a Pi base image that has it.
+if [ -r /opt/marsh/pi-gateway/marsh-task.mjs ]; then
+  set -- -e /opt/marsh/pi-gateway/marsh-task.mjs "$@"
+fi
 exec /opt/marsh/pi-gateway/node_modules/.bin/pi --approve \
   -e /opt/marsh/pi-gateway/mcp-gateway.mjs "$@"

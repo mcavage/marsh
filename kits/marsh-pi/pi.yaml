@@ -48,6 +48,11 @@ capabilities:
       agent: pi
       command: ["/usr/local/bin/marsh-pi", "--acp"]
 
+  # Non-interactive prompt verbs: how marsh's task tool starts Pi.
+  - type: com.docker.sandbox/agent-sessions@1
+    config:
+      prompt: ["-p", "{{.Prompt}}"]
+
   - type: com.docker.sandbox/agent-context@1
     config:
       filename: AGENTS.md
