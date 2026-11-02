@@ -1631,7 +1631,7 @@ mod tests {
                 .with_backend(Arc::new(RelayBackend)),
         );
         let session_id = server.store().attach_shell(
-            42,
+            std::process::id(),
             crate::SessionAuthority {
                 username: "example".into(),
                 uid: 1000,
@@ -1682,6 +1682,9 @@ mod tests {
 
         recv(&ready_receive, "relay readiness").unwrap();
         wait_until("the guest relay socket appears", || socket.exists());
+        // Exercise the same sweep that runs every five seconds in serve_until.
+        // A fabricated client PID lets that sweep revoke our relay mid-test.
+        crate::release_departed(&server.store(), server.backend.as_ref(), &server.acp);
         let client = Client::connect_relay(&socket, &token_path).unwrap();
         let daemon_id = server.store().daemon_id();
         let build_identity = server.build_identity.clone();
