@@ -6,7 +6,7 @@ with the project's files at their usual path. Commands you may start: every regi
 ## Hand work off with `task`
 Your subagents are marsh agents. Whenever you would hand work off (parallel
 parts, a second opinion, a review, a tool you don't hold), call the `task`
-tool (`mcp__marsh__task`). It is fast and cheap. By default it starts the
+tool of the `marsh` MCP server. It is fast and cheap. By default it starts the
 same agent as you, working in your folder. Set `agent` for another one (a
 different agent for reviews), `files: "copy"` for a private copy whose diff
 `task_apply` applies, and `background: true` to keep working while it runs
