@@ -235,17 +235,21 @@ class TaskTool(ScenarioSuite):
                           ["task_output", {"id": "t9"}]])
         require(out["init"]["serverInfo"]["name"] == "marsh" and out["exit"] == 0, f"init/exit: {out!r}"[:600])
         tools = {tool["name"]: tool for tool in out["tools"]}
+        # Every registered command with prompt verbs is an agent here.
+        agents = sorted(command["name"] for command in self.document("status", "--json")["commands"]
+                        if (command.get("sessions") or {}).get("prompt"))
+        require({"claude", "codex", "fixture"} <= set(agents), f"agents with prompt verbs: {agents}")
         require(set(tools) == {"task", "task_output", "task_apply"}, f"tools: {sorted(tools)}")
         description = tools["task"]["description"]
         require(description.startswith("Hand work to another agent. Fast and cheap: use it whenever you would "
-                                        "hand work off") and "Agents: claude, codex, fixture." in description,
+                                        "hand work off") and f"Agents: {', '.join(agents)}." in description,
                 f"task description: {description!r}")
         properties = tools["task"]["inputSchema"]["properties"]
         require(set(properties) == {"description", "prompt", "agent", "files", "background"}
                 and properties["files"]["enum"] == ["shared", "copy"]
-                and properties["agent"]["enum"] == ["claude", "codex", "fixture"], f"task schema: {properties!r}"[:800])
+                and properties["agent"]["enum"] == agents, f"task schema: {properties!r}"[:800])
         texts = [(call.get("isError"), call["content"][0]["text"]) for call in out["calls"]]
-        require(texts[0] == (True, "`nope` is not an agent this job may start; available: claude, codex, fixture"),
+        require(texts[0] == (True, f"`nope` is not an agent this job may start; available: {', '.join(agents)}"),
                 f"unknown agent: {texts[0]!r}")
         require(texts[1][0] and "set `agent`: you (shell) are not one this job may start" in texts[1][1],
                 f"no default agent for a shell job: {texts[1]!r}")
