@@ -137,10 +137,13 @@ impl Setup {
         if !names.is_empty() {
             agent["enum"] = json!(names);
         }
+        // `anthropic/alwaysLoad`: Claude Code declares these upfront rather
+        // than behind its tool search, so the model sees `task` every turn.
         json!([
             {
                 "name": "task",
                 "description": format!("{TASK_DESCRIPTION}\n\nAgents: {agents}."),
+                "_meta": {"anthropic/alwaysLoad": true},
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -160,6 +163,7 @@ impl Setup {
             {
                 "name": "task_output",
                 "description": "The result of a task (or its status if it is not done). `wait: true` waits for it to finish; `transcript: true` returns its whole output.",
+                "_meta": {"anthropic/alwaysLoad": true},
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -173,6 +177,7 @@ impl Setup {
             {
                 "name": "task_apply",
                 "description": "Apply a finished `copy` task's diff to your folder (3-way when it no longer applies cleanly; conflicts are named).",
+                "_meta": {"anthropic/alwaysLoad": true},
                 "inputSchema": {
                     "type": "object",
                     "properties": {"id": {"type": "string", "description": "The task id."}},
