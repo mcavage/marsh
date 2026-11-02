@@ -1,0 +1,127 @@
+name: Stress
+# Run chosen tests many times on the CI runners, where the flakes happen
+# (small machines, about a thousand tests at once), instead of on a laptop.
+# Manual only: Actions > Stress > Run workflow, or
+#   gh workflow run stress.yml -f filter='test(=NAME)' -f package=marsh-daemon -f os=macos
+# Every iteration runs the selected tests concurrently with the rest of the
+# package's tests unless `alone` is set, so the load resembles a CI run.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit to test (default: the selected branch)"
+        required: false
+      package:
+        description: "Cargo package (-p), for example marsh-daemon"
+        required: true
+      filter:
+        description: "nextest filterset, for example test(=relay::tests::slow_client_preserves_large_output_while_a_sibling_completes)"
+        required: true
+      count:
+        description: "Iterations (--stress-count)"
+        required: false
+        default: '200'
+      os:
+        description: Runner
+        type: choice
+        options: [macos, linux, both]
+        default: both
+      alone:
+        description: "Run only the selected tests (no background load from the other tests of the package)"
+        type: boolean
+        default: false
+permissions:
+  contents: read
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+jobs:
+  stress:
+    name: Stress ${{ inputs.package }} on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os == 'both' && '["macos", "linux"]' || format('["{0}"]', inputs.os)) }}
+    runs-on: ${{ matrix.os == 'macos' && 'macos-26' || 'ubuntu-26.04-arm' }}
+    timeout-minutes: 120
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.19.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-bin: 'false'
+          save-if: 'false'
+      - name: GNU Bash 5.3 (test oracle, macOS)
+        if: runner.os == 'macOS'
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+      - id: bash-cache
+        if: runner.os == 'Linux'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/gnu-bash
+          key: gnu-bash-5.3-${{ runner.os }}-${{ runner.arch }}-0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba
+      - name: GNU Bash 5.3 (test oracle, Linux)
+        if: runner.os == 'Linux'
+        env:
+          CACHED: ${{ steps.bash-cache.outputs.cache-hit }}
+        run: |
+          prefix="$HOME/.local/gnu-bash"
+          if [ "$CACHED" != true ]; then
+            curl -fsSL -o "$RUNNER_TEMP/bash-5.3.tar.gz" https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz
+            echo "0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba  $RUNNER_TEMP/bash-5.3.tar.gz" | sha256sum -c
+            tar -xzf "$RUNNER_TEMP/bash-5.3.tar.gz" -C "$RUNNER_TEMP"
+            (cd "$RUNNER_TEMP/bash-5.3" && ./configure --quiet --prefix="$prefix" && make -s -j"$(nproc)" && make -s install)
+          fi
+          echo "$prefix/bin" >> "$GITHUB_PATH"
+      - name: cargo-nextest
+        run: |
+          mkdir -p "$HOME/.cargo/bin"
+          if [ "$RUNNER_OS" = macOS ]; then
+            curl -fsSL -o "$RUNNER_TEMP/nextest.tgz" https://get.nexte.st/0.9.148/mac
+            echo "6c23b7fb4ca82c571fc8dfedbab45bfa773d45918f933170c85d21cd7f4b852b  $RUNNER_TEMP/nextest.tgz" | shasum -a 256 -c
+          else
+            curl -fsSL -o "$RUNNER_TEMP/nextest.tgz" https://get.nexte.st/0.9.148/linux-arm
+            echo "81469eb963ef883fd590e60189e77d6aba3d91b418591d3391f50fe3e9480d2b  $RUNNER_TEMP/nextest.tgz" | sha256sum -c
+          fi
+          tar -xzf "$RUNNER_TEMP/nextest.tgz" -C "$HOME/.cargo/bin"
+      - name: Build
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: cargo nextest run --no-run -p "$PACKAGE" --locked
+      - name: Stress
+        env:
+          PACKAGE: ${{ inputs.package }}
+          FILTER: ${{ inputs.filter }}
+          COUNT: ${{ inputs.count }}
+          ALONE: ${{ inputs.alone }}
+          MARSH_TEST_CANARY_API_KEY: canary-not-a-credential
+        run: |
+          # Background load: the package's other tests, run in a loop while
+          # the stressed tests run (unless `alone`).
+          if [ "$ALONE" != true ]; then
+            ( while :; do cargo nextest run -p "$PACKAGE" --locked --no-fail-fast -E "not ($FILTER)" >/dev/null 2>&1; done ) &
+            load=$!
+          fi
+          status=0
+          cargo nextest run -p "$PACKAGE" --locked --no-fail-fast -E "$FILTER" --stress-count "$COUNT" || status=$?
+          [ -z "${load:-}" ] || kill "$load" 2>/dev/null || true
+          exit "$status"
