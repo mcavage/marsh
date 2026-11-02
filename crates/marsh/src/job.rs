@@ -27,6 +27,7 @@ Usage:
                                                            This job's Kit in Docker Cloud
   marsh jobs [--json] | jobs --tree [--json] | jobs show JOB [--json]   This job's subtree
   marsh context                                            Print this job's context
+  marsh task-mcp                                           The task tool (MCP on stdio) for this job's agent
   marsh open URL                                           Open a web link on the Mac (also xdg-open, open)
 
 Registered names in /run/marsh/bin are links: calling one starts a child job.
@@ -84,6 +85,7 @@ pub fn main() -> i32 {
                 | "collect"
                 | "cloud"
                 | "open"
+                | "task-mcp"
         )
         && Path::new(JOB_JSON).exists()
     {
@@ -387,6 +389,7 @@ fn cli(arguments: &[OsString]) -> i32 {
         "fanout" => crate::fanout_cli::fanout(rest, crate::fanout_cli::Place::Job),
         "collect" => crate::fanout_cli::collect(rest),
         "open" => open(rest),
+        "task-mcp" => crate::task_mcp::main(rest),
         other => {
             eprintln!("marsh: `{other}` is not available inside a job; see `marsh --help`");
             2

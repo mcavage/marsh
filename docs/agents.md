@@ -26,6 +26,52 @@ including another invocation of the same agent, subject to the
 Configure each child's provider through
 [Docker Sandboxes](kits.md#signing-in), as you would for a direct call.
 
+## The task tool
+
+`marsh task-mcp` is an MCP server (stdio) for an agent inside a job. Its
+`task` tool hands work to another registered agent, the way an agent's own
+subagent tool would, but the subagent is a marsh child job: it shows in
+`marsh jobs --tree`, and the spawn set, the [limits](#limits-and-messages)
+and the parent's wall time apply as for any child. The server starts each
+child through the job's own in-job `marsh`, so children get the tool too.
+An agent Kit registers it in its agent's MCP configuration:
+
+```json
+{"mcpServers": {"marsh": {"command": "/run/marsh/bin/marsh", "args": ["task-mcp"]}}}
+```
+
+`task` takes:
+
+| Argument | Meaning |
+|---|---|
+| `description` | 3 to 6 words, shown to the user. |
+| `prompt` | Everything the agent needs; it does not see the caller's conversation. At most 100 KiB. |
+| `agent` | A registered agent. Default: the caller's own. The tool's description lists the agents this job may start. |
+| `files` | `"shared"` (default): the agent works in the caller's folder and its edits land at once. `"copy"`: it works on a private [split](split.md) fork; the result includes its diff. |
+| `background` | `false` (default) waits for the result; `true` returns a task id at once. |
+
+The result is the agent's final message, its exit status, the path of its
+whole output in the caller's container (`transcript`) and its job id (`marsh
+jobs show ID`). For `"copy"` it adds the diff (32 KiB shown; the full patch
+is the split's `diff.patch`), which is not applied until the caller asks.
+`task_output(id, wait?, transcript?)` returns a background task's result, or
+its status while it runs. `task_apply(id)` applies a `"copy"` task's diff to
+the caller's folder with [`marsh split apply ID LABEL --json`](split.md):
+3-way when it no longer applies cleanly, with conflicts named. A refusal (a
+limit, a name outside the spawn set) is a tool error with marsh's reason.
+
+An agent is offered when its Kit declares non-interactive prompt verbs
+(`com.docker.sandbox/agent-sessions@1` `prompt`, shown by `marsh status
+--json` under `commands[].sessions`); the child runs `NAME VERBS...` with the
+prompt filled in, e.g. `claude -p PROMPT` or `codex exec PROMPT`, and its
+stdout is the final message. A published Kit's verbs are known once marsh has
+read its descriptor (after its first use, or a `marsh status`). `marsh
+status --json` lists the `task-tool-v1` feature.
+
+Each `"copy"` task leaves a kept split (`marsh splits` on your Mac lists it;
+`marsh splits rm ID` removes it). When the agent closes the server (it
+exits), running tasks are cancelled.
+
 ## Split from inside an agent
 
 An agent can split work across private forks and read the results back as
@@ -184,7 +230,7 @@ stdout, stderr, and exit status pass through.
 
 `bash`, `sh`, and every other tool in the job come from the image. The in-job
 `marsh` command is also in `/run/marsh/bin`. It has `run`, `split`, `join`,
-`fanout`, `collect`, `jobs`, `context`, `open`, and `cloud`
+`fanout`, `collect`, `jobs`, `context`, `open`, `cloud`, and `task-mcp`
 ([Cloud from a job](cloud.md#cloud-from-a-job)). `xdg-open` and `open` are
 there too (see [Opening links](#opening-links)).
 
@@ -251,12 +297,11 @@ Every Kit job gets `/run/marsh/context.md`, written for that job. It contains:
 
 - the job's name,
 - the commands it may start,
-- the limits,
-- short examples of `codex exec`, `marsh split`, `marsh fanout`, and
-  `marsh jobs --tree`,
-- how to run a long split from a tool with a timeout, and what a child cannot
-  read from the parent's image,
-- advice on when not to start more jobs.
+- that its subagents are marsh agents, started with the
+  [`task` tool](#the-task-tool),
+- for agents without the tool, short examples of `codex exec`,
+  `marsh split`, `marsh fanout`, and `marsh jobs --tree`,
+- the limits.
 
 `marsh context` prints it. Outside a job, it prints the shared text with no job
 name or spawn set filled in.

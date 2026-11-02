@@ -656,6 +656,8 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
             print!("{}", marsh_contracts::process::CONTEXT);
             return Ok(0);
         }
+        // The task tool serves an agent inside a job, never the host or the shell.
+        Some("task-mcp") => return Ok(marsh::task_mcp::main(&arguments[2..])),
         Some("open")
             if env::var_os("MARSH_DAEMON_SOCKET").is_some()
                 && env::var_os(external_commands::SESSION_VARIABLE).is_some() =>

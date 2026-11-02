@@ -2563,6 +2563,7 @@ fn job_environment(
         limits: process::Limits::default(),
         env,
         forwarded: capability.forwarded.clone(),
+        prompts: capability.prompts.clone(),
     };
     let bytes = serde_json::to_vec_pretty(&document).map_err(io::Error::other)?;
     let target = directory.join("job.json");

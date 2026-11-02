@@ -424,4 +424,11 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `S05-interactive-rc-ctrl-c-exit`: Interactive bash/zsh on a PTY: the user's rc alias works, the session bin stays first on PATH
 - `S06-selection-precedence`: `marsh config shell` sets the home default; MARSH_SHELL overrides it; --shell overrides both;
 
+### Task tool (`task_tool_uat.py`, 4)
+
+- `T01-protocol-and-refusals`: T01: tools/list carries the contract; refusals are tool errors that say why.
+- `T02-live-shared`: T02: a claude job's `task` (default agent, shared files) edits the caller's folder; the child is its job. (billed; only with `--live`)
+- `T03-live-copy-apply`: T03: `files: "copy"` returns a diff and leaves the folder alone until `task_apply` applies it. (billed; only with `--live`)
+- `T04-live-background`: T04: `background: true` returns an id at once; `task_output(wait)` returns the result (codex child). (billed; only with `--live`)
+
 <!-- END GENERATED SCENARIO INDEX -->

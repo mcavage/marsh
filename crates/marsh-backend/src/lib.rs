@@ -658,6 +658,27 @@ impl StockDaemonBackend {
     /// The agent (ACP adapter, session verbs) of one captured Kit generation,
     /// cached by its identity: the adapter always matches the image prepared
     /// from that same generation.
+    /// Each registered agent's `agent-sessions@1` prompt verbs, for a job's
+    /// `marsh task-mcp`; never waits on a registry (`status_kit_agent`).
+    fn prompt_verbs(&self) -> BTreeMap<String, Vec<String>> {
+        marsh_daemon::DaemonBackend::command_catalog(self)
+            .into_iter()
+            .filter_map(|command| {
+                let verbs = command
+                    .sessions?
+                    .get("prompt")?
+                    .as_array()?
+                    .iter()
+                    .map(|verb| verb.as_str().map(str::to_owned))
+                    .collect::<Option<Vec<_>>>()?;
+                verbs
+                    .iter()
+                    .any(|verb| verb.contains(marsh_contracts::process::PROMPT_PLACEHOLDER))
+                    .then_some((command.name, verbs))
+            })
+            .collect()
+    }
+
     fn kit_agent_for(&self, kit: &NativeKitRef) -> Result<KitAgent, DaemonError> {
         let agent = match cached_kit_agent(&self.config.control_home, kit) {
             Some(agent) => agent,
@@ -1991,6 +2012,7 @@ impl DaemonBackend for StockDaemonBackend {
                 forwarded: forwarded_names,
                 env_key: marsh_contracts::process::hex(marsh_daemon::process::env_key()),
                 kit,
+                prompts: self.prompt_verbs(),
             }),
         };
         let output_budget = spec.resources.output_bytes;
