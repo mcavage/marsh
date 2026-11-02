@@ -1537,19 +1537,48 @@ fn bounded_system_runner_preserves_output_and_status() {
     assert_eq!(output.stderr, b"stderr");
 }
 
-/// Long enough for a starved runner to start the fixture's shell and write
-/// its pid file; the deadline itself is what ends each call.
+/// The bounded call's deadline. It starts only once the fixture has reported
+/// its descendant, so it never races the fixture's own setup.
 const FIXTURE_DEADLINE: Duration = Duration::from_secs(2);
 /// The fixtures' descendants sleep this long: a call that waited for them
 /// instead of its deadline would take this long.
 const DESCENDANT_LIFETIME_SECS: u64 = 60;
 
-fn fixture_pid(path: &Path) -> i32 {
-    fs::read_to_string(path)
-        .unwrap_or_else(|error| panic!("fixture did not record its pid: {error}"))
-        .trim()
-        .parse()
-        .unwrap()
+/// Start `script` through the system runner and wait until it prints a
+/// descendant's pid on the attached stdout. `run_bounded` is exactly
+/// `run_attachment_bounded(spawn_attached(..))`; splitting it lets the
+/// deadline start after the descendant exists. Otherwise a starved runner can
+/// reach the deadline and kill the group before the fixture forks, escapes or
+/// records anything.
+fn spawn_reporting_fixture(script: String) -> (Attachment, i32) {
+    let invocation = Invocation {
+        program: "/bin/sh".into(),
+        arguments: vec!["-c".into(), script.into()],
+        working_directory: None,
+        environment: Vec::new(),
+    };
+    let mut attachment = SystemCommandRunner::new("/tmp")
+        .spawn_attached(&invocation)
+        .unwrap();
+    let mut stdout = std::mem::replace(&mut attachment.stdout, Box::new(io::empty()));
+    let (send, receive) = mpsc::channel();
+    thread::spawn(move || {
+        let mut line = Vec::new();
+        let mut byte = [0];
+        while stdout.read_exact(&mut byte).is_ok() && byte[0] != b'\n' {
+            line.push(byte[0]);
+        }
+        let _ = send.send((stdout, line));
+    });
+    let (stdout, line) = receive
+        .recv_timeout(Duration::from_secs(30))
+        .expect("fixture did not report its descendant's pid");
+    attachment.stdout = stdout;
+    let pid = String::from_utf8(line)
+        .ok()
+        .and_then(|line| line.parse().ok())
+        .expect("fixture reported no pid");
+    (attachment, pid)
 }
 
 /// Whether `pid` exits (or is a zombie awaiting its reaper) within a generous
@@ -1588,28 +1617,15 @@ fn exits(pid: i32) -> bool {
 
 #[test]
 fn bounded_system_runner_kills_descendant_process_group() {
-    let directory = tempfile::tempdir().unwrap();
-    let child_pid = directory.path().join("child.pid");
-    let script = format!(
-        "sleep {DESCENDANT_LIFETIME_SECS} & echo $! > '{}'; wait",
-        child_pid.display()
-    );
-    let runner = SystemCommandRunner::new("/tmp");
-    let invocation = Invocation {
-        program: "/bin/sh".into(),
-        arguments: vec!["-c".into(), script.into()],
-        working_directory: None,
-        environment: Vec::new(),
-    };
+    let (attachment, child_pid) =
+        spawn_reporting_fixture(format!("sleep {DESCENDANT_LIFETIME_SECS} & echo $!; wait"));
 
     let started = std::time::Instant::now();
-    let error = runner
-        .run_bounded(&invocation, FIXTURE_DEADLINE)
-        .unwrap_err();
+    let error = run_attachment_bounded(attachment, FIXTURE_DEADLINE).unwrap_err();
     assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
     assert!(started.elapsed() < Duration::from_secs(DESCENDANT_LIFETIME_SECS / 2));
     assert!(
-        exits(fixture_pid(&child_pid)),
+        exits(child_pid),
         "the descendant outlived its process group's deadline"
     );
 }
@@ -1711,25 +1727,12 @@ fn bounded_attachment_successful_output_cannot_hide_termination_failure() {
 #[test]
 #[cfg(target_os = "linux")]
 fn bounded_system_runner_cancels_escaped_pipe_holders_without_waiting_for_eof() {
-    let root = tempfile::tempdir().unwrap();
-    let pid_file = root.path().join("escaped-pid");
-    let invocation = Invocation {
-        program: "/bin/sh".into(),
-        arguments: vec![
-            "-c".into(),
-            format!(
-                "setsid /bin/sh -c 'echo $$ > {}; exec sleep {DESCENDANT_LIFETIME_SECS}' & exit 7",
-                pid_file.display()
-            )
-            .into(),
-        ],
-        working_directory: None,
-        environment: Vec::new(),
-    };
+    let (attachment, pid) = spawn_reporting_fixture(format!(
+        "setsid /bin/sh -c 'echo $$; exec sleep {DESCENDANT_LIFETIME_SECS}' & exit 7"
+    ));
     let started = std::time::Instant::now();
-    let result = SystemCommandRunner::new("/tmp").run_bounded(&invocation, FIXTURE_DEADLINE);
+    let result = run_attachment_bounded(attachment, FIXTURE_DEADLINE);
     let elapsed = started.elapsed();
-    let pid = fixture_pid(&pid_file);
     // This deliberately escaped fixture remains alive: EOF was not manufactured
     // by killing it. Test teardown explicitly terminates its own exact group.
     let live = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok();
@@ -1791,23 +1794,10 @@ fn local_control_is_fenced_after_reaping_for_both_pipe_and_pty() {
 #[test]
 #[cfg(target_os = "linux")]
 fn bounded_system_runner_kills_group_even_when_leader_exited_before_pipe_drain() {
-    let root = tempfile::tempdir().unwrap();
-    let pid_file = root.path().join("child-pid");
-    let invocation = Invocation {
-        program: "/bin/sh".into(),
-        arguments: vec![
-            "-c".into(),
-            format!(
-                "/bin/sh -c 'echo $$ > {}; exec sleep {DESCENDANT_LIFETIME_SECS}' & exit 7",
-                pid_file.display()
-            )
-            .into(),
-        ],
-        working_directory: None,
-        environment: Vec::new(),
-    };
-    let result = SystemCommandRunner::new("/tmp").run_bounded(&invocation, FIXTURE_DEADLINE);
-    let pid = fixture_pid(&pid_file);
+    let (attachment, pid) = spawn_reporting_fixture(format!(
+        "/bin/sh -c 'echo $$; exec sleep {DESCENDANT_LIFETIME_SECS}' & exit 7"
+    ));
+    let result = run_attachment_bounded(attachment, FIXTURE_DEADLINE);
     let exited = exits(pid);
     if !exited {
         let _ = nix::sys::signal::kill(
