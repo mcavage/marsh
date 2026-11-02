@@ -136,6 +136,13 @@
       allowedVersions: "<3.15",
     },
     {
+      description: "CI follows the documented Node 24 toolchain and Renovate's Node engine requirement",
+      matchManagers: ["github-actions"],
+      matchPackageNames: ["actions/node-versions"],
+      matchFileNames: [".github/workflows/ci.yml"],
+      allowedVersions: "<25",
+    },
+    {
       // ignorePaths alone is not enough: presets set it too. Brush is a patched
       // vendored snapshot (docs/upstream/brush), and the notices archive holds
       // verbatim upstream files (Codex's Cargo.toml, workflows) as evidence.

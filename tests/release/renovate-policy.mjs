@@ -36,6 +36,16 @@ const action = extracted.deps.find(dep => dep.depName === 'actions/setup-python'
 assert.ok(action, 'The setup-python action must still be extracted');
 const actionPolicy = await applyPackageRules({ ...action, manager: 'github-actions', packageFile, packageRules: config.packageRules });
 assert.equal(actionPolicy.allowedVersions, undefined, 'The interpreter constraint must not restrict the action version');
+const nodeDependencies = extracted.deps.filter(dep => dep.depName === 'node' && dep.depType === 'uses-with');
+assert.ok(nodeDependencies.length, 'Renovate must find the CI Node interpreters');
+for (const dep of nodeDependencies) {
+  const nodePolicy = await applyPackageRules({ ...dep, manager: 'github-actions', packageFile, packageRules: config.packageRules });
+  assert.ok(nodePolicy.allowedVersions, 'CI Node must have a compatibility constraint');
+  assert.ok(versions.subset(dep.currentValue, nodePolicy.allowedVersions), 'Configured CI Node must satisfy its constraint');
+  assert.ok(versions.intersects(dep.currentValue, require('renovate/package.json').engines.node), 'The validator must run on a Node version supported by the Renovate engine');
+  assert.ok(versions.matches('24.22.2', nodePolicy.allowedVersions), 'Node 24 must remain eligible');
+  assert.ok(!versions.matches('26.0.0', nodePolicy.allowedVersions), 'Node 26 requires a coordinated toolchain migration');
+}
 // The shell image's interpreter and library packages have exact-version
 // dependencies. Verify that Renovate sees every pin and groups them with the
 // base-image update, rather than proposing incompatible pieces separately.
