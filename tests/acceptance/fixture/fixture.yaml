@@ -13,3 +13,8 @@ args:
     buildArg: SHELL_IMAGE
 capabilities:
   - type: com.docker.sandbox/sbx@1
+  # Prompt verbs (agent-sessions@1): marsh's task tool starts the fixture as
+  # an agent, `fixture exec sh -c PROMPT` (task_tool_uat.py).
+  - type: com.docker.sandbox/agent-sessions@1
+    config:
+      prompt: ["exec", "sh", "-c", "{{.Prompt}}"]

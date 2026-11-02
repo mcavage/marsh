@@ -985,8 +985,8 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
 /// `marsh run` from the host or the shell VM: a session-root job through
 /// `Execute` (`docs/design/processes.md` s3), narrowed by `--spawn`/`MARSH_SPAWN`.
 fn run_command(arguments: &[OsString]) -> i32 {
-    let (spawn, name, rest, acp) = match marsh::job::parse_run(arguments) {
-        Ok(Some(run)) => (run.spawn, run.name, run.arguments, run.acp),
+    let (spawn, label, name, rest, acp) = match marsh::job::parse_run(arguments) {
+        Ok(Some(run)) => (run.spawn, run.label, run.name, run.arguments, run.acp),
         Ok(None) => {
             print!("{}", marsh::job::RUN_HELP);
             return 0;
@@ -1020,7 +1020,7 @@ fn run_command(arguments: &[OsString]) -> i32 {
         environment.retain(|name, _| marsh_daemon::split::forwardable(name));
     }
     let spec = marsh_daemon::ExecuteSpec {
-        label: None,
+        label,
         kit: None,
         command: name,
         arguments: rest

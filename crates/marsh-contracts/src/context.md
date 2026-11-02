@@ -19,13 +19,10 @@ with your files, and its output and exit status come back:
     claude -p "write a test for parse()" </dev/null
 `marsh run NAME [ARG...]` does the same. A child gets no terminal: give it
 `</dev/null` (and `| cat`).
-- Private copies, compared:
-    h=$(marsh split -n ::: a codex exec "fix the test" ::: b claude -p "fix the test")
-    marsh join --keep <<<"$h"        # each branch's status, output and diff
-    marsh split apply ID b           # apply branch b's diff (ID is in the handle)
-  For work longer than your tool call's timeout, `marsh split -d ...` prints
-  the handle at once and `marsh join --keep <<<"$h"` waits later.
-- Same files, at once: `marsh fanout -n ::: t make test ::: l make lint | marsh collect`.
+Private copies (`marsh split ::: a CMD... ::: b CMD... | marsh join`,
+`marsh split apply ID LABEL`) and concurrent work on the same files
+(`marsh fanout ... | marsh collect`): `marsh split --help`, `marsh fanout
+--help`, https://runmar.sh/docs/agents.html.
 A child is a fresh container from its own Kit's image: paste what it needs
 from your image (skills under /opt/...) into its prompt.
 

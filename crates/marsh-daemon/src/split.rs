@@ -84,9 +84,13 @@ pub struct SplitCreateSpec {
     /// `split --from CHECKPOINT`: the checkpoint's tree is the base.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
-    /// `split --open --label TEXT`: recorded on the split.
+    /// `split --label TEXT`: recorded on the split and its argv branch jobs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// The caller's narrowed spawn set (`MARSH_SPAWN`) for its argv branch
+    /// jobs; admission intersects it with the parent's, so it only narrows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn: Option<Vec<String>>,
 }
 
 /// Sent by the joiner after its consumer ends (`SplitRelease`).
@@ -223,7 +227,7 @@ pub struct SplitRecord {
     /// back into its copies.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub cancelled: bool,
-    /// The creator's label (`split --open --label TEXT`).
+    /// The creator's label (`split --label TEXT`), also on its argv branch jobs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
@@ -1857,6 +1861,7 @@ impl SplitEngine {
                 session: spec.session.clone(),
                 authority: authority.clone(),
                 environment: environment.clone(),
+                spawn: spec.spawn.clone(),
                 spool: Arc::clone(&spool),
                 runtime: Arc::clone(&runtime),
                 output: Arc::clone(&output),
@@ -1969,7 +1974,6 @@ impl SplitEngine {
             return Err("split: no branches".into());
         }
         match &spec.label {
-            Some(_) if !spec.open => return Err("split: --label is for an --open split".into()),
             Some(label) if !crate::valid_label(label) => {
                 return Err("split: a label is 1 to 128 bytes with no control characters".into());
             }
@@ -2296,6 +2300,7 @@ impl SplitEngine {
             session,
             authority,
             environment,
+            spawn,
             spool,
             runtime,
             output,
@@ -2363,7 +2368,8 @@ impl SplitEngine {
         } else {
             let argv = spec.argv.clone().unwrap_or_default();
             let spec = ExecuteSpec {
-                label: None,
+                // The split's label is also its argv branch jobs' label.
+                label: record.label.clone(),
                 kit: None,
                 command: String::from_utf8_lossy(&argv[0]).into_owned(),
                 arguments: argv[1..].to_vec(),
@@ -2381,7 +2387,7 @@ impl SplitEngine {
                         Creator::Job(job) => Some(job.clone()),
                         Creator::Host | Creator::Session(_) => None,
                     },
-                    spawn: None,
+                    spawn: spawn.clone(),
                     branch: true,
                     start_env: std::collections::BTreeMap::new(),
                 }),
@@ -2642,6 +2648,7 @@ struct BranchContext {
     session: SessionSpec,
     authority: Option<SessionAuthority>,
     environment: marsh_contracts::ExportedEnvironment,
+    spawn: Option<Vec<String>>,
     spool: Arc<Vec<u8>>,
     runtime: Arc<Runtime>,
     output: Arc<AtomicUsize>,

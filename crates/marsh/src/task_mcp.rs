@@ -9,7 +9,7 @@ use marsh_contracts::process::{self as contract, JOB_JSON, JobDocument, SOCKET};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::io::{BufRead as _, Write as _};
+use std::io::{BufRead as _, Read as _, Seek as _, Write as _};
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -34,6 +34,18 @@ const DIFF_CAP: usize = 32 * 1024;
 const TRANSCRIPT_CAP: usize = 128 * 1024;
 const STDERR_TAIL: usize = 4 * 1024;
 const PROGRESS_EVERY: Duration = Duration::from_secs(20);
+/// Largest JSON-RPC message read from stdin; a longer line is refused.
+const MAX_LINE_BYTES: usize = 1 << 20;
+/// `tools/call` requests in flight at once; more are refused at once.
+const MAX_CALLS: usize = 32;
+/// Tasks one server starts (a tree's launch limit is 128 too).
+const MAX_TASKS: u64 = 128;
+/// A description is also the task's job label, `task: DESCRIPTION`
+/// (labels are at most 128 bytes).
+const MAX_DESCRIPTION_BYTES: usize = 120;
+/// The label prefix on every task's job receipt (`marsh jobs --json`,
+/// `marsh events`): `task: DESCRIPTION`.
+pub const LABEL_PREFIX: &str = "task: ";
 
 const TASK_DESCRIPTION: &str = "Hand work to another agent. Fast and cheap: use it whenever you would hand \
 work off — parallel parts, a second opinion, a review, a tool you don't hold. Defaults: the same agent as \
@@ -45,8 +57,6 @@ share the folder.";
 /// What `task-mcp` knows at start: this job and the agents it may start.
 #[derive(Clone, Debug)]
 struct Setup {
-    /// This job's id (`job:<id>` is its children's parent).
-    job: String,
     /// The calling agent's registered name: the default `agent`.
     caller: String,
     /// Agent name -> prompt verbs, limited to this job's spawn set.
@@ -87,7 +97,6 @@ impl Setup {
         });
         let short = document.job.get(..8).unwrap_or(&document.job);
         Self {
-            job: document.job.clone(),
             caller: document.name.clone(),
             agents,
             none_reason,
@@ -219,19 +228,19 @@ fn task_request(setup: &Setup, arguments: &Value) -> Result<TaskRequest, String>
     if prompt.contains('\0') {
         return Err("the prompt contains a NUL byte".into());
     }
-    let description = text("description")
-        .map(str::trim)
-        .filter(|description| !description.is_empty())
-        .map_or_else(
-            || {
-                prompt
-                    .split_whitespace()
-                    .take(6)
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            },
-            str::to_owned,
-        );
+    let description = match text("description").map(str::trim) {
+        Some(description) if !description.is_empty() => {
+            if description.len() > MAX_DESCRIPTION_BYTES
+                || description.chars().any(char::is_control)
+            {
+                return Err(format!(
+                    "`description` is 3-6 words: at most {MAX_DESCRIPTION_BYTES} bytes, no control characters"
+                ));
+            }
+            description.to_owned()
+        }
+        _ => short_description(prompt),
+    };
     if setup.agents.is_empty() {
         return Err(format!(
             "no agent can be started: {}",
@@ -280,6 +289,27 @@ fn task_request(setup: &Setup, arguments: &Value) -> Result<TaskRequest, String>
     })
 }
 
+/// The first words of `prompt` as a description: no control characters,
+/// at most `MAX_DESCRIPTION_BYTES`.
+fn short_description(prompt: &str) -> String {
+    let mut description = String::new();
+    for word in prompt.split_whitespace().take(6) {
+        let word = word.chars().filter(|c| !c.is_control()).collect::<String>();
+        if description.len() + word.len() + 1 > MAX_DESCRIPTION_BYTES {
+            break;
+        }
+        if !description.is_empty() {
+            description.push(' ');
+        }
+        description.push_str(&word);
+    }
+    if description.is_empty() {
+        "task".into()
+    } else {
+        description
+    }
+}
+
 /// How a task ended.
 #[derive(Clone, Debug, Default)]
 struct Outcome {
@@ -319,9 +349,21 @@ struct Task {
 }
 
 #[derive(Default)]
+#[allow(clippy::struct_field_names)]
 struct Tasks {
     next: u64,
+    /// stdin closed: no task starts any more.
+    closing: bool,
     tasks: BTreeMap<String, Task>,
+}
+
+/// One `tools/call` in flight, registered before its thread starts so a
+/// `notifications/cancelled` that arrives first is not lost.
+#[derive(Default)]
+struct Call {
+    cancelled: bool,
+    /// The task a blocking `task` call started.
+    task: Option<String>,
 }
 
 struct Server {
@@ -329,8 +371,7 @@ struct Server {
     tasks: Mutex<Tasks>,
     changed: Condvar,
     out: Mutex<std::io::Stdout>,
-    /// Request id -> task id, for blocking calls a client may cancel.
-    calls: Mutex<BTreeMap<String, String>>,
+    calls: Mutex<BTreeMap<String, Call>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -366,7 +407,14 @@ pub fn main(arguments: &[OsString]) -> i32 {
     let narrowed = std::env::var("MARSH_SPAWN")
         .ok()
         .map(|value| contract::parse_spawn(&value));
-    let setup = Setup::from_document(&document, narrowed.as_deref());
+    let mut setup = Setup::from_document(&document, narrowed.as_deref());
+    match private_directory(&setup.dir) {
+        Ok(directory) => setup.dir = directory,
+        Err(error) => {
+            eprintln!("marsh: task-mcp: {error}");
+            return 125;
+        }
+    }
     let server = Arc::new(Server {
         setup,
         tasks: Mutex::new(Tasks::default()),
@@ -374,13 +422,37 @@ pub fn main(arguments: &[OsString]) -> i32 {
         out: Mutex::new(std::io::stdout()),
         calls: Mutex::new(BTreeMap::new()),
     });
-    let stdin = std::io::stdin();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        if line.trim().is_empty() {
+    let mut stdin = std::io::stdin().lock();
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        match (&mut stdin)
+            .take(MAX_LINE_BYTES as u64 + 1)
+            .read_until(b'\n', &mut line)
+        {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        if line.len() > MAX_LINE_BYTES && !line.ends_with(b"\n") {
+            // Discard the rest of the oversized message.
+            let mut rest = Vec::new();
+            while !rest.ends_with(b"\n") {
+                rest.clear();
+                match (&mut stdin).take(64 * 1024).read_until(b'\n', &mut rest) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+            server.send(&json!({
+                "jsonrpc": "2.0", "id": null,
+                "error": {"code": -32600, "message": format!("message over {MAX_LINE_BYTES} bytes")}
+            }));
             continue;
         }
-        match serde_json::from_str::<Value>(&line) {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        match serde_json::from_slice::<Value>(&line) {
             Ok(Value::Array(batch)) => {
                 for message in batch {
                     Server::dispatch(&server, &message);
@@ -395,6 +467,28 @@ pub fn main(arguments: &[OsString]) -> i32 {
     }
     server.shutdown();
     0
+}
+
+/// A new owner-only directory for this server's transcripts: never one that
+/// already exists (another process could have planted links in it).
+fn private_directory(base: &Path) -> Result<PathBuf, String> {
+    use std::os::unix::fs::DirBuilderExt as _;
+    for attempt in 0..16_u32 {
+        let candidate = if attempt == 0 {
+            base.to_path_buf()
+        } else {
+            PathBuf::from(format!("{}-{attempt}", base.display()))
+        };
+        match std::fs::DirBuilder::new().mode(0o700).create(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(format!("cannot create {}: {error}", candidate.display())),
+        }
+    }
+    Err(format!(
+        "cannot create a private directory near {}",
+        base.display()
+    ))
 }
 
 impl Server {
@@ -442,11 +536,30 @@ impl Server {
             "ping" => server.reply(&id, &json!({})),
             "tools/list" => server.reply(&id, &json!({"tools": server.setup.tools()})),
             "tools/call" => {
+                let key = id.to_string();
+                {
+                    let mut calls = lock(&server.calls);
+                    if calls.len() >= MAX_CALLS || calls.contains_key(&key) {
+                        drop(calls);
+                        server.send(&json!({
+                            "jsonrpc": "2.0", "id": id,
+                            "error": {"code": -32000, "message": format!(
+                                "busy: {MAX_CALLS} tool calls are in flight (or this request id is in use)")}
+                        }));
+                        return;
+                    }
+                    calls.insert(key.clone(), Call::default());
+                }
                 let server = Arc::clone(server);
                 std::thread::spawn(move || {
-                    let result = server.call(&id, &params);
-                    lock(&server.calls).remove(&id.to_string());
-                    server.reply(&id, &result);
+                    let result = server.call(&key, &params);
+                    let cancelled = lock(&server.calls)
+                        .remove(&key)
+                        .is_some_and(|call| call.cancelled);
+                    // A cancelled request gets no response (MCP).
+                    if !cancelled {
+                        server.reply(&id, &result);
+                    }
                 });
             }
             _ => server.send(&json!({
@@ -456,15 +569,15 @@ impl Server {
         }
     }
 
-    fn call(self: &Arc<Self>, id: &Value, params: &Value) -> Value {
+    fn call(self: &Arc<Self>, key: &str, params: &Value) -> Value {
         let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
         let progress = params
             .get("_meta")
             .and_then(|meta| meta.get("progressToken"))
             .cloned();
         let result = match params["name"].as_str().unwrap_or_default() {
-            "task" => self.task(id, &arguments, progress.as_ref()),
-            "task_output" => self.task_output(&arguments, progress.as_ref()),
+            "task" => self.task(key, &arguments, progress.as_ref()),
+            "task_output" => self.task_output(key, &arguments, progress.as_ref()),
             "task_apply" => self.task_apply(&arguments),
             other => Err(format!("unknown tool `{other}`")),
         };
@@ -474,80 +587,112 @@ impl Server {
         }
     }
 
+    fn cancelled(&self, key: &str) -> bool {
+        lock(&self.calls)
+            .get(key)
+            .is_some_and(|call| call.cancelled)
+    }
+
     fn task(
         self: &Arc<Self>,
-        call: &Value,
+        key: &str,
         arguments: &Value,
         progress: Option<&Value>,
     ) -> Result<String, String> {
         let request = task_request(&self.setup, arguments)?;
-        let id = {
+        // Start and record the child under one lock, so shutdown either sees
+        // it running or refuses it.
+        let (id, pid) = {
             let mut tasks = lock(&self.tasks);
+            if tasks.closing {
+                return Err("the task server is shutting down".into());
+            }
+            if tasks.next >= MAX_TASKS {
+                return Err(format!("this server already started {MAX_TASKS} tasks"));
+            }
+            if self.cancelled(key) {
+                return Err("cancelled".into());
+            }
             tasks.next += 1;
-            format!("t{}", tasks.next)
+            let id = format!("t{}", tasks.next);
+            let directory = self.setup.dir.join(&id);
+            std::fs::create_dir(&directory)
+                .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+            let child = self.spawn(&request, &id, &directory)?;
+            let pid = child.id();
+            tasks.tasks.insert(
+                id.clone(),
+                Task {
+                    id: id.clone(),
+                    request: request.clone(),
+                    started: Instant::now(),
+                    job: None,
+                    state: State::Running { pid },
+                    applied: false,
+                },
+            );
+            let server = Arc::clone(self);
+            let watched = id.clone();
+            let watched_request = request.clone();
+            std::thread::spawn(move || server.watch(&watched, &watched_request, child, &directory));
+            (id, pid)
         };
-        let directory = self.setup.dir.join(&id);
-        std::fs::create_dir_all(&directory)
-            .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
-        let (child, start) = self.spawn(&request, &id, &directory)?;
-        let background = request.background;
-        let started = format!(
-            "Task {id} started in the background ({}, files {}). Get its result with \
-             task_output(id: \"{id}\", wait: true), or keep working and check later.",
-            request.agent,
-            files_word(request.files),
-        );
-        lock(&self.tasks).tasks.insert(
-            id.clone(),
-            Task {
-                id: id.clone(),
-                request: request.clone(),
-                started: Instant::now(),
-                job: None,
-                state: State::Running { pid: child.id() },
-                applied: false,
-            },
-        );
-        if !background {
-            lock(&self.calls).insert(call.to_string(), id.clone());
+        if request.background {
+            return Ok(format!(
+                "Task {id} started in the background ({}, files {}). Get its result with \
+                 task_output(id: \"{id}\", wait: true), or keep working and check later.",
+                request.agent,
+                files_word(request.files),
+            ));
         }
-        let server = Arc::clone(self);
-        let watched = id.clone();
-        std::thread::spawn(move || server.watch(&watched, &request, child, &directory, start));
-        if background {
-            return Ok(started);
+        let cancelled = {
+            let mut calls = lock(&self.calls);
+            let call = calls.entry(key.to_owned()).or_default();
+            call.task = Some(id.clone());
+            call.cancelled
+        };
+        if cancelled {
+            terminate(pid);
         }
-        self.wait(&id, progress);
+        self.wait(&id, progress, None);
         let tasks = lock(&self.tasks);
         render(&tasks.tasks[&id], false)
     }
 
     /// Start the child through this job's own marsh: `marsh run AGENT VERBS`
-    /// (shared) or a one-branch argv split (copy).
+    /// (shared) or a one-branch argv split (copy), labelled with the task's
+    /// description.
     fn spawn(
         &self,
         request: &TaskRequest,
         id: &str,
         directory: &Path,
-    ) -> Result<(std::process::Child, i64), String> {
+    ) -> Result<std::process::Child, String> {
         let file = |name: &str| {
-            std::fs::File::create(directory.join(name))
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(directory.join(name))
                 .map_err(|error| format!("cannot create {}/{name}: {error}", directory.display()))
         };
+        let label = format!("{LABEL_PREFIX}{}", request.description);
         let mut command = Command::new(&self.setup.marsh);
         match request.files {
             Files::Shared => {
-                command.arg("run").arg(&request.agent).args(&request.argv);
+                command
+                    .args(["run", "--label", &label])
+                    .arg(&request.agent)
+                    .args(&request.argv)
+                    .env(crate::job::STARTED_FILE, directory.join("job"));
             }
             Files::Copy => {
                 command
-                    .args(["split", "-n", ":::", id])
+                    .args(["split", "-n", "--label", &label, ":::", id])
                     .arg(&request.agent)
                     .args(&request.argv);
             }
         }
-        let start = now_unix_ms();
-        let child = command
+        command
             .stdin(Stdio::null())
             .stdout(file(match request.files {
                 Files::Shared => "stdout",
@@ -555,104 +700,74 @@ impl Server {
             })?)
             .stderr(file("stderr")?)
             .spawn()
-            .map_err(|error| format!("cannot start {}: {error}", self.setup.marsh.display()))?;
-        Ok((child, start))
+            .map_err(|error| format!("cannot start {}: {error}", self.setup.marsh.display()))
     }
 
-    /// Follow one task to its end, then record its outcome.
+    /// Follow one task to its end (reaping its process), then record it.
     fn watch(
         &self,
         id: &str,
         request: &TaskRequest,
         mut child: std::process::Child,
         directory: &Path,
-        start: i64,
     ) {
-        let mut looked = Instant::now()
-            .checked_sub(Duration::from_secs(1))
-            .unwrap_or_else(Instant::now);
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status),
                 Ok(None) => {}
                 Err(_) => break child.wait().ok(),
             }
-            let unknown = lock(&self.tasks)
-                .tasks
-                .get(id)
-                .is_some_and(|task| task.job.is_none());
-            if request.files == Files::Shared
-                && unknown
-                && looked.elapsed() >= Duration::from_millis(500)
-            {
-                looked = Instant::now();
-                if let Some(job) = self.find_child(request, start) {
-                    if let Some(task) = lock(&self.tasks).tasks.get_mut(id) {
-                        task.job = Some(job);
-                    }
-                    self.changed.notify_all();
-                }
-            }
+            self.note_job(id, directory);
             std::thread::sleep(Duration::from_millis(100));
         };
+        self.note_job(id, directory);
         let code = status.and_then(|status| status.code());
         let signal = status.and_then(|status| status.signal());
         let mut outcome = match request.files {
             Files::Shared => shared_outcome(directory, code, signal),
             Files::Copy => self.copy_outcome(directory, code, signal),
         };
-        let known = lock(&self.tasks)
-            .tasks
-            .get(id)
-            .and_then(|task| task.job.clone());
-        let job = match request.files {
-            Files::Shared => known.or_else(|| self.find_child(request, start)),
-            Files::Copy => outcome.split.as_ref().and_then(|_| {
-                read_json(&directory.join("manifest.json")).and_then(|manifest| {
-                    manifest["branches"][0]["job_id"]
-                        .as_str()
-                        .map(str::to_owned)
-                })
-            }),
-        };
-        if job.is_some() {
-            outcome.refused = None;
-        }
-        if let Some(task) = lock(&self.tasks).tasks.get_mut(id) {
-            task.job = job.or_else(|| task.job.clone());
+        let copy_job = (request.files == Files::Copy)
+            .then(|| read_json(&directory.join("manifest.json")))
+            .flatten()
+            .and_then(|manifest| {
+                manifest["branches"][0]["job_id"]
+                    .as_str()
+                    .map(str::to_owned)
+            });
+        let mut tasks = lock(&self.tasks);
+        if let Some(task) = tasks.tasks.get_mut(id) {
+            if copy_job.is_some() {
+                task.job = copy_job;
+            }
+            if task.job.is_some() {
+                // It started: its status is the agent's, not a refusal.
+                outcome.refused = None;
+            }
             task.state = State::Done(Box::new(outcome));
         }
+        drop(tasks);
         self.changed.notify_all();
     }
 
-    /// This job's child for `request`, from the job's subtree: the newest
-    /// one with the agent's name and arguments started since `start` that
-    /// no other task claimed.
-    fn find_child(&self, request: &TaskRequest, start: i64) -> Option<String> {
-        let client = marsh_daemon::Client::capability(Path::new(SOCKET));
-        let marsh_daemon::PublicReply::ProcessTree { document } = client
-            .request(marsh_daemon::PublicRequest::ProcessShow)
-            .ok()?
-        else {
-            return None;
+    /// The child's job id, as `marsh run` wrote it from the daemon's
+    /// `JobStarted` (shared tasks).
+    fn note_job(&self, id: &str, directory: &Path) {
+        let mut tasks = lock(&self.tasks);
+        let Some(task) = tasks.tasks.get_mut(id).filter(|task| task.job.is_none()) else {
+            return;
         };
-        let claimed = lock(&self.tasks)
-            .tasks
-            .values()
-            .filter_map(|task| task.job.clone())
-            .collect::<Vec<_>>();
-        let parent = format!("job:{}", self.setup.job);
-        let mut found = Vec::new();
-        collect_children(&document["jobs"], &parent, &mut found);
-        found
-            .into_iter()
-            .filter(|node| {
-                node["command"] == request.agent.as_str()
-                    && node["created_unix_ms"].as_i64().unwrap_or(0) >= start - 2_000
-                    && args_match(&node["args"], &request.argv)
-            })
-            .filter_map(|node| node["job_id"].as_str().map(str::to_owned))
-            .find(|job| !claimed.contains(job))
+        let job = read_head(&directory.join("job"), 64);
+        let job = job.trim();
+        if !job.is_empty()
+            && job
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
+        {
+            task.job = Some(job.to_owned());
+            drop(tasks);
+            self.changed.notify_all();
+        }
     }
 
     fn copy_outcome(&self, directory: &Path, code: Option<i32>, signal: Option<i32>) -> Outcome {
@@ -662,7 +777,7 @@ impl Server {
             ..Outcome::default()
         };
         let errors = read_capped(&directory.join("stderr"), STDERR_TAIL, true);
-        let handle = std::fs::read_to_string(directory.join("handle")).unwrap_or_default();
+        let handle = read_head(&directory.join("handle"), 4096);
         let split = handle
             .lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
@@ -729,59 +844,62 @@ impl Server {
         if lane.join("diff.patch").is_file() {
             outcome.patch = Some(lane.join("diff.patch"));
         }
-        outcome.files = std::fs::read_to_string(lane.join("files"))
-            .unwrap_or_default()
+        outcome.files = read_head(&lane.join("files"), 64 * 1024)
             .lines()
             .map(str::to_owned)
             .collect();
         if branch["job_id"].is_null() && outcome.code != Some(0) {
-            outcome.refused = Some(refusal_text(&outcome.stderr, outcome.code, signal));
+            // The branch's admission refusal is its status (`failed: ...`).
+            let reason = format!("{}\n{}", outcome.status, outcome.stderr);
+            outcome.refused = Some(refusal_text(&reason, outcome.code, signal));
         }
         outcome
     }
 
-    /// Wait for a task to finish, sending progress when the client asked.
-    fn wait(&self, id: &str, progress: Option<&Value>) {
+    /// Wait for a task to finish, sending progress when the client asked;
+    /// with `call`, stop waiting (false) when that call is cancelled.
+    fn wait(&self, id: &str, progress: Option<&Value>, call: Option<&str>) -> bool {
         let started = Instant::now();
         let mut tick = 0_u64;
         let mut tasks = lock(&self.tasks);
         loop {
-            match tasks.tasks.get(id) {
-                Some(Task {
-                    state: State::Running { .. },
-                    ..
-                }) => {}
-                _ => return,
+            if !matches!(
+                tasks.tasks.get(id).map(|task| &task.state),
+                Some(State::Running { .. })
+            ) {
+                return true;
+            }
+            if call.is_some_and(|call| self.cancelled(call)) {
+                return false;
             }
             let (next, _) = self
                 .changed
-                .wait_timeout(tasks, PROGRESS_EVERY)
+                .wait_timeout(tasks, Duration::from_millis(500))
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             tasks = next;
             if let Some(token) = progress
                 && started.elapsed() >= PROGRESS_EVERY * u32::try_from(tick + 1).unwrap_or(u32::MAX)
             {
                 tick += 1;
-                let running = matches!(
-                    tasks.tasks.get(id).map(|task| &task.state),
-                    Some(State::Running { .. })
-                );
-                if running {
-                    self.send(&json!({
-                        "jsonrpc": "2.0",
-                        "method": "notifications/progress",
-                        "params": {
-                            "progressToken": token,
-                            "progress": tick,
-                            "message": format!("task {id} running for {}s", started.elapsed().as_secs()),
-                        }
-                    }));
-                }
+                self.send(&json!({
+                    "jsonrpc": "2.0",
+                    "method": "notifications/progress",
+                    "params": {
+                        "progressToken": token,
+                        "progress": tick,
+                        "message": format!("task {id} running for {}s", started.elapsed().as_secs()),
+                    }
+                }));
             }
         }
     }
 
-    fn task_output(&self, arguments: &Value, progress: Option<&Value>) -> Result<String, String> {
+    fn task_output(
+        &self,
+        key: &str,
+        arguments: &Value,
+        progress: Option<&Value>,
+    ) -> Result<String, String> {
         let id = self.known(arguments)?;
         let flag = |name: &str| {
             arguments
@@ -789,8 +907,8 @@ impl Server {
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
         };
-        if flag("wait") {
-            self.wait(&id, progress);
+        if flag("wait") && !self.wait(&id, progress, Some(key)) {
+            return Err("cancelled".into());
         }
         let tasks = lock(&self.tasks);
         render(&tasks.tasks[&id], flag("transcript"))
@@ -886,42 +1004,64 @@ impl Server {
         }
     }
 
-    /// A client cancelled a blocking `task` call: stop its child (the in-job
-    /// marsh relays the signal, which cancels the child job or the split).
+    /// A client cancelled a call: a blocking `task` stops its child (the
+    /// in-job marsh relays the signal, which cancels the child job or the
+    /// split); a waiting `task_output` stops waiting.
     fn cancel_call(&self, request: &Value) {
-        let Some(id) = lock(&self.calls).remove(&request.to_string()) else {
-            return;
+        let task = {
+            let mut calls = lock(&self.calls);
+            let Some(call) = calls.get_mut(&request.to_string()) else {
+                return;
+            };
+            call.cancelled = true;
+            call.task.clone()
         };
-        if let Some(Task {
-            state: State::Running { pid },
-            ..
-        }) = lock(&self.tasks).tasks.get(&id)
+        if let Some(id) = task
+            && let Some(Task {
+                state: State::Running { pid },
+                ..
+            }) = lock(&self.tasks).tasks.get(&id)
         {
             terminate(*pid);
         }
+        self.changed.notify_all();
     }
 
-    /// stdin closed: the agent is gone. Stop every running task and wait
-    /// briefly for them to end.
+    /// stdin closed: the agent is gone. No task starts any more; every
+    /// running one is stopped (TERM, then KILL after 15 s) and reaped.
     fn shutdown(&self) {
-        for task in lock(&self.tasks).tasks.values() {
-            if let State::Running { pid } = task.state {
-                terminate(pid);
-            }
-        }
-        let deadline = Instant::now() + Duration::from_secs(15);
-        let mut tasks = lock(&self.tasks);
-        while Instant::now() < deadline
-            && tasks
+        let running = |tasks: &Tasks| {
+            tasks
                 .tasks
                 .values()
-                .any(|task| matches!(task.state, State::Running { .. }))
-        {
-            tasks = self
-                .changed
-                .wait_timeout(tasks, Duration::from_millis(200))
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .0;
+                .filter_map(|task| match task.state {
+                    State::Running { pid } => Some(pid),
+                    State::Done(_) => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut tasks = lock(&self.tasks);
+        tasks.closing = true;
+        for pid in running(&tasks) {
+            terminate(pid);
+        }
+        for (grace, kill) in [
+            (Duration::from_secs(15), true),
+            (Duration::from_secs(5), false),
+        ] {
+            let deadline = Instant::now() + grace;
+            while Instant::now() < deadline && !running(&tasks).is_empty() {
+                tasks = self
+                    .changed
+                    .wait_timeout(tasks, Duration::from_millis(200))
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .0;
+            }
+            if kill {
+                for pid in running(&tasks) {
+                    signal(pid, nix::sys::signal::Signal::SIGKILL);
+                }
+            }
         }
     }
 }
@@ -929,11 +1069,12 @@ impl Server {
 use std::fmt::Write as _;
 
 fn terminate(pid: u32) {
+    signal(pid, nix::sys::signal::Signal::SIGTERM);
+}
+
+fn signal(pid: u32, signal: nix::sys::signal::Signal) {
     if let Ok(pid) = i32::try_from(pid) {
-        let _ = nix::sys::signal::kill(
-            nix::unistd::Pid::from_raw(pid),
-            nix::sys::signal::Signal::SIGTERM,
-        );
+        let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), signal);
     }
 }
 
@@ -1071,32 +1212,40 @@ fn render(task: &Task, transcript: bool) -> Result<String, String> {
 }
 
 /// Up to `cap` bytes of `path` (its tail when `tail`), lossy UTF-8, with a
-/// note when cut.
+/// note when cut; never reads more than `cap` bytes.
 fn read_capped(path: &Path, cap: usize, tail: bool) -> String {
-    let Ok(bytes) = std::fs::read(path) else {
+    let Ok(mut file) = std::fs::File::open(path) else {
         return String::new();
     };
-    if bytes.len() <= cap {
-        return String::from_utf8_lossy(&bytes).into_owned();
+    let length = file.metadata().map_or(0, |metadata| metadata.len());
+    let cap64 = cap as u64;
+    if length > cap64 && tail && file.seek(std::io::SeekFrom::Start(length - cap64)).is_err() {
+        return String::new();
     }
-    if tail {
-        format!(
-            "[... first {} bytes cut]\n{}",
-            bytes.len() - cap,
-            String::from_utf8_lossy(&bytes[bytes.len() - cap..])
-        )
-    } else {
-        format!(
-            "{}\n[... cut at {cap} of {} bytes; the whole text is in {}]",
-            String::from_utf8_lossy(&bytes[..cap]),
-            bytes.len(),
+    let mut bytes = Vec::new();
+    let _ = (&mut file).take(cap64).read_to_end(&mut bytes);
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    match (length > cap64, tail) {
+        (false, _) => text,
+        (true, true) => format!("[... first {} bytes cut]\n{text}", length - cap64),
+        (true, false) => format!(
+            "{text}\n[... cut at {cap} of {length} bytes; the whole text is in {}]",
             path.display()
-        )
+        ),
     }
 }
 
+/// The first `cap` bytes of a small file, lossy UTF-8.
+fn read_head(path: &Path, cap: u64) -> String {
+    let mut bytes = Vec::new();
+    if let Ok(file) = std::fs::File::open(path) {
+        let _ = file.take(cap).read_to_end(&mut bytes);
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 fn read_json(path: &Path) -> Option<Value> {
-    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+    serde_json::from_str(&read_head(path, 4 << 20)).ok()
 }
 
 fn string_list(value: &Value) -> Vec<String> {
@@ -1107,34 +1256,6 @@ fn string_list(value: &Value) -> Vec<String> {
         .filter_map(Value::as_str)
         .map(str::to_owned)
         .collect()
-}
-
-fn collect_children<'a>(nodes: &'a Value, parent: &str, found: &mut Vec<&'a Value>) {
-    for node in nodes.as_array().into_iter().flatten() {
-        if node["node"] == "job" && node["lineage"]["parent"] == parent {
-            found.push(node);
-        }
-        collect_children(&node["children"], parent, found);
-    }
-}
-
-/// A receipt's display arguments are the first 16, each cut to 200
-/// characters: each must be a prefix of the argument we passed.
-fn args_match(recorded: &Value, argv: &[String]) -> bool {
-    let recorded = string_list(recorded);
-    recorded.len() <= argv.len()
-        && recorded
-            .iter()
-            .zip(argv)
-            .all(|(shown, passed)| passed.starts_with(shown.trim_end_matches('…')))
-}
-
-fn now_unix_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
-        })
 }
 
 #[cfg(test)]
@@ -1234,13 +1355,20 @@ mod tests {
     }
 
     #[test]
-    fn display_arguments_match_by_prefix() {
-        let long = "x".repeat(300);
-        assert!(args_match(
-            &json!(["-p", "x".repeat(200)]),
-            &["-p".into(), long.clone()]
-        ));
-        assert!(!args_match(&json!(["-p", "y"]), &["-p".into(), long]));
-        assert!(args_match(&json!([]), &["-p".into()]));
+    fn descriptions_are_bounded_labels() {
+        let setup = setup(&["claude"], None);
+        let long = "word ".repeat(40);
+        let error = task_request(&setup, &json!({"prompt": "x", "description": long})).unwrap_err();
+        assert!(error.contains("at most 120 bytes"), "{error}");
+        let error =
+            task_request(&setup, &json!({"prompt": "x", "description": "a\nb"})).unwrap_err();
+        assert!(error.contains("no control characters"), "{error}");
+        let request = task_request(
+            &setup,
+            &json!({"prompt": "fix\tthe\u{1b}[31m bug now please, thanks a lot"}),
+        )
+        .unwrap();
+        assert_eq!(request.description, "fix the[31m bug now please, thanks");
+        assert!(LABEL_PREFIX.len() + MAX_DESCRIPTION_BYTES <= 128);
     }
 }

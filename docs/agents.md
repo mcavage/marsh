@@ -60,6 +60,14 @@ the caller's folder with [`marsh split apply ID LABEL --json`](split.md):
 3-way when it no longer applies cleanly, with conflicts named. A refusal (a
 limit, a name outside the spawn set) is a tool error with marsh's reason.
 
+Each task's job carries the label `task: DESCRIPTION` (`label` in `marsh jobs
+--json`, `marsh jobs show`, and the job lines of `marsh events --json`), so a
+viewer can show the task under its caller. A description is at most 120 bytes
+with no control characters; without one, the prompt's first words are used.
+The server starts children with `marsh run --label` and, for `"copy"`,
+`marsh split --label`, whose label is also its branch jobs' label. The
+caller's `MARSH_SPAWN` narrows both kinds of child, and their own children.
+
 An agent is offered when its Kit declares non-interactive prompt verbs
 (`com.docker.sandbox/agent-sessions@1` `prompt`, shown by `marsh status
 --json` under `commands[].sessions`); the child runs `NAME VERBS...` with the

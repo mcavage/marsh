@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import shlex
+import signal
 import sys
+import time
 from typing import Any
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -29,6 +32,12 @@ SCENARIOS = {
     "T02-live-shared": "live_shared",
     "T03-live-copy-apply": "live_copy_apply",
     "T04-live-background": "live_background",
+    "T05-spawn-narrowing-grandchild": "spawn_narrowing",
+    "T06-admission-refusal": "admission_refusal",
+    "T07-cross-job-ids": "cross_job_ids",
+    "T08-cancel-and-reap": "cancel_and_reap",
+    "T09-symlink-safe-copy": "symlink_safe_copy",
+    "T10-conflicts-keep-edits": "conflicts_keep_edits",
 }
 ORDER = list(SCENARIOS)
 LIVE = {"T02-live-shared", "T03-live-copy-apply", "T04-live-background"}
@@ -57,6 +66,87 @@ print("@@" + json.dumps(out))
 """
 
 
+# A scripted MCP client for the fixture agent (no model): run as
+# `fixture exec python3 -c STEP_CLIENT STEPS` in a fixture job, it drives
+# `marsh task-mcp` through STEPS:
+#   ["call", NAME, ARGS]                     a tools/call; its result is recorded
+#   ["cancel", NAME, ARGS, SECONDS]          a tools/call cancelled after SECONDS;
+#                                            records whether a response came anyway
+#   ["sh", SCRIPT]                           a shell step in the caller's folder
+#   ["eof"]                                  close the server's stdin; record how long it took to exit
+# Every task prompt is a shell script: the fixture's prompt verbs are
+# `exec sh -c PROMPT`.
+STEP_CLIENT = r"""
+import json, subprocess, sys, threading, time
+server = subprocess.Popen(["marsh", "task-mcp"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+replies, lock = {}, threading.Condition()
+def reader():
+    for line in server.stdout:
+        message = json.loads(line)
+        if "id" in message:
+            with lock:
+                replies[message["id"]] = message
+                lock.notify_all()
+threading.Thread(target=reader, daemon=True).start()
+def send(message):
+    server.stdin.write(json.dumps(message) + "\n")
+    server.stdin.flush()
+def reply(n, timeout):
+    deadline = time.time() + timeout
+    with lock:
+        while n not in replies and time.time() < deadline:
+            lock.wait(deadline - time.time())
+        return replies.get(n)
+send({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-06-18",
+      "capabilities": {}, "clientInfo": {"name": "uat", "version": "0"}}})
+reply(0, 30)
+out = []
+for n, step in enumerate(json.loads(sys.argv[1]), 1):
+    if step[0] == "call":
+        send({"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {"name": step[1], "arguments": step[2]}})
+        got = reply(n, 600)
+        out.append(got and got.get("result"))
+    elif step[0] == "cancel":
+        send({"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {"name": step[1], "arguments": step[2]}})
+        time.sleep(step[3])
+        send({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": n, "reason": "uat"}})
+        out.append({"responded": reply(n, 20) is not None})
+    elif step[0] == "sh":
+        done = subprocess.run(["sh", "-c", step[1]], capture_output=True, text=True)
+        out.append({"status": done.returncode, "stdout": done.stdout, "stderr": done.stderr})
+    elif step[0] == "eof":
+        began = time.time()
+        server.stdin.close()
+        out.append({"exit": server.wait(timeout=120), "seconds": round(time.time() - began, 1)})
+if not server.stdin.closed:
+    server.stdin.close()
+    server.wait(timeout=120)
+print("@@" + json.dumps(out))
+"""
+
+
+def stage_fixture(destination: pathlib.Path) -> pathlib.Path:
+    """This checkout's fixture Kit with the canonical inputs publication adds
+    (scripts/publish-kits.py), as a source Kit marsh builds itself."""
+    import importlib.util
+    root = pathlib.Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location("marsh_publish_kits", root / "scripts/publish-kits.py")
+    kits = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(kits)
+    source = root / "tests/acceptance/fixture"
+    expanded, _ = kits.canonical_inputs(root, {source}, {})
+    budget = [kits.STAGE_LIMIT]
+    for relative in kits.git_files(source):
+        kits.copy_regular(source / relative, destination / relative, budget)
+    for relative, origin in expanded[source]["files"].items():
+        kits.copy_regular(pathlib.Path(origin), destination / relative, budget)
+    return destination
+
+
+def text_of(result: Any) -> str:
+    return (result or {}).get("content", [{}])[0].get("text", "")
+
+
 class TaskTool(ScenarioSuite):
     LABEL = "task-tool"
     EVIDENCE = "task-tool.json"
@@ -71,6 +161,8 @@ class TaskTool(ScenarioSuite):
         mapping = json.loads(registry.read_text())
         for name in ("claude", "codex", "shell"):
             mapping.setdefault(name, str(arguments.guest_artifacts / "kits" / f"marsh-{name}"))
+        if arguments.stage_fixture:
+            mapping["fixture"] = str(stage_fixture(self.root / "fixture-kit"))
         registry.write_text(json.dumps(mapping, sort_keys=True) + "\n", encoding="utf-8")
 
     def drive(self, calls: list[list[Any]], *, prefix: str = "") -> dict[str, Any]:
@@ -81,6 +173,36 @@ class TaskTool(ScenarioSuite):
         require(completed.returncode == 0 and "@@" in out,
                 f"MCP client job failed ({completed.returncode}): {out[-600:]!r} {text(completed.stderr)[-800:]!r}")
         return json.loads(out.split("@@", 1)[1])
+
+    def steps(self, steps: list[list[Any]], *, env: str = "", nest: bool = False,
+              timeout: float = 900) -> list[Any]:
+        """A fixture job running STEP_CLIENT (with `nest`, as a fixture job's child)."""
+        client = ["exec", "sh", "-c", f"{env}exec python3 -c {shlex.quote(STEP_CLIENT)} "
+                                      f"{shlex.quote(json.dumps(steps))}"]
+        argv = ["run", "fixture", *client]
+        if nest:
+            argv = ["run", "fixture", "exec", "sh", "-c", shlex.join(["fixture", *client]) + " </dev/null"]
+        completed = self.cli(argv, self.project, timeout=timeout)
+        out = text(completed.stdout)
+        require(completed.returncode == 0 and "@@" in out,
+                f"fixture MCP client failed ({completed.returncode}): {out[-800:]!r} {text(completed.stderr)[-1200:]!r}")
+        return json.loads(out.split("@@", 1)[1])
+
+    def job_state(self, job: str, timeout: float = 120) -> dict[str, Any]:
+        """A job's receipt once it is terminal with its cleanup settled."""
+        deadline = time.monotonic() + timeout
+        while True:
+            receipt = self.show(job)
+            if receipt.get("state") not in ("running", "queued", "submitted") and receipt.get("cleanup") != "pending":
+                return receipt
+            require(time.monotonic() < deadline, f"job {job} did not end: {receipt.get('state')}")
+            time.sleep(0.5)
+
+    @staticmethod
+    def job_of(result: Any) -> str:
+        found = re.search(r"job ([0-9a-f-]{36})", text_of(result))
+        require(found, f"the result names no job: {text_of(result)[-600:]!r}")
+        return found.group(1)
 
     def claude(self, prompt: str, timeout: float = 900) -> str:
         """A real claude job given the task server; returns its final message."""
@@ -116,14 +238,14 @@ class TaskTool(ScenarioSuite):
         require(set(tools) == {"task", "task_output", "task_apply"}, f"tools: {sorted(tools)}")
         description = tools["task"]["description"]
         require(description.startswith("Hand work to another agent. Fast and cheap: use it whenever you would "
-                                        "hand work off") and "Agents: claude, codex." in description,
+                                        "hand work off") and "Agents: claude, codex, fixture." in description,
                 f"task description: {description!r}")
         properties = tools["task"]["inputSchema"]["properties"]
         require(set(properties) == {"description", "prompt", "agent", "files", "background"}
                 and properties["files"]["enum"] == ["shared", "copy"]
-                and properties["agent"]["enum"] == ["claude", "codex"], f"task schema: {properties!r}"[:800])
+                and properties["agent"]["enum"] == ["claude", "codex", "fixture"], f"task schema: {properties!r}"[:800])
         texts = [(call.get("isError"), call["content"][0]["text"]) for call in out["calls"]]
-        require(texts[0] == (True, "`nope` is not an agent this job may start; available: claude, codex"),
+        require(texts[0] == (True, "`nope` is not an agent this job may start; available: claude, codex, fixture"),
                 f"unknown agent: {texts[0]!r}")
         require(texts[1][0] and "set `agent`: you (shell) are not one this job may start" in texts[1][1],
                 f"no default agent for a shell job: {texts[1]!r}")
@@ -185,6 +307,134 @@ class TaskTool(ScenarioSuite):
             "final message", 1)[-1], f"task_output: {output[-1200:]!r}")
         self.child_of_top_claude(before, "codex")
 
+    def spawn_narrowing(self) -> None:
+        """T05: MARSH_SPAWN narrowing reaches a task's child in shared and copy mode: its grandchild is refused."""
+        script = "shell -c 'echo GRANDCHILD' </dev/null; echo rc=$?"
+        out = self.steps([["call", "task", {"description": "try a grandchild", "prompt": script}],
+                          ["call", "task", {"description": "try a grandchild", "prompt": script, "files": "copy"}]],
+                         env="MARSH_SPAWN=fixture ")
+        for result, mode in zip(out, ("shared", "copy")):
+            body = text_of(result)
+            require("rc=126" in body and "GRANDCHILD" not in body.split("final message", 1)[-1],
+                    f"{mode}: the child's grandchild was not refused by the narrowed spawn set: {body[-900:]!r}")
+            child = self.job_state(self.job_of(result))
+            require(self.lin(child).get("spawn") == ["fixture"],
+                    f"{mode}: the child's recorded spawn set is not the caller's narrowed one: {self.lin(child)}")
+            require(child.get("label") == "task: try a grandchild", f"{mode}: job label: {child.get('label')!r}")
+            require(not [r for r in (self.show(j) for j in self.job_ids())
+                         if r["command"] == "shell" and f"job:{child['job_id']}" == self.lin(r, strict=False).get("parent")],
+                    f"{mode}: a shell grandchild was started")
+
+    def admission_refusal(self) -> None:
+        """T06: admission refusals (same-Kit chain; depth, shared and copy) are tool errors with marsh's reason."""
+        out = self.steps([["call", "task", {"description": "too deep", "prompt": "echo SHOULD-NOT-RUN"}]], nest=True)
+        body = text_of(out[0])
+        require(out[0].get("isError") and "same-Kit chain limit" in body and "SHOULD-NOT-RUN" not in body,
+                f"the third fixture in a row was not refused as a tool error: {body[-900:]!r}")
+        # A split's argv branch is not a same-Kit step (processes.md s6), so a
+        # copy task meets the depth limit: a `shell` caller at depth 4.
+        steps = [["call", "task", {"description": "too deep", "prompt": "echo NO", "agent": "fixture"}],
+                 ["call", "task", {"description": "too deep", "prompt": "echo NO", "agent": "fixture",
+                                   "files": "copy"}]]
+        caller = ["shell", "-c", f"exec python3 -c {shlex.quote(STEP_CLIENT)} {shlex.quote(json.dumps(steps))}"]
+        depth3 = ["fixture", "exec", "sh", "-c", shlex.join(caller) + " </dev/null"]
+        depth2 = ["shell", "-c", shlex.join(depth3) + " </dev/null"]
+        completed = self.cli(["run", "fixture", "exec", "sh", "-c", shlex.join(depth2) + " </dev/null"],
+                             self.project, timeout=900)
+        output = text(completed.stdout)
+        require(completed.returncode == 0 and "@@" in output,
+                f"depth-4 caller failed ({completed.returncode}): {output[-600:]!r} {text(completed.stderr)[-900:]!r}")
+        for result, mode in zip(json.loads(output.split("@@", 1)[1]), ("shared", "copy")):
+            body = text_of(result)
+            require(result.get("isError") and "depth limit 4" in body, f"{mode}: depth 5 was not refused: {body[-900:]!r}")
+
+    def cross_job_ids(self) -> None:
+        """T07: a task id belongs to its own job's server: another job's server refuses it."""
+        first = self.steps([["call", "task", {"description": "make a copy", "prompt": "echo x >> notes.txt; echo OK",
+                                              "files": "copy"}]])
+        require("files copy) exited 0" in text_of(first[0]), f"copy task: {text_of(first[0])[-600:]!r}")
+        second = self.steps([["call", "task_output", {"id": "t1"}], ["call", "task_apply", {"id": "t1"}]])
+        for result in second:
+            require(result.get("isError") and text_of(result).startswith("no task t1"),
+                    f"another job's task id was accepted: {text_of(result)!r}")
+        require(self.notes() == ["alpha", "beta"], f"notes.txt changed: {self.notes()}")
+
+    def cancel_and_reap(self) -> None:
+        """T08: cancelling a call stops its child or its wait; EOF and the caller's end stop and reap every task."""
+        out = self.steps([["cancel", "task", {"description": "blocking sleeper", "prompt": "sleep 300"}, 4],
+                          ["call", "task", {"description": "background sleeper", "prompt": "sleep 300",
+                                            "background": True}],
+                          ["cancel", "task_output", {"id": "t2", "wait": True}, 2],
+                          ["call", "task_output", {"id": "t2"}],
+                          ["eof"]])
+        require(out[0] == {"responded": False}, f"a cancelled task call got a response: {out[0]}")
+        require(out[2] == {"responded": False}, f"a cancelled task_output wait got a response: {out[2]}")
+        require("is running" in text_of(out[3]), f"the background task stopped with the wait: {text_of(out[3])!r}")
+        require(out[4]["exit"] == 0 and out[4]["seconds"] < 30, f"the server did not exit promptly: {out[4]}")
+        sleepers = [r for r in (self.show(j) for j in self.job_ids()) if r.get("label") in
+                    ("task: blocking sleeper", "task: background sleeper")]
+        require(len(sleepers) == 2, f"want both sleeper jobs: {[r.get('label') for r in sleepers]}")
+        for receipt in sleepers:
+            settled = self.job_state(receipt["job_id"])
+            require(settled["state"] == "cancelled" and settled["cleanup"] == "verified",
+                    f"{settled.get('label')}: not cancelled and cleaned up: {settled['state']} {settled['cleanup']}")
+        # The caller's own end (its client killed) cancels a task still running.
+        before = self.job_ids()
+        caller = self.spawn([self.marsh, "run", "fixture", "exec", "sh", "-c",
+                             f"exec python3 -c {shlex.quote(STEP_CLIENT)} " + shlex.quote(json.dumps(
+                                 [["call", "task", {"description": "orphan sleeper", "prompt": "sleep 300",
+                                                    "background": True}], ["sh", "sleep 600"]]))], self.project)
+        self.wait_until(lambda: any(self.show(j).get("label") == "task: orphan sleeper"
+                                    and self.show(j).get("state") == "running" for j in self.job_ids() - before),
+                        120, "the orphan sleeper to run", (caller,))
+        os.killpg(caller.pid, signal.SIGTERM)
+        self.reap(caller, 60)
+        for job in self.job_ids() - before:
+            settled = self.job_state(job)
+            require(settled["state"] in ("cancelled", "failed") and settled["cleanup"] == "verified",
+                    f"{settled['command']} {settled.get('label')}: survived its caller: {settled['state']}")
+
+    def symlink_safe_copy(self) -> None:
+        """T09: a copy task's links stay links: apply makes the link, never writes through one."""
+        outside = self.root / "outside.txt"
+        outside.write_text("untouched\n")
+        (self.project / "outlink").symlink_to(outside)
+        self.git(self.project, "add", "-A")
+        self.git(self.project, "commit", "-q", "-m", "outlink")
+        script = ("ln -s /etc/hostname evil && (echo pwned > outlink) 2>/dev/null; "
+                  "echo changed >> notes.txt; echo DONE")
+        out = self.steps([["call", "task", {"description": "links", "prompt": script, "files": "copy"}],
+                          ["call", "task_apply", {"id": "t1"}]])
+        require("files copy) exited 0" in text_of(out[0]), f"copy task: {text_of(out[0])[-800:]!r}")
+        require(not out[1].get("isError") and "apply clean" in text_of(out[1]), f"apply: {text_of(out[1])!r}")
+        evil = self.project / "evil"
+        require(evil.is_symlink() and os.readlink(evil) == "/etc/hostname", "the applied link is not a link")
+        require(outside.read_text() == "untouched\n", "a write through the project's link reached outside it")
+        require(self.notes() == ["alpha", "beta", "changed"], f"notes.txt: {self.notes()}")
+        evil.unlink()
+        self.git(self.project, "rm", "-q", "outlink")
+        self.git(self.project, "commit", "-q", "-m", "drop outlink")
+        self.git(self.project, "checkout", "-q", "notes.txt")
+
+    def conflicts_keep_edits(self) -> None:
+        """T10: task_apply never overwrites the caller's concurrent edits: unstaged it refuses, staged it names conflicts."""
+        task = {"description": "upper alpha", "prompt": "sed -i s/alpha/ALPHA/ notes.txt; echo DONE", "files": "copy"}
+        out = self.steps([["call", "task", task],
+                          ["sh", "sed -i s/alpha/alpha-local/ notes.txt"],
+                          ["call", "task_apply", {"id": "t1"}],
+                          ["sh", "cat notes.txt"],
+                          ["sh", "git add notes.txt"],
+                          ["call", "task_apply", {"id": "t1"}],
+                          ["sh", "cat notes.txt"]])
+        require(out[2].get("isError") and "apply failed" in text_of(out[2]), f"unstaged apply: {text_of(out[2])!r}")
+        require(out[3]["stdout"] == "alpha-local\nbeta\n", f"the refused apply changed the file: {out[3]}")
+        require(not out[5].get("isError") and "apply conflicts" in text_of(out[5]) and "notes.txt" in text_of(out[5]),
+                f"staged apply: {text_of(out[5])!r}")
+        merged = out[6]["stdout"]
+        require("alpha-local" in merged and "ALPHA" in merged and "<<<<<<<" in merged,
+                f"the conflict lost an edit: {merged!r}")
+        self.git(self.project, "reset", "-q", "--hard")
+
     def run_all(self) -> None:
         self.stock_before = stock_baseline(self.sbx)
         self.source["stock_before"] = self.stock_before
@@ -193,7 +443,12 @@ class TaskTool(ScenarioSuite):
         self.git(self.project, "add", "-A")
         self.git(self.project, "commit", "-q", "-m", "seed")
         self.document("status", "--json")
-        self.run([self.marsh, "--load", "shell", "-c", "true"], timeout=900)
+        self.run([self.marsh, "--load", "fixture,shell", "-c", "true"], timeout=1800)
+        sessions = {command["name"]: command.get("sessions") for command in
+                    self.document("status", "--json").get("commands", [])}
+        require((sessions.get("fixture") or {}).get("prompt"),
+                "the fixture Kit declares no agent-sessions@1 prompt verbs; pass --stage-fixture "
+                "or republish the fixture from this checkout")
         if LIVE & set(self.selected):
             self.run([self.marsh, "--load", "claude,codex", "-c", "true"], timeout=1800)
         self.document("status", "--json")
@@ -207,6 +462,8 @@ def main() -> int:
                  "holds the ref (registered as the harness requires; the scenarios use claude, codex and shell)")
     parser.add_argument("--live", action="store_true",
                         help="also run the billed scenarios (T02-T04: real claude and codex turns)")
+    parser.add_argument("--stage-fixture", action="store_true",
+                        help="register this checkout's fixture Kit source (with its prompt verbs) instead of --kit")
     return suite_main(TaskTool, parser)
 
 

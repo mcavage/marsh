@@ -1827,7 +1827,7 @@ impl DaemonBackend for StockDaemonBackend {
         let image = vm.job_image().clone();
         let (job_id, attempt_id, lineage) = store.begin_job_process(
             NewJob {
-                label: None,
+                label: request.label.clone(),
                 session_id: request.session.session_id.clone(),
                 command: request.command.clone(),
                 kit_ref: vm.kit_ref.clone(),
