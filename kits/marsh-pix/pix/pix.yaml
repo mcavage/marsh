@@ -35,6 +35,10 @@ capabilities:
     config:
       agent: pix
       command: ["/usr/local/bin/marsh-pix", "--acp"]
+  # Non-interactive prompt verbs: how marsh's task tool starts Pix.
+  - type: com.docker.sandbox/agent-sessions@1
+    config:
+      prompt: ["-p", "{{.Prompt}}"]
   - type: com.docker.sandbox/network-policy@1
     config:
       runtime:

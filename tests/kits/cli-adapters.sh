@@ -157,7 +157,9 @@ printf 'prompt over stdin' | run_adapter pi "$root/pi-pipe"
 assert_invocation "$root/pi-pipe" 'tty=no
 arg=--approve
 arg=-e
-arg=/opt/marsh/pi-gateway/mcp-gateway.mjs'
+arg=/opt/marsh/pi-gateway/mcp-gateway.mjs
+arg=-e
+arg=/opt/marsh/pi-gateway/marsh-task.mjs'
 test "$(cat "$root/pi-pipe/stdin")" = 'prompt over stdin'
 
 # Explicit subcommands and options reach the real CLI exactly once and in
@@ -191,6 +193,8 @@ assert_invocation "$root/pi-help" 'tty=no
 arg=--approve
 arg=-e
 arg=/opt/marsh/pi-gateway/mcp-gateway.mjs
+arg=-e
+arg=/opt/marsh/pi-gateway/marsh-task.mjs
 arg=--help'
 
 # A bare Codex invocation on a terminal remains the interactive TUI. Python is

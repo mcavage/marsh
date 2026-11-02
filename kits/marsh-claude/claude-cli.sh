@@ -42,8 +42,15 @@ case "${1:-}" in
   *) exec "$cli" "$@" ;;
 esac
 
+# With the task tool (below), the merged settings also deny Claude's own
+# subagent tools and add the PreToolUse hook that refuses them.
+task=
+if [ -r /run/marsh/job.json ] && /run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1; then
+  task=1
+fi
+
 merge() {
-  node -e '
+  MARSH_TASK_TOOL=$task node -e '
 const fs = require("fs");
 const value = process.argv[1];
 let settings;
@@ -56,6 +63,16 @@ if (settings === null || Array.isArray(settings) || typeof settings !== "object"
 const sandbox = settings.sandbox !== null && typeof settings.sandbox === "object" &&
   !Array.isArray(settings.sandbox) ? settings.sandbox : {};
 settings.sandbox = {...sandbox, enabled: false};
+if (process.env.MARSH_TASK_TOOL === "1") {
+  const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const permissions = object(settings.permissions);
+  const deny = Array.isArray(permissions.deny) ? permissions.deny : [];
+  settings.permissions = {...permissions, deny: [...deny, "Agent", "Workflow"]};
+  const hooks = object(settings.hooks);
+  const pre = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : [];
+  settings.hooks = {...hooks, PreToolUse: [...pre, {matcher: "Agent|Task|Workflow", hooks: [{type: "command",
+    command: "echo \"use mcp__marsh__task: subagents here are marsh agents\" >&2; exit 2"}]}]};
+}
 process.stdout.write(JSON.stringify(settings));
 ' "$1"
 }
@@ -97,7 +114,12 @@ for argument do
 done
 shift "$count"
 if [ -z "$found" ]; then
-  set -- "$@" --settings '{"sandbox":{"enabled":false}}'
+  set -- "$@" --settings "$(merge '{}')"
+fi
+# The task tool's server, for this session only (Claude merges repeated
+# --mcp-config values with the SDK's own).
+if [ -n "$task" ]; then
+  set -- --mcp-config '{"mcpServers":{"marsh":{"command":"/run/marsh/bin/marsh","args":["task-mcp"],"alwaysLoad":true}}}' "$@"
 fi
 if [ -z "$appended" ] && [ -n "$context" ]; then
   set -- "$@" --append-system-prompt "$context"

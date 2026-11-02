@@ -308,10 +308,22 @@ fi
 # jobs (docs/agents.md). It is appended to Claude's system prompt for this run
 # only; nothing is written to the project or the selected home. Subcommands
 # take no prompt flags.
+#
+# When this job's marsh has the task tool (`marsh task-mcp`, docs/agents.md),
+# Claude's subagents are marsh agents: the server is registered for this run
+# (--mcp-config, first so that its variadic value ends at the next option),
+# and Claude's own subagent tools (Agent, Workflow) are denied, with a
+# PreToolUse hook that refuses them in case a rule is not applied.
 case "${1:-}" in
   mcp|plugin|plugins|setup-token|doctor|install|migrate-installer|config|agents|auth|remote-control|help|completion) ;;
   *)
     if [ -r /run/marsh/context.md ]; then
+      if /run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1; then
+        exec claude --mcp-config '{"mcpServers":{"marsh":{"command":"/run/marsh/bin/marsh","args":["task-mcp"],"alwaysLoad":true}}}' \
+          --dangerously-skip-permissions \
+          --settings '{"sandbox":{"enabled":false},"permissions":{"deny":["Agent","Workflow"]},"hooks":{"PreToolUse":[{"matcher":"Agent|Task|Workflow","hooks":[{"type":"command","command":"echo \"use mcp__marsh__task: subagents here are marsh agents\" >&2; exit 2"}]}]}}' \
+          --append-system-prompt "$(cat /run/marsh/context.md)" "$@"
+      fi
       exec claude --dangerously-skip-permissions --settings '{"sandbox":{"enabled":false}}' \
         --append-system-prompt "$(cat /run/marsh/context.md)" "$@"
     fi

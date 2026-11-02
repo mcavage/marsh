@@ -10,6 +10,11 @@ if (Boolean(url) !== Boolean(token) ||
   throw new Error("invalid stock MCP Gateway environment");
 }
 
+// MARSH_TASK_MCP=1 (set by an adapter whose agent takes the task tool this
+// way): every session also gets marsh's task server (`marsh task-mcp`).
+const task = process.env.MARSH_TASK_MCP === "1";
+delete process.env.MARSH_TASK_MCP;
+
 const agent = spawn(process.execPath, process.argv.slice(2), {
   stdio: ["pipe", "inherit", "inherit"],
 });
@@ -39,16 +44,24 @@ const input = new Transform({
       if (end > 1024 * 1024) return done(new Error("ACP frame too large"));
       const frame = pending.subarray(0, end);
       pending = pending.subarray(end + 1);
-      if (url) {
+      if (url || task) {
         let request;
         try { request = JSON.parse(frame); } catch { /* Agent handles invalid JSON. */ }
-        if (request?.method === "session/new" &&
-            Array.isArray(request.params?.mcpServers) &&
-            request.params.mcpServers.length === 0) {
-          request.params.mcpServers = [{
-            type: "http", name: "mcp-gateway", url,
-            headers: [{ name: "Authorization", value: `Bearer ${token}` }],
-          }];
+        const servers = request?.params?.mcpServers;
+        const gateway = url && request?.method === "session/new" &&
+          Array.isArray(servers) && servers.length === 0;
+        const marsh = task && /^session\/(new|load|resume|fork)$/.test(request?.method ?? "") &&
+          Array.isArray(servers) && !servers.some(server => server?.name === "marsh");
+        if (gateway || marsh) {
+          if (gateway) {
+            servers.push({
+              type: "http", name: "mcp-gateway", url,
+              headers: [{ name: "Authorization", value: `Bearer ${token}` }],
+            });
+          }
+          if (marsh) {
+            servers.push({ name: "marsh", command: "/run/marsh/bin/marsh", args: ["task-mcp"], env: [] });
+          }
           const rewritten = `${JSON.stringify(request)}\n`;
           if (Buffer.byteLength(rewritten) > 1024 * 1024) {
             return done(new Error("ACP frame too large after Gateway setup"));
