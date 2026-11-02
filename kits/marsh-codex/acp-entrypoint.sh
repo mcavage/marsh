@@ -109,6 +109,10 @@ if (process.argv[2] === "1") {
   const agents = config.agents !== null && typeof config.agents === "object" &&
     !Array.isArray(config.agents) ? config.agents : {};
   config.agents = {...agents, enabled: false};
+  // V2 multi-agent (`features.multi_agent_v2`, e.g. in config.toml) ignores
+  // `agents.enabled`: both features are off too.
+  config["features.multi_agent"] = false;
+  config["features.multi_agent_v2"] = false;
   config["mcp_servers.marsh.tool_timeout_sec"] = 86400;
 }
 process.stdout.write(JSON.stringify(config));

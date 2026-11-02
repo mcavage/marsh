@@ -224,10 +224,13 @@ case "${2:-}" in
       set -- -c "developer_instructions=$codex_context" "$@"
       # With the task tool (`marsh task-mcp`, docs/agents.md), Codex's
       # subagents are marsh agents: the server is registered for this run and
-      # Codex's own multi-agent tools are off (`agents.enabled`). A task can
+      # Codex's own multi-agent tools are off: `agents.enabled`, and both
+      # multi-agent features, since `features.multi_agent_v2` set in a
+      # user's config.toml brings V2's tools back regardless. A task can
       # run as long as the job, so its calls get the job's wall time.
       if /run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1; then
-        set -- -c agents.enabled=false \
+        set -- -c agents.enabled=false -c features.multi_agent=false \
+          -c features.multi_agent_v2=false \
           -c 'mcp_servers.marsh.command="/run/marsh/bin/marsh"' \
           -c 'mcp_servers.marsh.args=["task-mcp"]' \
           -c mcp_servers.marsh.tool_timeout_sec=86400 "$@"
