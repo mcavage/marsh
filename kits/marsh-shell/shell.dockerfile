@@ -2,7 +2,7 @@
 # Engine, which runs this Kit's jobs from this same image), the POSIX text
 # tools and python3 (also as `python`), assembled from Debian packages in a -dev build stage
 # (image-base/assemble-packages.sh). The runtime image has no package manager.
-FROM dhi.io/debian-base:trixie@sha256:d926f4b236859d51ce506a4efa3d93eb7d49e198450e998887dd9ba7150be599 AS base
+FROM dhi.io/debian-base:trixie@sha256:834d20c209fe4aac50dc95877d68d421f97ea38a905586bfdaf938bebb3924c0 AS base
 
 FROM dhi.io/debian-base:trixie-dev@sha256:4acea5ed5a62e96222c5dbe834e143708214208efd16a9aab4e1a2e86e1a14d4 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
