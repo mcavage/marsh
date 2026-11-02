@@ -9,15 +9,15 @@
 # `claude install` to wire the symlink. That second step is a Bun runtime,
 # which aborts under QEMU when cross-building arm64, so the kit fetches
 # the platform binary directly into the layout install.sh would have left.
-FROM dhi.io/node:26-debian13@sha256:38c8bbf0ccffd6603b32f602c08b4f407a2a83b010f7371854deaa6e0c2576c4 AS base
+FROM dhi.io/node:26-debian13@sha256:dea81b92cdabf3879e8edaad05c8aa4460603b6b0351fcf6c481eb12b24c8bd5 AS base
 
-FROM dhi.io/debian-base:trixie-dev@sha256:9e479c64f8d27f8fa368ef62804c2ddb9b3e43a68c13a200b2f668b4771b049e AS packages
+FROM dhi.io/debian-base:trixie-dev@sha256:4acea5ed5a62e96222c5dbe834e143708214208efd16a9aab4e1a2e86e1a14d4 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
 RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
 
-FROM dhi.io/debian-base:trixie-dev@sha256:9e479c64f8d27f8fa368ef62804c2ddb9b3e43a68c13a200b2f668b4771b049e AS download
+FROM dhi.io/debian-base:trixie-dev@sha256:4acea5ed5a62e96222c5dbe834e143708214208efd16a9aab4e1a2e86e1a14d4 AS download
 ARG CLAUDE_VERSION
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates
@@ -42,7 +42,7 @@ RUN case "$TARGETARCH" in \
 # Claude ACP adapter, pinned by package-lock.json. Its Agent SDK carries the
 # matching native Claude Code build, which the adapter drives through
 # claude-cli.sh so the container, not bubblewrap, stays the sandbox.
-FROM dhi.io/node:26-debian13-dev@sha256:6d1c8db117086399179ccc021bb73dd11c027760d5625befe75e2ed5f8105372 AS npm
+FROM dhi.io/node:26-debian13-dev@sha256:a7e7e221f0fda5e998a3b21b000fda21397ee767a0a643f4f8e1433912edbb36 AS npm
 WORKDIR /opt/marsh/claude-acp
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
