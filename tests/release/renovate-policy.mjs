@@ -16,6 +16,7 @@ GlobalConfig.set({ localDir: process.cwd(), platform: 'github' });
 const { extractPackageFile } = await import(new URL('./modules/manager/github-actions/extract.js', validator));
 const { applyPackageRules } = await import(new URL('./util/package-rules/index.js', validator));
 const { api: versions } = await import(new URL('./modules/versioning/npm/index.js', validator));
+const { extractPackageFile: extractRegex } = await import(new URL('./modules/manager/custom/regex/index.js', validator));
 const config = JSON5.parse(readFileSync('.github/renovate.json5', 'utf8'));
 const packageFile = '.github/workflows/ci.yml';
 const extracted = await extractPackageFile(readFileSync(packageFile, 'utf8'), packageFile);
@@ -31,4 +32,26 @@ const action = extracted.deps.find(dep => dep.depName === 'actions/setup-python'
 assert.ok(action, 'The setup-python action must still be extracted');
 const actionPolicy = await applyPackageRules({ ...action, manager: 'github-actions', packageFile, packageRules: config.packageRules });
 assert.equal(actionPolicy.allowedVersions, undefined, 'The interpreter constraint must not restrict the action version');
-console.log('Renovate publisher Python policy passed');
+// The shell image's interpreter and library packages have exact-version
+// dependencies. Verify that Renovate sees every pin and groups them with the
+// base-image update, rather than proposing incompatible pieces separately.
+const dockerfile = 'packaging/shell/Dockerfile';
+const aptManager = config.customManagers.find(manager => manager.datasourceTemplate === 'deb');
+const packages = extractRegex(readFileSync(dockerfile, 'utf8'), dockerfile, aptManager).deps;
+const family = ['python-3.14', 'python-3.14-minimal', 'libpython-3.14', 'libpython-3.14-minimal', 'libpython-3.14-stdlib'];
+const familyPins = family.map(name => {
+  const dep = packages.find(item => item.depName === name);
+  assert.ok(dep, `Renovate must discover the ${name} pin`);
+  return dep.currentValue;
+});
+assert.equal(new Set(familyPins).size, 1, 'The Python runtime family must use one revision');
+const imageFile = 'packaging/shell-image';
+const imageManager = config.customManagers.find(manager => manager.managerFilePatterns.includes('/^packaging/shell-image$/'));
+const image = extractRegex(readFileSync(imageFile, 'utf8'), imageFile, imageManager).deps[0];
+const imagePolicy = await applyPackageRules({ ...image, packageName: image.packageName ?? image.depName, manager: 'custom.regex', packageFile: imageFile, packageRules: config.packageRules });
+assert.ok(imagePolicy.groupName, 'DHI image updates must be grouped');
+for (const dep of packages) {
+  const packagePolicy = await applyPackageRules({ ...dep, packageName: dep.packageName ?? dep.depName, manager: 'custom.regex', packageFile: dockerfile, packageRules: config.packageRules });
+  assert.equal(packagePolicy.groupName, imagePolicy.groupName, `${dep.depName} must update with the DHI base`);
+}
+console.log('Renovate dependency policy passed');

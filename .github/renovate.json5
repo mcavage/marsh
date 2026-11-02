@@ -136,17 +136,17 @@
       enabled: false,
     },
     {
-      description: "All DHI bases in one PR: their license notices are verified together",
+      description: "DHI base images and apt pins move together so their package revisions stay compatible",
       matchPackageNames: ["dhi.io/**"],
-      groupName: "DHI base images",
+      groupName: "DHI inputs",
       // Digest updates carry no release date.
       minimumReleaseAge: null,
       schedule: ["at any time"],
     },
     {
-      description: "DHI-built apt packages in one PR, with the DHI base images' cadence",
+      description: "DHI-built apt packages travel with their base images",
       matchDatasources: ["deb"],
-      groupName: "DHI packages",
+      groupName: "DHI inputs",
       // The Debian index carries no release date.
       minimumReleaseAge: null,
       schedule: ["at any time"],
