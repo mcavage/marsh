@@ -77,7 +77,7 @@ jobs:
       - name: Compiler cache (content-addressed, reusable across source changes)
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
-          version: v0.18.0
+          version: v0.19.0
       # Bash is the differential-test oracle, and the oracle is GNU Bash 5.3
       # (docs/design/bash-compatibility.md); Ubuntu 24.04 ships 5.2.
       - name: GNU Bash 5.3 (test oracle)
@@ -150,7 +150,7 @@ jobs:
       - name: Compiler cache (content-addressed, reusable across source changes)
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
-          version: v0.18.0
+          version: v0.19.0
       # The differential-test oracle is GNU Bash 5.3; the runner has only
       # /bin/bash 3.2.
       - name: GNU Bash 5.3 (test oracle)
@@ -360,7 +360,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
-             ! git diff --name-only "origin/$BASE_REF...HEAD" | grep -Eq '^\.github/(renovate|workflows/ci\.yml$)'; then
+             ! git diff --name-only "origin/$BASE_REF...HEAD" | grep -Eq '^(\.github/(renovate|workflows/ci\.yml$)|tests/release/renovate-policy\.mjs$)'; then
             echo "run=false" >> "$GITHUB_OUTPUT"; echo "Renovate config unchanged."
           else echo "run=true" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -369,9 +369,10 @@ jobs:
           node-version: '24'
       - name: Validate the repository and global configs
         if: steps.changes.outputs.run == 'true'
-        # Pin the actual validator, not a moving major that can select a
-        # just-published/unavailable tarball. This version meets the local
-        # three-day npm release-age policy and requires Node 24.
+        # Use the bot's exact engine version, never a floating major. Renovate
+        # updates the shared pin after the normal release-age observation.
         run: |
-          npx --yes --package renovate@44.150.1 renovate-config-validator --strict
-          RENOVATE_CONFIG_FILE=.github/renovate-global.js npx --yes --package renovate@44.150.1 renovate-config-validator --strict
+          version=$(cat .github/renovate-version)
+          npx --yes --package "renovate@$version" renovate-config-validator --strict
+          RENOVATE_CONFIG_FILE=.github/renovate-global.js npx --yes --package "renovate@$version" renovate-config-validator --strict
+          npx --yes --package "renovate@$version" --call 'node tests/release/renovate-policy.mjs "$(command -v renovate-config-validator)"'

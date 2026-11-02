@@ -31,6 +31,14 @@
 
   customManagers: [
     {
+      description: "One Renovate version for the self-hosted bot, config validator and policy tests",
+      customType: "regex",
+      managerFilePatterns: ["/^\\.github/renovate-version$/"],
+      matchStrings: ["^(?<currentValue>\\d+\\.\\d+\\.\\d+)\\s*$"],
+      depNameTemplate: "renovate",
+      datasourceTemplate: "npm",
+    },
+    {
       description: "The shell VM template's DHI base (packaging/shell-image), by digest",
       customType: "regex",
       managerFilePatterns: ["/^packaging/shell-image$/"],
@@ -115,11 +123,24 @@
 
   packageRules: [
     {
+      description: "Renovate engine updates follow the weekly Actions cadence and run the same policy tests",
+      matchPackageNames: ["renovate"],
+      groupName: "GitHub Actions",
+      schedule: ["before 6am on monday"],
+    },
+    {
       description: "Publisher PyYAML wheels support Python through 3.14; raise with requirements-publish.txt",
       matchManagers: ["github-actions"],
-      matchPackageNames: ["python"],
+      matchPackageNames: ["actions/python-versions"],
       matchFileNames: [".github/workflows/ci.yml"],
       allowedVersions: "<3.15",
+    },
+    {
+      description: "CI follows the documented Node 24 toolchain and Renovate's Node engine requirement",
+      matchManagers: ["github-actions"],
+      matchPackageNames: ["actions/node-versions"],
+      matchFileNames: [".github/workflows/ci.yml"],
+      allowedVersions: "<25",
     },
     {
       // ignorePaths alone is not enough: presets set it too. Brush is a patched
@@ -136,17 +157,17 @@
       enabled: false,
     },
     {
-      description: "All DHI bases in one PR: their license notices are verified together",
+      description: "DHI base images and apt pins move together so their package revisions stay compatible",
       matchPackageNames: ["dhi.io/**"],
-      groupName: "DHI base images",
+      groupName: "DHI inputs",
       // Digest updates carry no release date.
       minimumReleaseAge: null,
       schedule: ["at any time"],
     },
     {
-      description: "DHI-built apt packages in one PR, with the DHI base images' cadence",
+      description: "DHI-built apt packages travel with their base images",
       matchDatasources: ["deb"],
-      groupName: "DHI packages",
+      groupName: "DHI inputs",
       // The Debian index carries no release date.
       minimumReleaseAge: null,
       schedule: ["at any time"],
