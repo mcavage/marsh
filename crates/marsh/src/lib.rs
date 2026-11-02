@@ -15,3 +15,4 @@ pub mod session_process;
 pub mod shell_choice;
 pub mod shell_supervisor;
 pub mod split_cli;
+pub mod task_mcp;

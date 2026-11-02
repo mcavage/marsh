@@ -21,6 +21,7 @@ marsh results
 | Error before a shell opens | [marsh will not start](#marsh-will-not-start) |
 | An environment file or MCP connection fails | [Environment files and MCP connections](#environment-files-and-mcp-connections) |
 | A command exits 125 or 126 | [A job was refused](#a-job-was-refused) |
+| The `task` tool returns an error, or lists no agent | [The task tool](#the-task-tool) |
 | `cleanup uncertain` in `jobs --tree`, or a worker `quarantined` in `marsh status` | [Cleanup uncertain and quarantine](#cleanup-uncertain-and-quarantine) |
 | A VM will not go away | [Removing VMs](#removing-vms) |
 | `join` left a split behind | [A split was kept](#a-split-was-kept) |
@@ -132,6 +133,22 @@ excluded by `MARSH_SPAWN` exits 126; other refusals, including those through
 Refused child calls count toward the tree's 64-launch budget. Avoid retry
 loops. A depth or same-Kit-chain refusal needs a different call structure;
 waiting will not clear it. See [job-tree limits](agents.md#limits-and-messages).
+
+## The task tool
+
+A refused `task` call is a tool error carrying the same reason as the table
+above (`task t3 (claude): the task did not start: depth limit 4`). Other
+errors:
+
+| Message | Cause |
+|---|---|
+| `no agent can be started: this job may start no agents` | the job was started with `--no-spawn` or `MARSH_SPAWN=none` |
+| `no registered agent declares non-interactive prompt verbs` | no Kit declares `agent-sessions@1` `prompt`, or marsh has not read a published Kit's descriptor yet: run `marsh status` on your Mac, then start the agent again |
+| `` `NAME` is not an agent this job may start `` | NAME is outside the spawn set or has no prompt verbs; the message lists the agents it may start |
+| `task-mcp runs inside a marsh job` | `marsh task-mcp` was started outside a Kit job |
+
+A task's whole output is in the `transcript` path its result names, inside
+the calling job's container; `marsh jobs show ID` shows its job.
 
 ## Cleanup uncertain and quarantine
 

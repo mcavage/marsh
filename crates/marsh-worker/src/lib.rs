@@ -498,10 +498,13 @@ impl Worker {
                     SetupStage::Create,
                     &error,
                 );
-                // ByteBridge is reserved for a known rejection BEFORE Docker
-                // create. Unknown/post-create errors, including carrier binding,
+                // ByteBridge and CreateNotStarted (e.g. cancelled during the
+                // image inspect) are rejections BEFORE Docker create. Unknown/post-create errors, including carrier binding,
                 // must retain ownership and quarantine even if deterministic.
-                let rejected_before_effect = matches!(error, RuntimeError::ByteBridge(_));
+                let rejected_before_effect = matches!(
+                    error,
+                    RuntimeError::ByteBridge(_) | RuntimeError::CreateNotStarted { .. }
+                );
                 // Docker refused the create, or it did not complete and its
                 // container never started, and the runtime proved nothing of
                 // it remains: this job failed, the VM is fine.

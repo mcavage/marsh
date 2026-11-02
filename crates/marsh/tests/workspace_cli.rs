@@ -263,6 +263,7 @@ fn checkpoints_keep_the_tree_and_git_state_and_retain_twenty_per_label() {
         "lane-shell-v1",
         "lane-checkpoints-v1",
         "cloud-sync-v1",
+        "task-tool-v1",
     ] {
         assert!(
             hello["features"]

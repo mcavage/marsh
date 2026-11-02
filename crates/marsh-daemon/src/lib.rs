@@ -102,6 +102,7 @@ pub const FEATURES: &[&str] = &[
     "lane-shell-v1",
     "lane-checkpoints-v1",
     "cloud-sync-v1",
+    "task-tool-v1",
 ];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while
@@ -7719,6 +7720,26 @@ impl Client {
         relay_attachment(&execution, false, input, output, error).map_err(lost_after_accept)
     }
 
+    /// [`Self::run_process_with_io`], calling `started` with the child's job
+    /// id as soon as the daemon reports it.
+    pub fn run_process_with_io_started<R, O, E>(
+        &self,
+        spec: ExecuteSpec,
+        input: R,
+        output: O,
+        error: E,
+        started: &mut dyn FnMut(&str),
+    ) -> Result<i32, DaemonError>
+    where
+        R: Read + Send + 'static,
+        O: Write,
+        E: Write,
+    {
+        let execution = self.start_attached(PublicRequest::ProcessRun(spec))?;
+        relay_attachment_started(&execution, false, input, output, error, started)
+            .map_err(lost_after_accept)
+    }
+
     fn start_attached(&self, body: PublicRequest) -> Result<ClientExecution, DaemonError> {
         let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
         write_frame(
@@ -7875,16 +7896,29 @@ fn attachment_input_closed(error: &DaemonError) -> bool {
             io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset | io::ErrorKind::NotConnected))
 }
 
+fn relay_attachment<R: Read + Send + 'static, O: Write, E: Write>(
+    execution: &ClientExecution,
+    terminal: bool,
+    input: R,
+    output: O,
+    error: E,
+) -> Result<i32, DaemonError> {
+    relay_attachment_started(execution, terminal, input, output, error, &mut |_| {})
+}
+
+/// [`relay_attachment`], calling `started` with the job id the daemon
+/// reports (`JobStarted`) before the job's output.
 #[allow(
     clippy::too_many_lines,
     reason = "one attachment owns its input, signal and output lifecycle"
 )]
-fn relay_attachment<R: Read + Send + 'static, O: Write, E: Write>(
+fn relay_attachment_started<R: Read + Send + 'static, O: Write, E: Write>(
     execution: &ClientExecution,
     terminal: bool,
     mut input: R,
     mut output: O,
     mut error: E,
+    started: &mut dyn FnMut(&str),
 ) -> Result<i32, DaemonError> {
     let (input_failure_send, input_failure_receive) = mpsc::channel();
     let signal_relay = SignalRelay::start(execution.clone(), terminal, input_failure_send.clone())?;
@@ -7981,7 +8015,8 @@ fn relay_attachment<R: Read + Send + 'static, O: Write, E: Write>(
                 }
                 error.flush()?;
             }
-            AttachmentFrame::JobStarted { .. } | AttachmentFrame::ShellReady => {}
+            AttachmentFrame::JobStarted { job_id } => started(&job_id),
+            AttachmentFrame::ShellReady => {}
             AttachmentFrame::Refresh { directories } => refresh_listings(&directories),
             AttachmentFrame::ControlError {
                 operation, message, ..

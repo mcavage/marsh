@@ -125,7 +125,7 @@ stream, and a dropped stream cancels the split, unless it was created with
 
 | Request | From | Payload -> reply |
 |---|---|---|
-| `SplitCreate` | relay, socket | `cwd`, `branches: [{label, shell(string) \| argv([..])}]`, `env`, `keep`, streamed stdin -> `split`, events, manifest. Dropping the stream before capture cancels |
+| `SplitCreate` | relay, socket | `cwd`, `branches: [{label, shell(string) \| argv([..])}]`, `env`, `keep`, `spawn?` (the caller's `MARSH_SPAWN`, narrowing every argv branch job), `label?` (also each argv branch job's label), streamed stdin -> `split`, events, manifest. Dropping the stream before capture cancels |
 | `SplitJoin` | relay, socket | `split`, then `consumed(status) \| keep` -> manifest and `out/` contents (streamed to callers that cannot see the dir). Creator only; this is also the release |
 | `SplitCancel` | relay | `split` -> ack once the subtree is revoked and signalled. The session may cancel any of its splits; a shell branch may cancel splits below it |
 | `SplitShow` | relay | `split?` -> manifest + subtree, or every split in scope |
@@ -189,7 +189,8 @@ kept splits; its text counts only attached shells.
 ## 6. Lifecycle and cleanup
 
 Split states: `run -> await -> joined | kept`, or `run -> cancelled`.
-Unfinished work becomes `uncertain` on daemon restart. Section 12 lists the
+An argv branch whose job admission refused it (a limit, the spawn set) is
+`failed: <reason>`: no job ran, so there is nothing to verify. Unfinished work becomes `uncertain` on daemon restart. Section 12 lists the
 public state strings.
 
 - **Capture** happens once every writer is confirmed gone: the shell

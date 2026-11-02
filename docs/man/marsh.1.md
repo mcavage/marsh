@@ -103,6 +103,11 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 : Print the text every job is given about marsh (its name, limits, and how to
   start other jobs).
 
+**task-mcp**
+: Inside a job only: serve the **task**, **task_output**, and **task_apply**
+  tools over MCP on stdin and stdout, so the job's agent hands work to other
+  registered agents as child jobs.
+
 **results** [**--json**]
 : List finished jobs, newest first: command, exit status, cleanup, timing.
   **WALL** is the whole request, from the call to verified cleanup. It

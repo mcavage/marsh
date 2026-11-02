@@ -13,7 +13,7 @@ use std::os::unix::process::ExitStatusExt as _;
 use std::path::Path;
 
 pub const SPLIT_HELP: &str =
-    "Usage: marsh split [-n] [-d] [--from CHECKPOINT] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]...
+    "Usage: marsh split [-n] [-d] [--from CHECKPOINT] [--label TEXT] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]...
        marsh split --open [--from CHECKPOINT] [--label TEXT] LABEL...
        marsh split close ID [--json]
        marsh split apply ID LABEL [--3way] [--json]
@@ -36,8 +36,9 @@ confined to it; only the split's creator may start them. `close` stops
 admitting lane jobs, waits up to 30 s for running ones, captures every lane,
 keeps the split, and prints its manifest. `apply` applies a captured lane's
 patch to the project in the shell VM. --from bases the forks on a checkpoint.
---label TEXT (1 to 128 bytes, no control characters) is recorded on the split:
-in its manifest, `marsh splits --json`, and its `marsh events` lines.
+--label TEXT (1 to 128 bytes, no control characters) is recorded on the split
+(its manifest, `marsh splits --json`, its `marsh events` lines) and on its
+`:::` branch jobs.
 ";
 pub const CHECKPOINT_HELP: &str =
     "Usage: marsh checkpoint [--lane SPLIT_ID/LABEL] [--label TEXT] [--json]
@@ -222,9 +223,6 @@ fn parse_split(arguments: &[OsString]) -> Result<SplitArguments, String> {
     if branches.is_empty() {
         return Err("split: no branches; see `marsh split --help`".into());
     }
-    if label.is_some() && !open {
-        return Err("split: --label is for an --open split".into());
-    }
     Ok(SplitArguments {
         branches,
         no_input: no_input || open,
@@ -297,6 +295,10 @@ fn create(channel: &Channel, parsed: SplitArguments, spool: &[u8]) -> i32 {
         environment,
         start_env,
         detach,
+        // `MARSH_SPAWN` narrows argv branch jobs as it narrows `marsh run`.
+        spawn: std::env::var("MARSH_SPAWN")
+            .ok()
+            .map(|value| marsh_contracts::process::parse_spawn(&value)),
         open: parsed.open,
         from: parsed.from,
         label: parsed.label,
@@ -775,6 +777,7 @@ impl brush_shell::bundled::split::SplitWorkspace for SessionSplit {
             from: None,
             label: None,
             detach: false,
+            spawn: None,
         };
         let client = self.client()?;
         let mut stream = client

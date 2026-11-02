@@ -27,13 +27,18 @@ Usage:
                                                            This job's Kit in Docker Cloud
   marsh jobs [--json] | jobs --tree [--json] | jobs show JOB [--json]   This job's subtree
   marsh context                                            Print this job's context
+  marsh task-mcp                                           The task tool (MCP on stdio) for this job's agent
   marsh open URL                                           Open a web link on the Mac (also xdg-open, open)
 
 Registered names in /run/marsh/bin are links: calling one starts a child job.
 See /run/marsh/context.md.
 ";
 
-pub const RUN_HELP: &str = "Usage: marsh run [--spawn NAME,...|--no-spawn] [--acp] NAME [ARG...]\n\nRun registered command NAME as a new job (from a job: a child job). stdin,\nstdout, stderr, and the exit status are relayed; a refusal exits 125.\n--spawn and --no-spawn (or MARSH_SPAWN) narrow what NAME may start;\nnothing widens it. --acp runs NAME's ACP adapter (its Kit's acp@1) as an\nACP server on stdin and stdout (not from inside a job).\n";
+pub const RUN_HELP: &str = "Usage: marsh run [--spawn NAME,...|--no-spawn] [--label TEXT] [--acp] NAME [ARG...]\n\nRun registered command NAME as a new job (from a job: a child job). stdin,\nstdout, stderr, and the exit status are relayed; a refusal exits 125.\n--spawn and --no-spawn (or MARSH_SPAWN) narrow what NAME may start;\nnothing widens it. --label TEXT (1 to 128 bytes, no control characters)\nis recorded on the job (`marsh jobs --json`, `marsh events`). --acp runs\nNAME's ACP adapter (its Kit's acp@1) as an ACP server on stdin and stdout\n(not from inside a job).\n";
+
+/// When set, `marsh run` writes the child's job id to this file as soon as
+/// the daemon reports it (`marsh task-mcp`). Never forwarded (`MARSH_*`).
+pub const STARTED_FILE: &str = "MARSH_STARTED_FILE";
 
 /// The artifact's entry: a shebang link, or (invoked directly) Brush.
 #[must_use]
@@ -84,6 +89,7 @@ pub fn main() -> i32 {
                 | "collect"
                 | "cloud"
                 | "open"
+                | "task-mcp"
         )
         && Path::new(JOB_JSON).exists()
     {
@@ -192,6 +198,7 @@ fn child(name: &str, arguments: &[OsString], spawn: Option<Vec<String>>, from_li
         spawn,
         from_link,
         marsh_daemon::Placement::Local,
+        None,
     )
 }
 
@@ -219,6 +226,7 @@ fn cloud_child(arguments: &[OsString]) -> i32 {
         None,
         false,
         marsh_daemon::Placement::Cloud,
+        None,
     )
 }
 
@@ -228,6 +236,7 @@ fn child_at(
     spawn: Option<Vec<String>>,
     from_link: bool,
     placement: marsh_daemon::Placement,
+    label: Option<String>,
 ) -> i32 {
     let document = document().unwrap_or_default();
     let refused = if from_link { 126 } else { 125 };
@@ -246,7 +255,7 @@ fn child_at(
     });
     let (environment, start_env) = offered(&document);
     let spec = ExecuteSpec {
-        label: None,
+        label,
         kit: None,
         command: name.to_owned(),
         arguments: arguments
@@ -273,11 +282,17 @@ fn child_at(
     // and started nothing, so it is retried briefly.
     let mut result = Err(DaemonError::Refused(String::new()));
     for attempt in 0..30 {
-        result = client.run_process_with_io(
+        result = client.run_process_with_io_started(
             spec.clone(),
             std::io::stdin(),
             std::io::stdout(),
             std::io::stderr(),
+            &mut |job| {
+                // `marsh task-mcp` reads its child's job id here.
+                if let Some(path) = std::env::var_os(STARTED_FILE) {
+                    let _ = std::fs::write(path, job);
+                }
+            },
         );
         match &result {
             // A refused connection may also surface as a broken pipe: the
@@ -364,7 +379,14 @@ fn cli(arguments: &[OsString]) -> i32 {
                 eprintln!("marsh: run --acp is for the host or the shell, not a job");
                 125
             }
-            Ok(Some(run)) => child(&run.name, &run.arguments, run.spawn, false),
+            Ok(Some(run)) => child_at(
+                &run.name,
+                &run.arguments,
+                run.spawn,
+                false,
+                marsh_daemon::Placement::Local,
+                run.label,
+            ),
             Err(message) => {
                 eprintln!("marsh: {message}");
                 2
@@ -387,6 +409,7 @@ fn cli(arguments: &[OsString]) -> i32 {
         "fanout" => crate::fanout_cli::fanout(rest, crate::fanout_cli::Place::Job),
         "collect" => crate::fanout_cli::collect(rest),
         "open" => open(rest),
+        "task-mcp" => crate::task_mcp::main(rest),
         other => {
             eprintln!("marsh: `{other}` is not available inside a job; see `marsh --help`");
             2
@@ -412,6 +435,7 @@ fn open(arguments: &[OsString]) -> i32 {
 #[allow(clippy::type_complexity)]
 pub fn parse_run(arguments: &[OsString]) -> Result<Option<RunArguments>, String> {
     let mut spawn = None;
+    let mut label = None;
     let mut acp = false;
     let mut index = 0;
     while let Some(argument) = arguments.get(index).and_then(|argument| argument.to_str()) {
@@ -430,6 +454,16 @@ pub fn parse_run(arguments: &[OsString]) -> Result<Option<RunArguments>, String>
             value if value.starts_with("--spawn=") => {
                 spawn = Some(contract::parse_spawn(&value["--spawn=".len()..]));
             }
+            "--label" => {
+                index += 1;
+                label = Some(
+                    arguments
+                        .get(index)
+                        .and_then(|value| value.to_str())
+                        .ok_or("run: --label needs TEXT")?
+                        .to_owned(),
+                );
+            }
             _ => break,
         }
         index += 1;
@@ -438,9 +472,10 @@ pub fn parse_run(arguments: &[OsString]) -> Result<Option<RunArguments>, String>
         .get(index)
         .and_then(|name| name.to_str())
         .filter(|name| !name.starts_with('-'))
-        .ok_or("run: usage: marsh run [--spawn NAME,...|--no-spawn] [--acp] NAME [ARG...]")?;
+        .ok_or("run: usage: marsh run [--spawn NAME,...|--no-spawn] [--label TEXT] [--acp] NAME [ARG...]")?;
     Ok(Some(RunArguments {
         spawn,
+        label,
         name: name.to_owned(),
         arguments: arguments[index + 1..].to_vec(),
         acp,
@@ -450,6 +485,8 @@ pub fn parse_run(arguments: &[OsString]) -> Result<Option<RunArguments>, String>
 /// `marsh run`'s parsed options.
 pub struct RunArguments {
     pub spawn: Option<Vec<String>>,
+    /// `--label TEXT`: recorded on the job's receipt (`marsh jobs`, events).
+    pub label: Option<String>,
     pub name: String,
     pub arguments: Vec<OsString>,
     pub acp: bool,

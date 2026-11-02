@@ -31,6 +31,8 @@ pub const MIN_CHILD_WALL_MS: u64 = 1_000;
 /// Connections per attempt on `cap.sock`: `FAN_OUT_LIMIT + 4`.
 pub const CONNECTION_LIMIT: usize = FAN_OUT_LIMIT + 4;
 pub const CONNECTION_REFUSAL: &str = "marsh: too many concurrent daemon requests in this job";
+/// The prompt in an `agent-sessions@1` `prompt` verb.
+pub const PROMPT_PLACEHOLDER: &str = "{{.Prompt}}";
 pub const TTY_REFUSAL: &str = "marsh: interactive child jobs are not supported yet";
 
 /// What the daemon asks the worker to publish for one job.
@@ -60,6 +62,11 @@ pub struct JobCapability {
         skip_serializing_if = "crate::kit_assets::KitAssets::is_empty"
     )]
     pub kit: crate::kit_assets::KitAssets,
+    /// Each registered agent's non-interactive prompt verbs
+    /// (`agent-sessions@1` `prompt`, e.g. `["-p", "{{.Prompt}}"]`), for
+    /// `marsh task-mcp`. A name without them is not offered as an agent.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub prompts: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// `/run/marsh/job.json`, written by the worker (docs/design/processes.md s4).
@@ -82,6 +89,9 @@ pub struct JobDocument {
     /// Variables received from the parent: always forwarded to children.
     #[serde(default)]
     pub forwarded: Vec<String>,
+    /// Registered agents' prompt verbs (`JobCapability::prompts`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub prompts: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

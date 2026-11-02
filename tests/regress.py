@@ -215,6 +215,11 @@ class Plan:
                             [python, str(ACCEPTANCE / "acp_uat.py"), "--marsh", str(self.marsh), "--guest-artifacts",
                              str(self.guest), *self.common()], 120, ("verify", "regress")))
         candidate("lanes_uat.py", "lanes", 240, ("verify", "regress"), ["--kit", self.kit])
+        # The task tool with the fixture as its agent (no model calls; T02-T04 are billed, `--live` by
+        # hand). Stages this checkout's fixture, whose prompt verbs a published ref may lack.
+        suites.append(Suite("task-tool", "task_tool",
+                            [python, str(ACCEPTANCE / "task_tool_uat.py"), "--prefix", str(self.prefix),
+                             "--kit", self.kit, "--stage-fixture", *self.common()], 300, ("regress",)))
         suites.append(Suite("mcp-load", "mcp_load",
                             [python, str(ACCEPTANCE / "mcp_load_uat.py"), "--marsh", str(self.marsh),
                              "--guest-artifacts", str(self.guest), *self.common(), "--kit", "fixture"],

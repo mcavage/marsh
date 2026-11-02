@@ -26,6 +26,7 @@ def suites() -> list[tuple[str, str, list[tuple[str, str]]]]:
     from harness import scenario_list
     from processes_uat import LIVE, Processes
     from shells_uat import Shells
+    from task_tool_uat import LIVE as TASK_LIVE, TaskTool
     from workspaces_uat import Workspaces
 
     processes = [(scenario, summary + (" (billed; only with `--live`)" if scenario in LIVE else ""))
@@ -35,6 +36,9 @@ def suites() -> list[tuple[str, str, list[tuple[str, str]]]]:
         ("Workspaces", "workspaces_uat.py", sorted(scenario_list(Workspaces))),
         ("Processes", "processes_uat.py", processes),
         ("Shells", "shells_uat.py", sorted(scenario_list(Shells))),
+        ("Task tool", "task_tool_uat.py",
+         [(scenario, summary + (" (billed; only with `--live`)" if scenario in TASK_LIVE else ""))
+          for scenario, summary in scenario_list(TaskTool)]),
     ]
 
 
