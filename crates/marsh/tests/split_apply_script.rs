@@ -332,19 +332,47 @@ fn apply_in(root: &Path, store: &Path, patch: &Path, mode: &str) -> String {
 
 #[test]
 fn an_import_that_fails_leaves_the_index_untouched_and_the_apply_failed() {
-    use std::os::unix::fs::PermissionsExt;
     if !have_git() {
         return;
     }
-    let (root, store, patch) = three_way_case(None);
-    let index = fs::read(root.join(".git/index")).unwrap();
-    let objects = root.join(".git/objects");
-    fs::set_permissions(&objects, fs::Permissions::from_mode(0o555)).unwrap();
-    let reply = apply_in(&root, &store, &patch, "json");
-    fs::set_permissions(&objects, fs::Permissions::from_mode(0o755)).unwrap();
-    assert!(reply.starts_with("R\0failed\0"), "{reply:?}");
-    assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
-    assert_eq!(fs::read_to_string(root.join("b.txt")).unwrap(), "k-root\n");
+    for existing_fanout in [false, true] {
+        let (root, store, patch) = three_way_case(None);
+        let index = fs::read(root.join(".git/index")).unwrap();
+        let patch_text = fs::read_to_string(&patch).unwrap();
+        let header = patch_text
+            .lines()
+            .find_map(|line| line.strip_prefix("index "))
+            .unwrap();
+        let new_oid = header
+            .split_once("..")
+            .unwrap()
+            .1
+            .split_whitespace()
+            .next()
+            .unwrap();
+        let fanout = root.join(".git/objects").join(&new_oid[..2]);
+        if existing_fanout {
+            fs::create_dir_all(&fanout).unwrap();
+        }
+        // A read-only objects directory still allows writes into an existing
+        // writable fanout. Commit hashes (and thus those fanouts) vary with
+        // timestamps, making chmod alone an unreliable import failure.
+        // Block this blob's fanout with a file instead, even for a root caller.
+        let saved = root.join(".git/saved-fanout");
+        if fanout.exists() {
+            fs::rename(&fanout, &saved).unwrap();
+        }
+        fs::write(&fanout, "not a directory\n").unwrap();
+        let reply = apply_in(&root, &store, &patch, "json");
+        fs::remove_file(&fanout).unwrap();
+        if saved.exists() {
+            fs::rename(saved, fanout).unwrap();
+        }
+        assert!(reply.starts_with("R\0failed\0"), "{reply:?}");
+        assert!(reply.contains("objects could not be copied"), "{reply:?}");
+        assert_eq!(fs::read(root.join(".git/index")).unwrap(), index);
+        assert_eq!(fs::read_to_string(root.join("b.txt")).unwrap(), "k-root\n");
+    }
 }
 
 #[test]
