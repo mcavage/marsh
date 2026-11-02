@@ -189,7 +189,8 @@ kept splits; its text counts only attached shells.
 ## 6. Lifecycle and cleanup
 
 Split states: `run -> await -> joined | kept`, or `run -> cancelled`.
-Unfinished work becomes `uncertain` on daemon restart. Section 12 lists the
+An argv branch whose job admission refused it (a limit, the spawn set) is
+`failed: <reason>`: no job ran, so there is nothing to verify. Unfinished work becomes `uncertain` on daemon restart. Section 12 lists the
 public state strings.
 
 - **Capture** happens once every writer is confirmed gone: the shell

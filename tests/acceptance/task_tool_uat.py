@@ -38,6 +38,7 @@ SCENARIOS = {
     "T08-cancel-and-reap": "cancel_and_reap",
     "T09-symlink-safe-copy": "symlink_safe_copy",
     "T10-conflicts-keep-edits": "conflicts_keep_edits",
+    "T11-fan-out-limit": "fan_out_limit",
 }
 ORDER = list(SCENARIOS)
 LIVE = {"T02-live-shared", "T03-live-copy-apply", "T04-live-background"}
@@ -438,6 +439,38 @@ class TaskTool(ScenarioSuite):
         require("alpha-local" in merged and "ALPHA" in merged and "<<<<<<<" in merged,
                 f"the conflict lost an edit: {merged!r}")
         self.git(self.project, "reset", "-q", "--hard")
+
+    def fan_out_limit(self) -> None:
+        """T11: 8 live tasks: a 9th is refused (shared and copy), the caller keeps working, every result returns."""
+        workers = [["call", "task", {"description": f"worker {n}", "prompt": f"sleep 8; echo RESULT-{n}",
+                                     "background": True}] for n in range(1, 9)]
+        out = self.steps([*workers, ["sh", "sleep 4"],
+                          ["call", "task", {"description": "ninth shared", "prompt": "echo NO"}],
+                          ["call", "task", {"description": "ninth copy", "prompt": "echo NO", "files": "copy"}],
+                          *[["call", "task_output", {"id": f"t{n}", "wait": True}] for n in range(1, 9)],
+                          ["sh", "sleep 3"],
+                          ["call", "task", {"description": "after the limit", "prompt": "echo AFTER"}],
+                          # Eight more, cancelled while they start (EOF at once).
+                          *[["call", "task", {"description": f"early {n}", "prompt": "sleep 120",
+                                              "background": True}] for n in range(8)],
+                          ["eof"]])
+        for mode, result in (("shared", out[9]), ("copy", out[10])):
+            require(result.get("isError") and "fan-out limit 8" in text_of(result) and "uncertain" not in text_of(result),
+                    f"{mode}: the 9th task was not refused cleanly: {text_of(result)[-600:]!r}")
+        for n, result in enumerate(out[11:19], 1):
+            require(f"exited 0" in text_of(result) and f"RESULT-{n}" in text_of(result),
+                    f"t{n}'s result was lost: {text_of(result)[-600:]!r}")
+        require("AFTER" in text_of(out[20]), f"the caller could not start a task after the limit: {text_of(out[20])!r}")
+        require(out[-1]["exit"] == 0, f"the server did not exit: {out[-1]}")
+        tasks = [r for r in (self.show(j) for j in self.job_ids()) if (r.get("label") or "").startswith(
+            ("task: worker", "task: early", "task: after the limit"))]
+        require(len(tasks) == 17, f"want 17 task jobs: {[r.get('label') for r in tasks]}")
+        for receipt in tasks:
+            settled = self.job_state(receipt["job_id"])
+            require(settled["cleanup"] == "verified", f"{settled.get('label')}: cleanup {settled['cleanup']}")
+        status = self.document("status", "--json")
+        require(all(w.get("health") == "ready" for w in status.get("workers", [])),
+                f"a worker was quarantined: {status.get('workers')}")
 
     def run_all(self) -> None:
         self.stock_before = stock_baseline(self.sbx)

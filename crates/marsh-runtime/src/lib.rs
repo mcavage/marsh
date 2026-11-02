@@ -2063,97 +2063,19 @@ impl<R: CommandRunner> JobRuntime for DockerCliRuntime<R> {
         cancel: &Cancellation,
     ) -> Result<ContainerId, RuntimeError> {
         let cancel = cancel.with_timeout(Duration::from_secs(30));
-        cancel.check()?;
-        spec.validate()?;
-        let cwd_bytes = spec.working_directory.as_os_str().as_bytes();
-        if cwd_bytes.len() > 4096 || cwd_bytes.contains(&0) {
-            return Err(RuntimeError::InvalidSpec(
-                JobSpecError::InvalidWorkingDirectory,
-            ));
-        }
-        let sbx_environment = validate_sbx_environment(&self.sbx_environment, self.sbx_profile)?;
-        let byte_bridge = byte_carrier::required(spec);
-        let mut arguments = vec![
-            OsString::from("create"),
-            OsString::from("--interactive"),
-            // Keep the workload out of the container PID 1 slot. Linux gives
-            // PID 1 special default-signal semantics, which would otherwise
-            // let an unhandled Ctrl-C be ignored instead of terminating the
-            // attached shell process. Docker's init also reaps descendants.
-            OsString::from("--init"),
-            OsString::from("--workdir"),
-            if spec.working_directory.to_str().is_none() {
-                OsString::from("/")
-            } else {
-                spec.working_directory.as_os_str().to_owned()
-            },
-            OsString::from("--user"),
-            OsString::from(format!("{}:{}", spec.identity.uid, spec.identity.gid)),
-            OsString::from("--cap-drop"),
-            OsString::from("ALL"),
-            OsString::from("--security-opt"),
-            OsString::from("no-new-privileges=true"),
-            OsString::from("--pids-limit"),
-            spec.resources.pids.to_string().into(),
-            OsString::from("--memory"),
-            spec.resources.memory_bytes.to_string().into(),
-            OsString::from("--cpus"),
-            format!("{:.3}", f64::from(spec.resources.cpu_millis) / 1000.0).into(),
-            OsString::from("--storage-opt"),
-            format!("size={}", spec.resources.writable_bytes).into(),
-        ];
-        if spec.terminal {
-            arguments.push("--tty".into());
-        }
-        // The container's starting environment beside the image's `Env`,
-        // recorded for `job.json` as it is passed.
-        let mut started = BTreeMap::<String, Vec<u8>>::new();
-        if !sbx_environment.is_empty() {
-            let has_proxy = sbx_environment.iter().any(|(name, _)| name == "HTTP_PROXY");
-            if has_proxy {
-                validate_ca_bundle(&self.trusted_ca_bundle, self.trusted_ca_owner)?;
-            }
-            for (name, value) in sbx_environment {
-                started.insert(name.clone(), value.as_bytes().to_vec());
-                let mut assignment = OsString::from(name);
-                assignment.push("=");
-                assignment.push(value);
-                arguments.extend(["--env".into(), assignment]);
-            }
-            if has_proxy {
-                let trusted_ca_bundle = self
-                    .trusted_ca_bundle
-                    .to_str()
-                    .ok_or(RuntimeError::InvalidCaBundle)?;
-                for name in ["NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"] {
-                    started.insert(name.to_owned(), trusted_ca_bundle.as_bytes().to_vec());
-                    arguments
-                        .extend(["--env".into(), format!("{name}={trusted_ca_bundle}").into()]);
-                }
-                arguments.extend([
-                    "--mount".into(),
-                    format!(
-                        "type=bind,source={trusted_ca_bundle},target={trusted_ca_bundle},readonly"
-                    )
-                    .into(),
-                ]);
-            }
-        }
-        if !byte_bridge {
-            for (name, value) in &spec.exported_environment {
-                started.insert(name.clone(), value.clone());
-                let mut assignment = OsString::from(name);
-                assignment.push("=");
-                assignment.push(std::ffi::OsStr::from_bytes(value));
-                arguments.extend(["--env".into(), assignment]);
-            }
-        }
-        for (name, value) in &spec.session_environment {
-            started.insert(name.clone(), value.as_bytes().to_vec());
-            arguments.extend(["--env".into(), format!("{name}={value}").into()]);
-        }
-        push_docker_mounts(&mut arguments, spec)?;
-        self.capability_arguments(&mut arguments, spec, started, &cancel)?;
+        let (arguments, byte_bridge) =
+            self.create_arguments(spec, &cancel)
+                .map_err(|error| match error {
+                    // Nothing was asked of Docker to create yet: a cancel or
+                    // timeout, or a failed read (the image inspect), leaves
+                    // no container.
+                    RuntimeError::Io(_) | RuntimeError::CommandFailed { .. } => {
+                        RuntimeError::CreateNotStarted {
+                            cause: error.to_string(),
+                        }
+                    }
+                    error => error,
+                })?;
         let container = self.create_from_arguments(spec, arguments, byte_bridge, &cancel)?;
         self.writable_limits
             .lock()
@@ -2418,6 +2340,108 @@ static IMAGE_ENV: std::sync::OnceLock<Mutex<BTreeMap<String, Vec<String>>>> =
     std::sync::OnceLock::new();
 
 impl<R: CommandRunner> DockerCliRuntime<R> {
+    /// `docker create`'s arguments for `spec`; nothing is asked of Docker
+    /// to create anything here (`create_cancellable` maps any error to
+    /// `CreateNotStarted`).
+    fn create_arguments(
+        &self,
+        spec: &JobSpec,
+        cancel: &Cancellation,
+    ) -> Result<(Vec<OsString>, bool), RuntimeError> {
+        cancel.check()?;
+        spec.validate()?;
+        let cwd_bytes = spec.working_directory.as_os_str().as_bytes();
+        if cwd_bytes.len() > 4096 || cwd_bytes.contains(&0) {
+            return Err(RuntimeError::InvalidSpec(
+                JobSpecError::InvalidWorkingDirectory,
+            ));
+        }
+        let sbx_environment = validate_sbx_environment(&self.sbx_environment, self.sbx_profile)?;
+        let byte_bridge = byte_carrier::required(spec);
+        let mut arguments = vec![
+            OsString::from("create"),
+            OsString::from("--interactive"),
+            // Keep the workload out of the container PID 1 slot. Linux gives
+            // PID 1 special default-signal semantics, which would otherwise
+            // let an unhandled Ctrl-C be ignored instead of terminating the
+            // attached shell process. Docker's init also reaps descendants.
+            OsString::from("--init"),
+            OsString::from("--workdir"),
+            if spec.working_directory.to_str().is_none() {
+                OsString::from("/")
+            } else {
+                spec.working_directory.as_os_str().to_owned()
+            },
+            OsString::from("--user"),
+            OsString::from(format!("{}:{}", spec.identity.uid, spec.identity.gid)),
+            OsString::from("--cap-drop"),
+            OsString::from("ALL"),
+            OsString::from("--security-opt"),
+            OsString::from("no-new-privileges=true"),
+            OsString::from("--pids-limit"),
+            spec.resources.pids.to_string().into(),
+            OsString::from("--memory"),
+            spec.resources.memory_bytes.to_string().into(),
+            OsString::from("--cpus"),
+            format!("{:.3}", f64::from(spec.resources.cpu_millis) / 1000.0).into(),
+            OsString::from("--storage-opt"),
+            format!("size={}", spec.resources.writable_bytes).into(),
+        ];
+        if spec.terminal {
+            arguments.push("--tty".into());
+        }
+        // The container's starting environment beside the image's `Env`,
+        // recorded for `job.json` as it is passed.
+        let mut started = BTreeMap::<String, Vec<u8>>::new();
+        if !sbx_environment.is_empty() {
+            let has_proxy = sbx_environment.iter().any(|(name, _)| name == "HTTP_PROXY");
+            if has_proxy {
+                validate_ca_bundle(&self.trusted_ca_bundle, self.trusted_ca_owner)?;
+            }
+            for (name, value) in sbx_environment {
+                started.insert(name.clone(), value.as_bytes().to_vec());
+                let mut assignment = OsString::from(name);
+                assignment.push("=");
+                assignment.push(value);
+                arguments.extend(["--env".into(), assignment]);
+            }
+            if has_proxy {
+                let trusted_ca_bundle = self
+                    .trusted_ca_bundle
+                    .to_str()
+                    .ok_or(RuntimeError::InvalidCaBundle)?;
+                for name in ["NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"] {
+                    started.insert(name.to_owned(), trusted_ca_bundle.as_bytes().to_vec());
+                    arguments
+                        .extend(["--env".into(), format!("{name}={trusted_ca_bundle}").into()]);
+                }
+                arguments.extend([
+                    "--mount".into(),
+                    format!(
+                        "type=bind,source={trusted_ca_bundle},target={trusted_ca_bundle},readonly"
+                    )
+                    .into(),
+                ]);
+            }
+        }
+        if !byte_bridge {
+            for (name, value) in &spec.exported_environment {
+                started.insert(name.clone(), value.clone());
+                let mut assignment = OsString::from(name);
+                assignment.push("=");
+                assignment.push(std::ffi::OsStr::from_bytes(value));
+                arguments.extend(["--env".into(), assignment]);
+            }
+        }
+        for (name, value) in &spec.session_environment {
+            started.insert(name.clone(), value.as_bytes().to_vec());
+            arguments.extend(["--env".into(), format!("{name}={value}").into()]);
+        }
+        push_docker_mounts(&mut arguments, spec)?;
+        self.capability_arguments(&mut arguments, spec, started, cancel)?;
+        Ok((arguments, byte_bridge))
+    }
+
     /// The worker's per-attempt job capability, read-only, with the static
     /// artifact bound over its mountpoint (`docs/design/processes.md` s4); nothing else
     /// reaches the daemon and nothing image-owned is shadowed.
@@ -2642,6 +2666,9 @@ pub enum RuntimeError {
         "docker create did not complete ({cause}); the container never started and none is left"
     )]
     CreateAbandoned { cause: String },
+    /// Failed before `docker create` was run: no container of it exists.
+    #[error("the job's container was not created ({cause})")]
+    CreateNotStarted { cause: String },
     #[error("{0}")]
     ByteBridge(&'static str),
     #[error(

@@ -2167,6 +2167,18 @@ impl SplitEngine {
             r.branches[index].started_unix_ms = Some(unix_ms());
         });
         let result = self.run_branch(context);
+        if let Err(BranchError::Refused(message)) = &result {
+            if let Some(used) = self.lock().pool.get_mut(&record.session) {
+                *used = used.saturating_sub(1);
+            }
+            let status = format!(
+                "failed: {}",
+                message.strip_prefix("marsh: ").unwrap_or(message)
+            );
+            write_status(&status);
+            set(BranchState::Failed, &status, 125);
+            return;
+        }
         if result.is_err() {
             // Transport lost: the slot stays held until `workers reset`.
             *self
@@ -2191,7 +2203,7 @@ impl SplitEngine {
         };
         let (code, stdout, stderr) = match result {
             Ok(result) => result,
-            Err(message) => {
+            Err(BranchError::Refused(message) | BranchError::Uncertain(message)) => {
                 // Never verified, never removed (`NoRemoveWhileLive`).
                 let status = format!("uncertain: {message}");
                 write_status(&status);
@@ -2292,7 +2304,7 @@ impl SplitEngine {
 
     /// Run one branch to its confirmed end: `(status, stdout, stderr)`, or an
     /// error when that end is uncertain.
-    fn run_branch(&self, context: &BranchContext) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
+    fn run_branch(&self, context: &BranchContext) -> Result<(i32, Vec<u8>, Vec<u8>), BranchError> {
         let BranchContext {
             record,
             index,
@@ -2352,7 +2364,7 @@ impl SplitEngine {
             let result = self
                 .client
                 .start_shell(spec)
-                .map_err(|e| e.to_string())
+                .map_err(|e| BranchError::Uncertain(e.to_string()))
                 .and_then(|execution| self.drive(&execution, spool, true, runtime, output, &job));
             // Capture only after every Kit job the branch started has ended
             // (H1): the shell's exit tears down their clients, and the
@@ -2362,9 +2374,9 @@ impl SplitEngine {
             let _ = store.detach_shell(&session_id);
             self.lock().branch_sessions.remove(&session_id);
             let result = result?;
-            settled
-                .then_some(result)
-                .ok_or_else(|| "a Kit job started by the branch did not end".to_owned())
+            settled.then_some(result).ok_or_else(|| {
+                BranchError::Uncertain("a Kit job started by the branch did not end".to_owned())
+            })
         } else {
             let argv = spec.argv.clone().unwrap_or_default();
             let spec = ExecuteSpec {
@@ -2393,10 +2405,11 @@ impl SplitEngine {
                 }),
                 acp: false,
             };
+            // Refused before it was accepted: nothing of the branch ran.
             let execution = self
                 .client
                 .start_execution(spec)
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| BranchError::Refused(e.to_string()))?;
             self.drive(&execution, spool, false, runtime, output, &job)
         }
     }
@@ -2421,7 +2434,8 @@ impl SplitEngine {
         runtime: &Arc<Runtime>,
         output: &Arc<AtomicUsize>,
         job: &dyn Fn(&Self, String),
-    ) -> Result<(i32, Vec<u8>, Vec<u8>), String> {
+    ) -> Result<(i32, Vec<u8>, Vec<u8>), BranchError> {
+        let mut started = false;
         runtime
             .executions
             .lock()
@@ -2465,13 +2479,25 @@ impl SplitEngine {
             }
         };
         loop {
-            match execution.receive().map_err(|e| e.to_string())? {
+            match execution
+                .receive()
+                .map_err(|e| BranchError::Uncertain(e.to_string()))?
+            {
                 AttachmentFrame::Stdout { bytes } => account(&bytes, &mut stdout),
                 AttachmentFrame::Stderr { bytes } => account(&bytes, &mut stderr),
                 AttachmentFrame::ShellReady if shell => start_input(),
-                AttachmentFrame::JobStarted { job_id } => job(self, job_id),
+                AttachmentFrame::JobStarted { job_id } => {
+                    started = true;
+                    job(self, job_id);
+                }
                 AttachmentFrame::Exited { code } => return Ok((code, stdout, stderr)),
-                AttachmentFrame::Failed { message } => return Err(message),
+                // An argv branch's job fails before `JobStarted` only when it
+                // was refused (admission: limits, spawn set): no record, no
+                // container, nothing to verify.
+                AttachmentFrame::Failed { message } if !shell && !started => {
+                    return Err(BranchError::Refused(message));
+                }
+                AttachmentFrame::Failed { message } => return Err(BranchError::Uncertain(message)),
                 _ => {}
             }
         }
@@ -2639,6 +2665,26 @@ struct Plan<'a> {
     depth: u32,
     pool: String,
     git: Option<GitSnapshot>,
+}
+
+/// Why a branch has no result.
+enum BranchError {
+    /// Refused before anything of it ran (admission): a clean failure.
+    Refused(String),
+    /// Its end was not confirmed: never verified, never removed.
+    Uncertain(String),
+}
+
+impl From<&str> for BranchError {
+    fn from(message: &str) -> Self {
+        Self::Uncertain(message.to_owned())
+    }
+}
+
+impl From<String> for BranchError {
+    fn from(message: String) -> Self {
+        Self::Uncertain(message)
+    }
 }
 
 struct BranchContext {
