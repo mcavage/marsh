@@ -4903,7 +4903,11 @@ impl ConnectionHandler {
         release_departed(&self.store, self.backend.as_ref(), &self.acp);
     }
 
-    fn handle_shutdown(&self, stream: &mut UnixStream) -> Result<(), DaemonError> {
+    fn handle_shutdown(
+        &self,
+        stream: &mut UnixStream,
+        admission: RequestAdmission,
+    ) -> Result<(), DaemonError> {
         // The pinned stock SBX was removed: this daemon can no longer reach a
         // VM, so it can neither clean up nor serve, and only a new daemon can
         // recover. Never with live work attached: an open shell or a running
@@ -4911,11 +4915,16 @@ impl ConnectionHandler {
         let removed = stock_sbx_removed(self.stock_sbx.as_deref());
         let may_stop = self.store.safe_to_shutdown() || (removed && self.store.can_recover());
         if !may_stop {
+            let message = self.busy_lifecycle_message();
+            // The daemon keeps serving: release the lifecycle admission
+            // before the refusal, so the caller's next request (a retry, or
+            // a probe) is never refused by this one's tail.
+            drop(admission);
             return write_frame(
                 stream,
                 &PublicReply::Error {
                     code: ErrorCode::InvalidRequest,
-                    message: self.busy_lifecycle_message(),
+                    message,
                 },
             );
         }
@@ -4950,7 +4959,6 @@ impl ConnectionHandler {
         request: PublicRequest,
     ) -> Result<(), DaemonError> {
         match request {
-            PublicRequest::Shutdown => self.handle_shutdown(&mut stream),
             PublicRequest::AttachEphemeralShell {
                 pid,
                 session,
@@ -5910,7 +5918,7 @@ impl ConnectionHandler {
         } else {
             self.store.begin_ordinary_request()
         };
-        let _admission = match admission {
+        let admission = match admission {
             Ok(admission) => admission,
             Err(error) => {
                 return write_frame(
@@ -6008,6 +6016,7 @@ impl ConnectionHandler {
             _ => requested,
         };
         match request.body {
+            PublicRequest::Shutdown => self.handle_shutdown(&mut stream, admission),
             PublicRequest::SplitClose { split } => {
                 // A detached cloud run in a lane's copy settles by collection,
                 // which the background collector does every few minutes: while
