@@ -946,8 +946,11 @@ mod tests {
     }
 
     /// Bound a relay join so a protocol regression fails instead of hanging.
-    fn join_within(handle: thread::JoinHandle<Result<(), DaemonError>>) -> Result<(), DaemonError> {
-        wait_until("the host relay stops", || handle.is_finished());
+    fn join_within(
+        what: &str,
+        handle: thread::JoinHandle<Result<(), DaemonError>>,
+    ) -> Result<(), DaemonError> {
+        wait_until(what, || handle.is_finished());
         handle.join().unwrap()
     }
 
@@ -1044,7 +1047,7 @@ mod tests {
         write_frame(&mut guest, &TunnelFrame::Shutdown).unwrap();
         write_frame(&mut guest, &TunnelFrame::Cleaned).unwrap();
         release_send.send(()).unwrap();
-        join_within(relay).unwrap();
+        join_within("the host relay stops", relay).unwrap();
         acceptor.join().unwrap();
     }
 
@@ -1098,7 +1101,7 @@ mod tests {
         let mut guest = sender.join().unwrap().unwrap();
         write_frame(&mut guest, &TunnelFrame::Shutdown).unwrap();
         write_frame(&mut guest, &TunnelFrame::Cleaned).unwrap();
-        join_within(relay).unwrap();
+        join_within("the host relay stops", relay).unwrap();
         sibling_result.unwrap();
         assert_eq!(&actual, b"sibling");
     }
@@ -1111,7 +1114,6 @@ mod tests {
         let (host, mut guest) = socket_pair();
         guest.set_read_timeout(Some(PATIENCE)).unwrap();
         guest.set_write_timeout(Some(PATIENCE)).unwrap();
-        let control = guest.try_clone().unwrap();
         let host_reader = host.try_clone().unwrap();
         let relay = thread::spawn(move || run_host(host_reader, host, &socket, "a".repeat(64)));
         assert!(matches!(
@@ -1157,10 +1159,15 @@ mod tests {
         write_frame(&mut guest, &TunnelFrame::Eof { connection: 1 }).unwrap();
         let delivered = read_to_end(&mut replacement);
         // Always release blocked writers before assertions, including with
-        // the previous implementation that queued Close behind the data.
-        control.shutdown(Shutdown::Both).unwrap();
-        relay.join().unwrap().unwrap();
-        drain.join().unwrap();
+        // the previous implementation that queued Close behind the data. The
+        // relay stops in band: macOS can miss the wakeup of a tunnel read
+        // after a socket shutdown. Closing both daemon peers fully then ends
+        // every connection thread, so the tunnel closes and the drain ends.
+        write_frame(&mut guest, &TunnelFrame::Shutdown).unwrap();
+        write_frame(&mut guest, &TunnelFrame::Cleaned).unwrap();
+        join_within("the host relay stops", relay).unwrap();
+        drop((stalled, replacement));
+        wait_until("the tunnel drain ends", || drain.is_finished());
         assert!(
             abandoned.is_ok_and(|bytes| bytes.len() < MAX_PENDING_CHUNKS * CHUNK_BYTES),
             "Close left the abandoned socket connected or delivered all queued data"
@@ -1176,7 +1183,6 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         let (host, mut guest) = socket_pair();
         guest.set_read_timeout(Some(PATIENCE)).unwrap();
-        let control = guest.try_clone().unwrap();
         let host_reader = host.try_clone().unwrap();
         let relay = thread::spawn(move || run_host(host_reader, host, &socket, "a".repeat(64)));
         assert!(matches!(
@@ -1200,8 +1206,9 @@ mod tests {
             }
             completed += 1;
         }
-        control.shutdown(Shutdown::Both).unwrap();
-        relay.join().unwrap().unwrap();
+        write_frame(&mut guest, &TunnelFrame::Shutdown).unwrap();
+        write_frame(&mut guest, &TunnelFrame::Cleaned).unwrap();
+        join_within("the host relay stops", relay).unwrap();
         assert_eq!(
             completed,
             MAX_RELAY_CONNECTIONS * 2,
@@ -1213,7 +1220,8 @@ mod tests {
         _root: tempfile::TempDir,
         socket: PathBuf,
         listener: UnixListener,
-        control: UnixStream,
+        tunnel: SharedWriter<UnixStream>,
+        cleaned: Arc<AtomicBool>,
         host: thread::JoinHandle<Result<(), DaemonError>>,
         guest: thread::JoinHandle<Result<(), DaemonError>>,
     }
@@ -1227,21 +1235,27 @@ mod tests {
             let socket = root.path().join("session/socket");
             let token = root.path().join("session/token");
             let (host_stream, guest_stream) = socket_pair();
-            let control = host_stream.try_clone().unwrap();
             let host_reader = host_stream.try_clone().unwrap();
             let guest_reader = guest_stream.try_clone().unwrap();
+            let tunnel = Arc::new(Mutex::new(host_stream));
+            let cleaned = Arc::new(AtomicBool::new(false));
             let (ready, received) = mpsc::channel();
-            let host = thread::spawn(move || {
-                run_host_with_ready(
-                    host_reader,
-                    host_stream,
-                    &daemon_socket,
-                    "a".repeat(64),
-                    |result| {
-                        ready.send(result).unwrap();
-                    },
-                )
-            });
+            let host = {
+                let tunnel = Arc::clone(&tunnel);
+                let cleaned = Arc::clone(&cleaned);
+                thread::spawn(move || {
+                    run_host_shared(
+                        host_reader,
+                        &tunnel,
+                        &daemon_socket,
+                        "a".repeat(64),
+                        |result| {
+                            ready.send(result.map(|_| ())).unwrap();
+                        },
+                        &cleaned,
+                    )
+                })
+            };
             let guest_socket = socket.clone();
             let guest =
                 thread::spawn(move || run_guest(guest_reader, guest_stream, &guest_socket, &token));
@@ -1250,7 +1264,8 @@ mod tests {
                 _root: root,
                 socket,
                 listener,
-                control,
+                tunnel,
+                cleaned,
                 host,
                 guest,
             }
@@ -1266,10 +1281,14 @@ mod tests {
             (guest, host)
         }
 
+        /// Stop both relays in band, as the backend does. A `shutdown` of the
+        /// tunnel socket would rely on macOS waking the relays' blocked
+        /// tunnel reads, which it sometimes never does (see `READ_WAKE`).
         fn stop(self) {
-            self.control.shutdown(Shutdown::Both).unwrap();
-            self.host.join().unwrap().unwrap();
-            self.guest.join().unwrap().unwrap();
+            request_guest_shutdown(&self.tunnel).unwrap();
+            join_within("the guest relay stops", self.guest).unwrap();
+            join_within("the host relay stops", self.host).unwrap();
+            assert!(self.cleaned.load(Ordering::Acquire));
             assert!(!self.socket.exists());
         }
     }
@@ -1660,14 +1679,24 @@ mod tests {
         let socket = runtime.join("daemon.sock");
         let token_path = runtime.join("daemon.token");
         let (host_tunnel, guest_tunnel) = socket_pair();
-        let host_control = host_tunnel.try_clone().unwrap();
+        let host_reader = host_tunnel.try_clone().unwrap();
+        let host_tunnel = Arc::new(Mutex::new(host_tunnel));
+        let cleaned = Arc::new(AtomicBool::new(false));
         let (ready_send, ready_receive) = mpsc::channel();
         let host_task = {
-            let reader = host_tunnel.try_clone().unwrap();
+            let tunnel = Arc::clone(&host_tunnel);
+            let cleaned = Arc::clone(&cleaned);
             thread::spawn(move || {
-                run_host_with_ready(reader, host_tunnel, &daemon_socket, token, move |ready| {
-                    ready_send.send(ready).unwrap();
-                })
+                run_host_shared(
+                    host_reader,
+                    &tunnel,
+                    &daemon_socket,
+                    token,
+                    move |ready| {
+                        ready_send.send(ready.map(|_| ())).unwrap();
+                    },
+                    &cleaned,
+                )
                 .unwrap();
             })
         };
@@ -1758,11 +1787,16 @@ mod tests {
         );
         assert_eq!(shell_output, b"\x1b[32mguest shell\x1b[0m");
 
-        // Interrupt the transport through the socket rather than injecting a
-        // frame outside the relay writer lock alongside in-flight credits.
-        host_control.shutdown(Shutdown::Both).unwrap();
+        // Stop in band through the relay's own writer lock, as the backend
+        // does, so no frame interleaves with in-flight credits. A socket
+        // shutdown would rely on macOS waking both blocked tunnel reads,
+        // which it sometimes never does (see `READ_WAKE`).
+        request_guest_shutdown(&host_tunnel).unwrap();
+        wait_until("the guest relay stops", || guest_task.is_finished());
         guest_task.join().unwrap();
+        wait_until("the host relay stops", || host_task.is_finished());
         host_task.join().unwrap();
+        assert!(cleaned.load(Ordering::Acquire));
         stop.store(true, Ordering::Relaxed);
         server_task.join().unwrap();
         assert!(!socket.exists());
