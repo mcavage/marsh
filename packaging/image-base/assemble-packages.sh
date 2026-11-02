@@ -36,7 +36,7 @@ for link in bin sbin lib; do
 done
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-sh "$here/align-perl.sh"
+sh "$here/align-packages.sh"
 apt-get install -y -qq --no-install-recommends "$@" >/dev/null
 names=
 for spec in "$@"; do names="$names ${spec%%=*}"; done
