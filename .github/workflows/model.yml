@@ -1,0 +1,43 @@
+name: TLA+ model (huge)
+# The huge TLA+ configs (Workspace_depth3_pass: 237M distinct states, about
+# 35 min on 12 cores and hours on a 4-core runner) run here, nightly and on
+# demand, never in CI: in CI's concurrency group they held every run on main
+# behind them. CI checks every other config (ci.yml, job `model`); `make
+# regress` checks all of them before a release.
+on:
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: model-huge
+  cancel-in-progress: false
+jobs:
+  huge:
+    name: TLA+ model (huge configs)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verdict cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/tlc-cache
+          key: tlc-depth3-java21-${{ hashFiles('docs/model/**') }}
+          # check.sh separately hashes each spec/config, tools jar and runner.
+          restore-keys: tlc-depth3-java21-
+      - name: Check the huge configs
+        env:
+          TLC_RUNNER: java
+          # /tmp can be quota-limited; TLC's disk-backed queue needs the
+          # runner workspace filesystem for large state spaces.
+          TMPDIR: ${{ runner.temp }}
+          TLC_CACHE: ${{ runner.temp }}/tlc-cache
+        run: |
+          df -h "$TMPDIR"
+          make test-model MODEL_FLAGS=--huge MODEL_CACHE="$TLC_CACHE"

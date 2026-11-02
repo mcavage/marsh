@@ -55,8 +55,8 @@ real `sbx` stack:
 | command | runs | where |
 |---|---|---|
 | `make test` | `test-rust`, `test-harness`, `test-model` (below); no VMs, no credentials | your machine; CI on Linux arm64 and macOS |
-| `make test-rust` | `cargo fmt --check`, clippy, every workspace test under `cargo-nextest` (one process per test), doctests, the ignored binary callers, and the typed ACP host caller | CI on both |
-| `make test-harness` | onboarding journeys through the shipped binaries, MCP protocol callers, the Kit publisher, kit adapter scripts, self-tests of the acceptance/perf/release tooling; on Linux, the Bash differential suites (`tests/acceptance/bash_suites.py`, GNU Bash 5.3.0) | CI on both (suites: Linux) |
+| `make test-rust` | `make lint` (`cargo fmt --check`, clippy), `make test-unit` (every workspace test under `cargo-nextest`, one process per test, and doctests), `make test-callers` (the ignored binary callers and the typed ACP host caller) | CI on both |
+| `make test-harness` | `make test-bash` (Linux: the Bash differential suites, `tests/acceptance/bash_suites.py`, GNU Bash 5.3.0), `make test-entrypoints` (onboarding journeys through the shipped binaries, MCP protocol callers), `make test-tools` (the Kit publisher, kit adapter scripts, self-tests of the acceptance/perf/release tooling) | CI on both (suites: Linux; tools: Linux, and macOS on `main`) |
 | `make test-model` | quick TLA+ sweep (Docker, or `TLC_RUNNER=java`) | CI's model job runs every config |
 | `make check` | real smoke test of the installed dev product | Mac, after `make dev` |
 | `make verify` | `check` plus the highest-signal sbx suites | Mac, before you push |
@@ -108,18 +108,24 @@ removes its VMs, only by the recorded VM name and UUID
 
 ### What CI covers, and what needs your Mac
 
-A pull request runs only the lanes its files need (`scripts/ci-changes.sh`):
-a docs-only change runs just the docs and link checks, and the macOS host tests
-run when crates, Cargo files, tests, vendor, the Makefile or the toolchain
-changed. A merge to `main` runs every lane: `make test-rust` and
-`make test-harness` on Linux arm64 and on macOS, the full TLA+ sweep, and the
+CI splits `make test` into its pieces (`make lint`, `test-unit`,
+`test-callers`, `test-bash`, `test-entrypoints`, `test-tools`, `test-model`)
+and runs them as parallel jobs; `CI passed` is the one required check. A pull
+request runs only the lanes its files need (`scripts/ci-changes.sh`): a
+docs-only change runs just the docs and link checks, and the macOS jobs run
+when crates, Cargo files, tests, vendor, the Makefile or the toolchain changed.
+Linux arm64 runs everything, including the shell's Bash differential tests
+(against GNU Bash 5.3). On a pull request macOS runs clippy, the host side of
+the workspace tests (`make test-unit TEST_SCOPE=host`: everything but the
+platform-neutral guest worker, contract values and Bash audit), the binary
+callers and the entrypoint harnesses. A merge to `main` also runs the full
+workspace tests and the tooling self-tests on macOS, every TLA+ config but the
+huge one (which runs nightly, [model.yml](.github/workflows/model.yml)), and the
 docs and link checks. The macOS release build runs in the nightly and release
-workflows, not in CI. Rust jobs use content-addressed `sccache` compiler results across source changes; Cargo
-build-output caches still require an exact source key. The isolated Python
-harness tests run concurrently (`HARNESS_JOBS=3`; set it to 1 to serialize).
-On Linux that includes the shell's Bash differential tests (against GNU Bash
-5.3) and every workspace crate. Host-side tests use a fake `sbx` and temporary
-homes. Nothing in CI starts a microVM, so `make check`, `make verify`, `make regress`, and
+workflows, not in CI. Rust jobs use content-addressed `sccache` compiler
+results across source changes. The isolated Python harness tests run
+concurrently (`HARNESS_JOBS=3`; set it to 1 to serialize). Host-side tests use
+a fake `sbx` and temporary homes. Nothing in CI starts a microVM, so `make check`, `make verify`, `make regress`, and
 `make acceptance` run only on a Mac. The reasons:
 
 - A microVM needs a hypervisor. GitHub's hosted macOS runners are themselves

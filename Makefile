@@ -60,6 +60,8 @@ TLA2TOOLS_SHA256 := 7beec0f04818732a62fa193731711a99aa4f11279499b2360a7d156c519e
 # the real-CLI ACP callers (MARSH_ACP_CALLER_BIN). Every #[ignore]d test is one.
 BINARY_CALLERS := (package(marsh-mcp) & binary(mcp_load)) | (package(marsh-daemon) & test(/^mcp_load_tests::/)) \
 	| (package(marsh-acp) & binary(fixture_caller))
+# Their packages: building only these test binaries, not the workspace's.
+BINARY_CALLER_PACKAGES := -p marsh-mcp -p marsh-daemon -p marsh-acp
 # The binary callers' host publications write under $HOME: give them their own.
 CALLER_HOME = $(abspath $(TARGET_DIR))/caller-home
 # Everything the Rust tests start inherits MARSH_TEST_RUN (unless a test clears
@@ -77,14 +79,20 @@ LEAK_CHECK = $(PYTHON) tests/leaked_processes.py --bin "$(TEST_BIN)" --token "$(
 MCP_TEST_FILES := test_stdio_protocol.py test_guest_export_boundary.py test_publication_cli.py \
 	$(if $(filter Darwin,$(shell uname -s)),test_export_stdio_protocol.py)
 
-.PHONY: release help build build-host build-linux prepare-shell-image test test-rust test-harness test-model mcp kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf man site site-check dist dist-local fixture-ref formula
+.PHONY: release help build build-host build-linux prepare-shell-image test test-rust test-harness test-model lint test-unit test-callers test-bash test-entrypoints test-tools mcp kits kit-publish kit-publish-fixture install install-preflight uninstall acceptance acceptance-smoke perf man site site-check dist dist-local fixture-ref formula
 
 help:
 	@printf '%s\n' \
 		'Tests (CONTRIBUTING.md):' \
 		'make test              The VM-free gate CI runs: test-rust, test-harness, test-model' \
-		'make test-rust         fmt, clippy, every workspace test (cargo-nextest), doctests, MCP load callers' \
-		'make test-harness      Python/shell harnesses: onboarding, MCP callers, publisher, tool self-tests' \
+		'make test-rust         lint + test-unit + test-callers:' \
+		'  make lint            fmt, clippy' \
+		'  make test-unit       every workspace test (cargo-nextest), doctests (TEST_SCOPE=host: macOS host side)' \
+		'  make test-callers    MCP load and ACP callers against the built binaries' \
+		'make test-harness      test-bash + test-entrypoints + test-tools:' \
+		'  make test-bash       Bash differential suites (Linux)' \
+		'  make test-entrypoints  onboarding journeys and MCP protocol callers' \
+		'  make test-tools      publisher and tooling self-tests (no Rust build)' \
 		'make test-model        Quick TLA+ sweep (MODEL_FLAGS= for every config)' \
 		'make check [DEV_KIT=ref]  Mac: fast real smoke of the installed dev product (warm scope in target/check)' \
 		'make check-reset       Mac: stop the make check scope and delete target/check (run before removing a worktree)' \
@@ -137,51 +145,80 @@ prepare-shell-image:
 		$(if $(filter 1,$(SHELL_IMAGE_INSECURE_REGISTRY)),--insecure-registry,)
 
 # `make test` is the VM-free gate, and CI runs these same targets
-# (.github/workflows/ci.yml): test-rust and test-harness on Linux and macOS,
-# the model in its own job. Nothing here starts a VM or needs credentials.
+# (.github/workflows/ci.yml), each piece in its own job: test-rust and
+# test-harness on Linux, their host side on macOS, the model in its own job.
+# Nothing here starts a VM or needs credentials.
 test: test-rust test-harness test-model
+
+# TEST_SCOPE=host (CI's macOS lane) runs only the host side of test-unit. The
+# guest worker, the shared contract values and the Brush-against-Bash audit
+# (the shell runs in the Linux guest) are platform-neutral: Linux runs them.
+TEST_SCOPE ?= all
+HOST_SCOPE_EXCLUDES := --exclude marsh-worker --exclude marsh-contracts
+NEXTEST_SCOPE = $(if $(filter host,$(TEST_SCOPE)),$(HOST_SCOPE_EXCLUDES) -E 'not binary_id(marsh::bash_audit)')
+DOCTEST_SCOPE = $(if $(filter host,$(TEST_SCOPE)),$(HOST_SCOPE_EXCLUDES))
+
+# test-rust = lint + test-unit + test-callers.
+test-rust: lint test-unit test-callers
+
+lint:
+	$(CARGO) fmt --all -- --check
+	$(CARGO) clippy --workspace --all-targets --locked --target-dir "$(TARGET_DIR)" -- -D warnings
 
 # Every workspace test, one process per test (cargo-nextest; .config/nextest.toml
 # fails a hung test by name). nextest skips doctests, so cargo runs those.
-# Then the #[ignore]d binary callers and the ACP host caller, which drive the
-# built marsh, marsh-mcp and marshd binaries (no VM) with an isolated HOME.
 # Every step that runs tests is followed, pass or fail, by $(LEAK_CHECK).
-test-rust:
+test-unit:
+	@case "$(TEST_SCOPE)" in all|host) ;; *) echo 'make: TEST_SCOPE must be all or host' >&2; exit 1;; esac
 	@$(CARGO) nextest --version >/dev/null 2>&1 || { echo 'make test: cargo-nextest is required: brew install cargo-nextest (or cargo install --locked cargo-nextest)' >&2; exit 1; }
-	$(CARGO) fmt --all -- --check
-	$(CARGO) clippy --workspace --all-targets --locked --target-dir "$(TARGET_DIR)" -- -D warnings
-	$(TEST_CANARY) MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" \
+	@# Build first, without this run's marker: a compiler wrapper's server
+	@# (sccache) started by the build would otherwise count as leaked.
+	$(CARGO) nextest run --no-run --workspace $(NEXTEST_SCOPE) --locked --target-dir "$(TARGET_DIR)"
+	$(TEST_CANARY) MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(CARGO) nextest run --workspace $(NEXTEST_SCOPE) --locked --target-dir "$(TARGET_DIR)" \
 		--profile "$(NEXTEST_PROFILE)" || { $(LEAK_CHECK); exit 1; }
 	$(LEAK_CHECK)
-	$(CARGO) test --workspace --doc --locked --target-dir "$(TARGET_DIR)"
+	$(CARGO) test --workspace $(DOCTEST_SCOPE) --doc --locked --target-dir "$(TARGET_DIR)"
+
+# The #[ignore]d binary callers and the ACP host caller, which drive the built
+# marsh, marsh-mcp and marshd binaries (no VM) with an isolated HOME.
+test-callers:
+	@$(CARGO) nextest --version >/dev/null 2>&1 || { echo 'make test: cargo-nextest is required: brew install cargo-nextest (or cargo install --locked cargo-nextest)' >&2; exit 1; }
 	$(CARGO) build --workspace --bins --locked --target-dir "$(TARGET_DIR)"
 	rm -rf "$(CALLER_HOME)" && mkdir -m 700 "$(CALLER_HOME)"
 	CARGO_HOME="$${CARGO_HOME:-$$HOME/.cargo}" RUSTUP_HOME="$${RUSTUP_HOME:-$$HOME/.rustup}" HOME="$(CALLER_HOME)" \
 		MARSH_LOAD_TEST_BIN="$(TEST_BIN)/marsh" MARSH_ACP_CALLER_BIN="$(TEST_BIN)/marsh" MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(TEST_CANARY) \
-		$(CARGO) nextest run --workspace --locked --target-dir "$(TARGET_DIR)" \
+		$(CARGO) nextest run $(BINARY_CALLER_PACKAGES) --locked --target-dir "$(TARGET_DIR)" \
 		--profile "$(NEXTEST_PROFILE)" --run-ignored only -E '$(BINARY_CALLERS)' || { $(LEAK_CHECK); exit 1; }
 	$(TEST_CANARY) MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(PYTHON) tests/acceptance/acp-fixture/typed_host_caller.py \
 		--marsh "$(TEST_BIN)/marsh" || { $(LEAK_CHECK); exit 1; }
 	$(LEAK_CHECK)
 
-# Python and shell harnesses against the debug binaries: shipped-entrypoint
-# journeys (onboarding), MCP protocol callers, the Kit publisher, the
-# self-tests of the acceptance, perf, release and eval (fakemarsh) tooling, and (Linux only) the
-# Bash differential suites against GNU Bash 5.3.0 on PATH, gated on
-# tests/acceptance/bash_divergences.json.
-test-harness:
-	$(CARGO) build --workspace --bins --locked --target-dir "$(TARGET_DIR)"
+# Python and shell harnesses. test-bash: (Linux only) the Bash differential
+# suites against GNU Bash 5.3.0 on PATH, gated on
+# tests/acceptance/bash_divergences.json. test-entrypoints: shipped-entrypoint
+# journeys (onboarding) and MCP protocol callers against the debug binaries.
+# test-tools: the Kit publisher and the self-tests of the acceptance, perf,
+# release and eval (fakemarsh) tooling; they build nothing.
+test-harness: test-bash test-entrypoints test-tools
+
+test-bash:
 	@if [ "$$(uname -s)" = Linux ]; then \
+		$(CARGO) build -p marsh --bin marsh-local --locked --target-dir "$(TARGET_DIR)" && \
 		rm -rf "$(abspath $(TARGET_DIR))/bash-suites" && \
 		$(PYTHON) tests/acceptance/bash_suites.py --candidate "$(TEST_BIN)/marsh-local" \
 			--oracle "$$(command -v bash)" --evidence "$(abspath $(TARGET_DIR))/bash-suites"; \
 	else \
 		echo 'make test-harness: skipping the Bash differential suites (tests/acceptance/bash_suites.py): Linux only; macOS cannot create their non-UTF-8 file names'; \
 	fi
+
+test-entrypoints:
+	$(CARGO) build --workspace --bins --locked --target-dir "$(TARGET_DIR)"
 	$(PYTHON) tests/acceptance/onboarding.py --marsh "$(TEST_BIN)/marsh" --shell "$(TEST_BIN)/marsh-local" \
 		--evidence "$(abspath $(TARGET_DIR))/onboarding.json"
 	MARSH_BINARY="$(TEST_BIN)/marsh" MARSH_MCP_BIN="$(TEST_BIN)/marsh-mcp" \
 		$(PYTHON) tests/parallel_unittest.py -j $(HARNESS_JOBS) -W error $(addprefix tests/mcp/,$(MCP_TEST_FILES))
+
+test-tools:
 	$(PYTHON) tests/parallel_unittest.py -j $(HARNESS_JOBS) -W error \
 		tests/acceptance/test_*.py tests/release/test_*.py \
 		evals/benchmark/test_*.py evals/reach/test_*.py tests/test_parallel_unittest.py

@@ -3,17 +3,16 @@ on:
   pull_request:
   push:
     branches: [main]
-  # The huge TLA+ configs (Workspace_depth3_pass) run here, not per push.
-  schedule:
-    - cron: '17 7 * * *'
   workflow_dispatch:
 permissions:
   contents: read
+# Every commit on main gets its own run: GitHub keeps one pending run per
+# group, so a shared group would drop the in-between commits (and a cancelled
+# run cannot be the "CI passed" that release.yml waits for). A newer push
+# cancels a superseded pull request run. The huge TLA+ configs run in
+# model.yml, never in this group.
 concurrency:
-  group: ci-${{ github.ref }}
-  # A newer push cancels a superseded pull request run. Runs on main finish: a
-  # cancelled run cannot be the "CI passed" that release.yml waits for, and
-  # frequent merges would otherwise keep cancelling a cold TLA+ sweep.
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 env:
   CARGO_INCREMENTAL: "0"
@@ -21,12 +20,15 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
 
 # What CI checks: `make test` (formatting, lints, every workspace test, the
-# Python and shell harnesses, the TLA+ model) on Linux and macOS, and docs
-# links. A pull request runs only the lanes its files need (scripts/ci-changes.sh):
-# a docs-only change runs the docs check alone, and the macOS host tests run
-# when host code, tests or the build changed. A merge to main runs every lane,
-# including the full TLA+ sweep. The macOS release build is not here: the
-# nightly and release workflows build it (release.yml).
+# Python and shell harnesses, the TLA+ model), split into parallel jobs, and
+# docs links. Linux arm64 runs all of it. macOS runs clippy and the host side:
+# on a pull request the workspace tests except the platform-neutral guest
+# worker, contract values and Bash audit (Makefile TEST_SCOPE=host), the binary
+# callers and the entrypoint harnesses; on main, everything. A pull request
+# runs only the lanes its files need (scripts/ci-changes.sh): a docs-only
+# change runs the docs check alone. "CI passed" is the one required check.
+# The huge TLA+ configs run nightly (model.yml). The macOS release build is not
+# here: the nightly and release workflows build it (release.yml).
 # What it does not: start microVMs. GitHub's macOS arm64 runners are VMs
 # without nested virtualization and its Linux arm64 runners have no KVM; Linux
 # x64 has KVM, but the guests are linux/arm64 and the host needs APFS file IDs
@@ -34,15 +36,19 @@ env:
 # acceptance) runs on a Mac by hand; see CONTRIBUTING.md.
 jobs:
   changes:
-    # Which lanes a pull request needs. A merge or manual run needs them all.
-    # The lanes below run when this job fails, so a broken classifier can only
-    # cost time, never skip a check.
+    # Which lanes a change needs. A merge or manual run needs them all, except
+    # the image build, which runs when an image input changed since the
+    # previous push. The lanes below run when this job fails, so a broken
+    # classifier can only cost time, never skip a check.
     name: What changed
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     outputs:
       code: ${{ steps.classify.outputs.code }}
       host: ${{ steps.classify.outputs.host }}
+      model: ${{ steps.classify.outputs.model }}
+      images: ${{ steps.classify.outputs.images }}
+      renovate: ${{ steps.classify.outputs.renovate }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,19 +57,53 @@ jobs:
         id: classify
         env:
           BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            printf 'code=true\nhost=true\n' >> "$GITHUB_OUTPUT"; exit 0
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            git diff --name-only "origin/$BASE_REF...HEAD" | sh scripts/ci-changes.sh | tee -a "$GITHUB_OUTPUT"
+            exit 0
           fi
-          git diff --name-only "origin/$BASE_REF...HEAD" | sh scripts/ci-changes.sh | tee -a "$GITHUB_OUTPUT"
+          printf 'code=true\nhost=true\nmodel=true\nrenovate=true\n' | tee -a "$GITHUB_OUTPUT"
+          if [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            git diff --name-only "$BEFORE...HEAD" | sh scripts/ci-changes.sh | grep '^images=' | tee -a "$GITHUB_OUTPUT"
+          else
+            echo images=true | tee -a "$GITHUB_OUTPUT"
+          fi
 
-  linux:
-    name: Linux arm64 (shell, guest crates, protocols)
+  lint:
+    name: Lint (fmt, clippy; Linux)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
     runs-on: ubuntu-26.04-arm
-    timeout-minutes: 45
+    timeout-minutes: 20
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+      - name: Compiler cache (content-addressed, reusable across source changes)
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.19.0
+      # Built dependencies and the registry, restored from main's last run
+      # (a pull request only restores). Workspace crates always rebuild;
+      # sccache supplies the unchanged ones.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-bin: 'false'
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: make lint
+        run: make lint
+
+  linux-unit:
+    name: Linux arm64 (workspace tests)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: 'true'
@@ -73,55 +113,140 @@ jobs:
         with:
           node-version: '24'
       - name: Rust toolchain
-        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+        run: rustup toolchain install 1.99.1 --profile minimal
       - name: Compiler cache (content-addressed, reusable across source changes)
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.19.0
       # Bash is the differential-test oracle, and the oracle is GNU Bash 5.3
-      # (docs/design/bash-compatibility.md); Ubuntu 24.04 ships 5.2.
+      # (docs/design/bash-compatibility.md); Ubuntu ships an older one. Built
+      # once from the checked tarball and cached by its checksum.
+      - id: bash-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/gnu-bash
+          key: gnu-bash-5.3-${{ runner.os }}-${{ runner.arch }}-0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba
       - name: GNU Bash 5.3 (test oracle)
+        env:
+          CACHED: ${{ steps.bash-cache.outputs.cache-hit }}
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/bash-5.3.tar.gz" https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz
-          echo "0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba  $RUNNER_TEMP/bash-5.3.tar.gz" | sha256sum -c
-          tar -xzf "$RUNNER_TEMP/bash-5.3.tar.gz" -C "$RUNNER_TEMP"
-          cd "$RUNNER_TEMP/bash-5.3"
-          ./configure --quiet --prefix="$RUNNER_TEMP/bash"
-          make -s -j"$(nproc)"
-          make -s install
+          prefix="$HOME/.local/gnu-bash"
+          if [ "$CACHED" != true ]; then
+            curl -fsSL -o "$RUNNER_TEMP/bash-5.3.tar.gz" https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz
+            echo "0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba  $RUNNER_TEMP/bash-5.3.tar.gz" | sha256sum -c
+            tar -xzf "$RUNNER_TEMP/bash-5.3.tar.gz" -C "$RUNNER_TEMP"
+            (cd "$RUNNER_TEMP/bash-5.3" && ./configure --quiet --prefix="$prefix" && make -s -j"$(nproc)" && make -s install)
+          fi
           # shellcheck disable=SC2016 # expanded by the new bash
-          "$RUNNER_TEMP/bash/bin/bash" -c '[ "${BASH_VERSINFO[0]}${BASH_VERSINFO[1]}" -ge 53 ]'
-          echo "$RUNNER_TEMP/bash/bin" >> "$GITHUB_PATH"
+          "$prefix/bin/bash" -c '[ "${BASH_VERSINFO[0]}${BASH_VERSINFO[1]}" -ge 53 ]'
+          echo "$prefix/bin" >> "$GITHUB_PATH"
       - name: cargo-nextest
         run: |
           mkdir -p "$HOME/.cargo/bin"
           curl -fsSL -o "$RUNNER_TEMP/nextest.tgz" https://get.nexte.st/0.9.148/linux-arm
           echo "81469eb963ef883fd590e60189e77d6aba3d91b418591d3391f50fe3e9480d2b  $RUNNER_TEMP/nextest.tgz" | sha256sum -c
           tar -xzf "$RUNNER_TEMP/nextest.tgz" -C "$HOME/.cargo/bin"
-      # Cargo sources can cross source changes; target output cannot. sccache
-      # separately reuses compiler results by their actual compilation inputs.
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Built dependencies and the registry, restored from main's last run
+      # (a pull request only restores). Workspace crates always rebuild;
+      # sccache supplies the unchanged ones.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-registry-linux-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: target
-          key: cargo-linux-${{ runner.arch }}-rust1.99-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**', 'tests/**') }}
+          cache-bin: 'false'
+          save-if: ${{ github.event_name != 'pull_request' }}
       - name: Tool versions
         run: |
           cargo --version
           python3 --version
           node --version
           bash --version | head -1
-      # The same targets as a local `make test` (Makefile): every workspace
-      # test, then the Python and shell harnesses. The model has its own job.
-      - name: make test-rust (fmt, clippy, every workspace test, MCP load callers)
-        run: make test-rust NEXTEST_PROFILE=ci
-      - name: make test-harness (onboarding, MCP callers, publisher, tool self-tests)
-        run: make test-harness
+      - name: make test-unit (every workspace test, doctests)
+        env:
+          CARGO_LOG: cargo::core::compiler::fingerprint=info
+        run: make test-unit NEXTEST_PROFILE=ci
+
+  linux-callers:
+    name: Linux arm64 (binary callers, entrypoints)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Compiler cache (content-addressed, reusable across source changes)
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.19.0
+      - name: cargo-nextest
+        run: |
+          mkdir -p "$HOME/.cargo/bin"
+          curl -fsSL -o "$RUNNER_TEMP/nextest.tgz" https://get.nexte.st/0.9.148/linux-arm
+          echo "81469eb963ef883fd590e60189e77d6aba3d91b418591d3391f50fe3e9480d2b  $RUNNER_TEMP/nextest.tgz" | sha256sum -c
+          tar -xzf "$RUNNER_TEMP/nextest.tgz" -C "$HOME/.cargo/bin"
+      # Built dependencies and the registry, restored from main's last run
+      # (a pull request only restores). Workspace crates always rebuild;
+      # sccache supplies the unchanged ones.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-bin: 'false'
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: make test-callers (MCP load and ACP callers)
+        run: make test-callers NEXTEST_PROFILE=ci
+      - name: make test-entrypoints (onboarding, MCP protocol callers)
+        run: make test-entrypoints
+
+  linux-bash:
+    name: Linux arm64 (Bash differential suites)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-26.04-arm
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Compiler cache (content-addressed, reusable across source changes)
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.19.0
+      - id: bash-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/gnu-bash
+          key: gnu-bash-5.3-${{ runner.os }}-${{ runner.arch }}-0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba
+      - name: GNU Bash 5.3 (test oracle)
+        env:
+          CACHED: ${{ steps.bash-cache.outputs.cache-hit }}
+        run: |
+          prefix="$HOME/.local/gnu-bash"
+          if [ "$CACHED" != true ]; then
+            curl -fsSL -o "$RUNNER_TEMP/bash-5.3.tar.gz" https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz
+            echo "0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba  $RUNNER_TEMP/bash-5.3.tar.gz" | sha256sum -c
+            tar -xzf "$RUNNER_TEMP/bash-5.3.tar.gz" -C "$RUNNER_TEMP"
+            (cd "$RUNNER_TEMP/bash-5.3" && ./configure --quiet --prefix="$prefix" && make -s -j"$(nproc)" && make -s install)
+          fi
+          # shellcheck disable=SC2016 # expanded by the new bash
+          "$prefix/bin/bash" -c '[ "${BASH_VERSINFO[0]}${BASH_VERSINFO[1]}" -ge 53 ]'
+          echo "$prefix/bin" >> "$GITHUB_PATH"
+      # Built dependencies and the registry, restored from main's last run
+      # (a pull request only restores). Workspace crates always rebuild;
+      # sccache supplies the unchanged ones.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-bin: 'false'
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: make test-bash (Bash differential suites)
+        run: make test-bash
       # The Bash differential suites' per-case observations, to diagnose a mismatch.
       - name: Bash suite evidence
         if: failure()
@@ -131,12 +256,33 @@ jobs:
           path: target/bash-suites
           if-no-files-found: ignore
 
-  macos:
-    name: macOS arm64 (host build and tests)
+  tools:
+    # The publisher and tooling self-tests are Python and shell: no Rust build.
+    name: Tooling and publisher (Linux)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true') }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The publisher venv gets an interpreter its pinned PyYAML has wheels
+      # for, leaving the runner's python3 alone.
+      - id: publisher-python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+          update-environment: false
+      - name: make test-tools (publisher, tool self-tests)
+        run: make test-tools HARNESS_JOBS="$(nproc)" PUBLISHER_PYTHON="${{ steps.publisher-python.outputs.python-path }}"
+
+  macos-unit:
+    # clippy sees the cfg(target_os = "macos") code only here. Hosted macOS
+    # runners are scarce, so clippy shares this job rather than taking a third.
+    name: macOS arm64 (clippy, host workspace tests)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
       SCCACHE_GHA_ENABLED: 'true'
@@ -162,19 +308,19 @@ jobs:
           # shellcheck disable=SC2016 # expanded by the new bash
           "$(brew --prefix)/bin/bash" -c '[ "${BASH_VERSINFO[0]}${BASH_VERSINFO[1]}" -ge 53 ]'
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
-          "$(brew --prefix)/bin/bash" --version | head -1
-      # Registry sources are content-addressed by Cargo.lock, so they may be
-      # restored across source changes; build output is not (exact source key).
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: cargo-nextest
+        run: |
+          mkdir -p "$HOME/.cargo/bin"
+          curl -fsSL -o "$RUNNER_TEMP/nextest.tgz" https://get.nexte.st/0.9.148/mac
+          echo "6c23b7fb4ca82c571fc8dfedbab45bfa773d45918f933170c85d21cd7f4b852b  $RUNNER_TEMP/nextest.tgz" | shasum -a 256 -c
+          tar -xzf "$RUNNER_TEMP/nextest.tgz" -C "$HOME/.cargo/bin"
+      # Built dependencies and the registry, restored from main's last run
+      # (a pull request only restores). Workspace crates always rebuild;
+      # sccache supplies the unchanged ones.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: cargo-registry-macos-${{ hashFiles('Cargo.lock') }}
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: target
-          key: cargo-macos-${{ runner.arch }}-rust1.99-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', 'crates/**', 'vendor/**', 'tests/**') }}
+          cache-bin: 'false'
+          save-if: ${{ github.event_name != 'pull_request' }}
       - name: Tool versions
         run: |
           cargo --version
@@ -183,25 +329,64 @@ jobs:
           node --version
           bash --version | head -1
           sysctl -n hw.ncpu
+      - name: make lint
+        run: make lint
+      # Host tests use fake sbx executables and temporary homes; none needs
+      # Docker Sandboxes or credentials. A pull request skips the
+      # platform-neutral crates Linux runs (Makefile TEST_SCOPE).
+      - name: make test-unit (host workspace tests, doctests)
+        env:
+          TEST_SCOPE: ${{ github.event_name == 'pull_request' && 'host' || 'all' }}
+        run: make test-unit NEXTEST_PROFILE=ci TEST_SCOPE="$TEST_SCOPE"
+
+  macos-callers:
+    name: macOS arm64 (binary callers, entrypoints)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal
+      - name: Compiler cache (content-addressed, reusable across source changes)
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.19.0
       - name: cargo-nextest
         run: |
           mkdir -p "$HOME/.cargo/bin"
           curl -fsSL -o "$RUNNER_TEMP/nextest.tgz" https://get.nexte.st/0.9.148/mac
           echo "6c23b7fb4ca82c571fc8dfedbab45bfa773d45918f933170c85d21cd7f4b852b  $RUNNER_TEMP/nextest.tgz" | shasum -a 256 -c
           tar -xzf "$RUNNER_TEMP/nextest.tgz" -C "$HOME/.cargo/bin"
-      # Host tests use fake sbx executables and temporary homes; none needs
-      # Docker Sandboxes or credentials.
-      - name: make test-rust (fmt, clippy, every workspace test, MCP load callers)
-        run: make test-rust NEXTEST_PROFILE=ci
-      # The runner's Python is newer than the publisher's pinned PyYAML has
-      # wheels for; give the publisher venv one it does, leaving python3 alone.
+      # Built dependencies and the registry, restored from main's last run
+      # (a pull request only restores). Workspace crates always rebuild;
+      # sccache supplies the unchanged ones.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          cache-bin: 'false'
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: make test-callers (MCP load and ACP callers)
+        run: make test-callers NEXTEST_PROFILE=ci
+      - name: make test-entrypoints (onboarding, MCP protocol callers)
+        run: make test-entrypoints
+      # On main, the tooling self-tests run on macOS too: the release tooling
+      # (make release, make regress) runs on a Mac.
       - id: publisher-python
+        if: github.event_name != 'pull_request'
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.14'
           update-environment: false
-      - name: make test-harness (onboarding, MCP callers, publisher, tool self-tests)
-        run: make test-harness PUBLISHER_PYTHON="${{ steps.publisher-python.outputs.python-path }}"
+      - name: make test-tools (publisher, tool self-tests)
+        if: github.event_name != 'pull_request'
+        run: make test-tools PUBLISHER_PYTHON="${{ steps.publisher-python.outputs.python-path }}"
 
   docs:
     name: Docs and site
@@ -221,78 +406,36 @@ jobs:
         run: python3 tests/release/test_site.py
 
   model:
-    # Workspace_depth3_pass alone runs ~30 min, so the config marked `huge` is
-    # its own shard and the rest share one; inside a shard check.sh runs configs
-    # concurrently (docs/model/check.sh --help). On a pull request both shards
-    # check only when a model input changed (spec/config/runner, pinned TLA+ tools,
-    # the model target or this job); otherwise they pass at once. A merge to main
-    # checks every config. The verdict cache is keyed by the model files, so an
-    # unchanged model is quick; the first run after a model change on main is
-    # cold (the pull request's cache is not visible there) and takes ~30 min.
-    name: TLA+ model (${{ matrix.shard }})
+    # Every config except the huge ones (those run nightly in model.yml);
+    # check.sh runs them concurrently (docs/model/check.sh --help). The verdict
+    # cache is keyed by the model files, so an unchanged model is quick.
+    name: TLA+ model
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.model == 'true') }}
     runs-on: ubuntu-26.04
-    # Workspace_depth3_pass is 237M distinct states since open lanes and
-    # checkpoints joined the Workspace spec (35 min on 12 cores; the 90-minute
-    # limit cancelled it twice on the 4-core runner).
-    timeout-minutes: 300
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [depth3, rest]
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Did a model input change?
-        id: changes
-        env:
-          BASE_REF: ${{ github.base_ref }}
-          SHARD: ${{ matrix.shard }}
-        run: |
-          set -euo pipefail
-          # The huge shard (237M states, hours on a 4-core runner) runs nightly and
-          # on demand only: per push it serialized every run on main behind it.
-          if [ "$SHARD" = depth3 ] && [ "$GITHUB_EVENT_NAME" != schedule ] && [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"; echo "Huge configs run nightly and on demand, not per push or pull request."; exit 0
-          fi
-          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          range="origin/$BASE_REF...HEAD"
-          if git diff --name-only "$range" | grep -Eq '^docs/model/(.*\.(tla|cfg)|check\.sh)$' ||
-             git diff -U0 "$range" -- Makefile .github/workflows/ci.yml | grep -Ev '^(\+\+\+|---) ' |
-               grep -Eq '^[-+].*(TLA2TOOLS|tla2tools|test-model|MODEL_FLAGS|MODEL_CACHE|setup-java|tlc-)'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"; echo "No model input changed; nothing to check."
-          fi
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        if: steps.changes.outputs.run == 'true'
         with:
           distribution: temurin
           java-version: '21'
       - name: Verdict cache
-        if: steps.changes.outputs.run == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/tlc-cache
-          key: tlc-${{ matrix.shard }}-java21-${{ hashFiles('docs/model/**') }}
+          key: tlc-rest-java21-${{ hashFiles('docs/model/**') }}
           # check.sh separately hashes each spec/config, tools jar and runner.
           # Reuse unchanged verdicts when only another model or its docs moved.
-          restore-keys: tlc-${{ matrix.shard }}-java21-
-      - name: Check every config (positive configs pass, negative controls fail as expected)
-        if: steps.changes.outputs.run == 'true'
+          restore-keys: tlc-rest-java21-
+      - name: Check every config but the huge ones (positive configs pass, negative controls fail as expected)
         env:
           TLC_RUNNER: java
           # /tmp can be quota-limited; TLC's disk-backed queue needs the
           # runner workspace filesystem for large state spaces.
           TMPDIR: ${{ runner.temp }}
           TLC_CACHE: ${{ runner.temp }}/tlc-cache
-          SHARD: ${{ matrix.shard }}
-        run: |
-          if [ "$SHARD" = depth3 ]; then flag=--huge; else flag=--no-huge; fi
-          df -h "$TMPDIR"
-          make test-model MODEL_FLAGS="$flag" MODEL_CACHE="$TLC_CACHE"
+        run: make test-model MODEL_FLAGS=--no-huge MODEL_CACHE="$TLC_CACHE"
 
   images:
     # Builds the shell template and every Kit from their pinned inputs, without
@@ -301,30 +444,18 @@ jobs:
     # verifies the downloaded checksums and the license notices. It runs only
     # when an input changed, and not for fork PRs (no registry secrets there).
     name: Kit and shell images (build, no push)
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    needs: changes
+    if: >-
+      !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.images == 'true') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-26.04-arm
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - name: Did an image input change?
-        id: changes
-        env:
-          BASE_REF: ${{ github.base_ref }}
-          BEFORE: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then range="origin/$BASE_REF...HEAD"
-          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then range="$BEFORE...HEAD"
-          else echo "run=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          inputs='^(kits/marsh-(claude|codex|pi|shell)/|packaging/(shell|shell-image|commands\.json|agents\.json|image-base|image-repair|dhi-notices|notice-overrides)|tests/acceptance/[a-z-]*fixture/|scripts/(publish-kits|prepare-shell-image|prepare-kit-inputs|build_inputs|image_observations|stage-kits|owned_process|stock_sdk)\.py|scripts/requirements-publish\.txt|Makefile$|\.github/workflows/ci\.yml$)'
-          if git diff --name-only "$range" | grep -Eq "$inputs"; then echo "run=true" >> "$GITHUB_OUTPUT"
-          else echo "run=false" >> "$GITHUB_OUTPUT"; echo "No image input changed; nothing to build."; fi
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        if: steps.changes.outputs.run == 'true'
       - name: Log in to Docker Hub and Docker Hardened Images
-        if: steps.changes.outputs.run == 'true'
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -333,42 +464,27 @@ jobs:
             printf '%s' "$DOCKERHUB_TOKEN" | docker login "$registry" --username "$DOCKERHUB_USERNAME" --password-stdin
           done
       - name: Publisher dependencies
-        if: steps.changes.outputs.run == 'true'
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/python" -m pip install --require-hashes --no-deps --only-binary=:all: -r scripts/requirements-publish.txt
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
       - name: Shell VM template
-        if: steps.changes.outputs.run == 'true'
         run: python3 scripts/prepare-shell-image.py --validate-only
       - name: Kits and the acceptance fixture
-        if: steps.changes.outputs.run == 'true'
         run: make kits TARGET_DIR="$RUNNER_TEMP/target"
 
   renovate-config:
     name: Renovate config
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.renovate == 'true') }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - name: Did the config change?
-        id: changes
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: |
-          set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
-             ! git diff --name-only "origin/$BASE_REF...HEAD" | grep -Eq '^(\.github/(renovate|workflows/ci\.yml$)|tests/release/renovate-policy\.mjs$)'; then
-            echo "run=false" >> "$GITHUB_OUTPUT"; echo "Renovate config unchanged."
-          else echo "run=true" >> "$GITHUB_OUTPUT"; fi
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: steps.changes.outputs.run == 'true'
         with:
           node-version: '24'
       - name: Validate the repository and global configs
-        if: steps.changes.outputs.run == 'true'
         # Use the bot's exact engine version, never a floating major. Renovate
         # updates the shared pin after the normal release-age observation.
         run: |
@@ -376,3 +492,22 @@ jobs:
           npx --yes --package "renovate@$version" renovate-config-validator --strict
           RENOVATE_CONFIG_FILE=.github/renovate-global.js npx --yes --package "renovate@$version" renovate-config-validator --strict
           npx --yes --package "renovate@$version" --call 'node tests/release/renovate-policy.mjs "$(command -v renovate-config-validator)"'
+
+  passed:
+    # The one required status check: every lane above passed or was not
+    # needed. A skipped lane is fine; a failed or cancelled one is not. (When
+    # the classifier fails, every lane runs, so its own result is not counted.)
+    name: CI passed
+    needs: [lint, linux-unit, linux-callers, linux-bash, tools, macos-unit, macos-callers, docs, model, images, renovate-config]
+    if: always()
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - name: Every lane passed or was skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do
+            case $result in success|skipped) ;; *) echo "::error::a lane ended $result"; exit 1;; esac
+          done
