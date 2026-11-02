@@ -21,6 +21,18 @@ fn run(program: &str, script: &str, from_stdin: bool) -> Output {
 
 /// As [`run`]; with `-c`, `name` is `$0`, which prefixes Bash's diagnostics.
 fn run_named(program: &str, script: &str, from_stdin: bool, name: Option<&str>) -> Output {
+    run_observed(program, script, from_stdin, name, |_| {})
+}
+
+/// As [`run_named`]; `observe` runs with the shell's working directory once
+/// the script has started.
+fn run_observed(
+    program: &str,
+    script: &str,
+    from_stdin: bool,
+    name: Option<&str>,
+    observe: impl FnOnce(&std::path::Path),
+) -> Output {
     common::assert_no_blocking_fifo_open(script);
     let directory = tempfile::tempdir().unwrap();
     let mut command = shell(program);
@@ -53,6 +65,7 @@ fn run_named(program: &str, script: &str, from_stdin: bool, name: Option<&str>) 
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(script.as_bytes()).unwrap();
     }
+    observe(directory.path());
     common::wait_for_exit(
         child,
         &format!("{program}: {script}"),
@@ -94,10 +107,59 @@ fn differential(script: &str, status: i32, stdout: &[u8]) {
 }
 
 fn differential_with_input_mode(script: &str, status: i32, stdout: &[u8], from_stdin: bool) {
-    let bash = run("bash", script, from_stdin);
+    differential_observed(script, status, stdout, from_stdin, |_| {});
+}
+
+/// For a script that writes a background job's PID to `exited-pid` and then
+/// waits for a `go` file before its `wait -n`: `go` appears once that job has
+/// exited. GNU Bash 5.3's `wait -n` misses a job that exits while it starts,
+/// when an earlier job is still running (`wait_for_any_job` scans for a dead
+/// job, unblocks `SIGCHLD`, whose handler can reap it then, and its next scan
+/// stops at the first running job before blocking in `waitpid`); it then waits
+/// for that earlier job, which in these scripts never ends. A job that has
+/// already exited, and so has been reaped by the time `wait -n` starts, is the
+/// one it reports.
+fn differential_after_exit(script: &str, status: i32, stdout: &[u8], from_stdin: bool) {
+    differential_observed(script, status, stdout, from_stdin, |directory| {
+        let recorded = directory.join("exited-pid");
+        let mut pid = None;
+        common::wait_until(
+            &format!("{script}: exited-pid"),
+            Duration::from_secs(20),
+            || {
+                pid = std::fs::read_to_string(&recorded)
+                    .ok()
+                    .and_then(|text| text.trim().parse::<i32>().ok());
+                pid.is_some()
+            },
+        );
+        let pid = pid.unwrap();
+        common::wait_until(
+            &format!("{script}: job {pid} exited"),
+            Duration::from_secs(20),
+            || common::has_exited(pid),
+        );
+        std::fs::write(directory.join("go"), b"").unwrap();
+    });
+}
+
+fn differential_observed(
+    script: &str,
+    status: i32,
+    stdout: &[u8],
+    from_stdin: bool,
+    observe: impl Fn(&std::path::Path),
+) {
+    let bash = run_observed("bash", script, from_stdin, None, &observe);
     assert_eq!(bash.status.code(), Some(status), "Bash: {script}: {bash:?}");
     assert_eq!(bash.stdout, stdout, "Bash: {script}: {bash:?}");
-    let brush = run(env!("CARGO_BIN_EXE_marsh-local"), script, from_stdin);
+    let brush = run_observed(
+        env!("CARGO_BIN_EXE_marsh-local"),
+        script,
+        from_stdin,
+        None,
+        &observe,
+    );
     assert_eq!(
         brush.status.code(),
         bash.status.code(),
@@ -250,11 +312,12 @@ fn background_pipeline_wait_uses_launch_time_pipefail() {
 
 #[test]
 fn background_pipefail_survives_canceled_wait_next() {
-    // The losing wait reaps the rightmost stage before the competing job finishes.
-    differential(
-        "set -o pipefail; sh -c 'while test ! -e release; do sleep .005; done; exit 7' | sh -c 'exit 9' | sh -c ': >right-done; exit 0' & slow=$!; while test ! -e right-done; do sleep .005; done; sh -c 'exit 3' & fast=$!; wait -n; first=$?; : >release; wait \"$slow\"; second=$?; printf '%s %s\\n' \"$first\" \"$second\"",
+    // The losing wait reaps the rightmost stage; the competing job has finished.
+    differential_after_exit(
+        "set -o pipefail; sh -c 'while test ! -e release; do sleep .005; done; exit 7' | sh -c 'exit 9' | sh -c ': >right-done; exit 0' & slow=$!; while test ! -e right-done; do sleep .005; done; sh -c 'exit 3' & printf %s $! >exited-pid; until test -e go; do sleep .005; done; wait -n; first=$?; : >release; wait \"$slow\"; second=$?; printf '%s %s\\n' \"$first\" \"$second\"",
         0,
         b"3 9\n",
+        false,
     );
 }
 
@@ -272,8 +335,8 @@ fn background_pipefail_survives_input_loop_polling() {
     // front. The selected failure must stay the rightmost one, not the last one observed.
     // Keep the left stage blocked until wait -n selects the competing job; it
     // marks its exit so the next line's poll sees it gone.
-    differential_with_input_mode(
-        "set -o pipefail\nsh -c 'while test ! -e release; do sleep .005; done; : >left-done; exit 7' | sh -c 'exit 9' | sh -c ': >right-done; exit 0' & slow=$!; while test ! -e right-done; do sleep .005; done; sh -c 'exit 3' & wait -n; first=$?; : >release\nuntil test -e left-done; do sleep .005; done\nwait \"$slow\"; second=$?; printf '%s %s\\n' \"$first\" \"$second\"\n",
+    differential_after_exit(
+        "set -o pipefail\nsh -c 'while test ! -e release; do sleep .005; done; : >left-done; exit 7' | sh -c 'exit 9' | sh -c ': >right-done; exit 0' & slow=$!; while test ! -e right-done; do sleep .005; done; sh -c 'exit 3' & printf %s $! >exited-pid; until test -e go; do sleep .005; done; wait -n; first=$?; : >release\nuntil test -e left-done; do sleep .005; done\nwait \"$slow\"; second=$?; printf '%s %s\\n' \"$first\" \"$second\"\n",
         0,
         b"3 9\n",
         true,
