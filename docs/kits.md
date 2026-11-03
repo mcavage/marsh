@@ -71,7 +71,8 @@ provider:
 | Host command | Used by |
 |---|---|
 | `sbx secret set anthropic` | `claude` and `pi` |
-| `sbx secret set openai` | `codex` |
+| `sbx secret set openai` | `codex`, `pi` |
+| `sbx secret set google`, `mistral`, `xai` | `pi` |
 
 `sbx secret import` takes keys from your environment variables instead. The
 Claude and Codex Kits also accept an OAuth login that `sbx` holds. The `sbx`
@@ -83,7 +84,7 @@ If nothing is bound, an agent can still sign in from inside its container
 (`~/.marsh/home` on the Mac) as ordinary files, and every job in the scope can
 read it. Prefer `sbx secret`.
 
-The Pi Kit declares an Anthropic API key only. `shell` has no credentials.
+The Pi and Pix Kits declare an API key credential for each of `anthropic`, `openai`, `google`, `mistral` and `xai`, and allow only those providers' API hosts; a provider you hold no key for is simply not used. `shell` has no credentials.
 
 ### Updates
 

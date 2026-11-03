@@ -592,6 +592,12 @@ pub struct AgentFacts {
     pub prompt: bool,
     /// Its Kit declares a model option (`org.marsh/agent-model@1`).
     pub model_option: bool,
+    /// Its Kit declares itself multi-provider (`services: ["*"]`): it can use
+    /// a vendor's models only where `reaches` says its Kit can.
+    pub multi_provider: bool,
+    /// Per credential service, the hosts its Kit allows and injects that
+    /// service's key for.
+    pub reaches: BTreeMap<String, BTreeSet<String>>,
 }
 
 /// Read `$MARSH_HOME/peer-review.d/*.yaml` and the class table and resolve
@@ -671,6 +677,9 @@ pub fn load(scope: &Path, agents: &BTreeMap<String, AgentFacts>) -> PeerReviewSt
                         "{}'s Kit declares no model option (org.marsh/agent-model@1)",
                         entry.agent
                     )),
+                    Some(facts) if facts.multi_provider => {
+                        cannot_reach(&entry.agent, &reviewer.vendor, &facts.reaches)
+                    }
                     Some(_) => None,
                 }
             };
@@ -781,45 +790,140 @@ pub fn context(status: &PeerReviewStatus, spawn: &[String]) -> String {
     text
 }
 
+/// The service a multi-provider agent's Kit declares (`org.marsh/agent-model@1`
+/// `services`): it reaches every vendor whose key the host holds.
+pub use marsh_contracts::kit_assets::ANY_PROVIDER;
+
+/// The API host of each vendor whose key a multi-provider agent's Kit might
+/// carry; a credential service is named for its vendor (`sbx secret ls`).
+const VENDOR_HOSTS: [(&str, &str); 6] = [
+    ("anthropic", "api.anthropic.com"),
+    ("openai", "api.openai.com"),
+    ("google", "generativelanguage.googleapis.com"),
+    ("mistral", "api.mistral.ai"),
+    ("xai", "api.x.ai"),
+    ("deepseek", "api.deepseek.com"),
+];
+
+/// Why a multi-provider `agent` cannot use `vendor`'s models: its Kit must
+/// allow the vendor's API host and inject the vendor's key for it
+/// (`reaches`, per credential service).
+fn cannot_reach(
+    agent: &str,
+    vendor: &str,
+    reaches: &BTreeMap<String, BTreeSet<String>>,
+) -> Option<String> {
+    let Some((_, host)) = VENDOR_HOSTS.iter().find(|(name, _)| *name == vendor) else {
+        return Some(format!(
+            "{agent} can't reach {vendor}: marsh does not know its API host"
+        ));
+    };
+    (!reaches
+        .get(vendor)
+        .is_some_and(|hosts| hosts.contains(*host)))
+    .then(|| {
+        format!(
+            "{agent} can't reach {host} (its Kit must allow the host and inject the {vendor} key for it)"
+        )
+    })
+}
+
+/// A registered agent as `marsh config peer-review on` sees it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct DetectAgent {
+    /// Its Kit's credential services, `"*"` for a multi-provider agent.
+    pub services: BTreeSet<String>,
+    /// Per credential service, the hosts its Kit allows and injects that
+    /// service's key for.
+    pub reaches: BTreeMap<String, BTreeSet<String>>,
+}
+
+/// What detection found.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Detected {
+    /// Reviewers marsh can start, by class then vendor.
+    pub ready: Vec<DropInReviewer>,
+    /// Vendors whose key the host holds, with no agent that reaches them
+    /// except a multi-provider one whose Kit cannot (the reason says why).
+    /// `marsh peer-review ls` lists them as not ready.
+    pub unreachable: Vec<(DropInReviewer, String)>,
+}
+
 /// The reviewers `marsh config peer-review on` offers: for each class and
 /// each vendor an agent with a model option can reach with a stored
 /// credential, the vendor's newest model in that class. A vendor's own
-/// agent (one that reaches only it) is preferred.
+/// agent (one that reaches only it) is preferred. A multi-provider agent
+/// (services `["*"]`) is the last resort, takes the provider-qualified id
+/// (`openai/gpt-6.1-terra`), and counts for a vendor only where its Kit
+/// allows the vendor's API host and injects its key.
 #[must_use]
 pub fn detect(
     table: &ClassTable,
-    agents: &BTreeMap<String, BTreeSet<String>>,
+    agents: &BTreeMap<String, DetectAgent>,
     credentials: &BTreeSet<String>,
-) -> Vec<DropInReviewer> {
-    let mut chosen = BTreeMap::<(ModelClass, String), (usize, String)>::new();
-    for (agent, vendors) in agents {
-        for vendor in vendors
+) -> Detected {
+    let mut chosen = BTreeMap::<(ModelClass, String), (usize, String, bool)>::new();
+    let mut blocked = BTreeMap::<(ModelClass, String), (String, String)>::new();
+    for (agent, facts) in agents {
+        let any = facts.services.contains(ANY_PROVIDER);
+        for vendor in credentials
             .iter()
-            .filter(|vendor| credentials.contains(*vendor))
+            .filter(|vendor| any || facts.services.contains(*vendor))
         {
+            let named = facts.services.contains(vendor);
+            let refusal = if any {
+                cannot_reach(agent, vendor, &facts.reaches)
+            } else {
+                None
+            };
+            let rank = if named {
+                facts.services.len()
+            } else {
+                usize::MAX
+            };
             for class in ModelClass::ALL {
                 if table.newest(vendor, class).is_none() {
                     continue;
                 }
-                let rank = vendors.len();
                 let key = (class, vendor.clone());
-                if chosen.get(&key).is_none_or(|(best, _)| rank < *best) {
-                    chosen.insert(key, (rank, agent.clone()));
+                if let Some(reason) = &refusal {
+                    blocked
+                        .entry(key)
+                        .or_insert_with(|| (agent.clone(), reason.clone()));
+                } else if chosen.get(&key).is_none_or(|(best, _, _)| rank < *best) {
+                    chosen.insert(key, (rank, agent.clone(), any));
                 }
             }
         }
     }
-    chosen
-        .into_iter()
-        .filter_map(|((class, vendor), (_, agent))| {
-            Some(DropInReviewer {
-                model: table.newest(&vendor, class)?,
-                agent,
-                class: Some(class),
-                vendor: Some(vendor),
-            })
+    let reviewer = |class: ModelClass, vendor: &str, agent: String, qualified: bool| {
+        let newest = table.newest(vendor, class)?;
+        Some(DropInReviewer {
+            model: if qualified {
+                format!("{vendor}/{newest}")
+            } else {
+                newest
+            },
+            agent,
+            class: Some(class),
+            vendor: Some(vendor.to_owned()),
         })
-        .collect()
+    };
+    Detected {
+        unreachable: blocked
+            .into_iter()
+            .filter(|(key, _)| !chosen.contains_key(key))
+            .filter_map(|((class, vendor), (agent, reason))| {
+                Some((reviewer(class, &vendor, agent, true)?, reason))
+            })
+            .collect(),
+        ready: chosen
+            .into_iter()
+            .filter_map(|((class, vendor), (_, agent, qualified))| {
+                reviewer(class, &vendor, agent, qualified)
+            })
+            .collect(),
+    }
 }
 
 #[cfg(test)]
@@ -988,6 +1092,7 @@ mod tests {
                     AgentFacts {
                         prompt: *name != "shell",
                         model_option: *model_option,
+                        ..AgentFacts::default()
                     },
                 )
             })
@@ -1110,24 +1215,39 @@ mod tests {
         assert_eq!(DropIn::parse("").unwrap(), DropIn::default());
     }
 
+    fn set(list: &[&str]) -> BTreeSet<String> {
+        list.iter().map(|v| (*v).to_owned()).collect()
+    }
+
+    fn agent(services: &[&str], reaches: &[(&str, &str)]) -> DetectAgent {
+        let mut found = DetectAgent {
+            services: set(services),
+            reaches: BTreeMap::new(),
+        };
+        for (service, host) in reaches {
+            found
+                .reaches
+                .entry((*service).to_owned())
+                .or_default()
+                .insert((*host).to_owned());
+        }
+        found
+    }
+
     #[test]
     fn detect_prefers_each_vendors_own_agent() {
         let table = ClassTable::builtin();
-        let vendors = |list: &[&str]| {
-            list.iter()
-                .map(|v| (*v).to_owned())
-                .collect::<BTreeSet<_>>()
-        };
         let agents = BTreeMap::from([
-            ("claude".to_owned(), vendors(&["anthropic"])),
-            ("codex".to_owned(), vendors(&["openai"])),
+            ("claude".to_owned(), agent(&["anthropic"], &[])),
+            ("codex".to_owned(), agent(&["openai"], &[])),
             (
                 "pix".to_owned(),
-                vendors(&["anthropic", "openai", "google"]),
+                agent(&["anthropic", "openai", "google"], &[]),
             ),
         ]);
-        let found = detect(&table, &agents, &vendors(&["anthropic", "openai"]));
+        let found = detect(&table, &agents, &set(&["anthropic", "openai"]));
         let mid = found
+            .ready
             .iter()
             .filter(|r| r.class == Some(ModelClass::Mid))
             .map(|r| (r.agent.as_str(), r.model.as_str()))
@@ -1136,14 +1256,122 @@ mod tests {
             mid,
             [("claude", "claude-sonnet-5-5"), ("codex", "gpt-6.1-terra")]
         );
-        assert!(!found.iter().any(|r| r.agent == "pix"));
+        assert!(!found.ready.iter().any(|r| r.agent == "pix"));
         let rendered = DropIn {
             version: Some(1),
             enabled: Some(true),
-            reviewers: found,
+            reviewers: found.ready,
         }
         .render("written by marsh");
         assert!(DropIn::parse(&rendered).is_ok(), "{rendered}");
+    }
+
+    #[test]
+    fn a_multi_provider_agent_counts_only_for_vendors_its_kit_reaches() {
+        let table = ClassTable::builtin();
+        let pi = agent(
+            &[ANY_PROVIDER, "anthropic"],
+            &[
+                ("anthropic", "api.anthropic.com"),
+                ("openai", "api.openai.com"),
+                // A key injected for a host the Kit does not allow never gets here.
+            ],
+        );
+        let agents = BTreeMap::from([
+            ("claude".to_owned(), agent(&["anthropic"], &[])),
+            ("pi".to_owned(), pi),
+        ]);
+        let found = detect(&table, &agents, &set(&["anthropic", "openai", "deepseek"]));
+        for class in ModelClass::ALL {
+            let by = |vendor: &str| {
+                found
+                    .ready
+                    .iter()
+                    .find(|r| r.class == Some(class) && r.vendor.as_deref() == Some(vendor))
+                    .map(|r| (r.agent.as_str(), r.model.clone()))
+            };
+            assert_eq!(by("anthropic").map(|r| r.0), Some("claude"), "{class:?}");
+            // openai has no agent of its own here: pi, with the qualified id.
+            assert_eq!(
+                by("openai"),
+                table
+                    .newest("openai", class)
+                    .map(|model| ("pi", format!("openai/{model}"))),
+                "{class:?}"
+            );
+            // deepseek: pi's Kit has neither its host nor its key.
+            assert_eq!(by("deepseek"), None, "{class:?}");
+        }
+        let blocked = found
+            .unreachable
+            .iter()
+            .map(|(r, reason)| (r.agent.as_str(), r.vendor.as_deref(), reason.as_str()))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            blocked.into_iter().collect::<Vec<_>>(),
+            [(
+                "pi",
+                Some("deepseek"),
+                "pi can't reach api.deepseek.com (its Kit must allow the host and inject the deepseek key for it)"
+            )]
+        );
+        assert!(
+            found
+                .unreachable
+                .iter()
+                .all(|(r, _)| r.model.starts_with("deepseek/deepseek-"))
+        );
+        // The host alone is not enough: no injected key, no reach.
+        let no_key = BTreeMap::from([("pi".to_owned(), agent(&[ANY_PROVIDER], &[]))]);
+        let found = detect(&table, &no_key, &set(&["openai"]));
+        assert_eq!(found.ready.len(), 0);
+        assert_eq!(found.unreachable.len(), 3);
+        // Without a stored key nothing is offered or blocked.
+        let found = detect(&table, &agents, &BTreeSet::new());
+        assert_eq!((found.ready.len(), found.unreachable.len()), (0, 0));
+    }
+
+    #[test]
+    fn load_skips_a_multi_provider_agent_for_a_vendor_its_kit_cannot_reach() {
+        let scope = tempfile::tempdir().unwrap();
+        let directory = scope.path().join(DROPIN_DIR);
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            directory.join("marsh.yaml"),
+            "enabled: true\nreviewers:\n  - {agent: pi, model: openai/gpt-6.1-terra}\n  - {agent: pi, model: deepseek/deepseek-v4-flash}\n  - {agent: pi, model: claude-sonnet-5-5}\n",
+        )
+        .unwrap();
+        let facts = AgentFacts {
+            prompt: true,
+            model_option: true,
+            multi_provider: true,
+            reaches: BTreeMap::from([(
+                "openai".to_owned(),
+                BTreeSet::from(["api.openai.com".to_owned()]),
+            )]),
+        };
+        let status = load(scope.path(), &BTreeMap::from([("pi".to_owned(), facts)]));
+        assert_eq!(
+            status
+                .reviewers
+                .iter()
+                .map(|r| r.model.as_str())
+                .collect::<Vec<_>>(),
+            ["openai/gpt-6.1-terra"]
+        );
+        let mut reasons = status
+            .skipped
+            .iter()
+            .map(|r| r.reason.clone().unwrap())
+            .collect::<Vec<_>>();
+        reasons.sort();
+        assert_eq!(
+            reasons,
+            [
+                "pi can't reach api.anthropic.com (its Kit must allow the host and inject the anthropic key for it)",
+                "pi can't reach api.deepseek.com (its Kit must allow the host and inject the deepseek key for it)"
+            ]
+        );
     }
 
     #[test]

@@ -44,6 +44,7 @@ capabilities:
     optional: true
     config:
       args: ["--model", "{{.Model}}"]
+      services: ["*"]   # multi-provider: any vendor whose key the host holds (`provider/model` ids)
   - type: com.docker.sandbox/network-policy@1
     config:
       runtime:
@@ -51,6 +52,8 @@ capabilities:
           - api.anthropic.com:443
           - api.openai.com:443
           - generativelanguage.googleapis.com:443
+          - api.mistral.ai:443
+          - api.x.ai:443
           - registry.npmjs.org:443
           - pi.dev:443
   - type: com.docker.sandbox/credential@1
@@ -86,6 +89,26 @@ capabilities:
         proxyManaged: true
         inject:
           - {domain: generativelanguage.googleapis.com, header: x-goog-api-key, format: "%s"}
+  - type: com.docker.sandbox/credential@1
+    optional: true
+    description: Mistral API
+    config:
+      service: mistral
+      phase: runtime
+      apiKey:
+        name: MISTRAL_API_KEY
+        inject:
+          - {domain: api.mistral.ai, header: Authorization, format: "Bearer %s"}
+  - type: com.docker.sandbox/credential@1
+    optional: true
+    description: xAI API
+    config:
+      service: xai
+      phase: runtime
+      apiKey:
+        name: XAI_API_KEY
+        inject:
+          - {domain: api.x.ai, header: Authorization, format: "Bearer %s"}
   # Skills a mixin adds (agent-skill@1), e.g. through a kit set; Pix loads
   # this folder when it exists. Independent of HOME, so marsh and stock SBX
   # both deliver here.

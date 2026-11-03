@@ -219,8 +219,9 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   uploads it into a root-only file in its sandbox; the token can use every
   cloud sandbox on the account. See https://runmar.sh/docs/cloud.html.
 
-**config peer-review** [**on**|**off**]
-: Set, or with no value print, peer review by another vendor's model. **on**
+**config peer-review** [**on**|**off**|**ls** [**--json**]]
+: Set, or with no value print, peer review by another vendor's model. **ls**
+  is **peer-review ls**. **on**
   writes *MARSH_HOME*/**peer-review.d/marsh.yaml** with **enabled: true** and
   the reviewers marsh detects (agents whose Kit declares a model option, for
   vendors whose key **sbx secret ls** shows); **off** sets **enabled: false**
@@ -232,6 +233,13 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   model, the drop-in that named each, how its class was found), those not
   ready and why, and drop-in errors. **--json** prints **marsh status
   --json**'s **peer_review** document.
+
+**peer-review classify** *MODEL*... [**--json**]
+: Print each model's class (small, mid, large), vendor, and how it was
+  classed, from the table the daemon uses (*MARSH_HOME*/**model-classes.yaml**
+  over marsh's own). Needs no daemon. **--json** prints
+  **[{"model","class","vendor","how"}]**; the last three are **null** for a
+  model the table cannot class.
 
 **kit install** *NAME* [*REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*]
 : Register a published Kit under *NAME* in this scope. A tag is resolved to its

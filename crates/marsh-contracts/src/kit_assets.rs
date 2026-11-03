@@ -11,6 +11,7 @@
 //! destination is a read-only directory of links to the bundled skills.
 
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 /// The manifest annotation that carries a v3 Kit's descriptor.
@@ -200,6 +201,13 @@ pub struct KitAgent {
     /// holds that credential (`marsh config peer-review on`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub services: Vec<String>,
+    /// For each credential service, the hosts the Kit both allows
+    /// (`network-policy@1` `runtime.allow`) and has the service's key injected
+    /// for (`credential@1` `apiKey.inject[].domain`): where the key can
+    /// actually be used (`marsh config peer-review on` trusts a
+    /// multi-provider agent only there).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub reaches: BTreeMap<String, Vec<String>>,
 }
 
 /// marsh's own capability: the agent's model option for `task(model)`,
@@ -207,6 +215,11 @@ pub struct KitAgent {
 /// Stock SBX rejects unknown `agent-sessions@1` keys, so it lives here;
 /// marsh shows it as `model` in the agent's session verbs.
 pub const AGENT_MODEL_CAPABILITY: &str = "org.marsh/agent-model@1";
+
+/// `org.marsh/agent-model@1` `services: ["*"]` marks a multi-provider agent
+/// (Pi): it reaches every vendor whose key the host holds, and takes
+/// `provider/model` ids. It appears as this entry in `KitAgent::services`.
+pub const ANY_PROVIDER: &str = "*";
 
 /// marsh's own capability: which of the session's mounts a Kit's jobs get.
 pub const HOME_CAPABILITY: &str = "org.marsh/home@1";
@@ -221,6 +234,74 @@ fn agent_name(name: &str) -> String {
 
 /// `org.marsh/agent-model@1` `args`: 1-8 non-empty strings, one with the
 /// `{{.Model}}` placeholder.
+/// Whether the model capability's `services` marks a multi-provider agent:
+/// only `["*"]` is accepted.
+fn any_provider(config: &serde_json::Value) -> Result<bool, String> {
+    match config.get("services") {
+        None => Ok(false),
+        Some(services) if *services == serde_json::json!([ANY_PROVIDER]) => Ok(true),
+        Some(_) => Err(format!(
+            "{AGENT_MODEL_CAPABILITY}: services must be [\"{ANY_PROVIDER}\"]"
+        )),
+    }
+}
+
+/// Whether `org.marsh/home@1` says the selected home is never mounted.
+fn home_mount_none(config: &serde_json::Value) -> Result<bool, String> {
+    match config.get("mount").and_then(serde_json::Value::as_str) {
+        Some("none") => Ok(true),
+        Some("selected") => Ok(false),
+        _ => Err(format!(
+            "{HOME_CAPABILITY}: mount must be \"none\" or \"selected\""
+        )),
+    }
+}
+
+/// The hosts of a `network-policy@1` `runtime.allow` list (ports dropped).
+fn allowed_hosts(config: &serde_json::Value) -> Vec<String> {
+    config["runtime"]["allow"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(|entry| {
+            entry
+                .rsplit_once(':')
+                .map_or(entry, |(host, _)| host)
+                .to_owned()
+        })
+        .collect()
+}
+
+/// A `credential@1`'s `(service, domain)` for each `apiKey.inject` rule.
+fn injected_hosts(config: &serde_json::Value) -> Vec<(String, String)> {
+    let Some(service) = config.get("service").and_then(serde_json::Value::as_str) else {
+        return Vec::new();
+    };
+    config["apiKey"]["inject"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|rule| rule["domain"].as_str())
+        .map(|domain| (service.to_owned(), domain.to_owned()))
+        .collect()
+}
+
+fn reaches(
+    allowed: &BTreeSet<String>,
+    injected: Vec<(String, String)>,
+) -> BTreeMap<String, Vec<String>> {
+    let mut found = BTreeMap::<String, Vec<String>>::new();
+    for (service, domain) in injected {
+        let hosts = found.entry(service).or_default();
+        if allowed.contains(&domain) && !hosts.contains(&domain) {
+            hosts.push(domain);
+        }
+    }
+    found.retain(|_, hosts| !hosts.is_empty());
+    found
+}
+
 fn model_option(config: &serde_json::Value) -> Result<serde_json::Value, String> {
     let placeholder = crate::process::MODEL_PLACEHOLDER;
     config
@@ -277,6 +358,9 @@ impl KitAgent {
         let mut adapters = Vec::new();
         let mut sessions = Vec::new();
         let mut model_args = None;
+        let mut multi_provider = false;
+        let mut allowed = BTreeSet::new();
+        let mut injected = Vec::<(String, String)>::new();
         for capability in capabilities {
             let config = capability.get("config").cloned().unwrap_or_default();
             match capability.get("type").and_then(serde_json::Value::as_str) {
@@ -295,8 +379,15 @@ impl KitAgent {
                     }
                     sessions.push(config);
                 }
-                Some(AGENT_MODEL_CAPABILITY) => model_args = Some(model_option(&config)?),
+                Some(AGENT_MODEL_CAPABILITY) => {
+                    model_args = Some(model_option(&config)?);
+                    multi_provider = multi_provider || any_provider(&config)?;
+                }
+                Some("com.docker.sandbox/network-policy@1") => {
+                    allowed.extend(allowed_hosts(&config));
+                }
                 Some("com.docker.sandbox/credential@1") => {
+                    injected.extend(injected_hosts(&config));
                     if let Some(service) = config
                         .get("service")
                         .and_then(serde_json::Value::as_str)
@@ -307,19 +398,13 @@ impl KitAgent {
                     }
                 }
                 // Any component of a set may narrow; none can widen back.
-                Some(HOME_CAPABILITY) => {
-                    match config.get("mount").and_then(serde_json::Value::as_str) {
-                        Some("none") => agent.no_home = true,
-                        Some("selected") => {}
-                        _ => {
-                            return Err(format!(
-                                "{HOME_CAPABILITY}: mount must be \"none\" or \"selected\""
-                            ));
-                        }
-                    }
-                }
+                Some(HOME_CAPABILITY) => agent.no_home |= home_mount_none(&config)?,
                 _ => {}
             }
+        }
+        agent.reaches = reaches(&allowed, injected);
+        if multi_provider {
+            agent.services.push(ANY_PROVIDER.to_owned());
         }
         agent.services.sort();
         agent.acp = adapters
@@ -618,6 +703,40 @@ mod tests {
             serde_json::json!(["--model", "{{.Model}}"])
         );
         assert!(KitAgent::from_descriptor(&model(serde_json::json!(["--model"]))).is_err());
+        // `services: ["*"]` declares a multi-provider agent.
+        let multi = |services: serde_json::Value| {
+            serde_json::json!({"capabilities": [credential("anthropic"),
+                {"type": AGENT_MODEL_CAPABILITY, "config": {"args": ["--model", "{{.Model}}"], "services": services}}]})
+        };
+        assert_eq!(
+            KitAgent::from_descriptor(&multi(serde_json::json!(["*"])))
+                .unwrap()
+                .services,
+            ["*", "anthropic"]
+        );
+        assert!(KitAgent::from_descriptor(&multi(serde_json::json!(["openai"]))).is_err());
+        // A key counts only on a host the Kit both allows and injects it for.
+        let injecting = |service: &str, domain: &str| {
+            serde_json::json!({
+                "type": "com.docker.sandbox/credential@1",
+                "config": {"service": service, "apiKey": {"inject": [{"domain": domain, "header": "Authorization", "format": "Bearer %s"}]}}
+            })
+        };
+        let reach = KitAgent::from_descriptor(&serde_json::json!({"capabilities": [
+            {"type": "com.docker.sandbox/network-policy@1",
+             "config": {"runtime": {"allow": ["api.openai.com:443", "api.x.ai:443"]}}},
+            injecting("openai", "api.openai.com"),
+            injecting("mistral", "api.mistral.ai"),
+            {"group": {"capabilities": [injecting("xai", "api.openai.com")]}},
+        ]}))
+        .unwrap();
+        assert_eq!(
+            reach.reaches,
+            BTreeMap::from([
+                ("openai".to_owned(), vec!["api.openai.com".to_owned()]),
+                ("xai".to_owned(), vec!["api.openai.com".to_owned()]),
+            ])
+        );
         // Two adapters and an unnamed declaration: whose it is is unknown.
         let two = serde_json::json!({"capabilities": [adapter("a"), adapter("b"), sessions]});
         assert!(KitAgent::from_descriptor(&two).unwrap().sessions.is_none());

@@ -704,6 +704,23 @@ impl StockDaemonBackend {
                     marsh_daemon::peer_review::AgentFacts {
                         prompt: verbs.prompts.contains_key(name),
                         model_option: verbs.models.contains_key(name),
+                        multi_provider: verbs.services.get(name).is_some_and(|services| {
+                            services
+                                .iter()
+                                .any(|service| service == marsh_contracts::kit_assets::ANY_PROVIDER)
+                        }),
+                        reaches: verbs
+                            .reaches
+                            .get(name)
+                            .map(|reaches| {
+                                reaches
+                                    .iter()
+                                    .map(|(service, hosts)| {
+                                        (service.clone(), hosts.iter().cloned().collect())
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
                     },
                 )
             })
@@ -1308,6 +1325,10 @@ impl DaemonBackend for StockDaemonBackend {
                     services: agent
                         .as_ref()
                         .map(|agent| agent.services.clone())
+                        .unwrap_or_default(),
+                    reaches: agent
+                        .as_ref()
+                        .map(|agent| agent.reaches.clone())
                         .unwrap_or_default(),
                     sessions: agent.and_then(|agent| agent.sessions),
                     name,
@@ -5001,6 +5022,9 @@ struct AgentVerbs {
     registered: Vec<String>,
     prompts: BTreeMap<String, Vec<String>>,
     models: BTreeMap<String, Vec<String>>,
+    /// Each command's credential services and where its Kit can use them.
+    services: BTreeMap<String, Vec<String>>,
+    reaches: BTreeMap<String, BTreeMap<String, Vec<String>>>,
 }
 
 fn agent_verbs(catalog: &[marsh_daemon::CommandStatus]) -> AgentVerbs {
@@ -5020,6 +5044,12 @@ fn agent_verbs(catalog: &[marsh_daemon::CommandStatus]) -> AgentVerbs {
     let mut found = AgentVerbs::default();
     for command in catalog {
         found.registered.push(command.name.clone());
+        found
+            .services
+            .insert(command.name.clone(), command.services.clone());
+        found
+            .reaches
+            .insert(command.name.clone(), command.reaches.clone());
         let Some(sessions) = &command.sessions else {
             continue;
         };
