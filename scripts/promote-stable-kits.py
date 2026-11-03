@@ -11,10 +11,16 @@ A Kit image moves only when both hold:
     supports (`supported` reads it from that release's kit_source.rs), so a
     stable user is never offered an image that needs a newer marsh; marsh
     checks the label again before switching;
-  * its Kit descriptor (which names the agent, ACP adapter and package
-    versions the image provides, and its network policy) differs from the one
-    :latest has now. Builds are not bit-for-bit reproducible, so without this
-    every main build would hand every user a new digest with nothing new in it.
+  * what it was built from differs from what :latest was built from: its
+    `org.marsh.kit.inputs` annotation (publish-kits.py: a hash of the staged
+    Kit directory, with the canonical inputs added to it, and the build
+    arguments) or, failing that, its Kit descriptor (the agent, ACP adapter and
+    package versions it provides, and its network policy). A change to a Kit's
+    scripts or Dockerfile (an entrypoint, an MCP registration) moves the tag
+    even when the descriptor is the same. Builds are not bit-for-bit
+    reproducible, so comparing digests would hand every user a new image after
+    every main build with nothing new in it. A :latest built before the
+    annotation existed counts as different.
 
 Subcommands:
   supported FILE                     print LOW-HIGH from a kit_source.rs, or
@@ -34,6 +40,7 @@ import sys
 
 CONTRACT_LABEL = "org.marsh.kit.contract"
 DESCRIPTOR = "vnd.docker.sandbox.kit.descriptor"
+INPUTS = "org.marsh.kit.inputs"
 RANGE = re.compile(
     r"^pub const SUPPORTED_KIT_CONTRACTS: RangeInclusive<u32> = (\d+)\.\.=(\d+);$", re.M
 )
@@ -49,18 +56,25 @@ def parse_range(value: str) -> tuple[int, int] | None:
     return (int(match.group(1)), int(match.group(2))) if match else None
 
 
-def decide(contract, accepted, descriptor, current):
-    """(move?, reason) for one image."""
+def decide(contract, accepted, build, current):
+    """(move?, reason) for one image. `build` and `current` (None when the tag
+    does not exist) are {"descriptor": ..., "inputs": ...} annotations."""
     if accepted is None:
         return False, "the newest stable marsh declares no supported Kit contract"
     low, high = accepted
     if contract is None or not low <= contract <= high:
         return False, f"contract {contract if contract is not None else 'none'} is outside {low}-{high}"
-    if descriptor is None:
+    if build.get("descriptor") is None:
         return False, "the build has no Kit descriptor"
-    if current is not None and current == descriptor:
+    if current is None:
+        return True, f"contract {contract}; no current tag"
+    if build.get("inputs") is not None:
+        if build["inputs"] == current.get("inputs"):
+            return False, "built from the same Kit inputs as the current tag"
+        return True, f"contract {contract}; built from changed Kit inputs"
+    if build["descriptor"] == current.get("descriptor"):
         return False, "same Kit descriptor as the current tag"
-    return True, f"contract {contract}"
+    return True, f"contract {contract}; new Kit descriptor"
 
 
 class Docker:
@@ -86,8 +100,8 @@ class Docker:
         value = ((image.get("config") or {}).get("Labels") or {}).get(CONTRACT_LABEL, "")
         return int(value) if str(value).strip().isdigit() else None
 
-    def descriptor(self, reference: str) -> str | None:
-        """The arm64 manifest's Kit descriptor annotation."""
+    def annotations(self, reference: str) -> dict[str, str | None]:
+        """The arm64 manifest's Kit descriptor and inputs annotations."""
         top = json.loads(self.run("inspect", "--raw", reference))
         manifest = top
         for entry in top.get("manifests", []):
@@ -97,12 +111,13 @@ class Docker:
                     self.run("inspect", "--raw", f"{repository(reference)}@{entry['digest']}")
                 )
                 break
-        return (manifest.get("annotations") or {}).get(DESCRIPTOR)
+        annotations = manifest.get("annotations") or {}
+        return {"descriptor": annotations.get(DESCRIPTOR), "inputs": annotations.get(INPUTS)}
 
-    def current_descriptor(self, tag: str) -> str | None:
+    def current(self, tag: str) -> dict[str, str | None] | None:
         """None when the tag does not exist yet."""
         try:
-            return self.descriptor(tag)
+            return self.annotations(tag)
         except RuntimeError as error:
             if "not found" in str(error).lower():
                 return None
@@ -129,8 +144,8 @@ def promote(args) -> int:
             move, reason = decide(
                 docker.contract(reference),
                 accepted,
-                docker.descriptor(reference),
-                docker.current_descriptor(target),
+                docker.annotations(reference),
+                docker.current(target),
             )
             if move and args.apply:
                 docker.run("create", "--tag", target, reference)

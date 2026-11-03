@@ -40,6 +40,7 @@ For skills, dotfiles, MCP connections, and extra directories, see
 | `MARSH_CLOUD_CPUS` | Default `--cpus` for [`cloud`](cloud.md#sandbox-size-lifetime-and-image) calls from this shell: 1, 2, 4, 8, or 16 (2 GiB of memory per CPU). Default 2. |
 | `MARSH_CLOUD_TTL` | Default `--ttl` for `cloud` calls: 1m to 24h, such as `30m` or `2h`. Default `4h`. |
 | `MARSH_CLOUD_IMAGE` | Default `--image` for `cloud` calls: an image pinned by digest. Read by the daemon too, as its own default. |
+| `MARSH_VM_IDLE_SECONDS` | For tests: the [idle VM limit](troubleshooting.md#garbage-collection) in seconds instead of `marsh config vm-idle-days`. Read when the daemon starts. |
 | `MARSH_AUTO_UPDATE` | `0` (or `off`) turns off [automatic Kit updates](kits.md#updates), and the automatic adding of `pix` and `hermes`, for the daemon it starts, as `marsh config auto-update off` does. Read when the daemon starts. |
 | `MARSH_CLOUD_CHILDREN` | The most agent sandboxes one [detached cloud run](cloud.md#agents-calling-agents-with-the-lid-closed) may start with `marsh config cloud-delegate on`: 1 to 64. Default 8. Read when the daemon starts. |
 | `MARSH_OPEN_URLS` | `0` (or `off`) stops [`xdg-open` in a shell or job](agents.md#opening-links) from opening links on your Mac, as `marsh config open-urls off` does; links are printed instead. Read when the daemon starts. |
@@ -113,14 +114,15 @@ When unset, control directories are in
 
 | Path | Contents |
 |---|---|
-| `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, whether Kits update themselves, set by `marsh config auto-update on\|off`, whether `xdg-open` opens links on your Mac, set by `marsh config open-urls on\|off`, and whether detached cloud runs may start agent sandboxes, set by `marsh config cloud-delegate on\|off` (default off). Default path `~/.marsh/config.json`. |
+| `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, whether Kits update themselves, set by `marsh config auto-update on\|off`, whether `xdg-open` opens links on your Mac, set by `marsh config open-urls on\|off`, and whether detached cloud runs may start agent sandboxes, set by `marsh config cloud-delegate on\|off` (default off), and after how many days unused VMs are removed, set by `marsh config vm-idle-days DAYS\|off` (default 3). Default path `~/.marsh/config.json`. |
 | `$MARSH_HOME/home/` | The guest home. Agent logins and settings (`.claude`, `.codex`) live here. Every job in the scope can read it. Default path `~/.marsh/home/`. |
 | `$MARSH_HOME/sbxenv.yaml` | Shared MCP servers and extra directories for every Kit and the shell. |
 | `$MARSH_HOME/sbxenv.d/*.yaml` | More shared servers and directories, same schema as `sbxenv.yaml`, read in name order after it. |
 | `$MARSH_HOME/sbxenvs/NAME.yaml` | Additional servers and directories for registered command `NAME`; `shell.yaml` also configures the shell VM. |
 | `CONTROL/HASH/` | Host-only control directory for a scope. `marsh status` prints it. Never mounted into a VM. |
 | `CONTROL/HASH/commands.json` | Your command registry. Overrides packaged entries by name. See [Commands and Kits](kits.md#adding-a-command). |
-| `CONTROL/HASH/kit-updates.json` | When [automatic Kit updates](kits.md#updates) last checked, and what they changed. |
+| `CONTROL/HASH/vm-gc.json` | When [garbage collection](troubleshooting.md#garbage-collection) last ran, what it removed, and when this marsh last used each of its VMs. |
+| `CONTROL/HASH/kit-updates.json` | When [automatic Kit updates](kits.md#updates) last checked, and what they changed. Kit changes still finishing are in `marsh status`, not here. |
 | `CONTROL/HASH/state/results.journal` | Structural job receipts, for `marsh results`. |
 | `PREFIX/libexec/marsh/` | Packaged `commands.json`, `shell-image`, and the Linux binaries. |
 | `~/Library/Application Support/marsh/published-mcp/`, `published-acp/` | Host-only MCP and ACP publication declarations. Under `MARSH_CONTROL_HOME` when it is set. |

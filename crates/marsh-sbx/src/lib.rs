@@ -181,6 +181,21 @@ pub struct KitVmSpec {
     pub lifecycle_workspace: PathBuf,
 }
 
+/// One VM this daemon's ownership map records, as stock SBX lists it now
+/// ([`StockSbx::recorded_vms`]).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecordedVm {
+    pub name: String,
+    pub purpose: VmPurpose,
+    /// The ownership key: a Kit identity, or a shell selector (`shell`, `dev`,
+    /// `ephemeral:SESSION`, …).
+    pub key: String,
+    pub running: bool,
+    pub quarantined: bool,
+    /// Stock SBX's `last_used_at` (RFC 3339), if it lists one.
+    pub last_used_at: Option<String>,
+}
+
 /// A compatible stock-SBX VM ready to receive jobs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReadyKitVm {
@@ -1604,6 +1619,31 @@ impl StockSbx {
         image_contract_label(&output.stdout).map_err(SbxError::KitResolution)
     }
 
+    /// When a published Kit image was built: the `created` time of its
+    /// linux/arm64 image configuration (set by `BuildKit`), as a sortable UTC
+    /// timestamp (`2026-10-29T10:43:13.000000000Z`). `None` when the image
+    /// names no UTC creation time.
+    ///
+    /// # Errors
+    /// Fails when Docker cannot read the image configuration.
+    pub fn kit_created(&self, image: &OciImage) -> Result<Option<String>, SbxError> {
+        let output = self.run_program_bounded_os(
+            "read Kit creation time",
+            Path::new("docker"),
+            KIT_RESOLUTION_TIMEOUT,
+            [
+                "buildx",
+                "imagetools",
+                "inspect",
+                image.as_str(),
+                "--format",
+                "{{json .Image}}",
+            ],
+        )?;
+        Self::require_success("read Kit creation time", output.clone())?;
+        image_created(&output.stdout).map_err(SbxError::KitResolution)
+    }
+
     /// Reads the skills and instructions a published Kit declares, from its
     /// descriptor annotation on the linux/arm64 manifest (`kit_assets`). A
     /// bare image ID (a local source Kit) has no registry copy: nothing.
@@ -1896,6 +1936,133 @@ impl StockSbx {
         self.retire_kit_vm_before(spec, deadline, None)
     }
 
+    /// The VMs this daemon's ownership map records with a UUID that stock SBX
+    /// still lists under it, from a fresh inventory; and the `marsh-` VMs it
+    /// lists that no map of this daemon records (another scope's, or nobody's).
+    ///
+    /// # Errors
+    /// Fails when stock SBX cannot list its VMs.
+    pub fn recorded_vms(&self) -> Result<(Vec<RecordedVm>, Vec<String>), SbxError> {
+        let view = self.stock_view(true)?;
+        let quarantined = self.quarantined_vms();
+        let mut recorded = Vec::new();
+        for (name, purpose, key) in self.ownership.recorded() {
+            let VmClass::Owned { running, .. } = self.ownership.classify(&view, &name) else {
+                continue;
+            };
+            recorded.push(RecordedVm {
+                last_used_at: view.get(&name).and_then(|vm| vm.last_used_at.clone()),
+                quarantined: quarantined.contains_key(&name),
+                name,
+                purpose,
+                key,
+                running,
+            });
+        }
+        let ours = self.ownership.host_names();
+        let grants = self.ownership.grant_names();
+        let foreign = view
+            .names()
+            .filter(|name| {
+                name.starts_with("marsh-") && !ours.contains(*name) && !grants.contains(*name)
+            })
+            .map(str::to_owned)
+            .collect();
+        Ok((recorded, foreign))
+    }
+
+    /// Whether a shell session or a retained shell mount of this daemon
+    /// holds the shell VM `name` (a shell reset would refuse it).
+    #[must_use]
+    pub fn shell_vm_in_use(&self, name: &str) -> bool {
+        self.check_shell_reset_admission(name).is_err()
+    }
+
+    /// The recorded name of `(purpose, key)`, never assigning one.
+    #[must_use]
+    pub fn recorded_vm_name(&self, purpose: VmPurpose, key: &str) -> Option<String> {
+        self.ownership.lookup(purpose, key)
+    }
+
+    /// Removes one recorded Kit VM that nothing uses (garbage collection):
+    /// refused while quarantined, while a running job's mounts or a pin of a
+    /// `live` session hold it, or (unless `may_be_running`) while it runs.
+    /// `key` is its ownership key (the Kit identity). Returns whether a VM was
+    /// removed.
+    ///
+    /// # Errors
+    /// Fails when ownership, use, or removal cannot be verified.
+    pub fn remove_unused_kit_vm(
+        &self,
+        name: &str,
+        key: &str,
+        live: &BTreeSet<String>,
+        may_be_running: bool,
+        deadline: Instant,
+    ) -> Result<bool, SbxError> {
+        validate_name(name)?;
+        let (vm_transition, _vm_cleanup) =
+            weak_rw_transition_lock(&self.grant_vm_transition_locks, name.to_owned());
+        let _vm_transition = vm_transition
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (stock_operation, _stock_cleanup) =
+            weak_mutex_transition_lock(&self.grant_stock_operation_locks, name.to_owned());
+        let _stock_operation = stock_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.reject_quarantined(name)?;
+        match self.classify_vm(name, true)? {
+            VmClass::Absent => return Ok(false),
+            VmClass::Foreign => return Err(SbxError::ForeignVm(name.to_owned())),
+            VmClass::Owned { running, .. } if running && !may_be_running => {
+                return Err(SbxError::ActiveWorkerState(name.to_owned()));
+            }
+            VmClass::Owned { .. } => {}
+        }
+        {
+            let mut references = self
+                .grant_mount_references
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if references.iter().any(|((vm, _), reference)| {
+                vm == name
+                    && (reference.active_jobs > 0
+                        || reference
+                            .pinned_sessions
+                            .keys()
+                            .any(|session| live.contains(session)))
+            }) || self.worker_lease_busy_and_live(name)?
+            {
+                return Err(SbxError::ActiveWorkerState(name.to_owned()));
+            }
+            references.retain(|(vm, _), _| vm != name);
+        }
+        self.drop_worker_lease_before(name, deadline)?;
+        self.remove_owned_vm(name, deadline)?;
+        self.clear_worker_generation_named(name, key);
+        Ok(true)
+    }
+
+    /// Whether [`Self::retire_kit_vm_before`] with these `live` sessions
+    /// would refuse `name` as still in use: a running job's mounts, or a pin
+    /// of an attached shell that ran it.
+    #[must_use]
+    pub fn kit_vm_in_use(&self, name: &str, live: &BTreeSet<String>) -> bool {
+        self.grant_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|((vm, _), reference)| {
+                vm == name
+                    && (reference.active_jobs > 0
+                        || reference
+                            .pinned_sessions
+                            .keys()
+                            .any(|session| live.contains(session)))
+            })
+    }
+
     /// Retire one exactly-owned Kit VM (recorded UUID) for an operator reset.
     /// `live` names the shell sessions that are still attached; a retained
     /// pin from any other session, or retained job references on a VM the
@@ -1986,29 +2153,33 @@ impl StockSbx {
     }
 
     fn clear_worker_generation(&self, spec: &KitVmSpec) {
+        self.clear_worker_generation_named(&spec.name, spec.workload_kit.identity());
+    }
+
+    fn clear_worker_generation_named(&self, name: &str, identity: &str) {
         // Reset holds the VM write fence: no initializer for this generation
         // can be waiting under its read fence. Drop only the dead selector.
         self.worker_init_locks
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&spec.name);
+            .remove(name);
         self.ownership.invalidate();
         self.installed_worker_artifacts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&spec.name);
+            .remove(name);
         self.worker_generations
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&spec.name);
+            .remove(name);
         self.quarantined_workers
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(&spec.name);
+            .remove(name);
         self.local_resolutions
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(spec.workload_kit.identity());
+            .remove(identity);
     }
 
     /// Reuses an exactly-owned VM or creates one from the Kit's own image,
@@ -7785,16 +7956,49 @@ fn resolved_kit_image(stdout: &[u8]) -> Option<String> {
 /// The contract label from `docker buildx imagetools inspect --format
 /// '{{json .Image}}'`: one image configuration, or a map of them by platform
 /// for an index (marsh Kits run on linux/arm64).
-fn image_contract_label(stdout: &[u8]) -> Result<Option<u32>, String> {
-    let value: serde_json::Value = serde_json::from_slice(stdout)
+/// The linux/arm64 image configuration of `docker buildx imagetools inspect
+/// --format '{{json .Image}}'` output (one image, or keyed by platform).
+fn image_configuration(stdout: &[u8]) -> Result<serde_json::Value, String> {
+    let mut value: serde_json::Value = serde_json::from_slice(stdout)
         .map_err(|_| "Docker returned an unreadable image configuration".to_owned())?;
-    let configuration = if value.get("config").is_some() {
-        &value
-    } else {
-        value
-            .get("linux/arm64")
-            .ok_or_else(|| "the image has no linux/arm64 configuration".to_owned())?
-    };
+    if value.get("config").is_some() || value.get("created").is_some() {
+        return Ok(value);
+    }
+    value
+        .get_mut("linux/arm64")
+        .map(serde_json::Value::take)
+        .ok_or_else(|| "the image has no linux/arm64 configuration".to_owned())
+}
+
+/// See [`StockSbx::kit_created`]: RFC 3339 in UTC, with the fraction
+/// padded to nanoseconds so that the strings sort by time.
+fn image_created(stdout: &[u8]) -> Result<Option<String>, String> {
+    let configuration = image_configuration(stdout)?;
+    Ok(configuration
+        .get("created")
+        .and_then(serde_json::Value::as_str)
+        .and_then(sortable_utc))
+}
+
+fn sortable_utc(text: &str) -> Option<String> {
+    let rest = text.strip_suffix('Z')?;
+    let (seconds, fraction) = rest.split_once('.').unwrap_or((rest, ""));
+    let shape = seconds.len() == 19
+        && seconds
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| match index {
+                4 | 7 => byte == b'-',
+                10 => byte == b'T',
+                13 | 16 => byte == b':',
+                _ => byte.is_ascii_digit(),
+            });
+    (shape && fraction.len() <= 9 && fraction.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| format!("{seconds}.{fraction:0<9}Z"))
+}
+
+fn image_contract_label(stdout: &[u8]) -> Result<Option<u32>, String> {
+    let configuration = image_configuration(stdout)?;
     Ok(configuration
         .get("config")
         .and_then(|config| config.get("Labels"))
@@ -8115,6 +8319,29 @@ mod kit_resolution_tests {
         assert_eq!(sbx.kit_contract(&image).unwrap(), None);
         let (sbx, _) = stock(r#"{"linux/amd64":{"config":{}}}"#.into());
         assert!(sbx.kit_contract(&image).is_err());
+    }
+
+    #[test]
+    fn the_creation_time_is_a_sortable_utc_timestamp() {
+        let image = OciImage::parse(format!("docker.io/mcavage/marsh-pi@{DIGEST}")).unwrap();
+        let (sbx, _) =
+            stock(r#"{"linux/arm64":{"created":"2026-11-02T22:27:19.178412012Z"}}"#.into());
+        assert_eq!(
+            sbx.kit_created(&image).unwrap().as_deref(),
+            Some("2026-11-02T22:27:19.178412012Z")
+        );
+        let (sbx, _) = stock(r#"{"created":"2026-10-29T10:43:13Z","config":{}}"#.into());
+        let older = sbx.kit_created(&image).unwrap().unwrap();
+        assert_eq!(older, "2026-10-29T10:43:13.000000000Z");
+        assert!(older < "2026-10-29T10:43:13.5Z".replace(".5Z", ".500000000Z"));
+        for unusable in [
+            r#"{"created":"2026-10-29T10:43:13+01:00"}"#,
+            r#"{"created":"yesterday"}"#,
+            r#"{"config":{}}"#,
+        ] {
+            let (sbx, _) = stock(unusable.into());
+            assert_eq!(sbx.kit_created(&image).unwrap(), None, "{unusable}");
+        }
     }
 
     #[test]

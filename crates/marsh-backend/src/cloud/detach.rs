@@ -1166,7 +1166,10 @@ impl StockDaemonBackend {
             );
         }
         // A scope lifecycle transition (`marsh stop`) waits for this write.
-        let Ok(_admission) = store.begin_background_request() else {
+        let Ok(_admission) = store.begin_background_request(format!(
+            "the write-back of detached cloud run {}",
+            &record.job_id[..record.job_id.len().min(8)]
+        )) else {
             record.detail = "write-back waits for a lifecycle change to finish".into();
             record.save(paths)?;
             return Ok(record);

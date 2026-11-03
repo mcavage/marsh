@@ -645,6 +645,17 @@ def verify_output_parent(path, retained):
             raise ValueError("output directory identity or permissions changed during build")
 
 
+INPUTS_ANNOTATION = "org.marsh.kit.inputs"
+
+
+def inputs_identity(state, root, source):
+    """sha256 of everything a Kit image is built from: its staged context (the
+    Kit directory and the canonical inputs added to it) and its build arguments.
+    The same inputs give the same value on every build."""
+    record = state["sources"][str(source.relative_to(root))]
+    return sha(json_bytes({"staged_tree": record["staged_tree"], "arguments": record["arguments"]}))
+
+
 def build(source, plan, temporary, output, phase):
     context, descriptor, arguments = plan
     metadata = temporary / f"{source.name}-{phase}.json"
@@ -765,6 +776,9 @@ def run(args):
                     recheck()
                     repository = f"{prefix}/{name_prefix}{source.name}"
                     output = f"type=image,name={repository}:{args.tag},push=true"
+                    # What the image is built from, for promote-stable-kits.py:
+                    # builds are not reproducible, but this is.
+                    output += f",annotation.{INPUTS_ANNOTATION}={inputs_identity(state, root, source)}"
                     if args.insecure_registry:
                         output += ",registry.insecure=true"
                     metadata = build(source, plan, temporary, output, "publish")

@@ -59,9 +59,9 @@ impl StockDaemonBackend {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .get(vm)
-                .map(|(command, spec)| {
-                    commands.push(command.clone());
-                    spec.clone()
+                .map(|draining| {
+                    commands.push(draining.command.clone());
+                    draining.spec.clone()
                 })
                 .or_else(|| {
                     self.remembered_ephemeral_kits()

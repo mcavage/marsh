@@ -65,6 +65,8 @@ Usage:
   marsh config auto-update [on|off]    Show or set automatic Kit updates
   marsh config open-urls [on|off]      Show or set opening job links on the Mac
   marsh config cloud-delegate [on|off] Let detached cloud runs start agent sandboxes
+  marsh config vm-idle-days [DAYS|off] Show or set when unused VMs are removed
+  marsh gc [--dry-run] [--json]        Remove this home's superseded and unused VMs now
   marsh stop [--json]                  Remove this home's VMs and stop its daemon
   marsh reset [--json]                 Remove this home's VMs; keep the daemon
   marsh init                           Create this home and copy your git name and email into it
@@ -233,6 +235,9 @@ uninstall
          Remove a Kit added with `marsh kit install` (a known Kit stays removed
          until you install it again), or return an updated packaged command to
          the version this marsh shipped.
+
+Neither waits for running jobs: new jobs use the change at once, and running
+jobs finish on the previous Kit (`marsh status` lists it under pending).
 
 Commands that follow a tag update themselves when the daemon starts and once
 an hour; `marsh status` lists updates. To update now, run `marsh stop` when

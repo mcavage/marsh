@@ -21,6 +21,19 @@ WALL is the whole request, invocation to verified cleanup, including Kit VM
 preparation; `marsh jobs` RUN is only the job's own run in the ready VM.
 ";
 
+const GC_HELP: &str = "\
+Usage:
+  marsh gc [--dry-run] [--json]
+
+Removes the selected home's own VMs that nothing uses and that are superseded
+(no command runs their Kit any more, or an older shell VM) or unused for
+`marsh config vm-idle-days` days (default 3; the next use creates them again).
+The daemon does this by itself when it starts and hourly; `marsh gc` does it
+now. Lists each VM it removed or kept, and why. VMs another home or tool owns
+are listed as not ours and never touched. --dry-run removes nothing. Exits 1
+if a removal failed.
+";
+
 const WORKERS_HELP: &str = "\
 Usage:
   marsh workers reset KIT[,KIT...]|all [--detached]
@@ -144,6 +157,10 @@ pub fn prepare(
         }
         ProductCommand::ResultsHelp => return write_help(&mut stdout, RESULTS_HELP),
         ProductCommand::WorkersHelp => return write_help(&mut stdout, WORKERS_HELP),
+        ProductCommand::GcHelp => return write_help(&mut stdout, GC_HELP),
+        ProductCommand::Gc { dry_run, json } => {
+            return gc_command(client.as_ref(), dry_run, json, &mut stdout);
+        }
         ProductCommand::WorkersForgetCloud { name } => {
             writeln!(stdout, "{}", client.forget_cloud_create(&name)?)?;
             return Ok(ProductOutcome::Complete(0));
@@ -530,6 +547,61 @@ pub fn lifecycle_summary(
     text
 }
 
+fn gc_command(
+    client: &dyn DaemonClient,
+    dry_run: bool,
+    json: bool,
+    stdout: &mut impl Write,
+) -> Result<ProductOutcome, ProductError> {
+    let report = client.gc_vms(dry_run)?;
+    if json {
+        serde_json::to_writer_pretty(&mut *stdout, &report)
+            .map_err(|error| ProductError::Operation(error.to_string()))?;
+        writeln!(stdout)?;
+    } else {
+        write_gc_report(stdout, &report)?;
+    }
+    let failed = report.entries.iter().any(|entry| entry.action == "failed");
+    Ok(ProductOutcome::Complete(i32::from(failed)))
+}
+
+/// `marsh gc` output: one line per VM, removed first.
+fn write_gc_report(
+    writer: &mut impl Write,
+    report: &marsh_daemon::VmGcReport,
+) -> Result<(), ProductError> {
+    let order = ["removed", "would_remove", "failed", "kept", "not_ours"];
+    let mut entries = report.entries.iter().collect::<Vec<_>>();
+    entries.sort_by_key(|entry| order.iter().position(|action| *action == entry.action));
+    if entries.is_empty() {
+        writeln!(writer, "no VMs")?;
+    }
+    for entry in entries {
+        let action = match entry.action.as_str() {
+            "would_remove" => "would remove",
+            "not_ours" => "not ours",
+            other => other,
+        };
+        let purpose = if entry.purpose.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", entry.purpose)
+        };
+        writeln!(
+            writer,
+            "{action:<12} {}{purpose}: {}",
+            entry.vm, entry.reason
+        )?;
+    }
+    if report.idle_days == 0 {
+        writeln!(
+            writer,
+            "idle VMs are kept (`marsh config vm-idle-days off`)"
+        )?;
+    }
+    Ok(())
+}
+
 fn reset_workers(
     client: &dyn DaemonClient,
     selection: &crate::cli::LoadSelection,
@@ -770,6 +842,18 @@ fn write_kit_updates(
             writer,
             "    waiting:    {} (switch not started; retried each minute)",
             updates.waiting.join(", ")
+        )?;
+    }
+    for pending in &updates.pending {
+        writeln!(
+            writer,
+            "    pending:    {} ({} running on {})",
+            pending.message,
+            match pending.running_jobs {
+                1 => "1 job".to_owned(),
+                jobs => format!("{jobs} jobs"),
+            },
+            pending.vm
         )?;
     }
     for update in updates.recent.iter().rev().take(5) {
@@ -1162,12 +1246,23 @@ mod tests {
                 unix_ms: now - 2 * 60 * 60 * 1000,
                 notified: true,
             }],
+            pending: vec![marsh_daemon::PendingKitChange {
+                command: "claude".into(),
+                change: "uninstall".into(),
+                from: "docker.io/mcavage/marsh-claude@sha256:1".into(),
+                to: Some("local-v3:/kits/marsh-claude".into()),
+                vm: "marsh-k-12345678".into(),
+                running_jobs: 1,
+                message:
+                    "claude updates when its running jobs end; new jobs already use the new Kit"
+                        .into(),
+            }],
         };
         let mut text = Vec::new();
         write_kit_updates(&mut text, Some(&updates)).unwrap();
         assert_eq!(
             String::from_utf8(text).unwrap(),
-            "  Kit updates:  on; checked 3h ago (error)\n    problem:    pix: registry unreachable\n    waiting:    codex (switch not started; retried each minute)\n    2h ago: claude updated (2.1.305 → 2.1.307)\n"
+            "  Kit updates:  on; checked 3h ago (error)\n    problem:    pix: registry unreachable\n    waiting:    codex (switch not started; retried each minute)\n    pending:    claude updates when its running jobs end; new jobs already use the new Kit (1 job running on marsh-k-12345678)\n    2h ago: claude updated (2.1.305 → 2.1.307)\n"
         );
         let mut off = Vec::new();
         let disabled = marsh_daemon::KitUpdateStatus::default();

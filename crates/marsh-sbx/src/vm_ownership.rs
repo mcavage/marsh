@@ -447,6 +447,42 @@ impl VmOwnership {
         Ok(result)
     }
 
+    /// `(name, purpose, key)` of each entry with a recorded UUID; a legacy
+    /// unkeyed entry counts as a Kit VM with no key.
+    pub(crate) fn recorded(&self) -> Vec<(String, VmPurpose, String)> {
+        self.lock()
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.uuid.is_some())
+            .map(|(name, entry)| {
+                let purpose = if entry.purpose == VmPurpose::Shell.label() {
+                    VmPurpose::Shell
+                } else {
+                    VmPurpose::Kit
+                };
+                (name.clone(), purpose, entry.key.clone())
+            })
+            .collect()
+    }
+
+    /// The name recorded for `(purpose, key)`, without assigning one.
+    pub(crate) fn lookup(&self, purpose: VmPurpose, key: &str) -> Option<String> {
+        self.lock()
+            .entries
+            .iter()
+            .find(|(_, entry)| entry.purpose == purpose.label() && entry.key == key)
+            .map(|(name, _)| name.clone())
+    }
+
+    /// Names in development grants' child maps.
+    pub(crate) fn grant_names(&self) -> BTreeSet<String> {
+        self.lock()
+            .grants
+            .values()
+            .flat_map(|grant| grant.names.keys().cloned())
+            .collect()
+    }
+
     pub(crate) fn host_names(&self) -> BTreeSet<String> {
         self.lock().entries.keys().cloned().collect()
     }

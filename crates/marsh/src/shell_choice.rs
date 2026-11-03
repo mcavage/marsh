@@ -109,7 +109,7 @@ pub fn resolve(
     Ok(configured(scope_root)?.unwrap_or_default())
 }
 
-pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n       marsh config auto-update [on|off]\n       marsh config open-urls [on|off]\n       marsh config cloud-delegate [on|off]\n\nshell        Show or set this home's default interactive shell. `marsh` (the\n             default) is marsh's Brush; `bash` and `zsh` are the shell VM's own,\n             started with your ~/.bashrc or ~/.zshrc from the selected home. One\n             launch may override it with --shell NAME or MARSH_SHELL=NAME.\nauto-update  Show or set whether Kits that follow a tag update themselves, and\n             whether hermes and pix appear by themselves (default on).\n             MARSH_AUTO_UPDATE=0 at daemon start also turns it off.\nopen-urls    Show or set whether `xdg-open URL` in a shell or job started from\n             your terminal opens the link on your Mac (default on). Off, the\n             link is only printed. MARSH_OPEN_URLS=0 at daemon start also\n             turns it off.\ncloud-delegate\n             Show or set whether a detached cloud run (`cloud -d`) may start\n             agent sandboxes itself (default off). On, marsh uploads the Docker\n             access token stored in your Keychain (`security add-generic-password\n             -s marsh-cloud-delegate -a YOUR_DOCKER_ID -w`) into the run's\n             root-only state; it can use all of your Docker Cloud sandboxes\n             and quota. See docs/cloud.md.\n\nStored in $MARSH_HOME/config.json. Run a script named `config` as\n`marsh ./config`.\n";
+pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n       marsh config auto-update [on|off]\n       marsh config open-urls [on|off]\n       marsh config cloud-delegate [on|off]\n       marsh config vm-idle-days [DAYS|off]\n\nshell        Show or set this home's default interactive shell. `marsh` (the\n             default) is marsh's Brush; `bash` and `zsh` are the shell VM's own,\n             started with your ~/.bashrc or ~/.zshrc from the selected home. One\n             launch may override it with --shell NAME or MARSH_SHELL=NAME.\nauto-update  Show or set whether Kits that follow a tag update themselves, and\n             whether hermes and pix appear by themselves (default on).\n             MARSH_AUTO_UPDATE=0 at daemon start also turns it off.\nopen-urls    Show or set whether `xdg-open URL` in a shell or job started from\n             your terminal opens the link on your Mac (default on). Off, the\n             link is only printed. MARSH_OPEN_URLS=0 at daemon start also\n             turns it off.\ncloud-delegate\n             Show or set whether a detached cloud run (`cloud -d`) may start\n             agent sandboxes itself (default off). On, marsh uploads the Docker\n             access token stored in your Keychain (`security add-generic-password\n             -s marsh-cloud-delegate -a YOUR_DOCKER_ID -w`) into the run's\n             root-only state; it can use all of your Docker Cloud sandboxes\n             and quota. See docs/cloud.md.\nvm-idle-days Show or set after how many days without use marsh removes one\n             of its Kit or shell VMs (default 3, 1 to 365; `off` keeps them). The\n             next use creates it again. See `marsh gc`.\n\nStored in $MARSH_HOME/config.json. Run a script named `config` as\n`marsh ./config`.\n";
 
 /// `auto_update` in `config.json`; read by the daemon (`docs/kits.md`).
 pub const AUTO_UPDATE_KEY: &str = "auto_update";
@@ -120,6 +120,36 @@ pub const AUTO_UPDATE_KEY: &str = "auto_update";
 /// Reports an unreadable or malformed config file.
 pub fn auto_update(scope_root: &Path) -> Result<bool, String> {
     config_switch(scope_root, AUTO_UPDATE_KEY)
+}
+
+/// `vm_idle_days` in `config.json`; read by the daemon's VM garbage
+/// collection (`marsh gc`, docs/troubleshooting.md).
+pub const VM_IDLE_DAYS_KEY: &str = "vm_idle_days";
+const DEFAULT_VM_IDLE_DAYS: u64 = 3;
+
+/// Days without use after which marsh removes one of its VMs; 0 is off.
+///
+/// # Errors
+/// Reports an unreadable or malformed config file.
+pub fn vm_idle_days(scope_root: &Path) -> Result<u64, String> {
+    let path = scope_root.join(CONFIG_FILE);
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(DEFAULT_VM_IDLE_DAYS),
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
+    let value: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid {}: {error}", path.display()))?;
+    match value.get(VM_IDLE_DAYS_KEY) {
+        None | Some(serde_json::Value::Null) => Ok(DEFAULT_VM_IDLE_DAYS),
+        Some(serde_json::Value::Number(days)) if days.as_u64().is_some_and(|days| days <= 365) => {
+            Ok(days.as_u64().unwrap_or(DEFAULT_VM_IDLE_DAYS))
+        }
+        Some(_) => Err(format!(
+            "invalid {}: {VM_IDLE_DAYS_KEY} must be 0 to 365",
+            path.display()
+        )),
+    }
 }
 
 /// `open_urls` in `config.json`; read by the daemon (`docs/agents.md`).
@@ -204,6 +234,7 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
             println!("{}", if on { "on" } else { "off" });
             Ok(0)
         }
+        ["vm-idle-days", rest @ ..] if rest.len() <= 1 => vm_idle_days_command(rest.first().copied(), scope_root),
         [key @ ("auto-update" | "open-urls" | "cloud-delegate"), value @ ("on" | "off")] => {
             let key = match *key {
                 "auto-update" => AUTO_UPDATE_KEY,
@@ -240,11 +271,48 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
             Ok(0)
         }
         _ => Err((
-            "usage: marsh config shell [marsh|bash|zsh] | marsh config auto-update [on|off] | marsh config open-urls [on|off] | marsh config cloud-delegate [on|off]"
+            "usage: marsh config shell [marsh|bash|zsh] | marsh config auto-update [on|off] | marsh config open-urls [on|off] | marsh config cloud-delegate [on|off] | marsh config vm-idle-days [DAYS|off]"
                 .to_owned(),
             2,
         )),
     }
+}
+
+/// `marsh config vm-idle-days [DAYS|off]`.
+fn vm_idle_days_command(value: Option<&str>, scope_root: &Path) -> Result<i32, (String, i32)> {
+    let Some(value) = value else {
+        let days = vm_idle_days(scope_root).map_err(|message| (message, 1))?;
+        if days == 0 {
+            println!("off");
+        } else {
+            println!("{days}");
+        }
+        return Ok(0);
+    };
+    let days = match value {
+        "off" => 0,
+        days => days
+            .parse::<u64>()
+            .ok()
+            .filter(|days| (1..=365).contains(days))
+            .ok_or_else(|| {
+                (
+                    format!("marsh config vm-idle-days: {value:?} is not 1 to 365 or off"),
+                    2,
+                )
+            })?,
+    };
+    write_config(scope_root, VM_IDLE_DAYS_KEY, days.into()).map_err(|error| {
+        (
+            format!(
+                "cannot write {}: {error}",
+                scope_root.join(CONFIG_FILE).display()
+            ),
+            1,
+        )
+    })?;
+    println!("{value}");
+    Ok(0)
 }
 
 fn write_config(scope_root: &Path, key: &str, value: serde_json::Value) -> io::Result<()> {
@@ -496,6 +564,32 @@ mod tests {
         );
         std::fs::write(root.join(CONFIG_FILE), b"{\"shell\":3}").unwrap();
         assert!(resolve(None, None, &root).is_err());
+    }
+
+    #[test]
+    fn vm_idle_days_default_to_three_and_can_be_turned_off() {
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("scope");
+        assert_eq!(vm_idle_days(&root), Ok(3));
+        assert_eq!(
+            config_command(&["vm-idle-days".into(), "7".into()], &root),
+            Ok(0)
+        );
+        assert_eq!(vm_idle_days(&root), Ok(7));
+        assert_eq!(
+            config_command(&["vm-idle-days".into(), "off".into()], &root),
+            Ok(0)
+        );
+        assert_eq!(vm_idle_days(&root), Ok(0));
+        for bad in ["0", "366", "soon"] {
+            assert_eq!(
+                config_command(&["vm-idle-days".into(), bad.into()], &root)
+                    .unwrap_err()
+                    .1,
+                2,
+                "{bad}"
+            );
+        }
     }
 
     #[test]
