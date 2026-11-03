@@ -43,7 +43,9 @@ case "${1:-}" in
 esac
 
 # With the task tool (below), the merged settings also deny Claude's own
-# subagent tools and add the PreToolUse hook that refuses them.
+# subagent tools, add the PreToolUse hook that refuses them, and allow
+# marsh's own task tools without a permission prompt (an ACP session's
+# permission mode would otherwise ask before every task_output).
 task=
 if [ -r /run/marsh/job.json ] && /run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1; then
   task=1
@@ -67,7 +69,9 @@ if (process.env.MARSH_TASK_TOOL === "1") {
   const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
   const permissions = object(settings.permissions);
   const deny = Array.isArray(permissions.deny) ? permissions.deny : [];
-  settings.permissions = {...permissions, deny: [...deny, "Agent", "Workflow"]};
+  const allow = Array.isArray(permissions.allow) ? permissions.allow : [];
+  settings.permissions = {...permissions, deny: [...deny, "Agent", "Workflow"],
+    allow: [...allow, "mcp__marsh__task", "mcp__marsh__task_output", "mcp__marsh__task_apply"]};
   const hooks = object(settings.hooks);
   const pre = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse : [];
   settings.hooks = {...hooks, PreToolUse: [...pre, {matcher: "Agent|Task|Workflow", hooks: [{type: "command",

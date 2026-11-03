@@ -219,6 +219,20 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   uploads it into a root-only file in its sandbox; the token can use every
   cloud sandbox on the account. See https://runmar.sh/docs/cloud.html.
 
+**config peer-review** [**on**|**off**]
+: Set, or with no value print, peer review by another vendor's model. **on**
+  writes *MARSH_HOME*/**peer-review.d/marsh.yaml** with **enabled: true** and
+  the reviewers marsh detects (agents whose Kit declares a model option, for
+  vendors whose key **sbx secret ls** shows); **off** sets **enabled: false**
+  there. Then prints the table, as **peer-review ls** does. See
+  https://runmar.sh/docs/peer-review.html.
+
+**peer-review ls** [**--json**]
+: Print whether peer review is on, the ready reviewers (class, vendor, agent,
+  model, the drop-in that named each, how its class was found), those not
+  ready and why, and drop-in errors. **--json** prints **marsh status
+  --json**'s **peer_review** document.
+
 **kit install** *NAME* [*REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*]
 : Register a published Kit under *NAME* in this scope. A tag is resolved to its
   digest now; only that digest runs. Without a reference, *NAME* must be a Kit

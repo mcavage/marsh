@@ -313,7 +313,8 @@ fi
 # Claude's subagents are marsh agents: the server is registered for this run
 # (--mcp-config, first so that its variadic value ends at the next option),
 # and Claude's own subagent tools (Agent, Workflow) are denied, with a
-# PreToolUse hook that refuses them in case a rule is not applied.
+# PreToolUse hook that refuses them in case a rule is not applied. marsh's
+# own task tools are allowed, so no permission mode asks for them.
 case "${1:-}" in
   mcp|plugin|plugins|setup-token|doctor|install|migrate-installer|config|agents|auth|remote-control|help|completion) ;;
   *)
@@ -321,7 +322,7 @@ case "${1:-}" in
       if /run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1; then
         exec claude --mcp-config '{"mcpServers":{"marsh":{"command":"/run/marsh/bin/marsh","args":["task-mcp"],"alwaysLoad":true}}}' \
           --dangerously-skip-permissions \
-          --settings '{"sandbox":{"enabled":false},"permissions":{"deny":["Agent","Workflow"]},"hooks":{"PreToolUse":[{"matcher":"Agent|Task|Workflow","hooks":[{"type":"command","command":"echo \"use mcp__marsh__task: subagents here are marsh agents\" >&2; exit 2"}]}]}}' \
+          --settings '{"sandbox":{"enabled":false},"permissions":{"deny":["Agent","Workflow"],"allow":["mcp__marsh__task","mcp__marsh__task_output","mcp__marsh__task_apply"]},"hooks":{"PreToolUse":[{"matcher":"Agent|Task|Workflow","hooks":[{"type":"command","command":"echo \"use mcp__marsh__task: subagents here are marsh agents\" >&2; exit 2"}]}]}}' \
           --append-system-prompt "$(cat /run/marsh/context.md)" "$@"
       fi
       exec claude --dangerously-skip-permissions --settings '{"sandbox":{"enabled":false}}' \

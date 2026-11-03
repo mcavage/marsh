@@ -1,0 +1,1050 @@
+//! Peer review by another vendor's model (`docs/peer-review.md`).
+//!
+//! marsh owns the model classes: a curated table (`data/model-classes.yaml`,
+//! overridable in `$MARSH_HOME/model-classes.yaml`) and, for a model no rule
+//! names, its output price in a models.dev snapshot taken in CI
+//! (`data/models-dev.json`, `scripts/update-models-dev.py`); nothing is
+//! fetched at run time. Who may review comes from `$MARSH_HOME/peer-review.d/
+//! *.yaml` drop-ins (Narwhal writes `narwhal.yaml`, `marsh config peer-review
+//! on` writes `marsh.yaml`), read whenever they are needed (every job start
+//! and `marsh status`), so an edit applies to the next job.
+
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// The drop-in directory under `$MARSH_HOME`.
+pub const DROPIN_DIR: &str = "peer-review.d";
+/// The drop-in `marsh config peer-review on|off` writes.
+pub const MARSH_DROPIN: &str = "marsh.yaml";
+/// The class table override under `$MARSH_HOME`.
+pub const OVERRIDE_FILE: &str = "model-classes.yaml";
+const MAX_FILES: usize = 64;
+const MAX_FILE_BYTES: u64 = 64 * 1024;
+const MAX_REVIEWERS: usize = 64;
+const MAX_NAME_BYTES: usize = 128;
+
+const BUILTIN_TABLE: &str = include_str!("../data/model-classes.yaml");
+const SNAPSHOT: &str = include_str!("../data/models-dev.json");
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelClass {
+    Small,
+    Mid,
+    Large,
+}
+
+impl ModelClass {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Small => "small",
+            Self::Mid => "mid",
+            Self::Large => "large",
+        }
+    }
+
+    pub const ALL: [Self; 3] = [Self::Small, Self::Mid, Self::Large];
+}
+
+/// Output-price bands (USD per million output tokens) for models no rule
+/// names: below `small_below` is small, from `large_from` up is large.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Bands {
+    pub small_below: f64,
+    pub large_from: f64,
+}
+
+impl Bands {
+    #[must_use]
+    pub fn class(&self, output: f64) -> ModelClass {
+        if output < self.small_below {
+            ModelClass::Small
+        } else if output >= self.large_from {
+            ModelClass::Large
+        } else {
+            ModelClass::Mid
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Rule {
+    #[serde(rename = "match")]
+    pattern: String,
+    class: ModelClass,
+    vendor: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TableFile {
+    #[serde(default)]
+    bands: Option<Bands>,
+    #[serde(default)]
+    rules: Vec<Rule>,
+}
+
+/// How a model was classed.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Classified {
+    pub class: ModelClass,
+    pub vendor: String,
+    /// `model-classes: claude-sonnet-*`, `$MARSH_HOME/model-classes.yaml:
+    /// my-*`, `models.dev family gpt-sol: gpt-*sol*`, or `models.dev price
+    /// $5/M output`.
+    pub how: String,
+}
+
+/// The effective class table: override rules first, then marsh's.
+#[derive(Clone, Debug)]
+pub struct ClassTable {
+    rules: Vec<(Rule, &'static str)>,
+    bands: Bands,
+}
+
+const BUILTIN: &str = "model-classes";
+const OVERRIDE: &str = "$MARSH_HOME/model-classes.yaml";
+
+impl ClassTable {
+    /// marsh's curated table alone.
+    ///
+    /// # Panics
+    /// When the shipped table is malformed (a unit test keeps it parsing).
+    #[must_use]
+    pub fn builtin() -> Self {
+        let file: TableFile =
+            serde_yaml::from_str(BUILTIN_TABLE).expect("data/model-classes.yaml parses");
+        Self {
+            rules: file.rules.into_iter().map(|rule| (rule, BUILTIN)).collect(),
+            bands: file.bands.expect("data/model-classes.yaml has bands"),
+        }
+    }
+
+    /// marsh's table with `$MARSH_HOME/model-classes.yaml` over it. A
+    /// malformed override is ignored and its error returned.
+    #[must_use]
+    pub fn load(scope: &Path) -> (Self, Option<String>) {
+        let mut table = Self::builtin();
+        let path = scope.join(OVERRIDE_FILE);
+        match read_small(&path) {
+            Ok(None) => (table, None),
+            Ok(Some(text)) => match parse_table(&text) {
+                Ok(file) => {
+                    if let Some(bands) = file.bands {
+                        table.bands = bands;
+                    }
+                    let mut rules = file
+                        .rules
+                        .into_iter()
+                        .map(|rule| (rule, OVERRIDE))
+                        .collect::<Vec<_>>();
+                    rules.append(&mut table.rules);
+                    table.rules = rules;
+                    (table, None)
+                }
+                Err(error) => (table, Some(format!("{}: {error}", path.display()))),
+            },
+            Err(error) => (table, Some(error)),
+        }
+    }
+
+    #[must_use]
+    pub const fn bands(&self) -> Bands {
+        self.bands
+    }
+
+    fn rule_for(&self, text: &str) -> Option<&(Rule, &'static str)> {
+        self.rules
+            .iter()
+            .find(|(rule, _)| glob(&rule.pattern.to_ascii_lowercase(), text))
+    }
+
+    /// The class and vendor of `model` (an id as the agent's model option
+    /// takes it, optionally `provider/model`): the first rule matching its
+    /// name or its models.dev family, else its models.dev output price.
+    #[must_use]
+    pub fn classify(&self, model: &str) -> Option<Classified> {
+        let name = normalize(model);
+        if name.is_empty() {
+            return None;
+        }
+        if let Some((rule, origin)) = self.rule_for(&name) {
+            return Some(Classified {
+                class: rule.class,
+                vendor: rule.vendor.clone(),
+                how: format!("{origin}: {}", rule.pattern),
+            });
+        }
+        let row = lookup(model)?;
+        let family = row.family.to_ascii_lowercase();
+        if !family.is_empty()
+            && let Some((rule, origin)) = self.rule_for(&family)
+        {
+            return Some(Classified {
+                class: rule.class,
+                vendor: rule.vendor.clone(),
+                how: format!("models.dev family {family}; {origin}: {}", rule.pattern),
+            });
+        }
+        Some(Classified {
+            class: self.bands.class(row.output),
+            vendor: row.vendor().to_owned(),
+            how: format!("models.dev price ${}/M output", row.output),
+        })
+    }
+
+    /// The newest model of `vendor` in `class` that the vendor itself serves,
+    /// by the rules alone (what `marsh config peer-review on` offers).
+    #[must_use]
+    pub fn newest(&self, vendor: &str, class: ModelClass) -> Option<String> {
+        let mut best: Option<&SnapshotModel> = None;
+        for row in snapshot().models.iter().filter(|row| {
+            row.provider == vendor && row.maker.is_empty() && plain_chat_model(&row.id)
+        }) {
+            let name = normalize(&row.id);
+            let family = row.family.to_ascii_lowercase();
+            let Some((rule, _)) = self.rule_for(&name).or_else(|| {
+                (!family.is_empty())
+                    .then(|| self.rule_for(&family))
+                    .flatten()
+            }) else {
+                continue;
+            };
+            if rule.class != class || rule.vendor != vendor {
+                continue;
+            }
+            let better = best.is_none_or(|best| {
+                (row.released.as_str(), std::cmp::Reverse(row.id.len()))
+                    > (best.released.as_str(), std::cmp::Reverse(best.id.len()))
+            });
+            if better {
+                best = Some(row);
+            }
+        }
+        best.map(|row| row.id.clone())
+    }
+}
+
+fn parse_table(text: &str) -> Result<TableFile, String> {
+    let file: TableFile = serde_yaml::from_str(text).map_err(|error| error.to_string())?;
+    if let Some(bands) = file.bands
+        && !(bands.small_below.is_finite()
+            && bands.large_from.is_finite()
+            && 0.0 <= bands.small_below
+            && bands.small_below <= bands.large_from)
+    {
+        return Err("bands: need 0 <= small_below <= large_from".into());
+    }
+    for rule in &file.rules {
+        if rule.pattern.trim().is_empty() || rule.pattern.len() > MAX_NAME_BYTES {
+            return Err(format!("rule {:?}: `match` is 1-128 bytes", rule.pattern));
+        }
+        valid_vendor(&rule.vendor).map_err(|error| format!("rule {:?}: {error}", rule.pattern))?;
+    }
+    Ok(file)
+}
+
+/// Ids that are not ordinary chat models, or are moving aliases.
+fn plain_chat_model(id: &str) -> bool {
+    const SKIP: [&str; 14] = [
+        "latest",
+        "preview",
+        "-exp",
+        "image",
+        "tts",
+        "live",
+        "realtime",
+        "audio",
+        "search",
+        "research",
+        "codex",
+        "computer-use",
+        "customtools",
+        "translate",
+    ];
+    let id = id.to_ascii_lowercase();
+    !SKIP.iter().any(|word| id.contains(word))
+        // Dated snapshots (`...-20250929`) repeat their undated name.
+        && !id
+            .rsplit('-')
+            .next()
+            .is_some_and(|tail| tail.len() == 8 && tail.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+/// A model id as the rules see it: lowercase, without `provider/`, a cloud
+/// region or vendor prefix (`us.`, `global.anthropic.`), or a host suffix
+/// (`@eu`, `:free`).
+fn normalize(model: &str) -> String {
+    const PREFIXES: [&str; 16] = [
+        "global.",
+        "us.",
+        "eu.",
+        "apac.",
+        "jp.",
+        "au.",
+        "anthropic.",
+        "openai.",
+        "google.",
+        "meta.",
+        "mistral.",
+        "deepseek.",
+        "qwen.",
+        "moonshotai.",
+        "zai.",
+        "minimax.",
+    ];
+    let model = model.trim().to_ascii_lowercase();
+    let mut name = model.rsplit('/').next().unwrap_or_default();
+    name = name.split(['@', ':']).next().unwrap_or_default();
+    while let Some(rest) = PREFIXES.iter().find_map(|prefix| name.strip_prefix(prefix)) {
+        name = rest;
+    }
+    name.to_owned()
+}
+
+/// `*` matches any run of characters; everything else matches itself.
+fn glob(pattern: &str, text: &str) -> bool {
+    let parts = pattern.split('*').collect::<Vec<_>>();
+    if parts.len() == 1 {
+        return pattern == text;
+    }
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    if !text.starts_with(first) || text.len() < first.len() + last.len() || !text.ends_with(last) {
+        return false;
+    }
+    let mut rest = &text[first.len()..text.len() - last.len()];
+    for part in &parts[1..parts.len() - 1] {
+        match rest.find(part) {
+            Some(at) => rest = &rest[at + part.len()..],
+            None => return false,
+        }
+    }
+    true
+}
+
+#[derive(Debug, Deserialize)]
+struct SnapshotModel {
+    provider: String,
+    id: String,
+    family: String,
+    maker: String,
+    output: f64,
+    #[allow(dead_code)]
+    open_weights: bool,
+    released: String,
+}
+
+impl SnapshotModel {
+    /// The model's maker when models.dev names one, else its provider.
+    fn vendor(&self) -> &str {
+        if self.maker.is_empty() {
+            &self.provider
+        } else {
+            &self.maker
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SnapshotFile {
+    #[allow(dead_code)]
+    fields: Vec<String>,
+    models: Vec<SnapshotModel>,
+}
+
+struct Snapshot {
+    models: Vec<SnapshotModel>,
+    by_name: BTreeMap<String, Vec<usize>>,
+}
+
+fn snapshot() -> &'static Snapshot {
+    static SNAPSHOT_INDEX: OnceLock<Snapshot> = OnceLock::new();
+    SNAPSHOT_INDEX.get_or_init(|| {
+        // Rows are positional arrays (`fields`); serde reads them as structs.
+        let file: SnapshotFile =
+            serde_json::from_str(SNAPSHOT).expect("data/models-dev.json parses");
+        let mut by_name = BTreeMap::<String, Vec<usize>>::new();
+        for (index, row) in file.models.iter().enumerate() {
+            by_name.entry(normalize(&row.id)).or_default().push(index);
+        }
+        Snapshot {
+            models: file.models,
+            by_name,
+        }
+    })
+}
+
+/// The snapshot row for `model`: the named provider's (`provider/model`),
+/// else the one its vendor serves itself, else the first.
+fn lookup(model: &str) -> Option<&'static SnapshotModel> {
+    let snapshot = snapshot();
+    let rows = snapshot.by_name.get(&normalize(model))?;
+    let rows = rows.iter().map(|index| &snapshot.models[*index]);
+    let provider = model
+        .trim()
+        .split_once('/')
+        .map(|(provider, _)| provider.to_ascii_lowercase());
+    let rows = rows.collect::<Vec<_>>();
+    rows.iter()
+        .find(|row| provider.as_deref() == Some(row.provider.as_str()))
+        .or_else(|| rows.iter().find(|row| row.maker.is_empty()))
+        .or_else(|| rows.first())
+        .copied()
+}
+
+fn valid_vendor(vendor: &str) -> Result<(), String> {
+    if vendor.is_empty()
+        || vendor.len() > 64
+        || !vendor.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-_.".contains(&byte)
+        })
+    {
+        return Err(format!(
+            "vendor {vendor:?} is 1-64 lowercase letters, digits, `-`, `_` or `.`"
+        ));
+    }
+    Ok(())
+}
+
+/// A model id `task(model)` may pass to an agent's model option.
+///
+/// # Errors
+/// Returns why `model` is not one.
+pub fn valid_model(model: &str) -> Result<(), String> {
+    if model.is_empty()
+        || model.len() > MAX_NAME_BYTES
+        || model.starts_with('-')
+        || !model
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"-_.:/@[]".contains(&byte))
+    {
+        return Err(format!(
+            "model {model:?} is 1-128 letters, digits and `-_.:/@[]`, not starting with `-`"
+        ));
+    }
+    Ok(())
+}
+
+/// One drop-in file (`docs/peer-review.md`).
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DropIn {
+    /// The schema version: 1 (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<u32>,
+    /// `true` asks for peer review; `false` in any file turns it off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reviewers: Vec<DropInReviewer>,
+}
+
+/// One ready pairing: `agent` can run `model` (its vendor's credentials are
+/// in place). `class` and `vendor` default to the model's classification.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DropInReviewer {
+    pub agent: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class: Option<ModelClass>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<String>,
+}
+
+impl DropIn {
+    /// Parse and validate one drop-in.
+    ///
+    /// # Errors
+    /// Returns why the text is not a valid drop-in.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let file: Self = if text.trim().is_empty() {
+            Self::default()
+        } else {
+            serde_yaml::from_str(text).map_err(|error| error.to_string())?
+        };
+        if file.version.is_some_and(|version| version != 1) {
+            return Err("version: only 1 is supported".into());
+        }
+        if file.reviewers.len() > MAX_REVIEWERS {
+            return Err(format!("at most {MAX_REVIEWERS} reviewers per file"));
+        }
+        for (index, reviewer) in file.reviewers.iter().enumerate() {
+            let at = |error: String| format!("reviewers[{index}]: {error}");
+            marsh_contracts::command_registry::CommandName::parse(reviewer.agent.clone())
+                .map_err(|error| at(format!("agent: {error}")))?;
+            valid_model(&reviewer.model).map_err(at)?;
+            if let Some(vendor) = &reviewer.vendor {
+                valid_vendor(vendor).map_err(at)?;
+            }
+        }
+        Ok(file)
+    }
+
+    /// The YAML `marsh config peer-review` writes.
+    ///
+    /// # Panics
+    /// Never: the document always serializes.
+    #[must_use]
+    pub fn render(&self, comment: &str) -> String {
+        let mut text = String::new();
+        for line in comment.lines() {
+            let _ = writeln!(text, "# {line}");
+        }
+        text.push_str(&serde_yaml::to_string(self).expect("drop-in serializes"));
+        text
+    }
+}
+
+/// One reviewer in the effective table.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Reviewer {
+    pub class: ModelClass,
+    pub vendor: String,
+    pub agent: String,
+    pub model: String,
+    /// The drop-in that named it.
+    pub source: PathBuf,
+    /// Where class and vendor came from: `declared` or the classification.
+    pub classified: String,
+    /// Why it is not ready (only in `skipped`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// `marsh status` `peer_review`.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PeerReviewStatus {
+    /// A drop-in says `enabled: true` and none says `enabled: false`.
+    pub enabled: bool,
+    /// The drop-ins read, in name order.
+    #[serde(default)]
+    pub files: Vec<PathBuf>,
+    /// Drop-ins that say `enabled: false`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_by: Vec<PathBuf>,
+    /// Ready reviewers, by class then vendor.
+    #[serde(default)]
+    pub reviewers: Vec<Reviewer>,
+    /// Named but not ready, each with its reason.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<Reviewer>,
+    /// Files (or the class override) that failed validation; a failing
+    /// file contributes nothing.
+    #[serde(default)]
+    pub errors: Vec<String>,
+}
+
+/// What marsh knows about one registered agent.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AgentFacts {
+    /// Its Kit declares non-interactive prompt verbs (`agent-sessions@1`
+    /// `prompt`): `task` can start it.
+    pub prompt: bool,
+    /// Its Kit declares a model option (`org.marsh/agent-model@1`).
+    pub model_option: bool,
+}
+
+/// Read `$MARSH_HOME/peer-review.d/*.yaml` and the class table and resolve
+/// the effective reviewers against the registered agents.
+#[must_use]
+pub fn load(scope: &Path, agents: &BTreeMap<String, AgentFacts>) -> PeerReviewStatus {
+    let (table, table_error) = ClassTable::load(scope);
+    let mut status = PeerReviewStatus::default();
+    status.errors.extend(table_error);
+    let directory = scope.join(DROPIN_DIR);
+    let mut said_on = false;
+    let mut seen = BTreeMap::<(String, String), PathBuf>::new();
+    for path in dropin_files(&directory, &mut status.errors) {
+        let file = match read_small(&path).and_then(|text| {
+            DropIn::parse(&text.unwrap_or_default())
+                .map_err(|error| format!("{}: {error}", path.display()))
+        }) {
+            Ok(file) => file,
+            Err(error) => {
+                status.errors.push(error);
+                continue;
+            }
+        };
+        status.files.push(path.clone());
+        match file.enabled {
+            Some(true) => said_on = true,
+            Some(false) => status.disabled_by.push(path.clone()),
+            None => {}
+        }
+        for entry in file.reviewers {
+            let classified = table.classify(&entry.model);
+            let declared = entry.class.is_some() && entry.vendor.is_some();
+            let class = entry
+                .class
+                .or_else(|| classified.as_ref().map(|found| found.class));
+            let vendor = entry
+                .vendor
+                .clone()
+                .or_else(|| classified.as_ref().map(|found| found.vendor.clone()));
+            let mut reviewer = Reviewer {
+                class: class.unwrap_or(ModelClass::Mid),
+                vendor: vendor.clone().unwrap_or_default(),
+                agent: entry.agent.clone(),
+                model: entry.model.clone(),
+                source: path.clone(),
+                classified: if declared {
+                    "declared".into()
+                } else {
+                    classified
+                        .as_ref()
+                        .map_or_else(|| "unknown".into(), |found| found.how.clone())
+                },
+                reason: None,
+            };
+            let key = (entry.agent.clone(), entry.model.to_ascii_lowercase());
+            reviewer.reason = if class.is_none() || vendor.is_none() {
+                Some(format!(
+                    "marsh cannot class {}: add `class` and `vendor`, or a rule in $MARSH_HOME/{OVERRIDE_FILE}",
+                    entry.model
+                ))
+            } else if let Some(first) = seen.get(&key) {
+                Some(format!("already named in {}", first.display()))
+            } else {
+                match agents.get(&entry.agent) {
+                    None => Some(format!("{} is not a registered command", entry.agent)),
+                    Some(facts) if !facts.prompt => Some(format!(
+                        "{}'s Kit declares no prompt verbs (agent-sessions@1 `prompt`), so `task` cannot start it",
+                        entry.agent
+                    )),
+                    Some(facts) if !facts.model_option => Some(format!(
+                        "{}'s Kit declares no model option (org.marsh/agent-model@1)",
+                        entry.agent
+                    )),
+                    Some(_) => None,
+                }
+            };
+            if reviewer.reason.is_some() {
+                status.skipped.push(reviewer);
+            } else {
+                seen.insert(key, path.clone());
+                status.reviewers.push(reviewer);
+            }
+        }
+    }
+    status.enabled = said_on && status.disabled_by.is_empty();
+    status.reviewers.sort_by(|a, b| {
+        (a.class, &a.vendor, &a.agent, &a.model).cmp(&(b.class, &b.vendor, &b.agent, &b.model))
+    });
+    status
+}
+
+/// `peer-review.d/*.yaml` (and `.yml`) in name order; dotfiles are skipped.
+fn dropin_files(directory: &Path, errors: &mut Vec<String>) -> Vec<PathBuf> {
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => {
+            errors.push(format!("{}: {error}", directory.display()));
+            return Vec::new();
+        }
+    };
+    let mut names = entries
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| {
+            !name.starts_with('.')
+                && (name.strip_suffix(".yaml").is_some() || name.strip_suffix(".yml").is_some())
+        })
+        .collect::<Vec<_>>();
+    names.sort();
+    if names.len() > MAX_FILES {
+        errors.push(format!(
+            "{}: only the first {MAX_FILES} drop-ins are read",
+            directory.display()
+        ));
+        names.truncate(MAX_FILES);
+    }
+    names.into_iter().map(|name| directory.join(name)).collect()
+}
+
+/// A small regular file's text; `None` when it does not exist.
+fn read_small(path: &Path) -> Result<Option<String>, String> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("{}: {error}", path.display())),
+    };
+    if !metadata.is_file() {
+        return Err(format!("{}: not a regular file", path.display()));
+    }
+    if metadata.len() > MAX_FILE_BYTES {
+        return Err(format!("{}: over {MAX_FILE_BYTES} bytes", path.display()));
+    }
+    std::fs::read_to_string(path)
+        .map(Some)
+        .map_err(|error| format!("{}: {error}", path.display()))
+}
+
+/// The section appended to a job's `context.md` while peer review is on:
+/// the instruction and the ready reviewers this job may start. Empty when
+/// peer review is off or no reviewer is in the job's spawn set.
+#[must_use]
+pub fn context(status: &PeerReviewStatus, spawn: &[String]) -> String {
+    if !status.enabled {
+        return String::new();
+    }
+    let rows = status
+        .reviewers
+        .iter()
+        .filter(|reviewer| spawn.contains(&reviewer.agent))
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut text = String::from(
+        "## Second opinion\n\
+         Before you report substantial work as done (a code change, a plan or design, an \
+         analysis someone will act on, a document the user will send; not a quick answer or a \
+         trivial edit), get a second opinion: call `task` with the reviewer for your own \
+         model's class from the table below, from a different vendor than your model's, \
+         sharing the folder, asking for findings only. Then address them, or tell the user \
+         which you didn't and why. No row for your class with another vendor: skip it.\n\
+         Classes: small (claude-haiku, gpt-luna, gemini-flash), mid (claude-sonnet, gpt-terra, \
+         gemini-pro), large (claude-opus, claude-fable, gpt-sol, gpt-astra).\n\n\
+         | class | vendor | task arguments |\n|---|---|---|\n",
+    );
+    for reviewer in rows {
+        let _ = writeln!(
+            text,
+            "| {} | {} | agent: \"{}\", model: \"{}\" |",
+            reviewer.class.name(),
+            reviewer.vendor,
+            reviewer.agent,
+            reviewer.model
+        );
+    }
+    text
+}
+
+/// The reviewers `marsh config peer-review on` offers: for each class and
+/// each vendor an agent with a model option can reach with a stored
+/// credential, the vendor's newest model in that class. A vendor's own
+/// agent (one that reaches only it) is preferred.
+#[must_use]
+pub fn detect(
+    table: &ClassTable,
+    agents: &BTreeMap<String, BTreeSet<String>>,
+    credentials: &BTreeSet<String>,
+) -> Vec<DropInReviewer> {
+    let mut chosen = BTreeMap::<(ModelClass, String), (usize, String)>::new();
+    for (agent, vendors) in agents {
+        for vendor in vendors
+            .iter()
+            .filter(|vendor| credentials.contains(*vendor))
+        {
+            for class in ModelClass::ALL {
+                if table.newest(vendor, class).is_none() {
+                    continue;
+                }
+                let rank = vendors.len();
+                let key = (class, vendor.clone());
+                if chosen.get(&key).is_none_or(|(best, _)| rank < *best) {
+                    chosen.insert(key, (rank, agent.clone()));
+                }
+            }
+        }
+    }
+    chosen
+        .into_iter()
+        .filter_map(|((class, vendor), (_, agent))| {
+            Some(DropInReviewer {
+                model: table.newest(&vendor, class)?,
+                agent,
+                class: Some(class),
+                vendor: Some(vendor),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn class(table: &ClassTable, model: &str) -> Option<(ModelClass, String)> {
+        table
+            .classify(model)
+            .map(|found| (found.class, found.vendor))
+    }
+
+    #[test]
+    fn the_curated_table_pairs_the_vendors_families() {
+        let table = ClassTable::builtin();
+        let small = ModelClass::Small;
+        let mid = ModelClass::Mid;
+        let large = ModelClass::Large;
+        for (model, expected, vendor) in [
+            ("claude-haiku-5-5", small, "anthropic"),
+            ("gpt-6-luna", small, "openai"),
+            ("claude-sonnet-5-5", mid, "anthropic"),
+            ("sonnet", mid, "anthropic"),
+            ("gpt-6.1-terra", mid, "openai"),
+            ("openai/gpt-6.1-terra", mid, "openai"),
+            ("us.anthropic.claude-sonnet-5-5-v1:0", mid, "anthropic"),
+            ("claude-fable-5-1", large, "anthropic"),
+            ("gpt-6-astra", large, "openai"),
+            ("claude-opus-5-5", large, "anthropic"),
+            ("gpt-6.1-sol", large, "openai"),
+            ("gemini-3.8-flash", small, "google"),
+            ("gemini-3.1-pro-preview", mid, "google"),
+            ("deepseek-v4-flash", small, "deepseek"),
+            ("qwen3.8-max", large, "alibaba"),
+            ("glm-5.3", mid, "zai"),
+            ("kimi-k2.6", mid, "moonshotai"),
+        ] {
+            assert_eq!(
+                class(&table, model),
+                Some((expected, vendor.to_owned())),
+                "{model}"
+            );
+        }
+        // A family rule reaches an id the patterns do not name.
+        let found = table.classify("gpt-5.6").unwrap();
+        assert_eq!((found.class, found.vendor.as_str()), (large, "openai"));
+        assert!(
+            found.how.starts_with("models.dev family gpt-sol"),
+            "{}",
+            found.how
+        );
+    }
+
+    #[test]
+    fn the_override_comes_first_and_can_move_the_bands() {
+        let scope = tempfile::tempdir().unwrap();
+        std::fs::write(
+            scope.path().join(OVERRIDE_FILE),
+            "bands: {small_below: 1, large_from: 3}\n\
+             rules:\n  - {match: \"gpt-*sol*\", class: mid, vendor: openai}\n",
+        )
+        .unwrap();
+        let (table, error) = ClassTable::load(scope.path());
+        assert_eq!(error, None);
+        let found = table.classify("gpt-6.1-sol").unwrap();
+        assert_eq!(found.class, ModelClass::Mid);
+        assert_eq!(found.how, "$MARSH_HOME/model-classes.yaml: gpt-*sol*");
+        // An unnamed model moves with the bands: grok-4.7 lists $6/M output.
+        assert_eq!(table.classify("grok-4.7").unwrap().class, ModelClass::Large);
+        // A malformed override is reported and marsh's table still applies.
+        std::fs::write(scope.path().join(OVERRIDE_FILE), "rules: [{match: x}]").unwrap();
+        let (table, error) = ClassTable::load(scope.path());
+        assert!(error.unwrap().contains("model-classes.yaml"));
+        assert_eq!(
+            table.classify("gpt-6.1-sol").unwrap().class,
+            ModelClass::Large
+        );
+    }
+
+    #[test]
+    fn unnamed_models_fall_back_to_their_price_band_and_unknown_ones_to_none() {
+        let table = ClassTable::builtin();
+        // xAI has no rule: $6/M output is mid; the maker is the vendor.
+        let found = table.classify("grok-4.7").unwrap();
+        assert_eq!(
+            (found.class, found.vendor.as_str()),
+            (ModelClass::Mid, "xai")
+        );
+        assert_eq!(found.how, "models.dev price $6/M output");
+        // Meta's Muse Wonder lists $20/M output: large.
+        assert_eq!(
+            class(&table, "muse-wonder-1.0"),
+            Some((ModelClass::Large, "meta".into()))
+        );
+        assert_eq!(table.bands().class(0.5), ModelClass::Small);
+        assert_eq!(table.classify("no-such-model-anywhere"), None);
+        assert_eq!(table.classify(""), None);
+    }
+
+    #[test]
+    fn newest_picks_the_vendors_current_model_in_a_class() {
+        let table = ClassTable::builtin();
+        assert_eq!(
+            table.newest("openai", ModelClass::Mid).as_deref(),
+            Some("gpt-6.1-terra")
+        );
+        assert_eq!(
+            table.newest("anthropic", ModelClass::Mid).as_deref(),
+            Some("claude-sonnet-5-5")
+        );
+        assert_eq!(
+            table.newest("anthropic", ModelClass::Small).as_deref(),
+            Some("claude-haiku-5-5")
+        );
+    }
+
+    fn agents(entries: &[(&str, bool)]) -> BTreeMap<String, AgentFacts> {
+        entries
+            .iter()
+            .map(|(name, model_option)| {
+                (
+                    (*name).to_owned(),
+                    AgentFacts {
+                        prompt: *name != "shell",
+                        model_option: *model_option,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn dropins_resolve_to_ready_reviewers_and_say_why_others_are_not() {
+        let scope = tempfile::tempdir().unwrap();
+        let directory = scope.path().join(DROPIN_DIR);
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(
+            directory.join("narwhal.yaml"),
+            "enabled: true\nreviewers:\n\
+             - {agent: codex, model: gpt-6.1-terra}\n\
+             - {agent: claude, model: claude-sonnet-5-5}\n\
+             - {agent: pi, model: claude-opus-5-5}\n\
+             - {agent: hermes, model: gpt-6-astra}\n\
+             - {agent: shell, model: gpt-6-astra}\n\
+             - {agent: codex, model: my-house-model}\n\
+             - {agent: codex, model: my-house-model, class: large, vendor: openai}\n",
+        )
+        .unwrap();
+        std::fs::write(directory.join("broken.yaml"), "enabled: maybe\n").unwrap();
+        std::fs::write(directory.join(".swap.yaml"), "not: [yaml").unwrap();
+        let known = agents(&[
+            ("claude", true),
+            ("codex", true),
+            ("pi", false),
+            ("shell", false),
+        ]);
+        let status = load(scope.path(), &known);
+        assert!(status.enabled);
+        assert_eq!(status.files, [directory.join("narwhal.yaml")]);
+        assert_eq!(status.errors.len(), 1, "{:?}", status.errors);
+        assert!(status.errors[0].contains("broken.yaml"));
+        let ready = status
+            .reviewers
+            .iter()
+            .map(|r| {
+                (
+                    r.class.name(),
+                    r.vendor.as_str(),
+                    r.agent.as_str(),
+                    r.model.as_str(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ready,
+            [
+                ("mid", "anthropic", "claude", "claude-sonnet-5-5"),
+                ("mid", "openai", "codex", "gpt-6.1-terra"),
+                ("large", "openai", "codex", "my-house-model"),
+            ]
+        );
+        let reasons = status
+            .skipped
+            .iter()
+            .map(|r| r.reason.clone().unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            reasons[0].contains("pi's Kit declares no model option"),
+            "{reasons:?}"
+        );
+        assert!(reasons[1].contains("hermes is not a registered command"));
+        assert!(reasons[2].contains("shell's Kit declares no prompt verbs"));
+        assert!(reasons[3].contains("cannot class my-house-model"));
+
+        let text = context(&status, &["claude".into(), "codex".into()]);
+        assert!(text.starts_with("## Second opinion\n"));
+        assert!(text.contains("| mid | openai | agent: \"codex\", model: \"gpt-6.1-terra\" |"));
+        let only_claude = context(&status, &["claude".into()]);
+        assert!(!only_claude.contains("codex"));
+        assert_eq!(context(&status, &[]), "");
+
+        // `enabled: false` anywhere turns it off.
+        std::fs::write(directory.join("marsh.yaml"), "enabled: false\n").unwrap();
+        let status = load(scope.path(), &known);
+        assert!(!status.enabled);
+        assert_eq!(status.disabled_by, [directory.join("marsh.yaml")]);
+        assert_eq!(context(&status, &["codex".into()]), "");
+    }
+
+    #[test]
+    fn dropins_are_validated() {
+        for (text, error) in [
+            ("version: 2\n", "version"),
+            ("colour: blue\n", "unknown field"),
+            ("reviewers: [{agent: codex}]\n", "missing field `model`"),
+            (
+                "reviewers: [{agent: codex, model: '--yolo'}]\n",
+                "not starting with `-`",
+            ),
+            ("reviewers: [{agent: 'Co dex', model: x}]\n", "agent"),
+            (
+                "reviewers: [{agent: codex, model: x, class: huge}]\n",
+                "unknown variant",
+            ),
+            (
+                "reviewers: [{agent: codex, model: x, vendor: OpenAI}]\n",
+                "lowercase",
+            ),
+        ] {
+            let found = DropIn::parse(text).unwrap_err();
+            assert!(found.contains(error), "{text}: {found}");
+        }
+        assert_eq!(DropIn::parse("").unwrap(), DropIn::default());
+    }
+
+    #[test]
+    fn detect_prefers_each_vendors_own_agent() {
+        let table = ClassTable::builtin();
+        let vendors = |list: &[&str]| {
+            list.iter()
+                .map(|v| (*v).to_owned())
+                .collect::<BTreeSet<_>>()
+        };
+        let agents = BTreeMap::from([
+            ("claude".to_owned(), vendors(&["anthropic"])),
+            ("codex".to_owned(), vendors(&["openai"])),
+            (
+                "pix".to_owned(),
+                vendors(&["anthropic", "openai", "google"]),
+            ),
+        ]);
+        let found = detect(&table, &agents, &vendors(&["anthropic", "openai"]));
+        let mid = found
+            .iter()
+            .filter(|r| r.class == Some(ModelClass::Mid))
+            .map(|r| (r.agent.as_str(), r.model.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            mid,
+            [("claude", "claude-sonnet-5-5"), ("codex", "gpt-6.1-terra")]
+        );
+        assert!(!found.iter().any(|r| r.agent == "pix"));
+        let rendered = DropIn {
+            version: Some(1),
+            enabled: Some(true),
+            reviewers: found,
+        }
+        .render("written by marsh");
+        assert!(DropIn::parse(&rendered).is_ok(), "{rendered}");
+    }
+
+    #[test]
+    fn globs() {
+        assert!(glob("claude-sonnet-*", "claude-sonnet-5-5"));
+        assert!(glob("gpt-*sol*", "gpt-sol"));
+        assert!(glob("gemini-*flash*", "gemini-3.8-flash"));
+        assert!(!glob("gemini-*flash*", "gemini-3.1-pro"));
+        assert!(glob("sonnet", "sonnet"));
+        assert!(!glob("sonnet", "sonnet-4"));
+        assert!(!glob("a*a", "a"));
+    }
+}

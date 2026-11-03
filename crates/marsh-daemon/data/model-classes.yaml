@@ -1,0 +1,76 @@
+# marsh's curated model classes (docs/peer-review.md). A peer reviewer is a
+# model of a different vendor in the same class as the agent's own model.
+#
+# Each rule is a glob (`*` matches any run of characters) tested, in order,
+# against the model id (lowercased, without a `provider/` prefix or a cloud
+# region prefix such as `us.` or `global.`) and then against its models.dev
+# family. The first match wins, so narrow patterns come before broad ones.
+# A model no rule matches is classed by its models.dev output price (`bands`).
+#
+# $MARSH_HOME/model-classes.yaml overrides this file: its rules are tried
+# first, and its `bands` replace these.
+
+# Output price in USD per million tokens: below `small_below` is small, from
+# `large_from` up is large, between is mid.
+bands:
+  small_below: 4
+  large_from: 18
+
+rules:
+  # Anthropic
+  - {match: "claude-haiku-*", class: small, vendor: anthropic}
+  - {match: "claude-*-haiku*", class: small, vendor: anthropic}
+  - {match: "haiku", class: small, vendor: anthropic}
+  - {match: "claude-sonnet-*", class: mid, vendor: anthropic}
+  - {match: "claude-*-sonnet*", class: mid, vendor: anthropic}
+  - {match: "sonnet", class: mid, vendor: anthropic}
+  - {match: "claude-opus-*", class: large, vendor: anthropic}
+  - {match: "claude-*-opus*", class: large, vendor: anthropic}
+  - {match: "opus", class: large, vendor: anthropic}
+  - {match: "claude-fable*", class: large, vendor: anthropic}
+  - {match: "fable", class: large, vendor: anthropic}
+
+  # OpenAI (gpt-oss is open weights, but still OpenAI's model)
+  - {match: "gpt-oss-20b*", class: small, vendor: openai}
+  - {match: "gpt-oss*", class: mid, vendor: openai}
+  - {match: "gpt-*luna*", class: small, vendor: openai}
+  - {match: "gpt-*-nano*", class: small, vendor: openai}
+  - {match: "gpt-*-mini*", class: small, vendor: openai}
+  - {match: "gpt-*terra*", class: mid, vendor: openai}
+  - {match: "gpt-*sol*", class: large, vendor: openai}
+  - {match: "gpt-*astra*", class: large, vendor: openai}
+
+  # Google
+  - {match: "gemma-*", class: small, vendor: google}
+  - {match: "gemini-*flash*", class: small, vendor: google}
+  - {match: "gemini-*pro*", class: mid, vendor: google}
+
+  # DeepSeek
+  - {match: "deepseek-*flash*", class: small, vendor: deepseek}
+  - {match: "deepseek-*", class: mid, vendor: deepseek}
+
+  # Alibaba Qwen
+  - {match: "qwen*-flash*", class: small, vendor: alibaba}
+  - {match: "qwen*-turbo*", class: small, vendor: alibaba}
+  - {match: "qwen*-max*", class: large, vendor: alibaba}
+  - {match: "qwen*", class: mid, vendor: alibaba}
+
+  # Moonshot Kimi
+  - {match: "kimi-k3*", class: large, vendor: moonshotai}
+  - {match: "kimi-*", class: mid, vendor: moonshotai}
+
+  # Z.ai GLM
+  - {match: "glm-*flash*", class: small, vendor: zai}
+  - {match: "glm-*air*", class: small, vendor: zai}
+  - {match: "glm-*", class: mid, vendor: zai}
+
+  # MiniMax
+  - {match: "minimax-*flash*", class: small, vendor: minimax}
+  - {match: "minimax-*", class: mid, vendor: minimax}
+
+  # Mistral
+  - {match: "ministral*", class: small, vendor: mistral}
+  - {match: "mistral-small*", class: small, vendor: mistral}
+  - {match: "mistral-medium*", class: mid, vendor: mistral}
+  - {match: "devstral*", class: mid, vendor: mistral}
+  - {match: "mistral-large*", class: large, vendor: mistral}

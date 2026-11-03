@@ -114,6 +114,9 @@ if (process.argv[2] === "1") {
   config["features.multi_agent"] = false;
   config["features.multi_agent_v2"] = false;
   config["mcp_servers.marsh.tool_timeout_sec"] = 86400;
+  // marsh'"'"'s own task tools never ask for approval, whatever mode the
+  // ACP client switches a session to.
+  config["mcp_servers.marsh.default_tools_approval_mode"] = "approve";
 }
 process.stdout.write(JSON.stringify(config));
 ' /run/marsh/context.md "$(/run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1 && echo 1)")

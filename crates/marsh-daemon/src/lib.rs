@@ -57,6 +57,7 @@ pub mod cloud_delegate;
 pub mod cloud_detached;
 pub mod cloud_fs;
 pub mod open_url;
+pub mod peer_review;
 pub mod process;
 mod shell_admission;
 mod shell_client;
@@ -103,6 +104,7 @@ pub const FEATURES: &[&str] = &[
     "lane-checkpoints-v1",
     "cloud-sync-v1",
     "task-tool-v1",
+    "peer-review-v1",
 ];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while
@@ -1320,6 +1322,10 @@ pub trait DaemonBackend: Send + Sync + 'static {
     fn sbxenv_status(&self) -> Option<SbxenvStatus> {
         None
     }
+    /// What `marsh status` reports about peer review (`docs/peer-review.md`).
+    fn peer_review_status(&self) -> Option<peer_review::PeerReviewStatus> {
+        None
+    }
     /// Host-only paths that appeared after start (a live-reloaded local MCP
     /// server's executable); added to the guest-mount protection.
     fn dynamic_protected_guest_roots(&self) -> Vec<PathBuf> {
@@ -1631,6 +1637,9 @@ pub struct StatusDocument {
     /// Registered commands (`docs/acp.md`).
     #[serde(default)]
     pub commands: Vec<CommandStatus>,
+    /// Peer review by another vendor's model (`docs/peer-review.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_review: Option<Box<peer_review::PeerReviewStatus>>,
     /// Quarantined worker VMs marsh retired on its own, newest last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub worker_recoveries: Vec<WorkerRecovery>,
@@ -1647,6 +1656,10 @@ pub struct CommandStatus {
     pub acp: Option<bool>,
     #[serde(default)]
     pub sessions: Option<serde_json::Value>,
+    /// Its Kit's credential services (`credential@1`): the model vendors it
+    /// can reach (`docs/peer-review.md`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub services: Vec<String>,
 }
 
 /// `marsh status` `sbxenv`: the environment files the daemon is using now.
@@ -1857,6 +1870,9 @@ pub struct JobSummary {
     pub detached: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// `JobReceipt::model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 impl JobSummary {
@@ -1874,6 +1890,7 @@ impl JobSummary {
             parent: job.lineage.as_ref().map(|lineage| lineage.parent.clone()),
             detached: job.detached.clone(),
             label: job.label.clone(),
+            model: job.model.clone(),
         }
     }
 }
@@ -1969,6 +1986,11 @@ pub struct JobReceipt {
     /// The caller's label (`marsh cloud -d --label TEXT`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// The model the job was asked to run: what its arguments pass to its
+    /// Kit's model option (`task(model)` or a caller's `--model M`). Absent
+    /// when none was passed (the agent then uses its own default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// `scheme://host` of each link this job opened on the Mac (`xdg-open`),
     /// at most `open_url::MAX_RECORDED`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3412,6 +3434,7 @@ impl DaemonStore {
             children: Vec::new(),
             detached: None,
             label: job.label,
+            model: None,
             opened: Vec::new(),
             cloud_children: Vec::new(),
             mounts: job.mounts,
@@ -3454,6 +3477,18 @@ impl DaemonStore {
             .collect();
         if let Some(receipt) = self.lock().jobs.get_mut(job_id) {
             receipt.args = args;
+        }
+    }
+
+    /// Record the model a queued job runs (`docs/peer-review.md`): what its
+    /// arguments pass to its Kit's model option. Journaled with the job's
+    /// next transition.
+    pub fn set_job_model(&self, job_id: &str, model: &str) {
+        if peer_review::valid_model(model).is_err() {
+            return;
+        }
+        if let Some(receipt) = self.lock().jobs.get_mut(job_id) {
+            receipt.model = Some(model.to_owned());
         }
     }
 
@@ -4036,6 +4071,7 @@ impl DaemonStore {
             sbxenv: None,
             stock_sbx_removed: None,
             commands: Vec::new(),
+            peer_review: None,
             worker_recoveries: state.worker_recoveries.clone(),
         }
     }
@@ -6359,6 +6395,7 @@ impl ConnectionHandler {
                     .clone()
                     .filter(|path| stock_sbx_removed(Some(path)));
                 status.commands = self.backend.command_catalog();
+                status.peer_review = self.backend.peer_review_status().map(Box::new);
                 self.backend.annotate_status(&mut status);
                 write_frame(&mut stream, &PublicReply::Status(Box::new(status)))
             }

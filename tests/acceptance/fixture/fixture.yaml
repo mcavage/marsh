@@ -18,3 +18,9 @@ capabilities:
   - type: com.docker.sandbox/agent-sessions@1
     config:
       prompt: ["exec", "sh", "-c", "{{.Prompt}}"]
+  # Its model option (marsh's org.marsh/agent-model@1) lands in the prompt
+  # script's $0 and $1 (`sh -c PROMPT --model M`).
+  - type: org.marsh/agent-model@1
+    optional: true
+    config:
+      args: ["--model", "{{.Model}}"]

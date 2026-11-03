@@ -52,6 +52,11 @@ capabilities:
   - type: com.docker.sandbox/agent-sessions@1
     config:
       prompt: ["-p", "{{.Prompt}}"]
+  # marsh's model option for `task(model)` (`-p PROMPT --model M`).
+  - type: org.marsh/agent-model@1
+    optional: true
+    config:
+      args: ["--model", "{{.Model}}"]
 
   - type: com.docker.sandbox/agent-context@1
     config:

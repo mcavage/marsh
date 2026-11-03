@@ -8,6 +8,7 @@ pub mod external_commands;
 pub mod fanout_cli;
 pub mod job;
 pub mod open_link;
+pub mod peer_review_cli;
 pub mod product;
 pub mod registered_commands;
 pub mod session;
