@@ -211,7 +211,7 @@ fn wait_n_can_collect_each_job_once_and_reports_empty_set() {
     let dir = tempfile::tempdir().unwrap();
     let output = marsh()
         .current_dir(dir.path())
-        .args(["--no-config", "--noprofile", "--norc", "-c", "sh -c 'exit 7' & sh -c 'while test ! -e second-may-exit; do sleep .01; done; exit 9' & wait -n; first=$?; : >second-may-exit; wait -n; second=$?; wait -n; third=$?; rm -f second-may-exit; printf '%s:%s:%s' \"$first\" \"$second\" \"$third\""])
+        .args(["--no-config", "--noprofile", "--norc", "-c", "sh -c 'exit 7' & sh -c '_w=0; while test ! -e second-may-exit; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep .1; done; exit 9' & wait -n; first=$?; : >second-may-exit; wait -n; second=$?; wait -n; third=$?; rm -f second-may-exit; printf '%s:%s:%s' \"$first\" \"$second\" \"$third\""])
         .output().unwrap();
     assert_eq!(output.status.code(), Some(0), "{:?}", output.stderr);
     assert_eq!(output.stdout, b"7:9:127");

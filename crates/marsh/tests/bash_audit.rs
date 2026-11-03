@@ -314,7 +314,7 @@ fn background_pipeline_wait_uses_launch_time_pipefail() {
 fn background_pipefail_survives_canceled_wait_next() {
     // The losing wait reaps the rightmost stage; the competing job has finished.
     differential_after_exit(
-        "set -o pipefail; sh -c 'while test ! -e release; do sleep .005; done; exit 7' | sh -c 'exit 9' | sh -c ': >right-done; exit 0' & slow=$!; while test ! -e right-done; do sleep .005; done; sh -c 'exit 3' & printf %s $! >exited-pid; until test -e go; do sleep .005; done; wait -n; first=$?; : >release; wait \"$slow\"; second=$?; printf '%s %s\\n' \"$first\" \"$second\"",
+        "set -o pipefail; sh -c '_w=0; while test ! -e release; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep .1; done; exit 7' | sh -c 'exit 9' | sh -c ': >right-done; exit 0' & slow=$!; _w=0; while test ! -e right-done; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep .1; done; sh -c 'exit 3' & printf %s $! >exited-pid; _w=0; until test -e go; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep .1; done; wait -n; first=$?; : >release; wait \"$slow\"; second=$?; printf '%s %s\\n' \"$first\" \"$second\"",
         0,
         b"3 9\n",
         false,
@@ -326,7 +326,7 @@ fn background_pipefail_survives_input_loop_polling() {
     // `-s` goes through the real input loop, which polls jobs before reading each line.
     // Poll the first failure while the last stage is still running, then collect after reap.
     differential_with_input_mode(
-        "mkfifo gate\nexec 3<>gate\nset -o pipefail\nsh -c ': >left-done; exit 7' | sh -c 'read x <gate; : >right-done; exit 0' & pid=$!\nuntil test -e left-done; do sleep .005; done\nset +o pipefail\necho >&3\nuntil test -e right-done; do sleep .005; done\nwait \"$pid\"\n",
+        "mkfifo gate\nexec 3<>gate\nset -o pipefail\nsh -c ': >left-done; exit 7' | sh -c 'read x <gate; : >right-done; exit 0' & pid=$!\n_w=0; until test -e left-done; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep .1; done\nset +o pipefail\necho >&3\n_w=0; until test -e right-done; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep .1; done\nwait \"$pid\"\n",
         7,
         b"",
         true,
@@ -336,7 +336,7 @@ fn background_pipefail_survives_input_loop_polling() {
     // Keep the left stage blocked until wait -n selects the competing job; it
     // marks its exit so the next line's poll sees it gone.
     differential_after_exit(
-        "set -o pipefail\nsh -c 'while test ! -e release; do sleep .005; done; : >left-done; exit 7' | sh -c 'exit 9' | sh -c ': >right-done; exit 0' & slow=$!; while test ! -e right-done; do sleep .005; done; sh -c 'exit 3' & printf %s $! >exited-pid; until test -e go; do sleep .005; done; wait -n; first=$?; : >release\nuntil test -e left-done; do sleep .005; done\nwait \"$slow\"; second=$?; printf '%s %s\\n' \"$first\" \"$second\"\n",
+        "set -o pipefail\nsh -c '_w=0; while test ! -e release; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep .1; done; : >left-done; exit 7' | sh -c 'exit 9' | sh -c ': >right-done; exit 0' & slow=$!; _w=0; while test ! -e right-done; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep .1; done; sh -c 'exit 3' & printf %s $! >exited-pid; _w=0; until test -e go; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep .1; done; wait -n; first=$?; : >release\n_w=0; until test -e left-done; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep .1; done\nwait \"$slow\"; second=$?; printf '%s %s\\n' \"$first\" \"$second\"\n",
         0,
         b"3 9\n",
         true,
