@@ -127,6 +127,9 @@ pub trait DaemonClient: Send + Sync + 'static {
     fn reset_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
         Err(ClientError("reset is unavailable".into()))
     }
+    fn gc_vms(&self, _dry_run: bool) -> Result<marsh_daemon::VmGcReport, ClientError> {
+        Err(ClientError("gc is unavailable".into()))
+    }
     fn stop_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
         Err(ClientError("stop is unavailable".into()))
     }
@@ -1557,6 +1560,10 @@ impl DaemonClient for LocalDaemonClient {
 
     fn reset_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
         self.0.reset_scope().map_err(map_daemon_error)
+    }
+
+    fn gc_vms(&self, dry_run: bool) -> Result<marsh_daemon::VmGcReport, ClientError> {
+        self.0.gc_vms(dry_run).map_err(map_daemon_error)
     }
 
     fn stop_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {

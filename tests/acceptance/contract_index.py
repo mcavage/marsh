@@ -24,6 +24,7 @@ def suites() -> list[tuple[str, str, list[tuple[str, str]]]]:
     """(heading, suite file, [(id, summary)]) for every scenario suite."""
     import run
     from harness import scenario_list
+    from kit_changes_uat import KitChanges
     from processes_uat import LIVE, Processes
     from shells_uat import Shells
     from task_tool_uat import LIVE as TASK_LIVE, TaskTool
@@ -39,6 +40,7 @@ def suites() -> list[tuple[str, str, list[tuple[str, str]]]]:
         ("Task tool", "task_tool_uat.py",
          [(scenario, summary + (" (billed; only with `--live`)" if scenario in TASK_LIVE else ""))
           for scenario, summary in scenario_list(TaskTool)]),
+        ("Kit changes", "kit_changes_uat.py", scenario_list(KitChanges)),
     ]
 
 

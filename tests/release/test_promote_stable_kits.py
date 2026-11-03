@@ -51,13 +51,21 @@ class Decisions(unittest.TestCase):
         self.assertIsNotNone(PROMOTE.supported(source))
         self.assertIsNone(PROMOTE.supported("pub const OTHER: u32 = 1;"))
 
-    def test_only_a_supported_contract_with_a_new_descriptor_moves(self):
-        self.assertTrue(PROMOTE.decide(1, (1, 1), "new", "old")[0])
-        self.assertTrue(PROMOTE.decide(1, (1, 2), "new", None)[0])
-        self.assertFalse(PROMOTE.decide(2, (1, 1), "new", "old")[0])
-        self.assertFalse(PROMOTE.decide(None, (1, 1), "new", "old")[0])
-        self.assertFalse(PROMOTE.decide(1, None, "new", "old")[0])
-        self.assertFalse(PROMOTE.decide(1, (1, 1), "same", "same")[0])
+    def test_only_a_supported_contract_built_from_new_inputs_moves(self):
+        def built(descriptor, inputs=None):
+            return {"descriptor": descriptor, "inputs": inputs}
+        self.assertTrue(PROMOTE.decide(1, (1, 1), built("new"), built("old"))[0])
+        self.assertTrue(PROMOTE.decide(1, (1, 2), built("new"), None)[0])
+        self.assertFalse(PROMOTE.decide(2, (1, 1), built("new"), built("old"))[0])
+        self.assertFalse(PROMOTE.decide(None, (1, 1), built("new"), built("old"))[0])
+        self.assertFalse(PROMOTE.decide(1, None, built("new"), built("old"))[0])
+        self.assertFalse(PROMOTE.decide(1, (1, 1), built("same"), built("same"))[0])
+        # Same descriptor, changed scripts (the task-mcp registration): moves.
+        self.assertTrue(PROMOTE.decide(1, (1, 1), built("same", "b"), built("same", "a"))[0])
+        # A :latest from before the annotation counts as different.
+        self.assertTrue(PROMOTE.decide(1, (1, 1), built("same", "b"), built("same"))[0])
+        # A rebuild from the same inputs does not, even with a changed descriptor.
+        self.assertFalse(PROMOTE.decide(1, (1, 1), built("new", "a"), built("old", "a"))[0])
 
     def test_repositories_keep_registry_ports(self):
         self.assertEqual(PROMOTE.repository("localhost:5000/a/b:latest"), "localhost:5000/a/b")
@@ -94,7 +102,8 @@ class Promote(unittest.TestCase):
         }
         index = {"manifests": [{"digest": ARM, "platform": {"os": "linux", "architecture": "arm64"}}]}
         labelled = lambda contract: {"config": {"Labels": {"org.marsh.kit.contract": contract}}}
-        manifest = lambda version: {"annotations": {PROMOTE.DESCRIPTOR: descriptor(version)}}
+        manifest = lambda version, inputs=None: {"annotations": {
+            PROMOTE.DESCRIPTOR: descriptor(version), **({PROMOTE.INPUTS: inputs} if inputs else {})}}
         self.registry = {
             "image": {
                 self.refs["pi"]: labelled("1"),
@@ -107,8 +116,8 @@ class Promote(unittest.TestCase):
                 f"docker.io/mcavage/marsh-pi@{ARM}": manifest("1.4.0"),
                 "docker.io/mcavage/marsh-pi:latest": manifest("1.3.0"),
                 # codex: rebuilt, nothing new.
-                self.refs["codex"]: manifest("0.163.0"),
-                "docker.io/mcavage/marsh-codex:latest": manifest("0.163.0"),
+                self.refs["codex"]: manifest("0.163.0", "sha256:c"),
+                "docker.io/mcavage/marsh-codex:latest": manifest("0.163.0", "sha256:c"),
                 # claude: needs a newer marsh.
                 self.refs["claude"]: manifest("2.1.400"),
             },
@@ -124,8 +133,18 @@ class Promote(unittest.TestCase):
         result, created = self.run_script(self.registry, "--apply")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(created, [f"--tag docker.io/mcavage/marsh-pi:latest {self.refs['pi']}"])
-        self.assertIn("kept docker.io/mcavage/marsh-codex:latest: same Kit descriptor", result.stdout)
+        self.assertIn("kept docker.io/mcavage/marsh-codex:latest: built from the same Kit inputs", result.stdout)
         self.assertIn("kept docker.io/mcavage/marsh-claude:latest: contract 2 is outside 1-1", result.stdout)
+
+    def test_changed_kit_scripts_move_the_tag_with_the_same_descriptor(self):
+        # The task-mcp registration changed claude's entrypoint, not its descriptor.
+        self.registry["raw"][self.refs["codex"]] = {"annotations": {
+            PROMOTE.DESCRIPTOR: descriptor("0.163.0"), PROMOTE.INPUTS: "sha256:new"}}
+        result, created = self.run_script(self.registry, "--apply")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"--tag docker.io/mcavage/marsh-codex:latest {self.refs['codex']}", created)
+        self.assertIn("moved docker.io/mcavage/marsh-codex:latest: contract 1; built from changed Kit inputs",
+                      result.stdout)
 
     def test_a_missing_build_fails_after_trying_the_rest(self):
         del self.registry["raw"][self.refs["codex"]]

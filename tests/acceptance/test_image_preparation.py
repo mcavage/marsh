@@ -371,10 +371,12 @@ class ImageCallerTests(unittest.TestCase):
         slow = '''
 if args[:2] == ['buildx','build']:
  import os,signal,time
- (root/'started.json').write_text(json.dumps({'pid':os.getpid(),'pgid':os.getpgrp(),'parent':os.getppid()}))
  def stop(number,frame):
   (root/'terminated').write_text(str(number));sys.exit(128+number)
  signal.signal(signal.SIGTERM,stop)
+ # Whole or not at all: the test reads it as soon as it exists.
+ (root/'started.json.tmp').write_text(json.dumps({'pid':os.getpid(),'pgid':os.getpgrp(),'parent':os.getppid()}))
+ os.replace(root/'started.json.tmp',root/'started.json')
  while True:time.sleep(.1)
 '''
         peer.write_text(peer.read_text().replace('def sha(data):', slow + '\ndef sha(data):'))

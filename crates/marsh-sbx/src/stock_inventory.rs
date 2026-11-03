@@ -20,6 +20,9 @@ pub struct StockInventoryVm {
     pub status: String,
     pub agent: Option<String>,
     pub workspaces: Option<Vec<PathBuf>>,
+    /// When stock SBX last ran something in it (RFC 3339), if it says.
+    #[serde(default)]
+    pub last_used_at: Option<String>,
 }
 
 /// Validated complete inventory data, not source-observation authority. No
@@ -95,6 +98,7 @@ impl StockInventory {
                         .to_owned(),
                     agent: None,
                     workspaces: None,
+                    last_used_at: None,
                 }
             };
             vm.id.make_ascii_lowercase();
@@ -124,6 +128,11 @@ impl StockInventory {
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&StockInventoryVm> {
         self.vms.get(name)
+    }
+
+    /// Every listed VM name.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.vms.keys().map(String::as_str)
     }
 
     #[must_use]

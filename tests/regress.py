@@ -228,6 +228,10 @@ class Plan:
                             [python, str(ACCEPTANCE / "mcp_gateway_uat.py"), "--marsh", str(self.marsh),
                              "--guest-artifacts", str(self.guest), *self.common()],
                             100, ("regress",), ("mcp-registry",), ("mcp-registry",)))
+        # Kit changes while jobs run, and a dev build's source Kits (needs this dev prefix).
+        suites.append(Suite("kit-changes", "kit_changes",
+                            [python, str(ACCEPTANCE / "kit_changes_uat.py"), "--prefix", str(self.prefix),
+                             "--kit", self.kit, *self.common()], 120, ("regress",)))
         suites.append(Suite("kit-live-install", "kit_live_install",
                             [python, str(ACCEPTANCE / "kit_live_install_uat.py"), "--marsh", str(self.marsh),
                              *self.common(), "--kit", self.kit], 40, ("regress",)))
