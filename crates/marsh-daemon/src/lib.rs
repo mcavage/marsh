@@ -4637,7 +4637,15 @@ impl Server {
                     let (Some(backend), Some(store)) = (backend.upgrade(), store.upgrade()) else {
                         return;
                     };
-                    backend.auto_update_kits(&DaemonStore(store));
+                    // A panic in one pass is logged; the next pass still runs.
+                    let pass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        backend.auto_update_kits(&DaemonStore(store));
+                    }));
+                    if pass.is_err() {
+                        eprintln!(
+                            "marshd: a background Kit/VM pass panicked; it runs again in a minute"
+                        );
+                    }
                     if !pause(KIT_UPDATER_INTERVAL) {
                         return;
                     }

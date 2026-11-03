@@ -124,7 +124,7 @@ are doing, and an offline check is reported only in `marsh status`.
 
 A command you installed by digest never changes, and neither does a packaged
 command you pointed at a different image or a Kit folder in `commands.json`.
-A packaged command still updates from any image of its own repository.
+A packaged command keeps updating after an automatic update moved it to a newer image of its own repository; one you pinned there by hand stays.
 ACP agents for a packaged command, or for a command installed from a tag,
 follow its updates.
 

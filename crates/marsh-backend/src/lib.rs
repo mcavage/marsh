@@ -4359,8 +4359,9 @@ impl StockDaemonBackend {
 
     /// Commands the check follows: those installed from a tag (including the
     /// known Kits marsh added), and on a release build the packaged ones at
-    /// any digest of their own repository. A different image or a local Kit
-    /// folder in `commands.json` never moves.
+    /// the shipped pin or at a digest of their own repository that an
+    /// automatic update wrote. A digest, another image or a local Kit folder
+    /// the user put in `commands.json` never moves.
     fn auto_update_names(&self, sources: &BTreeMap<String, KitTag>) -> Vec<String> {
         self.command_names()
             .into_iter()
@@ -4372,8 +4373,14 @@ impl StockDaemonBackend {
                 else {
                     return false;
                 };
+                // At the shipped pin, or at a digest an automatic update
+                // wrote: a digest the user put in commands.json stays.
+                let record = kit_auto_update::read(&self.config.control_home);
                 self.registered_kit(name).is_ok_and(|current| {
-                    same_repository(current.workload.identity(), packaged.workload.identity())
+                    let identity = current.workload.identity();
+                    same_repository(identity, packaged.workload.identity())
+                        && (identity == packaged.workload.identity()
+                            || record.wrote_automatically(name, identity))
                 })
             })
             .collect()
@@ -4855,8 +4862,18 @@ impl StockDaemonBackend {
                 Some((live, quarantined.contains(worker_id))),
             );
             if let Err(error) = retired {
-                store.finish_worker_reset(worker_id, false)?;
-                store.cancel_workers_reset(&worker_ids[index + 1..]);
+                // Only claimed workers are settled; a target this daemon never
+                // registered (an automatic claim of an unserved VM) has none.
+                if worker_ids.contains(worker_id) {
+                    store.finish_worker_reset(worker_id, false)?;
+                }
+                let rest = specs
+                    .keys()
+                    .skip(index + 1)
+                    .filter(|id| worker_ids.contains(id))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                store.cancel_workers_reset(&rest);
                 return Err(backend_error(error));
             }
             self.ready_kits
@@ -6912,6 +6929,8 @@ mod kit_lifecycle_callers {
         tags: Mutex<BTreeMap<String, Option<String>>>,
         /// Image configuration `created` times by image reference.
         created: Mutex<BTreeMap<String, String>>,
+        /// `sbx ls` fails (no VM effect can be verified).
+        fail_ls: std::sync::atomic::AtomicBool,
     }
 
     impl Registry {
@@ -6922,6 +6941,7 @@ mod kit_lifecycle_callers {
                 runs: Mutex::new(Vec::new()),
                 tags: Mutex::new(BTreeMap::new()),
                 created: Mutex::new(BTreeMap::new()),
+                fail_ls: std::sync::atomic::AtomicBool::new(false),
             })
         }
         fn calls(&self, needle: &str) -> usize {
@@ -7003,6 +7023,13 @@ mod kit_lifecycle_callers {
                 return ok(format!(r#"{{"config":{{"Labels":{labels}}}{created}}}"#));
             }
             if argv[1..] == ["ls", "--json"] {
+                if self.fail_ls.load(std::sync::atomic::Ordering::Acquire) {
+                    return Ok(marsh_runtime::CommandOutput {
+                        exit_code: Some(1),
+                        stdout: Vec::new(),
+                        stderr: b"cannot reach the sandbox daemon".to_vec(),
+                    });
+                }
                 return ok(r#"{"sandboxes":[]}"#.into());
             }
             Ok(marsh_runtime::CommandOutput {
@@ -7712,6 +7739,61 @@ mod kit_lifecycle_callers {
         ));
     }
 
+    /// An explicit digest pin of a packaged command's own repository (as the
+    /// user writes it in commands.json; `kit install` refuses packaged names)
+    /// and a non-packaged `kit install NAME REPO@sha256:` stay across a pass.
+    #[test]
+    fn explicit_digest_pins_stay_across_an_update_pass() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(PI_NEW, Some(1));
+        let backend = automatic(
+            daemon(home.path(), &registry, Some(PI_NEW), Some("latest")),
+            home.path(),
+            None,
+        );
+        // pix was installed by digest: no recorded tag.
+        kit_lifecycle::write_sources(&backend.config.control_home, &BTreeMap::new()).unwrap();
+        decline_builtins(&backend);
+        *registry.resolved.lock().unwrap() =
+            "docker.io/example/pi@sha256:8888888888888888888888888888888888888888888888888888888888888888".into();
+        let before = overlay(&backend);
+        let store_home = tempfile::tempdir().unwrap();
+        backend.auto_update_pass(&DaemonStore::new(store_home.path()), DAY);
+        assert_eq!(registry.calls("kit"), 0, "neither pin is even checked");
+        assert_eq!(overlay(&backend), before);
+        assert_eq!(
+            backend.registered_kit("pi").unwrap().workload.identity(),
+            PI_NEW
+        );
+        assert_eq!(
+            backend.registered_kit("pix").unwrap().workload.identity(),
+            OLD
+        );
+    }
+
+    /// A failed removal of a VM this daemon never registered (an automatic
+    /// claim with no worker) is an error, not a panic of the updater thread.
+    #[test]
+    fn a_failed_removal_of_an_unserved_vm_does_not_panic() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(NEW, Some(1));
+        let backend = daemon(home.path(), &registry, None, None);
+        let store_home = tempfile::tempdir().unwrap();
+        let store = DaemonStore::new(store_home.path());
+        let spec = backend.kit_spec("pix").unwrap();
+        let claim = RetirementClaim {
+            worker_ids: Vec::new(),
+            live: BTreeSet::new(),
+            quarantined: BTreeSet::new(),
+        };
+        registry
+            .fail_ls
+            .store(true, std::sync::atomic::Ordering::Release);
+        let other = backend.kit_spec("pi").unwrap();
+        let specs = BTreeMap::from([(spec.name.clone(), spec), (other.name.clone(), other)]);
+        assert!(backend.retire_claimed(&store, &specs, &claim).is_err());
+    }
+
     #[test]
     fn a_draining_kit_vm_with_running_jobs_is_left_alone() {
         let home = tempfile::tempdir().unwrap();
@@ -7805,10 +7887,15 @@ mod kit_lifecycle_callers {
     fn packaged_commands_follow_their_repository_and_other_pins_stay() {
         let registry = Registry::new(NEW, Some(1));
         let sources = BTreeMap::new();
-        // pi moved to a newer digest of its own repository (e.g. by an older
-        // `marsh kit upgrade`, since removed): still follows on a release build.
+        // pi at a newer digest of its own repository: it follows when an
+        // automatic update wrote it, and stays when the user pinned it.
         let home = tempfile::tempdir().unwrap();
         let moved = daemon(home.path(), &registry, Some(PI_NEW), Some("latest"));
+        assert_eq!(
+            moved.auto_update_names(&sources),
+            [] as [std::string::String; 0]
+        );
+        updated_automatically(&moved, "pi", PI_NEW);
         assert_eq!(moved.auto_update_names(&sources), ["pi"]);
         // pi replaced by a different image: pinned by hand, never moves.
         let home = tempfile::tempdir().unwrap();
