@@ -47,10 +47,13 @@ so that delegation goes through marsh:
 | Kit | Registers `task-mcp` with | Built-in subagents |
 |---|---|---|
 | `claude` | `--mcp-config` (`alwaysLoad`, so `mcp__marsh__task` is offered every turn); `mcp__marsh__task`, `mcp__marsh__task_output` and `mcp__marsh__task_apply` in `permissions.allow`, so no permission mode asks for them | `Agent` and `Workflow` in `permissions.deny` (`--settings`), and a `PreToolUse` hook that refuses them with "use mcp__marsh__task" |
-| `codex` | `-c mcp_servers.marsh...` (CLI); the ACP session's MCP servers (ACP); `default_tools_approval_mode = "approve"`, so its tools never ask for approval | `agents.enabled = false`, `features.multi_agent = false` and `features.multi_agent_v2 = false` (V2 ignores `agents.enabled`) |
+| `codex` | `-c mcp_servers.marsh...` (CLI); the ACP session's MCP servers (ACP); `approval_mode = "approve"` for exactly `task`, `task_output` and `task_apply`, so they never ask for approval | `agents.enabled = false`, `features.multi_agent = false` and `features.multi_agent_v2 = false` (V2 ignores `agents.enabled`) |
 | `pi`, `pix` | Pi's `registerMcpServer` from a Kit extension, tools declared directly (Pi has no tool approval prompts) | none to turn off |
 
-Each Kit does this only when the job's marsh has `task-mcp`. `pi` and `pix`
+Each Kit does this only when the job's marsh has `task-mcp`. In ACP mode the
+name `marsh` is then reserved for this server: the Kits' ACP proxy drops a
+client-supplied MCP server named `marsh` from every session, so no other
+server inherits these approvals. `pi` and `pix`
 also declare their prompt verbs (`pi -p`), so the tool can start them.
 
 `task` takes:

@@ -4949,35 +4949,45 @@ fn agent_verbs(catalog: &[marsh_daemon::CommandStatus]) -> AgentVerbs {
 }
 
 /// The model a job's arguments pass through its Kit's model option
-/// (`org.marsh/agent-model@1` `args`, e.g. `["-m", "{{.Model}}"]`): the last
-/// place the option's words appear with a model filled in.
+/// (`org.marsh/agent-model@1` `args`, e.g. `["-m", "{{.Model}}"]`), the way
+/// the agent's own parser reads it: `FLAG M` and, for a long flag,
+/// `FLAG=M`; the last one wins; nothing after `--` is an option. `None`
+/// when the arguments pass no model, when any occurrence is malformed, when
+/// they spell another model flag (`--model` for a Kit declaring `-m`, or
+/// `-m` for one declaring `--model`), or when the option is not one
+/// `FLAG {{.Model}}` pair: then marsh cannot be sure, and records nothing.
 fn model_from_arguments(option: &[String], arguments: &[Vec<u8>]) -> Option<String> {
     use marsh_contracts::process::MODEL_PLACEHOLDER;
-    if option.is_empty() || arguments.len() < option.len() {
+    let [flag, value] = option else {
+        return None;
+    };
+    if value != MODEL_PLACEHOLDER || !flag.starts_with('-') || flag.contains(MODEL_PLACEHOLDER) {
         return None;
     }
+    let long = flag.starts_with("--");
+    let equals = format!("{flag}=");
+    let other_spellings = ["-m", "--model"];
     let mut found = None;
-    for window in arguments.windows(option.len()) {
-        let mut model = None;
-        let matched = option.iter().zip(window).all(|(word, argument)| {
-            let Ok(argument) = std::str::from_utf8(argument) else {
-                return false;
-            };
-            match word.split_once(MODEL_PLACEHOLDER) {
-                None => word == argument,
-                Some((before, after)) => argument
-                    .strip_prefix(before)
-                    .and_then(|rest| rest.strip_suffix(after))
-                    .filter(|value| marsh_daemon::peer_review::valid_model(value).is_ok())
-                    .is_some_and(|value| {
-                        model = Some(value.to_owned());
-                        true
-                    }),
-            }
-        });
-        if matched && model.is_some() {
-            found = model;
+    let mut words = arguments.iter();
+    while let Some(word) = words.next() {
+        let word = std::str::from_utf8(word).ok()?;
+        if word == "--" {
+            break;
         }
+        let model = if word == flag {
+            std::str::from_utf8(words.next()?).ok()?
+        } else if long && let Some(model) = word.strip_prefix(&equals) {
+            model
+        } else if other_spellings
+            .iter()
+            .any(|other| word == *other || word.starts_with(&format!("{other}=")))
+        {
+            return None;
+        } else {
+            continue;
+        };
+        marsh_daemon::peer_review::valid_model(model).ok()?;
+        found = Some(model.to_owned());
     }
     found
 }
@@ -5014,29 +5024,45 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let option = |list: &[&str]| list.iter().map(|w| (*w).to_owned()).collect::<Vec<_>>();
+        let model = |option: &[String], list: &[&str]| model_from_arguments(option, &words(list));
         let codex = option(&["-m", "{{.Model}}"]);
+        let claude = option(&["--model", "{{.Model}}"]);
         assert_eq!(
-            model_from_arguments(&codex, &words(&["exec", "review", "-m", "gpt-6.1-terra"]))
-                .as_deref(),
+            model(&codex, &["exec", "review", "-m", "gpt-6.1-terra"]).as_deref(),
             Some("gpt-6.1-terra")
         );
-        // The last one wins, as in the agents' own parsers.
+        // The last one wins, whichever form it has.
         assert_eq!(
-            model_from_arguments(&codex, &words(&["-m", "a", "exec", "x", "-m", "b"])).as_deref(),
+            model(&codex, &["-m", "a", "exec", "x", "-m", "b"]).as_deref(),
             Some("b")
         );
         assert_eq!(
-            model_from_arguments(&codex, &words(&["exec", "review"])),
-            None
+            model(&claude, &["--model", "sonnet", "--model=opus"]).as_deref(),
+            Some("opus")
         );
-        assert_eq!(model_from_arguments(&codex, &words(&["exec", "-m"])), None);
-        let joined = option(&["--model={{.Model}}"]);
         assert_eq!(
-            model_from_arguments(&joined, &words(&["-p", "x", "--model=sonnet"])).as_deref(),
+            model(&claude, &["--model=opus", "-p", "x", "--model", "sonnet"]).as_deref(),
             Some("sonnet")
         );
+        // Nothing after `--` is an option.
         assert_eq!(
-            model_from_arguments(&codex, &words(&["-m", "--yolo"])),
+            model(&claude, &["--model", "sonnet", "--", "--model", "opus"]).as_deref(),
+            Some("sonnet")
+        );
+        assert_eq!(model(&claude, &["-p", "x", "--", "--model=opus"]), None);
+        // No model, a malformed one, or another spelling marsh does not
+        // declare: nothing is recorded rather than a guess.
+        assert_eq!(model(&codex, &["exec", "review"]), None);
+        assert_eq!(model(&codex, &["exec", "-m"]), None);
+        assert_eq!(model(&codex, &["-m", "--yolo"]), None);
+        assert_eq!(model(&codex, &["-m", "a", "--model", "b"]), None);
+        assert_eq!(model(&codex, &["-m", "a", "--model=b"]), None);
+        assert_eq!(model(&claude, &["--model", "a", "-m", "b"]), None);
+        assert_eq!(model(&claude, &["--model", "a", "--model=--x"]), None);
+        // `-m=X` is not a short option's form; only the declared pair shape is read.
+        assert_eq!(model(&codex, &["-m=gpt"]), None);
+        assert_eq!(
+            model(&option(&["--model={{.Model}}"]), &["--model=x"]),
             None
         );
     }

@@ -234,7 +234,9 @@ case "${2:-}" in
           -c 'mcp_servers.marsh.command="/run/marsh/bin/marsh"' \
           -c 'mcp_servers.marsh.args=["task-mcp"]' \
           -c mcp_servers.marsh.tool_timeout_sec=86400 \
-          -c 'mcp_servers.marsh.default_tools_approval_mode="approve"' "$@"
+          -c 'mcp_servers.marsh.tools.task.approval_mode="approve"' \
+          -c 'mcp_servers.marsh.tools.task_output.approval_mode="approve"' \
+          -c 'mcp_servers.marsh.tools.task_apply.approval_mode="approve"' "$@"
       fi
     fi
     ;;

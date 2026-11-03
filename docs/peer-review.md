@@ -36,7 +36,8 @@ The section goes only to root jobs, the agents that report to you; a task's
 child (a reviewer, or any other subagent) does not get it, so reviews do not
 start reviews of their own. It is also left out when peer review is off, when
 no reviewer is ready, or when no ready reviewer's agent is in the job's spawn
-set (`MARSH_SPAWN`).
+set (`MARSH_SPAWN`). The table has at most one row per class and vendor (the
+first ready reviewer in table order) and at most 8 rows.
 Agents know their own model, so the table does not name it.
 
 ## `task(model)`
@@ -73,9 +74,14 @@ marsh records the model each job was asked to run as `model` on its receipt:
 with `--json`), and the job lines of `marsh events --json`. The daemon reads it
 from the job's own arguments through its Kit's model option, so it is present
 for a `task(model: M)` child and for a caller's own `claude -p … --model M`.
-If the arguments pass the option more than once, the last value wins. When no
-model was passed, `model` is absent: the agent then uses its own default,
-which marsh does not read from the agent's settings and does not guess. A job
+marsh reads the option the way the agent's parser does: `FLAG M` and, for a
+long flag, `FLAG=M` (`--model sonnet --model=opus` is `opus`); the last one
+wins; nothing after `--` is an option. When marsh cannot be sure, it records
+nothing rather than a guess: a malformed value, another spelling of a model
+flag than the Kit declares (`--model` for Codex's `-m`), or a Kit option that
+is not one `FLAG {{.Model}}` pair. When no model was passed, `model` is
+absent: the agent then uses its own default, which marsh does not read from
+the agent's settings and does not guess. A job
 event's `model` appears from the job's first transition after it is queued
 (the same as `args`). The task label stays `task: DESCRIPTION`, so a task card
 can show "Review by codex · gpt-6.1-terra" from `command`, `label` and `model`.
@@ -92,8 +98,7 @@ marsh decides a model's class and vendor:
 2. **Price band.** A model with no matching rule is classed by its output price
    in a models.dev snapshot: under $4 per million output tokens is small, $18
    or more is large, and anything between is mid. The vendor is the model's
-   maker when models.dev names one (`canonical_model_id`), otherwise its
-   provider.
+   maker, never the host that lists it (see below).
 3. **Unknown.** marsh cannot class a model that is in neither the table nor the
    snapshot. A reviewer with such a model needs explicit `class` and `vendor`.
 
@@ -120,8 +125,23 @@ rules:
 
 The snapshot, `crates/marsh-daemon/data/models-dev.json`, is generated from
 <https://models.dev/api.json> by `scripts/update-models-dev.py`. For each
-vendor and model name it keeps one row: provider, model id, family, maker,
-output price, open weights and release date. It keeps only chat models that
+vendor and model name it keeps one row: provider, model id, family, vendor,
+output price, open weights and release date.
+
+A row's vendor is the model's maker, found in this order: the prefix of
+models.dev's `canonical_model_id`; the model id's own prefix when it names a
+known maker (`x-ai/grok-4`, not `azure/grok-4-3`); the provider when it is a
+known maker (its own listing); the one known maker of the same model name on
+other hosts (`grok-4-6` and `grok-4.6` are one name); the one known maker of
+its family (Muse on Venice is Meta's). A known maker is one some listing's
+`canonical_model_id` names. Maker spellings are canonicalized by
+`crates/marsh-daemon/data/vendor-aliases.json` (`x-ai` and `spacexai` are
+`xai`, `zhipuai` and `z-ai` are `zai`, `qwen` is `alibaba`, a leading `~` is
+dropped), which marsh also applies to rule and drop-in vendors. When the
+maker stays unknown the vendor is empty: marsh classes the model by price but
+gives it no vendor, so it pairs only with an explicit `vendor` in a drop-in.
+
+The snapshot keeps only chat models that
 call tools and list a price. The `models-dev` workflow regenerates the
 snapshot weekly and opens a pull request when it changes. marsh never fetches
 models.dev at run time.

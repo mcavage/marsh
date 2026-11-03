@@ -25,9 +25,12 @@ const MAX_FILES: usize = 64;
 const MAX_FILE_BYTES: u64 = 64 * 1024;
 const MAX_REVIEWERS: usize = 64;
 const MAX_NAME_BYTES: usize = 128;
+/// Rows of the reviewer table in `context.md`.
+const CONTEXT_ROWS: usize = 8;
 
 const BUILTIN_TABLE: &str = include_str!("../data/model-classes.yaml");
 const SNAPSHOT: &str = include_str!("../data/models-dev.json");
+const ALIASES: &str = include_str!("../data/vendor-aliases.json");
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -94,7 +97,10 @@ struct TableFile {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Classified {
     pub class: ModelClass,
-    pub vendor: String,
+    /// The model's maker; `None` when models.dev names none that marsh can
+    /// trust (the host that lists a model is never its vendor), so it can
+    /// only be paired with an explicit `vendor`.
+    pub vendor: Option<String>,
     /// `model-classes: claude-sonnet-*`, `$MARSH_HOME/model-classes.yaml:
     /// my-*`, `models.dev family gpt-sol: gpt-*sol*`, or `models.dev price
     /// $5/M output`.
@@ -177,7 +183,7 @@ impl ClassTable {
         if let Some((rule, origin)) = self.rule_for(&name) {
             return Some(Classified {
                 class: rule.class,
-                vendor: rule.vendor.clone(),
+                vendor: Some(rule.vendor.clone()),
                 how: format!("{origin}: {}", rule.pattern),
             });
         }
@@ -188,13 +194,13 @@ impl ClassTable {
         {
             return Some(Classified {
                 class: rule.class,
-                vendor: rule.vendor.clone(),
+                vendor: Some(rule.vendor.clone()),
                 how: format!("models.dev family {family}; {origin}: {}", rule.pattern),
             });
         }
         Some(Classified {
             class: self.bands.class(row.output),
-            vendor: row.vendor().to_owned(),
+            vendor: (!row.vendor.is_empty()).then(|| row.vendor.clone()),
             how: format!("models.dev price ${}/M output", row.output),
         })
     }
@@ -204,9 +210,11 @@ impl ClassTable {
     #[must_use]
     pub fn newest(&self, vendor: &str, class: ModelClass) -> Option<String> {
         let mut best: Option<&SnapshotModel> = None;
-        for row in snapshot().models.iter().filter(|row| {
-            row.provider == vendor && row.maker.is_empty() && plain_chat_model(&row.id)
-        }) {
+        for row in snapshot()
+            .models
+            .iter()
+            .filter(|row| row.vendor == vendor && row.first_party() && plain_chat_model(&row.id))
+        {
             let name = normalize(&row.id);
             let family = row.family.to_ascii_lowercase();
             let Some((rule, _)) = self.rule_for(&name).or_else(|| {
@@ -246,6 +254,10 @@ fn parse_table(text: &str) -> Result<TableFile, String> {
             return Err(format!("rule {:?}: `match` is 1-128 bytes", rule.pattern));
         }
         valid_vendor(&rule.vendor).map_err(|error| format!("rule {:?}: {error}", rule.pattern))?;
+    }
+    let mut file = file;
+    for rule in &mut file.rules {
+        rule.vendor = vendor_name(&rule.vendor);
     }
     Ok(file)
 }
@@ -308,6 +320,12 @@ fn normalize(model: &str) -> String {
     name.to_owned()
 }
 
+/// A model's name across hosts (`grok-4.6` on one, `grok-4-6` on another),
+/// as the snapshot generator groups them.
+fn name_key(model: &str) -> String {
+    normalize(model).replace('.', "-")
+}
+
 /// `*` matches any run of characters; everything else matches itself.
 fn glob(pattern: &str, text: &str) -> bool {
     let parts = pattern.split('*').collect::<Vec<_>>();
@@ -333,7 +351,8 @@ struct SnapshotModel {
     provider: String,
     id: String,
     family: String,
-    maker: String,
+    /// The model's maker, canonical (`vendor_name`); "" when unknown.
+    vendor: String,
     output: f64,
     #[allow(dead_code)]
     open_weights: bool,
@@ -341,14 +360,37 @@ struct SnapshotModel {
 }
 
 impl SnapshotModel {
-    /// The model's maker when models.dev names one, else its provider.
-    fn vendor(&self) -> &str {
-        if self.maker.is_empty() {
-            &self.provider
-        } else {
-            &self.maker
-        }
+    /// The vendor's own listing of its model.
+    fn first_party(&self) -> bool {
+        !self.vendor.is_empty() && vendor_name(&self.provider) == self.vendor
     }
+}
+
+/// A maker's canonical vendor id: lowercase, a leading `~` dropped, and
+/// spellings such as `x-ai` or `zhipuai` mapped by `data/vendor-aliases.json`
+/// (which the snapshot generator applies too).
+///
+/// # Panics
+/// When the shipped alias file is malformed (a unit test keeps it parsing).
+#[must_use]
+pub fn vendor_name(name: &str) -> String {
+    static ALIAS_MAP: OnceLock<BTreeMap<String, String>> = OnceLock::new();
+    let aliases = ALIAS_MAP.get_or_init(|| {
+        let file: serde_json::Value =
+            serde_json::from_str(ALIASES).expect("data/vendor-aliases.json parses");
+        file["aliases"]
+            .as_object()
+            .expect("vendor-aliases.json has aliases")
+            .iter()
+            .filter_map(|(from, to)| Some((from.clone(), to.as_str()?.to_owned())))
+            .collect()
+    });
+    let name = name.trim().to_ascii_lowercase();
+    let name = name.trim_start_matches('~');
+    aliases
+        .get(name)
+        .cloned()
+        .unwrap_or_else(|| name.to_owned())
 }
 
 #[derive(Debug, Deserialize)]
@@ -371,7 +413,7 @@ fn snapshot() -> &'static Snapshot {
             serde_json::from_str(SNAPSHOT).expect("data/models-dev.json parses");
         let mut by_name = BTreeMap::<String, Vec<usize>>::new();
         for (index, row) in file.models.iter().enumerate() {
-            by_name.entry(normalize(&row.id)).or_default().push(index);
+            by_name.entry(name_key(&row.id)).or_default().push(index);
         }
         Snapshot {
             models: file.models,
@@ -384,7 +426,7 @@ fn snapshot() -> &'static Snapshot {
 /// else the one its vendor serves itself, else the first.
 fn lookup(model: &str) -> Option<&'static SnapshotModel> {
     let snapshot = snapshot();
-    let rows = snapshot.by_name.get(&normalize(model))?;
+    let rows = snapshot.by_name.get(&name_key(model))?;
     let rows = rows.iter().map(|index| &snapshot.models[*index]);
     let provider = model
         .trim()
@@ -393,7 +435,8 @@ fn lookup(model: &str) -> Option<&'static SnapshotModel> {
     let rows = rows.collect::<Vec<_>>();
     rows.iter()
         .find(|row| provider.as_deref() == Some(row.provider.as_str()))
-        .or_else(|| rows.iter().find(|row| row.maker.is_empty()))
+        .or_else(|| rows.iter().find(|row| row.first_party()))
+        .or_else(|| rows.iter().find(|row| !row.vendor.is_empty()))
         .or_else(|| rows.first())
         .copied()
 }
@@ -586,8 +629,9 @@ pub fn load(scope: &Path, agents: &BTreeMap<String, AgentFacts>) -> PeerReviewSt
                 .or_else(|| classified.as_ref().map(|found| found.class));
             let vendor = entry
                 .vendor
-                .clone()
-                .or_else(|| classified.as_ref().map(|found| found.vendor.clone()));
+                .as_deref()
+                .map(vendor_name)
+                .or_else(|| classified.as_ref().and_then(|found| found.vendor.clone()));
             let mut reviewer = Reviewer {
                 class: class.unwrap_or(ModelClass::Mid),
                 vendor: vendor.clone().unwrap_or_default(),
@@ -604,9 +648,14 @@ pub fn load(scope: &Path, agents: &BTreeMap<String, AgentFacts>) -> PeerReviewSt
                 reason: None,
             };
             let key = (entry.agent.clone(), entry.model.to_ascii_lowercase());
-            reviewer.reason = if class.is_none() || vendor.is_none() {
+            reviewer.reason = if class.is_none() {
                 Some(format!(
                     "marsh cannot class {}: add `class` and `vendor`, or a rule in $MARSH_HOME/{OVERRIDE_FILE}",
+                    entry.model
+                ))
+            } else if vendor.is_none() {
+                Some(format!(
+                    "marsh does not know who makes {} (models.dev names only hosts): add `vendor`",
                     entry.model
                 ))
             } else if let Some(first) = seen.get(&key) {
@@ -694,10 +743,15 @@ pub fn context(status: &PeerReviewStatus, spawn: &[String]) -> String {
     if !status.enabled {
         return String::new();
     }
+    // One reviewer per class and vendor (the first, in table order), at
+    // most CONTEXT_ROWS rows: the section stays short.
+    let mut seen = BTreeSet::new();
     let rows = status
         .reviewers
         .iter()
         .filter(|reviewer| spawn.contains(&reviewer.agent))
+        .filter(|reviewer| seen.insert((reviewer.class, reviewer.vendor.clone())))
+        .take(CONTEXT_ROWS)
         .collect::<Vec<_>>();
     if rows.is_empty() {
         return String::new();
@@ -775,7 +829,7 @@ mod tests {
     fn class(table: &ClassTable, model: &str) -> Option<(ModelClass, String)> {
         table
             .classify(model)
-            .map(|found| (found.class, found.vendor))
+            .map(|found| (found.class, found.vendor.unwrap_or_default()))
     }
 
     #[test]
@@ -811,7 +865,10 @@ mod tests {
         }
         // A family rule reaches an id the patterns do not name.
         let found = table.classify("gpt-5.6").unwrap();
-        assert_eq!((found.class, found.vendor.as_str()), (large, "openai"));
+        assert_eq!(
+            (found.class, found.vendor.as_deref()),
+            (large, Some("openai"))
+        );
         assert!(
             found.how.starts_with("models.dev family gpt-sol"),
             "{}",
@@ -851,8 +908,8 @@ mod tests {
         // xAI has no rule: $6/M output is mid; the maker is the vendor.
         let found = table.classify("grok-4.7").unwrap();
         assert_eq!(
-            (found.class, found.vendor.as_str()),
-            (ModelClass::Mid, "xai")
+            (found.class, found.vendor.as_deref()),
+            (ModelClass::Mid, Some("xai"))
         );
         assert_eq!(found.how, "models.dev price $6/M output");
         // Meta's Muse Wonder lists $20/M output: large.
@@ -863,6 +920,46 @@ mod tests {
         assert_eq!(table.bands().class(0.5), ModelClass::Small);
         assert_eq!(table.classify("no-such-model-anywhere"), None);
         assert_eq!(table.classify(""), None);
+    }
+
+    #[test]
+    fn a_model_has_its_makers_vendor_on_every_host() {
+        let table = ClassTable::builtin();
+        // Hosts spell the maker differently (`x-ai`, `xai`) or name none.
+        for model in [
+            "fastrouter/x-ai/grok-4",
+            "llmgateway-providers/xai/grok-4",
+            "xai/grok-4",
+            "grok-4",
+        ] {
+            assert_eq!(
+                class(&table, model),
+                Some((ModelClass::Mid, "xai".into())),
+                "{model}"
+            );
+        }
+        assert_eq!(
+            class(&table, "venice/grok-4-6"),
+            class(&table, "xai/grok-4.6")
+        );
+        // Muse on a host is still Meta's, never the host's.
+        for model in [
+            "venice/muse-wonder",
+            "kilo/meta/muse-wonder",
+            "meta/muse-wonder-1.0",
+        ] {
+            assert_eq!(
+                class(&table, model).map(|found| found.1),
+                Some("meta".into()),
+                "{model}"
+            );
+        }
+        // No maker anywhere: classed by price, but no vendor to pair.
+        let found = table.classify("abliteration-ai/abliterated-model").unwrap();
+        assert_eq!(found.vendor, None, "{found:?}");
+        assert_eq!(vendor_name("~X-AI"), "xai");
+        assert_eq!(vendor_name("zhipuai"), "zai");
+        assert_eq!(vendor_name("openai"), "openai");
     }
 
     #[test]
@@ -911,7 +1008,10 @@ mod tests {
              - {agent: hermes, model: gpt-6-astra}\n\
              - {agent: shell, model: gpt-6-astra}\n\
              - {agent: codex, model: my-house-model}\n\
-             - {agent: codex, model: my-house-model, class: large, vendor: openai}\n",
+             - {agent: codex, model: my-house-model, class: large, vendor: openai}\n\
+             - {agent: codex, model: abliteration-ai/abliterated-model}\n\
+             - {agent: claude, model: x-ai/grok-4, vendor: x-ai}\n\
+             - {agent: codex, model: grok-4, vendor: xai}\n",
         )
         .unwrap();
         std::fs::write(directory.join("broken.yaml"), "enabled: maybe\n").unwrap();
@@ -944,6 +1044,9 @@ mod tests {
             [
                 ("mid", "anthropic", "claude", "claude-sonnet-5-5"),
                 ("mid", "openai", "codex", "gpt-6.1-terra"),
+                // An explicit vendor alias is canonical too.
+                ("mid", "xai", "claude", "x-ai/grok-4"),
+                ("mid", "xai", "codex", "grok-4"),
                 ("large", "openai", "codex", "my-house-model"),
             ]
         );
@@ -959,10 +1062,16 @@ mod tests {
         assert!(reasons[1].contains("hermes is not a registered command"));
         assert!(reasons[2].contains("shell's Kit declares no prompt verbs"));
         assert!(reasons[3].contains("cannot class my-house-model"));
+        assert!(
+            reasons[4].contains("does not know who makes abliteration-ai/abliterated-model"),
+            "{reasons:?}"
+        );
 
         let text = context(&status, &["claude".into(), "codex".into()]);
         assert!(text.starts_with("## Second opinion\n"));
         assert!(text.contains("| mid | openai | agent: \"codex\", model: \"gpt-6.1-terra\" |"));
+        // Two reviewers of one class and vendor: only the first is shown.
+        assert_eq!(text.matches("| mid | xai |").count(), 1);
         let only_claude = context(&status, &["claude".into()]);
         assert!(!only_claude.contains("codex"));
         assert_eq!(context(&status, &[]), "");

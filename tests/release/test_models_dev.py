@@ -54,14 +54,48 @@ class UpdateModelsDev(unittest.TestCase):
         }
         result, snapshot = self.run_script(api)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(snapshot["fields"], ["provider", "id", "family", "maker", "output", "open_weights", "released"])
+        self.assertEqual(snapshot["fields"], ["provider", "id", "family", "vendor", "output", "open_weights", "released"])
         rows = {(row[0], row[1]): row for row in snapshot["models"]}
         # The vendor's own listing wins over a host's copy of the same model.
         self.assertIn(("openai", "gpt-6.1-terra"), rows)
         self.assertNotIn(("openrouter", "openai/gpt-6.1-terra"), rows)
-        self.assertEqual(rows[("openrouter", "qwen/qwen3.8-max")][3:6], ["qwen", 6.0, True])
+        # The id's `qwen/` prefix is a known maker spelling: Alibaba's.
+        self.assertEqual(rows[("openrouter", "qwen/qwen3.8-max")][3:6], ["alibaba", 6.0, True])
         self.assertNotIn(("openai", "gpt-image-2"), rows)
         self.assertNotIn(("openrouter", "no-tools"), rows)
+
+    def test_the_vendor_is_the_maker_on_every_host_and_never_the_host(self):
+        models = {f"filler-{n}": model("filler", 1) for n in range(120)}
+        api = {
+            "xai": {"models": {"grok-4.6": model("grok", 6)}},
+            "fastrouter": {"models": {"x-ai/grok-4": model("grok", 15)}},
+            "llmgateway-providers": {"models": {
+                "xai/grok-4": model("grok", 15),
+                "azure/grok-4-3": model("grok", 2.5),
+                "meta/muse-wonder-1.0": model("muse", 20, canonical="meta/muse-wonder-1.0"),
+            }},
+            "venice": {"models": {
+                "grok-4-6": model("grok", 6.8),
+                "muse-wonder": model("muse", 25),
+                "house-model": model("", 2),
+            }},
+            "zzz": {"models": models},
+        }
+        result, snapshot = self.run_script(api)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        vendor = {(row[0], row[1]): row[3] for row in snapshot["models"]}
+        # `x-ai` and `xai` are one vendor: one row for grok-4, vendor xai.
+        grok = [key for key in vendor if key[1].endswith("grok-4")]
+        self.assertEqual([vendor[key] for key in grok], ["xai"], grok)
+        # A host's prefix (azure/) is not a maker; the family's one maker is.
+        self.assertEqual(vendor[("llmgateway-providers", "azure/grok-4-3")], "xai")
+        # Same model on a host (grok-4-6 vs grok-4.6): deduped into xai's own.
+        self.assertNotIn(("venice", "grok-4-6"), vendor)
+        self.assertEqual(vendor[("xai", "grok-4.6")], "xai")
+        # Muse on venice is Meta's (family), never venice's.
+        self.assertEqual(vendor[("venice", "muse-wonder")], "meta")
+        # No maker anywhere: unknown, not the host.
+        self.assertEqual(vendor[("venice", "house-model")], "")
 
     def test_refuses_a_truncated_catalog(self):
         result, snapshot = self.run_script({"openai": {"models": {"gpt-6.1-terra": model("gpt-terra", 5)}}})

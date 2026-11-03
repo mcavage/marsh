@@ -30,6 +30,12 @@ if [ "${1:-}" = --acp ]; then
   esac
   CLAUDE_CODE_EXECUTABLE=/opt/marsh/claude-acp/claude-cli.sh
   export CLAUDE_CODE_EXECUTABLE
+  # With the task tool, claude-cli.sh registers marsh's own server and allows
+  # its three tools; the proxy drops any client server named `marsh`.
+  if [ -r /run/marsh/job.json ] && /run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1; then
+    MARSH_TASK_MCP=reserve
+    export MARSH_TASK_MCP
+  fi
   exec node /opt/marsh/claude-acp/mcp-gateway-proxy.mjs \
     /opt/marsh/claude-acp/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js "$@"
 fi
