@@ -90,6 +90,17 @@ Fixes made after the move to `cc73400c`, folded into the area patches:
   `split` branches). Covered by
   `programs_start_with_sigint_unblocked_from_every_path` (Bash
   differential) and `cancelled_cloud_split_branches_end_by_sigint`.
+- Finished background jobs are reaped at the next command boundary
+  (`0002`, `0003`), as Bash's `SIGCHLD` handler reaps them. A job's
+  processes were collected only when something waited for or polled the
+  job (an interactive prompt, `jobs`, `wait`), so a noninteractive
+  `while kill -0 $pid; do sleep 1; done` never ended. After each pipeline
+  `JobManager::reap_exited` polls every job process once; a process that
+  has exited keeps its result (`ChildProcess::reap_if_exited`) for the
+  wait or poll that would have collected it, so job selection, pipefail by
+  stage index, `wait PID`/`wait -n`, `jobs` and notifications are
+  unchanged, and the `CHLD` trap counts the child when it is reaped.
+  Covered by `finished_background_jobs_are_reaped_without_a_wait`.
 
 ## Retired per-fix inventory
 

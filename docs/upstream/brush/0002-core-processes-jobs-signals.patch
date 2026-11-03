@@ -1,5 +1,5 @@
 diff --git a/brush-core/src/jobs.rs b/brush-core/src/jobs.rs
-index 72cfe800..9f907451 100644
+index 72cfe800..851ab8e7 100644
 --- a/brush-core/src/jobs.rs
 +++ b/brush-core/src/jobs.rs
 @@ -9,6 +9,7 @@ use futures::FutureExt;
@@ -140,7 +140,7 @@ index 72cfe800..9f907451 100644
      /// Returns the current job, if there is one.
      pub fn current_job(&self) -> Option<&Job> {
          self.jobs
-@@ -152,32 +228,364 @@ impl JobManager {
+@@ -152,32 +228,378 @@ impl JobManager {
                  let id = s.parse::<usize>().ok()?;
                  self.jobs.iter_mut().find(|j| j.id == id)
              }
@@ -203,8 +203,8 @@ index 72cfe800..9f907451 100644
 +                JobSpecMatch::Found(index) => return found(inherited, index),
 +                JobSpecMatch::Ambiguous => return JobSpecMatch::Ambiguous,
 +                JobSpecMatch::NoSuchJob => {}
-+            }
-+        }
+             }
+         }
 +        JobSpecMatch::NoSuchJob
 +    }
 +
@@ -236,7 +236,7 @@ index 72cfe800..9f907451 100644
 +        if key.inherited {
 +            if key.index < self.inherited.len() {
 +                self.inherited.remove(key.index);
-             }
++            }
 +            return;
 +        }
 +        if key.index >= self.jobs.len() {
@@ -245,13 +245,11 @@ index 72cfe800..9f907451 100644
 +        let job = self.jobs.remove(key.index);
 +        if let Some(pid) = job.representative_pid() {
 +            self.remember_reaped(pid, &job.known_status());
-         }
++        }
 +        self.reannotate();
 +        reap_in_background(job);
-     }
- 
--    /// Waits for all managed jobs to complete.
--    pub async fn wait_all(&mut self) -> Result<Vec<Job>, error::Error> {
++    }
++
 +    /// `disown -a` and `disown -r`: removes every job (or every running one),
 +    /// remembering none of their statuses; `-a` also forgets saved statuses.
 +    pub fn disown_all(&mut self, running_only: bool) {
@@ -308,8 +306,10 @@ index 72cfe800..9f907451 100644
 +        if self.jobs.len() != before {
 +            self.reannotate();
 +        }
-+    }
-+
+     }
+ 
+-    /// Waits for all managed jobs to complete.
+-    pub async fn wait_all(&mut self) -> Result<Vec<Job>, error::Error> {
 +    /// Waits for all managed jobs to complete. With `keep_finished_last` (a
 +    /// noninteractive shell), the `$!` job is kept, unreported, if it had
 +    /// already finished when the wait began, as Bash keeps it.
@@ -348,11 +348,10 @@ index 72cfe800..9f907451 100644
 +        if let Some(job) = kept {
 +            self.jobs.push(job);
 +            self.jobs.sort_by_key(|job| job.id);
-         }
++        }
 +        Ok(swept)
 +    }
- 
--        Ok(self.sweep_completed_jobs())
++
 +    /// Removes finished jobs that `jobs` has just reported.
 +    pub fn forget_reported(&mut self, ids: &[usize]) {
 +        let before = self.jobs.len();
@@ -399,13 +398,14 @@ index 72cfe800..9f907451 100644
 +            .collect::<Vec<_>>();
 +        if waits.is_empty() {
 +            return Ok(None);
-+        }
+         }
 +        let ((id, pid, result), _, _) = futures::future::select_all(waits).await;
 +        let result = result?;
 +        self.sweep_waited_jobs();
 +        Ok(Some((id, pid, result)))
 +    }
-+
+ 
+-        Ok(self.sweep_completed_jobs())
 +    /// Resolves a child process ID to its managed job.
 +    pub fn job_for_pid_mut(&mut self, pid: sys::process::ProcessId) -> Option<&mut Job> {
 +        self.jobs
@@ -490,6 +490,20 @@ index 72cfe800..9f907451 100644
 +                job.notified = true;
 +            }
 +        }
++    }
++
++    /// Collects the statuses of job processes that have exited, as Bash's
++    /// `SIGCHLD` handler does, without reporting or removing any job: `wait`,
++    /// `jobs` and completion notices still see each job and its status, but
++    /// the process is gone (`kill -0 PID` fails).
++    pub fn reap_exited(&mut self) {
++        for job in &mut self.jobs {
++            for (_, task) in &mut job.tasks {
++                if let JobTask::External(process) = task {
++                    process.reap_if_exited();
++                }
++            }
++        }
      }
  
      /// Polls all managed jobs for completion.
@@ -512,7 +526,7 @@ index 72cfe800..9f907451 100644
                  results.push((job, result));
              } else if matches!(self.jobs[i].state, JobState::Done) {
                  // TODO(jobs): This is a workaround to remove jobs that are done but for which we
-@@ -188,9 +596,42 @@ impl JobManager {
+@@ -188,9 +610,42 @@ impl JobManager {
              }
          }
  
@@ -555,7 +569,7 @@ index 72cfe800..9f907451 100644
      fn sweep_completed_jobs(&mut self) -> Vec<Job> {
          let mut completed_jobs = vec![];
  
-@@ -203,6 +644,9 @@ impl JobManager {
+@@ -203,6 +658,9 @@ impl JobManager {
              }
          }
  
@@ -565,7 +579,7 @@ index 72cfe800..9f907451 100644
          completed_jobs
      }
  }
-@@ -242,6 +686,17 @@ pub enum JobAnnotation {
+@@ -242,6 +700,17 @@ pub enum JobAnnotation {
      Previous,
  }
  
@@ -583,7 +597,7 @@ index 72cfe800..9f907451 100644
  impl Display for JobAnnotation {
      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
          match self {
-@@ -254,8 +709,17 @@ impl Display for JobAnnotation {
+@@ -254,8 +723,17 @@ impl Display for JobAnnotation {
  
  /// Encapsulates a set of processes managed by the shell as a single unit.
  pub struct Job {
@@ -603,7 +617,7 @@ index 72cfe800..9f907451 100644
  
      /// The annotation of the job (e.g., current, previous).
      annotation: JobAnnotation,
-@@ -268,14 +732,30 @@ pub struct Job {
+@@ -268,14 +746,30 @@ pub struct Job {
  
      /// The current operational state of the job.
      pub state: JobState,
@@ -636,7 +650,7 @@ index 72cfe800..9f907451 100644
          )
      }
  }
-@@ -288,16 +768,32 @@ impl Job {
+@@ -288,16 +782,32 @@ impl Job {
      /// * `children` - The job's known child processes.
      /// * `command_line` - The command line of the job.
      /// * `state` - The current operational state of the job.
@@ -671,7 +685,7 @@ index 72cfe800..9f907451 100644
          }
      }
  
-@@ -308,7 +804,59 @@ impl Job {
+@@ -308,7 +818,59 @@ impl Job {
              .map_or(Cow::Borrowed("<pid unknown>"), |pid| {
                  Cow::Owned(pid.to_string())
              });
@@ -732,7 +746,7 @@ index 72cfe800..9f907451 100644
      }
  
      /// Returns the annotation of the job.
-@@ -334,6 +882,63 @@ impl Job {
+@@ -334,6 +896,63 @@ impl Job {
          matches!(self.annotation, JobAnnotation::Previous)
      }
  
@@ -796,7 +810,7 @@ index 72cfe800..9f907451 100644
      /// Polls whether the job has completed.
      pub fn poll_done(
          &mut self,
-@@ -342,12 +947,15 @@ impl Job {
+@@ -342,12 +961,15 @@ impl Job {
  
          tracing::debug!(target: trace_categories::JOBS, "Polling job {} for completion...", self.id);
  
@@ -816,7 +830,7 @@ index 72cfe800..9f907451 100644
                  }
                  None => {
                      return Ok(None);
-@@ -364,12 +972,13 @@ impl Job {
+@@ -364,12 +986,13 @@ impl Job {
  
      /// Waits for the job to complete.
      pub async fn wait(&mut self) -> Result<ExecutionResult, error::Error> {
@@ -834,7 +848,7 @@ index 72cfe800..9f907451 100644
                      self.tasks.pop_back();
                  }
                  JobTaskWaitResult::Stopped => {
-@@ -381,7 +990,19 @@ impl Job {
+@@ -381,7 +1004,19 @@ impl Job {
  
          self.state = JobState::Done;
  
@@ -855,7 +869,7 @@ index 72cfe800..9f907451 100644
      }
  
      /// Moves the job to execute in the background.
-@@ -420,23 +1041,43 @@ impl Job {
+@@ -420,23 +1055,43 @@ impl Job {
      /// Continues the job's stopped processes: all of its process group, if it has one.
      fn continue_processes(&self) -> Result<(), error::Error> {
          if let Some(pgid) = self.own_process_group() {
@@ -869,7 +883,7 @@ index 72cfe800..9f907451 100644
 +        let mut pids = self.task_pids();
 +        if pids.is_empty() {
 +            pids.extend(self.process_group_id());
-         }
++        }
 +        if pids.is_empty() {
 +            return Err(error::ErrorKind::FailedToSendSignal.into());
 +        }
@@ -878,7 +892,7 @@ index 72cfe800..9f907451 100644
 +            if let Err(error) = sys::signal::continue_process(pid) {
 +                result = Err(error);
 +            }
-+        }
+         }
 +        result
      }
  
@@ -898,18 +912,18 @@ index 72cfe800..9f907451 100644
 +        }
 +        if pids.is_empty() {
 +            return Err(error::ErrorKind::FailedToSendSignal.into());
-+        }
+         }
 +        let mut result = Ok(());
 +        for pid in pids {
 +            if let Err(error) = sys::signal::check_signalable(pid) {
 +                result = Err(error);
 +            }
-         }
++        }
 +        result
      }
  
      /// Kills the job: sends the signal to all of its process group, if it has one. A job sent
-@@ -448,10 +1089,8 @@ impl Job {
+@@ -448,10 +1103,8 @@ impl Job {
      pub fn kill(&mut self, signal: traps::TrapSignal) -> Result<(), error::Error> {
          if let Some(pgid) = self.own_process_group() {
              sys::signal::kill_process_group(pgid, signal)?;
@@ -921,7 +935,7 @@ index 72cfe800..9f907451 100644
          }
  
          // As bash does, continue a stopped job sent SIGTERM or SIGHUP, so that it acts on it;
-@@ -465,32 +1104,117 @@ impl Job {
+@@ -465,32 +1118,117 @@ impl Job {
  
      /// Tries to retrieve a "representative" pid for the job.
      pub fn representative_pid(&self) -> Option<sys::process::ProcessId> {
@@ -1164,7 +1178,7 @@ index 418a2b44..305f2495 100644
          }
      }
 diff --git a/brush-core/src/processes.rs b/brush-core/src/processes.rs
-index 334c3a4e..966830e0 100644
+index 334c3a4e..1cdf20a5 100644
 --- a/brush-core/src/processes.rs
 +++ b/brush-core/src/processes.rs
 @@ -1,6 +1,12 @@
@@ -1181,7 +1195,7 @@ index 334c3a4e..966830e0 100644
  
  use futures::FutureExt;
  
-@@ -21,6 +27,11 @@ pub struct ChildProcess {
+@@ -21,6 +27,14 @@ pub struct ChildProcess {
      pid: Option<sys::process::ProcessId>,
      /// If available, the process group ID of the child.
      pgid: Option<sys::process::ProcessId>,
@@ -1190,10 +1204,13 @@ index 334c3a4e..966830e0 100644
 +    interrupted: bool,
 +    term_trapped: bool,
 +    terminated: bool,
++    /// The result of a process collected before anyone waited for it (see
++    /// [`ChildProcess::reap_if_exited`]), kept for the wait.
++    reaped: Option<Result<ExecutionResult, std::io::Error>>,
  }
  
  impl ChildProcess {
-@@ -37,9 +48,62 @@ impl ChildProcess {
+@@ -37,9 +51,63 @@ impl ChildProcess {
              exec_future: std::sync::Mutex::new(Box::pin(future)),
              pid: None,
              pgid: None,
@@ -1201,6 +1218,7 @@ index 334c3a4e..966830e0 100644
 +            interrupted: false,
 +            term_trapped: false,
 +            terminated: false,
++            reaped: None,
          }
      }
  
@@ -1256,7 +1274,41 @@ index 334c3a4e..966830e0 100644
      /// Marks the process as a native child of the shell's, with the given IDs: job
      /// control signals it, and waiting for it notices when it stops.
      ///
-@@ -76,6 +140,13 @@ impl ChildProcess {
+@@ -69,13 +137,47 @@ impl ChildProcess {
+         self.pgid
+     }
+ 
++    /// Collects the process's status if it has exited, as Bash's `SIGCHLD`
++    /// handler does, so its PID no longer names a process (`kill -0` fails).
++    /// The status is kept for whoever waits for or polls the process.
++    pub(crate) fn reap_if_exited(&mut self) {
++        if self.reaped.is_some() {
++            return;
++        }
++        let checkable_future = self
++            .exec_future
++            .get_mut()
++            .unwrap_or_else(PoisonError::into_inner);
++        if let Some(result) = checkable_future.now_or_never() {
++            #[cfg(unix)]
++            crate::signals::note_child_reaped();
++            self.reaped = Some(result);
++        }
++    }
++
+     /// Waits for the process to exit.
+     pub async fn wait(&mut self) -> Result<ProcessWaitResult, error::Error> {
++        if let Some(result) = self.reaped.take() {
++            return Ok(ProcessWaitResult::Completed {
++                result: result?,
++                interrupted: std::mem::take(&mut self.interrupted),
++                terminated: std::mem::take(&mut self.terminated),
++                killed_by_int: self.killed_by_int.load(Ordering::Relaxed),
++            });
++        }
++
+         #[allow(unused_mut, reason = "only mutated on some platforms")]
+         let mut sigtstp = sys::signal::tstp_signal_listener()?;
          #[allow(unused_mut, reason = "only mutated on some platforms")]
          let mut sigchld = sys::signal::chld_signal_listener()?;
  
@@ -1270,7 +1322,7 @@ index 334c3a4e..966830e0 100644
          // The child may have stopped before there were listeners to hear about it
          // (e.g., straight after `fg` resumed it).
          if let Some(pid) = self.pid
-@@ -87,8 +158,33 @@ impl ChildProcess {
+@@ -87,8 +189,33 @@ impl ChildProcess {
          #[allow(clippy::ignored_unit_patterns)]
          loop {
              tokio::select! {
@@ -1306,7 +1358,7 @@ index 334c3a4e..966830e0 100644
                  },
                  // Only this child's stop counts: another wait may be under way at the same time
                  // (e.g., a background job's), for a child of its own, and the terminal's stop
-@@ -103,11 +199,6 @@ impl ChildProcess {
+@@ -103,11 +230,6 @@ impl ChildProcess {
                          break Ok(ProcessWaitResult::Stopped);
                      }
                  },
@@ -1318,7 +1370,14 @@ index 334c3a4e..966830e0 100644
              }
          }
      }
-@@ -125,16 +216,30 @@ impl ChildProcess {
+@@ -121,20 +243,37 @@ impl ChildProcess {
+     }
+ 
+     pub(crate) fn poll(&mut self) -> Option<Result<ExecutionResult, error::Error>> {
++        if let Some(result) = self.reaped.take() {
++            return Some(result.map_err(Into::into));
++        }
+         let checkable_future = self
              .exec_future
              .get_mut()
              .unwrap_or_else(PoisonError::into_inner);
@@ -1352,7 +1411,7 @@ index 334c3a4e..966830e0 100644
      /// The process stopped and has not yet completed.
      Stopped,
  }
-@@ -167,6 +272,10 @@ pub struct LaunchRequest {
+@@ -167,6 +306,10 @@ pub struct LaunchRequest {
      /// Whether to kill the process if the shell drops the [`ChildProcess`] for it
      /// before it exits.
      pub kill_on_drop: bool,

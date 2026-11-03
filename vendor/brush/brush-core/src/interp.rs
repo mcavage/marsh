@@ -550,6 +550,12 @@ async fn deliver_pending_signals<SE: extensions::ShellExtensions>(
     // starts with the trap reset, leave the children they reap to the shell.
     static RUNNING_CHLD_TRAP: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
+    // Bash reaps a background job's processes when they exit, not when
+    // something waits for them. Not while a `CHLD` trap runs, whose own
+    // reaps are dropped: the trap runs for these after it.
+    if !RUNNING_CHLD_TRAP.load(std::sync::atomic::Ordering::Acquire) {
+        shell.jobs_mut().reap_exited();
+    }
     let chld = crate::traps::TrapSignal::Signal(sys::signal::Signal::SIGCHLD);
     if !shell.is_subshell() && !RUNNING_CHLD_TRAP.load(std::sync::atomic::Ordering::Acquire) {
         let reaped = crate::signals::take_reaped_children();

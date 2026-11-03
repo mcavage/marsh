@@ -569,6 +569,20 @@ impl JobManager {
         }
     }
 
+    /// Collects the statuses of job processes that have exited, as Bash's
+    /// `SIGCHLD` handler does, without reporting or removing any job: `wait`,
+    /// `jobs` and completion notices still see each job and its status, but
+    /// the process is gone (`kill -0 PID` fails).
+    pub fn reap_exited(&mut self) {
+        for job in &mut self.jobs {
+            for (_, task) in &mut job.tasks {
+                if let JobTask::External(process) = task {
+                    process.reap_if_exited();
+                }
+            }
+        }
+    }
+
     /// Polls all managed jobs for completion.
     pub fn poll(&mut self) -> Result<Vec<JobResult>, error::Error> {
         self.cleanup_dead_jobs();

@@ -740,7 +740,7 @@ index ea17b5f2..23046c66 100644
      }
  }
 diff --git a/brush-core/src/interp.rs b/brush-core/src/interp.rs
-index 22ab6d3c..4e03c12a 100644
+index 22ab6d3c..a627d45b 100644
 --- a/brush-core/src/interp.rs
 +++ b/brush-core/src/interp.rs
 @@ -2,8 +2,10 @@ use brush_parser::ast::{self, CommandPrefixOrSuffixItem};
@@ -925,7 +925,7 @@ index 22ab6d3c..4e03c12a 100644
      // The job runs in a shell of its own, so only its status leaves it.
      let join_handle = sys::tasks::spawn(async move {
          let result = cloned_ao_list
-@@ -300,11 +387,323 @@ fn spawn_async_ao_list_in_task<'a, SE: extensions::ShellExtensions>(
+@@ -300,11 +387,329 @@ fn spawn_async_ao_list_in_task<'a, SE: extensions::ShellExtensions>(
          Ok(cloned_shell.end_subshell(result, || cloned_params.try_stderr(&cloned_shell)))
      });
  
@@ -1094,6 +1094,12 @@ index 22ab6d3c..4e03c12a 100644
 +    // starts with the trap reset, leave the children they reap to the shell.
 +    static RUNNING_CHLD_TRAP: std::sync::atomic::AtomicBool =
 +        std::sync::atomic::AtomicBool::new(false);
++    // Bash reaps a background job's processes when they exit, not when
++    // something waits for them. Not while a `CHLD` trap runs, whose own
++    // reaps are dropped: the trap runs for these after it.
++    if !RUNNING_CHLD_TRAP.load(std::sync::atomic::Ordering::Acquire) {
++        shell.jobs_mut().reap_exited();
++    }
 +    let chld = crate::traps::TrapSignal::Signal(sys::signal::Signal::SIGCHLD);
 +    if !shell.is_subshell() && !RUNNING_CHLD_TRAP.load(std::sync::atomic::Ordering::Acquire) {
 +        let reaped = crate::signals::take_reaped_children();
@@ -1251,7 +1257,7 @@ index 22ab6d3c..4e03c12a 100644
  }
  
  #[async_trait::async_trait]
-@@ -370,6 +769,45 @@ impl Execute for ast::Pipeline {
+@@ -370,6 +775,45 @@ impl Execute for ast::Pipeline {
          shell: &mut Shell<impl extensions::ShellExtensions>,
          params: &ExecutionParameters,
      ) -> Result<ExecutionResult, error::Error> {
@@ -1297,7 +1303,7 @@ index 22ab6d3c..4e03c12a 100644
          // Capture current timing if so requested.
          let stopwatch = self
              .timed
-@@ -386,7 +824,7 @@ impl Execute for ast::Pipeline {
+@@ -386,7 +830,7 @@ impl Execute for ast::Pipeline {
  
          // Spawn all the processes required for the pipeline, connecting outputs/inputs with pipes
          // as needed.
@@ -1306,7 +1312,7 @@ index 22ab6d3c..4e03c12a 100644
  
          // Wait for the processes. This also has a side effect of updating pipeline status.
          let mut result =
-@@ -433,6 +871,12 @@ impl Execute for ast::Pipeline {
+@@ -433,6 +877,12 @@ impl Execute for ast::Pipeline {
              shell.apply_errexit_if_enabled(&mut result);
          }
  
@@ -1319,7 +1325,7 @@ index 22ab6d3c..4e03c12a 100644
          // If requested, report timing.
          if let (Some(timed), Some(stopwatch)) = (&self.timed, &stopwatch)
              && let Some(mut stderr) = params.try_fd(shell, openfiles::OpenFiles::STDERR_FD)
-@@ -461,10 +905,764 @@ impl Execute for ast::Pipeline {
+@@ -461,10 +911,764 @@ impl Execute for ast::Pipeline {
      }
  }
  
@@ -2086,7 +2092,7 @@ index 22ab6d3c..4e03c12a 100644
  ) -> Result<VecDeque<ExecutionSpawnResult>, error::Error> {
      let pipeline_len = pipeline.seq.len();
      let mut pipe_readers = vec![];
-@@ -521,6 +1719,51 @@ async fn spawn_pipeline_processes(
+@@ -521,6 +1725,51 @@ async fn spawn_pipeline_processes(
              cmd_params.try_stderr(shell)
          };
  
@@ -2138,7 +2144,7 @@ index 22ab6d3c..4e03c12a 100644
          let pipeline_context = if !run_in_current_shell {
              // Make sure that all commands in the pipeline are in the same process group.
              if current_pipeline_index > 0 {
-@@ -578,9 +1821,19 @@ async fn wait_for_pipeline_processes_and_update_status(
+@@ -578,9 +1827,19 @@ async fn wait_for_pipeline_processes_and_update_status(
      let mut result = ExecutionResult::success();
      let mut stopped_children = vec![];
      let mut last_failure_exit_code: Option<ExecutionExitCode> = None;
@@ -2158,7 +2164,7 @@ index 22ab6d3c..4e03c12a 100644
  
      while let Some(child) = process_spawn_results.pop_front() {
          let wait_result = if !stopped_children.is_empty() {
-@@ -590,7 +1843,15 @@ async fn wait_for_pipeline_processes_and_update_status(
+@@ -590,7 +1849,15 @@ async fn wait_for_pipeline_processes_and_update_status(
          };
  
          match wait_result {
@@ -2175,7 +2181,7 @@ index 22ab6d3c..4e03c12a 100644
                  result = current_result;
                  shell.set_last_exit_status(result.exit_code.into());
                  shell
-@@ -614,6 +1875,39 @@ async fn wait_for_pipeline_processes_and_update_status(
+@@ -614,6 +1881,39 @@ async fn wait_for_pipeline_processes_and_update_status(
          }
      }
  
@@ -2215,7 +2221,7 @@ index 22ab6d3c..4e03c12a 100644
      // Apply pipefail semantics if enabled
      if shell.options().return_last_failure_from_pipeline {
          if let Some(failure_exit_code) = last_failure_exit_code {
-@@ -621,6 +1915,21 @@ async fn wait_for_pipeline_processes_and_update_status(
+@@ -621,6 +1921,21 @@ async fn wait_for_pipeline_processes_and_update_status(
          }
      }
  
@@ -2237,7 +2243,7 @@ index 22ab6d3c..4e03c12a 100644
      if shell.options().interactive {
          sys::terminal::move_self_to_foreground()?;
      }
-@@ -628,10 +1937,12 @@ async fn wait_for_pipeline_processes_and_update_status(
+@@ -628,10 +1943,12 @@ async fn wait_for_pipeline_processes_and_update_status(
      // If there were stopped jobs, then encapsulate the pipeline as a managed job and hand it
      // off to the job manager.
      if !stopped_children.is_empty() {
@@ -2250,7 +2256,7 @@ index 22ab6d3c..4e03c12a 100644
          ));
  
          let formatted = job.to_string();
-@@ -658,6 +1969,36 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::Command {
+@@ -658,6 +1975,36 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::Command {
          pipeline_context.shell.set_current_cmd(self);
  
          match self {
@@ -2287,7 +2293,7 @@ index 22ab6d3c..4e03c12a 100644
              Self::Simple(simple) => simple.execute_in_pipeline(pipeline_context, params).await,
              Self::Compound(compound, redirects) => {
                  // Set up any additional redirects.
-@@ -667,6 +2008,19 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::Command {
+@@ -667,6 +2014,19 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::Command {
                      }
                  }
  
@@ -2307,7 +2313,7 @@ index 22ab6d3c..4e03c12a 100644
                  match pipeline_context.shell {
                      // An owned shell is a discarded clone, so this stage can run asynchronously.
                      // That lets the pipeline start readers before writers fill the pipe.
-@@ -710,9 +2064,23 @@ impl Execute for ast::CompoundCommand {
+@@ -710,9 +2070,23 @@ impl Execute for ast::CompoundCommand {
                  list.execute(shell, params).await
              }
              Self::Subshell(ast::SubshellCommand { list, .. }) => {
@@ -2331,7 +2337,7 @@ index 22ab6d3c..4e03c12a 100644
  
                  // Handle errors within the subshell context to prevent fatal errors
                  // from propagating to the parent shell.
-@@ -727,15 +2095,9 @@ impl Execute for ast::CompoundCommand {
+@@ -727,15 +2101,9 @@ impl Execute for ast::CompoundCommand {
              Self::Arithmetic(a) => a.execute(shell, params).await,
              Self::ArithmeticForClause(a) => a.execute(shell, params).await,
              Self::Coprocess(c) => c.execute(shell, params).await,
@@ -2350,7 +2356,7 @@ index 22ab6d3c..4e03c12a 100644
          }
      }
  }
-@@ -768,6 +2130,59 @@ impl Execute for ast::CoprocessCommand {
+@@ -768,6 +2136,59 @@ impl Execute for ast::CoprocessCommand {
          // Set up the pipes that we'll use to communicate with the coprocess.
          let (stdin_reader, stdin_writer) = sys::pipes::pipe()?;
          let (stdout_reader, stdout_writer) = sys::pipes::pipe()?;
@@ -2410,7 +2416,7 @@ index 22ab6d3c..4e03c12a 100644
  
          // Allocate new fds in the (parent) shell for the read end of the coprocess's stdout
          // and the write end of the coprocess's stdin.
-@@ -782,10 +2197,10 @@ impl Execute for ast::CoprocessCommand {
+@@ -782,10 +2203,10 @@ impl Execute for ast::CoprocessCommand {
          let mut child_params = params.clone();
          child_params
              .open_files
@@ -2423,7 +2429,7 @@ index 22ab6d3c..4e03c12a 100644
  
          let body = self.body.clone();
          let join_handle = sys::tasks::spawn(async move {
-@@ -797,7 +2212,7 @@ impl Execute for ast::CoprocessCommand {
+@@ -797,7 +2218,7 @@ impl Execute for ast::CoprocessCommand {
                  .execute_in_pipeline(pipeline_context, child_params)
                  .await?;
              match spawn_result.wait().await? {
@@ -2432,7 +2438,7 @@ index 22ab6d3c..4e03c12a 100644
                  ExecutionWaitResult::Stopped(_) => Ok(ExecutionResult::stopped()),
              }
          });
-@@ -806,6 +2221,7 @@ impl Execute for ast::CoprocessCommand {
+@@ -806,6 +2227,7 @@ impl Execute for ast::CoprocessCommand {
              [jobs::JobTask::Internal(join_handle)],
              format!("coproc {name}"),
              jobs::JobState::Running,
@@ -2440,7 +2446,7 @@ index 22ab6d3c..4e03c12a 100644
          ));
          let job_id = job.id;
  
-@@ -1181,6 +2597,33 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
+@@ -1181,6 +2603,33 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
          mut context: PipelineExecutionContext<'_, SE>,
          mut params: ExecutionParameters,
      ) -> Result<ExecutionSpawnResult, error::Error> {
@@ -2474,7 +2480,7 @@ index 22ab6d3c..4e03c12a 100644
          let prefix_iter = self.prefix.as_ref().map(|s| s.0.iter()).unwrap_or_default();
          let suffix_iter = self.suffix.as_ref().map(|s| s.0.iter()).unwrap_or_default();
          let cmd_name_items = self
-@@ -1191,6 +2634,9 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
+@@ -1191,6 +2640,9 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
          let mut assignments = vec![];
          let mut args: Vec<CommandArg> = vec![];
          let mut command_takes_assignments = false;
@@ -2484,7 +2490,7 @@ index 22ab6d3c..4e03c12a 100644
  
          // Capture the status change count before expansion, so we can detect
          // if expansion (e.g., command substitution) set an exit status.
-@@ -1198,13 +2644,7 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
+@@ -1198,13 +2650,7 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
  
          for item in prefix_iter.chain(cmd_name_items.iter()).chain(suffix_iter) {
              match item {
@@ -2499,7 +2505,7 @@ index 22ab6d3c..4e03c12a 100644
                  CommandPrefixOrSuffixItem::ProcessSubstitution(kind, subshell_command) => {
                      let (installed_fd_num, substitution_file) = setup_process_substitution(
                          &context.shell,
-@@ -1252,51 +2692,25 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
+@@ -1252,51 +2698,25 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
                      }
                  }
                  CommandPrefixOrSuffixItem::Word(arg) => {
@@ -2567,7 +2573,7 @@ index 22ab6d3c..4e03c12a 100644
                      }
  
                      let mut next_args = next_args.into_iter().map(CommandArg::String).collect();
-@@ -1305,6 +2719,47 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
+@@ -1305,6 +2725,47 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
              }
          }
  
@@ -2615,7 +2621,7 @@ index 22ab6d3c..4e03c12a 100644
          // If we have a command, then execute it.
          if let Some(CommandArg::String(cmd_name)) = args.first() {
              let cmd_name = cmd_name.clone();
-@@ -1330,7 +2785,17 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
+@@ -1330,7 +2791,17 @@ impl<SE: extensions::ShellExtensions> ExecuteInPipeline<SE> for ast::SimpleComma
                  process_group_id: context.process_group_id,
              };
  
@@ -2634,7 +2640,7 @@ index 22ab6d3c..4e03c12a 100644
                  Ok(result) => Ok(result),
                  // In a shell of its own, as an expansion error in a prefix
                  // assignment is, an error ends the stage alone.
-@@ -1387,6 +2852,8 @@ async fn execute_command(
+@@ -1387,6 +2858,8 @@ async fn execute_command(
      cmd_name: String,
      assignments: &[&ast::Assignment],
      args: Vec<CommandArg>,
@@ -2643,7 +2649,7 @@ index 22ab6d3c..4e03c12a 100644
  ) -> Result<ExecutionSpawnResult, error::Error> {
      // Run the command in a new ephemeral environment scope, for its variable assignments.
      let mut scoped;
-@@ -1403,15 +2870,27 @@ async fn execute_command(
+@@ -1403,15 +2876,27 @@ async fn execute_command(
          }
      };
  
@@ -2673,7 +2679,7 @@ index 22ab6d3c..4e03c12a 100644
          )
          .await?;
      }
-@@ -1428,6 +2907,8 @@ async fn execute_command(
+@@ -1428,6 +2913,8 @@ async fn execute_command(
      // Construct the command struct.
      let mut cmd = commands::SimpleCommand::new(shell, params, cmd_name, args);
      cmd.process_group_id = context.process_group_id;
@@ -2682,7 +2688,7 @@ index 22ab6d3c..4e03c12a 100644
  
      // Run through any pre-execution hooks as best effort.
      let _ = commands::on_preexecute(&mut cmd).await;
-@@ -1437,31 +2918,6 @@ async fn execute_command(
+@@ -1437,31 +2924,6 @@ async fn execute_command(
      cmd.execute().await
  }
  
@@ -2714,7 +2720,7 @@ index 22ab6d3c..4e03c12a 100644
  /// Expands the given words, with splitting enabled, yielding the fields they expand to.
  async fn expand_words(
      shell: &mut Shell<impl extensions::ShellExtensions>,
-@@ -1476,6 +2932,131 @@ async fn expand_words(
+@@ -1476,6 +2938,131 @@ async fn expand_words(
      Ok(fields)
  }
  
@@ -2846,7 +2852,7 @@ index 22ab6d3c..4e03c12a 100644
  async fn expand_assignment(
      shell: &mut Shell<impl extensions::ShellExtensions>,
      params: &ExecutionParameters,
-@@ -1562,12 +3143,22 @@ async fn apply_assignment(
+@@ -1562,12 +3149,22 @@ async fn apply_assignment(
      // Figure out if we are trying to assign to a variable or assign to an element of an existing
      // array.
      let mut array_index;
@@ -2872,7 +2878,7 @@ index 22ab6d3c..4e03c12a 100644
              let expanded = expansion::basic_expand_word(shell, params, index).await?;
              array_index = Some(expanded);
              name
-@@ -1647,6 +3238,12 @@ async fn apply_assignment(
+@@ -1647,6 +3244,12 @@ async fn apply_assignment(
      // Read option before taking mutable borrow on env.
      let export_variables_on_modification = shell.options().export_variables_on_modification;
  
@@ -2885,7 +2891,7 @@ index 22ab6d3c..4e03c12a 100644
      // Like bash, a variable for one command can't override a readonly one: report that and
      // skip this assignment. The command still runs.
      if required_scope.is_some()
-@@ -1747,6 +3344,51 @@ pub(crate) async fn setup_redirect(
+@@ -1747,6 +3350,51 @@ pub(crate) async fn setup_redirect(
      redirect: &ast::IoRedirect,
  ) -> Result<(), error::Error> {
      match redirect {
@@ -2937,7 +2943,7 @@ index 22ab6d3c..4e03c12a 100644
          ast::IoRedirect::OutputAndError(f, append) => {
              let mut expanded_fields =
                  expansion::full_expand_and_split_word(shell, params, f).await?;
-@@ -1770,8 +3412,9 @@ pub(crate) async fn setup_redirect(
+@@ -1770,8 +3418,9 @@ pub(crate) async fn setup_redirect(
                          return Err(error::ErrorKind::InvalidRedirection.into());
                      }
  
@@ -2948,7 +2954,7 @@ index 22ab6d3c..4e03c12a 100644
  
                      let default_fd_if_unspecified = get_default_fd_for_redirect_kind(kind);
                      match kind {
-@@ -1825,10 +3468,7 @@ pub(crate) async fn setup_redirect(
+@@ -1825,10 +3474,7 @@ pub(crate) async fn setup_redirect(
                      let opened_file = shell
                          .open_file(&options, &expanded_file_path, params)
                          .map_err(|err| {
@@ -2960,7 +2966,7 @@ index 22ab6d3c..4e03c12a 100644
                          })?;
  
                      params.open_files.set_fd(fd_num, opened_file);
-@@ -1994,10 +3634,7 @@ fn setup_redirect_output_and_error_to(
+@@ -1994,10 +3640,7 @@ fn setup_redirect_output_and_error_to(
      let stdout_file = shell
          .open_file(&file_options, &abs_file_path, params)
          .map_err(|err| {
@@ -2972,7 +2978,7 @@ index 22ab6d3c..4e03c12a 100644
          })?;
  
      let stderr_file = stdout_file.clone();
-@@ -2028,6 +3665,7 @@ fn setup_process_substitution(
+@@ -2028,6 +3671,7 @@ fn setup_process_substitution(
  ) -> Result<(ShellFd, OpenFile), error::Error> {
      // TODO(execute): Don't execute synchronously!
      // Execute in a subshell.
@@ -2980,7 +2986,7 @@ index 22ab6d3c..4e03c12a 100644
      let mut subshell = shell.clone();
  
      // Set up execution parameters for the child execution.
-@@ -2049,6 +3687,36 @@ fn setup_process_substitution(
+@@ -2049,6 +3693,36 @@ fn setup_process_substitution(
          }
      };
  
@@ -3017,7 +3023,7 @@ index 22ab6d3c..4e03c12a 100644
      // Asynchronously spawn off the subshell; we intentionally don't block on its
      // completion.
      let subshell_cmd = subshell_cmd.to_owned();
-@@ -2060,8 +3728,11 @@ fn setup_process_substitution(
+@@ -2060,8 +3734,11 @@ fn setup_process_substitution(
              .await;
      });
  
@@ -3031,7 +3037,7 @@ index 22ab6d3c..4e03c12a 100644
      let mut candidate_fd_num = 63;
      while params.open_files.contains_fd(candidate_fd_num) {
          candidate_fd_num -= 1;
-@@ -2069,14 +3740,14 @@ fn setup_process_substitution(
+@@ -2069,14 +3746,14 @@ fn setup_process_substitution(
              return error::unimp("no available file descriptors");
          }
      }
@@ -3049,7 +3055,7 @@ index 22ab6d3c..4e03c12a 100644
  
      // ast-grep-ignore: platform-cfg-outside-sys
      #[cfg(any(target_os = "linux", target_os = "android"))]
-@@ -2093,78 +3764,3 @@ fn setup_open_file_with_contents(contents: &str) -> Result<OpenFile, error::Erro
+@@ -2093,78 +3770,3 @@ fn setup_open_file_with_contents(contents: &str) -> Result<OpenFile, error::Erro
  
      Ok(reader.into())
  }

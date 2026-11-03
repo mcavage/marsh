@@ -1455,6 +1455,32 @@ fn cancelled_cloud_split_branches_end_by_sigint() {
     );
 }
 
+/// Bash reaps a background job's processes when they exit, so `kill -0` on
+/// `$!` fails once the job is done while `wait PID`, `wait -n` and `$!` still
+/// report it, and a `CHLD` trap runs for it without anything waiting. marsh
+/// collected a job only when something waited for it, so a
+/// `while kill -0 $pid` loop never ended. Each loop is bounded so a
+/// regression fails rather than hangs.
+#[test]
+fn finished_background_jobs_are_reaped_without_a_wait() {
+    differential(
+        r#"sh -c 'sleep .2; exit 5' & pid=$!; sh -c 'sleep .3; exit 6' & p2=$!
+i=0; while kill -0 $pid 2>/dev/null; do i=$((i+1)); [ $i -ge 100 ] && break; sleep .1; done
+[ $i -lt 100 ] && echo ended; wait $pid; echo "status $?"
+i=0; while kill -0 $p2 2>/dev/null; do i=$((i+1)); [ $i -ge 100 ] && break; sleep .1; done
+[ $i -lt 100 ] && echo ended; wait -n; echo "next $?"; echo $(( $! == p2 ))"#,
+        0,
+        b"ended\nstatus 5\nended\nnext 6\n1\n",
+    );
+    differential(
+        r#"trap 'echo chld' CHLD; sh -c 'exit 4' & pid=$!
+while kill -0 $pid 2>/dev/null && [ $SECONDS -lt 10 ]; do :; done; trap - CHLD
+[ $SECONDS -lt 10 ] && echo ended; wait $pid; echo "status $?""#,
+        0,
+        b"chld\nended\nstatus 4\n",
+    );
+}
+
 /// Syntax errors name the line Bash names: the line of an unexpected token,
 /// or the line after the last one read for an unexpected end of file.
 #[test]
