@@ -1,0 +1,630 @@
+//! Garbage collection of this daemon's own VMs (`marsh gc`,
+//! docs/troubleshooting.md "Removing VMs"). Only VMs this daemon's ownership
+//! map records, with their recorded UUID, are ever removed; a `marsh-` VM it
+//! does not record is listed as not ours and left alone.
+//!
+//! A recorded VM is removed when nothing uses it and either it is superseded
+//! (no registered command runs its Kit any more, or it is a shell VM of an
+//! older selector) or it has not been used for `vm_idle_days` (default 3; the
+//! next use creates it again). A VM a job or attached shell uses, a
+//! quarantined one (automatic recovery or `marsh workers reset` owns it), one
+//! finishing a Kit change (it drains), and a Kit VM that was already running
+//! when this daemon started (a job of an earlier daemon may still run there)
+//! are kept. Passes run when the daemon starts, then hourly.
+
+use super::{StockDaemonBackend, backend_error, unix_millis};
+use marsh_daemon::{DaemonError, DaemonStore, VmGcEntry, VmGcReport, VmGcStatus};
+use marsh_sbx::{RecordedVm, VmPurpose};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    io::{Read, Write},
+    path::Path,
+    time::{Duration, Instant, SystemTime},
+};
+
+const RECORD_FILE: &str = "vm-gc.json";
+/// Key in `$MARSH_HOME/config.json`, written by `marsh config vm-idle-days`.
+const CONFIG_KEY: &str = "vm_idle_days";
+const DEFAULT_IDLE_DAYS: u64 = 3;
+const DAY_MS: u64 = 24 * 60 * 60 * 1000;
+const PASS_INTERVAL_MS: u64 = 60 * 60 * 1000;
+/// A superseded VM used more recently than this is kept.
+const SUPERSEDED_GRACE_MS: u64 = 10 * 60 * 1000;
+const MAX_RECENT: usize = 20;
+const MAX_RECORD_BYTES: u64 = 256 * 1024;
+const REMOVAL_TIMEOUT: Duration = Duration::from_mins(5);
+
+/// What garbage collection remembers between daemon runs: removals (for
+/// `marsh status`) and when this marsh last saw each of its VMs used.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub(crate) struct Record {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_pass_unix_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent: Vec<VmGcEntry>,
+    /// VM name to the last time a job or shell of this marsh used it, or the
+    /// first time a pass saw it with no other record of its use.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub used: BTreeMap<String, u64>,
+}
+
+pub(crate) fn read(control_home: &Path) -> Record {
+    let path = control_home.join(RECORD_FILE);
+    if !fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.is_file()) {
+        return Record::default();
+    }
+    let mut bytes = Vec::new();
+    let read = fs::File::open(&path)
+        .and_then(|file| file.take(MAX_RECORD_BYTES + 1).read_to_end(&mut bytes));
+    if read.is_err() || bytes.len() as u64 > MAX_RECORD_BYTES {
+        return Record::default();
+    }
+    serde_json::from_slice(&bytes).unwrap_or_default()
+}
+
+fn write(control_home: &Path, record: &Record) -> Result<(), DaemonError> {
+    let mut bytes = serde_json::to_vec_pretty(record)
+        .map_err(|error| DaemonError::InvalidState(error.to_string()))?;
+    bytes.push(b'\n');
+    let mut temporary = tempfile::NamedTempFile::new_in(control_home)?;
+    temporary.write_all(&bytes)?;
+    temporary.as_file().sync_all()?;
+    temporary
+        .persist(control_home.join(RECORD_FILE))
+        .map_err(|error| error.error)?;
+    Ok(())
+}
+
+/// `vm_idle_days` from the scope's `config.json`: 0 is off; anything
+/// unreadable is the default.
+pub(crate) fn idle_days(scope_root: Option<&Path>) -> u64 {
+    scope_root
+        .and_then(|root| fs::read(root.join("config.json")).ok())
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|config| config.get(CONFIG_KEY).and_then(serde_json::Value::as_u64))
+        .filter(|days| *days <= 365)
+        .unwrap_or(DEFAULT_IDLE_DAYS)
+}
+
+/// Unix milliseconds of an RFC 3339 UTC time (`2026-11-03T15:38:03.431Z`).
+pub(crate) fn utc_millis(text: &str) -> Option<u64> {
+    let rest = text.strip_suffix('Z')?;
+    let (seconds, fraction) = rest.split_once('.').unwrap_or((rest, ""));
+    let field = |range: std::ops::Range<usize>| seconds.get(range)?.parse::<u64>().ok();
+    if seconds.len() != 19 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let (year, month, day) = (field(0..4)?, field(5..7)?, field(8..10)?);
+    let (hour, minute, second) = (field(11..13)?, field(14..16)?, field(17..19)?);
+    if !(1970..=9999).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    // Days from civil (Howard Hinnant), for the proleptic Gregorian calendar.
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year / 400;
+    let of_era = year - era * 400;
+    let shifted = if month > 2 { month - 3 } else { month + 9 };
+    let of_year = (153 * shifted + 2) / 5 + day - 1;
+    let of_cycle = of_era * 365 + of_era / 4 - of_era / 100 + of_year;
+    let days = era * 146_097 + of_cycle - 719_468;
+    let millis = fraction
+        .get(..3)
+        .map_or_else(|| format!("{fraction:0<3}"), str::to_owned)
+        .parse::<u64>()
+        .ok()?;
+    Some(((days * 24 + hour) * 60 + minute) * 60_000 + second * 1000 + millis)
+}
+
+/// What a pass knows about one recorded VM.
+#[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)] // Independent facts about one VM.
+pub(crate) struct Candidate {
+    pub purpose: VmPurpose,
+    /// A registered command's Kit, the shell VM, or a live session's.
+    pub current: bool,
+    /// Why something still uses it, if it does.
+    pub in_use: Option<String>,
+    pub quarantined: bool,
+    pub running: bool,
+    /// This daemon has served it and knows no job runs there.
+    pub known_here: bool,
+    pub last_used_ms: Option<u64>,
+}
+
+/// How long a VM may go unused, in ms (0 is forever): `MARSH_VM_IDLE_SECONDS`
+/// at daemon launch (for tests), else `idle_days`.
+pub(crate) fn idle_limit_ms(environment: Option<&str>, idle_days: u64) -> u64 {
+    environment
+        .and_then(|seconds| seconds.trim().parse::<u64>().ok())
+        .map_or(idle_days * DAY_MS, |seconds| seconds.saturating_mul(1000))
+}
+
+fn describe_idle(ms: u64) -> String {
+    let (count, unit) = match ms {
+        ms if ms >= DAY_MS => (ms / DAY_MS, "day"),
+        ms if ms >= 60 * 60 * 1000 => (ms / (60 * 60 * 1000), "hour"),
+        ms if ms >= 60_000 => (ms / 60_000, "minute"),
+        ms => (ms / 1000, "second"),
+    };
+    format!("{count} {unit}{}", if count == 1 { "" } else { "s" })
+}
+
+/// `Ok(reason)`: remove it; `Err(reason)`: keep it. `idle_ms` 0 keeps idle VMs.
+pub(crate) fn decide(vm: &Candidate, now_ms: u64, idle_ms: u64) -> Result<String, String> {
+    if vm.quarantined {
+        return Err(
+            "quarantined: automatic recovery or `marsh workers reset KIT` removes it".into(),
+        );
+    }
+    if let Some(reason) = &vm.in_use {
+        return Err(reason.clone());
+    }
+    if vm.purpose == VmPurpose::Kit && vm.running && !vm.known_here {
+        return Err("running since before this daemon started; `marsh reset` removes it".into());
+    }
+    // A VM just prepared for a command being installed or updated is not
+    // current yet: give the switch time to happen.
+    if !vm.current
+        && vm.last_used_ms.is_some_and(|last| {
+            now_ms.saturating_sub(last) < SUPERSEDED_GRACE_MS.min(idle_ms.max(1))
+        })
+    {
+        return Err("used within the last few minutes".into());
+    }
+    if !vm.current {
+        return Ok(match vm.purpose {
+            VmPurpose::Kit => "superseded: no command runs this Kit any more".into(),
+            VmPurpose::Shell => "superseded: an older shell VM".into(),
+        });
+    }
+    let Some(last) = vm.last_used_ms else {
+        return Err("no record of its last use yet".into());
+    };
+    let idle = now_ms.saturating_sub(last);
+    if idle_ms > 0 && idle >= idle_ms {
+        return Ok(format!(
+            "unused for {}; the next use creates it again",
+            describe_idle(idle)
+        ));
+    }
+    Err("in use within its idle limit".into())
+}
+
+impl StockDaemonBackend {
+    fn gc_idle_days(&self) -> u64 {
+        idle_days(
+            self.auto_update
+                .as_ref()
+                .map(|auto| auto.scope_root.as_path()),
+        )
+    }
+
+    /// A job or shell of this marsh used `vm` now. Written at most every ten
+    /// minutes per VM: the record is advisory.
+    pub(super) fn note_vm_used(&self, vm: &str) {
+        let now = unix_millis(SystemTime::now());
+        let mut used = self
+            .vm_used
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if used
+            .get(vm)
+            .is_some_and(|last| now.saturating_sub(*last) < 10 * 60 * 1000)
+        {
+            return;
+        }
+        used.insert(vm.to_owned(), now);
+        drop(used);
+        let _guard = self
+            .vm_gc_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut record = read(&self.config.control_home);
+        record.used.insert(vm.to_owned(), now);
+        let _ = write(&self.config.control_home, &record);
+    }
+
+    /// The background pass: at the daemon's start, then hourly.
+    pub(super) fn gc_pass(&self, store: &DaemonStore, now_ms: u64) {
+        let due = &self.vm_gc_due_ms;
+        if now_ms < due.load(std::sync::atomic::Ordering::Acquire)
+            || store.lifecycle_active()
+            || self.sbx.removed_executable().is_some()
+        {
+            return;
+        }
+        due.store(
+            now_ms.saturating_add(PASS_INTERVAL_MS),
+            std::sync::atomic::Ordering::Release,
+        );
+        if let Err(error) = self.collect_vms(store, now_ms, false) {
+            eprintln!("marshd: VM garbage collection: {error}");
+        }
+    }
+
+    /// `marsh gc [--dry-run]`.
+    pub(super) fn gc_now(
+        &self,
+        dry_run: bool,
+        store: &DaemonStore,
+    ) -> Result<VmGcReport, DaemonError> {
+        self.collect_vms(store, unix_millis(SystemTime::now()), dry_run)
+    }
+
+    pub(super) fn gc_status(&self) -> VmGcStatus {
+        let record = read(&self.config.control_home);
+        VmGcStatus {
+            idle_days: self.gc_idle_days(),
+            last_pass_unix_ms: record.last_pass_unix_ms,
+            recent: record.recent,
+        }
+    }
+
+    /// The VM names in use by registered commands and sessions now, by Kit
+    /// identity or shell selector.
+    fn current_vms(&self, live: &BTreeSet<String>) -> (BTreeSet<String>, BTreeSet<String>) {
+        let mut kits = BTreeSet::new();
+        for name in self.command_names() {
+            let Some(identity) = self
+                .registered_kit(&name)
+                .ok()
+                .and_then(|kit| kit.workload.capture_generation().ok())
+                .map(|kit| kit.identity().to_owned())
+            else {
+                continue;
+            };
+            if let Some(vm) = self.sbx.recorded_vm_name(VmPurpose::Kit, &identity) {
+                kits.insert(vm);
+            }
+        }
+        let mut shells = BTreeSet::from([self.config.shell.name.clone()]);
+        shells.extend(self.sbx.recorded_vm_name(VmPurpose::Shell, "dev"));
+        for session in live {
+            shells.extend(
+                self.sbx
+                    .recorded_vm_name(VmPurpose::Shell, &format!("ephemeral:{session}")),
+            );
+        }
+        (kits, shells)
+    }
+
+    #[allow(clippy::too_many_lines)] // One pass: observe, decide, act, record.
+    fn collect_vms(
+        &self,
+        store: &DaemonStore,
+        now_ms: u64,
+        dry_run: bool,
+    ) -> Result<VmGcReport, DaemonError> {
+        let _pass = self
+            .vm_gc_pass
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let idle_days = self.gc_idle_days();
+        let idle_ms = idle_limit_ms(self.vm_idle_override.as_deref(), idle_days);
+        let (recorded, foreign) = self.sbx.recorded_vms().map_err(backend_error)?;
+        let live = store.attached_session_ids();
+        let (current_kits, current_shells) = self.current_vms(&live);
+        let draining = self
+            .draining_kits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .keys()
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let ephemeral = self
+            .remembered_ephemeral_kits()
+            .into_iter()
+            .map(|spec| spec.name)
+            .collect::<BTreeSet<_>>();
+        let known_here = self
+            .registered_workers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let mut record = {
+            let _guard = self
+                .vm_gc_lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            read(&self.config.control_home)
+        };
+        let mut entries = Vec::new();
+        let mut first_seen = Vec::new();
+        for vm in &recorded {
+            let reported = vm.last_used_at.as_deref().and_then(utc_millis);
+            let ours = record.used.get(&vm.name).copied().max(
+                self.vm_used
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get(&vm.name)
+                    .copied(),
+            );
+            let last_used_ms = reported.max(ours);
+            if last_used_ms.is_none() {
+                first_seen.push(vm.name.clone());
+            }
+            let in_use = self.vm_in_use(vm, store, &live, &draining, &ephemeral);
+            let candidate = Candidate {
+                purpose: vm.purpose,
+                current: match vm.purpose {
+                    VmPurpose::Kit => current_kits.contains(&vm.name),
+                    VmPurpose::Shell => current_shells.contains(&vm.name),
+                },
+                in_use,
+                quarantined: vm.quarantined || self.vm_quarantined(store, &vm.name),
+                running: vm.running,
+                known_here: known_here.contains(&vm.name),
+                last_used_ms,
+            };
+            let purpose = match vm.purpose {
+                VmPurpose::Kit => "kit",
+                VmPurpose::Shell => "shell",
+            };
+            let (action, reason) = match decide(&candidate, now_ms, idle_ms) {
+                Err(reason) => ("kept", reason),
+                Ok(reason) if dry_run => ("would_remove", reason),
+                Ok(reason) => match self.remove_recorded(vm, &candidate, store, &live) {
+                    Ok(()) => ("removed", reason),
+                    Err(error) => ("failed", format!("{reason}; not removed: {error}")),
+                },
+            };
+            entries.push(VmGcEntry {
+                vm: vm.name.clone(),
+                purpose: purpose.into(),
+                action: action.into(),
+                reason,
+                unix_ms: now_ms,
+            });
+        }
+        for name in foreign {
+            entries.push(VmGcEntry {
+                vm: name,
+                purpose: String::new(),
+                action: "not_ours".into(),
+                reason: "not recorded by this marsh home; never touched".into(),
+                unix_ms: now_ms,
+            });
+        }
+        if !dry_run {
+            let _guard = self
+                .vm_gc_lock
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut latest = read(&self.config.control_home);
+            latest.last_pass_unix_ms = Some(now_ms);
+            for name in first_seen {
+                latest.used.entry(name).or_insert(now_ms);
+            }
+            let names = recorded
+                .iter()
+                .map(|vm| vm.name.as_str())
+                .collect::<BTreeSet<_>>();
+            latest.used.retain(|name, _| names.contains(name.as_str()));
+            for entry in entries.iter().filter(|entry| entry.action == "removed") {
+                latest.used.remove(&entry.vm);
+                latest.recent.push(entry.clone());
+            }
+            let excess = latest.recent.len().saturating_sub(MAX_RECENT);
+            latest.recent.drain(..excess);
+            record = latest;
+            write(&self.config.control_home, &record)?;
+        }
+        Ok(VmGcReport {
+            dry_run,
+            idle_days,
+            entries,
+        })
+    }
+
+    fn vm_in_use(
+        &self,
+        vm: &RecordedVm,
+        store: &DaemonStore,
+        live: &BTreeSet<String>,
+        draining: &BTreeSet<String>,
+        ephemeral: &BTreeSet<String>,
+    ) -> Option<String> {
+        if draining.contains(&vm.name) {
+            return Some("finishing a Kit change: removed when its jobs end".into());
+        }
+        if ephemeral.contains(&vm.name) {
+            return Some("an ephemeral-home session's Kit VM".into());
+        }
+        match vm.purpose {
+            VmPurpose::Kit => (store.worker_busy(&vm.name)
+                || self.sbx.kit_vm_in_use(&vm.name, live))
+            .then(|| "a job or an attached shell uses it".into()),
+            VmPurpose::Shell => self
+                .sbx
+                .shell_vm_in_use(&vm.name)
+                .then(|| "an attached shell uses it".into()),
+        }
+    }
+
+    /// Removes one VM `decide` chose, through the same fences as a reset.
+    fn remove_recorded(
+        &self,
+        vm: &RecordedVm,
+        candidate: &Candidate,
+        store: &DaemonStore,
+        live: &BTreeSet<String>,
+    ) -> Result<(), DaemonError> {
+        // A lifecycle transition (`marsh stop`) is not started under this.
+        let _admission =
+            store.begin_background_request(format!("the garbage collection of VM {}", vm.name))?;
+        let deadline = Instant::now() + REMOVAL_TIMEOUT;
+        match vm.purpose {
+            VmPurpose::Shell => {
+                let mut spec = self.config.shell.clone();
+                spec.name.clone_from(&vm.name);
+                self.sbx
+                    .reset_shell_vm_before(&spec, deadline)
+                    .map_err(backend_error)?;
+            }
+            VmPurpose::Kit => {
+                // A current Kit's preparation holds its Kit lock: no job can
+                // start on the VM while it is removed.
+                let spec = candidate
+                    .current
+                    .then(|| self.spec_for_recorded_kit(&vm.name))
+                    .flatten();
+                let lock = spec.as_ref().map(|spec| self.kit_lock(spec)).transpose()?;
+                let _guard = lock.as_ref().map(|lock| {
+                    lock.lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                });
+                // A worker this daemon registered is claimed as by a reset, so
+                // no job reserves it meanwhile.
+                let registered = store
+                    .status(None)
+                    .workers
+                    .iter()
+                    .any(|worker| worker.worker_id == vm.name);
+                let claim = registered
+                    .then(|| Self::claim_retirement(store, vec![vm.name.clone()]))
+                    .transpose()?;
+                if let (Some(spec), Some(claim)) = (spec, &claim) {
+                    self.retire_claimed(store, &BTreeMap::from([(vm.name.clone(), spec)]), claim)?;
+                } else {
+                    {
+                        let removed = self.sbx.remove_unused_kit_vm(
+                            &vm.name,
+                            &vm.key,
+                            live,
+                            candidate.known_here,
+                            deadline,
+                        );
+                        if let Some(claim) = &claim {
+                            if removed.is_ok() {
+                                store.finish_worker_reset(&vm.name, true)?;
+                            } else {
+                                store.cancel_workers_reset(&claim.worker_ids);
+                            }
+                        }
+                        removed.map_err(backend_error)?;
+                        self.registered_workers
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .remove(&vm.name);
+                    }
+                }
+                self.ready_kits
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .retain(|_, ready| ready.name != vm.name);
+            }
+        }
+        Ok(())
+    }
+
+    /// The spec of the registered command whose Kit VM is `vm`.
+    fn spec_for_recorded_kit(&self, vm: &str) -> Option<marsh_sbx::KitVmSpec> {
+        self.command_names()
+            .into_iter()
+            .filter_map(|name| self.kit_spec(&name).ok())
+            .find(|spec| spec.name == vm)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NOW: u64 = 100 * DAY_MS;
+
+    fn vm(current: bool, last_used_ms: Option<u64>) -> Candidate {
+        Candidate {
+            purpose: VmPurpose::Kit,
+            current,
+            in_use: None,
+            quarantined: false,
+            running: false,
+            known_here: false,
+            last_used_ms,
+        }
+    }
+
+    #[test]
+    fn superseded_and_long_unused_vms_go_and_nothing_in_use_does() {
+        assert!(
+            decide(&vm(false, Some(NOW - DAY_MS)), NOW, 3 * DAY_MS)
+                .unwrap()
+                .starts_with("superseded")
+        );
+        assert!(
+            decide(&vm(true, Some(NOW - 4 * DAY_MS)), NOW, 3 * DAY_MS)
+                .unwrap()
+                .starts_with("unused for 4 days")
+        );
+        assert!(decide(&vm(true, Some(NOW - 2 * DAY_MS)), NOW, 3 * DAY_MS).is_err());
+        assert!(
+            decide(&vm(true, Some(0)), NOW, 0).is_err(),
+            "idle retirement off"
+        );
+        assert_eq!(idle_limit_ms(None, 3), 3 * DAY_MS);
+        assert_eq!(idle_limit_ms(Some("30"), 3), 30_000);
+        assert!(
+            decide(&vm(true, Some(NOW - 60_000)), NOW, 30_000)
+                .unwrap()
+                .starts_with("unused for 1 minute;")
+        );
+        assert!(decide(&vm(true, None), NOW, 3 * DAY_MS).is_err());
+        let mut used = vm(false, Some(0));
+        used.in_use = Some("a job uses it".into());
+        assert_eq!(decide(&used, NOW, 3 * DAY_MS), Err("a job uses it".into()));
+        let mut quarantined = vm(false, Some(0));
+        quarantined.quarantined = true;
+        assert!(decide(&quarantined, NOW, 3 * DAY_MS).is_err());
+        // A Kit VM already running when this daemon started may hold a job
+        // of an earlier daemon; one this daemon served and knows idle goes.
+        let mut running = vm(false, Some(0));
+        running.running = true;
+        assert!(decide(&running, NOW, 3 * DAY_MS).is_err());
+        running.known_here = true;
+        assert!(decide(&running, NOW, 3 * DAY_MS).is_ok());
+        let mut shell = vm(false, Some(0));
+        shell.purpose = VmPurpose::Shell;
+        shell.running = true;
+        assert!(
+            decide(&shell, NOW, 3 * DAY_MS)
+                .unwrap()
+                .contains("older shell VM")
+        );
+    }
+
+    #[test]
+    fn stock_times_are_read_as_utc() {
+        assert_eq!(utc_millis("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(
+            utc_millis("2026-11-03T15:38:03.431Z"),
+            Some(1_793_720_283_431)
+        );
+        assert_eq!(utc_millis("2000-03-01T00:00:00.5Z"), Some(951_868_800_500));
+        for bad in [
+            "2026-11-03T15:38:03+01:00",
+            "yesterday",
+            "2026-13-03T00:00:00Z",
+        ] {
+            assert_eq!(utc_millis(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_idle_limit_comes_from_the_scope_config() {
+        let root = tempfile::tempdir().unwrap();
+        assert_eq!(idle_days(None), 3);
+        assert_eq!(idle_days(Some(root.path())), 3);
+        fs::write(root.path().join("config.json"), r#"{"vm_idle_days":7}"#).unwrap();
+        assert_eq!(idle_days(Some(root.path())), 7);
+        fs::write(root.path().join("config.json"), r#"{"vm_idle_days":0}"#).unwrap();
+        assert_eq!(idle_days(Some(root.path())), 0);
+    }
+}

@@ -128,16 +128,18 @@ marsh stop                   # when nothing is running; the next launch uses the
 
 The commands (`claude`, `codex`, `pi`, `shell`, `pix`, `hermes`, and Kits you
 installed from a tag) move to newer images by themselves: marsh checks each
-time its daemon starts and once an hour, and switches a command when it has no
-running jobs. The next time you use an updated command, marsh prints one line
+time its daemon starts and once an hour, and switches a command at once (its
+running jobs finish on the previous image). The next time you use an updated command, marsh prints one line
 such as `marsh: claude updated (2.1.305 → 2.1.307)`. `marsh status` lists
 recent updates. To update right now, run `marsh stop` when nothing is running,
 then use marsh again. To turn updates off, run `marsh config auto-update off`.
 See [Updates](kits.md#updates).
 
 A command that was updated keeps its newer image when marsh itself is
-upgraded. `marsh kit uninstall NAME` returns a packaged command to the version
-your marsh shipped.
+upgraded. One that was left on an image older than the one the new marsh
+ships moves to the new marsh's image when its daemon starts
+([Updates](kits.md#updates)). `marsh kit uninstall NAME` returns a packaged
+command to the version your marsh shipped.
 
 For a script install, run the installer again instead of `brew upgrade`. For a
 tarball install, repeat the extraction and copy steps with the new release.

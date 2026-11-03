@@ -1,7 +1,7 @@
 # Cross-component model
 
-Seven TLA+ modules specify current cross-component state (six local modules and
-the cloud ownership extension). An eighth, `Placement`,
+Eight TLA+ modules specify current cross-component state (seven local modules and
+the cloud ownership extension). A ninth, `Placement`,
 specifies the cloud placement extension; only its single-crossing,
 session-origin part is implemented (see
 [coverage and gaps](#proposed-placement-model)). TLC checks their bounded state
@@ -48,6 +48,15 @@ The code-location table below records the implementation mapping and known gaps.
   transport generation. Start, exit, and verified cgroup cleanup are in-band frames;
   transport loss makes started sessions uncertain and quarantines the VM; a dead idle
   supervisor is replaced only after a failed liveness ping with no live attempt.
+- `KitSwitch.tla`: one Kit command name and the VMs of the Kit images it has named. A
+  Kit change (an automatic update, `marsh kit install`/`uninstall`, the move to the Kits a
+  newer marsh ships) moves the name at once, whatever runs: new jobs start on the new Kit's
+  VM, and the VM it moved away from keeps its running jobs (draining) and is retired only
+  when none runs there; the name may move back to a draining Kit. Invariants
+  `ChangeSparesRunning`, `StartsOnCurrent`, `RunningHasVM`; liveness `DrainEnds`. Controls:
+  `retireBusy` (a draining VM retired under a running job: ChangeSparesRunning) and
+  `admitDraining` (a new job started on a draining VM: StartsOnCurrent). Attached-shell
+  pins that also hold a draining VM are a guard of the same retire, not modeled.
 - `Grants.tla`: an ACP session published as an MCP tool and an MCP pipeline loaded into a
   named sandbox. Both use the same model: publish binds one target incarnation, revoke is
   terminal, and requests and one-time permissions are checked when delivered. The same
@@ -85,7 +94,7 @@ Invariants: `NoForeignEffect`, `OwnedAreOurs`, `NoLeak`, `ChildNoLeak`, `ChildCo
 (a grant only affects VMs it made), `RevokedChildInert` (no grant effect after revoke or
 without its session), `ChildCapacity`, `MapsDisjoint` (Ownership); `CapacityBound`, `NoReplay`,
 `NoStartOnQuarantined`, `LossIsUncertain`, `MountRefcount`, `NoStaleSourceUse`,
-`CancelScoped`, `AutoRetireVerified` (Worker); `RevokedGrantInert`, `GrantTargetBound`, `OneTimePermission`,
+`CancelScoped`, `AutoRetireVerified` (Worker); `ChangeSparesRunning`, `StartsOnCurrent`, `RunningHasVM` (KitSwitch); `RevokedGrantInert`, `GrantTargetBound`, `OneTimePermission`,
 `DefaultSparesRunning`, `DefaultRevokedInert`, `DefaultReachesNewVms` (Grants); `SnapshotImmutable`, `CheckpointImmutable`, `AdminReadOnly`,
 `ExposedClean`, `OneBase`, `ChildFromParent`, `ForkIsolation`, `NoWriteToUserTree`,
 `CaptureStable`, `LineageWF`, `BudgetBound`, `LiveUnderLive`, `CancelPropagates`,
@@ -94,7 +103,7 @@ without its session), `ChildCapacity`, `MapsDisjoint` (Ownership); `CapacityBoun
 `CancelPropagates`, `RevokedAtRestart`, `RestartUncertain`, `NoReplay`, `EntryOnce`,
 `NoEntryRecursion`, `SameKitBound`, `SpawnSetAttenuates`, `KitVMBound`, `NoHomeKitHome` (Process). Liveness: `ChildCleanedAfterRevoke` (strong
 fairness on host cleanup, which is retried after every restart and inventory),
-`AttemptsTerminate` and `QuarantineHeals` (Worker; weak fairness, no operator action), and `EventuallySettled` (Workspace; weak fairness on
+`AttemptsTerminate` and `QuarantineHeals` (Worker; weak fairness, no operator action), `DrainEnds` (KitSwitch; weak fairness on job ends and the drain pass), and `EventuallySettled` (Workspace; weak fairness on
 daemon steps and process progress, checked in the smaller `Workspace_live_pass.cfg`).
 
 Each module has a `Bug` constant. `Module.cfg` uses `Bug = "none"` and checks every
@@ -209,11 +218,12 @@ positive config fails or a negative control passes or fails for the wrong reason
 | Sbxenv: Launch (ExtraAttenuation, SplitOmitsExtras) | `marsh-backend` `execute` selects a root's environment, an ordinary child's inherited receipt view, or no extras for a split; `sbxenv.rs` `additional_grants` applies existing descriptor/overlap admission; `inherited_environment` maps only parent-recorded additions. Rust callers: `sbxenv::tests`, `marsh-sbx/tests/mcp_environment.rs`; real caller: `tests/acceptance/sbxenvs_uat.py` |
 | Inventory, Use, StartVM, Remove | marsh-sbx `lib.rs` `StockSbx::stock_view` (cached `sbx ls --json`, refreshed on demand; `stock_inventory.rs` decodes it) and `classify_vm` -> `vm_ownership.rs` `classify` (owned only with its recorded UUID present, else foreign or absent); `ensure_kit_vm_authorized` / `ensure_shell_vm_inner` (StartVM); `remove_owned_vm` (fresh classification, `sbx rm`, then proves the recorded UUID is gone) |
 | CreateBegin / CreateDo / Record / Restart | marsh-sbx `vm_ownership.rs` (`assign`, `restore_intent` for a replacement under a just-removed name, `store_view` adopt/drop) |
-| Remove (incl. operator Retire) | marsh-sbx `retire_kit_vm_before` via `marsh workers reset KIT` (a quarantined VM's references, and pins of shells no longer attached, end with the VM; a host caller's session stops being attached when it detaches, or when marsh-daemon `client_liveness.rs` finds its process gone with no job or shell attachment in flight) and via `marsh stop`/`reset` `teardown_scope` (lifecycle admission proves no attached shell or running job, so every retained reference ends with the VM); `shell_recovery_specs` includes persisted `owned_shell_names` across personal-environment generations, used only for UUID-checked removal; `retire_stale_shell` when an owned shell VM's marker names another shell image (an upgrade), refused while a session or live mount holds it, then CreateBegin again under the same name |
+| Remove (incl. operator Retire) | marsh-backend `vm_gc.rs` (`marsh gc`, daemon start, hourly): only names from this daemon's map (`StockSbx::recorded_vms`, fresh inventory, recorded UUID present); a current Kit's VM is claimed as by a reset under its Kit lock, any other through marsh-sbx `remove_unused_kit_vm` (refuses quarantined, in-use, or — unless this daemon served it — running VMs) or `reset_shell_vm_before`; then marsh-sbx `retire_kit_vm_before` via `marsh workers reset KIT` (a quarantined VM's references, and pins of shells no longer attached, end with the VM; a host caller's session stops being attached when it detaches, or when marsh-daemon `client_liveness.rs` finds its process gone with no job or shell attachment in flight) and via `marsh stop`/`reset` `teardown_scope` (lifecycle admission proves no attached shell or running job, so every retained reference ends with the VM); `shell_recovery_specs` includes persisted `owned_shell_names` across personal-environment generations, used only for UUID-checked removal; `retire_stale_shell` when an owned shell VM's marker names another shell image (an upgrade), refused while a session or live mount holds it, then CreateBegin again under the same name |
 | ChildCreateBegin/Do/Record, ChildOp, ChildRemove | marsh-daemon `dev_broker.rs` (`serve`, `serve_admitted` incl. `Action::Run`: a fresh `run` is a ChildCreate, a reattach a ChildOp; `check_owned`) + `dev_broker/policy.rs`; grant section in marsh-sbx `vm_ownership.rs` (`update_dev_grants`, adoption in `store_view`) |
 | RevokeChild, Restart (revoke all), HostAdoptChild, HostCleanChild | marsh-daemon `dev_broker.rs` (`revoke_session` at session end in marsh-backend `open_shell`, `revoke_all` at `marsh stop`/`marsh reset` and in `marshd` startup, `remove_children`) |
 | Admit / Run / Exit / Cleanup / Cancel | marsh-sbx `StockSbx::launch_worker` (refuses a quarantined VM or a stale worker generation; one `AttemptRoute` per attempt on the VM's retained worker transport); marsh-worker `control.rs` (per-attempt start, exit and cleanup frames) and `transport.rs` (`cancellation`); a `docker create` that Docker refused is Run+Exit+Cleanup only after marsh-runtime `remove_labelled` proves no container with its per-create label remains (`RuntimeError::CreateRefused`); any other create error is uncertain and quarantines. Not implemented as modeled: a per-VM `CAP`; concurrency is bounded by the daemon's session pool (`marsh-daemon/src/process.rs` `admit`) |
 | TransportLoss / ReplaceTransport / Retire | marsh-sbx `ensure_worker_lease` (a dead transport with live attempts quarantines the VM in `quarantined_workers`, with its reason; a live one that is slow to answer a ping fails only the new start; an idle one is replaced under a new worker generation; a reinstalled worker artifact is not swapped in under running attempts), `WorkerLoss` (the loss diagnostic), `stop_quarantined_because`, `retire_kit_vm_before` (`marsh workers reset KIT`). marsh-backend `execute`: a start or wall timeout with the transport up sends Cancel and waits `WORKER_CANCEL_SETTLE` for the worker's verified report (Cleanup), not TransportLoss |
+| KitSwitch: Change / Start / RetireDrained / Reuse | marsh-backend `lib.rs`: `claim_old_vm` (Change: retire the replaced Kit's VM now when idle, else drain; never refused for running work) from `apply_upgrade` (updates), `unregister` (`uninstall_kit`, `move_to_shipped`), and `bring_shipped_source_kits` (daemon start, nothing running); Start is `kit_spec` of the registered name; `retire_drained` (each background pass: drops a VM the name names again — Reuse — and otherwise retires only when `DaemonStore::worker_busy` is false and marsh-sbx `kit_vm_in_use` sees no running job or attached-shell pin); `pending_kit_changes` (`marsh status` `kit_updates.pending`) |
 | ContainerEnds / AutoRetire | the quarantine stop (`stop_quarantined_name`, `sbx stop`) or the container's own end; marsh-backend `worker_recovery.rs` `recover_quarantined_vm` (background pass each minute, and before a job prepares the VM): no unfinished job record on the VM (`DaemonStore::worker_has_unfinished_jobs`), then marsh-sbx `verify_no_running_containers` (recorded VM absent, stopped, or running with an empty `docker ps`; otherwise it stays quarantined with the reason in `WorkerQuarantine::recovery`), then the same retirement as Retire; held slots are released as after a reset |
 | Shell: Admit / Run / Exit / Cleanup | marsh-sbx `shell_supervisor.rs` (`Supervisor::spawn`, `Control::cleanup_session`); guest `marsh/src/shell_supervisor.rs` |
 | Shell: TransportLoss / ReplaceTransport | marsh-sbx `shell_supervisor.rs` (`lose`, `ping`); `ensure_shell_lease` (replace idle, quarantine with live attempts) |

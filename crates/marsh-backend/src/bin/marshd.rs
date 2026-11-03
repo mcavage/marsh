@@ -193,7 +193,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_packaged(packaged, channel);
     let backend = backend
         .with_sbxenvs()?
-        .with_auto_update(env::var_os("MARSH_AUTO_UPDATE"), home.clone());
+        .with_auto_update(env::var_os("MARSH_AUTO_UPDATE"), home.clone())
+        .with_vm_idle_override(env::var("MARSH_VM_IDLE_SECONDS").ok());
+    // A dev or local build runs the Kits it installed, before any job starts.
+    for name in backend.bring_shipped_source_kits() {
+        eprintln!("marshd: {name} runs the Kit this marsh installed again");
+    }
     let protected_guest_roots = backend.protected_guest_roots().to_vec();
     // All registry/configuration validation precedes even the stock version probe.
     stock.validate_supported_version().map_err(|_| {

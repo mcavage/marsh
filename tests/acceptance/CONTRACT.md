@@ -438,4 +438,12 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `T10-conflicts-keep-edits`: T10: task_apply never overwrites the caller's concurrent edits: unstaged it refuses, staged it names conflicts.
 - `T11-fan-out-limit`: T11: 8 live tasks: a 9th is refused (shared and copy), the caller keeps working, every result returns.
 
+### Kit changes (`kit_changes_uat.py`, 5)
+
+- `K01-dev-build-runs-source-kits`: A dev build runs its packaged source Kit, not the published image an update pinned.
+- `K02-uninstall-while-running`: `marsh kit uninstall` with a running job: exit 0, the job finishes, the VM goes after.
+- `K03-new-kit-while-old-runs`: A different Kit under the name while the old one runs a job: new jobs use it at once.
+- `K04-gc-superseded-stopped-at-start`: A stopped, superseded Kit VM this home records is removed when the daemon starts.
+- `K05-gc-idle-and-in-use`: `marsh gc` removes an idle VM, keeps one a job uses, and never touches others'.
+
 <!-- END GENERATED SCENARIO INDEX -->

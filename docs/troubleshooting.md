@@ -202,6 +202,7 @@ back for two minutes in case it still lands, then removed or retried.
 
 | Command | Effect |
 |---|---|
+| `marsh gc [--dry-run]` | Remove this home's superseded and long-unused VMs now ([below](#garbage-collection)) |
 | `marsh workers reset KIT` | Remove one idle or quarantined Kit VM |
 | `marsh workers reset all` | Remove all idle or quarantined Kit VMs |
 | `marsh workers reset cloud` | Delete every [Docker Cloud](cloud.md) sandbox this daemon owns |
@@ -220,6 +221,32 @@ are not.
 `reset` and `stop` do not delete Docker Cloud sandboxes. marsh deletes each
 one when its `cloud` call ends; if a call ended `cleanup uncertain`, run
 `marsh workers reset cloud`. Cloud sandboxes also expire after 4 hours.
+
+### Garbage collection
+
+marsh removes its own VMs that nothing uses when they are no longer needed:
+
+- **Superseded:** a Kit VM of an image no command runs any more (after an
+  update, `marsh kit uninstall`, `marsh workers reset`, or an edit of
+  `commands.json`), or a shell VM of an older shell image or environment. A
+  VM that still has running jobs is removed once they end.
+- **Unused:** a Kit or shell VM unused for 3 days. Change the limit with
+  `marsh config vm-idle-days DAYS` (1 to 365), or keep idle VMs with
+  `marsh config vm-idle-days off`. The next use creates the VM again, which
+  takes as long as a first start.
+
+The daemon does this when it starts and then every hour; `marsh gc` does it
+now and lists every VM of this home with what it did and why
+(`--dry-run` removes nothing, `--json` prints the report). It keeps a VM that
+a job or an attached shell uses, a quarantined one (see
+[Cleanup uncertain and quarantine](#cleanup-uncertain-and-quarantine)), and a
+running Kit VM it has not served since it started (a job of an earlier daemon
+may still be there; `marsh reset` removes it). `marsh status --json` lists
+recent removals under `vm_gc`.
+
+Only VMs in this home's list are removed, by their recorded identity.
+`marsh-` VMs of other homes, or that no home lists, are shown as `not ours`
+and left alone; remove one you are sure is unused with `sbx rm NAME`.
 
 ### Which VMs marsh touches
 
@@ -279,6 +306,19 @@ from your Mac, then start marsh again: the new shell VM adds the CA. Kit jobs
 were not affected.
 
 ## Stale daemon after an upgrade
+
+- **`marsh: waiting for the daemon to finish another request…`** `marsh stop`
+  and `marsh reset` wait, for up to 30 s, while the daemon serves another
+  request (an app polling `marsh status`, a Kit update). If it is still busy
+  then, the refusal names what it was serving
+  (`a request was still being served: a status request`). Live work (an
+  attached session, a running job) is refused at once instead, as below.
+- **A Kit still runs the old version.** `marsh status` lists a Kit change
+  whose old VM still has running jobs under `pending`; new jobs already use
+  the new Kit, and the old VM goes once those jobs end
+  ([Changes while jobs run](kits.md#changes-while-jobs-run)). On a dev
+  install, packaged commands run the installed source Kits (their
+  `marsh status --json` `commands[].reference` starts with `local-v3:`).
 
 - **`marsh reset` and `marsh stop` both refuse.** A reset or stop first releases
   the sessions of clients that are gone (and asks their jobs to end again,

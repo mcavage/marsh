@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -135,6 +136,12 @@ metadata.write_text(json.dumps({'containerimage.digest': 'sha256:' + 'b' * 64}))
         self.assertEqual(len(records), 4)
         self.assertTrue(all('type=cacheonly' in row['args'] for row in records[:2]))
         self.assertTrue(all(any('push=true' in arg for arg in row['args']) for row in records[2:]))
+        # Each push names what it was built from (promote-stable-kits.py), the
+        # same for the same inputs: a hash, not the build's digest.
+        annotations = [re.search(r",annotation\.org\.marsh\.kit\.inputs=(sha256:[0-9a-f]{64})(?:,|$)",
+                                 next(arg for arg in row['args'] if 'push=true' in arg)) for row in records[2:]]
+        self.assertTrue(all(annotations), records[2:])
+        self.assertEqual(len({found.group(1) for found in annotations}), 2, "one per Kit")
         self.assertTrue(all(not any(a.startswith('--call') for a in row['args']) for row in records))
         self.assertEqual(records[0]['context'], records[2]['context'])
         self.assertEqual(records[1]['files'], records[3]['files'])

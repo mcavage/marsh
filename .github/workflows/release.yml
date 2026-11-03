@@ -38,9 +38,13 @@ name: Release
 #     crates/marsh-contracts/src/kit_source.rs), so a stable user is never
 #     offered an image that needs a newer marsh (marsh checks the label again
 #     before it switches); and
-#   * its Kit descriptor, which names the agent, adapter and package versions
-#     it provides, differs from the one :latest has, so a rebuild with nothing
-#     new does not hand every user a new digest.
+#   * it was built from different Kit inputs than :latest (the
+#     org.marsh.kit.inputs annotation publish-kits.py adds: a hash of the
+#     staged Kit directory and build arguments), so a change to a Kit's scripts
+#     moves it even when its descriptor (agent, adapter, package versions) is
+#     unchanged, while a rebuild with nothing new does not hand every user a
+#     new digest. An image without the annotation falls back to comparing
+#     descriptors; a :latest without it counts as different.
 # scripts/promote-stable-kits.py makes that decision. A stable tag still moves
 # :latest to the release's own images. :nightly behaves as before.
 #

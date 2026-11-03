@@ -103,7 +103,8 @@ are doing, and an offline check is reported only in `marsh status`.
   limit counts a command's old and new image once. A failure keeps the old
   image. An image that needs a newer marsh (its `org.marsh.kit.contract`
   label) is refused. A VM that was still draining when the daemon stopped is
-  removed by `marsh reset` or `marsh stop`.
+  removed by [garbage collection](troubleshooting.md#garbage-collection) once
+  it is stopped, or by `marsh reset` or `marsh stop`.
 - After a switch, the next time you run that command at a terminal, or open a
   marsh shell, marsh prints one line on stderr, once:
 
@@ -125,8 +126,46 @@ A command you installed by digest never changes, and neither does a packaged
 command you pointed at a different image or a Kit folder in `commands.json`.
 A packaged command still updates from any image of its own repository.
 ACP agents for a packaged command, or for a command installed from a tag,
-follow its updates. Upgrading marsh itself also brings the versions it ships;
-see [Upgrade](install.md#upgrade).
+follow its updates.
+
+Upgrading marsh itself also brings the versions it ships. When the daemon of
+a new marsh starts, each packaged command that an update had moved to an image
+of its own repository (a `commands.json` entry marsh wrote, not a tag you
+installed) is checked against the image this release pins:
+
+- if that image is older than the pin (by the `created` time of its image
+  configuration in the registry), the command moves to the pin, like an
+  update: the pinned image's VM is prepared first, then new jobs use it, and
+  `marsh status` lists the switch. A newer image stays, and later updates
+  apply as before. If the registry cannot be reached, the command stays until
+  it can (marsh retries every ten minutes).
+- a dev or local build (`make dev`, `make dist-local`) always runs the source
+  Kits it installed: before the first job, each packaged command that an
+  update had pinned to a published `…/marsh-NAME` image runs its `kits/marsh-NAME`
+  source Kit again, and updates never move it to a published image.
+
+This happens even with automatic updates off. See [Upgrade](install.md#upgrade).
+
+### Changes while jobs run
+
+A Kit change never waits for running work and never stops it. An update,
+`marsh kit install`, `marsh kit uninstall`, and the move to the Kits a new marsh
+ships switch the name at once: new jobs use the new Kit, while jobs already
+running (and shells that ran them) keep the previous Kit's VM until they end.
+The command prints, for example:
+
+```text
+claude is back to the version this marsh shipped
+claude updates when its running jobs end; new jobs already use the new Kit
+```
+
+`marsh status` lists each change still finishing under `pending`, with its
+VM and running jobs (`kit_updates.pending` in `marsh status --json`: `command`,
+`change`, `from`, `to`, `vm`, `running_jobs`, `message`). marsh removes the
+previous VM within about a minute of its last job ending. Both VMs exist
+meanwhile. A VM still draining when the daemon stops is removed by
+[garbage collection](troubleshooting.md#garbage-collection) once it is stopped, or by
+`marsh reset` or `marsh stop`.
 
 Inside marsh, `claude --version`, `codex --version`, and `pi --version` show the
 installed versions. Resetting a VM alone does not update its pinned image.
@@ -209,7 +248,8 @@ away.
 
 `marsh kit uninstall NAME` removes a command you installed, including `pix`
 or `hermes`. For a packaged command that was updated, it returns to the
-version your marsh shipped.
+version your marsh shipped. Running jobs of the command do not hold it back;
+they finish on the old Kit ([Changes while jobs run](#changes-while-jobs-run)).
 
 The tags installed commands follow are recorded in `kit-sources.json` next to
 `commands.json`. Updates keep their record in `kit-updates.json` in the same

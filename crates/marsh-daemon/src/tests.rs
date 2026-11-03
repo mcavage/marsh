@@ -2976,9 +2976,12 @@ fn resident_replacement_retries_the_bounded_post_probe_admission_race() {
     // Model the narrow tail where Ping has written its reply but its ordinary
     // admission guard has not dropped yet. The retry is bounded: with the
     // admission held throughout, the caller gives up with the busy refusal.
-    let admission = server.store.begin_ordinary_request().unwrap();
+    let admission = server
+        .store
+        .begin_ordinary_request("a ping request")
+        .unwrap();
     assert!(matches!(
-        client.shutdown_resident_after_probe_within(Duration::ZERO),
+        client.shutdown_resident_waiting(Duration::ZERO, Duration::ZERO),
         Err(DaemonError::Remote(message)) if busy_lifecycle_refusal(&message)
     ));
     assert!(!server.shutdown_requested.load(Ordering::Acquire));
@@ -3763,6 +3766,77 @@ fn stop_scope_client_returns_complete_only_after_endpoint_owner_release() {
     task.join().unwrap();
     assert!(Client::connect_if_running(home.path()).unwrap().is_none());
     assert_eq!(*calls.lock().unwrap(), vec![ScopeLifecycleAction::Stop]);
+}
+
+/// `marsh stop` while another request is being served (Narwhal polling
+/// `marsh status`, the Kit updater): the client waits it out and stops; held
+/// past its bound, the refusal names the request instead of saying retry.
+#[test]
+fn stop_waits_out_a_request_in_flight_and_then_names_it() {
+    let home = home();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let server = Server::bind(home.path())
+        .unwrap()
+        .with_backend(Arc::new(LifecycleBackend {
+            complete: true,
+            calls: Arc::clone(&calls),
+        }));
+    let held = server
+        .store
+        .begin_ordinary_request("a status request")
+        .unwrap();
+    let task = thread::spawn(move || server.serve_until(|| false).unwrap());
+    let client = Client::connect(home.path()).unwrap();
+
+    let refused = Client::wait_out_busy(Duration::from_millis(200), || {
+        client.scope_lifecycle_with_timeout(PublicRequest::StopScope, PATIENCE)
+    })
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("a request was still being served: a status request")
+            && refused.contains("after waiting")
+            && !refused.contains("retry"),
+        "{refused}"
+    );
+    assert!(calls.lock().unwrap().is_empty());
+
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(500));
+        drop(held);
+    });
+    let report = client.stop_scope().unwrap();
+    release.join().unwrap();
+    task.join().unwrap();
+    assert!(report.cleanup_complete);
+    assert_eq!(*calls.lock().unwrap(), vec![ScopeLifecycleAction::Stop]);
+}
+
+/// Live work is a real refusal: it is reported at once, not waited out.
+#[test]
+fn stop_does_not_wait_out_an_attached_session() {
+    let home = home();
+    let server = Arc::new(Server::bind(home.path()).unwrap().with_backend(Arc::new(
+        LifecycleBackend {
+            complete: true,
+            calls: Arc::new(Mutex::new(Vec::new())),
+        },
+    )));
+    let _session = server.store.attach_shell(
+        std::process::id(),
+        authority("/Users/example/project", home.path()),
+    );
+    let task_server = Arc::clone(&server);
+    let task = thread::spawn(move || task_server.serve_one().unwrap());
+    let started = Instant::now();
+    let refused = Client::connect(home.path())
+        .unwrap()
+        .stop_scope()
+        .unwrap_err()
+        .to_string();
+    task.join().unwrap();
+    assert!(started.elapsed() < Duration::from_secs(10), "{refused}");
+    assert!(refused.contains("a session of pid"), "{refused}");
 }
 
 /// The owner unlinks its lock while the stopping client may be between the

@@ -114,6 +114,11 @@ const RESIDENT_SHUTDOWN_RETRY_INTERVAL: Duration = Duration::from_millis(10);
 const BUSY_LIFECYCLE_MESSAGE: &str = "daemon has active shell sessions or jobs, or unrecovered shell cleanup uncertainty; exit active shells and use host `marsh reset` or `marsh stop` to recover";
 /// Start of the busy refusal that names what blocks the daemon.
 const BUSY_BLOCKED: &str = "daemon is busy: ";
+/// What follows [`BUSY_BLOCKED`] when only other requests hold the daemon:
+/// a client waits for them (`transient_busy`).
+const REQUEST_IN_FLIGHT: &str = "a request was still being served";
+/// How long a client waits out [`REQUEST_IN_FLIGHT`] before reporting it.
+const TRANSIENT_BUSY_WAIT: Duration = Duration::from_secs(30);
 const STOCK_SBX_REMOVED: &str = "stock sbx was removed (upgraded?)";
 /// How often an idle daemon looks for its pinned stock SBX executable.
 const STOCK_SBX_PROBE_INTERVAL: Duration = Duration::from_secs(5);
@@ -132,6 +137,25 @@ pub fn stock_sbx_removed_message(path: &Path) -> String {
 /// deletes the old version's directory).
 fn stock_sbx_removed(path: Option<&Path>) -> bool {
     path.is_some_and(|path| !path.is_file())
+}
+
+/// A refusal only because another request was being served: the client
+/// waits it out (`Client::wait_out_busy`). Not a refusal for live work.
+fn transient_busy(message: &str) -> bool {
+    message
+        .strip_prefix(BUSY_BLOCKED)
+        .is_some_and(|rest| rest.starts_with(REQUEST_IN_FLIGHT))
+}
+
+/// `a status request`, for a busy refusal.
+fn request_label(body: &PublicRequest) -> String {
+    serde_json::to_value(body)
+        .ok()
+        .and_then(|value| value.get("type")?.as_str().map(str::to_owned))
+        .map_or_else(
+            || "a request".to_owned(),
+            |kind| format!("a {kind} request"),
+        )
 }
 
 /// A refusal a replacing client waits out briefly before reporting it.
@@ -577,6 +601,10 @@ pub enum PublicRequest {
     ResetWorkers {
         selection: LoadSelection,
     },
+    /// `marsh gc`: remove this daemon's superseded and long-unused VMs now.
+    GcVms {
+        dry_run: bool,
+    },
     /// Forget the ownership record of one unresolved cloud create, on the
     /// operator's word that nothing was created (`marsh workers forget cloud`).
     ForgetCloudCreate {
@@ -840,6 +868,7 @@ pub enum PublicReply {
     WorkersReset {
         kits: Vec<String>,
     },
+    VmGc(VmGcReport),
     ScopeLifecycle(ScopeLifecycleReport),
     PreparationAccepted,
     ExecutionAccepted,
@@ -1280,7 +1309,7 @@ pub trait DaemonBackend: Send + Sync + 'static {
     /// background thread: a no-op unless a check or a waiting switch is due.
     fn auto_update_kits(&self, _store: &DaemonStore) {}
     /// What `marsh status` reports about automatic Kit updates.
-    fn kit_update_status(&self) -> Option<KitUpdateStatus> {
+    fn kit_update_status(&self, _store: &DaemonStore) -> Option<KitUpdateStatus> {
         None
     }
     /// One pass of the environment-file watcher, from the server's
@@ -1316,6 +1345,14 @@ pub trait DaemonBackend: Send + Sync + 'static {
         _store: DaemonStore,
     ) -> Result<Vec<String>, DaemonError> {
         Err(DaemonError::BackendUnavailable)
+    }
+    /// `marsh gc`: one garbage collection of this daemon's VMs now.
+    fn gc_vms(&self, _dry_run: bool, _store: &DaemonStore) -> Result<VmGcReport, DaemonError> {
+        Err(DaemonError::BackendUnavailable)
+    }
+    /// What `marsh status` reports about VM garbage collection.
+    fn vm_gc_status(&self) -> Option<VmGcStatus> {
+        None
     }
     fn forget_cloud_create(&self, _name: &str) -> Result<(), DaemonError> {
         Err(DaemonError::BackendUnavailable)
@@ -1580,6 +1617,9 @@ pub struct StatusDocument {
     /// The hourly automatic Kit update check (`docs/kits.md`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kit_updates: Option<Box<KitUpdateStatus>>,
+    /// What VM garbage collection removed recently (`marsh gc`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vm_gc: Option<Box<VmGcStatus>>,
     /// The active `sbxenv.yaml`, `sbxenv.d/*.yaml` and `sbxenvs/*.yaml`
     /// configuration (`docs/configuration.md`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1646,6 +1686,65 @@ pub struct KitUpdateStatus {
     /// Recent automatic switches, oldest first.
     #[serde(default)]
     pub recent: Vec<KitUpdateRecord>,
+    /// Kit changes (an update, `marsh kit install`/`uninstall`, the move to
+    /// the Kits this marsh shipped) still finishing: new jobs already use the
+    /// new Kit, and the jobs or shells still on the previous Kit's VM keep it
+    /// until they end.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending: Vec<PendingKitChange>,
+}
+
+/// One VM a garbage collection looked at (`marsh gc`).
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmGcEntry {
+    pub vm: String,
+    /// `kit` or `shell`; empty for a VM this daemon does not record.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub purpose: String,
+    /// `removed`, `would_remove` (a dry run), `kept`, `failed`, or `not_ours`
+    /// (a `marsh-` VM no map of this daemon records: never touched).
+    pub action: String,
+    pub reason: String,
+    pub unix_ms: u64,
+}
+
+/// The reply to `marsh gc`.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmGcReport {
+    pub dry_run: bool,
+    /// Days without use after which a VM is removed; 0 is off.
+    pub idle_days: u64,
+    pub entries: Vec<VmGcEntry>,
+}
+
+/// `marsh status` `vm_gc`.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct VmGcStatus {
+    pub idle_days: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_pass_unix_ms: Option<u64>,
+    /// VMs removed recently, oldest first.
+    #[serde(default)]
+    pub recent: Vec<VmGcEntry>,
+}
+
+/// One entry of [`KitUpdateStatus::pending`].
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PendingKitChange {
+    pub command: String,
+    /// `update`, `uninstall`, or `shipped` (back to the Kit this marsh ships).
+    pub change: String,
+    /// The previous Kit, still running jobs.
+    pub from: String,
+    /// The Kit new jobs use; none when the command was removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    /// The previous Kit's VM, removed once nothing uses it.
+    pub vm: String,
+    /// Jobs still running there.
+    pub running_jobs: usize,
+    /// `claude updates when its running jobs end`.
+    pub message: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -2007,7 +2106,10 @@ struct State {
     authentication_tokens: BTreeMap<String, Option<String>>,
     capability_tokens: BTreeMap<String, String>,
     reservations: BTreeMap<String, String>,
-    ordinary_requests: usize,
+    /// Requests and daemon-initiated work in flight, by admission, each with
+    /// what it is (for a busy refusal).
+    ordinary_requests: BTreeMap<u64, String>,
+    next_request: u64,
     lifecycle_active: bool,
     process: process::ProcessTable,
     /// Session of each running split shell branch -> (split, label): a Kit
@@ -2058,6 +2160,7 @@ impl PublicRequest {
             | Self::AttachEphemeralShell { .. }
             | Self::Shutdown
             | Self::ResetWorkers { .. }
+            | Self::GcVms { .. }
             | Self::ForgetCloudCreate { .. }
             | Self::UninstallKit { .. }
             | Self::ResetScope
@@ -2219,6 +2322,7 @@ fn scope_can_recover(state: &State) -> bool {
 struct RequestAdmission {
     store: DaemonStore,
     lifecycle: bool,
+    id: u64,
 }
 
 /// Held by daemon-initiated work for its duration; see
@@ -2231,10 +2335,10 @@ impl Drop for RequestAdmission {
         if self.lifecycle {
             state.lifecycle_active = false;
         } else {
-            state.ordinary_requests = state
+            state
                 .ordinary_requests
-                .checked_sub(1)
-                .expect("ordinary request admission count underflow");
+                .remove(&self.id)
+                .expect("ordinary request admission is recorded");
         }
     }
 }
@@ -2343,7 +2447,8 @@ impl DaemonStore {
             capability_tokens: BTreeMap::new(),
             process: process::ProcessTable::load(journal_home),
             reservations: BTreeMap::new(),
-            ordinary_requests: 0,
+            ordinary_requests: BTreeMap::new(),
+            next_request: 0,
             lifecycle_active: false,
             branch_sessions: BTreeMap::new(),
             fenced_splits: std::collections::BTreeSet::new(),
@@ -2445,24 +2550,51 @@ impl DaemonStore {
     /// flight: the daemon may stop without a client asking.
     fn can_exit_unasked(&self) -> bool {
         let state = self.lock();
-        scope_can_recover(&state) && state.ordinary_requests == 0 && !state.lifecycle_active
+        scope_can_recover(&state) && state.ordinary_requests.is_empty() && !state.lifecycle_active
     }
 
-    fn begin_ordinary_request(&self) -> Result<RequestAdmission, DaemonError> {
+    /// Admits one request or piece of daemon work; `what` names it in a
+    /// busy refusal (`a status request`).
+    fn begin_ordinary_request(
+        &self,
+        what: impl Into<String>,
+    ) -> Result<RequestAdmission, DaemonError> {
         let mut state = self.lock();
         if state.lifecycle_active {
             return Err(DaemonError::InvalidState(
                 "daemon lifecycle transition is active".into(),
             ));
         }
-        state.ordinary_requests = state
-            .ordinary_requests
+        let id = state.next_request;
+        state.next_request = id
             .checked_add(1)
             .ok_or_else(|| DaemonError::InvalidState("request admission exhausted".into()))?;
+        state.ordinary_requests.insert(id, what.into());
         Ok(RequestAdmission {
             store: self.clone(),
             lifecycle: false,
+            id,
         })
+    }
+
+    /// What is in flight, for a busy refusal: `a status request (2)`.
+    #[must_use]
+    pub fn requests_in_flight(&self) -> Vec<String> {
+        let state = self.lock();
+        let mut counts = BTreeMap::<&str, usize>::new();
+        for what in state.ordinary_requests.values() {
+            *counts.entry(what.as_str()).or_default() += 1;
+        }
+        counts
+            .into_iter()
+            .map(|(what, count)| {
+                if count == 1 {
+                    what.to_owned()
+                } else {
+                    format!("{what} ({count})")
+                }
+            })
+            .collect()
     }
 
     fn begin_lifecycle_request(&self) -> Result<RequestAdmission, DaemonError> {
@@ -2472,13 +2604,14 @@ impl DaemonStore {
                 "daemon lifecycle transition is already active".into(),
             ));
         }
-        if state.ordinary_requests != 0 || !scope_can_recover(&state) {
+        if !state.ordinary_requests.is_empty() || !scope_can_recover(&state) {
             return Err(DaemonError::InvalidState(BUSY_LIFECYCLE_MESSAGE.into()));
         }
         state.lifecycle_active = true;
         Ok(RequestAdmission {
             store: self.clone(),
             lifecycle: true,
+            id: 0,
         })
     }
 
@@ -2842,7 +2975,7 @@ impl DaemonStore {
     /// absence the host adapter just verified. Never called after mere umount.
     pub fn complete_shell_vm_recovery(&self, vm: &str) -> Result<(), DaemonError> {
         let mut state = self.lock();
-        if state.ordinary_requests != 0 || !scope_can_recover(&state) {
+        if !state.ordinary_requests.is_empty() || !scope_can_recover(&state) {
             return Err(DaemonError::InvalidState(BUSY_LIFECYCLE_MESSAGE.into()));
         }
         let sessions = state
@@ -3899,6 +4032,7 @@ impl DaemonStore {
             splits: split::SplitCounts::default(),
             processes: process::ProcessCounts::default(),
             kit_updates: None,
+            vm_gc: None,
             sbxenv: None,
             stock_sbx_removed: None,
             commands: Vec::new(),
@@ -3927,8 +4061,11 @@ impl DaemonStore {
     ///
     /// # Errors
     /// Refuses while a lifecycle transition is active.
-    pub fn begin_background_request(&self) -> Result<BackgroundAdmission, DaemonError> {
-        self.begin_ordinary_request().map(BackgroundAdmission)
+    pub fn begin_background_request(
+        &self,
+        what: impl Into<String>,
+    ) -> Result<BackgroundAdmission, DaemonError> {
+        self.begin_ordinary_request(what).map(BackgroundAdmission)
     }
 
     #[must_use]
@@ -4629,7 +4766,7 @@ fn finish_session(
 /// VM is still bound becomes cleanup-uncertain instead, which `marsh reset` and
 /// `marsh stop` recover.
 fn release_departed(store: &DaemonStore, backend: &dyn DaemonBackend, acp: &AcpSessionManager) {
-    let Ok(_admission) = store.begin_ordinary_request() else {
+    let Ok(_admission) = store.begin_ordinary_request("the release of departed sessions") else {
         return;
     };
     for departed in store.departed_sessions() {
@@ -4882,9 +5019,14 @@ impl ConnectionHandler {
             _ => {
                 let blockers = self.store.lifecycle_blockers();
                 if blockers.is_empty() {
-                    // Nothing in view blocks it: the request raced one that
-                    // just ended.
-                    format!("{BUSY_BLOCKED}a request was still being served; retry")
+                    // Only requests in flight: a client waits these out
+                    // (`transient_busy`).
+                    let requests = self.store.requests_in_flight();
+                    if requests.is_empty() {
+                        format!("{BUSY_BLOCKED}{REQUEST_IN_FLIGHT}")
+                    } else {
+                        format!("{BUSY_BLOCKED}{REQUEST_IN_FLIGHT}: {}", requests.join(", "))
+                    }
                 } else {
                     format!(
                         "{BUSY_BLOCKED}{}; a session whose client is gone is released within seconds, and a reset or stop retries once it is",
@@ -5885,6 +6027,7 @@ impl ConnectionHandler {
             || matches!(
                 request.body,
                 PublicRequest::ResetWorkers { .. }
+                    | PublicRequest::GcVms { .. }
                     | PublicRequest::UninstallKit { .. }
                     | PublicRequest::Status { .. }
             )
@@ -5916,7 +6059,8 @@ impl ConnectionHandler {
         let admission = if lifecycle_request {
             self.store.begin_lifecycle_request()
         } else {
-            self.store.begin_ordinary_request()
+            self.store
+                .begin_ordinary_request(request_label(&request.body))
         };
         let admission = match admission {
             Ok(admission) => admission,
@@ -6207,7 +6351,8 @@ impl ConnectionHandler {
                 let mut status = self.store.status(session_id);
                 status.splits = self.splits.counts();
                 status.processes = self.store.process_counts();
-                status.kit_updates = self.backend.kit_update_status().map(Box::new);
+                status.kit_updates = self.backend.kit_update_status(&self.store).map(Box::new);
+                status.vm_gc = self.backend.vm_gc_status().map(Box::new);
                 status.sbxenv = self.backend.sbxenv_status().map(Box::new);
                 status.stock_sbx_removed = self
                     .stock_sbx
@@ -6305,6 +6450,7 @@ fn authorize_request_session(
         | PublicRequest::RegisteredCommands
         | PublicRequest::RegisteredKits
         | PublicRequest::ResetWorkers { .. }
+        | PublicRequest::GcVms { .. }
         | PublicRequest::ForgetCloudCreate { .. }
         | PublicRequest::UninstallKit { .. }
         | PublicRequest::ResetScope
@@ -6387,6 +6533,10 @@ fn dispatch_request(
                 Err(error) => public_error(&error),
             }
         }
+        PublicRequest::GcVms { dry_run } => match backend.gc_vms(dry_run, store) {
+            Ok(report) => PublicReply::VmGc(report),
+            Err(error) => public_error(&error),
+        },
         PublicRequest::ForgetCloudCreate { name } => match backend.forget_cloud_create(&name) {
             Ok(()) => PublicReply::SplitDone {
                 message: format!("forgot the unresolved cloud create {name}"),
@@ -6997,23 +7147,38 @@ impl Client {
     }
 
     fn shutdown_resident_after_probe_within(&self, retry: Duration) -> Result<(), DaemonError> {
+        self.shutdown_resident_waiting(retry, TRANSIENT_BUSY_WAIT)
+    }
+
+    /// `retry` bounds the wait for any busy refusal (the probe's own
+    /// admission ending); `busy` the wait for other requests in flight.
+    fn shutdown_resident_waiting(
+        &self,
+        retry: Duration,
+        busy: Duration,
+    ) -> Result<(), DaemonError> {
         let deadline = Instant::now() + retry;
-        loop {
-            let reply = self.request(PublicRequest::Shutdown)?;
-            match reply {
-                PublicReply::ShuttingDown => return Ok(()),
-                PublicReply::Error {
-                    code: ErrorCode::InvalidRequest,
-                    ref message,
-                } if busy_lifecycle_refusal(message) && Instant::now() < deadline => {
-                    thread::sleep(
-                        RESIDENT_SHUTDOWN_RETRY_INTERVAL
-                            .min(deadline.saturating_duration_since(Instant::now())),
-                    );
+        Self::wait_out_busy(busy, || {
+            loop {
+                let reply = self.request(PublicRequest::Shutdown)?;
+                match reply {
+                    PublicReply::ShuttingDown => return Ok(()),
+                    PublicReply::Error {
+                        code: ErrorCode::InvalidRequest,
+                        ref message,
+                    } if busy_lifecycle_refusal(message)
+                        && !transient_busy(message)
+                        && Instant::now() < deadline =>
+                    {
+                        thread::sleep(
+                            RESIDENT_SHUTDOWN_RETRY_INTERVAL
+                                .min(deadline.saturating_duration_since(Instant::now())),
+                        );
+                    }
+                    reply => return Err(unexpected_reply(reply)),
                 }
-                reply => return Err(unexpected_reply(reply)),
             }
-        }
+        })
     }
 
     pub fn request(&self, body: PublicRequest) -> Result<PublicReply, DaemonError> {
@@ -7486,6 +7651,27 @@ impl Client {
         }
     }
 
+    pub fn gc_vms(&self, dry_run: bool) -> Result<VmGcReport, DaemonError> {
+        Self::wait_out_busy(TRANSIENT_BUSY_WAIT, || {
+            let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
+            stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+            write_frame(
+                &mut stream,
+                &Envelope {
+                    protocol: PROTOCOL.into(),
+                    token: self.token.clone(),
+                    body: PublicRequest::GcVms { dry_run },
+                },
+            )?;
+            // VM removal is bounded by the stock-SBX adapter's lifecycle timeout.
+            stream.set_read_timeout(None)?;
+            match read_frame(&mut stream)? {
+                PublicReply::VmGc(report) => Ok(report),
+                reply => Err(unexpected_reply(reply)),
+            }
+        })
+    }
+
     pub fn forget_cloud_create(&self, name: &str) -> Result<String, DaemonError> {
         match self.request(PublicRequest::ForgetCloudCreate { name: name.into() })? {
             PublicReply::SplitDone { message } => Ok(message),
@@ -7494,11 +7680,11 @@ impl Client {
     }
 
     pub fn reset_scope(&self) -> Result<ScopeLifecycleReport, DaemonError> {
-        self.scope_lifecycle(PublicRequest::ResetScope)
+        self.scope_lifecycle(&PublicRequest::ResetScope)
     }
 
     pub fn stop_scope(&self) -> Result<ScopeLifecycleReport, DaemonError> {
-        let mut report = self.scope_lifecycle(PublicRequest::StopScope)?;
+        let mut report = self.scope_lifecycle(&PublicRequest::StopScope)?;
         if report.cleanup_complete && wait_for_owner_release(&self.paths).is_err() {
             report.cleanup_complete = false;
             report.components.push(ScopeCleanupComponent {
@@ -7512,8 +7698,46 @@ impl Client {
         Ok(report)
     }
 
-    fn scope_lifecycle(&self, request: PublicRequest) -> Result<ScopeLifecycleReport, DaemonError> {
-        self.scope_lifecycle_with_timeout(request, SCOPE_LIFECYCLE_REPLY_TIMEOUT)
+    fn scope_lifecycle(
+        &self,
+        request: &PublicRequest,
+    ) -> Result<ScopeLifecycleReport, DaemonError> {
+        Self::wait_out_busy(TRANSIENT_BUSY_WAIT, || {
+            self.scope_lifecycle_with_timeout(request.clone(), SCOPE_LIFECYCLE_REPLY_TIMEOUT)
+        })
+    }
+
+    /// Runs `attempt` again while the daemon refuses it only because another
+    /// request is being served (`transient_busy`), with a growing pause, for
+    /// up to `wait`; says so once on stderr. Then the refusal names what was
+    /// still in flight. Any other refusal is returned at once.
+    fn wait_out_busy<T>(
+        wait: Duration,
+        mut attempt: impl FnMut() -> Result<T, DaemonError>,
+    ) -> Result<T, DaemonError> {
+        let deadline = Instant::now() + wait;
+        let mut pause = Duration::from_millis(50);
+        let mut said = false;
+        loop {
+            match attempt() {
+                Err(DaemonError::Remote(message)) if transient_busy(&message) => {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return Err(DaemonError::Remote(format!(
+                            "{message} (still, after waiting {}s)",
+                            wait.as_secs()
+                        )));
+                    }
+                    if !said {
+                        eprintln!("marsh: waiting for the daemon to finish another request…");
+                        said = true;
+                    }
+                    thread::sleep(pause.min(left));
+                    pause = (pause * 2).min(Duration::from_secs(1));
+                }
+                other => return other,
+            }
+        }
     }
 
     fn scope_lifecycle_with_timeout(

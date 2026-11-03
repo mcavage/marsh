@@ -51,6 +51,12 @@ pub enum ProductCommand {
     Stop {
         json: bool,
     },
+    /// `marsh gc`: remove this home's superseded and long-unused VMs now.
+    Gc {
+        dry_run: bool,
+        json: bool,
+    },
+    GcHelp,
 }
 
 /// `marsh --dev`: attach this shell with a development grant.
@@ -254,7 +260,7 @@ fn parse_product_os_command(
         .is_some_and(|name| {
             matches!(
                 name,
-                "kit" | "stop" | "reset" | "workers" | "status" | "jobs" | "results"
+                "kit" | "stop" | "reset" | "workers" | "status" | "jobs" | "results" | "gc"
             )
         })
     {
@@ -370,6 +376,21 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
                 command: command.clone(),
             }
         }
+        [name, flags @ ..]
+            if name == "gc"
+                && flags
+                    .iter()
+                    .all(|flag| flag == "--dry-run" || flag == "--json")
+                && flags.len() <= 2 =>
+        {
+            ProductCommand::Gc {
+                dry_run: flags.iter().any(|flag| flag == "--dry-run"),
+                json: flags.iter().any(|flag| flag == "--json"),
+            }
+        }
+        [name, help] if name == "gc" && matches!(help.as_str(), "-h" | "--help") => {
+            ProductCommand::GcHelp
+        }
         [name] if name == "reset" => ProductCommand::Reset { json: false },
         [name] if name == "stop" => ProductCommand::Stop { json: false },
         [name, json] if name == "reset" && json == "--json" => ProductCommand::Reset { json: true },
@@ -454,6 +475,9 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         }
         [name, ..] if name == "stop" || name == "reset" => {
             return Err(CliError(format!("usage: marsh {name} [--json]")));
+        }
+        [name, ..] if name == "gc" => {
+            return Err(CliError("usage: marsh gc [--dry-run] [--json]".into()));
         }
         [name, ..] if name == "workers" => {
             return Err(CliError(
