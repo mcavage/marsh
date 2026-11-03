@@ -16,9 +16,17 @@ MARSH_HOME/control scope that removes only VMs from its own ownership map:
   the old VM, which is removed afterwards.
 - K04: a recorded Kit VM that is stopped and superseded (its command is gone
   from `commands.json`) is removed when the next daemon starts; status lists it.
-- K05: with a short idle limit, `marsh gc` removes a Kit VM unused for longer,
-  keeps the VM of a running job, and lists `marsh-` VMs it does not record as
-  not ours; `--dry-run` removes nothing.
+- K05: with a short idle limit, `marsh gc` removes a stopped Kit VM unused for
+  longer, keeps a running one and the VM of a running job, and lists `marsh-`
+  VMs it does not record as not ours; `--dry-run` removes nothing.
+- K06: jobs started while `marsh gc` removes their stopped VM all succeed with
+  verified cleanup (admission vs. collection).
+- K07: the daemon is killed while a Kit change drains a VM with a running job;
+  the next daemon's collection keeps that VM (and its job's container) until
+  `marsh reset`.
+- K08: an attached shell's VM is kept.
+Cloud and detached runs use cloud sandboxes, which are neither in local
+`sbx ls` nor in the ownership map garbage collection reads; not exercised here.
 
 Needs a dev install (`--prefix`, `make dev`): its packaged `shell` is the source
 Kit `kits/marsh-shell`; the published `docker.io/mcavage/marsh-shell` image
@@ -48,6 +56,9 @@ SCENARIOS = {
     "K03-new-kit-while-old-runs": "new_kit_while_old_runs",
     "K04-gc-superseded-stopped-at-start": "gc_superseded_at_start",
     "K05-gc-idle-and-in-use": "gc_idle_and_in_use",
+    "K06-gc-vs-admission": "gc_vs_admission",
+    "K07-crash-mid-drain": "crash_mid_drain",
+    "K08-gc-keeps-attached-shell": "gc_keeps_attached_shell",
 }
 ORDER = list(SCENARIOS)
 PUBLISHED_SHELL = "docker.io/mcavage/marsh-shell"
@@ -262,9 +273,10 @@ class KitChanges(ScenarioSuite):
             idle = self.vm_of("fixture")
             installed = self.cli(["kit", "install", "busy", self.shell_image], self.project, timeout=1800)
             require(installed.returncode == 0, f"install failed: {text(installed.stderr)[-800:]}")
-            process, job = self.start_hold("busy", 90)
+            process, job = self.start_hold("busy", 120)
             busy = job["vm_id"]
-            time.sleep(25)
+            self.sbx_stop(idle)
+            time.sleep(25)  # past the idle limit, counting the stop as a use
             dry = self.cli(["gc", "--dry-run", "--json"], self.project, timeout=300)
             require(dry.returncode == 0, f"gc --dry-run failed: {text(dry.stderr)[-800:]}")
             planned = {entry["vm"]: entry for entry in json.loads(dry.stdout)["entries"]}
@@ -292,6 +304,99 @@ class KitChanges(ScenarioSuite):
             again = self.vm_of("fixture")
             require(again != idle, "the removed VM was not recreated under a new name")
         finally:
+            self.restart_daemon({"MARSH_VM_IDLE_SECONDS": None})
+
+    def sbx_stop(self, vm: str) -> None:
+        stopped = subprocess.run([self.sbx, "stop", vm], capture_output=True, text=True, timeout=180)
+        require(stopped.returncode == 0, f"sbx stop {vm}: {stopped.stderr[-400:]}")
+
+    def sbx_status(self, vm: str) -> str | None:
+        listed = json.loads(subprocess.run([self.sbx, "ls", "--json"], capture_output=True, text=True,
+                                           timeout=60).stdout or "[]")
+        listed = listed.get("sandboxes", []) if isinstance(listed, dict) else listed
+        return next((row.get("status") for row in listed if row.get("name") == vm), None)
+
+    def gc_report(self) -> dict[str, dict[str, Any]]:
+        done = self.cli(["gc", "--json"], self.project, timeout=600)
+        require(done.returncode == 0, f"gc failed ({done.returncode}): {text(done.stdout)[-600:]!r} "
+                                      f"{text(done.stderr)[-800:]!r}")
+        return {entry["vm"]: entry for entry in json.loads(done.stdout)["entries"]}
+
+    def gc_vs_admission(self) -> None:
+        """Jobs started while `marsh gc` removes their stopped VM succeed with verified cleanup."""
+        self.restart_daemon({"MARSH_VM_IDLE_SECONDS": "5"})
+        try:
+            for round_ in range(3):
+                vm = self.vm_of("fixture")
+                self.sbx_stop(vm)
+                time.sleep(7)
+                before = self.job_ids()
+                runner = self.spawn([self.marsh, "run", "fixture", "identity"], self.project)
+                collector = self.spawn([self.marsh, "gc", "--json"], self.project)
+                status, out, err = self.reap(runner, 900)
+                require(status == 0 and self.identity(out),
+                        f"round {round_}: the job failed ({status}): {text(err)[-800:]!r}")
+                gc_status, gc_out, gc_err = self.reap(collector, 900)
+                require(gc_status == 0, f"round {round_}: gc failed: {text(gc_err)[-800:]!r}")
+                entry = {e["vm"]: e for e in json.loads(gc_out)["entries"]}.get(vm, {})
+                require(entry.get("action") in ("removed", "kept", None),
+                        f"round {round_}: {entry!r}")
+                receipts = [self.show(job) for job in self.job_ids() - before]
+                require(len(receipts) == 1 and receipts[0].get("cleanup") == "verified",
+                        f"round {round_}: {receipts!r}"[:900])
+        finally:
+            self.restart_daemon({"MARSH_VM_IDLE_SECONDS": None})
+
+    def crash_mid_drain(self) -> None:
+        """A restart mid-drain never lets collection remove a VM whose job may still run."""
+        installed = self.cli(["kit", "install", "draining", self.shell_image], self.project, timeout=1800)
+        require(installed.returncode == 0, f"install failed: {text(installed.stderr)[-800:]}")
+        process, job = self.start_hold("draining", 150)
+        vm = job["vm_id"]
+        removed = self.cli(["kit", "uninstall", "draining"], self.project, timeout=120)
+        require(removed.returncode == 0, f"uninstall failed: {text(removed.stderr)[-800:]}")
+        pid = self.owned_daemon_pid
+        subprocess.run(["kill", "-KILL", str(pid)], check=True)
+        self.wait_until(lambda: stable_process_identity(pid) is None, 60, "the killed daemon to exit")
+        for field in ("owned_daemon_id", "owned_daemon_pid", "owned_daemon_process_identity",
+                      "owned_daemon_control_token"):
+            setattr(self, field, None)
+        self.document("status", "--json")  # its successor, which this scope now owns
+        report = self.gc_report()
+        require(report.get(vm, {}).get("action") == "kept", f"the draining VM: {report.get(vm)!r}")
+        require(vm in self.recorded_vms() and self.sbx_status(vm) == "running",
+                f"{vm} was removed or stopped under its job")
+        ps = subprocess.run([self.sbx, "exec", "-u", "root", vm, "docker", "ps", "-q"],
+                            capture_output=True, text=True, timeout=120)
+        require(ps.returncode == 0 and ps.stdout.strip(), f"the job's container is gone: {ps.stdout!r} {ps.stderr!r}")
+        self.kill(process)
+        # Its receipt is unknown now; only an operator reset removes the VM.
+        reset = self.cli(["reset", "--json"], self.project, timeout=900)
+        require(reset.returncode == 0, f"reset failed: {text(reset.stderr)[-800:]}")
+        require(vm not in self.recorded_vms(), "reset left the VM")
+
+    def gc_keeps_attached_shell(self) -> None:
+        """An attached shell's VM is kept, whatever the idle limit."""
+        self.restart_daemon({"MARSH_VM_IDLE_SECONDS": "1"})
+        shell = subprocess.Popen([self.marsh, "--no-config", "--noprofile", "--norc", "-s"], cwd=self.project,
+                                 env=self.host_env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, start_new_session=True)
+        self.live.append(shell)
+        try:
+            assert shell.stdin is not None
+            shell.stdin.write(b"printf 'ATTACHED\\n'\n")
+            shell.stdin.flush()
+            self.wait_until(lambda: any(s.get("state") == "attached" for s in self.status().get("shells", [])),
+                            600, "an attached shell", (shell,))
+            time.sleep(3)
+            shells = {e["vm"]: e for e in self.gc_report().values() if e.get("purpose") == "shell"}
+            require(shells and all(e["action"] == "kept" for e in shells.values()),
+                    f"shell VMs: {shells!r}")
+            shell.stdin.write(b"exit\n")
+            shell.stdin.flush()
+            shell.wait(timeout=120)
+        finally:
+            self.kill(shell)
             self.restart_daemon({"MARSH_VM_IDLE_SECONDS": None})
 
     def run_all(self) -> None:
