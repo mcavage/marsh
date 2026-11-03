@@ -52,6 +52,12 @@ stdio adapter, anything else is the CLI as before. Each Kit declares that
 adapter as `com.docker.sandbox/acp@1` (`/usr/local/bin/marsh-NAME --acp`), so
 `marsh run --acp NAME` and `acp run NAME` start it; the declaration selects
 the program and nothing else.
+
+`patch-pi-acp.mjs` removes one behavior of `pi-acp` at image build: its
+terminal startup banner (`pi vX`, `## Context`, `## Skills`) is not sent as an
+agent message. The text stays in the `session/new` response
+(`_meta.piAcp.startupInfo`). A `pi-acp` release that changes that code fails
+the build.
 ACP sessions therefore share the CLI's warm Kit VM, network allowlist, and
 credential binding. Claude's adapter drives its Agent SDK's own native Claude
 Code build (the SDK pins it) through `claude-cli.sh`. Codex ACP keeps its

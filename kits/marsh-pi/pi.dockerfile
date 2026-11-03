@@ -17,10 +17,11 @@ FROM dhi.io/node:26-debian13-dev@sha256:5a92bf639721c31a2b66c0b7c81debcc7804d7f4
 ARG PI_VERSION
 WORKDIR /opt/marsh/pi-gateway
 COPY package.json package-lock.json ./
-COPY patch-pi-dependencies.mjs ./
+COPY patch-pi-dependencies.mjs patch-pi-acp.mjs ./
 RUN test "$PI_VERSION" = "$(node -p 'require("./package.json").dependencies["@earendil-works/pi-coding-agent"]')" \
  && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
  && node patch-pi-dependencies.mjs \
+ && node patch-pi-acp.mjs \
  && test -f node_modules/pi-acp/dist/index.js \
  && node_modules/.bin/pi --version
 COPY --chmod=0644 mcp-gateway.mjs ./mcp-gateway.mjs
