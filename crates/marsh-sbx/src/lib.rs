@@ -196,6 +196,14 @@ pub struct RecordedVm {
     pub last_used_at: Option<String>,
 }
 
+/// What [`StockSbx::stop_idle_kit_vm`] found.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KitVmStop {
+    Stopped,
+    AlreadyStopped,
+    Absent,
+}
+
 /// A compatible stock-SBX VM ready to receive jobs.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReadyKitVm {
@@ -2041,6 +2049,158 @@ impl StockSbx {
         self.remove_owned_vm(name, deadline)?;
         self.clear_worker_generation_named(name, key);
         Ok(true)
+    }
+
+    /// `marsh workers stop`: stops one recorded Kit VM (`sbx stop`), keeping
+    /// the VM, its disk and its saved mounts; the Kit's next preparation
+    /// starts it again. Under the VM's transition fence it is listed afresh,
+    /// and refused while quarantined, while a job's mounts or a `live`
+    /// session's pins hold it, or while its worker still runs attempts: a
+    /// stop never ends running work. `key` is its ownership key.
+    ///
+    /// # Errors
+    /// Fails when ownership or idleness cannot be verified, or when stock
+    /// SBX does not report the VM stopped afterwards.
+    pub fn stop_idle_kit_vm(
+        &self,
+        name: &str,
+        live: &BTreeSet<String>,
+        deadline: Instant,
+    ) -> Result<KitVmStop, SbxError> {
+        validate_name(name)?;
+        let (vm_transition, _vm_cleanup) =
+            weak_rw_transition_lock(&self.grant_vm_transition_locks, name.to_owned());
+        let _vm_transition = vm_transition
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (stock_operation, _stock_cleanup) =
+            weak_mutex_transition_lock(&self.grant_stock_operation_locks, name.to_owned());
+        let _stock_operation = stock_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.reject_quarantined(name)?;
+        let running = match self.classify_vm(name, true)? {
+            VmClass::Absent => return Ok(KitVmStop::Absent),
+            VmClass::Foreign => return Err(SbxError::ForeignVm(name.to_owned())),
+            VmClass::Owned { running, .. } => running,
+        };
+        if self.kit_vm_in_use(name, live) || self.worker_lease_busy_and_live(name)? {
+            return Err(SbxError::ActiveWorkerState(name.to_owned()));
+        }
+        // The retained worker process ends with the VM; the next preparation
+        // installs and starts it again.
+        self.drop_worker_lease_before(name, deadline)?;
+        self.worker_generations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(name);
+        if !running {
+            return Ok(KitVmStop::AlreadyStopped);
+        }
+        self.ownership.invalidate();
+        // Local stock SBX addresses sandboxes by name; the fresh
+        // classification above fenced this name to the recorded UUID.
+        Self::require_success(
+            "stop Kit VM",
+            self.run_bounded_os(
+                "stop Kit VM",
+                self.lifecycle_timeout(deadline, "stop Kit VM")?,
+                ["stop", name],
+            )?,
+        )?;
+        match self.classify_vm(name, true)? {
+            VmClass::Owned { running: false, .. } => Ok(KitVmStop::Stopped),
+            _ => Err(SbxError::HostGrantFence(format!(
+                "stock SBX does not list {name} stopped after `sbx stop`"
+            ))),
+        }
+    }
+
+    /// Replace a Kit VM that was stopped and did not come back healthy when
+    /// started for its next job: remove it by its recorded UUID and keep its
+    /// name as an intent, so the caller's next preparation creates a fresh
+    /// VM under it. The caller observed it stopped under the Kit lock with
+    /// no job admitted to it since, so no container runs there; a job's
+    /// mounts or a `live` session's pins still refuse, as does quarantine.
+    ///
+    /// # Errors
+    /// Fails when ownership, idleness, or removal cannot be verified.
+    pub fn replace_unhealthy_kit_vm(
+        &self,
+        spec: &KitVmSpec,
+        live: &BTreeSet<String>,
+        deadline: Instant,
+    ) -> Result<(), SbxError> {
+        validate_name(&spec.name)?;
+        let (vm_transition, _vm_cleanup) =
+            weak_rw_transition_lock(&self.grant_vm_transition_locks, spec.name.clone());
+        let _vm_transition = vm_transition
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (stock_operation, _stock_cleanup) =
+            weak_mutex_transition_lock(&self.grant_stock_operation_locks, spec.name.clone());
+        let _stock_operation = stock_operation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.reject_quarantined(&spec.name)?;
+        if let VmClass::Foreign = self.classify_vm(&spec.name, true)? {
+            return Err(SbxError::ForeignVm(spec.name.clone()));
+        }
+        {
+            let mut references = self
+                .grant_mount_references
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if references.iter().any(|((vm, _), reference)| {
+                vm == &spec.name
+                    && (reference.active_jobs > 0
+                        || reference
+                            .pinned_sessions
+                            .keys()
+                            .any(|session| live.contains(session)))
+            }) || self.worker_lease_busy_and_live(&spec.name)?
+            {
+                return Err(SbxError::ActiveWorkerState(spec.name.clone()));
+            }
+            references.retain(|(vm, _), _| vm != &spec.name);
+        }
+        self.drop_worker_lease_before(&spec.name, deadline)?;
+        self.remove_owned_vm(&spec.name, deadline)?;
+        self.clear_worker_generation(spec);
+        self.ownership.restore_intent(&spec.name)
+    }
+
+    /// The recorded Kit VMs the last stock listing showed stopped (no new
+    /// listing: `marsh status` stays cheap). Empty when none was taken.
+    #[must_use]
+    pub fn stopped_kit_vms(&self) -> BTreeSet<String> {
+        let Some(view) = self.ownership.cached_view() else {
+            return BTreeSet::new();
+        };
+        self.ownership
+            .recorded()
+            .into_iter()
+            .filter(|(name, purpose, _)| {
+                *purpose == VmPurpose::Kit
+                    && matches!(
+                        self.ownership.classify(&view, name),
+                        VmClass::Owned { running: false, .. }
+                    )
+            })
+            .map(|(name, _, _)| name)
+            .collect()
+    }
+
+    /// Whether stock lists the recorded Kit VM of `spec` stopped now (a
+    /// fresh listing): its next preparation resumes it.
+    ///
+    /// # Errors
+    /// Fails when stock SBX cannot list its VMs.
+    pub fn kit_vm_stopped(&self, spec: &KitVmSpec) -> Result<bool, SbxError> {
+        Ok(matches!(
+            self.classify_vm(&spec.name, true)?,
+            VmClass::Owned { running: false, .. }
+        ))
     }
 
     /// Whether [`Self::retire_kit_vm_before`] with these `live` sessions

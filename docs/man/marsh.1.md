@@ -61,8 +61,9 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   work in all three.
 
 **--load** *KIT*[,*KIT*...]|**all**
-: Prepare the named Kit VMs before the prompt appears. Otherwise the first call
-  to a Kit boots its VM and prints **[starting** *NAME* **worker VM…]**.
+: Prepare the named Kit VMs before the prompt appears: create them, or start
+  them again if **workers stop** stopped them. Otherwise the first call to a Kit
+  boots its VM and prints **[starting** *NAME* **worker VM…]**.
 
 **--ephemeral-home**
 : Use a blank, private guest home that is not kept after the shell exits. If it
@@ -250,6 +251,13 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 : Remove a Kit added with **kit install** (a removed **pix** or **hermes**
   is not added again until installed), or return an updated packaged command
   to the version this marsh shipped.
+
+**workers stop** *KIT*[,*KIT*...]|**all** [**--json**]
+: Stop idle Kit VMs and keep them, with their disk and the Kit image cached in
+  them. The Kit's next job, or **--load** *KIT*, starts the same VM again. A VM
+  with running jobs, or held by an attached shell that ran the Kit, is not
+  stopped: marsh prints how many jobs run, cancels nothing, and exits 1. A
+  stopped VM is still removed after **vm-idle-days** unused.
 
 **workers reset** *KIT*[,*KIT*...]|**all**
 : Remove idle Kit VMs, including quarantined ones. The next use creates a new

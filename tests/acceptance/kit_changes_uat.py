@@ -25,6 +25,16 @@ MARSH_HOME/control scope that removes only VMs from its own ownership map:
   the next daemon's collection keeps that VM (and its job's container) until
   `marsh reset`.
 - K08: an attached shell's VM is kept.
+- K09: `marsh workers stop fixture` stops its idle VM in stock SBX and keeps it
+  (VM disk and the Kit image cached in it); `marsh status --json` lists the
+  worker `stopped`, `marsh gc` keeps it (not superseded, not uncertain), and the
+  next job starts the same VM. Reports the resume time against a fresh create.
+- K10: `marsh workers stop` with a running job refuses with the count (exit 1)
+  and stops nothing; the job runs to its end; afterwards the stop succeeds, and
+  `marsh --load KIT` starts the stopped VM.
+- K11: `marsh workers stop all` stops every idle Kit VM; each resumes on use.
+- K12: a stopped VM that does not come back healthy (its worker marker gone) is
+  replaced by the next job, which succeeds with verified cleanup.
 Cloud and detached runs use cloud sandboxes, which are neither in local
 `sbx ls` nor in the ownership map garbage collection reads; not exercised here.
 
@@ -59,6 +69,10 @@ SCENARIOS = {
     "K06-gc-vs-admission": "gc_vs_admission",
     "K07-crash-mid-drain": "crash_mid_drain",
     "K08-gc-keeps-attached-shell": "gc_keeps_attached_shell",
+    "K09-workers-stop-resumes": "workers_stop_resumes",
+    "K10-workers-stop-running-job": "workers_stop_running_job",
+    "K11-workers-stop-all": "workers_stop_all",
+    "K12-unhealthy-resume-replaced": "unhealthy_resume_replaced",
 }
 ORDER = list(SCENARIOS)
 PUBLISHED_SHELL = "docker.io/mcavage/marsh-shell"
@@ -403,6 +417,123 @@ class KitChanges(ScenarioSuite):
         finally:
             self.kill(shell)
             self.restart_daemon({"MARSH_VM_IDLE_SECONDS": None})
+
+    # ---- marsh workers stop ------------------------------------------------
+    def workers_stop(self, selection: str) -> tuple[int, dict[str, dict[str, Any]]]:
+        done = self.cli(["workers", "stop", selection, "--json"], self.project, timeout=600)
+        try:
+            entries = json.loads(done.stdout)["entries"]
+        except (ValueError, KeyError) as error:
+            raise AssertionError(f"workers stop {selection} ({done.returncode}): {text(done.stdout)[-600:]!r} "
+                                 f"{text(done.stderr)[-800:]!r}") from error
+        return done.returncode, {entry["vm"]: entry for entry in entries}
+
+    def worker_health(self, vm: str) -> str | None:
+        return next((w.get("health") for w in self.status().get("workers", []) if w.get("vm_id") == vm), None)
+
+    def vm_uuid(self, vm: str) -> str | None:
+        path = self.control_home / "vm-ownership.json"
+        return (json.loads(path.read_text()).get("vms", {}).get(vm) or {}).get("uuid")
+
+    def vm_exec(self, vm: str, script: str) -> str:
+        done = subprocess.run([self.sbx, "exec", "-u", "root", vm, "sh", "-c", script],
+                              capture_output=True, text=True, timeout=300)
+        require(done.returncode == 0, f"sbx exec {vm}: {done.stderr[-400:]}")
+        return done.stdout
+
+    def timed_job(self, command: str) -> tuple[float, str]:
+        started = time.monotonic()
+        before = self.job_ids()
+        vm = self.vm_of(command)
+        elapsed = time.monotonic() - started
+        receipt = next(self.show(job) for job in self.job_ids() - before)
+        print(f"timing {command}: {elapsed:.1f}s {json.dumps({k: v for k, v in receipt.items() if 'ms' in k or 'timing' in k})}", flush=True)
+        return elapsed, vm
+
+    def require_stopped(self, vm: str, what: str) -> None:
+        require(self.sbx_status(vm) == "stopped", f"{what}: sbx lists {vm} {self.sbx_status(vm)!r}")
+        require(vm in self.recorded_vms(), f"{what}: {vm} is no longer recorded")
+        require(self.worker_health(vm) == "stopped",
+                f"{what}: status lists {vm} as {self.worker_health(vm)!r}: {self.status().get('workers')!r}"[:900])
+
+    def workers_stop_resumes(self) -> None:
+        """An idle VM stops and keeps its disk and image; the next job starts the same VM (timed vs a create)."""
+        self.vm_of("fixture")
+        reset = self.cli(["workers", "reset", "fixture"], self.project, timeout=600)
+        require(reset.returncode == 0, f"workers reset failed: {text(reset.stderr)[-800:]}")
+        create_s, vm = self.timed_job("fixture")
+        images = set(self.vm_exec(vm, "docker images -q --no-trunc").split())
+        require(images, f"no image cached in {vm}")
+        self.vm_exec(vm, "echo kept > /var/lib/marsh/stop-probe")
+        status, report = self.workers_stop("fixture")
+        require(status == 0 and report.get(vm, {}).get("action") == "stopped",
+                f"stop ({status}): {report!r}"[:900])
+        self.require_stopped(vm, "K09")
+        gc = self.gc_report().get(vm, {})
+        require(gc.get("action") == "kept" and not gc.get("reason", "").startswith("superseded")
+                and "not verified" not in gc.get("reason", "") and "quarantined" not in gc.get("reason", ""),
+                f"gc of the stopped VM: {gc!r}")
+        again, report = self.workers_stop("fixture")
+        require(again == 0 and report.get(vm, {}).get("action") == "already_stopped", f"{report!r}"[:600])
+        resume_s, resumed = self.timed_job("fixture")
+        require(resumed == vm, f"the next job ran on {resumed}, not the stopped {vm}")
+        require(self.vm_exec(vm, "cat /var/lib/marsh/stop-probe").strip() == "kept", "the VM disk was not kept")
+        kept = set(self.vm_exec(vm, "docker images -q --no-trunc").split())
+        require(images <= kept, f"cached images lost: {sorted(images - kept)}")
+        require(self.worker_health(vm) == "ready", f"resumed worker: {self.worker_health(vm)!r}")
+        self.source["workers_stop_timing"] = {"create_s": round(create_s, 1), "resume_s": round(resume_s, 1)}
+        print(f"K09: first job on a fresh VM {create_s:.1f}s; on the stopped VM {resume_s:.1f}s", flush=True)
+
+    def workers_stop_running_job(self) -> None:
+        """A stop with a running job refuses with the count and stops nothing."""
+        process, job = self.start_hold("shell", 60)
+        vm = job["vm_id"]
+        status, report = self.workers_stop("shell")
+        entry = report.get(vm, {})
+        require(status == 1 and entry.get("action") == "refused" and entry.get("running_jobs") == 1
+                and "shell has 1 running job; not stopped" in entry.get("message", ""),
+                f"stop with a running job ({status}): {report!r}"[:900])
+        require(process.poll() is None and self.sbx_status(vm) == "running", "the stop touched the running job")
+        self.finish_hold(process, "K10")
+        receipt = self.show(job["job_id"])
+        require(receipt.get("cleanup") == "verified", f"the held job: {receipt!r}"[:600])
+        status, report = self.workers_stop("shell")
+        require(status == 0 and report.get(vm, {}).get("action") == "stopped", f"{report!r}"[:600])
+        self.require_stopped(vm, "K10")
+        loaded = self.cli(["--load", "shell", "--no-config", "--noprofile", "--norc", "-c", "true"], self.project,
+                          timeout=900)
+        require(loaded.returncode == 0, f"marsh --load shell ({loaded.returncode}): {text(loaded.stderr)[-800:]!r}")
+        require(self.sbx_status(vm) == "running", f"--load did not start {vm}: {self.sbx_status(vm)!r}")
+        require(vm in self.recorded_vms(), "--load replaced the stopped VM")
+
+    def workers_stop_all(self) -> None:
+        """`workers stop all` stops every idle Kit VM; each resumes on use."""
+        vms = {command: self.vm_of(command) for command in ("fixture", "shell")}
+        status, report = self.workers_stop("all")
+        require(status == 0 and all(report.get(vm, {}).get("action") == "stopped" for vm in vms.values()),
+                f"stop all ({status}): {report!r}"[:900])
+        for vm in vms.values():
+            self.require_stopped(vm, "K11")
+        for command, vm in vms.items():
+            require(self.vm_of(command) == vm, f"{command} did not resume {vm}")
+
+    def unhealthy_resume_replaced(self) -> None:
+        """A stopped VM that does not start healthy is replaced, and the job succeeds."""
+        vm = self.vm_of("fixture")
+        before = self.vm_uuid(vm)
+        self.vm_exec(vm, "rm /var/lib/marsh/worker.json")
+        status, report = self.workers_stop("fixture")
+        require(status == 0 and report.get(vm, {}).get("action") == "stopped", f"{report!r}"[:600])
+        jobs = self.job_ids()
+        # The replacement keeps the name under a new UUID (checked below from
+        # the ownership map): the harness's same-name guard must re-learn it.
+        self.owned_vm_identities.pop(vm, None)
+        require(self.vm_of("fixture") == vm, "the replacement does not keep the VM's name")
+        receipts = [self.show(job) for job in self.job_ids() - jobs]
+        require(len(receipts) == 1 and receipts[0].get("cleanup") == "verified", f"{receipts!r}"[:600])
+        after = self.vm_uuid(vm)
+        require(before and after and before != after, f"{vm} was not replaced ({before} -> {after})")
+        require(self.worker_health(vm) == "ready", f"replaced worker: {self.worker_health(vm)!r}")
 
     def run_all(self) -> None:
         self.stock_before = stock_baseline(self.sbx)

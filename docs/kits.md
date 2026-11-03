@@ -36,7 +36,8 @@ run `marsh kit install pix` again.
 
 A foreground call that boots a Kit VM prints `[starting NAME worker VM…]`.
 To prepare VMs before the prompt, start marsh with `marsh --load KIT,...` or
-`marsh --load all`.
+`marsh --load all`. That also starts VMs `marsh workers stop` stopped
+([Stopping VMs](#stopping-vms)).
 
 ### What `shell` is for
 
@@ -402,6 +403,41 @@ repository, `make kit-publish` does this for the packaged Kits
 
 To share a Kit, post it in
 [Show and tell](https://github.com/mcavage/marsh/discussions).
+
+## Stopping VMs
+
+A Kit VM keeps running between calls so the next one starts fast. To free its
+memory and CPU without losing it, stop it:
+
+| Command | Stops |
+|---|---|
+| `marsh workers stop codex` | The idle Codex Kit VM |
+| `marsh workers stop claude,pi` | Those idle Kit VMs |
+| `marsh workers stop all` | All idle Kit VMs |
+
+The VM and its disk are kept, including the Kit image loaded into it. The
+Kit's next call, or `marsh --load codex`, starts the same VM again; the image
+is not loaded again. `marsh status` lists a
+stopped VM as `stopped` (`"health": "stopped"` in `--json`).
+
+A stop never ends running work and does not wait for it. A VM with running
+jobs is not stopped, and marsh says how many:
+
+```text
+$ marsh workers stop claude
+claude has 2 running jobs; not stopped (nothing was cancelled; stop it once they have ended)
+```
+
+The same goes for a VM an attached marsh shell holds because it ran that Kit:
+exit the shell first. The command exits 1 when any selected VM was not
+stopped, and stops the rest. `--json` prints one entry per VM, with `action`
+(`stopped`, `already_stopped`, `absent`, `refused`, `failed`), `running_jobs`,
+and the message.
+
+If a stopped VM does not come back healthy, its next call replaces it with a
+new VM. A stopped VM that stays unused is still removed after
+`marsh config vm-idle-days` ([Garbage
+collection](troubleshooting.md#garbage-collection)).
 
 ## Removing VMs
 

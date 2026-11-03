@@ -439,7 +439,7 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `T11-fan-out-limit`: T11: 8 live tasks: a 9th is refused (shared and copy), the caller keeps working, every result returns.
 - `T12-peer-review-context-and-model`: T12: the peer-review section appears only while it is on and lists only ready reviewers
 
-### Kit changes (`kit_changes_uat.py`, 8)
+### Kit changes (`kit_changes_uat.py`, 12)
 
 - `K01-dev-build-runs-source-kits`: A dev build runs its packaged source Kit, not the published image an update pinned.
 - `K02-uninstall-while-running`: `marsh kit uninstall` with a running job: exit 0, the job finishes, the VM goes after.
@@ -449,5 +449,9 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `K06-gc-vs-admission`: Jobs started while `marsh gc` removes their stopped VM succeed with verified cleanup.
 - `K07-crash-mid-drain`: A restart mid-drain never lets collection remove a VM whose job may still run.
 - `K08-gc-keeps-attached-shell`: An attached shell's VM is kept, whatever the idle limit.
+- `K09-workers-stop-resumes`: An idle VM stops and keeps its disk and image; the next job starts the same VM (timed vs a create).
+- `K10-workers-stop-running-job`: A stop with a running job refuses with the count and stops nothing.
+- `K11-workers-stop-all`: `workers stop all` stops every idle Kit VM; each resumes on use.
+- `K12-unhealthy-resume-replaced`: A stopped VM that does not start healthy is replaced, and the job succeeds.
 
 <!-- END GENERATED SCENARIO INDEX -->

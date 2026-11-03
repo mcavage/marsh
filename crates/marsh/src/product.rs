@@ -36,7 +36,16 @@ if a removal failed.
 
 const WORKERS_HELP: &str = "\
 Usage:
+  marsh workers stop KIT[,KIT...]|all [--json]
   marsh workers reset KIT[,KIT...]|all [--detached]
+
+stop: stops the selected idle Kit VMs and keeps them, with their disk and
+cached Kit image; the Kit's next job, or marsh --load KIT, starts the same VM
+again. A VM with running jobs, or held by an attached shell that ran the Kit,
+is not stopped: marsh says how many jobs run and exits 1. Running work is never
+cancelled. A stopped VM still goes after `marsh config vm-idle-days` unused.
+
+reset:
 
 Stops and removes only the selected idle marsh Kit worker VMs. Active jobs are
 never cancelled. The project shell, selected home, results, credentials, and
@@ -180,6 +189,9 @@ pub fn prepare(
         }
         ProductCommand::WorkersReset { selection } => {
             return workers_reset(client.as_ref(), &selection, &mut stdout, &mut stderr);
+        }
+        ProductCommand::WorkersStop { selection, json } => {
+            return workers_stop(client.as_ref(), &selection, json, &mut stdout);
         }
         ProductCommand::Reset { json } | ProductCommand::Stop { json } => {
             let reset = matches!(parsed.command, ProductCommand::Reset { .. });
@@ -618,6 +630,31 @@ pub fn lifecycle_summary(
         );
     }
     text
+}
+
+/// `marsh workers stop`: one line per Kit VM; exits 1 unless every selected
+/// VM is stopped (or has none yet).
+fn workers_stop(
+    client: &dyn DaemonClient,
+    selection: &crate::cli::LoadSelection,
+    json: bool,
+    stdout: &mut impl Write,
+) -> Result<ProductOutcome, ProductError> {
+    let report = client.stop_workers(selection)?;
+    if json {
+        serde_json::to_writer_pretty(&mut *stdout, &report)
+            .map_err(|error| ProductError::Operation(error.to_string()))?;
+        writeln!(stdout)?;
+    } else {
+        for entry in &report.entries {
+            writeln!(stdout, "{}", entry.message)?;
+        }
+    }
+    let incomplete = report
+        .entries
+        .iter()
+        .any(|entry| matches!(entry.action.as_str(), "refused" | "failed"));
+    Ok(ProductOutcome::Complete(i32::from(incomplete)))
 }
 
 fn gc_command(

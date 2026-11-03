@@ -130,6 +130,12 @@ pub trait DaemonClient: Send + Sync + 'static {
     fn gc_vms(&self, _dry_run: bool) -> Result<marsh_daemon::VmGcReport, ClientError> {
         Err(ClientError("gc is unavailable".into()))
     }
+    fn stop_workers(
+        &self,
+        _selection: &LoadSelection,
+    ) -> Result<marsh_daemon::WorkersStopReport, ClientError> {
+        Err(ClientError("workers stop is unavailable".into()))
+    }
     fn stop_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {
         Err(ClientError("stop is unavailable".into()))
     }
@@ -1564,6 +1570,17 @@ impl DaemonClient for LocalDaemonClient {
 
     fn gc_vms(&self, dry_run: bool) -> Result<marsh_daemon::VmGcReport, ClientError> {
         self.0.gc_vms(dry_run).map_err(map_daemon_error)
+    }
+
+    fn stop_workers(
+        &self,
+        selection: &LoadSelection,
+    ) -> Result<marsh_daemon::WorkersStopReport, ClientError> {
+        let selection = match selection {
+            LoadSelection::All => marsh_daemon::LoadSelection::All,
+            LoadSelection::Kits(kits) => marsh_daemon::LoadSelection::Kits(kits.clone()),
+        };
+        self.0.stop_workers(&selection).map_err(map_daemon_error)
     }
 
     fn stop_scope(&self) -> Result<marsh_daemon::ScopeLifecycleReport, ClientError> {

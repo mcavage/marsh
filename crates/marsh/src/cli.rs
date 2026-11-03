@@ -38,6 +38,11 @@ pub enum ProductCommand {
     WorkersReset {
         selection: LoadSelection,
     },
+    /// `marsh workers stop`: stop idle Kit VMs, keeping them.
+    WorkersStop {
+        selection: LoadSelection,
+        json: bool,
+    },
     /// `marsh workers forget cloud NAME`.
     WorkersForgetCloud {
         name: String,
@@ -426,6 +431,20 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         {
             ProductCommand::WorkersForgetCloud {
                 name: create.clone(),
+            }
+        }
+        [name, stop, selection] if name == "workers" && stop == "stop" => {
+            ProductCommand::WorkersStop {
+                selection: parse_load_selection(selection, "worker stop")?,
+                json: false,
+            }
+        }
+        [name, stop, selection, json]
+            if name == "workers" && stop == "stop" && json == "--json" =>
+        {
+            ProductCommand::WorkersStop {
+                selection: parse_load_selection(selection, "worker stop")?,
+                json: true,
             }
         }
         [name, reset, selection] if name == "workers" && reset == "reset" => {
@@ -865,6 +884,35 @@ mod tests {
         ] {
             assert!(parse(strings(bad)).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn workers_stop_takes_a_selection() {
+        assert_eq!(
+            parse(strings(&[
+                "marsh",
+                "workers",
+                "stop",
+                "claude,pi",
+                "--json"
+            ]))
+            .unwrap()
+            .command,
+            ProductCommand::WorkersStop {
+                selection: LoadSelection::Kits(vec!["claude".into(), "pi".into()]),
+                json: true,
+            }
+        );
+        assert_eq!(
+            parse(strings(&["marsh", "workers", "stop", "all"]))
+                .unwrap()
+                .command,
+            ProductCommand::WorkersStop {
+                selection: LoadSelection::All,
+                json: false,
+            }
+        );
+        assert!(parse(strings(&["marsh", "workers", "stop"])).is_err());
     }
 
     #[test]
