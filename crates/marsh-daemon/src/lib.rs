@@ -3122,6 +3122,52 @@ impl DaemonStore {
         Ok(())
     }
 
+    /// Claims one worker VM for automatic retirement (garbage collection, a
+    /// drained Kit change), in one step under the store lock: refused while a
+    /// job reserved it, while it is quarantined or repairing or runs a
+    /// container, and while any job recorded on it is unfinished or its
+    /// cleanup pending or uncertain. Unlike [`Self::begin_workers_reset`] it
+    /// never discards a quarantined worker's containers. A registered worker
+    /// becomes `Repairing` (no job reserves it) and the call returns `true`;
+    /// finish with [`Self::finish_worker_reset`] or
+    /// [`Self::cancel_workers_reset`].
+    ///
+    /// # Errors
+    /// Says why the VM is not retirable now.
+    pub fn begin_automatic_retire(&self, vm: &str) -> Result<bool, DaemonError> {
+        let mut state = self.lock();
+        let busy = |why: &str| Err(DaemonError::InvalidState(format!("{vm} {why}")));
+        // A Kit start between preparing its VM and reserving it is recorded
+        // only as a start or an unreserved queued job: wait for all of them.
+        if state.reservations.values().any(|worker| worker == vm)
+            || !state.starting_kits.is_empty()
+            || state
+                .jobs
+                .values()
+                .any(|job| job.state == JobState::Queued && job.worker_id.is_none())
+        {
+            return busy("may have a job starting on it");
+        }
+        if state.jobs.values().any(|job| {
+            (job.worker_id.as_deref() == Some(vm) || job.vm_id.as_deref() == Some(vm))
+                && (matches!(
+                    job.state,
+                    JobState::Queued | JobState::Running | JobState::Detached | JobState::Unknown
+                ) || matches!(job.cleanup, CleanupState::Pending | CleanupState::Uncertain))
+        }) {
+            return busy("has a job that is unfinished or whose cleanup is not verified");
+        }
+        let Some(worker) = state.workers.get_mut(vm) else {
+            return Ok(false);
+        };
+        if worker.health != WorkerHealth::Ready || !worker.active_container_ids.is_empty() {
+            return busy("is quarantined, repairing, or running a container");
+        }
+        worker.health = WorkerHealth::Repairing;
+        worker.warm = false;
+        Ok(true)
+    }
+
     /// Complete one claimed reset. Successful removal forgets only the live
     /// worker registration; receipts and all other daemon state remain.
     pub fn finish_worker_reset(&self, worker_id: &str, succeeded: bool) -> Result<(), DaemonError> {
@@ -4631,7 +4677,15 @@ impl Server {
                     let (Some(backend), Some(store)) = (backend.upgrade(), store.upgrade()) else {
                         return;
                     };
-                    backend.auto_update_kits(&DaemonStore(store));
+                    // A panic in one pass is logged; the next pass still runs.
+                    let pass = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        backend.auto_update_kits(&DaemonStore(store));
+                    }));
+                    if pass.is_err() {
+                        eprintln!(
+                            "marshd: a background Kit/VM pass panicked; it runs again in a minute"
+                        );
+                    }
                     if !pause(KIT_UPDATER_INTERVAL) {
                         return;
                     }

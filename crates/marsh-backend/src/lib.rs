@@ -1259,9 +1259,12 @@ impl DaemonBackend for StockDaemonBackend {
         let pending = self.unregister(&command, &overlay, replacement, &store, "uninstall")?;
         sources.remove(&command);
         kit_lifecycle::write_sources(&self.config.control_home, &sources)?;
-        if marsh_contracts::builtin_kits::reference(&command).is_some() {
-            self.update_kit_record(|record| record.declined.insert(command.clone()));
-        }
+        self.update_kit_record(|record| {
+            record.automatic.remove(&command);
+            if marsh_contracts::builtin_kits::reference(&command).is_some() {
+                record.declined.insert(command.clone());
+            }
+        });
         Ok(match pending {
             Some(pending) => format!("{message}\n{pending}"),
             None => message,
@@ -3855,7 +3858,6 @@ enum UpgradeCheck {
 /// Why a switch did not happen: the Kit has running jobs, or anything else.
 #[derive(Debug)]
 enum UpgradeFailure {
-    Busy,
     Failed(DaemonError),
 }
 
@@ -3946,7 +3948,7 @@ impl StockDaemonBackend {
         let _guard = lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let old = self.claim_old_vm(store, &old_spec, still_used)?;
+        let old = self.claim_old_vm(store, &old_spec, still_used);
         if let Err(error) = self.persist_installed_command(overlay, &overlay.without(command)) {
             if let OldVm::Retire(claim) = &old {
                 store.cancel_workers_reset(&claim.worker_ids);
@@ -3996,27 +3998,49 @@ impl StockDaemonBackend {
 
     /// How a Kit change leaves the replaced Kit's VM `spec` (held under its
     /// Kit lock). A change never waits for, or stops, running work.
-    fn claim_old_vm(
-        &self,
-        store: &DaemonStore,
-        spec: &KitVmSpec,
-        still_used: bool,
-    ) -> Result<OldVm, DaemonError> {
+    fn claim_old_vm(&self, store: &DaemonStore, spec: &KitVmSpec, still_used: bool) -> OldVm {
         if still_used {
-            return Ok(OldVm::Shared);
+            return OldVm::Shared;
         }
-        if store.worker_busy(&spec.name)
-            || self
-                .sbx
-                .kit_vm_in_use(&spec.name, &store.attached_session_ids())
+        // Draining is always safe; retiring now only when provably idle.
+        match self.automatic_claim(store, &spec.name) {
+            Some(claim) => OldVm::Retire(claim),
+            None => OldVm::Drain,
+        }
+    }
+
+    /// Claims an idle Kit VM for automatic retirement, or `None` while it may
+    /// still be in use: a job or attached shell holds it, it is quarantined,
+    /// a job on it is unfinished or cleanup-uncertain
+    /// (`DaemonStore::begin_automatic_retire`), or this daemon never served it
+    /// (an earlier daemon's job may still run there) and marsh-sbx cannot
+    /// show that no container runs in it. Never the operator-reset claim.
+    fn automatic_claim(&self, store: &DaemonStore, vm: &str) -> Option<RetirementClaim> {
+        let live = store.attached_session_ids();
+        if store.worker_busy(vm)
+            || self.sbx.kit_vm_in_use(vm, &live)
+            || self.vm_quarantined(store, vm)
         {
-            return Ok(OldVm::Drain);
+            return None;
         }
-        match Self::claim_retirement(store, vec![spec.name.clone()]) {
-            Ok(claim) => Ok(OldVm::Retire(claim)),
-            Err(_) if store.worker_busy(&spec.name) => Ok(OldVm::Drain),
-            Err(error) => Err(error),
+        let served = store
+            .status(None)
+            .workers
+            .iter()
+            .any(|worker| worker.worker_id == vm);
+        if !served && self.sbx.verify_no_running_containers(vm).is_err() {
+            return None;
         }
+        let registered = store.begin_automatic_retire(vm).ok()?;
+        Some(RetirementClaim {
+            worker_ids: if registered {
+                vec![vm.to_owned()]
+            } else {
+                Vec::new()
+            },
+            live,
+            quarantined: BTreeSet::new(),
+        })
     }
 
     fn drain(&self, change: DrainingKit) {
@@ -4158,19 +4182,35 @@ impl StockDaemonBackend {
             return Vec::new();
         };
         let sources = kit_lifecycle::read_sources(&self.config.control_home).unwrap_or_default();
+        let record = kit_auto_update::read(&self.config.control_home);
         self.packaged
             .iter()
             .filter(|(name, _)| overlay.contains(name) && !sources.contains_key(*name))
             .filter_map(|(name, packaged)| {
                 let current = self.registered_kit(name).ok()?;
                 let identity = current.workload.identity();
-                let image = current.workload.workload_image()?;
+                let repository = current
+                    .workload
+                    .workload_image()?
+                    .as_str()
+                    .rsplit_once('@')?
+                    .0;
+                // Only an entry an automatic update wrote: a digest the user
+                // put in commands.json stays.
+                if !record.wrote_automatically(name, identity) {
+                    return None;
+                }
                 let own = match packaged.workload.source_dir() {
-                    Some(source) => {
-                        let repository = image.as_str().rsplit_once('@')?.0;
-                        repository.rsplit('/').next().map(std::ffi::OsStr::new)
-                            == source.file_name()
-                    }
+                    Some(source) => source
+                        .file_name()
+                        .and_then(std::ffi::OsStr::to_str)
+                        .is_some_and(|kit| {
+                            repository
+                                == format!(
+                                    "{}{kit}",
+                                    marsh_contracts::builtin_kits::PACKAGED_REPOSITORY_PREFIX
+                                )
+                        }),
                     None => {
                         identity != packaged.workload.identity()
                             && same_repository(identity, packaged.workload.identity())
@@ -4244,20 +4284,16 @@ impl StockDaemonBackend {
             let Ok(image) = OciImage::parse(current.clone()) else {
                 continue;
             };
-            let (current_created, pin_created) =
-                match (self.sbx.kit_created(&image), self.sbx.kit_created(&pin)) {
-                    (Ok(Some(current)), Ok(Some(pin))) => (current, pin),
-                    (Ok(_), Ok(_)) => continue,
-                    (Err(error), _) | (_, Err(error)) => {
-                        eprintln!(
-                            "marshd: {name}: cannot compare with the Kit this marsh ships: {error}"
-                        );
-                        retry = true;
-                        continue;
-                    }
-                };
-            if current_created >= pin_created {
-                continue;
+            match self.image_order(&image, &pin) {
+                Ok(std::cmp::Ordering::Less) => {}
+                Ok(_) => continue,
+                Err(reason) => {
+                    eprintln!(
+                        "marshd: {name}: cannot compare with the Kit this marsh ships ({reason}); retried in ten minutes"
+                    );
+                    retry = true;
+                    continue;
+                }
             }
             match self.move_to_shipped(&name, &packaged, &current, store) {
                 Ok(Some(update)) => updates.push(update),
@@ -4360,8 +4396,9 @@ impl StockDaemonBackend {
 
     /// Commands the check follows: those installed from a tag (including the
     /// known Kits marsh added), and on a release build the packaged ones at
-    /// any digest of their own repository. A different image or a local Kit
-    /// folder in `commands.json` never moves.
+    /// the shipped pin or at a digest of their own repository that an
+    /// automatic update wrote. A digest, another image or a local Kit folder
+    /// the user put in `commands.json` never moves.
     fn auto_update_names(&self, sources: &BTreeMap<String, KitTag>) -> Vec<String> {
         self.command_names()
             .into_iter()
@@ -4373,8 +4410,14 @@ impl StockDaemonBackend {
                 else {
                     return false;
                 };
+                // At the shipped pin, or at a digest an automatic update
+                // wrote: a digest the user put in commands.json stays.
+                let record = kit_auto_update::read(&self.config.control_home);
                 self.registered_kit(name).is_ok_and(|current| {
-                    same_repository(current.workload.identity(), packaged.workload.identity())
+                    let identity = current.workload.identity();
+                    same_repository(identity, packaged.workload.identity())
+                        && (identity == packaged.workload.identity()
+                            || record.wrote_automatically(name, identity))
                 })
             })
             .collect()
@@ -4562,13 +4605,9 @@ impl StockDaemonBackend {
             Ok(_) | Err(_) => return AutoOutcome::Nothing,
         };
         match self.apply_upgrade(command, &current, &image, store) {
-            Ok(drained) => {
-                // As after a worker reset: the retired VM no longer holds
-                // slots for its cleanup-uncertain jobs. A draining VM still
-                // has live jobs, and `retire_drained` releases them later.
-                if !drained {
-                    store.release_process_slots(&[command.to_owned()]);
-                }
+            // An automatic retirement never takes a VM with cleanup-uncertain
+            // jobs (`automatic_claim`), so no held slot is released here.
+            Ok(_drained) => {
                 AutoOutcome::Updated(KitUpdateRecord {
                     command: command.to_owned(),
                     from: current_identity,
@@ -4580,7 +4619,6 @@ impl StockDaemonBackend {
                     unix_ms: unix_millis(SystemTime::now()),
                 })
             }
-            Err(UpgradeFailure::Busy) => AutoOutcome::Waiting,
             Err(UpgradeFailure::Failed(error)) => AutoOutcome::Problem(error.to_string()),
         }
     }
@@ -4609,6 +4647,39 @@ impl StockDaemonBackend {
         for message in notices {
             let _ = attachment.send(&AttachmentFrame::Notice { message });
         }
+    }
+
+    /// How published Kit image `left` orders against `right`, newest last.
+    /// Publisher metadata first: the version each names (`kit_version`: its
+    /// `org.opencontainers.image.version`, else its agent's), when both are
+    /// dotted numbers and differ; else the `created` time of each image
+    /// configuration (RFC 3339, any offset). `Err` when neither tells, or
+    /// the registry cannot be read: the caller defers.
+    fn image_order(&self, left: &OciImage, right: &OciImage) -> Result<std::cmp::Ordering, String> {
+        let numeric = |image: &OciImage| -> Result<Option<Vec<u64>>, String> {
+            let version = self
+                .sbx
+                .kit_version(image)
+                .map_err(|error| error.to_string())?;
+            Ok(version.and_then(|version| {
+                version
+                    .split('.')
+                    .map(|part| part.parse::<u64>().ok())
+                    .collect::<Option<Vec<_>>>()
+            }))
+        };
+        if let (Some(left), Some(right)) = (numeric(left)?, numeric(right)?)
+            && left != right
+        {
+            return Ok(left.cmp(&right));
+        }
+        let created = |image: &OciImage| {
+            self.sbx
+                .kit_created(image)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| format!("{} names no creation time", image.as_str()))
+        };
+        Ok(created(left)?.cmp(&created(right)?))
     }
 
     /// Whether a Kit's tag names a newer image this marsh may switch to. A Kit
@@ -4644,14 +4715,20 @@ impl StockDaemonBackend {
         if let Err(reason) = check_contract(contract, packaged.is_some()) {
             return UpgradeCheck::Problem(reason);
         }
-        // Never a downgrade: a tag that names an image built before the one
-        // this command runs (a newer marsh's pin, say) leaves it alone.
-        if let Some(running) = current.workload.workload_image()
-            && let (Ok(Some(offered)), Ok(Some(running))) =
-                (self.sbx.kit_created(&image), self.sbx.kit_created(running))
-            && offered < running
-        {
-            return UpgradeCheck::Current;
+        // Never a downgrade: a tag that names an older image than the one
+        // this command runs (a newer marsh's pin, say) leaves it alone, and
+        // one whose order cannot be told is not taken either (next check).
+        if let Some(running) = current.workload.workload_image() {
+            match self.image_order(&image, running) {
+                Ok(std::cmp::Ordering::Less) => return UpgradeCheck::Current,
+                Ok(_) => {}
+                Err(reason) => {
+                    return UpgradeCheck::Problem(format!(
+                        "not switched to {}: cannot tell whether it is newer than the image it runs ({reason}); checked again at the next check",
+                        image.as_str()
+                    ));
+                }
+            }
         }
         UpgradeCheck::Available {
             current: current.workload.identity().to_owned(),
@@ -4694,10 +4771,9 @@ impl StockDaemonBackend {
         // Running jobs keep the old VM; the Kit still switches. A limit that
         // counts VMs does not apply to this transition.
         let (claim, drain) = match self.claim_old_vm(store, &old_spec, still_used) {
-            Ok(OldVm::Shared) => (None, false),
-            Ok(OldVm::Retire(claim)) => (Some(claim), false),
-            Ok(OldVm::Drain) => (None, true),
-            Err(_) => return Err(UpgradeFailure::Busy),
+            OldVm::Shared => (None, false),
+            OldVm::Retire(claim) => (Some(claim), false),
+            OldVm::Drain => (None, true),
         };
         let release = |claim: &Option<RetirementClaim>| {
             if let Some(claim) = claim {
@@ -4787,18 +4863,19 @@ impl StockDaemonBackend {
             let _guard = lock
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let Ok(claim) = Self::claim_retirement(store, vec![name.clone()]) else {
+            let Some(claim) = self.automatic_claim(store, &name) else {
                 continue;
             };
-            if self
-                .retire_claimed(store, &BTreeMap::from([(name.clone(), spec)]), &claim)
-                .is_ok()
-            {
-                self.draining_kits
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .remove(&name);
-                store.release_process_slots(&[command]);
+            match self.retire_claimed(store, &BTreeMap::from([(name.clone(), spec)]), &claim) {
+                Ok(()) => {
+                    self.draining_kits
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .remove(&name);
+                }
+                Err(error) => {
+                    eprintln!("marshd: {command}: drained VM {name} not removed: {error}");
+                }
             }
         }
     }
@@ -4822,8 +4899,18 @@ impl StockDaemonBackend {
                 Some((live, quarantined.contains(worker_id))),
             );
             if let Err(error) = retired {
-                store.finish_worker_reset(worker_id, false)?;
-                store.cancel_workers_reset(&worker_ids[index + 1..]);
+                // Only claimed workers are settled; a target this daemon never
+                // registered (an automatic claim of an unserved VM) has none.
+                if worker_ids.contains(worker_id) {
+                    store.finish_worker_reset(worker_id, false)?;
+                }
+                let rest = specs
+                    .keys()
+                    .skip(index + 1)
+                    .filter(|id| worker_ids.contains(id))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                store.cancel_workers_reset(&rest);
                 return Err(backend_error(error));
             }
             self.ready_kits
@@ -6920,6 +7007,8 @@ mod kit_lifecycle_callers {
         tags: Mutex<BTreeMap<String, Option<String>>>,
         /// Image configuration `created` times by image reference.
         created: Mutex<BTreeMap<String, String>>,
+        /// `sbx ls` fails (no VM effect can be verified).
+        fail_ls: std::sync::atomic::AtomicBool,
     }
 
     impl Registry {
@@ -6930,6 +7019,7 @@ mod kit_lifecycle_callers {
                 runs: Mutex::new(Vec::new()),
                 tags: Mutex::new(BTreeMap::new()),
                 created: Mutex::new(BTreeMap::new()),
+                fail_ls: std::sync::atomic::AtomicBool::new(false),
             })
         }
         fn calls(&self, needle: &str) -> usize {
@@ -6986,16 +7076,38 @@ mod kit_lifecycle_callers {
                     Some(value) => format!(r#"{{"org.marsh.kit.contract":"{value}"}}"#),
                     None => "{}".into(),
                 };
+                // By default a digest's first hex digit is its day in
+                // January: OLD < NEW < SHIPPED < PI_NEW < OTHER_PI. An empty
+                // entry names no creation time.
+                let reference = argv.get(4).map_or("", String::as_str);
                 let created = self
                     .created
                     .lock()
                     .unwrap()
-                    .get(argv.get(4).map_or("", String::as_str))
+                    .get(reference)
+                    .cloned()
+                    .or_else(|| {
+                        let day = reference
+                            .split_once("@sha256:")?
+                            .1
+                            .chars()
+                            .next()?
+                            .to_digit(16)?;
+                        Some(format!("2026-01-{:02}T00:00:00Z", day + 1))
+                    })
+                    .filter(|created| !created.is_empty())
                     .map(|created| format!(r#","created":"{created}""#))
                     .unwrap_or_default();
                 return ok(format!(r#"{{"config":{{"Labels":{labels}}}{created}}}"#));
             }
             if argv[1..] == ["ls", "--json"] {
+                if self.fail_ls.load(std::sync::atomic::Ordering::Acquire) {
+                    return Ok(marsh_runtime::CommandOutput {
+                        exit_code: Some(1),
+                        stdout: Vec::new(),
+                        stderr: b"cannot reach the sandbox daemon".to_vec(),
+                    });
+                }
                 return ok(r#"{"sandboxes":[]}"#.into());
             }
             Ok(marsh_runtime::CommandOutput {
@@ -7471,12 +7583,39 @@ mod kit_lifecycle_callers {
         )
     }
 
+    /// An automatic update wrote `reference` for `command` to commands.json.
+    fn updated_automatically(backend: &StockDaemonBackend, command: &str, reference: &str) {
+        backend.update_kit_record(|record| {
+            record.automatic.insert(command.into(), reference.into());
+        });
+    }
+
     #[test]
     fn a_dev_build_runs_its_source_kits_again_at_start() {
-        let home = tempfile::tempdir().unwrap();
         let registry = Registry::new(NEW, Some(1));
         let published = "docker.io/mcavage/marsh-pi@sha256:6666666666666666666666666666666666666666666666666666666666666666";
+        // The user pinned that digest themselves: it stays.
+        let home = tempfile::tempdir().unwrap();
+        let pinned = dev_daemon(home.path(), &registry, published);
+        assert_eq!(pinned.bring_shipped_source_kits(), [] as [String; 0]);
+        // Another namespace's `marsh-pi` is not this Kit, even if updated.
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = "docker.io/someone/marsh-pi@sha256:6666666666666666666666666666666666666666666666666666666666666666";
+        let theirs = dev_daemon(home.path(), &registry, elsewhere);
+        updated_automatically(&theirs, "pi", elsewhere);
+        assert_eq!(theirs.bring_shipped_source_kits(), [] as [String; 0]);
+
+        let home = tempfile::tempdir().unwrap();
         let backend = dev_daemon(home.path(), &registry, published);
+        // Written by an earlier marsh's update: known from its recent record.
+        backend.update_kit_record(|record| {
+            record.recent.push(marsh_daemon::KitUpdateRecord {
+                command: "pi".into(),
+                from: "local".into(),
+                to: published.into(),
+                ..marsh_daemon::KitUpdateRecord::default()
+            });
+        });
         let old_vm = backend.kit_spec("pi").unwrap().name;
 
         assert_eq!(backend.bring_shipped_source_kits(), ["pi"]);
@@ -7536,6 +7675,7 @@ mod kit_lifecycle_callers {
             .unwrap()
             .insert(PI_NEW.into(), "2026-11-02T00:00:00.5Z".into());
         let newer = daemon(home.path(), &registry, Some(PI_NEW), Some("latest"));
+        updated_automatically(&newer, "pi", PI_NEW);
         newer.bring_shipped_kits(&store, DAY);
         assert_eq!(
             newer.registered_kit("pi").unwrap().workload.identity(),
@@ -7553,6 +7693,7 @@ mod kit_lifecycle_callers {
         let home = tempfile::tempdir().unwrap();
         let docker = registry.calls("docker");
         let theirs = daemon(home.path(), &registry, Some(OTHER_PI), Some("latest"));
+        updated_automatically(&theirs, "pi", OTHER_PI);
         theirs.bring_shipped_kits(&store, DAY);
         assert_eq!(registry.calls("docker"), docker);
 
@@ -7565,7 +7706,14 @@ mod kit_lifecycle_callers {
             .lock()
             .unwrap()
             .insert(PI_OLD.into(), "2026-10-29T10:43:13Z".into());
+        // A digest the user wrote by hand, even an older one, stays.
+        let hand = daemon(home.path(), &registry, Some(PI_OLD), Some("latest"));
+        let docker = registry.calls("docker");
+        hand.bring_shipped_kits(&store, DAY);
+        assert_eq!(registry.calls("docker"), docker);
+        let home = tempfile::tempdir().unwrap();
         let older = daemon(home.path(), &registry, Some(PI_OLD), Some("latest"));
+        updated_automatically(&older, "pi", PI_OLD);
         let before = overlay(&older);
         older.bring_shipped_kits(&store, DAY);
         assert!(registry.calls("sbx") > 0, "the pinned image is prepared");
@@ -7583,8 +7731,27 @@ mod kit_lifecycle_callers {
         let home = tempfile::tempdir().unwrap();
         let docker = registry.calls("docker");
         let local = daemon(home.path(), &registry, Some(PI_OLD), None);
+        updated_automatically(&local, "pi", PI_OLD);
         local.bring_shipped_kits(&store, DAY);
         assert_eq!(registry.calls("docker"), docker);
+
+        // Order unknown (no creation time, no comparable version): kept, and
+        // retried later, never moved on a guess.
+        let home = tempfile::tempdir().unwrap();
+        registry
+            .created
+            .lock()
+            .unwrap()
+            .insert(PI_OLD.into(), String::new());
+        let unknown = daemon(home.path(), &registry, Some(PI_OLD), Some("latest"));
+        updated_automatically(&unknown, "pi", PI_OLD);
+        let sbx_calls = registry.calls("sbx");
+        unknown.bring_shipped_kits(&store, DAY);
+        assert_eq!(registry.calls("sbx"), sbx_calls, "nothing prepared");
+        let due = unknown
+            .shipped_due_ms
+            .load(std::sync::atomic::Ordering::Acquire);
+        assert!(due > DAY && due < u64::MAX, "a retry is scheduled: {due}");
     }
 
     /// A home on a release's pins (newer: they have the task tool) whose
@@ -7628,6 +7795,16 @@ mod kit_lifecycle_callers {
         );
         assert!(registry.calls("inspect") > 0, "the tag was checked");
 
+        // An image whose age cannot be told is not taken either.
+        registry
+            .created
+            .lock()
+            .unwrap()
+            .insert(PI_NEW.into(), String::new());
+        let UpgradeCheck::Problem(deferred) = backend.check_upgrade("pi", None) else {
+            panic!("an unordered image is deferred");
+        };
+        assert!(deferred.contains("cannot tell whether"), "{deferred}");
         // Once the tag names a newer image, the command follows it.
         registry
             .created
@@ -7638,6 +7815,61 @@ mod kit_lifecycle_callers {
             backend.check_upgrade("pi", None),
             UpgradeCheck::Available { .. }
         ));
+    }
+
+    /// An explicit digest pin of a packaged command's own repository (as the
+    /// user writes it in commands.json; `kit install` refuses packaged names)
+    /// and a non-packaged `kit install NAME REPO@sha256:` stay across a pass.
+    #[test]
+    fn explicit_digest_pins_stay_across_an_update_pass() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(PI_NEW, Some(1));
+        let backend = automatic(
+            daemon(home.path(), &registry, Some(PI_NEW), Some("latest")),
+            home.path(),
+            None,
+        );
+        // pix was installed by digest: no recorded tag.
+        kit_lifecycle::write_sources(&backend.config.control_home, &BTreeMap::new()).unwrap();
+        decline_builtins(&backend);
+        *registry.resolved.lock().unwrap() =
+            "docker.io/example/pi@sha256:8888888888888888888888888888888888888888888888888888888888888888".into();
+        let before = overlay(&backend);
+        let store_home = tempfile::tempdir().unwrap();
+        backend.auto_update_pass(&DaemonStore::new(store_home.path()), DAY);
+        assert_eq!(registry.calls("kit"), 0, "neither pin is even checked");
+        assert_eq!(overlay(&backend), before);
+        assert_eq!(
+            backend.registered_kit("pi").unwrap().workload.identity(),
+            PI_NEW
+        );
+        assert_eq!(
+            backend.registered_kit("pix").unwrap().workload.identity(),
+            OLD
+        );
+    }
+
+    /// A failed removal of a VM this daemon never registered (an automatic
+    /// claim with no worker) is an error, not a panic of the updater thread.
+    #[test]
+    fn a_failed_removal_of_an_unserved_vm_does_not_panic() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(NEW, Some(1));
+        let backend = daemon(home.path(), &registry, None, None);
+        let store_home = tempfile::tempdir().unwrap();
+        let store = DaemonStore::new(store_home.path());
+        let spec = backend.kit_spec("pix").unwrap();
+        let claim = RetirementClaim {
+            worker_ids: Vec::new(),
+            live: BTreeSet::new(),
+            quarantined: BTreeSet::new(),
+        };
+        registry
+            .fail_ls
+            .store(true, std::sync::atomic::Ordering::Release);
+        let other = backend.kit_spec("pi").unwrap();
+        let specs = BTreeMap::from([(spec.name.clone(), spec), (other.name.clone(), other)]);
+        assert!(backend.retire_claimed(&store, &specs, &claim).is_err());
     }
 
     #[test]
@@ -7733,10 +7965,15 @@ mod kit_lifecycle_callers {
     fn packaged_commands_follow_their_repository_and_other_pins_stay() {
         let registry = Registry::new(NEW, Some(1));
         let sources = BTreeMap::new();
-        // pi moved to a newer digest of its own repository (e.g. by an older
-        // `marsh kit upgrade`, since removed): still follows on a release build.
+        // pi at a newer digest of its own repository: it follows when an
+        // automatic update wrote it, and stays when the user pinned it.
         let home = tempfile::tempdir().unwrap();
         let moved = daemon(home.path(), &registry, Some(PI_NEW), Some("latest"));
+        assert_eq!(
+            moved.auto_update_names(&sources),
+            [] as [std::string::String; 0]
+        );
+        updated_automatically(&moved, "pi", PI_NEW);
         assert_eq!(moved.auto_update_names(&sources), ["pi"]);
         // pi replaced by a different image: pinned by hand, never moves.
         let home = tempfile::tempdir().unwrap();
@@ -7890,21 +8127,24 @@ mod kit_lifecycle_callers {
         );
         let store = DaemonStore::new(home.path());
         backend.auto_update_pass(&store, DAY);
-        backend.uninstall_kit("hermes".into(), store).unwrap();
+        backend
+            .uninstall_kit("hermes".into(), store.clone())
+            .unwrap();
         assert!(!backend.command_names().contains(&"hermes".to_owned()));
         assert!(
             kit_auto_update::read(&backend.config.control_home)
                 .declined
                 .contains("hermes")
         );
-        // Neither the next check nor a restart brings it back.
-        backend.auto_update_pass(&DaemonStore::new(home.path()), 3 * DAY);
+        // Neither the next check nor a restart brings it back. (One store: a
+        // second one on this journal would wait for the first's lock.)
+        backend.auto_update_pass(&store, 3 * DAY);
         let restarted = automatic(
             daemon(home.path(), &registry, None, Some("latest")),
             home.path(),
             None,
         );
-        restarted.auto_update_pass(&DaemonStore::new(home.path()), 3 * DAY + 1);
+        restarted.auto_update_pass(&store, 3 * DAY + 1);
         assert!(!backend.command_names().contains(&"hermes".to_owned()));
         assert!(!restarted.command_names().contains(&"hermes".to_owned()));
         assert!(!overlay(&restarted).contains("hermes"));

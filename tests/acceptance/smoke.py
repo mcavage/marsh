@@ -286,7 +286,7 @@ class Smoke(ProductScope):
         gates = [self.project / ".ready-a", self.project / ".ready-b"]
         release = self.project / ".release"
         scripts = [
-            f"touch {ready}; while test ! -e {release}; do sleep 0.05; done; printf shell"
+            f"touch {ready}; _w=0; while test ! -e {release}; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep 0.1; done; printf shell"
             for ready in gates
         ]
         processes = [

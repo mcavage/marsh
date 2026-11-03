@@ -224,7 +224,8 @@ one when its `cloud` call ends; if a call ended `cleanup uncertain`, run
 
 ### Garbage collection
 
-marsh removes its own VMs that nothing uses when they are no longer needed:
+marsh removes its own **stopped** VMs that nothing uses when they are no
+longer needed:
 
 - **Superseded:** a Kit VM of an image no command runs any more (after an
   update, `marsh kit uninstall`, `marsh workers reset`, or an edit of
@@ -237,12 +238,13 @@ marsh removes its own VMs that nothing uses when they are no longer needed:
 
 The daemon does this when it starts and then every hour; `marsh gc` does it
 now and lists every VM of this home with what it did and why
-(`--dry-run` removes nothing, `--json` prints the report). It keeps a VM that
-a job or an attached shell uses, a quarantined one (see
-[Cleanup uncertain and quarantine](#cleanup-uncertain-and-quarantine)), and a
-running Kit VM it has not served since it started (a job of an earlier daemon
-may still be there; `marsh reset` removes it). `marsh status --json` lists
-recent removals under `vm_gc`.
+(`--dry-run` removes nothing, `--json` prints the report). A VM that runs is
+never removed this way (`marsh reset` or `marsh stop` removes it); neither is
+one a job or an attached shell uses, a quarantined one (see
+[Cleanup uncertain and quarantine](#cleanup-uncertain-and-quarantine)), or one
+with a job whose end or cleanup was not verified. Each condition is checked
+again at the moment of removal. `marsh status --json` lists recent removals
+under `vm_gc`.
 
 Only VMs in this home's list are removed, by their recorded identity.
 `marsh-` VMs of other homes, or that no home lists, are shown as `not ours`

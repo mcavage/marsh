@@ -3,14 +3,18 @@
 //! map records, with their recorded UUID, are ever removed; a `marsh-` VM it
 //! does not record is listed as not ours and left alone.
 //!
-//! A recorded VM is removed when nothing uses it and either it is superseded
-//! (no registered command runs its Kit any more, or it is a shell VM of an
-//! older selector) or it has not been used for `vm_idle_days` (default 3; the
-//! next use creates it again). A VM a job or attached shell uses, a
-//! quarantined one (automatic recovery or `marsh workers reset` owns it), one
-//! finishing a Kit change (it drains), and a Kit VM that was already running
-//! when this daemon started (a job of an earlier daemon may still run there)
-//! are kept. Passes run when the daemon starts, then hourly.
+//! Deliberately narrow: a recorded VM is removed only when stock SBX lists it
+//! **stopped** (so no container of this or an earlier daemon runs in it), it
+//! is not quarantined, no job recorded on it is unfinished or
+//! cleanup-uncertain, no job reserved it, no mount or attached-shell pin holds
+//! it, it is not finishing a Kit change, and it is either superseded (no
+//! registered command runs its Kit any more, or a shell VM of an older
+//! selector) or unused for `vm_idle_days` (default 3; the next use creates it
+//! again). Every condition is checked again where it is enforced: the store
+//! claims the worker atomically (`DaemonStore::begin_automatic_retire`), and
+//! marsh-sbx lists the VM afresh under its transition fence before removing
+//! it. A running VM is never removed here; `marsh reset` or `marsh stop` does
+//! that. Passes run when the daemon starts, then hourly.
 
 use super::{StockDaemonBackend, backend_error, unix_millis};
 use marsh_daemon::{DaemonError, DaemonStore, VmGcEntry, VmGcReport, VmGcStatus};
@@ -30,8 +34,6 @@ const CONFIG_KEY: &str = "vm_idle_days";
 const DEFAULT_IDLE_DAYS: u64 = 3;
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 const PASS_INTERVAL_MS: u64 = 60 * 60 * 1000;
-/// A superseded VM used more recently than this is kept.
-const SUPERSEDED_GRACE_MS: u64 = 10 * 60 * 1000;
 const MAX_RECENT: usize = 20;
 const MAX_RECORD_BYTES: u64 = 256 * 1024;
 const REMOVAL_TIMEOUT: Duration = Duration::from_mins(5);
@@ -88,39 +90,16 @@ pub(crate) fn idle_days(scope_root: Option<&Path>) -> u64 {
         .unwrap_or(DEFAULT_IDLE_DAYS)
 }
 
-/// Unix milliseconds of an RFC 3339 UTC time (`2026-11-03T15:38:03.431Z`).
+/// Unix milliseconds of an RFC 3339 time (stock's `last_used_at`).
 pub(crate) fn utc_millis(text: &str) -> Option<u64> {
-    let rest = text.strip_suffix('Z')?;
-    let (seconds, fraction) = rest.split_once('.').unwrap_or((rest, ""));
-    let field = |range: std::ops::Range<usize>| seconds.get(range)?.parse::<u64>().ok();
-    if seconds.len() != 19 || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let (year, month, day) = (field(0..4)?, field(5..7)?, field(8..10)?);
-    let (hour, minute, second) = (field(11..13)?, field(14..16)?, field(17..19)?);
-    if !(1970..=9999).contains(&year)
-        || !(1..=12).contains(&month)
-        || !(1..=31).contains(&day)
-        || hour > 23
-        || minute > 59
-        || second > 60
-    {
-        return None;
-    }
-    // Days from civil (Howard Hinnant), for the proleptic Gregorian calendar.
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year / 400;
-    let of_era = year - era * 400;
-    let shifted = if month > 2 { month - 3 } else { month + 9 };
-    let of_year = (153 * shifted + 2) / 5 + day - 1;
-    let of_cycle = of_era * 365 + of_era / 4 - of_era / 100 + of_year;
-    let days = era * 146_097 + of_cycle - 719_468;
-    let millis = fraction
-        .get(..3)
-        .map_or_else(|| format!("{fraction:0<3}"), str::to_owned)
-        .parse::<u64>()
-        .ok()?;
-    Some(((days * 24 + hour) * 60 + minute) * 60_000 + second * 1000 + millis)
+    u64::try_from(marsh_sbx::rfc3339_unix_nanos(text)? / 1_000_000).ok()
+}
+
+/// Why a chosen VM was not removed after all.
+pub(crate) enum Removal {
+    /// The enforcing check found it in use (or it started meanwhile).
+    Kept(String),
+    Failed(String),
 }
 
 /// What a pass knows about one recorded VM.
@@ -134,8 +113,6 @@ pub(crate) struct Candidate {
     pub in_use: Option<String>,
     pub quarantined: bool,
     pub running: bool,
-    /// This daemon has served it and knows no job runs there.
-    pub known_here: bool,
     pub last_used_ms: Option<u64>,
 }
 
@@ -167,17 +144,11 @@ pub(crate) fn decide(vm: &Candidate, now_ms: u64, idle_ms: u64) -> Result<String
     if let Some(reason) = &vm.in_use {
         return Err(reason.clone());
     }
-    if vm.purpose == VmPurpose::Kit && vm.running && !vm.known_here {
-        return Err("running since before this daemon started; `marsh reset` removes it".into());
-    }
-    // A VM just prepared for a command being installed or updated is not
-    // current yet: give the switch time to happen.
-    if !vm.current
-        && vm.last_used_ms.is_some_and(|last| {
-            now_ms.saturating_sub(last) < SUPERSEDED_GRACE_MS.min(idle_ms.max(1))
-        })
-    {
-        return Err("used within the last few minutes".into());
+    if vm.running {
+        return Err(
+            "running: garbage collection removes only stopped VMs (`marsh reset` removes it)"
+                .into(),
+        );
     }
     if !vm.current {
         return Ok(match vm.purpose {
@@ -324,11 +295,6 @@ impl StockDaemonBackend {
             .into_iter()
             .map(|spec| spec.name)
             .collect::<BTreeSet<_>>();
-        let known_here = self
-            .registered_workers
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
         let mut record = {
             let _guard = self
                 .vm_gc_lock
@@ -361,7 +327,6 @@ impl StockDaemonBackend {
                 in_use,
                 quarantined: vm.quarantined || self.vm_quarantined(store, &vm.name),
                 running: vm.running,
-                known_here: known_here.contains(&vm.name),
                 last_used_ms,
             };
             let purpose = match vm.purpose {
@@ -373,7 +338,10 @@ impl StockDaemonBackend {
                 Ok(reason) if dry_run => ("would_remove", reason),
                 Ok(reason) => match self.remove_recorded(vm, &candidate, store, &live) {
                     Ok(()) => ("removed", reason),
-                    Err(error) => ("failed", format!("{reason}; not removed: {error}")),
+                    Err(Removal::Kept(why)) => ("kept", why),
+                    Err(Removal::Failed(error)) => {
+                        ("failed", format!("{reason}; not removed: {error}"))
+                    }
                 },
             };
             entries.push(VmGcEntry {
@@ -449,79 +417,79 @@ impl StockDaemonBackend {
         }
     }
 
-    /// Removes one VM `decide` chose, through the same fences as a reset.
+    /// Removes one VM `decide` chose. Its conditions are enforced again here,
+    /// atomically: the store claim refuses a reserved, quarantined or busy
+    /// worker and one with unfinished or uncertain jobs; marsh-sbx refuses it
+    /// unless it is listed stopped, under the VM's transition fence.
     fn remove_recorded(
         &self,
         vm: &RecordedVm,
         candidate: &Candidate,
         store: &DaemonStore,
         live: &BTreeSet<String>,
-    ) -> Result<(), DaemonError> {
+    ) -> Result<(), Removal> {
         // A lifecycle transition (`marsh stop`) is not started under this.
-        let _admission =
-            store.begin_background_request(format!("the garbage collection of VM {}", vm.name))?;
+        let _admission = store
+            .begin_background_request(format!("the garbage collection of VM {}", vm.name))
+            .map_err(|error| Removal::Kept(error.to_string()))?;
         let deadline = Instant::now() + REMOVAL_TIMEOUT;
-        match vm.purpose {
-            VmPurpose::Shell => {
-                let mut spec = self.config.shell.clone();
-                spec.name.clone_from(&vm.name);
-                self.sbx
-                    .reset_shell_vm_before(&spec, deadline)
-                    .map_err(backend_error)?;
-            }
-            VmPurpose::Kit => {
-                // A current Kit's preparation holds its Kit lock: no job can
-                // start on the VM while it is removed.
-                let spec = candidate
-                    .current
-                    .then(|| self.spec_for_recorded_kit(&vm.name))
-                    .flatten();
-                let lock = spec.as_ref().map(|spec| self.kit_lock(spec)).transpose()?;
-                let _guard = lock.as_ref().map(|lock| {
-                    lock.lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                });
-                // A worker this daemon registered is claimed as by a reset, so
-                // no job reserves it meanwhile.
-                let registered = store
-                    .status(None)
-                    .workers
-                    .iter()
-                    .any(|worker| worker.worker_id == vm.name);
-                let claim = registered
-                    .then(|| Self::claim_retirement(store, vec![vm.name.clone()]))
-                    .transpose()?;
-                if let (Some(spec), Some(claim)) = (spec, &claim) {
-                    self.retire_claimed(store, &BTreeMap::from([(vm.name.clone(), spec)]), claim)?;
-                } else {
-                    {
-                        let removed = self.sbx.remove_unused_kit_vm(
-                            &vm.name,
-                            &vm.key,
-                            live,
-                            candidate.known_here,
-                            deadline,
-                        );
-                        if let Some(claim) = &claim {
-                            if removed.is_ok() {
-                                store.finish_worker_reset(&vm.name, true)?;
-                            } else {
-                                store.cancel_workers_reset(&claim.worker_ids);
-                            }
-                        }
-                        removed.map_err(backend_error)?;
-                        self.registered_workers
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner)
-                            .remove(&vm.name);
-                    }
-                }
-                self.ready_kits
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .retain(|_, ready| ready.name != vm.name);
+        if self.vm_quarantined(store, &vm.name) {
+            return Err(Removal::Kept("quarantined".into()));
+        }
+        if vm.purpose == VmPurpose::Shell {
+            let mut spec = self.config.shell.clone();
+            spec.name.clone_from(&vm.name);
+            return self
+                .sbx
+                .remove_stopped_shell_vm(&spec, deadline)
+                .map(|_| ())
+                .map_err(|error| Removal::Kept(error.to_string()));
+        }
+        // A current Kit's preparation holds its Kit lock: no job starts on
+        // the VM while it is removed.
+        let spec = candidate
+            .current
+            .then(|| self.spec_for_recorded_kit(&vm.name))
+            .flatten();
+        let lock = spec
+            .as_ref()
+            .map(|spec| self.kit_lock(spec))
+            .transpose()
+            .map_err(|error| Removal::Failed(error.to_string()))?;
+        let _guard = lock.as_ref().map(|lock| {
+            lock.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        });
+        let registered = store
+            .begin_automatic_retire(&vm.name)
+            .map_err(|error| Removal::Kept(error.to_string()))?;
+        let removed = self
+            .sbx
+            .remove_unused_kit_vm(&vm.name, &vm.key, live, deadline);
+        if registered {
+            if removed.is_ok() {
+                store
+                    .finish_worker_reset(&vm.name, true)
+                    .map_err(|error| Removal::Failed(error.to_string()))?;
+            } else {
+                store.cancel_workers_reset(std::slice::from_ref(&vm.name));
             }
         }
+        match removed {
+            Ok(_) => {}
+            Err(marsh_sbx::SbxError::ActiveWorkerState(_)) => {
+                return Err(Removal::Kept("it started or is in use".into()));
+            }
+            Err(error) => return Err(Removal::Failed(backend_error(error).to_string())),
+        }
+        self.registered_workers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&vm.name);
+        self.ready_kits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|_, ready| ready.name != vm.name);
         Ok(())
     }
 
@@ -547,7 +515,6 @@ mod tests {
             in_use: None,
             quarantined: false,
             running: false,
-            known_here: false,
             last_used_ms,
         }
     }
@@ -555,7 +522,7 @@ mod tests {
     #[test]
     fn superseded_and_long_unused_vms_go_and_nothing_in_use_does() {
         assert!(
-            decide(&vm(false, Some(NOW - DAY_MS)), NOW, 3 * DAY_MS)
+            decide(&vm(false, Some(NOW)), NOW, 3 * DAY_MS)
                 .unwrap()
                 .starts_with("superseded")
         );
@@ -583,16 +550,12 @@ mod tests {
         let mut quarantined = vm(false, Some(0));
         quarantined.quarantined = true;
         assert!(decide(&quarantined, NOW, 3 * DAY_MS).is_err());
-        // A Kit VM already running when this daemon started may hold a job
-        // of an earlier daemon; one this daemon served and knows idle goes.
+        // A running VM is never removed here, whoever served it.
         let mut running = vm(false, Some(0));
         running.running = true;
         assert!(decide(&running, NOW, 3 * DAY_MS).is_err());
-        running.known_here = true;
-        assert!(decide(&running, NOW, 3 * DAY_MS).is_ok());
         let mut shell = vm(false, Some(0));
         shell.purpose = VmPurpose::Shell;
-        shell.running = true;
         assert!(
             decide(&shell, NOW, 3 * DAY_MS)
                 .unwrap()
@@ -604,15 +567,15 @@ mod tests {
     fn stock_times_are_read_as_utc() {
         assert_eq!(utc_millis("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(
+            utc_millis("2026-11-03T16:38:03.431+01:00"),
+            Some(1_793_720_283_431)
+        );
+        assert_eq!(
             utc_millis("2026-11-03T15:38:03.431Z"),
             Some(1_793_720_283_431)
         );
         assert_eq!(utc_millis("2000-03-01T00:00:00.5Z"), Some(951_868_800_500));
-        for bad in [
-            "2026-11-03T15:38:03+01:00",
-            "yesterday",
-            "2026-13-03T00:00:00Z",
-        ] {
+        for bad in ["2026-11-03T15:38:03", "yesterday", "2026-13-03T00:00:00Z"] {
             assert_eq!(utc_millis(bad), None, "{bad}");
         }
     }

@@ -40,6 +40,8 @@ impl Guarded {
 
     fn kill_and_reap(&mut self) -> Option<ExitStatus> {
         let mut child = self.child.take()?;
+        // Jobs the shell put in groups of their own (pipelines, `&`) too.
+        kill_descendants(child.id());
         if self.group {
             let _ = nix::sys::signal::killpg(pid_of(&child), nix::sys::signal::Signal::SIGKILL);
         }
@@ -217,7 +219,9 @@ pub fn has_exited(pid: i32) -> bool {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_err()
         || u32::try_from(pid).is_ok_and(|pid| {
             let states = thread_states(pid);
-            !states.is_empty() && states.iter().all(|state| *state == 'Z')
+            // Recent macOS `ps` lists no row at all for a zombie.
+            (cfg!(not(target_os = "linux")) && states.is_empty())
+                || (!states.is_empty() && states.iter().all(|state| *state == 'Z'))
         })
 }
 

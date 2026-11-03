@@ -1643,6 +1643,96 @@ fn worker_reset_refuses_active_selection_atomically_and_preserves_other_state() 
     assert_eq!(store.job(&job).unwrap().state, JobState::Cancelled);
 }
 
+/// Garbage collection and drained Kit changes claim a VM only when nothing
+/// recorded can still run there; unlike an operator reset they never take a
+/// quarantined worker (whose containers are cleanup-uncertain).
+#[test]
+fn automatic_retirement_refuses_reserved_quarantined_and_uncertain_workers() {
+    let home = home();
+    let store = reopen(home.path()).unwrap();
+    let session = store.attach_shell(1, authority("/Users/example/project", home.path()));
+    let scope = store.status(None).scope_id;
+    let register = |worker: &str| {
+        store
+            .register_worker(WorkerStatus {
+                worker_id: worker.into(),
+                vm_id: worker.into(),
+                scope_id: scope.clone(),
+                kit_ref: worker.into(),
+                kits: Vec::new(),
+                warm: true,
+                health: WorkerHealth::Ready,
+                container_capacity: 2,
+                active_container_ids: Vec::new(),
+                quarantine: None,
+            })
+            .unwrap();
+    };
+    let job = |command: &str| {
+        store
+            .begin_job(NewJob {
+                label: None,
+                session_id: session.clone(),
+                command: command.into(),
+                kit_ref: command.into(),
+                workload_image: format!("fixture@sha256:{}", "a".repeat(64)),
+                mounts: Vec::new(),
+            })
+            .unwrap()
+            .0
+    };
+    for worker in ["idle", "reserved", "quarantined", "uncertain"] {
+        register(worker);
+    }
+    let reserved = job("reserved");
+    store
+        .reserve_worker(&reserved, "reserved", "reserved")
+        .unwrap();
+    store
+        .quarantine_worker("quarantined", "transport lost")
+        .unwrap();
+    let uncertain = job("uncertain");
+    store
+        .reserve_worker(&uncertain, "uncertain", "uncertain")
+        .unwrap();
+    store
+        .mark_running(&uncertain, "uncertain", "uncertain", &"c".repeat(64))
+        .unwrap();
+    store
+        .finish_job(
+            &uncertain,
+            ExitStatus {
+                code: None,
+                cause: "controller_lost".into(),
+            },
+            false,
+            CleanupState::Uncertain,
+            TimingReport::default(),
+        )
+        .unwrap();
+    for worker in ["reserved", "quarantined", "uncertain"] {
+        assert!(store.begin_automatic_retire(worker).is_err(), "{worker}");
+    }
+    let quarantined = store
+        .status(None)
+        .workers
+        .into_iter()
+        .find(|worker| worker.worker_id == "quarantined")
+        .unwrap();
+    assert_eq!(quarantined.health, WorkerHealth::Quarantined);
+    // An idle worker is claimed (no job reserves it meanwhile); an unknown
+    // VM with no recorded job is claimable but not registered.
+    assert!(!store.begin_automatic_retire("never-served").unwrap());
+    assert!(store.begin_automatic_retire("idle").unwrap());
+    let blocked = job("idle");
+    assert!(store.reserve_worker(&blocked, "idle", "idle").is_err());
+    store.finish_worker_reset("idle", true).unwrap();
+    // A job between its VM's preparation and its reservation is unreserved
+    // and queued: nothing is claimed meanwhile.
+    register("next");
+    assert!(store.begin_automatic_retire("next").is_err());
+}
+
 #[test]
 fn abort_receipt_is_explicitly_failed() {
     let home = home();

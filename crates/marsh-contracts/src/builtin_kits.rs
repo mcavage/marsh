@@ -8,6 +8,10 @@ pub const BUILTIN_KITS: &[(&str, &str)] = &[
     ("pix", "docker.io/mcavage/marsh-pix:stable"),
 ];
 
+/// Where marsh publishes its packaged Kits: `kits/marsh-claude` is
+/// `docker.io/mcavage/marsh-claude`.
+pub const PACKAGED_REPOSITORY_PREFIX: &str = "docker.io/mcavage/";
+
 /// The tag a known Kit name installs from.
 #[must_use]
 pub fn reference(name: &str) -> Option<&'static str> {

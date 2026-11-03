@@ -32,6 +32,11 @@ pub(crate) struct Record {
     /// until `marsh kit install NAME`.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub declined: BTreeSet<String>,
+    /// The digest an automatic update last wrote to `commands.json` for each
+    /// command: what tells such an entry from one the user wrote (the move to
+    /// the Kits a newer marsh ships only replaces these).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub automatic: std::collections::BTreeMap<String, String>,
 }
 
 impl Record {
@@ -43,7 +48,22 @@ impl Record {
         })
     }
 
+    /// Whether `commands.json` naming `reference` for `command` was written
+    /// by an automatic update (this record, or a recent update's target for
+    /// homes updated before it existed).
+    pub fn wrote_automatically(&self, command: &str, reference: &str) -> bool {
+        self.automatic
+            .get(command)
+            .is_some_and(|to| to == reference)
+            || self
+                .recent
+                .iter()
+                .any(|update| update.command == command && update.to == reference)
+    }
+
     pub fn record_update(&mut self, update: KitUpdateRecord) {
+        self.automatic
+            .insert(update.command.clone(), update.to.clone());
         self.recent.push(update);
         let excess = self.recent.len().saturating_sub(MAX_RECENT);
         self.recent.drain(..excess);
