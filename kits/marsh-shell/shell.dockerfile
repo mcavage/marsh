@@ -4,7 +4,7 @@
 # (image-base/assemble-packages.sh). The runtime image has no package manager.
 FROM dhi.io/debian-base:trixie@sha256:834d20c209fe4aac50dc95877d68d421f97ea38a905586bfdaf938bebb3924c0 AS base
 
-FROM dhi.io/debian-base:trixie-dev@sha256:e84297c84888b5862a21c14b262f6a649e5700fd8207ba2417869fe19be31494 AS packages
+FROM dhi.io/debian-base:trixie-dev@sha256:af61a3296b0c92f16969f11ce8c2a93722e84c9e5c1bb42ed6afec796be71b04 AS packages
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
