@@ -18,13 +18,15 @@ marsh config peer-review off
 ## What the agent is told
 
 While peer review is on, each job's `/run/marsh/context.md` (`marsh context`
-in a job) ends with a short section. The section names the kinds of work that
-need a review, the example families in each class, and the ready reviewers
-this job may start:
+in a job) has a short section right after its opening paragraph, before the
+rest of the instructions. The section says which work needs a review (substantial work, the
+agent's call, with examples; not quick answers, typo or one-line fixes, or
+lookups), spells out the `task` call, lists the example families in each class, and the
+ready reviewers this job may start:
 
 ```text
-## Second opinion
-Before you report substantial work as done (a code change, a plan or design, an analysis someone will act on, a document the user will send; not a quick answer or a trivial edit), get a second opinion: call `task` with the reviewer for your own model's class from the table below, from a different vendor than your model's, sharing the folder, asking for findings only. Then address them, or tell the user which you didn't and why. No row for your class with another vendor: skip it.
+## Peer review: required before your final answer
+Before you report substantial work as done, get a review: call the marsh `task` tool with the agent and model of the row below for your own model's class whose vendor is not your model's, `description: "peer review"`, and a prompt that says what to review and asks for findings only, changing no files (e.g. "Review the uncommitted changes in this folder for bugs, missed cases and missing tests", or the plan or document itself). Substantial means, e.g., a code change beyond a trivial edit (new behavior, a bug fix, a refactor, anything with tests), a plan or design, an analysis someone will act on, a document the user will send. Not for quick answers, typo or one-line fixes, or pure lookups. Then fix what it finds, or tell the user which findings you left and why. No row for your class from another vendor: skip it.
 Classes: small (claude-haiku, gpt-luna, gemini-flash), mid (claude-sonnet, gpt-terra, gemini-pro), large (claude-opus, claude-fable, gpt-sol, gpt-astra).
 
 | class | vendor | task arguments |
