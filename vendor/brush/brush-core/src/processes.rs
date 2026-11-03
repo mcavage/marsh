@@ -32,6 +32,9 @@ pub struct ChildProcess {
     interrupted: bool,
     term_trapped: bool,
     terminated: bool,
+    /// The result of a process collected before anyone waited for it (see
+    /// [`ChildProcess::reap_if_exited`]), kept for the wait.
+    reaped: Option<Result<ExecutionResult, std::io::Error>>,
 }
 
 impl ChildProcess {
@@ -52,6 +55,7 @@ impl ChildProcess {
             interrupted: false,
             term_trapped: false,
             terminated: false,
+            reaped: None,
         }
     }
 
@@ -133,8 +137,35 @@ impl ChildProcess {
         self.pgid
     }
 
+    /// Collects the process's status if it has exited, as Bash's `SIGCHLD`
+    /// handler does, so its PID no longer names a process (`kill -0` fails).
+    /// The status is kept for whoever waits for or polls the process.
+    pub(crate) fn reap_if_exited(&mut self) {
+        if self.reaped.is_some() {
+            return;
+        }
+        let checkable_future = self
+            .exec_future
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(result) = checkable_future.now_or_never() {
+            #[cfg(unix)]
+            crate::signals::note_child_reaped();
+            self.reaped = Some(result);
+        }
+    }
+
     /// Waits for the process to exit.
     pub async fn wait(&mut self) -> Result<ProcessWaitResult, error::Error> {
+        if let Some(result) = self.reaped.take() {
+            return Ok(ProcessWaitResult::Completed {
+                result: result?,
+                interrupted: std::mem::take(&mut self.interrupted),
+                terminated: std::mem::take(&mut self.terminated),
+                killed_by_int: self.killed_by_int.load(Ordering::Relaxed),
+            });
+        }
+
         #[allow(unused_mut, reason = "only mutated on some platforms")]
         let mut sigtstp = sys::signal::tstp_signal_listener()?;
         #[allow(unused_mut, reason = "only mutated on some platforms")]
@@ -212,6 +243,9 @@ impl ChildProcess {
     }
 
     pub(crate) fn poll(&mut self) -> Option<Result<ExecutionResult, error::Error>> {
+        if let Some(result) = self.reaped.take() {
+            return Some(result.map_err(Into::into));
+        }
         let checkable_future = self
             .exec_future
             .get_mut()

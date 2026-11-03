@@ -207,6 +207,7 @@ mod imp {
             // SAFETY: the main thread did not take the request; it is ours again.
             command = unsafe { Box::from_raw(pointer) };
         }
+        let _mask = crate::sys::signal::SavedMask::new();
         command.exec()
     }
 
@@ -720,7 +721,7 @@ mod imp {
             // signal sockets, never touches the parent's runtime, and leaves with _exit.
             let pid = unsafe { libc::fork() };
             if pid == 0 {
-                run_child(flag, group, signals, blocked.previous(), keep, body);
+                run_child(flag, group, signals, blocked.for_child(), keep, body);
             }
             drop(blocked);
             if pid < 0 {
@@ -818,8 +819,9 @@ mod imp {
                 }
             }
         }
-        // SAFETY: restores the mask the parent had before blocking for the fork;
-        // a signal that arrived since then now takes the dispositions set above.
+        // SAFETY: restores the mask the parent had before blocking for the fork,
+        // with SIGINT as the shell started; a signal that arrived since then
+        // now takes the dispositions set above.
         unsafe { libc::pthread_sigmask(libc::SIG_SETMASK, &raw const mask, std::ptr::null_mut()) };
         close_foreign_pipes(keep);
         let mut pipes = [[-1; 2]; 2];
@@ -844,6 +846,8 @@ mod imp {
             }
         }
         let done = BodyDone(request_write);
+        // The body thread runs the child's shell and takes its SIGINT; it
+        // starts with the mask just restored.
         let thread = std::thread::Builder::new().spawn(move || {
             let _done = done;
             // The parent is waiting for this, and gives up on a child that
@@ -854,6 +858,7 @@ mod imp {
             }
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .worker_threads(2)
+                .on_thread_start(crate::sys::signal::keep_interrupts_off_this_thread)
                 .enable_all()
                 .build();
             let code = match runtime {
@@ -864,7 +869,9 @@ mod imp {
         });
         if let Ok(thread) = thread {
             // The body thread exits the process; until then this thread runs
-            // the in-place execs it asks for.
+            // the in-place execs it asks for (whose pre-exec step restores
+            // SIGINT for the program) and keeps SIGINT off itself.
+            crate::sys::signal::keep_interrupts_off_this_thread();
             while let Some(pointer) = read_exact::<{ size_of::<usize>() }>(request_read) {
                 use std::os::unix::process::CommandExt as _;
                 let pointer = usize::from_ne_bytes(pointer);
@@ -875,6 +882,7 @@ mod imp {
                 // gave up ownership of it.
                 let mut command = unsafe { Box::from_raw(pointer as *mut std::process::Command) };
                 let errno = command.exec().raw_os_error().unwrap_or(libc::EINVAL);
+                crate::sys::signal::keep_interrupts_off_this_thread();
                 let _ = write_all(reply_write, &errno.to_ne_bytes());
             }
             let _ = thread.join();

@@ -64,6 +64,44 @@ list emptied, 4,610 cases), stock upstream at `b562e058` matched Bash in 1,207
 cases and the previous vendored tree in 3,689. The rebased tree matches in
 3,699; no case that matched before fails now, and ten that failed now match.
 
+## Changes since the rebase
+
+Fixes made after the move to `cc73400c`, folded into the area patches:
+
+- SIGINT is taken only by the thread that runs the shell
+  (`0002`, `0003`, `0007`). Every other thread of the shell's process blocks
+  it: the runtime's workers and blocking threads (`on_thread_start`, set in
+  `brush_shell::entry` and in a forked shell's runtime), Brush's own threads
+  (`spawn_running`), and a forked shell's main thread, which runs in-place
+  execs. The shell decides whether an `INT` arrived during a foreground wait
+  once the child is reaped; when another thread took the signal and was
+  preempted before its handler recorded it, the shell reaped the child first,
+  saw no interruption, and the late record then ended the shell at the next
+  command (`group_sigint_during_a_surviving_childs_exit_is_the_childs` failed
+  about 1 run in 100 under load on Linux). Now the signal is either recorded
+  or still pending for the shell's thread, and `signals.rs` counts a pending
+  `INT` (`sigpending`) as arrived; arrivals are counted, so consuming a
+  pending one also covers its handler run when it comes. Because programs
+  inherit the starting thread's mask, every launch gives the child SIGINT as
+  the shell started: forks restore the pre-fork mask with SIGINT as at
+  startup (`BlockedForFork::for_child`), in-place execs unblock it in a
+  pre-exec step (restoring the thread's mask if the exec fails), and
+  embedders use `traps::restore_startup_interrupt_mask` (marsh's cloud
+  `split` branches). Covered by
+  `programs_start_with_sigint_unblocked_from_every_path` (Bash
+  differential) and `cancelled_cloud_split_branches_end_by_sigint`.
+- Finished background jobs are reaped at the next command boundary
+  (`0002`, `0003`), as Bash's `SIGCHLD` handler reaps them. A job's
+  processes were collected only when something waited for or polled the
+  job (an interactive prompt, `jobs`, `wait`), so a noninteractive
+  `while kill -0 $pid; do sleep 1; done` never ended. After each pipeline
+  `JobManager::reap_exited` polls every job process once; a process that
+  has exited keeps its result (`ChildProcess::reap_if_exited`) for the
+  wait or poll that would have collected it, so job selection, pipefail by
+  stage index, `wait PID`/`wait -n`, `jobs` and notifications are
+  unchanged, and the `CHLD` trap counts the child when it is reaped.
+  Covered by `finished_background_jobs_are_reaped_without_a_wait`.
+
 ## Retired per-fix inventory
 
 Each entry describes what that patch changed when introduced, against the old

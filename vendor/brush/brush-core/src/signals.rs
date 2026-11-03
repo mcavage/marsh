@@ -13,6 +13,12 @@
 //! when the runtime's driver next dispatches it, and a check made in between
 //! (a foreground child killed by the same group `INT` has just been reaped)
 //! would miss it and run another command before the shell died.
+//!
+//! An `INT` the kernel has queued but whose handler has not run yet counts as
+//! arrived too. Only the thread that runs the shell takes `INT` (the others
+//! block it, see [`crate::traps::keep_interrupts_off_this_thread`]), so such
+//! an `INT` is either still pending in the kernel or already recorded when the
+//! shell looks, never taken by a thread that has not run the handler yet.
 
 #[cfg(unix)]
 pub(crate) use imp::{
@@ -35,17 +41,83 @@ pub(crate) fn take(_signal: i32) -> bool {
 
 #[cfg(unix)]
 mod imp {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
 
-    /// A signal whose arrivals the handler records into `arrived`.
+    /// A signal whose arrivals the handler counts into `handled`.
+    ///
+    /// An arrival is a handler run not yet consumed, or the signal still
+    /// pending in the kernel. Consuming a pending one counts its handler run
+    /// in advance (`consumed`), so that run is not a new arrival when it comes.
     struct Recorded {
         signal: i32,
-        arrived: Arc<AtomicBool>,
+        handled: Arc<AtomicU64>,
+        consumed: AtomicU64,
         /// Whether this process has asked for the signal since it started (or
         /// since a fork). Handlers outlive a fork, but arrivals are only
         /// observed once the child listens for the signal itself.
         armed: bool,
+    }
+
+    impl Recorded {
+        /// Arrivals so far: handler runs, plus one if an `INT` is pending.
+        fn through(&self) -> u64 {
+            loop {
+                let handled = self.handled.load(Ordering::Acquire);
+                // Only INT is kept off the runtime's other threads; one the
+                // shell started with blocked is never delivered at all.
+                let pending = self.signal == libc::SIGINT
+                    && !crate::sys::signal::interrupts_blocked_at_start()
+                    && kernel_pending(self.signal);
+                // A handler run between the two reads may be the pending
+                // signal's (the query can unblock it here); read again rather
+                // than count it twice.
+                if self.handled.load(Ordering::Acquire) == handled {
+                    return handled + u64::from(pending);
+                }
+            }
+        }
+
+        fn arrived(&self) -> bool {
+            self.through() > self.consumed.load(Ordering::Acquire)
+        }
+
+        /// Consumes every arrival so far, including a pending one; returns
+        /// whether there was one.
+        fn consume(&self) -> bool {
+            let through = self.through();
+            self.consumed.swap(through, Ordering::AcqRel) < through
+        }
+
+        /// Forgets the arrivals so far without querying the kernel (safe in a
+        /// forked child).
+        fn forget(&self) {
+            self.consumed
+                .store(self.handled.load(Ordering::Acquire), Ordering::Release);
+        }
+    }
+
+    /// Whether `signal` is pending for this process: queued by the kernel but
+    /// not yet taken by a thread to run its handler.
+    fn kernel_pending(signal: i32) -> bool {
+        // `sigpending` reports only signals the calling thread blocks, so block
+        // the signal around the query. Unblocking it may run its handler here.
+        // SAFETY: every set is initialized by sigemptyset, pthread_sigmask or
+        // sigpending before it is read, and the thread's mask is restored.
+        unsafe {
+            let mut only: libc::sigset_t = std::mem::zeroed();
+            let mut previous: libc::sigset_t = std::mem::zeroed();
+            let mut pending: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&raw mut only);
+            libc::sigaddset(&raw mut only, signal);
+            if libc::pthread_sigmask(libc::SIG_BLOCK, &raw const only, &raw mut previous) != 0 {
+                return false;
+            }
+            let found = libc::sigpending(&raw mut pending) == 0
+                && libc::sigismember(&raw const pending, signal) == 1;
+            libc::pthread_sigmask(libc::SIG_SETMASK, &raw const previous, std::ptr::null_mut());
+            found
+        }
     }
 
     static LISTENING: AtomicBool = AtomicBool::new(false);
@@ -106,17 +178,26 @@ mod imp {
         if let Some(entry) = recorded.iter_mut().find(|entry| entry.signal == signal) {
             if !entry.armed {
                 // Arrivals from before this process listened are not its own.
-                entry.arrived.store(false, Ordering::Release);
+                entry.forget();
                 entry.armed = true;
                 LISTENING.store(true, Ordering::Release);
             }
             return;
         }
-        let arrived = Arc::new(AtomicBool::new(false));
-        if signal_hook::flag::register(signal, Arc::clone(&arrived)).is_ok() {
+        let handled = Arc::new(AtomicU64::new(0));
+        let counter = Arc::clone(&handled);
+        // SAFETY: the action only increments an atomic, which is
+        // async-signal-safe.
+        let registered = unsafe {
+            signal_hook::low_level::register(signal, move || {
+                counter.fetch_add(1, Ordering::AcqRel);
+            })
+        };
+        if registered.is_ok() {
             recorded.push(Recorded {
                 signal,
-                arrived,
+                handled,
+                consumed: AtomicU64::new(0),
                 armed: true,
             });
             LISTENING.store(true, Ordering::Release);
@@ -133,7 +214,7 @@ mod imp {
         };
         recorded
             .iter()
-            .filter(|entry| entry.armed && entry.arrived.swap(false, Ordering::AcqRel))
+            .filter(|entry| entry.armed && entry.consume())
             .map(|entry| entry.signal)
             .collect()
     }
@@ -149,18 +230,16 @@ mod imp {
         recorded
             .iter()
             .filter(|entry| entry.armed && entry.signal == signal)
-            .fold(false, |arrived, entry| {
-                entry.arrived.swap(false, Ordering::AcqRel) || arrived
-            })
+            .fold(false, |arrived, entry| entry.consume() || arrived)
     }
 
     /// Whether `signal` arrived since it was last taken, leaving the record.
     pub(crate) fn arrived(signal: i32) -> bool {
         LISTENING.load(Ordering::Acquire)
             && RECORDED.lock().is_ok_and(|recorded| {
-                recorded.iter().any(|entry| {
-                    entry.armed && entry.signal == signal && entry.arrived.load(Ordering::Acquire)
-                })
+                recorded
+                    .iter()
+                    .any(|entry| entry.armed && entry.signal == signal && entry.arrived())
             })
     }
 
@@ -183,7 +262,7 @@ mod imp {
             return;
         };
         for entry in recorded.iter().filter(|entry| entry.signal == signal) {
-            entry.arrived.store(false, Ordering::Release);
+            entry.consume();
         }
     }
 
@@ -196,7 +275,7 @@ mod imp {
         if let Ok(mut recorded) = RECORDED.try_lock() {
             for entry in recorded.iter_mut() {
                 entry.armed = false;
-                entry.arrived.store(false, Ordering::Release);
+                entry.forget();
             }
         }
     }

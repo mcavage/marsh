@@ -75,11 +75,15 @@ impl SplitWorkspace for CloudSplit {
                 .stdout(stdout)
                 .stderr(stderr)
                 .process_group(0);
+            // Cancellation is SIGINT to the branch group; a branch started
+            // from a thread that keeps SIGINT off must not inherit that.
+            brush_core::traps::restore_startup_interrupt_mask(&mut command);
             match command.spawn() {
                 Ok(mut child) => {
                     if let Some(mut stdin) = child.stdin.take() {
                         let input = input.clone();
                         std::thread::spawn(move || {
+                            brush_core::traps::keep_interrupts_off_this_thread();
                             let _ = stdin.write_all(&input);
                         });
                     }
@@ -115,6 +119,7 @@ impl SplitHandle for Running {
             signal_groups(&children, nix::sys::signal::Signal::SIGINT);
             let children = Arc::clone(&children);
             std::thread::spawn(move || {
+                brush_core::traps::keep_interrupts_off_this_thread();
                 std::thread::sleep(CANCEL_GRACE);
                 signal_groups(&children, nix::sys::signal::Signal::SIGKILL);
             });
@@ -129,13 +134,23 @@ impl SplitHandle for Running {
             .len();
         let mut codes = Vec::with_capacity(count);
         for index in 0..count {
-            let child = self
+            let pid = self
                 .children
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)[index]
-                .take();
-            let code = child.and_then(|mut child| {
-                let status = child.wait().ok();
+                .as_ref()
+                .and_then(|child| i32::try_from(child.id()).ok());
+            // The branch stays in the list, so a cancel still reaches its
+            // group, until it has exited; it is reaped only then, under the
+            // lock, so a cancel never signals a group ID that was freed.
+            if let Some(pid) = pid {
+                await_exit_unreaped(pid);
+            }
+            let mut children = self
+                .children
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let code = children[index].take().and_then(|mut child| {
                 // The branch's leftover processes must not write after capture.
                 if let Ok(pid) = i32::try_from(child.id()) {
                     let _ = nix::sys::signal::killpg(
@@ -143,6 +158,7 @@ impl SplitHandle for Running {
                         nix::sys::signal::Signal::SIGKILL,
                     );
                 }
+                let status = child.wait().ok();
                 status.map(|status| {
                     status
                         .code()
@@ -150,6 +166,7 @@ impl SplitHandle for Running {
                         .unwrap_or(125)
                 })
             });
+            drop(children);
             codes.push(code.or(Some(127)));
         }
         let cancelled = self.cancelled.load(std::sync::atomic::Ordering::Acquire);
@@ -195,5 +212,19 @@ impl SplitHandle for Running {
                 }
             }),
         })
+    }
+}
+
+/// Blocks until child `pid` has exited, leaving it unreaped (its PID and
+/// group ID stay reserved).
+fn await_exit_unreaped(pid: i32) {
+    let Some(pid) = rustix::process::Pid::from_raw(pid) else {
+        return;
+    };
+    let options = rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOWAIT;
+    while let Err(error) = rustix::process::waitid(rustix::process::WaitId::Pid(pid), options) {
+        if error != rustix::io::Errno::INTR {
+            return;
+        }
     }
 }
