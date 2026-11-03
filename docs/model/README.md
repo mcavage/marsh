@@ -48,15 +48,19 @@ The code-location table below records the implementation mapping and known gaps.
   transport generation. Start, exit, and verified cgroup cleanup are in-band frames;
   transport loss makes started sessions uncertain and quarantines the VM; a dead idle
   supervisor is replaced only after a failed liveness ping with no live attempt.
-- `KitSwitch.tla`: one Kit command name and the VMs of the Kit images it has named. A
-  Kit change (an automatic update, `marsh kit install`/`uninstall`, the move to the Kits a
-  newer marsh ships) moves the name at once, whatever runs: new jobs start on the new Kit's
-  VM, and the VM it moved away from keeps its running jobs (draining) and is retired only
-  when none runs there; the name may move back to a draining Kit. Invariants
-  `ChangeSparesRunning`, `StartsOnCurrent`, `RunningHasVM`; liveness `DrainEnds`. Controls:
-  `retireBusy` (a draining VM retired under a running job: ChangeSparesRunning) and
-  `admitDraining` (a new job started on a draining VM: StartsOnCurrent). Attached-shell
-  pins that also hold a draining VM are a guard of the same retire, not modeled.
+- `KitSwitch.tla`: one Kit command name and the VMs of the Kit images it has named, across
+  daemon restarts. A Kit change (an automatic update, `marsh kit install`/`uninstall`, the
+  move to the Kits a newer marsh ships) moves the name at once: new jobs start on the new
+  Kit's VM; the VM it moved away from is retired at once only when provably idle (no live
+  or uncertain job record, and either served by this daemon run or shown to run no
+  container), else it drains. Garbage collection removes a VM only while stock lists it
+  stopped with no live or uncertain record, re-checked under the VM's fence after its
+  observation. The daemon may restart (forgetting what it served and what drains; live
+  receipts become uncertain; containers keep running) and the environment may stop a VM.
+  Invariants `ChangeSparesRunning`, `StartsOnCurrent`, `RunningHasVM`; liveness `DrainEnds`.
+  Controls: `retireBusy` (retire under a running job), `trustTable` (trust only live
+  records after a restart), `gcRunning` (collect a running VM), `gcStale` (collect on the
+  stale observation) — all ChangeSparesRunning — and `admitDraining` (StartsOnCurrent).
 - `Grants.tla`: an ACP session published as an MCP tool and an MCP pipeline loaded into a
   named sandbox. Both use the same model: publish binds one target incarnation, revoke is
   terminal, and requests and one-time permissions are checked when delivered. The same
@@ -223,7 +227,7 @@ positive config fails or a negative control passes or fails for the wrong reason
 | RevokeChild, Restart (revoke all), HostAdoptChild, HostCleanChild | marsh-daemon `dev_broker.rs` (`revoke_session` at session end in marsh-backend `open_shell`, `revoke_all` at `marsh stop`/`marsh reset` and in `marshd` startup, `remove_children`) |
 | Admit / Run / Exit / Cleanup / Cancel | marsh-sbx `StockSbx::launch_worker` (refuses a quarantined VM or a stale worker generation; one `AttemptRoute` per attempt on the VM's retained worker transport); marsh-worker `control.rs` (per-attempt start, exit and cleanup frames) and `transport.rs` (`cancellation`); a `docker create` that Docker refused is Run+Exit+Cleanup only after marsh-runtime `remove_labelled` proves no container with its per-create label remains (`RuntimeError::CreateRefused`); any other create error is uncertain and quarantines. Not implemented as modeled: a per-VM `CAP`; concurrency is bounded by the daemon's session pool (`marsh-daemon/src/process.rs` `admit`) |
 | TransportLoss / ReplaceTransport / Retire | marsh-sbx `ensure_worker_lease` (a dead transport with live attempts quarantines the VM in `quarantined_workers`, with its reason; a live one that is slow to answer a ping fails only the new start; an idle one is replaced under a new worker generation; a reinstalled worker artifact is not swapped in under running attempts), `WorkerLoss` (the loss diagnostic), `stop_quarantined_because`, `retire_kit_vm_before` (`marsh workers reset KIT`). marsh-backend `execute`: a start or wall timeout with the transport up sends Cancel and waits `WORKER_CANCEL_SETTLE` for the worker's verified report (Cleanup), not TransportLoss |
-| KitSwitch: Change / Start / RetireDrained / Reuse | marsh-backend `lib.rs`: `claim_old_vm` (Change: retire the replaced Kit's VM now when idle, else drain; never refused for running work) from `apply_upgrade` (updates), `unregister` (`uninstall_kit`, `move_to_shipped`), and `bring_shipped_source_kits` (daemon start, nothing running); Start is `kit_spec` of the registered name; `retire_drained` (each background pass: drops a VM the name names again — Reuse — and otherwise retires only when `DaemonStore::worker_busy` is false and marsh-sbx `kit_vm_in_use` sees no running job or attached-shell pin); `pending_kit_changes` (`marsh status` `kit_updates.pending`) |
+| KitSwitch: Change / Start / RetireDrained / Reuse / GcObserve / GcRetire / Restart / StopVM | marsh-backend `lib.rs`: `claim_old_vm` (Change) and `retire_drained` both go through `automatic_claim` (CanRetire: not busy or pinned, not quarantined, marsh-daemon `DaemonStore::begin_automatic_retire` refuses reservations and unfinished or cleanup-uncertain receipts atomically, and a VM this run never served needs marsh-sbx `verify_no_running_containers`), never the operator-reset claim; Change callers are `apply_upgrade`, `unregister` (`uninstall_kit`, `move_to_shipped`) and `bring_shipped_source_kits`. Start is `kit_spec` of the registered name; Reuse is `retire_drained` dropping a VM the name names again. `vm_gc.rs` `collect_vms` (GcObserve) and `remove_recorded` (GcRetire: the store claim, then marsh-sbx `remove_unused_kit_vm` / `remove_stopped_shell_vm`, which list the VM afresh under its transition fence and refuse it unless stopped). Restart is daemon start (`draining_kits`, `registered_workers` in memory; receipts journaled; `DaemonStore::with_master_token` makes running jobs unknown). StopVM is stock. |
 | ContainerEnds / AutoRetire | the quarantine stop (`stop_quarantined_name`, `sbx stop`) or the container's own end; marsh-backend `worker_recovery.rs` `recover_quarantined_vm` (background pass each minute, and before a job prepares the VM): no unfinished job record on the VM (`DaemonStore::worker_has_unfinished_jobs`), then marsh-sbx `verify_no_running_containers` (recorded VM absent, stopped, or running with an empty `docker ps`; otherwise it stays quarantined with the reason in `WorkerQuarantine::recovery`), then the same retirement as Retire; held slots are released as after a reset |
 | Shell: Admit / Run / Exit / Cleanup | marsh-sbx `shell_supervisor.rs` (`Supervisor::spawn`, `Control::cleanup_session`); guest `marsh/src/shell_supervisor.rs` |
 | Shell: TransportLoss / ReplaceTransport | marsh-sbx `shell_supervisor.rs` (`lose`, `ping`); `ensure_shell_lease` (replace idle, quarantine with live attempts) |

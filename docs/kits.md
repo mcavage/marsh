@@ -133,16 +133,23 @@ a new marsh starts, each packaged command that an update had moved to an image
 of its own repository (a `commands.json` entry marsh wrote, not a tag you
 installed) is checked against the image this release pins:
 
-- if that image is older than the pin (by the `created` time of its image
-  configuration in the registry), the command moves to the pin, like an
-  update: the pinned image's VM is prepared first, then new jobs use it, and
+- if an automatic update wrote that entry (marsh records which ones; a digest
+  you put in `commands.json` yourself stays) and its image is older than the
+  pin, the command moves to the pin, like an update: the pinned image's VM is prepared first, then new jobs use it, and
   `marsh status` lists the switch. A newer image stays, and later updates
-  apply as before. If the registry cannot be reached, the command stays until
-  it can (marsh retries every ten minutes).
+  apply as before. If the order cannot be told, the command stays and marsh
+  retries every ten minutes.
 - a dev or local build (`make dev`, `make dist-local`) always runs the source
   Kits it installed: before the first job, each packaged command that an
-  update had pinned to a published `…/marsh-NAME` image runs its `kits/marsh-NAME`
-  source Kit again, and updates never move it to a published image.
+  automatic update had pinned to a published `docker.io/mcavage/marsh-NAME`
+  image runs its `kits/marsh-NAME` source Kit again, and updates never move it
+  to a published image.
+
+"Older" is the version each image names (its `org.opencontainers.image.version`,
+else its agent's) when both are numbers and differ, else the `created` time of
+its image configuration. An update never moves a command to an older image,
+and one whose order cannot be told is not taken (it is retried at the next
+check).
 
 This happens even with automatic updates off. See [Upgrade](install.md#upgrade).
 

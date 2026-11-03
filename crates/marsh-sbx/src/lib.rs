@@ -1620,13 +1620,12 @@ impl StockSbx {
     }
 
     /// When a published Kit image was built: the `created` time of its
-    /// linux/arm64 image configuration (set by `BuildKit`), as a sortable UTC
-    /// timestamp (`2026-10-29T10:43:13.000000000Z`). `None` when the image
-    /// names no UTC creation time.
+    /// linux/arm64 image configuration (set by `BuildKit`), in nanoseconds
+    /// since the Unix epoch. `None` when the image names no RFC 3339 time.
     ///
     /// # Errors
     /// Fails when Docker cannot read the image configuration.
-    pub fn kit_created(&self, image: &OciImage) -> Result<Option<String>, SbxError> {
+    pub fn kit_created(&self, image: &OciImage) -> Result<Option<i128>, SbxError> {
         let output = self.run_program_bounded_os(
             "read Kit creation time",
             Path::new("docker"),
@@ -1984,11 +1983,12 @@ impl StockSbx {
         self.ownership.lookup(purpose, key)
     }
 
-    /// Removes one recorded Kit VM that nothing uses (garbage collection):
-    /// refused while quarantined, while a running job's mounts or a pin of a
-    /// `live` session hold it, or (unless `may_be_running`) while it runs.
-    /// `key` is its ownership key (the Kit identity). Returns whether a VM was
-    /// removed.
+    /// Removes one recorded, stopped Kit VM that nothing uses (garbage
+    /// collection). Under the VM's transition fence it is listed afresh and
+    /// refused unless stopped (a stopped VM runs no container: no job of this
+    /// or an earlier daemon can be lost), and refused while quarantined or
+    /// while mounts of a job or pins of a `live` session are retained. `key`
+    /// is its ownership key (the Kit identity). Returns whether it was removed.
     ///
     /// # Errors
     /// Fails when ownership, use, or removal cannot be verified.
@@ -1997,7 +1997,6 @@ impl StockSbx {
         name: &str,
         key: &str,
         live: &BTreeSet<String>,
-        may_be_running: bool,
         deadline: Instant,
     ) -> Result<bool, SbxError> {
         validate_name(name)?;
@@ -2015,7 +2014,7 @@ impl StockSbx {
         match self.classify_vm(name, true)? {
             VmClass::Absent => return Ok(false),
             VmClass::Foreign => return Err(SbxError::ForeignVm(name.to_owned())),
-            VmClass::Owned { running, .. } if running && !may_be_running => {
+            VmClass::Owned { running: true, .. } => {
                 return Err(SbxError::ActiveWorkerState(name.to_owned()));
             }
             VmClass::Owned { .. } => {}
@@ -2476,6 +2475,30 @@ impl StockSbx {
         spec: &ShellVmSpec,
         deadline: Instant,
     ) -> Result<bool, SbxError> {
+        self.reset_shell_vm_inner(spec, deadline, false)
+    }
+
+    /// Garbage collection of a shell VM: as [`Self::reset_shell_vm_before`],
+    /// but refused (under the same fences) unless stock lists it stopped and
+    /// it is not quarantined.
+    ///
+    /// # Errors
+    /// Fails when it runs, is quarantined, is in use, or removal cannot be
+    /// verified.
+    pub fn remove_stopped_shell_vm(
+        &self,
+        spec: &ShellVmSpec,
+        deadline: Instant,
+    ) -> Result<bool, SbxError> {
+        self.reset_shell_vm_inner(spec, deadline, true)
+    }
+
+    fn reset_shell_vm_inner(
+        &self,
+        spec: &ShellVmSpec,
+        deadline: Instant,
+        stopped_only: bool,
+    ) -> Result<bool, SbxError> {
         validate_name(&spec.name)?;
         // Even an ephemeral open rejected before ensure may need a later retry
         // if its automatic cleanup cannot read healthy inventory. Remember the
@@ -2502,6 +2525,15 @@ impl StockSbx {
         let (operation, _cleanup) =
             weak_mutex_transition_lock(&self.grant_stock_operation_locks, spec.name.clone());
         let _operation = shell_admission_before(|| operation.try_lock(), deadline)?;
+        if stopped_only
+            && (quarantined
+                || matches!(
+                    self.classify_vm(&spec.name, true)?,
+                    VmClass::Owned { running: true, .. } | VmClass::Foreign
+                ))
+        {
+            return Err(SbxError::ActiveWorkerState(spec.name.clone()));
+        }
         if matches!(self.classify_vm(&spec.name, true)?, VmClass::Owned { .. }) {
             self.uncertain_shell_grants
                 .lock()
@@ -7972,29 +8004,86 @@ fn image_configuration(stdout: &[u8]) -> Result<serde_json::Value, String> {
 
 /// See [`StockSbx::kit_created`]: RFC 3339 in UTC, with the fraction
 /// padded to nanoseconds so that the strings sort by time.
-fn image_created(stdout: &[u8]) -> Result<Option<String>, String> {
+fn image_created(stdout: &[u8]) -> Result<Option<i128>, String> {
     let configuration = image_configuration(stdout)?;
     Ok(configuration
         .get("created")
         .and_then(serde_json::Value::as_str)
-        .and_then(sortable_utc))
+        .and_then(rfc3339_unix_nanos))
 }
 
-fn sortable_utc(text: &str) -> Option<String> {
-    let rest = text.strip_suffix('Z')?;
-    let (seconds, fraction) = rest.split_once('.').unwrap_or((rest, ""));
-    let shape = seconds.len() == 19
-        && seconds
+/// Nanoseconds since the Unix epoch of an RFC 3339 date-time
+/// (`2026-10-29T10:43:13.5+01:00`, `…Z`); `None` for anything else.
+#[must_use]
+pub fn rfc3339_unix_nanos(text: &str) -> Option<i128> {
+    let bytes = text.as_bytes();
+    if bytes.len() < 20 || !matches!(bytes[10], b'T' | b't' | b' ') {
+        return None;
+    }
+    let number = |range: std::ops::Range<usize>| -> Option<i64> {
+        let digits = text.get(range)?;
+        digits
             .bytes()
-            .enumerate()
-            .all(|(index, byte)| match index {
-                4 | 7 => byte == b'-',
-                10 => byte == b'T',
-                13 | 16 => byte == b':',
-                _ => byte.is_ascii_digit(),
-            });
-    (shape && fraction.len() <= 9 && fraction.bytes().all(|byte| byte.is_ascii_digit()))
-        .then(|| format!("{seconds}.{fraction:0<9}Z"))
+            .all(|byte| byte.is_ascii_digit())
+            .then(|| digits.parse().ok())?
+    };
+    if bytes[4] != b'-' || bytes[7] != b'-' || bytes[13] != b':' || bytes[16] != b':' {
+        return None;
+    }
+    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
+    let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days_in_month = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if !(1..=12).contains(&month)
+        || day < 1
+        || day > days_in_month[usize::try_from(month - 1).ok()?]
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    let mut rest = &text[19..];
+    let mut nanos: i128 = 0;
+    if let Some(fraction) = rest.strip_prefix('.') {
+        let length = fraction.bytes().take_while(u8::is_ascii_digit).count();
+        if length == 0 {
+            return None;
+        }
+        let digits = &fraction[..length.min(9)];
+        nanos = format!("{digits:0<9}").parse().ok()?;
+        rest = &fraction[length..];
+    }
+    let offset_seconds: i64 = match rest {
+        "Z" | "z" => 0,
+        _ => {
+            let sign = match rest.as_bytes().first()? {
+                b'+' => 1,
+                b'-' => -1,
+                _ => return None,
+            };
+            let offset = rest.get(1..)?;
+            if offset.len() != 5 || offset.as_bytes()[2] != b':' {
+                return None;
+            }
+            let hours: i64 = offset[..2].parse().ok()?;
+            let minutes: i64 = offset[3..].parse().ok()?;
+            if hours > 23 || minutes > 59 || !offset[..2].bytes().chain(offset[3..].bytes()).all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            sign * (hours * 3600 + minutes * 60)
+        }
+    };
+    // Days from civil (Howard Hinnant).
+    let shifted_year = if month <= 2 { year - 1 } else { year };
+    let era = shifted_year.div_euclid(400);
+    let of_era = shifted_year - era * 400;
+    let shifted_month = if month > 2 { month - 3 } else { month + 9 };
+    let of_year = (153 * shifted_month + 2) / 5 + day - 1;
+    let of_cycle = of_era * 365 + of_era / 4 - of_era / 100 + of_year;
+    let days = era * 146_097 + of_cycle - 719_468;
+    let seconds = ((days * 24 + hour) * 60 + minute) * 60 + second - offset_seconds;
+    Some(i128::from(seconds) * 1_000_000_000 + nanos)
 }
 
 fn image_contract_label(stdout: &[u8]) -> Result<Option<u32>, String> {
@@ -8322,20 +8411,29 @@ mod kit_resolution_tests {
     }
 
     #[test]
-    fn the_creation_time_is_a_sortable_utc_timestamp() {
+    fn the_creation_time_is_read_as_rfc3339_with_offsets() {
         let image = OciImage::parse(format!("docker.io/mcavage/marsh-pi@{DIGEST}")).unwrap();
         let (sbx, _) =
             stock(r#"{"linux/arm64":{"created":"2026-11-02T22:27:19.178412012Z"}}"#.into());
         assert_eq!(
-            sbx.kit_created(&image).unwrap().as_deref(),
-            Some("2026-11-02T22:27:19.178412012Z")
+            sbx.kit_created(&image).unwrap(),
+            Some(1_793_658_439_178_412_012)
         );
         let (sbx, _) = stock(r#"{"created":"2026-10-29T10:43:13Z","config":{}}"#.into());
-        let older = sbx.kit_created(&image).unwrap().unwrap();
-        assert_eq!(older, "2026-10-29T10:43:13.000000000Z");
-        assert!(older < "2026-10-29T10:43:13.5Z".replace(".5Z", ".500000000Z"));
+        assert_eq!(sbx.kit_created(&image).unwrap(), Some(1_793_270_593_000_000_000));
+        // The same instant with an offset; fractions order sub-second builds.
+        assert_eq!(
+            rfc3339_unix_nanos("2026-10-29T11:43:13+01:00"),
+            Some(1_793_270_593_000_000_000)
+        );
+        assert_eq!(
+            rfc3339_unix_nanos("2026-10-29T10:43:13.5-00:00"),
+            Some(1_793_270_593_500_000_000)
+        );
+        assert_eq!(rfc3339_unix_nanos("1970-01-01T00:00:00Z"), Some(0));
         for unusable in [
-            r#"{"created":"2026-10-29T10:43:13+01:00"}"#,
+            r#"{"created":"2026-10-29T10:43:13"}"#,
+            r#"{"created":"2026-02-30T10:43:13Z"}"#,
             r#"{"created":"yesterday"}"#,
             r#"{"config":{}}"#,
         ] {

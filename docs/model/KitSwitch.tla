@@ -3,96 +3,169 @@
 (* named. A Kit change (an automatic update, `marsh kit install` /        *)
 (* `uninstall`, the move to the Kits a newer marsh ships) moves the name  *)
 (* at once, whatever runs: new jobs start on the VM of the Kit the name   *)
-(* now names, and a VM the name moved away from keeps its running jobs    *)
-(* and is retired only once none runs there (draining). The name may move *)
-(* back to a draining Kit, which then serves again. Container/transport   *)
-(* detail is Worker.tla; VM ownership is Ownership.tla.                   *)
+(* now names; a VM it moved away from is retired at once only if it is    *)
+(* provably idle, else it drains and is retired once it is. Garbage       *)
+(* collection removes a VM only while stock lists it stopped and no job   *)
+(* recorded on it is live or uncertain, checked again under the VM's      *)
+(* fence (GcObserve, then GcRetire). The daemon may restart at any time:  *)
+(* it forgets which VMs it served and what drains, its live job records   *)
+(* become uncertain, and the containers keep running (orphans). The       *)
+(* environment may stop a VM, which ends its containers. Container and    *)
+(* transport detail is Worker.tla; VM ownership is Ownership.tla.         *)
 EXTENDS Naturals, FiniteSets
 
-CONSTANTS Jobs, Kits, MaxChanges, Bug
+CONSTANTS Jobs, Kits, MaxChanges, MaxRestarts, MaxStops, Bug
 
 None == "none"
-Bugs == {"none", "retireBusy", "admitDraining"}
+Bugs == {"none", "retireBusy", "admitDraining", "trustTable", "gcRunning", "gcStale"}
 ASSUME Bug \in Bugs
 
 VARIABLES
   cur,      \* the Kit the name runs, or None (uninstalled)
-  vm,       \* [Kits -> BOOLEAN] that Kit's VM exists
+  vm,       \* [Kits -> "absent" | "running" | "stopped"]
+  served,   \* [Kits -> BOOLEAN] this daemon run registered that VM's worker
   draining, \* Kits whose VM the name moved away from while it was in use
-  job,      \* [Jobs -> "idle" | "running" | "done"]
+  job,      \* [Jobs -> "idle" | "running" | "done"] the container, physically
   on,       \* [Jobs -> Kits] the VM a job runs on
-  changes,  \* Kit changes so far (bound)
-  killed,   \* ghost: a retire removed a VM a job was running on
+  rec,      \* [Jobs -> "none" | "live" | "uncertain" | "ended"] its journaled receipt
+  cand,     \* Kits a garbage collection pass observed as removable
+  changes, restarts, stops,
+  killed,   \* ghost: a VM was removed while a container ran in it
   stale     \* ghost: a job started on a VM the name had moved away from
 
-vars == <<cur, vm, draining, job, on, changes, killed, stale>>
+vars == <<cur, vm, served, draining, job, on, rec, cand, changes, restarts, stops,
+          killed, stale>>
 
 K0 == CHOOSE k \in Kits : TRUE
 
 Init ==
   /\ cur = K0
-  /\ vm = [k \in Kits |-> FALSE]
+  /\ vm = [k \in Kits |-> "absent"]
+  /\ served = [k \in Kits |-> FALSE]
   /\ draining = {}
   /\ job = [j \in Jobs |-> "idle"]
   /\ on = [j \in Jobs |-> K0]
-  /\ changes = 0
+  /\ rec = [j \in Jobs |-> "none"]
+  /\ cand = {}
+  /\ changes = 0 /\ restarts = 0 /\ stops = 0
   /\ killed = FALSE
   /\ stale = FALSE
 
-Busy(k) == \E j \in Jobs : job[j] = "running" /\ on[j] = k
+PhysBusy(k) == \E j \in Jobs : job[j] = "running" /\ on[j] = k
+\* What the daemon's records say: a live or cleanup-uncertain job on k.
+RecBusy(k) == \E j \in Jobs : rec[j] \in {"live", "uncertain"} /\ on[j] = k
+RecLive(k) == \E j \in Jobs : rec[j] = "live" /\ on[j] = k
 
-\* A job of the name starts on its current Kit's VM, preparing it if needed.
+\* `automatic_claim`: no recorded live/uncertain job, and either this run
+\* served the VM (its records are complete) or a check of the VM itself
+\* (stopped, or `docker ps` empty) shows no container.
+CanRetire(k) ==
+  IF Bug = "trustTable" THEN ~RecLive(k)
+  ELSE ~RecBusy(k) /\ (served[k] \/ ~PhysBusy(k))
+
+Remove(k) ==
+  /\ vm' = [vm EXCEPT ![k] = "absent"]
+  /\ served' = [served EXCEPT ![k] = FALSE]
+  /\ killed' = (killed \/ PhysBusy(k))
+
+\* A job of the name starts on its current Kit's VM, starting or creating it.
 Start(j, k) ==
   /\ job[j] = "idle"
   /\ \/ cur # None /\ k = cur
      \/ Bug = "admitDraining" /\ k \in draining /\ k # cur
   /\ job' = [job EXCEPT ![j] = "running"]
   /\ on' = [on EXCEPT ![j] = k]
-  /\ vm' = [vm EXCEPT ![k] = TRUE]
+  /\ rec' = [rec EXCEPT ![j] = "live"]
+  /\ vm' = [vm EXCEPT ![k] = "running"]
+  /\ served' = [served EXCEPT ![k] = TRUE]
   /\ stale' = (stale \/ k # cur)
-  /\ UNCHANGED <<cur, draining, changes, killed>>
+  /\ UNCHANGED <<cur, draining, cand, changes, restarts, stops, killed>>
 
+\* The container ends; an uncertain receipt stays uncertain.
 End(j) ==
   /\ job[j] = "running"
   /\ job' = [job EXCEPT ![j] = "done"]
-  /\ UNCHANGED <<cur, vm, draining, on, changes, killed, stale>>
+  /\ rec' = [rec EXCEPT ![j] = IF @ = "live" THEN "ended" ELSE @]
+  /\ UNCHANGED <<cur, vm, served, draining, on, cand, changes, restarts, stops, killed, stale>>
 
-\* The VM of a Kit no longer named goes now when idle, else it drains.
+\* Environment: stock stops a VM; its containers end, live receipts become
+\* uncertain (the transport was lost).
+StopVM(k) ==
+  /\ stops < MaxStops /\ vm[k] = "running"
+  /\ vm' = [vm EXCEPT ![k] = "stopped"]
+  /\ job' = [j \in Jobs |-> IF on[j] = k /\ job[j] = "running" THEN "done" ELSE job[j]]
+  /\ rec' = [j \in Jobs |-> IF on[j] = k /\ rec[j] = "live" THEN "uncertain" ELSE rec[j]]
+  /\ stops' = stops + 1
+  /\ UNCHANGED <<cur, served, draining, on, cand, changes, restarts, killed, stale>>
+
+\* The daemon restarts: memory is lost, containers keep running.
+Restart ==
+  /\ restarts < MaxRestarts
+  /\ served' = [k \in Kits |-> FALSE]
+  /\ draining' = {}
+  /\ cand' = {}
+  /\ rec' = [j \in Jobs |-> IF rec[j] = "live" THEN "uncertain" ELSE rec[j]]
+  /\ restarts' = restarts + 1
+  /\ UNCHANGED <<cur, vm, job, on, changes, stops, killed, stale>>
+
+\* The VM of a Kit no longer named is retired now when provably idle, else
+\* it drains.
 Change(k) ==
   LET old == cur IN
   /\ changes < MaxChanges
   /\ k # cur
   /\ cur' = k
   /\ changes' = changes + 1
-  /\ IF old # None /\ vm[old]
-       THEN IF Busy(old)
-              THEN /\ draining' = draining \cup {old}
-                   /\ UNCHANGED vm
-              ELSE /\ vm' = [vm EXCEPT ![old] = FALSE]
-                   /\ UNCHANGED draining
-       ELSE UNCHANGED <<vm, draining>>
-  /\ UNCHANGED <<job, on, killed, stale>>
+  /\ IF old # None /\ vm[old] # "absent"
+       THEN IF CanRetire(old) \/ Bug = "retireBusy"
+              THEN /\ Remove(old) /\ UNCHANGED draining
+              ELSE /\ draining' = draining \cup {old}
+                   /\ UNCHANGED <<vm, served, killed>>
+       ELSE UNCHANGED <<vm, served, draining, killed>>
+  /\ UNCHANGED <<job, on, rec, cand, restarts, stops, stale>>
 
 \* `retire_drained`: a draining VM the name names again leaves the set;
-\* otherwise it is retired once no job runs there.
+\* otherwise it is retired once provably idle.
 Reuse(k) ==
   /\ k \in draining /\ k = cur
   /\ draining' = draining \ {k}
-  /\ UNCHANGED <<cur, vm, job, on, changes, killed, stale>>
+  /\ UNCHANGED <<cur, vm, served, job, on, rec, cand, changes, restarts, stops, killed, stale>>
 
 RetireDrained(k) ==
   /\ k \in draining /\ k # cur
-  /\ ~Busy(k) \/ Bug = "retireBusy"
-  /\ vm' = [vm EXCEPT ![k] = FALSE]
+  /\ CanRetire(k) \/ Bug = "retireBusy"
+  /\ Remove(k)
   /\ draining' = draining \ {k}
-  /\ killed' = (killed \/ Busy(k))
-  /\ UNCHANGED <<cur, job, on, changes, stale>>
+  /\ UNCHANGED <<cur, job, on, rec, cand, changes, restarts, stops, stale>>
+
+\* Garbage collection: superseded or idle; only a stopped VM with no live
+\* or uncertain record, not draining.
+GcOk(k) ==
+  /\ k \notin draining
+  /\ IF Bug = "gcRunning" THEN vm[k] # "absent" /\ ~RecLive(k)
+     ELSE vm[k] = "stopped" /\ ~RecBusy(k)
+
+GcObserve(k) ==
+  /\ GcOk(k) /\ k \notin cand
+  /\ cand' = cand \cup {k}
+  /\ UNCHANGED <<cur, vm, served, draining, job, on, rec, changes, restarts, stops, killed, stale>>
+
+\* Under the VM's fence the conditions are checked again (`gcStale` trusts
+\* the observation instead).
+GcRetire(k) ==
+  /\ k \in cand
+  /\ cand' = cand \ {k}
+  /\ IF GcOk(k) \/ (Bug = "gcStale" /\ vm[k] # "absent")
+       THEN Remove(k)
+       ELSE UNCHANGED <<vm, served, killed>>
+  /\ UNCHANGED <<cur, draining, job, on, rec, changes, restarts, stops, stale>>
 
 Next ==
   \/ \E j \in Jobs, k \in Kits : Start(j, k)
   \/ \E j \in Jobs : End(j)
   \/ \E k \in Kits \cup {None} : Change(k)
-  \/ \E k \in Kits : Reuse(k) \/ RetireDrained(k)
+  \/ \E k \in Kits : Reuse(k) \/ RetireDrained(k) \/ StopVM(k) \/ GcObserve(k) \/ GcRetire(k)
+  \/ Restart
 
 Spec == /\ Init /\ [][Next]_vars
         /\ \A j \in Jobs : WF_vars(End(j))
@@ -100,18 +173,25 @@ Spec == /\ Init /\ [][Next]_vars
 
 TypeOK ==
   /\ cur \in Kits \cup {None}
-  /\ vm \in [Kits -> BOOLEAN]
-  /\ draining \subseteq Kits
+  /\ vm \in [Kits -> {"absent", "running", "stopped"}]
+  /\ served \in [Kits -> BOOLEAN]
+  /\ draining \subseteq Kits /\ cand \subseteq Kits
   /\ job \in [Jobs -> {"idle", "running", "done"}]
   /\ on \in [Jobs -> Kits]
+  /\ rec \in [Jobs -> {"none", "live", "uncertain", "ended"}]
 
-(* A Kit change never stops running work. *)
+(* No Kit change, drain, or garbage collection removes a VM a container    *)
+(* still runs in, across restarts.                                         *)
 ChangeSparesRunning == ~killed
 (* New jobs start on the Kit the name names now, never a draining one. *)
 StartsOnCurrent == ~stale
-(* A running job's VM exists. *)
-RunningHasVM == \A j \in Jobs : job[j] = "running" => vm[on[j]]
+(* A running container's VM exists and runs. *)
+RunningHasVM == \A j \in Jobs : job[j] = "running" => vm[on[j]] = "running"
 
-(* A draining VM is retired, or serves the name again, once its jobs end. *)
-DrainEnds == \A k \in Kits : (k \in draining) ~> (k \notin draining)
+Uncertain(k) == \E j \in Jobs : rec[j] = "uncertain" /\ on[j] = k
+(* A draining VM is retired, serves the name again, or is forgotten by a    *)
+(* restart (then garbage collection owns it) once its jobs end; one with an *)
+(* uncertain job is left to quarantine recovery (Worker.tla).              *)
+DrainEnds == \A k \in Kits :
+  (k \in draining /\ ~Uncertain(k)) ~> (k \notin draining \/ Uncertain(k))
 =============================================================================
