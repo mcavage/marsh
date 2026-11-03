@@ -1290,6 +1290,7 @@ impl DaemonBackend for StockDaemonBackend {
     }
 
     fn auto_update_kits(&self, store: &DaemonStore) {
+        self.remove_retired_vms();
         self.retire_drained(store);
         self.sbx.release_deferred_session_pins();
         self.recover_quarantined(store);

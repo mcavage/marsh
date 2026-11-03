@@ -431,7 +431,7 @@ claude has 2 running jobs; not stopped (nothing was cancelled; stop it once they
 The same goes for a VM an attached marsh shell holds because it ran that Kit:
 exit the shell first. The command exits 1 when any selected VM was not
 stopped, and stops the rest. `--json` prints one entry per VM, with `action`
-(`stopped`, `already_stopped`, `absent`, `refused`, `failed`), `running_jobs`,
+(`stopped`, `already_stopped`, `absent`, `refused`, `removed`, `failed`), `running_jobs`,
 and the message.
 
 If a stopped VM does not come back healthy, its next call replaces it with a

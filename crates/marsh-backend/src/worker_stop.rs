@@ -147,8 +147,8 @@ impl StockDaemonBackend {
                         return entry("failed", 0, format!("{label}: {error}"));
                     }
                 }
-                // A submitted stop that did not settle may still land: the
-                // claim stays (the VM is quarantined until it is retired).
+                // A stop that did not settle: the VM is retired for good
+                // (durably) and its removal is retried; the claim stays.
                 Err(marsh_sbx::SbxError::QuarantinedVm(_)) => {}
                 Err(_) => store.cancel_workers_reset(&claim.worker_ids),
             }
@@ -165,6 +165,13 @@ impl StockDaemonBackend {
                 entry("already_stopped", 0, format!("{label} is already stopped"))
             }
             Ok(KitVmStop::Absent) => entry("absent", 0, format!("{label} has no VM yet")),
+            Ok(KitVmStop::Retired) => entry(
+                "removed",
+                0,
+                format!(
+                    "{label}: the stop did not settle, so its VM was removed instead; the next call creates a new one"
+                ),
+            ),
             Err(marsh_sbx::SbxError::ActiveWorkerState(_)) => entry(
                 "refused",
                 0,
@@ -173,9 +180,7 @@ impl StockDaemonBackend {
             Err(marsh_sbx::SbxError::QuarantinedVm(why)) => entry(
                 "failed",
                 0,
-                format!(
-                    "{label}: the stop did not settle; no job starts on {why} until marsh retires it (the next call then creates a new VM)"
-                ),
+                format!("{label}: not stopped: VM {why}; the next call creates a new VM"),
             ),
             Err(error) => entry(
                 "failed",
@@ -183,6 +188,31 @@ impl StockDaemonBackend {
                 format!("{label}: not stopped: {}", backend_error(error)),
             ),
         }
+    }
+
+    /// Remove the VMs the ownership map marks retired for good (a stop that
+    /// did not settle, in this or an earlier daemon run). Each background
+    /// pass, starting when the daemon starts.
+    pub(super) fn remove_retired_vms(&self) {
+        let (removed, failed) = self.sbx.remove_retired_kit_vms();
+        for vm in removed {
+            self.forget_retired(&vm);
+            eprintln!("marshd: removed retired Kit VM {vm}");
+        }
+        for (vm, error) in failed {
+            eprintln!("marshd: retired Kit VM {vm} not removed yet: {error}");
+        }
+    }
+
+    fn forget_retired(&self, vm: &str) {
+        self.ready_kits
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|_, ready| ready.name != vm);
+        self.registered_workers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(vm);
     }
 
     /// Drop what this daemon run cached about a prepared Kit VM, so the next

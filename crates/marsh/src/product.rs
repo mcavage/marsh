@@ -653,7 +653,7 @@ fn workers_stop(
     let incomplete = report
         .entries
         .iter()
-        .any(|entry| matches!(entry.action.as_str(), "refused" | "failed"));
+        .any(|entry| matches!(entry.action.as_str(), "refused" | "failed" | "removed"));
     Ok(ProductOutcome::Complete(i32::from(incomplete)))
 }
 

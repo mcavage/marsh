@@ -105,8 +105,6 @@ const PREPARATION_SBX_TIMEOUT: Duration = Duration::from_mins(5);
 const PREPARATION_CREATE_TIMEOUT: Duration = Duration::from_mins(60);
 /// How long a create that did not report may still land under its name.
 const CREATE_SETTLE: Duration = Duration::from_mins(2);
-/// How long a submitted `sbx stop` that did not report may still land.
-const STOP_SETTLE: Duration = Duration::from_mins(2);
 /// Saved grant mounts of deleted projects dropped while starting one VM.
 const MAX_LOST_GRANT_MOUNTS: usize = 64;
 const PREPARATION_BUILD_TIMEOUT: Duration = Duration::from_mins(20);
@@ -134,8 +132,6 @@ pub struct VmQuarantine {
     pub since_unix_ms: u64,
     /// A submitted `sbx create` did not report: it may still land.
     pub create_pending: bool,
-    /// A submitted `sbx stop` did not settle: it may still land.
-    pub stop_pending: bool,
 }
 
 /// Whether a failed `sbx create` may still finish later: it timed out or its
@@ -206,6 +202,9 @@ pub enum KitVmStop {
     Stopped,
     AlreadyStopped,
     Absent,
+    /// The stop did not settle, so the VM was retired for good and removed;
+    /// the Kit's next job creates a new VM under a new name.
+    Retired,
 }
 
 /// A compatible stock-SBX VM ready to receive jobs.
@@ -2105,31 +2104,97 @@ impl StockSbx {
         // Local stock SBX addresses sandboxes by name; the fresh
         // classification above fenced this name to the recorded UUID.
         let timeout = self.lifecycle_timeout(deadline, "stop Kit VM")?;
+        // Before `sbx stop` is submitted, the VM is durably marked retired
+        // in the ownership map: should this daemon die, or the stop not
+        // settle, it may land at any later time, so the VM never serves
+        // again (no lookup returns it; the next job gets a new VM under a new
+        // name, in this or any later daemon) and is removed. Only a settled
+        // stop lifts the mark.
+        let prior = self.ownership.mark_retired(name)?;
         let outcome = self
             .run_bounded_os("stop Kit VM", timeout, ["stop", name])
             .and_then(|output| Self::require_success("stop Kit VM", output));
-        if matches!(&outcome, Err(SbxError::Io(error)) if marsh_runtime::command_not_started(error))
-        {
+        let not_started = matches!(&outcome, Err(SbxError::Io(error)) if marsh_runtime::command_not_started(error));
+        // Settled only when stock reported the stop done and lists the VM
+        // stopped (or the stop never started).
+        let settled = not_started
+            || (outcome.is_ok()
+                && matches!(
+                    self.classify_vm(name, true),
+                    Ok(VmClass::Owned { running: false, .. })
+                ));
+        if settled && self.ownership.unmark_retired(name, prior).is_ok() {
             return outcome.map(|()| KitVmStop::Stopped);
         }
-        // Submitted: settled only when stock reported the stop done and
-        // lists the VM stopped. Otherwise (a timeout, a lost reply, a
-        // failure, or a VM still listed running) the stop may land later, so
-        // no job may start there: the VM is fenced like a create that did not
-        // report, and retired once the stop can no longer land
-        // (`verify_no_running_containers`).
-        if outcome.is_ok()
-            && let Ok(VmClass::Owned { running: false, .. }) = self.classify_vm(name, true)
-        {
-            return Ok(KitVmStop::Stopped);
-        }
         let detail = match outcome {
+            Ok(()) if settled => "its retired mark could not be lifted".to_owned(),
             Ok(()) => "stock SBX still lists it running".to_owned(),
             Err(error) => error.to_string(),
         };
         let reason = format!("its `marsh workers stop` did not settle ({detail})");
-        self.quarantine_stop_pending(name, reason.clone());
-        Err(SbxError::QuarantinedVm(format!("{name} ({reason})")))
+        self.quarantine_vm(name, reason.clone());
+        // It is idle (a stop runs only on an idle VM): remove it now.
+        match self.remove_retired_locked(name, deadline) {
+            Ok(()) => Ok(KitVmStop::Retired),
+            Err(error) => Err(SbxError::QuarantinedVm(format!(
+                "{name} ({reason}; retired for good, its removal failed and is retried: {error})"
+            ))),
+        }
+    }
+
+    /// Remove a VM marked retired (the caller holds its transition fence and
+    /// stock operation lock), and forget it.
+    fn remove_retired_locked(&self, name: &str, deadline: Instant) -> Result<(), SbxError> {
+        self.drop_worker_lease_before(name, deadline)?;
+        self.grant_mount_references
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(vm, _), _| vm != name);
+        self.remove_owned_vm(name, deadline)?;
+        self.ownership.forget(name)?;
+        self.worker_init_locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(name);
+        self.worker_generations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(name);
+        self.quarantined_workers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(name);
+        Ok(())
+    }
+
+    /// Remove every VM the ownership map marks retired (this daemon's, or an
+    /// earlier daemon's whose removal did not finish). Each is fenced first,
+    /// so nothing is prepared there meanwhile. Returns the ones removed and
+    /// the failures.
+    pub fn remove_retired_kit_vms(&self) -> (Vec<String>, Vec<(String, SbxError)>) {
+        let mut removed = Vec::new();
+        let mut failed = Vec::new();
+        for name in self.ownership.retired_names() {
+            self.quarantine_vm(
+                &name,
+                "retired for good: a `marsh workers stop` did not settle",
+            );
+            let (vm_transition, _vm_cleanup) =
+                weak_rw_transition_lock(&self.grant_vm_transition_locks, name.clone());
+            let _vm_transition = vm_transition
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let (stock_operation, _stock_cleanup) =
+                weak_mutex_transition_lock(&self.grant_stock_operation_locks, name.clone());
+            let _stock_operation = stock_operation
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            match self.remove_retired_locked(&name, Instant::now() + PREPARATION_SBX_TIMEOUT) {
+                Ok(()) => removed.push(name),
+                Err(error) => failed.push((name, error)),
+            }
+        }
+        (removed, failed)
     }
 
     /// Replace a Kit VM that was stopped and did not come back healthy when
@@ -2469,6 +2534,12 @@ impl StockSbx {
         // after acquiring it so no new VM or worker lifecycle can begin once
         // quarantine is visible.
         self.reject_quarantined(&spec.name)?;
+        if self.ownership.is_retired(&spec.name) {
+            return Err(SbxError::QuarantinedVm(format!(
+                "{} (retired for good; the next call creates a new VM)",
+                spec.name
+            )));
+        }
         regular_executable(&spec.worker_binary)?;
         regular_executable(&byte_exec_artifact(&spec.worker_binary))?;
         regular_executable(&job_artifact(&spec.worker_binary))?;
@@ -5045,25 +5116,7 @@ impl StockSbx {
                 reason,
                 since_unix_ms: unix_millis_now(),
                 create_pending,
-                stop_pending: false,
             });
-    }
-
-    /// Fence `vm` after a `sbx stop` that did not settle: no job starts
-    /// there until it is retired, which waits out [`STOP_SETTLE`] while the
-    /// VM still runs.
-    fn quarantine_stop_pending(&self, vm: &str, reason: String) {
-        self.quarantined_workers
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .entry(vm.to_owned())
-            .or_insert_with(|| VmQuarantine {
-                reason,
-                since_unix_ms: unix_millis_now(),
-                create_pending: false,
-                stop_pending: false,
-            })
-            .stop_pending = true;
     }
 
     /// Every Kit VM this adapter refuses, with why and since when.
@@ -5091,20 +5144,6 @@ impl StockSbx {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(vm)
             .cloned();
-        // A submitted stop may still land, whatever the VM shows now (stock
-        // may have stopped it for another reason): retiring the VM, and so
-        // creating the next under its name, before then would let the late
-        // stop end the next job.
-        if pending.as_ref().is_some_and(|quarantine| {
-            quarantine.stop_pending
-                && unix_millis_now().saturating_sub(quarantine.since_unix_ms)
-                    < u64::try_from(STOP_SETTLE.as_millis()).unwrap_or(u64::MAX)
-        }) {
-            return Err(format!(
-                "its stop did not report; waiting up to {} s for it to settle",
-                STOP_SETTLE.as_secs()
-            ));
-        }
         match self
             .classify_vm(vm, true)
             .map_err(|error| format!("cannot list stock sandboxes to check the VM: {error}"))?

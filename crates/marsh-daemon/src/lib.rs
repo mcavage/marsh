@@ -1759,7 +1759,8 @@ pub struct WorkerStopEntry {
     pub kits: Vec<String>,
     pub vm: String,
     /// `stopped`, `already_stopped`, `absent` (no VM yet), `refused` (in
-    /// use; nothing was stopped), or `failed`.
+    /// use; nothing was stopped), `removed` (the stop did not settle, so the
+    /// VM was retired for good and removed), or `failed`.
     pub action: String,
     /// Jobs running or starting on it, when refused for them.
     #[serde(default, skip_serializing_if = "is_zero")]
