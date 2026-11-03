@@ -818,7 +818,7 @@ class Harness(IsolatedScope):
             command = "; ".join(
                 [
                     f"touch {shlex.quote(str(shell_ready))}",
-                    f"while test ! -e {shlex.quote(str(shell_go))}; do sleep 0.01; done",
+                    f"_w=0; while test ! -e {shlex.quote(str(shell_go))}; do _w=$((_w+1)); test \"$_w\" -lt 600 || exit 98; sleep 0.1; done",
                     *branches,
                     *waits,
                     "test \"$s1\" -eq 0 && test \"$s2\" -eq 0 && test \"$s3\" -eq 0",
