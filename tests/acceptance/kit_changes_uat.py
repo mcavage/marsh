@@ -92,6 +92,10 @@ class KitChanges(ScenarioSuite):
         mapping = json.loads(registry.read_text())
         mapping["shell"] = self.shell_image
         registry.write_text(json.dumps(mapping, sort_keys=True) + "\n", encoding="utf-8")
+        # ...and its own record of that update (a hand-written pin has none).
+        (self.control_home / "kit-updates.json").write_text(json.dumps({"recent": [{
+            "command": "shell", "from": "docker.io/mcavage/marsh-shell@sha256:" + "0" * 64,
+            "to": self.shell_image, "unix_ms": 1, "notified": True}]}) + "\n", encoding="utf-8")
 
     # ---- observation ----------------------------------------------------
     def status(self) -> dict[str, Any]:
@@ -366,9 +370,10 @@ class KitChanges(ScenarioSuite):
         require(report.get(vm, {}).get("action") == "kept", f"the draining VM: {report.get(vm)!r}")
         require(vm in self.recorded_vms() and self.sbx_status(vm) == "running",
                 f"{vm} was removed or stopped under its job")
-        ps = subprocess.run([self.sbx, "exec", "-u", "root", vm, "docker", "ps", "-q"],
-                            capture_output=True, text=True, timeout=120)
-        require(ps.returncode == 0 and ps.stdout.strip(), f"the job's container is gone: {ps.stdout!r} {ps.stderr!r}")
+        receipt = self.show(job["job_id"])
+        require(receipt.get("state") == "unknown", f"the job is not recorded uncertain: {receipt!r}"[:600])
+        require("not verified" in report[vm]["reason"] or "running" in report[vm]["reason"],
+                f"kept for the wrong reason: {report[vm]!r}")
         self.kill(process)
         # Its receipt is unknown now; only an operator reset removes the VM.
         reset = self.cli(["reset", "--json"], self.project, timeout=900)

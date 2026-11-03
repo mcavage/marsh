@@ -3111,8 +3111,16 @@ impl DaemonStore {
     pub fn begin_automatic_retire(&self, vm: &str) -> Result<bool, DaemonError> {
         let mut state = self.lock();
         let busy = |why: &str| Err(DaemonError::InvalidState(format!("{vm} {why}")));
-        if state.reservations.values().any(|worker| worker == vm) {
-            return busy("has a job starting on it");
+        // A Kit start between preparing its VM and reserving it is recorded
+        // only as a start or an unreserved queued job: wait for all of them.
+        if state.reservations.values().any(|worker| worker == vm)
+            || !state.starting_kits.is_empty()
+            || state
+                .jobs
+                .values()
+                .any(|job| job.state == JobState::Queued && job.worker_id.is_none())
+        {
+            return busy("may have a job starting on it");
         }
         if state.jobs.values().any(|job| {
             (job.worker_id.as_deref() == Some(vm) || job.vm_id.as_deref() == Some(vm))
