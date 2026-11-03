@@ -200,10 +200,14 @@ impl StockDaemonBackend {
         }
     }
 
-    /// `marsh status`: a registered command's Kit VM that stock last listed
-    /// stopped and this daemon does not serve is a `stopped` worker.
+    /// `marsh status`: a registered command's Kit VM that stock lists stopped
+    /// and this daemon does not serve is a `stopped` worker.
     pub(super) fn annotate_stopped(&self, workers: &mut Vec<WorkerStatus>, scope_id: &str) {
-        let stopped = self.sbx.stopped_kit_vms();
+        let served = workers
+            .iter()
+            .map(|worker| worker.vm_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        let stopped = self.sbx.stopped_kit_vms(&served);
         if stopped.is_empty() {
             return;
         }

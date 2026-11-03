@@ -2170,24 +2170,31 @@ impl StockSbx {
         self.ownership.restore_intent(&spec.name)
     }
 
-    /// The recorded Kit VMs the last stock listing showed stopped (no new
-    /// listing: `marsh status` stays cheap). Empty when none was taken.
+    /// The recorded Kit VMs, other than `served`, that the cached stock
+    /// listing shows stopped (listed afresh only when none is cached and
+    /// there is such a VM). Empty when stock cannot list.
     #[must_use]
-    pub fn stopped_kit_vms(&self) -> BTreeSet<String> {
-        let Some(view) = self.ownership.cached_view() else {
-            return BTreeSet::new();
-        };
-        self.ownership
+    pub fn stopped_kit_vms(&self, served: &BTreeSet<String>) -> BTreeSet<String> {
+        let kits = self
+            .ownership
             .recorded()
             .into_iter()
-            .filter(|(name, purpose, _)| {
-                *purpose == VmPurpose::Kit
-                    && matches!(
-                        self.ownership.classify(&view, name),
-                        VmClass::Owned { running: false, .. }
-                    )
-            })
+            .filter(|(name, purpose, _)| *purpose == VmPurpose::Kit && !served.contains(name))
             .map(|(name, _, _)| name)
+            .collect::<Vec<_>>();
+        if kits.is_empty() {
+            return BTreeSet::new();
+        }
+        let Ok(view) = self.stock_view(false) else {
+            return BTreeSet::new();
+        };
+        kits.into_iter()
+            .filter(|name| {
+                matches!(
+                    self.ownership.classify(&view, name),
+                    VmClass::Owned { running: false, .. }
+                )
+            })
             .collect()
     }
 
@@ -6491,6 +6498,16 @@ impl StockSbx {
                 ],
             )?;
             if output.succeeded() {
+                // A cached listing of it as stopped is stale now: a running
+                // shell's admission must not refuse it on that listing.
+                if self.ownership.cached_view().is_some_and(|view| {
+                    matches!(
+                        self.ownership.classify(&view, vm),
+                        VmClass::Owned { running: false, .. }
+                    )
+                }) {
+                    self.ownership.invalidate();
+                }
                 return serde_json::from_slice(&output.stdout).map_err(|_| {
                     SbxError::IncompatibleVm {
                         vm: vm.to_owned(),
