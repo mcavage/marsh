@@ -122,6 +122,6 @@ jobs:
             load=$!
           fi
           status=0
-          cargo nextest run -p "$PACKAGE" --locked --no-fail-fast -E "$FILTER" --stress-count "$COUNT" || status=$?
+          cargo nextest run -p "$PACKAGE" --locked --no-fail-fast --no-tests=warn -E "$FILTER" --stress-count "$COUNT" || status=$?
           [ -z "${load:-}" ] || kill "$load" 2>/dev/null || true
           exit "$status"

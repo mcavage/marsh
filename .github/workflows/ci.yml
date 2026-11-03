@@ -23,7 +23,8 @@ env:
 # Python and shell harnesses, the TLA+ model), split into parallel jobs, and
 # docs links. Linux arm64 runs all of it. macOS runs clippy and the host side:
 # on a pull request the workspace tests except the platform-neutral guest
-# worker, contract values and Bash audit (Makefile TEST_SCOPE=host), the binary
+# worker, contract values, Bash audit and API probe (Makefile TEST_SCOPE=host),
+# split between two jobs, the binary
 # callers and the entrypoint harnesses; on main, everything. A pull request
 # runs only the lanes its files need (scripts/ci-changes.sh): a docs-only
 # change runs the docs check alone. "CI passed" is the one required check.
@@ -333,14 +334,15 @@ jobs:
         run: make lint
       # Host tests use fake sbx executables and temporary homes; none needs
       # Docker Sandboxes or credentials. A pull request skips the
-      # platform-neutral crates Linux runs (Makefile TEST_SCOPE).
-      - name: make test-unit (host workspace tests, doctests)
+      # platform-neutral crates Linux runs (Makefile TEST_SCOPE). marsh-mcp
+      # and marsh-acp run in macos-callers, which builds their tests anyway.
+      - name: make test-unit (host workspace tests but marsh-mcp and marsh-acp, doctests)
         env:
           TEST_SCOPE: ${{ github.event_name == 'pull_request' && 'host' || 'all' }}
-        run: make test-unit NEXTEST_PROFILE=ci TEST_SCOPE="$TEST_SCOPE"
+        run: make test-unit NEXTEST_PROFILE=ci TEST_SCOPE="$TEST_SCOPE" TEST_EXCLUDE="marsh-mcp marsh-acp"
 
   macos-callers:
-    name: macOS arm64 (binary callers, entrypoints)
+    name: macOS arm64 (MCP and ACP tests, binary callers, entrypoints)
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.host == 'true') }}
     runs-on: macos-26
@@ -359,6 +361,13 @@ jobs:
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.19.0
+      - name: GNU Bash 5.3 (test oracle)
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+        run: |
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
       - name: cargo-nextest
         run: |
           mkdir -p "$HOME/.cargo/bin"
@@ -372,6 +381,10 @@ jobs:
         with:
           cache-bin: 'false'
           save-if: ${{ github.event_name != 'pull_request' }}
+      - name: make test-unit (marsh-mcp and marsh-acp workspace tests, doctests)
+        env:
+          TEST_SCOPE: ${{ github.event_name == 'pull_request' && 'host' || 'all' }}
+        run: make test-unit NEXTEST_PROFILE=ci TEST_SCOPE="$TEST_SCOPE" TEST_PACKAGES="marsh-mcp marsh-acp"
       - name: make test-callers (MCP load and ACP callers)
         run: make test-callers NEXTEST_PROFILE=ci
       - name: make test-entrypoints (onboarding, MCP protocol callers)

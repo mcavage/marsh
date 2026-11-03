@@ -151,12 +151,21 @@ prepare-shell-image:
 test: test-rust test-harness test-model
 
 # TEST_SCOPE=host (CI's macOS lane) runs only the host side of test-unit. The
-# guest worker, the shared contract values and the Brush-against-Bash audit
-# (the shell runs in the Linux guest) are platform-neutral: Linux runs them.
+# guest worker, the shared contract values, the Brush-against-Bash audit (the
+# shell runs in the Linux guest) and the probe that marsh-acp's public API
+# hides process spawning (a `cargo check`) are platform-neutral: Linux runs
+# them.
 TEST_SCOPE ?= all
 HOST_SCOPE_EXCLUDES := --exclude marsh-worker --exclude marsh-contracts
-NEXTEST_SCOPE = $(if $(filter host,$(TEST_SCOPE)),$(HOST_SCOPE_EXCLUDES) -E 'not binary_id(marsh::bash_audit)')
-DOCTEST_SCOPE = $(if $(filter host,$(TEST_SCOPE)),$(HOST_SCOPE_EXCLUDES))
+HOST_SCOPE_FILTER := not binary_id(marsh::bash_audit) and not (binary_id(marsh-acp::subprocess_test) and test(=production_builds_do_not_expose_host_process_spawning))
+# TEST_PACKAGES runs only those packages' tests; TEST_EXCLUDE leaves packages
+# out of the workspace (CI splits the macOS workspace tests between two jobs).
+TEST_PACKAGES ?=
+TEST_EXCLUDE ?=
+TEST_SELECTION = $(if $(TEST_PACKAGES),$(addprefix -p ,$(TEST_PACKAGES)),--workspace $(addprefix --exclude ,$(TEST_EXCLUDE)) \
+	$(if $(filter host,$(TEST_SCOPE)),$(HOST_SCOPE_EXCLUDES)))
+NEXTEST_SCOPE = $(TEST_SELECTION) $(if $(filter host,$(TEST_SCOPE)),-E '$(HOST_SCOPE_FILTER)')
+DOCTEST_SCOPE = $(TEST_SELECTION)
 
 # test-rust = lint + test-unit + test-callers.
 test-rust: lint test-unit test-callers
@@ -173,11 +182,11 @@ test-unit:
 	@$(CARGO) nextest --version >/dev/null 2>&1 || { echo 'make test: cargo-nextest is required: brew install cargo-nextest (or cargo install --locked cargo-nextest)' >&2; exit 1; }
 	@# Build first, without this run's marker: a compiler wrapper's server
 	@# (sccache) started by the build would otherwise count as leaked.
-	$(CARGO) nextest run --no-run --workspace $(NEXTEST_SCOPE) --locked --target-dir "$(TARGET_DIR)"
-	$(TEST_CANARY) MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(CARGO) nextest run --workspace $(NEXTEST_SCOPE) --locked --target-dir "$(TARGET_DIR)" \
+	$(CARGO) nextest run --no-run $(NEXTEST_SCOPE) --locked --target-dir "$(TARGET_DIR)"
+	$(TEST_CANARY) MARSH_TEST_RUN=$(TEST_RUN_TOKEN) $(CARGO) nextest run $(NEXTEST_SCOPE) --locked --target-dir "$(TARGET_DIR)" \
 		--profile "$(NEXTEST_PROFILE)" || { $(LEAK_CHECK); exit 1; }
 	$(LEAK_CHECK)
-	$(CARGO) test --workspace $(DOCTEST_SCOPE) --doc --locked --target-dir "$(TARGET_DIR)"
+	$(CARGO) test $(DOCTEST_SCOPE) --doc --locked --target-dir "$(TARGET_DIR)"
 
 # The #[ignore]d binary callers and the ACP host caller, which drive the built
 # marsh, marsh-mcp and marshd binaries (no VM) with an isolated HOME.

@@ -117,7 +117,8 @@ when crates, Cargo files, tests, vendor, the Makefile or the toolchain changed.
 Linux arm64 runs everything, including the shell's Bash differential tests
 (against GNU Bash 5.3). On a pull request macOS runs clippy, the host side of
 the workspace tests (`make test-unit TEST_SCOPE=host`: everything but the
-platform-neutral guest worker, contract values and Bash audit), the binary
+platform-neutral guest worker, contract values, Bash audit and the `cargo check`
+probe of marsh-acp's public API), the binary
 callers and the entrypoint harnesses. A merge to `main` also runs the full
 workspace tests and the tooling self-tests on macOS, every TLA+ config but the
 huge one (which runs nightly, [model.yml](.github/workflows/model.yml)), and the
