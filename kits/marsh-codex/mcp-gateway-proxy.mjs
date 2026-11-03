@@ -10,9 +10,18 @@ if (Boolean(url) !== Boolean(token) ||
   throw new Error("invalid stock MCP Gateway environment");
 }
 
-// MARSH_TASK_MCP=1 (set by an adapter whose agent takes the task tool this
-// way): every session also gets marsh's task server (`marsh task-mcp`).
-const task = process.env.MARSH_TASK_MCP === "1";
+// MARSH_TASK_MCP (set by the Kit's ACP entrypoint when the job has marsh's
+// task tool): the name `marsh` is reserved for marsh's own task server, whose
+// tools the Kit approves without asking. A client-supplied server named
+// `marsh` is dropped from every session, so it can never inherit that
+// approval. `add` (an adapter whose agent takes the task tool this way, e.g.
+// Codex) also adds marsh's server (`marsh task-mcp`) to every session;
+// `reserve` (an agent that registers it itself, e.g. Claude) only drops.
+const taskMode = process.env.MARSH_TASK_MCP;
+if (taskMode !== undefined && !["add", "reserve"].includes(taskMode)) {
+  throw new Error("MARSH_TASK_MCP must be add or reserve");
+}
+const task = taskMode !== undefined;
 delete process.env.MARSH_TASK_MCP;
 
 const agent = spawn(process.execPath, process.argv.slice(2), {
@@ -51,7 +60,14 @@ const input = new Transform({
         const gateway = url && request?.method === "session/new" &&
           Array.isArray(servers) && servers.length === 0;
         const marsh = task && /^session\/(new|load|resume|fork)$/.test(request?.method ?? "") &&
-          Array.isArray(servers) && !servers.some(server => server?.name === "marsh");
+          Array.isArray(servers);
+        if (marsh) {
+          const kept = servers.filter(server => server?.name !== "marsh");
+          if (kept.length !== servers.length) {
+            console.error("marsh: dropped a client MCP server named marsh (the name is marsh's own task server)");
+          }
+          servers.splice(0, servers.length, ...kept);
+        }
         if (gateway || marsh) {
           if (gateway) {
             servers.push({
@@ -59,7 +75,7 @@ const input = new Transform({
               headers: [{ name: "Authorization", value: `Bearer ${token}` }],
             });
           }
-          if (marsh) {
+          if (marsh && taskMode === "add") {
             servers.push({ name: "marsh", command: "/run/marsh/bin/marsh", args: ["task-mcp"], env: [] });
           }
           const rewritten = `${JSON.stringify(request)}\n`;

@@ -235,6 +235,7 @@ test-tools:
 	sh tests/kits/selected-home.sh
 	sh tests/kits/cli-adapters.sh
 	sh tests/kits/shell-adapter.sh
+	sh tests/kits/acp-proxy.sh
 	$(MAKE) --no-print-directory "$(PUBLISHER_VENV)/.ready"
 	"$(PUBLISHER_VENV)/bin/python" tests/parallel_unittest.py -j $(HARNESS_JOBS) -W error tests/kits/test_publisher_cli.py
 

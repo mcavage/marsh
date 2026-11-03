@@ -33,6 +33,10 @@ pub const CONNECTION_LIMIT: usize = FAN_OUT_LIMIT + 4;
 pub const CONNECTION_REFUSAL: &str = "marsh: too many concurrent daemon requests in this job";
 /// The prompt in an `agent-sessions@1` `prompt` verb.
 pub const PROMPT_PLACEHOLDER: &str = "{{.Prompt}}";
+/// The model in an `org.marsh/agent-model@1` option (marsh's extension,
+/// e.g. `["--model", "{{.Model}}"]`), appended after the prompt verbs when a
+/// `task` names a model.
+pub const MODEL_PLACEHOLDER: &str = "{{.Model}}";
 pub const TTY_REFUSAL: &str = "marsh: interactive child jobs are not supported yet";
 
 /// What the daemon asks the worker to publish for one job.
@@ -67,6 +71,15 @@ pub struct JobCapability {
     /// `marsh task-mcp`. A name without them is not offered as an agent.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub prompts: std::collections::BTreeMap<String, Vec<String>>,
+    /// Each registered agent's model option (`org.marsh/agent-model@1`,
+    /// e.g. `["--model", "{{.Model}}"]`), for `task(model)`. A name without
+    /// one refuses `model`.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub models: std::collections::BTreeMap<String, Vec<String>>,
+    /// The peer-review section of `context.md` (`docs/peer-review.md`):
+    /// empty unless peer review is on and a ready reviewer is in `spawn`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub peer_review: String,
 }
 
 /// `/run/marsh/job.json`, written by the worker (docs/design/processes.md s4).
@@ -92,6 +105,9 @@ pub struct JobDocument {
     /// Registered agents' prompt verbs (`JobCapability::prompts`).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub prompts: std::collections::BTreeMap<String, Vec<String>>,
+    /// Registered agents' model options (`JobCapability::models`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub models: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

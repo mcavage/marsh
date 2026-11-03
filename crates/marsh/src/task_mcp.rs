@@ -61,6 +61,9 @@ struct Setup {
     caller: String,
     /// Agent name -> prompt verbs, limited to this job's spawn set.
     agents: BTreeMap<String, Vec<String>>,
+    /// Agent name -> its model option (`org.marsh/agent-model@1`), for
+    /// `task(model)`; an agent without one refuses `model`.
+    models: BTreeMap<String, Vec<String>>,
     /// Why no agent is available, when none is.
     none_reason: Option<String>,
     /// The in-job marsh (the artifact) used to start children.
@@ -81,6 +84,12 @@ impl Setup {
             .filter(|(name, _)| allowed(name))
             .map(|(name, verbs)| (name.clone(), verbs.clone()))
             .collect::<BTreeMap<_, _>>();
+        let models = document
+            .models
+            .iter()
+            .filter(|(name, _)| agents.contains_key(*name))
+            .map(|(name, verbs)| (name.clone(), verbs.clone()))
+            .collect();
         let none_reason = agents.is_empty().then(|| {
             if document.spawn.is_empty() || narrowed.is_some_and(<[String]>::is_empty) {
                 "this job may start no agents (it was started with --no-spawn or MARSH_SPAWN=none)"
@@ -99,6 +108,7 @@ impl Setup {
         Self {
             caller: document.name.clone(),
             agents,
+            models,
             none_reason,
             marsh: PathBuf::from(contract::ARTIFACT),
             dir: std::env::temp_dir().join(format!("marsh-tasks-{short}-{}", std::process::id())),
@@ -146,6 +156,16 @@ impl Setup {
         if !names.is_empty() {
             agent["enum"] = json!(names);
         }
+        let with_models = self.models.keys().cloned().collect::<Vec<_>>();
+        let model = json!({
+            "type": "string",
+            "description": format!(
+                "The model the agent runs, passed to its own model option (e.g. a reviewer's model \
+                 from the peer-review table). Default: the agent's own default. Agents that take \
+                 one: {}.",
+                if with_models.is_empty() { "none".to_owned() } else { with_models.join(", ") }
+            ),
+        });
         // `anthropic/alwaysLoad`: Claude Code declares these upfront rather
         // than behind its tool search, so the model sees `task` every turn.
         json!([
@@ -159,6 +179,7 @@ impl Setup {
                         "description": {"type": "string", "description": "3-6 words, shown to the user."},
                         "prompt": {"type": "string", "description": "Everything the agent needs; it does not see this conversation."},
                         "agent": agent,
+                        "model": model,
                         "files": {
                             "type": "string",
                             "enum": ["shared", "copy"],
@@ -208,6 +229,8 @@ enum Files {
 struct TaskRequest {
     description: String,
     agent: String,
+    /// The model passed to the agent's model option, when the call set one.
+    model: Option<String>,
     argv: Vec<String>,
     files: Files,
     background: bool,
@@ -276,17 +299,54 @@ fn task_request(setup: &Setup, arguments: &Value) -> Result<TaskRequest, String>
         Some(Value::Bool(value)) => *value,
         Some(_) => return Err("`background` is true or false".into()),
     };
-    let argv = verbs
+    let mut argv = verbs
         .iter()
         .map(|verb| verb.replace(contract::PROMPT_PLACEHOLDER, prompt))
-        .collect();
+        .collect::<Vec<_>>();
+    let model = model_argument(setup, &agent, arguments, &mut argv)?;
     Ok(TaskRequest {
         description,
         agent,
+        model,
         argv,
         files,
         background,
     })
+}
+
+/// `task(model)`: validate it and append the agent's model option to `argv`
+/// (after the prompt verbs, so `codex exec PROMPT -m M` keeps the subcommand
+/// first); an agent whose Kit declares none refuses it.
+fn model_argument(
+    setup: &Setup,
+    agent: &str,
+    arguments: &Value,
+    argv: &mut Vec<String>,
+) -> Result<Option<String>, String> {
+    let model = match arguments.get("model") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(model)) if model.trim().is_empty() => return Ok(None),
+        Some(Value::String(model)) => model.trim(),
+        Some(_) => return Err("`model` is a string: the model id the agent should run".into()),
+    };
+    marsh_daemon::peer_review::valid_model(model).map_err(|error| format!("`model`: {error}"))?;
+    let Some(option) = setup.models.get(agent) else {
+        return Err(format!(
+            "`{agent}` takes no `model`: its Kit declares no model option (org.marsh/agent-model@1); \
+             agents that do: {}",
+            if setup.models.is_empty() {
+                "none".to_owned()
+            } else {
+                setup.models.keys().cloned().collect::<Vec<_>>().join(", ")
+            }
+        ));
+    };
+    argv.extend(
+        option
+            .iter()
+            .map(|verb| verb.replace(contract::MODEL_PLACEHOLDER, model)),
+    );
+    Ok(Some(model.to_owned()))
 }
 
 /// The first words of `prompt` as a description: no control characters,
@@ -641,7 +701,7 @@ impl Server {
             return Ok(format!(
                 "Task {id} started in the background ({}, files {}). Get its result with \
                  task_output(id: \"{id}\", wait: true), or keep working and check later.",
-                request.agent,
+                agent_words(&request),
                 files_word(request.files),
             ));
         }
@@ -675,19 +735,29 @@ impl Server {
                 .open(directory.join(name))
                 .map_err(|error| format!("cannot create {}/{name}: {error}", directory.display()))
         };
-        let label = format!("{LABEL_PREFIX}{}", request.description);
+        let label = task_label(request);
+        // The task's model is recorded on the child job from here, never
+        // read back from the agent's arguments.
+        let model = request
+            .model
+            .as_ref()
+            .map(|model| vec!["--model", model.as_str()])
+            .unwrap_or_default();
         let mut command = Command::new(&self.setup.marsh);
         match request.files {
             Files::Shared => {
                 command
                     .args(["run", "--label", &label])
+                    .args(&model)
                     .arg(&request.agent)
                     .args(&request.argv)
                     .env(crate::job::STARTED_FILE, directory.join("job"));
             }
             Files::Copy => {
                 command
-                    .args(["split", "-n", "--label", &label, ":::", id])
+                    .args(["split", "-n", "--label", &label])
+                    .args(&model)
+                    .args([":::", id])
                     .arg(&request.agent)
                     .args(&request.argv);
             }
@@ -1123,6 +1193,20 @@ fn exit_words(code: Option<i32>, signal: Option<i32>) -> String {
     }
 }
 
+/// The task's job label, `task: DESCRIPTION`. The model a task runs is the
+/// job's own `model` field (from its arguments), not part of the label.
+fn task_label(request: &TaskRequest) -> String {
+    format!("{LABEL_PREFIX}{}", request.description)
+}
+
+/// `codex` or `codex, model gpt-6.1-terra`.
+fn agent_words(request: &TaskRequest) -> String {
+    match &request.model {
+        Some(model) => format!("{}, model {model}", request.agent),
+        None => request.agent.clone(),
+    }
+}
+
 fn files_word(files: Files) -> &'static str {
     match files {
         Files::Shared => "shared",
@@ -1142,7 +1226,7 @@ fn render(task: &Task, transcript: bool) -> Result<String, String> {
             return Ok(format!(
                 "task {id} ({}, \"{}\", files {}) is running ({}s){job}. \
                  task_output(id: \"{id}\", wait: true) waits for it.",
-                request.agent,
+                agent_words(request),
                 request.description,
                 files_word(request.files),
                 task.started.elapsed().as_secs()
@@ -1151,11 +1235,11 @@ fn render(task: &Task, transcript: bool) -> Result<String, String> {
         State::Done(outcome) => outcome,
     };
     if let Some(refusal) = &outcome.refused {
-        return Err(format!("task {id} ({}): {refusal}", request.agent));
+        return Err(format!("task {id} ({}): {refusal}", agent_words(request)));
     }
     let mut text = format!(
         "task {id} ({}, \"{}\", files {}) {}\ntranscript: {} (stderr: {}){job}\n",
-        request.agent,
+        agent_words(request),
         request.description,
         files_word(request.files),
         outcome.status,
@@ -1270,6 +1354,19 @@ mod tests {
             prompts: [
                 ("claude", vec!["-p", "{{.Prompt}}"]),
                 ("codex", vec!["exec", "{{.Prompt}}"]),
+                ("pi", vec!["-p", "{{.Prompt}}"]),
+            ]
+            .into_iter()
+            .map(|(name, verbs)| {
+                (
+                    name.to_owned(),
+                    verbs.into_iter().map(str::to_owned).collect(),
+                )
+            })
+            .collect(),
+            models: [
+                ("claude", vec!["--model", "{{.Model}}"]),
+                ("codex", vec!["-m", "{{.Model}}"]),
             ]
             .into_iter()
             .map(|(name, verbs)| {
@@ -1303,6 +1400,7 @@ mod tests {
             TaskRequest {
                 description: "fix it".into(),
                 agent: "claude".into(),
+                model: None,
                 argv: vec!["-p".into(), "fix the bug".into()],
                 files: Files::Shared,
                 background: false,
@@ -1352,6 +1450,47 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("\"shared\" or \"copy\""), "{error}");
+    }
+
+    #[test]
+    fn model_goes_to_the_agents_model_option_or_is_refused() {
+        let setup = setup(&["claude", "codex", "pi"], None);
+        let request = task_request(
+            &setup,
+            &json!({"description": "review the change", "prompt": "review", "agent": "codex", "model": "gpt-6.1-terra"}),
+        )
+        .unwrap();
+        assert_eq!(request.argv, ["exec", "review", "-m", "gpt-6.1-terra"]);
+        assert_eq!(task_label(&request), "task: review the change");
+        assert_eq!(agent_words(&request), "codex, model gpt-6.1-terra");
+        let request = task_request(&setup, &json!({"prompt": "x", "model": "sonnet"})).unwrap();
+        assert_eq!(request.argv, ["-p", "x", "--model", "sonnet"]);
+        // Pi's Kit (here) declares no model option.
+        let error =
+            task_request(&setup, &json!({"prompt": "x", "agent": "pi", "model": "m"})).unwrap_err();
+        assert!(
+            error.contains("`pi` takes no `model`")
+                && error.contains("agents that do: claude, codex"),
+            "{error}"
+        );
+        for bad in [json!("--dangerously"), json!("a b"), json!(7)] {
+            let error = task_request(&setup, &json!({"prompt": "x", "model": bad})).unwrap_err();
+            assert!(error.contains("`model`"), "{error}");
+        }
+        // No model: unchanged argv and label.
+        let request = task_request(&setup, &json!({"prompt": "x", "model": ""})).unwrap();
+        assert_eq!(
+            (request.model, request.argv),
+            (None, vec!["-p".to_owned(), "x".to_owned()])
+        );
+        let tools = setup.tools();
+        let model = tools[0]["inputSchema"]["properties"]["model"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(
+            model.ends_with("Agents that take one: claude, codex."),
+            "{model}"
+        );
     }
 
     #[test]

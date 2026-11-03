@@ -46,11 +46,14 @@ so that delegation goes through marsh:
 
 | Kit | Registers `task-mcp` with | Built-in subagents |
 |---|---|---|
-| `claude` | `--mcp-config` (`alwaysLoad`, so `mcp__marsh__task` is offered every turn) | `Agent` and `Workflow` in `permissions.deny` (`--settings`), and a `PreToolUse` hook that refuses them with "use mcp__marsh__task" |
-| `codex` | `-c mcp_servers.marsh...` (CLI); the ACP session's MCP servers (ACP) | `agents.enabled = false`, `features.multi_agent = false` and `features.multi_agent_v2 = false` (V2 ignores `agents.enabled`) |
-| `pi`, `pix` | Pi's `registerMcpServer` from a Kit extension, tools declared directly | none to turn off |
+| `claude` | `--mcp-config` (`alwaysLoad`, so `mcp__marsh__task` is offered every turn); `mcp__marsh__task`, `mcp__marsh__task_output` and `mcp__marsh__task_apply` in `permissions.allow`, so no permission mode asks for them | `Agent` and `Workflow` in `permissions.deny` (`--settings`), and a `PreToolUse` hook that refuses them with "use mcp__marsh__task" |
+| `codex` | `-c mcp_servers.marsh...` (CLI); the ACP session's MCP servers (ACP); `approval_mode = "approve"` for exactly `task`, `task_output` and `task_apply`, so they never ask for approval | `agents.enabled = false`, `features.multi_agent = false` and `features.multi_agent_v2 = false` (V2 ignores `agents.enabled`) |
+| `pi`, `pix` | Pi's `registerMcpServer` from a Kit extension, tools declared directly (Pi has no tool approval prompts) | none to turn off |
 
-Each Kit does this only when the job's marsh has `task-mcp`. `pi` and `pix`
+Each Kit does this only when the job's marsh has `task-mcp`. In ACP mode the
+name `marsh` is then reserved for this server: the Kits' ACP proxy drops a
+client-supplied MCP server named `marsh` from every session, so no other
+server inherits these approvals. `pi` and `pix`
 also declare their prompt verbs (`pi -p`), so the tool can start them.
 
 `task` takes:
@@ -60,6 +63,7 @@ also declare their prompt verbs (`pi -p`), so the tool can start them.
 | `description` | 3 to 6 words, shown to the user. |
 | `prompt` | Everything the agent needs; it does not see the caller's conversation. At most 100 KiB. |
 | `agent` | A registered agent. Default: the caller's own. The tool's description lists the agents this job may start. |
+| `model` | The model the agent runs, passed to its Kit's model option (`org.marsh/agent-model@1`, e.g. `claude --model M`, `codex exec -m M`). Default: the agent's own. An agent without one refuses it. See [Peer review](peer-review.md). |
 | `files` | `"shared"` (default): the agent works in the caller's folder and its edits land at once. `"copy"`: it works on a private [split](split.md) fork; the result includes its diff. |
 | `background` | `false` (default) waits for the result; `true` returns a task id at once. |
 
@@ -73,7 +77,8 @@ the caller's folder with [`marsh split apply ID LABEL --json`](split.md):
 3-way when it no longer applies cleanly, with conflicts named. A refusal (a
 limit, a name outside the spawn set) is a tool error with marsh's reason.
 
-Each task's job carries the label `task: DESCRIPTION` (`label` in `marsh jobs
+Each task's job carries the label `task: DESCRIPTION`, and `model` when the
+call set one ([Model on task jobs](peer-review.md#model-on-task-jobs)) (`label` in `marsh jobs
 --json`, `marsh jobs show`, and the job lines of `marsh events --json`), so a
 viewer can show the task under its caller. A description is at most 120 bytes
 with no control characters; without one, the prompt's first words are used.

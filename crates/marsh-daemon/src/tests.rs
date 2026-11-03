@@ -3567,6 +3567,7 @@ fn execution_attachment_preserves_bytes_and_exit_status() {
     let status = client
         .execute_with_io(
             ExecuteSpec {
+                model: None,
                 label: None,
                 kit: None,
                 acp: false,
@@ -4049,6 +4050,7 @@ fn active_execute_refuses_lifecycle_immediately_without_blocking_status() {
     };
     let execution = client
         .start_execution(ExecuteSpec {
+            model: None,
             label: None,
             kit: None,
             acp: false,
@@ -5531,6 +5533,7 @@ fn receipt_journal_is_owner_only_and_keeps_no_job_or_prompt_content() {
     let code = client
         .execute_with_io(
             ExecuteSpec {
+                model: None,
                 label: None,
                 kit: None,
                 acp: false,

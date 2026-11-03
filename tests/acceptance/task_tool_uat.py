@@ -39,6 +39,7 @@ SCENARIOS = {
     "T09-symlink-safe-copy": "symlink_safe_copy",
     "T10-conflicts-keep-edits": "conflicts_keep_edits",
     "T11-fan-out-limit": "fan_out_limit",
+    "T12-peer-review-context-and-model": "peer_review",
 }
 ORDER = list(SCENARIOS)
 LIVE = {"T02-live-shared", "T03-live-copy-apply", "T04-live-background"}
@@ -246,7 +247,7 @@ class TaskTool(ScenarioSuite):
                                         "hand work off") and f"Agents: {', '.join(agents)}." in description,
                 f"task description: {description!r}")
         properties = tools["task"]["inputSchema"]["properties"]
-        require(set(properties) == {"description", "prompt", "agent", "files", "background"}
+        require(set(properties) == {"description", "prompt", "agent", "model", "files", "background"}
                 and properties["files"]["enum"] == ["shared", "copy"]
                 and properties["agent"]["enum"] == agents, f"task schema: {properties!r}"[:800])
         texts = [(call.get("isError"), call["content"][0]["text"]) for call in out["calls"]]
@@ -467,10 +468,91 @@ class TaskTool(ScenarioSuite):
         require(len(tasks) == 17, f"want 17 task jobs: {[r.get('label') for r in tasks]}")
         for receipt in tasks:
             settled = self.job_state(receipt["job_id"])
-            require(settled["cleanup"] == "verified", f"{settled.get('label')}: cleanup {settled['cleanup']}")
+            require(settled["cleanup"] == "verified", f"{settled.get('label')}: cleanup {settled['cleanup']}: "
+                    + json.dumps({k: settled.get(k) for k in ("state", "exit", "execution", "timing", "container_id")})[:1500])
         status = self.document("status", "--json")
         require(all(w.get("health") == "ready" for w in status.get("workers", [])),
                 f"a worker was quarantined: {status.get('workers')}")
+
+    def context_md(self, spawn: list[str] = ()) -> str:
+        """A fixture job's /run/marsh/context.md (with `spawn`, started with that spawn set)."""
+        narrow = ["--spawn", ",".join(spawn)] if spawn else []
+        completed = self.cli(["run", *narrow, "fixture", "exec", "cat", "/run/marsh/context.md"],
+                             self.project, timeout=600)
+        require(completed.returncode == 0, f"context job failed: {text(completed.stderr)[-800:]!r}")
+        return text(completed.stdout)
+
+    def peer_review(self) -> None:
+        """T12: the peer-review section appears only while it is on and lists only ready reviewers
+        this job may start; `task(model)` reaches the agent's model option and the child's receipt."""
+        dropins = self.home / "peer-review.d"
+        dropins.mkdir(exist_ok=True)
+        heading = "## Second opinion"
+        require(heading not in self.context_md(), "the section is in context.md with no drop-in")
+        status = self.document("status", "--json")
+        require("peer-review-v1" in status.get("features", []), f"features: {status.get('features')}")
+        require(status["peer_review"]["enabled"] is False, f"peer_review: {status.get('peer_review')}")
+        # Named, but not ready: shell has no prompt verbs; nope is not registered.
+        (dropins / "narwhal.yaml").write_text(
+            "enabled: true\nreviewers:\n"
+            "  - {agent: fixture, model: gpt-6.1-terra}\n"
+            "  - {agent: claude, model: claude-sonnet-5-5}\n"
+            "  - {agent: shell, model: gpt-6-luna}\n"
+            "  - {agent: nope, model: gpt-6-astra}\n")
+        (dropins / "broken.yaml").write_text("enabled: maybe\n")
+        listed = self.document("peer-review", "ls", "--json")
+        ready = [(r["class"], r["vendor"], r["agent"], r["model"]) for r in listed["reviewers"]]
+        require(listed["enabled"] and ready == [("mid", "anthropic", "claude", "claude-sonnet-5-5"),
+                                               ("mid", "openai", "fixture", "gpt-6.1-terra")],
+                f"peer-review ls: {listed!r}"[:1200])
+        reasons = {r["agent"]: r["reason"] for r in listed["skipped"]}
+        require("no prompt verbs" in reasons.get("shell", "") and "not a registered command" in reasons.get("nope", ""),
+                f"skipped: {listed['skipped']!r}"[:900])
+        require(any("broken.yaml" in error for error in listed["errors"]), f"errors: {listed['errors']}")
+        on = self.context_md()
+        section = on.split(heading, 1)[-1]
+        require(heading in on and '| mid | openai | agent: "fixture", model: "gpt-6.1-terra" |' in section
+                and '| mid | anthropic | agent: "claude", model: "claude-sonnet-5-5" |' in section
+                and "shell" not in section and "nope" not in section,
+                f"context while on: {section[:1500]!r}")
+        narrowed = self.context_md(["fixture"]).split(heading, 1)[-1]
+        require("fixture" in narrowed and '"claude"' not in narrowed, f"MARSH_SPAWN=fixture: {narrowed[:900]!r}")
+        (self.evidence / "peer-review-context.md").write_text(heading + section)
+        nested = self.cli(["run", "fixture", "exec", "sh", "-c", "fixture exec cat /run/marsh/context.md </dev/null"],
+                          self.project, timeout=600)
+        require(nested.returncode == 0 and "## Hand work off" in text(nested.stdout)
+                and heading not in text(nested.stdout), f"a child job got the section: {text(nested.stdout)[-900:]!r}")
+        # task(model): the fixture's model option lands in the prompt's $0 and $1.
+        out = self.steps([["call", "task", {"description": "review by fixture", "agent": "fixture",
+                                            "model": "gpt-6.1-terra", "prompt": 'echo "opt=$0 model=$1"'}]])
+        body = text_of(out[0])
+        require("opt=--model model=gpt-6.1-terra" in body and "model gpt-6.1-terra" in body, f"task(model): {body[-900:]!r}")
+        child = self.job_state(self.job_of(out[0]))
+        require(child.get("model") == "gpt-6.1-terra" and child.get("label") == "task: review by fixture",
+                f"child receipt: model {child.get('model')!r} label {child.get('label')!r}")
+        # The model is only ever what the task passed: an agent's own argv,
+        # however it spells model options, records nothing.
+        before = self.job_ids()
+        plain = self.cli(["run", "fixture", "exec", "sh", "-c", "true", "--model", "opus",
+                          "--append-system-prompt", "--model=sonnet", "-p", "hi"], self.project, timeout=600)
+        require(plain.returncode == 0, f"plain fixture job failed: {text(plain.stderr)[-600:]!r}")
+        (fresh,) = self.settle(before, 1, timeout=180)
+        require("model" not in fresh, f"a job's argv recorded a model: {fresh.get('model')!r}")
+        copy = self.steps([["call", "task", {"description": "copy review", "agent": "fixture", "files": "copy",
+                                             "model": "gpt-6-luna", "prompt": "true"}]])
+        copied = self.job_state(self.job_of(copy[0]))
+        require(copied.get("model") == "gpt-6-luna", f"copy task receipt: model {copied.get('model')!r}")
+        listed_jobs = self.document("jobs", "--json")
+        require(any(j.get("job_id") == child["job_id"] and j.get("model") == "gpt-6.1-terra"
+                    for j in listed_jobs.get("jobs", [])), "marsh jobs --json lacks the child's model")
+        # Off anywhere is off.
+        (dropins / "marsh.yaml").write_text("enabled: false\n")
+        require(heading not in self.context_md(), "the section is in context.md after enabled: false")
+        status = self.document("status", "--json")["peer_review"]
+        require(not status["enabled"] and status["disabled_by"] == [str(dropins / "marsh.yaml")],
+                f"peer_review after off: {status!r}"[:900])
+        for name in ("narwhal.yaml", "broken.yaml", "marsh.yaml"):
+            (dropins / name).unlink()
 
     def run_all(self) -> None:
         self.stock_before = stock_baseline(self.sbx)

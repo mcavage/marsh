@@ -150,6 +150,13 @@ capabilities:
       prompt: ["exec", "{{.Prompt}}"]
       resume: ["resume", "{{.SessionID}}"]
 
+  # marsh's model option for `task(model)`: appended after the prompt verbs,
+  # so after `exec` (`codex exec PROMPT -m M`; docs/peer-review.md).
+  - type: org.marsh/agent-model@1
+    optional: true
+    config:
+      args: ["-m", "{{.Model}}"]
+
   # Where codex reads shared skills, so the host's store reaches it.
   - type: com.docker.sandbox/agent-skills@1
     optional: true

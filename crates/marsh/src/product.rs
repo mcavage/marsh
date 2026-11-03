@@ -108,6 +108,7 @@ impl From<std::io::Error> for ProductError {
 ///
 /// # Errors
 /// Returns daemon, registry, or output failures without entering Brush.
+#[allow(clippy::too_many_lines)] // Keep the product command dispatch in one match.
 pub fn prepare(
     parsed: ParsedCli,
     client: Arc<dyn DaemonClient>,
@@ -154,6 +155,16 @@ pub fn prepare(
                 write_result(&mut stdout, value)?;
             }
             return Ok(ProductOutcome::Complete(0));
+        }
+        command @ (ProductCommand::PeerReviewList { .. }
+        | ProductCommand::PeerReviewConfig { .. }) => {
+            return peer_review(
+                &command,
+                client.as_ref(),
+                &session,
+                &mut stdout,
+                &mut stderr,
+            );
         }
         ProductCommand::ResultsHelp => return write_help(&mut stdout, RESULTS_HELP),
         ProductCommand::WorkersHelp => return write_help(&mut stdout, WORKERS_HELP),
@@ -423,6 +434,66 @@ fn detached_kept(stderr: &mut impl Write, kept: u64, command: &str) -> Result<()
         )?;
     }
     Ok(())
+}
+
+/// `marsh peer-review ls` and `marsh config peer-review` (`docs/peer-review.md`).
+fn peer_review(
+    command: &ProductCommand,
+    client: &dyn DaemonClient,
+    session: &SessionConfig,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> Result<ProductOutcome, ProductError> {
+    match *command {
+        ProductCommand::PeerReviewList { json } => {
+            let value = client.status_json()?;
+            let status =
+                crate::peer_review_cli::status_of(&value).map_err(ProductError::Operation)?;
+            if json {
+                write_json(
+                    stdout,
+                    &serde_json::to_value(&status).map_err(|error| {
+                        ProductError::Operation(format!("cannot encode peer review: {error}"))
+                    })?,
+                )?;
+            } else {
+                crate::peer_review_cli::render(stdout, &status)?;
+            }
+            Ok(ProductOutcome::Complete(0))
+        }
+        ProductCommand::PeerReviewConfig { set } => {
+            if let Some(on) = set {
+                let value = client.status_json()?;
+                let agents = crate::peer_review_cli::model_agents(&value);
+                let credentials = if on {
+                    crate::client::resolve_stock_sbx()
+                        .map_err(|error| error.to_string())
+                        .and_then(|sbx| crate::peer_review_cli::stored_credentials(&sbx))
+                        .unwrap_or_else(|error| {
+                            let _ = writeln!(stderr, "marsh: {error}");
+                            std::collections::BTreeSet::new()
+                        })
+                } else {
+                    std::collections::BTreeSet::new()
+                };
+                let scope = session
+                    .home_backing
+                    .parent()
+                    .unwrap_or(&session.home_backing);
+                let note = crate::peer_review_cli::write_switch(scope, on, &agents, &credentials)
+                    .map_err(ProductError::Operation)?;
+                if !note.is_empty() {
+                    writeln!(stderr, "marsh: {note}")?;
+                }
+            }
+            let value = client.status_json()?;
+            let status =
+                crate::peer_review_cli::status_of(&value).map_err(ProductError::Operation)?;
+            crate::peer_review_cli::render(stdout, &status)?;
+            Ok(ProductOutcome::Complete(0))
+        }
+        _ => Ok(ProductOutcome::Complete(2)),
+    }
 }
 
 fn write_help(stdout: &mut impl Write, help: &str) -> Result<ProductOutcome, ProductError> {
@@ -1024,6 +1095,9 @@ fn write_result(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
     writeln!(writer, "Result {}", receipt.cursor).map_err(ProductError::from)?;
     writeln!(writer, "  job:        {}", receipt.job_id).map_err(ProductError::from)?;
     writeln!(writer, "  command:    {}", receipt.command).map_err(ProductError::from)?;
+    if let Some(model) = &receipt.model {
+        writeln!(writer, "  model:      {model}").map_err(ProductError::from)?;
+    }
     writeln!(
         writer,
         "  placement:  {}{}",

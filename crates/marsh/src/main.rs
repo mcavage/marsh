@@ -67,6 +67,8 @@ Usage:
   marsh config cloud-delegate [on|off] Let detached cloud runs start agent sandboxes
   marsh config vm-idle-days [DAYS|off] Show or set when unused VMs are removed
   marsh gc [--dry-run] [--json]        Remove this home's superseded and unused VMs now
+  marsh config peer-review [on|off]    Show or set peer review by another vendor's model
+  marsh peer-review ls [--json]        Show the peer reviewers and where they came from
   marsh stop [--json]                  Remove this home's VMs and stop its daemon
   marsh reset [--json]                 Remove this home's VMs; keep the daemon
   marsh init                           Create this home and copy your git name and email into it
@@ -582,6 +584,7 @@ fn section_help(command: &str) -> Option<&'static str> {
         "acp" => Some(ACP_HOST_HELP),
         "mcp" => Some(MCP_HELP),
         "config" => Some(marsh::shell_choice::CONFIG_HELP),
+        "peer-review" => Some(marsh::peer_review_cli::HELP),
         _ => None,
     }
 }
@@ -726,7 +729,10 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
     if arguments.get(1).is_some_and(|arg| arg == "init") {
         return init_home(&arguments[2..]);
     }
-    if arguments.get(1).is_some_and(|arg| arg == "config") {
+    // `config peer-review` reads the daemon's agents: the product path.
+    if arguments.get(1).is_some_and(|arg| arg == "config")
+        && arguments.get(2).is_none_or(|arg| arg != "peer-review")
+    {
         let scope = SessionConfig::from_environment(false)
             .map_err(|error| RunError::new(error.to_string(), 1))?;
         let scope = scope
@@ -1025,6 +1031,7 @@ fn run_command(arguments: &[OsString]) -> i32 {
         environment.retain(|name, _| marsh_daemon::split::forwardable(name));
     }
     let spec = marsh_daemon::ExecuteSpec {
+        model: None,
         label,
         kit: None,
         command: name,
@@ -1446,6 +1453,7 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
     // A detached run reads nothing: its stdin is /dev/null.
     let stdin_null = stdin_null || detach;
     let spec = marsh_daemon::ExecuteSpec {
+        model: None,
         label,
         kit: None,
         command: "cloud".into(),

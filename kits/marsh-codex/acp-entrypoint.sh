@@ -114,6 +114,12 @@ if (process.argv[2] === "1") {
   config["features.multi_agent"] = false;
   config["features.multi_agent_v2"] = false;
   config["mcp_servers.marsh.tool_timeout_sec"] = 86400;
+  // marsh'"'"'s own three task tools never ask for approval, whatever mode
+  // the ACP client switches a session to; the proxy keeps the name `marsh`
+  // for marsh'"'"'s own server.
+  for (const tool of ["task", "task_output", "task_apply"]) {
+    config[`mcp_servers.marsh.tools.${tool}.approval_mode`] = "approve";
+  }
 }
 process.stdout.write(JSON.stringify(config));
 ' /run/marsh/context.md "$(/run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1 && echo 1)")
@@ -121,7 +127,7 @@ process.stdout.write(JSON.stringify(config));
   # The session's MCP servers come from the ACP request, so the proxy adds
   # the task server there.
   if /run/marsh/bin/marsh task-mcp --help >/dev/null 2>&1; then
-    MARSH_TASK_MCP=1
+    MARSH_TASK_MCP=add
     export MARSH_TASK_MCP
   fi
 fi

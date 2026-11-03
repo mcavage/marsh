@@ -686,25 +686,34 @@ impl StockDaemonBackend {
     /// The agent (ACP adapter, session verbs) of one captured Kit generation,
     /// cached by its identity: the adapter always matches the image prepared
     /// from that same generation.
-    /// Each registered agent's `agent-sessions@1` prompt verbs, for a job's
-    /// `marsh task-mcp`; never waits on a registry (`status_kit_agent`).
-    fn prompt_verbs(&self) -> BTreeMap<String, Vec<String>> {
-        marsh_daemon::DaemonBackend::command_catalog(self)
-            .into_iter()
-            .filter_map(|command| {
-                let verbs = command
-                    .sessions?
-                    .get("prompt")?
-                    .as_array()?
-                    .iter()
-                    .map(|verb| verb.as_str().map(str::to_owned))
-                    .collect::<Option<Vec<_>>>()?;
-                verbs
-                    .iter()
-                    .any(|verb| verb.contains(marsh_contracts::process::PROMPT_PLACEHOLDER))
-                    .then_some((command.name, verbs))
+    /// Each registered agent's `agent-sessions@1` prompt verbs and model
+    /// option, for a job's `marsh task-mcp`; never waits on a registry
+    /// (`status_kit_agent`).
+    fn agent_verbs(&self) -> AgentVerbs {
+        agent_verbs(&marsh_daemon::DaemonBackend::command_catalog(self))
+    }
+
+    /// Peer review as the drop-ins and the registered agents make it now.
+    fn peer_review(&self, verbs: &AgentVerbs) -> marsh_daemon::peer_review::PeerReviewStatus {
+        let agents = verbs
+            .registered
+            .iter()
+            .map(|name| {
+                (
+                    name.clone(),
+                    marsh_daemon::peer_review::AgentFacts {
+                        prompt: verbs.prompts.contains_key(name),
+                        model_option: verbs.models.contains_key(name),
+                    },
+                )
             })
-            .collect()
+            .collect();
+        let scope = self
+            .config
+            .daemon_home
+            .canonicalize()
+            .unwrap_or_else(|_| self.config.daemon_home.clone());
+        marsh_daemon::peer_review::load(&scope, &agents)
     }
 
     fn kit_agent_for(&self, kit: &NativeKitRef) -> Result<KitAgent, DaemonError> {
@@ -1202,6 +1211,10 @@ impl DaemonBackend for StockDaemonBackend {
         Some(self.sbxenv_status_document())
     }
 
+    fn peer_review_status(&self) -> Option<marsh_daemon::peer_review::PeerReviewStatus> {
+        Some(self.peer_review(&self.agent_verbs()))
+    }
+
     fn dynamic_protected_guest_roots(&self) -> Vec<PathBuf> {
         self.dynamic_protected_roots()
     }
@@ -1289,6 +1302,10 @@ impl DaemonBackend for StockDaemonBackend {
                 Some(marsh_daemon::CommandStatus {
                     reference: kit.workload.identity().to_owned(),
                     acp: agent.as_ref().map(|agent| agent.acp.is_some()),
+                    services: agent
+                        .as_ref()
+                        .map(|agent| agent.services.clone())
+                        .unwrap_or_default(),
                     sessions: agent.and_then(|agent| agent.sessions),
                     name,
                 })
@@ -1997,6 +2014,24 @@ impl DaemonBackend for StockDaemonBackend {
             });
             KitAssets::default()
         });
+        // Read after the grants are prepared, as the prompt verbs always
+        // were: nothing here may widen the window in which a closing session
+        // refuses a job's grant preparation.
+        let verbs = self.agent_verbs();
+        // The model the job was asked to run: only what the task tool
+        // passed (`marsh run --model`, `marsh split --model`), never read
+        // back from the agent's arguments (`docs/peer-review.md`).
+        if let Some(model) = request.model.as_deref() {
+            store.set_job_model(&job_id, model);
+        }
+        // Drop-ins are read at every job start, so an edit applies to the
+        // next job (`docs/peer-review.md`). Only a root job (the agent that reports to the user) is asked for
+        // a review: a reviewer or another child does not start its own.
+        let peer_review = if lineage.depth <= 1 {
+            marsh_daemon::peer_review::context(&self.peer_review(&verbs), &lineage.spawn)
+        } else {
+            String::new()
+        };
         let mut resources = self.config.resources;
         let (wall_seconds, parent_deadline) =
             store.set_job_deadline(&job_id, resources.wall_seconds);
@@ -2030,7 +2065,9 @@ impl DaemonBackend for StockDaemonBackend {
                 forwarded: forwarded_names,
                 env_key: marsh_contracts::process::hex(marsh_daemon::process::env_key()),
                 kit,
-                prompts: self.prompt_verbs(),
+                prompts: verbs.prompts,
+                models: verbs.models,
+                peer_review,
             }),
         };
         let output_budget = spec.resources.output_bytes;
@@ -4870,6 +4907,46 @@ fn fetch_kit_agent(
     Ok(agent)
 }
 
+/// Registered agents' prompt verbs and model options (`agent-sessions@1`
+/// `prompt` and marsh's `model`).
+#[derive(Default)]
+struct AgentVerbs {
+    registered: Vec<String>,
+    prompts: BTreeMap<String, Vec<String>>,
+    models: BTreeMap<String, Vec<String>>,
+}
+
+fn agent_verbs(catalog: &[marsh_daemon::CommandStatus]) -> AgentVerbs {
+    use marsh_contracts::process::{MODEL_PLACEHOLDER, PROMPT_PLACEHOLDER};
+    let verbs = |sessions: &serde_json::Value, key: &str, placeholder: &str| {
+        let verbs = sessions
+            .get(key)?
+            .as_array()?
+            .iter()
+            .map(|verb| verb.as_str().map(str::to_owned))
+            .collect::<Option<Vec<_>>>()?;
+        verbs
+            .iter()
+            .any(|verb| verb.contains(placeholder))
+            .then_some(verbs)
+    };
+    let mut found = AgentVerbs::default();
+    for command in catalog {
+        found.registered.push(command.name.clone());
+        let Some(sessions) = &command.sessions else {
+            continue;
+        };
+        let Some(prompt) = verbs(sessions, "prompt", PROMPT_PLACEHOLDER) else {
+            continue;
+        };
+        found.prompts.insert(command.name.clone(), prompt);
+        if let Some(model) = verbs(sessions, "model", MODEL_PLACEHOLDER) {
+            found.models.insert(command.name.clone(), model);
+        }
+    }
+    found
+}
+
 /// marsh's own agent Kits published before they declared acp@1 have the same
 /// `--acp` entrypoint mode (kits/README.md).
 fn with_published_acp(kit: &NativeKitRef, mut agent: KitAgent) -> KitAgent {
@@ -4893,6 +4970,7 @@ fn with_published_acp(kit: &NativeKitRef, mut agent: KitAgent) -> KitAgent {
 mod tests {
     use super::*;
     use marsh_daemon::SessionAuthority;
+
     use std::{
         collections::VecDeque,
         io::{self, Cursor},

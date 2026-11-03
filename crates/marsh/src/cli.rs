@@ -57,6 +57,14 @@ pub enum ProductCommand {
         json: bool,
     },
     GcHelp,
+    /// `marsh peer-review ls [--json]` (`docs/peer-review.md`).
+    PeerReviewList {
+        json: bool,
+    },
+    /// `marsh config peer-review [on|off]`: show, or write `marsh.yaml`.
+    PeerReviewConfig {
+        set: Option<bool>,
+    },
 }
 
 /// `marsh --dev`: attach this shell with a development grant.
@@ -260,7 +268,16 @@ fn parse_product_os_command(
         .is_some_and(|name| {
             matches!(
                 name,
-                "kit" | "stop" | "reset" | "workers" | "status" | "jobs" | "results" | "gc"
+                "kit"
+                    | "stop"
+                    | "reset"
+                    | "workers"
+                    | "status"
+                    | "jobs"
+                    | "results"
+                    | "peer-review"
+                    | "config"
+                    | "gc"
             )
         })
     {
@@ -413,6 +430,25 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         [name] if name == "status" => ProductCommand::Status { json: false },
         [name, json] if name == "status" && json == "--json" => {
             ProductCommand::Status { json: true }
+        }
+        [name] if name == "peer-review" => ProductCommand::PeerReviewList { json: false },
+        [name, ls] if name == "peer-review" && ls == "ls" => {
+            ProductCommand::PeerReviewList { json: false }
+        }
+        [name, ls, json] if name == "peer-review" && ls == "ls" && json == "--json" => {
+            ProductCommand::PeerReviewList { json: true }
+        }
+        [config, name] if config == "config" && name == "peer-review" => {
+            ProductCommand::PeerReviewConfig { set: None }
+        }
+        [config, name, value]
+            if config == "config"
+                && name == "peer-review"
+                && matches!(value.as_str(), "on" | "off") =>
+        {
+            ProductCommand::PeerReviewConfig {
+                set: Some(value == "on"),
+            }
         }
         [name] if name == "jobs" => ProductCommand::Results { json: false },
         [name, json] if name == "jobs" && json == "--json" => {
@@ -747,6 +783,27 @@ mod tests {
             }
         );
         assert!(parse(strings(&["marsh", "workers", "forget", "cloud"])).is_err());
+    }
+
+    #[test]
+    fn peer_review_commands_parse() {
+        let command = |words: &[&str]| parse(strings(words)).unwrap().command;
+        assert_eq!(
+            command(&["marsh", "peer-review", "ls", "--json"]),
+            ProductCommand::PeerReviewList { json: true }
+        );
+        assert_eq!(
+            command(&["marsh", "peer-review"]),
+            ProductCommand::PeerReviewList { json: false }
+        );
+        assert_eq!(
+            command(&["marsh", "config", "peer-review", "on"]),
+            ProductCommand::PeerReviewConfig { set: Some(true) }
+        );
+        assert_eq!(
+            command(&["marsh", "config", "peer-review"]),
+            ProductCommand::PeerReviewConfig { set: None }
+        );
     }
 
     #[test]

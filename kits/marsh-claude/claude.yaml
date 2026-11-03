@@ -125,6 +125,13 @@ capabilities:
       resume: ["--resume", "{{.SessionID}}"]
       list: ["claude", "agents", "--json", "--all"]
 
+  # marsh's model option for `task(model)`: appended after the prompt verbs
+  # (`claude -p PROMPT --model M`; docs/peer-review.md).
+  - type: org.marsh/agent-model@1
+    optional: true
+    config:
+      args: ["--model", "{{.Model}}"]
+
   - type: com.docker.sandbox/lifecycle@1
     config:
       install:

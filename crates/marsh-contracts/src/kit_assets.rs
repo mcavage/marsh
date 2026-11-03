@@ -195,7 +195,18 @@ pub struct KitAgent {
     /// mounted into this Kit's VM or its jobs, however they are started.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_home: bool,
+    /// The credential services it declares (`credential@1` `service`, e.g.
+    /// `anthropic`), sorted: the model vendors it can reach when the host
+    /// holds that credential (`marsh config peer-review on`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub services: Vec<String>,
 }
+
+/// marsh's own capability: the agent's model option for `task(model)`,
+/// `config.args` with a `{{.Model}}` placeholder (`docs/peer-review.md`).
+/// Stock SBX rejects unknown `agent-sessions@1` keys, so it lives here;
+/// marsh shows it as `model` in the agent's session verbs.
+pub const AGENT_MODEL_CAPABILITY: &str = "org.marsh/agent-model@1";
 
 /// marsh's own capability: which of the session's mounts a Kit's jobs get.
 pub const HOME_CAPABILITY: &str = "org.marsh/home@1";
@@ -206,6 +217,29 @@ fn agent_name(name: &str) -> String {
     name.strip_prefix("com.docker.kit/")
         .unwrap_or(name)
         .to_ascii_lowercase()
+}
+
+/// `org.marsh/agent-model@1` `args`: 1-8 non-empty strings, one with the
+/// `{{.Model}}` placeholder.
+fn model_option(config: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let placeholder = crate::process::MODEL_PLACEHOLDER;
+    config
+        .get("args")
+        .and_then(serde_json::Value::as_array)
+        .filter(|args| {
+            (1..=8).contains(&args.len())
+                && args.iter().all(|arg| {
+                    arg.as_str()
+                        .is_some_and(|arg| !arg.is_empty() && arg.len() <= 256)
+                })
+                && args
+                    .iter()
+                    .any(|arg| arg.as_str().is_some_and(|arg| arg.contains(placeholder)))
+        })
+        .map(|args| serde_json::Value::Array(args.clone()))
+        .ok_or_else(|| {
+            format!("{AGENT_MODEL_CAPABILITY}: args must be 1-8 strings, one with {placeholder}")
+        })
 }
 
 impl KitAgent {
@@ -242,6 +276,7 @@ impl KitAgent {
         let mut agent = Self::default();
         let mut adapters = Vec::new();
         let mut sessions = Vec::new();
+        let mut model_args = None;
         for capability in capabilities {
             let config = capability.get("config").cloned().unwrap_or_default();
             match capability.get("type").and_then(serde_json::Value::as_str) {
@@ -260,6 +295,17 @@ impl KitAgent {
                     }
                     sessions.push(config);
                 }
+                Some(AGENT_MODEL_CAPABILITY) => model_args = Some(model_option(&config)?),
+                Some("com.docker.sandbox/credential@1") => {
+                    if let Some(service) = config
+                        .get("service")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|service| !service.is_empty() && service.len() <= 64)
+                        && !agent.services.iter().any(|known| known == service)
+                    {
+                        agent.services.push(service.to_owned());
+                    }
+                }
                 // Any component of a set may narrow; none can widen back.
                 Some(HOME_CAPABILITY) => {
                     match config.get("mount").and_then(serde_json::Value::as_str) {
@@ -275,6 +321,7 @@ impl KitAgent {
                 _ => {}
             }
         }
+        agent.services.sort();
         agent.acp = adapters
             .iter()
             .find(|adapter| provided.contains(&agent_name(&adapter.agent)))
@@ -293,6 +340,11 @@ impl KitAgent {
             })
             .or_else(|| (sessions.len() == 1 && adapters.len() <= 1).then(|| &sessions[0]))
             .cloned();
+        if let (Some(serde_json::Value::Object(verbs)), Some(args)) =
+            (&mut agent.sessions, model_args)
+        {
+            verbs.insert("model".into(), args);
+        }
         Ok(agent)
     }
 }
@@ -543,6 +595,29 @@ mod tests {
         // One adapter: its Kit's only sessions declaration is its own.
         let one = serde_json::json!({"capabilities": [adapter("a"), sessions]});
         assert!(KitAgent::from_descriptor(&one).unwrap().sessions.is_some());
+        // Credential services, sorted and once each, from groups too.
+        let credential = |service: &str| serde_json::json!({"type": "com.docker.sandbox/credential@1", "config": {"service": service}});
+        let services = serde_json::json!({"capabilities": [
+            credential("openai"), {"group": {"capabilities": [credential("anthropic"), credential("openai")]}}
+        ]});
+        assert_eq!(
+            KitAgent::from_descriptor(&services).unwrap().services,
+            ["anthropic", "openai"]
+        );
+        // marsh's model option joins the session verbs as `model`.
+        let model = |args: serde_json::Value| {
+            serde_json::json!({"capabilities": [
+                {"type": "com.docker.sandbox/agent-sessions@1", "config": {"prompt": ["-p", "{{.Prompt}}"]}},
+                {"type": AGENT_MODEL_CAPABILITY, "config": {"args": args}}
+            ]})
+        };
+        let agent = KitAgent::from_descriptor(&model(serde_json::json!(["--model", "{{.Model}}"])))
+            .unwrap();
+        assert_eq!(
+            agent.sessions.unwrap()["model"],
+            serde_json::json!(["--model", "{{.Model}}"])
+        );
+        assert!(KitAgent::from_descriptor(&model(serde_json::json!(["--model"]))).is_err());
         // Two adapters and an unnamed declaration: whose it is is unknown.
         let two = serde_json::json!({"capabilities": [adapter("a"), adapter("b"), sessions]});
         assert!(KitAgent::from_descriptor(&two).unwrap().sessions.is_none());

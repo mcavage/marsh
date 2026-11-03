@@ -104,6 +104,15 @@ fn publish(dir: &Path, capability: &JobCapability) -> std::io::Result<()> {
     }
     let context = dir.join("context.md");
     let mut text = marsh_contracts::process::job_context(&capability.name, &capability.spawn);
+    // Peer review (`docs/peer-review.md`): present only while it is on.
+    if !capability.peer_review.trim().is_empty() {
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push('\n');
+        text.push_str(capability.peer_review.trim_end());
+        text.push('\n');
+    }
     for body in &capability.kit.contexts {
         if let Some(body) = kit_context(body) {
             if !text.ends_with('\n') {
@@ -386,13 +395,14 @@ mod tests {
                     KitContext::File(root.join("missing.md")),
                 ],
             },
+            peer_review: "## Second opinion\nAsk codex.\n".into(),
             ..JobCapability::default()
         };
         publish(&dir, &capability).unwrap();
         let context = fs::read_to_string(dir.join("context.md")).unwrap();
         assert!(context.starts_with(&marsh_contracts::process::job_context("pix", &[])));
         assert!(
-            context.ends_with("\n\nInline.\n\nFrom the mixin.\n"),
+            context.ends_with("\n\n## Second opinion\nAsk codex.\n\nInline.\n\nFrom the mixin.\n"),
             "{context}"
         );
         assert!(!context.contains("root only"));

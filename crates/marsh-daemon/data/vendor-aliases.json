@@ -1,0 +1,24 @@
+{
+  "_comment": "Model-maker spellings -> marsh's vendor id (docs/peer-review.md). A leading `~` is dropped first. Read by scripts/update-models-dev.py and by marsh (peer_review.rs), for snapshot rows, rules and drop-ins.",
+  "aliases": {
+    "x-ai": "xai",
+    "spacexai": "xai",
+    "z-ai": "zai",
+    "zai-org": "zai",
+    "zhipuai": "zai",
+    "zhipu": "zai",
+    "qwen": "alibaba",
+    "deepseek-ai": "deepseek",
+    "mistralai": "mistral",
+    "meta-llama": "meta",
+    "meta-contributor": "meta",
+    "facebook": "meta",
+    "moonshot": "moonshotai",
+    "kimi": "moonshotai",
+    "bytedance-seed": "bytedance",
+    "google-gemini": "google",
+    "gemini": "google",
+    "anthropic-claude": "anthropic",
+    "openai-gpt": "openai"
+  }
+}
