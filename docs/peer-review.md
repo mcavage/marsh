@@ -67,7 +67,7 @@ A call that sets `model` for an agent whose Kit has no model option fails with
 a tool error, and so does a malformed id (1 to 128 characters from
 `A-Za-z0-9-_.:/@[]`, not starting with `-`).
 
-### The job's `model`
+### Model on task jobs
 
 marsh records the model a task asked for as `model` on the child job's
 receipt: `marsh jobs --json` (each job), `marsh jobs show ID` (`model:`, and

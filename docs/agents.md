@@ -78,7 +78,7 @@ the caller's folder with [`marsh split apply ID LABEL --json`](split.md):
 limit, a name outside the spawn set) is a tool error with marsh's reason.
 
 Each task's job carries the label `task: DESCRIPTION`, and `model` when the
-call set one ([The job's model](peer-review.md#the-jobs-model)) (`label` in `marsh jobs
+call set one ([Model on task jobs](peer-review.md#model-on-task-jobs)) (`label` in `marsh jobs
 --json`, `marsh jobs show`, and the job lines of `marsh events --json`), so a
 viewer can show the task under its caller. A description is at most 120 bytes
 with no control characters; without one, the prompt's first words are used.
