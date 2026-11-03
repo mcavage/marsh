@@ -767,15 +767,16 @@ pub fn context(status: &PeerReviewStatus, spawn: &[String]) -> String {
     }
     let mut text = String::from(
         "## Peer review: required before your final answer\n\
-         If you changed any file (code, tests, config or docs, however small) or wrote a plan, \
-         design or analysis someone will act on, call the marsh `task` tool before you reply. \
-         Use the agent and model of the row below for your own model's class whose \
-         vendor is not your model's, `description: \"peer review\"`, and a prompt like \
-         \"Review the uncommitted changes in this folder (git status, git diff) for bugs, missed \
-         cases and missing tests. Findings only; change no files.\" Then fix what it finds, or \
-         tell the user which findings you left and why. Skip it only when you changed no file \
-         and wrote nothing to act on (a question, a quick answer), or when your class has no \
-         row from another vendor.\n\
+         Before you report substantial work as done, get a review: call the marsh `task` tool \
+         with the agent and model of the row below for your own model's class whose vendor is \
+         not your model's, `description: \"peer review\"`, and a prompt that says what to \
+         review and asks for findings only, changing no files (e.g. \"Review the uncommitted \
+         changes in this folder for bugs, missed cases and missing tests\", or the plan or \
+         document itself). Substantial means, e.g., a code change beyond a trivial edit (new \
+         behavior, a bug fix, a refactor, anything with tests), a plan or design, an analysis \
+         someone will act on, a document the user will send. Not for quick answers, typo or \
+         one-line fixes, or pure lookups. Then fix what it finds, or tell the user which \
+         findings you left and why. No row for your class from another vendor: skip it.\n\
          Classes: small (claude-haiku, gpt-luna, gemini-flash), mid (claude-sonnet, gpt-terra, \
          gemini-pro), large (claude-opus, claude-fable, gpt-sol, gpt-astra).\n\n\
          | class | vendor | task arguments |\n|---|---|---|\n",
