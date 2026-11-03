@@ -151,7 +151,7 @@ You can package another tool as a Docker Sandboxes Kit and register it with
 
 Run `sbx login` on your Mac, then configure the provider before calling an
 agent: `sbx secret set anthropic` for Claude, or `sbx secret set openai` for
-Codex. Pi can use Anthropic models with the Anthropic credential. Docker
+Codex. Pi can use Anthropic, OpenAI, Google, Mistral and xAI models with that provider's API key (`pi --model openai/MODEL`). Docker
 Sandboxes also supports OAuth bindings for the agent Kits; see
 [Signing in](kits.md#signing-in).
 

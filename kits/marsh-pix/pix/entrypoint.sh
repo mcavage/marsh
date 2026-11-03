@@ -31,6 +31,12 @@ esac
 case "${SBX_CRED_GOOGLE_MODE:-none}" in
   apikey) export GEMINI_API_KEY=proxy-managed ;;
 esac
+case "${SBX_CRED_MISTRAL_MODE:-none}" in
+  apikey) export MISTRAL_API_KEY=proxy-managed ;;
+esac
+case "${SBX_CRED_XAI_MODE:-none}" in
+  apikey) export XAI_API_KEY=proxy-managed ;;
+esac
 if [ "${1:-}" = --acp ]; then
   shift
   export PI_ACP_PI_COMMAND=/usr/local/bin/marsh-pix

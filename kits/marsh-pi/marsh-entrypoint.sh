@@ -16,6 +16,18 @@ mkdir -p "$HOME/.pi"
 case "${SBX_CRED_ANTHROPIC_MODE:-none}" in
   apikey|oauth) export ANTHROPIC_API_KEY=proxy-managed ;;
 esac
+case "${SBX_CRED_OPENAI_MODE:-none}" in
+  apikey) export OPENAI_API_KEY=proxy-managed ;;
+esac
+case "${SBX_CRED_GOOGLE_MODE:-none}" in
+  apikey) export GEMINI_API_KEY=proxy-managed ;;
+esac
+case "${SBX_CRED_MISTRAL_MODE:-none}" in
+  apikey) export MISTRAL_API_KEY=proxy-managed ;;
+esac
+case "${SBX_CRED_XAI_MODE:-none}" in
+  apikey) export XAI_API_KEY=proxy-managed ;;
+esac
 
 # ACP mode (`--acp`, the Kit's acp@1 adapter: `marsh run --acp pi`). The
 # community pi-acp adapter speaks ACP v1 on stdio and starts Pi in RPC mode

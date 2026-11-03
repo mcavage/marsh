@@ -14,7 +14,7 @@ required to run marsh. Intel Macs, Linux, and Windows are not supported hosts.
 brew install docker/tap/sbx mcavage/tap/marsh
 sbx login                    # interactive sign-in
 sbx secret set anthropic     # interactive key entry; claude and pi
-sbx secret set openai        # interactive key entry; codex
+sbx secret set openai        # interactive key entry; codex, and pi for OpenAI models
 marsh --version
 ```
 

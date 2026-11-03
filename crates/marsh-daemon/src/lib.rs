@@ -1664,6 +1664,10 @@ pub struct CommandStatus {
     /// can reach (`docs/peer-review.md`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub services: Vec<String>,
+    /// Per credential service, the hosts its Kit allows and injects that
+    /// service's key for (`KitAgent::reaches`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub reaches: BTreeMap<String, Vec<String>>,
 }
 
 /// `marsh status` `sbxenv`: the environment files the daemon is using now.

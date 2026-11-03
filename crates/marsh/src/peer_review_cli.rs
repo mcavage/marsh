@@ -2,9 +2,10 @@
 //! (`docs/peer-review.md`).
 
 use marsh_daemon::peer_review::{
-    ClassTable, DROPIN_DIR, DropIn, MARSH_DROPIN, PeerReviewStatus, detect,
+    ClassTable, DROPIN_DIR, DetectAgent, DropIn, MARSH_DROPIN, PeerReviewStatus, detect,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::io::Write;
 use std::path::Path;
 
@@ -184,10 +185,11 @@ pub fn render(out: &mut impl Write, status: &PeerReviewStatus) -> std::io::Resul
     Ok(())
 }
 
-/// Each registered agent with prompt verbs and a model option, and the
-/// credential services its Kit declares, from `marsh status --json`.
+/// Each registered agent with prompt verbs and a model option, the
+/// credential services its Kit declares and where it can use them, from
+/// `marsh status --json`.
 #[must_use]
-pub fn model_agents(status: &serde_json::Value) -> BTreeMap<String, BTreeSet<String>> {
+pub fn model_agents(status: &serde_json::Value) -> BTreeMap<String, DetectAgent> {
     let has = |sessions: &serde_json::Value, key: &str, placeholder: &str| {
         sessions[key].as_array().is_some_and(|verbs| {
             verbs
@@ -218,7 +220,27 @@ pub fn model_agents(status: &serde_json::Value) -> BTreeMap<String, BTreeSet<Str
                 .filter_map(serde_json::Value::as_str)
                 .map(str::to_owned)
                 .collect::<BTreeSet<_>>();
-            Some((command["name"].as_str()?.to_owned(), services))
+            let reaches = command["reaches"]
+                .as_object()
+                .into_iter()
+                .flatten()
+                .map(|(service, hosts)| {
+                    (
+                        service.clone(),
+                        hosts
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(serde_json::Value::as_str)
+                            .map(str::to_owned)
+                            .collect::<BTreeSet<_>>(),
+                    )
+                })
+                .collect();
+            Some((
+                command["name"].as_str()?.to_owned(),
+                DetectAgent { services, reaches },
+            ))
         })
         .collect()
 }
@@ -259,7 +281,7 @@ pub fn stored_credentials(sbx: &Path) -> Result<BTreeSet<String>, String> {
 pub fn write_switch(
     scope: &Path,
     on: bool,
-    agents: &BTreeMap<String, BTreeSet<String>>,
+    agents: &BTreeMap<String, DetectAgent>,
     credentials: &BTreeSet<String>,
 ) -> Result<String, String> {
     let directory = scope.join(DROPIN_DIR);
@@ -275,7 +297,7 @@ pub fn write_switch(
     if on {
         let (table, _) = ClassTable::load(scope);
         let detected = detect(&table, agents, credentials);
-        if detected.is_empty() {
+        if detected.ready.is_empty() {
             note = format!(
                 "marsh detected no reviewer: no registered agent with a model option ({}) can reach a vendor whose key sbx holds ({})",
                 if agents.is_empty() {
@@ -289,8 +311,33 @@ pub fn write_switch(
                     credentials.iter().cloned().collect::<Vec<_>>().join(", ")
                 }
             );
-        } else {
-            file.reviewers = detected;
+        }
+        if !detected.ready.is_empty() || !detected.unreachable.is_empty() {
+            let reasons = detected
+                .unreachable
+                .iter()
+                .map(|(_, reason)| reason.clone())
+                .collect::<BTreeSet<_>>();
+            if !reasons.is_empty() {
+                if !note.is_empty() {
+                    note.push_str("; ");
+                }
+                let _ = write!(
+                    note,
+                    "not ready (listed by `marsh peer-review ls`): {}",
+                    reasons.into_iter().collect::<Vec<_>>().join("; ")
+                );
+            }
+            file.reviewers = detected
+                .ready
+                .into_iter()
+                .chain(
+                    detected
+                        .unreachable
+                        .into_iter()
+                        .map(|(reviewer, _)| reviewer),
+                )
+                .collect();
         }
     }
     let text = file.render(
@@ -370,5 +417,42 @@ mod tests {
         assert_eq!((off.enabled, off.reviewers), (Some(false), file.reviewers));
         let note = write_switch(scope.path(), true, &BTreeMap::new(), &credentials).unwrap();
         assert!(note.contains("detected no reviewer"), "{note}");
+    }
+
+    #[test]
+    fn on_writes_a_multi_provider_agent_only_where_its_kit_reaches() {
+        let scope = tempfile::tempdir().unwrap();
+        let verbs = serde_json::json!({"prompt": ["-p", "{{.Prompt}}"], "model": ["--model", "{{.Model}}"]});
+        let status = serde_json::json!({"commands": [
+            {"name": "claude", "services": ["anthropic"], "sessions": verbs},
+            {"name": "pi", "services": ["*", "anthropic", "openai"], "sessions": verbs,
+             "reaches": {"anthropic": ["api.anthropic.com"], "openai": ["api.openai.com"]}},
+            {"name": "pix", "services": ["*", "anthropic"], "sessions": verbs,
+             "reaches": {"anthropic": ["api.anthropic.com"]}},
+        ]});
+        let agents = model_agents(&status);
+        let credentials = BTreeSet::from([
+            "openai".to_owned(),
+            "anthropic".to_owned(),
+            "mistral".to_owned(),
+        ]);
+        let note = write_switch(scope.path(), true, &agents, &credentials).unwrap();
+        // pi reaches openai; neither reaches mistral.
+        assert!(note.contains("pi can't reach api.mistral.ai"), "{note}");
+        let path = scope.path().join(DROPIN_DIR).join(MARSH_DROPIN);
+        let file = DropIn::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let pairs = |vendor: &str| {
+            file.reviewers
+                .iter()
+                .filter(|r| r.vendor.as_deref() == Some(vendor))
+                .map(|r| (r.agent.clone(), r.model.starts_with(&format!("{vendor}/"))))
+                .collect::<BTreeSet<_>>()
+        };
+        assert_eq!(
+            pairs("anthropic"),
+            BTreeSet::from([("claude".to_owned(), false)])
+        );
+        assert_eq!(pairs("openai"), BTreeSet::from([("pi".to_owned(), true)]));
+        assert_eq!(pairs("mistral"), BTreeSet::from([("pi".to_owned(), true)]));
     }
 }

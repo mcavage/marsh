@@ -64,11 +64,23 @@ its own capability). `marsh status --json` shows it as `model` under
 | `codex` | `["-m", "{{.Model}}"]` | `codex exec PROMPT -m M` |
 | `pi`, `pix` | `["--model", "{{.Model}}"]`, `services: ["*"]` | `pi -p PROMPT --model M` (`provider/id` works) |
 
-An agent that reaches any model vendor (Pi) says so with `services: ["*"]` in
-the same capability's `config`. `marsh status --json` then lists `"*"` in the
-agent's `commands[].services`, and `marsh config peer-review on` treats the
-agent as reaching every vendor whose key `sbx secret ls --global` holds. `["*"]`
-is the only value accepted.
+An agent that can run any vendor's model (Pi) says so with `services: ["*"]`
+in the same capability's `config` (`["*"]` is the only value accepted).
+`marsh status --json` lists `"*"` in the agent's `commands[].services`.
+Declaring it is not enough to be used: marsh counts a multi-provider agent
+for a vendor only where its Kit can reach it. The Kit must allow the vendor's
+API host (`network-policy@1` `runtime.allow`) and have a `credential@1` for
+the vendor's sbx service inject its key for that host (`apiKey.inject`).
+`commands[].reaches` in `marsh status --json` shows, per service, the hosts
+that hold for both. `pi` and `pix` do this for `anthropic`
+(`api.anthropic.com`), `openai` (`api.openai.com`), `google`
+(`generativelanguage.googleapis.com`), `mistral` (`api.mistral.ai`) and `xai`
+(`api.x.ai`): the services `sbx secret ls --global` can hold for a model
+maker. sbx injects a key only if the host holds it, and the entrypoint
+exports the provider's key variable (`OPENAI_API_KEY`, `GEMINI_API_KEY`, …) as
+a placeholder only then, from `SBX_CRED_<SERVICE>_MODE`; a Kit gets no raw key.
+A vendor with no sbx service, such as DeepSeek, has no key to inject, so no
+Kit reaches it through sbx.
 
 A call that sets `model` for an agent whose Kit has no model option fails with
 a tool error, and so does a malformed id (1 to 128 characters from
@@ -191,13 +203,17 @@ option: for each credential service the Kit declares (`credential@1`) that
 `sbx secret ls --global` shows as stored, marsh picks that vendor's newest
 model in each class from the snapshot. When several agents reach the same
 vendor, it prefers the vendor's own agent, meaning the one that reaches only
-that vendor. A multi-provider agent (`services: ["*"]`: `pi`, `pix`) is the
-last resort for each vendor that has no agent of its own, and takes the
-provider-qualified id that agent accepts: with keys for `anthropic` and
-`deepseek` and the agents `claude` and `pi`, each class's Anthropic reviewer is
-`claude` and its DeepSeek reviewer is `pi` with `deepseek/deepseek-…` (the
-vendor name is used as Pi's provider). Alone, a multi-provider agent takes a
-vendor it names itself (Pi's `anthropic`) by the bare id. Credentials that sbx does not list, such as some OAuth logins,
+that vendor. A multi-provider agent (`pi`, `pix`) is the last resort for
+each vendor that has no agent of its own, and takes the provider-qualified id
+(`openai/gpt-6.1-terra`; the vendor name is the provider name). It counts only
+where its Kit reaches the vendor's API host (see above). With keys for
+`anthropic` and `openai` and the agents `claude` and `pi`, each class's
+Anthropic reviewer is `claude` and its OpenAI reviewer is `pi`. For a vendor
+whose key is stored but that no agent reaches, `on` still writes the reviewer
+and prints why; `marsh peer-review ls` lists it under "Not ready", e.g. `pi
+can't reach api.mistral.ai (its Kit must allow the host and inject the mistral
+key for it)`. The same check applies to a multi-provider agent you name in a
+drop-in yourself. Credentials that sbx does not list, such as some OAuth logins,
 are not detected; add those reviewers to the file yourself. `off` sets
 `enabled: false` and keeps the list.
 
