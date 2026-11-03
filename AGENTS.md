@@ -99,7 +99,10 @@ journey. Do not grow mock suites or a parallel test framework to claim progress.
   preservation, receipts, and cleanup. Do not add unit tests that mirror the
   implementation.
 - No real credentials in unit tests.
-- Keep `docs/model/` in step with changes to ownership, worker lifecycle,
-  mounts, cancellation, or grants. Update the invariant, the negative control,
-  and the code-location table together. A TLC pass is not evidence about the
-  Rust code.
+- Keep `docs/model/` in step with changes to what marsh deletes, kills, or
+  reassigns: VMs, containers, jobs, mounts, grants, and ownership records,
+  including when that may happen (cancellation, restart, retirement). Update
+  the invariant, the negative control, and the code-location table together.
+  Other changes (CLI, help and docs, configuration, Kit settings, detection,
+  output formats) need tests, not model changes. A TLC pass is not evidence
+  about the Rust code.
