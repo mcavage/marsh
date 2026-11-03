@@ -120,7 +120,7 @@ the workspace tests (`make test-unit TEST_SCOPE=host`: everything but the
 platform-neutral guest worker, contract values and Bash audit), the binary
 callers and the entrypoint harnesses. A merge to `main` also runs the full
 workspace tests and the tooling self-tests on macOS, every TLA+ config but the
-huge one (which runs nightly, [model.yml](.github/workflows/model.yml)), and the
+huge one (which runs weekly, and in `make regress` before every release: [model.yml](.github/workflows/model.yml)), and the
 docs and link checks. The macOS release build runs in the nightly and release
 workflows, not in CI. Rust jobs use content-addressed `sccache` compiler
 results across source changes. The isolated Python harness tests run
