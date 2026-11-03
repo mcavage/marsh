@@ -766,13 +766,16 @@ pub fn context(status: &PeerReviewStatus, spawn: &[String]) -> String {
         return String::new();
     }
     let mut text = String::from(
-        "## Second opinion\n\
-         Before you report substantial work as done (a code change, a plan or design, an \
-         analysis someone will act on, a document the user will send; not a quick answer or a \
-         trivial edit), get a second opinion: call `task` with the reviewer for your own \
-         model's class from the table below, from a different vendor than your model's, \
-         sharing the folder, asking for findings only. Then address them, or tell the user \
-         which you didn't and why. No row for your class with another vendor: skip it.\n\
+        "## Peer review: required before your final answer\n\
+         If you changed any file (code, tests, config or docs, however small) or wrote a plan, \
+         design or analysis someone will act on, call the marsh `task` tool before you reply. \
+         Use the agent and model of the row below for your own model's class whose \
+         vendor is not your model's, `description: \"peer review\"`, and a prompt like \
+         \"Review the uncommitted changes in this folder (git status, git diff) for bugs, missed \
+         cases and missing tests. Findings only; change no files.\" Then fix what it finds, or \
+         tell the user which findings you left and why. Skip it only when you changed no file \
+         and wrote nothing to act on (a question, a quick answer), or when your class has no \
+         row from another vendor.\n\
          Classes: small (claude-haiku, gpt-luna, gemini-flash), mid (claude-sonnet, gpt-terra, \
          gemini-pro), large (claude-opus, claude-fable, gpt-sol, gpt-astra).\n\n\
          | class | vendor | task arguments |\n|---|---|---|\n",
@@ -1173,7 +1176,7 @@ mod tests {
         );
 
         let text = context(&status, &["claude".into(), "codex".into()]);
-        assert!(text.starts_with("## Second opinion\n"));
+        assert!(text.starts_with("## Peer review: required before your final answer\n"));
         assert!(text.contains("| mid | openai | agent: \"codex\", model: \"gpt-6.1-terra\" |"));
         // Two reviewers of one class and vendor: only the first is shown.
         assert_eq!(text.matches("| mid | xai |").count(), 1);

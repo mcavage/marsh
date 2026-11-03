@@ -487,7 +487,7 @@ class TaskTool(ScenarioSuite):
         this job may start; `task(model)` reaches the agent's model option and the child's receipt."""
         dropins = self.home / "peer-review.d"
         dropins.mkdir(exist_ok=True)
-        heading = "## Second opinion"
+        heading = "## Peer review: required before your final answer"
         require(heading not in self.context_md(), "the section is in context.md with no drop-in")
         status = self.document("status", "--json")
         require("peer-review-v1" in status.get("features", []), f"features: {status.get('features')}")
@@ -510,12 +510,12 @@ class TaskTool(ScenarioSuite):
                 f"skipped: {listed['skipped']!r}"[:900])
         require(any("broken.yaml" in error for error in listed["errors"]), f"errors: {listed['errors']}")
         on = self.context_md()
-        section = on.split(heading, 1)[-1]
+        section = on.split(heading, 1)[-1].split("\n## ", 1)[0]
         require(heading in on and '| mid | openai | agent: "fixture", model: "gpt-6.1-terra" |' in section
                 and '| mid | anthropic | agent: "claude", model: "claude-sonnet-5-5" |' in section
                 and "shell" not in section and "nope" not in section,
                 f"context while on: {section[:1500]!r}")
-        narrowed = self.context_md(["fixture"]).split(heading, 1)[-1]
+        narrowed = self.context_md(["fixture"]).split(heading, 1)[-1].split("\n## ", 1)[0]
         require("fixture" in narrowed and '"claude"' not in narrowed, f"MARSH_SPAWN=fixture: {narrowed[:900]!r}")
         (self.evidence / "peer-review-context.md").write_text(heading + section)
         nested = self.cli(["run", "fixture", "exec", "sh", "-c", "fixture exec cat /run/marsh/context.md </dev/null"],

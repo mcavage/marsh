@@ -682,7 +682,7 @@ impl StockDaemonBackend {
     }
 
     /// The ACP adapter and session verbs a command's Kit declares; kept under
-    /// the control home (`kit-agent-v2/`) once read from a published image or a
+    /// the control home (`KIT_AGENT_CACHE`) once read from a published image or a
     /// local build, so `marsh status` stays offline and fast.
     /// The agent (ACP adapter, session verbs) of one captured Kit generation,
     /// cached by its identity: the adapter always matches the image prepared
@@ -5080,19 +5080,99 @@ fn pending_message(command: &str, removed: bool) -> String {
     }
 }
 
+/// The cache of each Kit generation's agent (`KitAgent`). Bump it whenever
+/// `KitAgent` reads something new from a descriptor: an entry an older marsh
+/// wrote still parses (new fields default), so it would hide what the Kit
+/// declares. v2: bounded adapters and session verbs. v3: `no_home`. v4: the
+/// model option, `services` and `reaches` (peer review), and the reading
+/// marsh's version (`CachedKitAgent`): 0.3.5 cached the post-#260 Kits it
+/// auto-updated to in v3, so 0.3.6 saw no agent with a model option.
+const KIT_AGENT_CACHE: &str = "kit-agent-v4";
+
 fn kit_agent_path(control_home: &Path, kit: &NativeKitRef) -> PathBuf {
     control_home
-        // v2: bounded adapters and session verbs (entries of earlier builds
-        // were never checked against those bounds). v3: `no_home`; a v2 entry
-        // never read it, so it can't say a Kit wants the home.
-        .join("kit-agent-v3")
+        .join(KIT_AGENT_CACHE)
         .join(format!("{}.json", identity_digest(kit.identity())))
+}
+
+#[cfg(test)]
+mod kit_agent_cache_tests {
+    use marsh_contracts::kit_assets::{AcpAdapter, KitAgent};
+
+    /// A new `KitAgent` field stops this literal compiling: add it here, and
+    /// bump `KIT_AGENT_CACHE` (older entries would hide the field).
+    #[test]
+    fn kit_agent_cache_follows_its_fields() {
+        let agent = KitAgent {
+            acp: Some(AcpAdapter {
+                agent: "a".into(),
+                command: vec!["a".into()],
+                env: std::collections::BTreeMap::new(),
+                protocol_version: None,
+            }),
+            sessions: Some(serde_json::json!({"model": ["-m", "{{.Model}}"]})),
+            no_home: true,
+            services: vec!["openai".into()],
+            reaches: [("openai".to_owned(), vec!["api.openai.com".to_owned()])].into(),
+        };
+        let value = serde_json::to_value(&agent).unwrap();
+        let fields = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            (super::KIT_AGENT_CACHE, fields.join(",").as_str()),
+            ("kit-agent-v4", "acp,no_home,reaches,services,sessions"),
+        );
+    }
+
+    /// An entry another marsh wrote (or a v3-shaped one) is read again.
+    #[test]
+    fn another_marshs_entry_is_not_trusted() {
+        let home = tempfile::tempdir().unwrap();
+        let kit = super::NativeKitRef::immutable_oci(format!(
+            "docker.io/example/kit@sha256:{}",
+            "a".repeat(64)
+        ))
+        .unwrap();
+        let path = super::kit_agent_path(home.path(), &kit);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let agent = r#"{"sessions":{"prompt":["-p","{{.Prompt}}"]}}"#;
+        for stale in [
+            agent.to_owned(),
+            format!(r#"{{"marsh":"0.0.1","agent":{agent}}}"#),
+        ] {
+            std::fs::write(&path, stale).unwrap();
+            assert!(super::cached_kit_agent(home.path(), &kit).is_none());
+        }
+        let current = format!(
+            r#"{{"marsh":"{}","agent":{agent}}}"#,
+            env!("CARGO_PKG_VERSION")
+        );
+        std::fs::write(&path, current).unwrap();
+        assert!(super::cached_kit_agent(home.path(), &kit).is_some());
+    }
+}
+
+/// A `KIT_AGENT_CACHE` entry: the agent, and the marsh that read it. Another
+/// release's entry is read again: Kit images move under a running marsh
+/// (stable follows :latest), so an older marsh may have cached a Kit whose
+/// descriptor declares more than it could read.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct CachedKitAgent {
+    marsh: String,
+    agent: KitAgent,
 }
 
 fn cached_kit_agent(control_home: &Path, kit: &NativeKitRef) -> Option<KitAgent> {
     fs::read(kit_agent_path(control_home, kit))
         .ok()
-        .and_then(|bytes| serde_json::from_slice::<KitAgent>(&bytes).ok())
+        .and_then(|bytes| serde_json::from_slice::<CachedKitAgent>(&bytes).ok())
+        .filter(|cached| cached.marsh == env!("CARGO_PKG_VERSION"))
+        .map(|cached| cached.agent)
 }
 
 /// Read the Kit's descriptor and cache its agent once it is final.
@@ -5110,7 +5190,13 @@ fn fetch_kit_agent(
             fs::create_dir_all(directory)?;
             fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
             let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
-            serde_json::to_writer(&mut temporary, &agent)?;
+            serde_json::to_writer(
+                &mut temporary,
+                &CachedKitAgent {
+                    marsh: env!("CARGO_PKG_VERSION").to_owned(),
+                    agent: agent.clone(),
+                },
+            )?;
             temporary.persist(&path).map_err(|error| error.error)?;
             Ok(())
         };

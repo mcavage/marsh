@@ -104,14 +104,20 @@ fn publish(dir: &Path, capability: &JobCapability) -> std::io::Result<()> {
     }
     let context = dir.join("context.md");
     let mut text = marsh_contracts::process::job_context(&capability.name, &capability.spawn);
-    // Peer review (`docs/peer-review.md`): present only while it is on.
+    // Peer review (`docs/peer-review.md`): present only while it is on, and
+    // first after the opening paragraph; at the end, agents skipped it.
     if !capability.peer_review.trim().is_empty() {
-        if !text.ends_with('\n') {
+        let section = capability.peer_review.trim_end();
+        if let Some(at) = text.find("\n## ") {
+            text.insert_str(at + 1, &format!("{section}\n\n"));
+        } else {
+            if !text.ends_with('\n') {
+                text.push('\n');
+            }
+            text.push('\n');
+            text.push_str(section);
             text.push('\n');
         }
-        text.push('\n');
-        text.push_str(capability.peer_review.trim_end());
-        text.push('\n');
     }
     for body in &capability.kit.contexts {
         if let Some(body) = kit_context(body) {
@@ -400,9 +406,14 @@ mod tests {
         };
         publish(&dir, &capability).unwrap();
         let context = fs::read_to_string(dir.join("context.md")).unwrap();
-        assert!(context.starts_with(&marsh_contracts::process::job_context("pix", &[])));
+        let base = marsh_contracts::process::job_context("pix", &[]);
+        let (intro, rest) = base.split_at(base.find("\n## ").unwrap() + 1);
         assert!(
-            context.ends_with("\n\n## Second opinion\nAsk codex.\n\nInline.\n\nFrom the mixin.\n"),
+            context.starts_with(&format!("{intro}## Second opinion\nAsk codex.\n\n{rest}")),
+            "{context}"
+        );
+        assert!(
+            context.ends_with("\n\nInline.\n\nFrom the mixin.\n"),
             "{context}"
         );
         assert!(!context.contains("root only"));
