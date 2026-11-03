@@ -28,7 +28,7 @@ env:
 # callers and the entrypoint harnesses; on main, everything. A pull request
 # runs only the lanes its files need (scripts/ci-changes.sh): a docs-only
 # change runs the docs check alone. "CI passed" is the one required check.
-# The huge TLA+ configs run nightly (model.yml). The macOS release build is not
+# The huge TLA+ configs run weekly (model.yml) and in make regress. The macOS release build is not
 # here: the nightly and release workflows build it (release.yml).
 # What it does not: start microVMs. GitHub's macOS arm64 runners are VMs
 # without nested virtualization and its Linux arm64 runners have no KVM; Linux
@@ -419,7 +419,7 @@ jobs:
         run: python3 tests/release/test_site.py
 
   model:
-    # Every config except the huge ones (those run nightly in model.yml);
+    # Every config except the huge ones (those run weekly in model.yml);
     # check.sh runs them concurrently (docs/model/check.sh --help). The verdict
     # cache is keyed by the model files, so an unchanged model is quick.
     name: TLA+ model

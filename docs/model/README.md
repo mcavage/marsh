@@ -194,7 +194,7 @@ configs (`Process_live_pass.cfg`, `Workspace_live_pass.cfg`). It skips only the 
 `\* marsh-check: slow`, the larger positive bounds: `Workspace.cfg` (about 7 min), `Process_caps_pass`,
 `Process_kits_pass`, `Process_kitvms_pass` (about 2 min each), and `Workspace_depth3_pass` (about 30 min).
 The default and `make regress` run every config. `--huge` / `--no-huge` split the one config that does
-not fit a CI job from the rest: CI's model job runs `--no-huge`, and the nightly
+not fit a CI job from the rest: CI's model job runs `--no-huge`, and the weekly
 [model.yml](../../.github/workflows/model.yml) runs `--huge`. `TLC_CACHE=DIR` skips a config whose spec, config,
 jar and `check.sh` are byte-identical to one that already gave its expected verdict (`make test` uses
 `target/tlc-cache`); the release run does not set it. This needs Docker (or `TLC_RUNNER=java` with a local
