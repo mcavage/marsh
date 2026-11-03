@@ -52,7 +52,9 @@ impl Record {
     /// by an automatic update (this record, or a recent update's target for
     /// homes updated before it existed).
     pub fn wrote_automatically(&self, command: &str, reference: &str) -> bool {
-        self.automatic.get(command).is_some_and(|to| to == reference)
+        self.automatic
+            .get(command)
+            .is_some_and(|to| to == reference)
             || self
                 .recent
                 .iter()

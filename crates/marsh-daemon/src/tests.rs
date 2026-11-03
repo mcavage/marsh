@@ -1685,10 +1685,16 @@ fn automatic_retirement_refuses_reserved_quarantined_and_uncertain_workers() {
         register(worker);
     }
     let reserved = job("reserved");
-    store.reserve_worker(&reserved, "reserved", "reserved").unwrap();
-    store.quarantine_worker("quarantined", "transport lost").unwrap();
+    store
+        .reserve_worker(&reserved, "reserved", "reserved")
+        .unwrap();
+    store
+        .quarantine_worker("quarantined", "transport lost")
+        .unwrap();
     let uncertain = job("uncertain");
-    store.reserve_worker(&uncertain, "uncertain", "uncertain").unwrap();
+    store
+        .reserve_worker(&uncertain, "uncertain", "uncertain")
+        .unwrap();
     store
         .mark_running(&uncertain, "uncertain", "uncertain", &"c".repeat(64))
         .unwrap();
@@ -1716,11 +1722,15 @@ fn automatic_retirement_refuses_reserved_quarantined_and_uncertain_workers() {
     assert_eq!(quarantined.health, WorkerHealth::Quarantined);
     // An idle worker is claimed (no job reserves it meanwhile); an unknown
     // VM with no recorded job is claimable but not registered.
+    assert!(!store.begin_automatic_retire("never-served").unwrap());
     assert!(store.begin_automatic_retire("idle").unwrap());
     let blocked = job("idle");
     assert!(store.reserve_worker(&blocked, "idle", "idle").is_err());
     store.finish_worker_reset("idle", true).unwrap();
-    assert!(!store.begin_automatic_retire("never-served").unwrap());
+    // A job between its VM's preparation and its reservation is unreserved
+    // and queued: nothing is claimed meanwhile.
+    register("next");
+    assert!(store.begin_automatic_retire("next").is_err());
 }
 
 #[test]

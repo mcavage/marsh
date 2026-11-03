@@ -3961,12 +3961,7 @@ impl StockDaemonBackend {
 
     /// How a Kit change leaves the replaced Kit's VM `spec` (held under its
     /// Kit lock). A change never waits for, or stops, running work.
-    fn claim_old_vm(
-        &self,
-        store: &DaemonStore,
-        spec: &KitVmSpec,
-        still_used: bool,
-    ) -> OldVm {
+    fn claim_old_vm(&self, store: &DaemonStore, spec: &KitVmSpec, still_used: bool) -> OldVm {
         if still_used {
             return OldVm::Shared;
         }
@@ -3985,17 +3980,27 @@ impl StockDaemonBackend {
     /// show that no container runs in it. Never the operator-reset claim.
     fn automatic_claim(&self, store: &DaemonStore, vm: &str) -> Option<RetirementClaim> {
         let live = store.attached_session_ids();
-        if store.worker_busy(vm) || self.sbx.kit_vm_in_use(vm, &live) || self.vm_quarantined(store, vm)
+        if store.worker_busy(vm)
+            || self.sbx.kit_vm_in_use(vm, &live)
+            || self.vm_quarantined(store, vm)
         {
             return None;
         }
-        let served = store.status(None).workers.iter().any(|worker| worker.worker_id == vm);
+        let served = store
+            .status(None)
+            .workers
+            .iter()
+            .any(|worker| worker.worker_id == vm);
         if !served && self.sbx.verify_no_running_containers(vm).is_err() {
             return None;
         }
         let registered = store.begin_automatic_retire(vm).ok()?;
         Some(RetirementClaim {
-            worker_ids: if registered { vec![vm.to_owned()] } else { Vec::new() },
+            worker_ids: if registered {
+                vec![vm.to_owned()]
+            } else {
+                Vec::new()
+            },
             live,
             quarantined: BTreeSet::new(),
         })
@@ -4147,22 +4152,28 @@ impl StockDaemonBackend {
             .filter_map(|(name, packaged)| {
                 let current = self.registered_kit(name).ok()?;
                 let identity = current.workload.identity();
-                let repository = current.workload.workload_image()?.as_str().rsplit_once('@')?.0;
+                let repository = current
+                    .workload
+                    .workload_image()?
+                    .as_str()
+                    .rsplit_once('@')?
+                    .0;
                 // Only an entry an automatic update wrote: a digest the user
                 // put in commands.json stays.
                 if !record.wrote_automatically(name, identity) {
                     return None;
                 }
                 let own = match packaged.workload.source_dir() {
-                    Some(source) => source.file_name().and_then(std::ffi::OsStr::to_str).is_some_and(
-                        |kit| {
+                    Some(source) => source
+                        .file_name()
+                        .and_then(std::ffi::OsStr::to_str)
+                        .is_some_and(|kit| {
                             repository
                                 == format!(
                                     "{}{kit}",
                                     marsh_contracts::builtin_kits::PACKAGED_REPOSITORY_PREFIX
                                 )
-                        },
-                    ),
+                        }),
                     None => {
                         identity != packaged.workload.identity()
                             && same_repository(identity, packaged.workload.identity())
@@ -4818,7 +4829,9 @@ impl StockDaemonBackend {
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
                         .remove(&name);
                 }
-                Err(error) => eprintln!("marshd: {command}: drained VM {name} not removed: {error}"),
+                Err(error) => {
+                    eprintln!("marshd: {command}: drained VM {name} not removed: {error}");
+                }
             }
         }
     }
@@ -6976,7 +6989,12 @@ mod kit_lifecycle_callers {
                     .get(reference)
                     .cloned()
                     .or_else(|| {
-                        let day = reference.split_once("@sha256:")?.1.chars().next()?.to_digit(16)?;
+                        let day = reference
+                            .split_once("@sha256:")?
+                            .1
+                            .chars()
+                            .next()?
+                            .to_digit(16)?;
                         Some(format!("2026-01-{:02}T00:00:00Z", day + 1))
                     })
                     .filter(|created| !created.is_empty())
@@ -7615,7 +7633,11 @@ mod kit_lifecycle_callers {
         // Order unknown (no creation time, no comparable version): kept, and
         // retried later, never moved on a guess.
         let home = tempfile::tempdir().unwrap();
-        registry.created.lock().unwrap().insert(PI_OLD.into(), String::new());
+        registry
+            .created
+            .lock()
+            .unwrap()
+            .insert(PI_OLD.into(), String::new());
         let unknown = daemon(home.path(), &registry, Some(PI_OLD), Some("latest"));
         updated_automatically(&unknown, "pi", PI_OLD);
         let sbx_calls = registry.calls("sbx");
@@ -7940,7 +7962,9 @@ mod kit_lifecycle_callers {
         );
         let store = DaemonStore::new(home.path());
         backend.auto_update_pass(&store, DAY);
-        backend.uninstall_kit("hermes".into(), store.clone()).unwrap();
+        backend
+            .uninstall_kit("hermes".into(), store.clone())
+            .unwrap();
         assert!(!backend.command_names().contains(&"hermes".to_owned()));
         assert!(
             kit_auto_update::read(&backend.config.control_home)

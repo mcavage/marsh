@@ -8033,7 +8033,20 @@ pub fn rfc3339_unix_nanos(text: &str) -> Option<i128> {
     let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
     let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
     let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-    let days_in_month = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let days_in_month = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     if !(1..=12).contains(&month)
         || day < 1
         || day > days_in_month[usize::try_from(month - 1).ok()?]
@@ -8068,7 +8081,13 @@ pub fn rfc3339_unix_nanos(text: &str) -> Option<i128> {
             }
             let hours: i64 = offset[..2].parse().ok()?;
             let minutes: i64 = offset[3..].parse().ok()?;
-            if hours > 23 || minutes > 59 || !offset[..2].bytes().chain(offset[3..].bytes()).all(|b| b.is_ascii_digit()) {
+            if hours > 23
+                || minutes > 59
+                || !offset[..2]
+                    .bytes()
+                    .chain(offset[3..].bytes())
+                    .all(|b| b.is_ascii_digit())
+            {
                 return None;
             }
             sign * (hours * 3600 + minutes * 60)
@@ -8420,7 +8439,10 @@ mod kit_resolution_tests {
             Some(1_793_658_439_178_412_012)
         );
         let (sbx, _) = stock(r#"{"created":"2026-10-29T10:43:13Z","config":{}}"#.into());
-        assert_eq!(sbx.kit_created(&image).unwrap(), Some(1_793_270_593_000_000_000));
+        assert_eq!(
+            sbx.kit_created(&image).unwrap(),
+            Some(1_793_270_593_000_000_000)
+        );
         // The same instant with an offset; fractions order sub-second builds.
         assert_eq!(
             rfc3339_unix_nanos("2026-10-29T11:43:13+01:00"),

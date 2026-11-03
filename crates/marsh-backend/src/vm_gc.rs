@@ -137,7 +137,9 @@ fn describe_idle(ms: u64) -> String {
 /// `Ok(reason)`: remove it; `Err(reason)`: keep it. `idle_ms` 0 keeps idle VMs.
 pub(crate) fn decide(vm: &Candidate, now_ms: u64, idle_ms: u64) -> Result<String, String> {
     if vm.quarantined {
-        return Err("quarantined: automatic recovery or `marsh workers reset KIT` removes it".into());
+        return Err(
+            "quarantined: automatic recovery or `marsh workers reset KIT` removes it".into(),
+        );
     }
     if let Some(reason) = &vm.in_use {
         return Err(reason.clone());
@@ -573,11 +575,7 @@ mod tests {
             Some(1_793_720_283_431)
         );
         assert_eq!(utc_millis("2000-03-01T00:00:00.5Z"), Some(951_868_800_500));
-        for bad in [
-            "2026-11-03T15:38:03",
-            "yesterday",
-            "2026-13-03T00:00:00Z",
-        ] {
+        for bad in ["2026-11-03T15:38:03", "yesterday", "2026-13-03T00:00:00Z"] {
             assert_eq!(utc_millis(bad), None, "{bad}");
         }
     }
