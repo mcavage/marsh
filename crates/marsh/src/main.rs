@@ -52,6 +52,8 @@ Usage:
   marsh context                        Print the context text every job sees
   marsh results [--json]
   marsh results show CURSOR|JOB [--json]
+  marsh workers stop KIT[,KIT...]|all [--json]
+                                       Stop idle Kit VMs; their next job starts them
   marsh workers reset KIT[,KIT...]|all
   marsh workers forget cloud NAME
   marsh split [-n] [-b LABEL=STRING]... [::: LABEL CMD [ARG...]]...
@@ -115,7 +117,7 @@ Inside the project shell:
   acp stop ID              Stop the Kit job
 
 Options:
-  --load KIT[,KIT...]|all  Prepare selected configured Kit VMs before launch
+  --load KIT[,KIT...]|all  Prepare selected Kit VMs (create, or start stopped) before launch
   --shell marsh|bash|zsh   Interactive shell for this launch (default: the home's, else marsh)
   --ephemeral-home         Use a blank session home with no persistent writeback
   --dev                    Develop marsh: open a dev shell whose `sbx` is a confined host broker
@@ -225,7 +227,7 @@ fn version_text() -> String {
 const STATUS_HELP: &str = "Usage: marsh status [--json]\n\nShow scoped daemon, host control directory, effective per-job limits, shells, and workers.\nJob limits are a snapshot of the first daemon launch environment, not per-shell flags.\nUse the printed control directory for commands.json.\n";
 const JOBS_HELP: &str = "Usage: marsh jobs [--all] [--json]\n       marsh jobs --tree [--all] [--json]\n       marsh jobs show JOB [--json]\n\nList Kit jobs, running first, then newest: short id, start, state, exit,\nRUN time (in the ready Kit VM; `marsh results` WALL adds VM preparation),\nand command. Inside a session only its jobs are listed; from a\nhost terminal, running trees, trees started in the last hour, and the five\nnewest trees. --all lists every recorded job. --tree draws child\njobs under their parent. JOB may be an id prefix. --json prints the full,\nunscoped document.\n";
 const RESULTS_HELP: &str = "Usage: marsh results [--json]\n       marsh results show CURSOR|JOB [--json]\n\nList durable Kit results or inspect one result.\n";
-const WORKERS_HELP: &str = "Usage: marsh workers reset KIT[,KIT...]|all [--detached]\n       marsh workers forget cloud NAME\n\nStop and recreate selected Kit workers on their next use. `cloud` deletes this\ndaemon's cloud sandboxes, except detached runs' (--detached discards those too).\n`forget cloud NAME` drops the record of a cloud create that never reported an\noutcome, when `sbx --cloud ls` shows no sandbox for it (a reset names it).\n";
+const WORKERS_HELP: &str = "Usage: marsh workers stop KIT[,KIT...]|all [--json]\n       marsh workers reset KIT[,KIT...]|all [--detached]\n       marsh workers forget cloud NAME\n\n`stop` stops the selected idle Kit VMs and keeps them (disk and cached Kit\nimage); the Kit's next job, or `marsh --load KIT`, starts the same VM again. A\nVM with running jobs, or held by an attached shell that ran the Kit, is not\nstopped (marsh says how many jobs run; exits 1); running work is never cancelled.\n`reset` stops and removes selected Kit workers; they are recreated on their next use. `cloud` deletes this\ndaemon's cloud sandboxes, except detached runs' (--detached discards those too).\n`forget cloud NAME` drops the record of a cloud create that never reported an\noutcome, when `sbx --cloud ls` shows no sandbox for it (a reset names it).\n";
 const KIT_HELP: &str = "Usage: marsh kit install NAME [REPOSITORY:TAG|REPOSITORY@sha256:DIGEST]
        marsh kit uninstall NAME
 
@@ -552,7 +554,7 @@ fn recognized_help_subcommand(command: &str, subcommand: &str) -> bool {
     matches!(
         (command, subcommand),
         ("jobs" | "results", "show")
-            | ("workers", "reset")
+            | ("workers", "reset" | "stop")
             | ("kit", "install" | "upgrade" | "uninstall")
             | ("acp", "install-published" | "remove-published")
             | (

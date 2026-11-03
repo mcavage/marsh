@@ -37,6 +37,11 @@ use std::{
 /// Purpose recorded for VMs created by a daemon before purposes existed or
 /// recorded without a lookup key.
 const UNKEYED: &str = "unkeyed";
+/// A VM retired for good (a `marsh workers stop` that did not settle): never
+/// looked up, prepared or admitted again, and removed as soon as possible,
+/// also by the next daemon. The purpose keeps the file schema (and an older
+/// marsh) unchanged: an unknown purpose is never looked up by any marsh.
+const RETIRED: &str = "retired";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum VmClass {
@@ -357,8 +362,75 @@ impl VmOwnership {
             .iter()
             .filter(|(_, entry)| {
                 entry.uuid.is_some()
-                    && (entry.purpose == VmPurpose::Kit.label() || entry.purpose == UNKEYED)
+                    && (entry.purpose == VmPurpose::Kit.label()
+                        || entry.purpose == UNKEYED
+                        || entry.purpose == RETIRED)
             })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
+    /// Persist that `name` is retired for good, before anything else is done
+    /// with it: no later lookup returns it, and every daemon removes it.
+    pub(crate) fn mark_retired(&self, name: &str) -> Result<String, SbxError> {
+        let mut state = self.lock();
+        let Some(entry) = state.entries.get_mut(name) else {
+            return Err(SbxError::HostGrantFence(format!(
+                "{name} is not recorded in the VM ownership map"
+            )));
+        };
+        let prior = std::mem::replace(&mut entry.purpose, RETIRED.into());
+        if let Err(error) = self.persist(&state) {
+            if let Some(entry) = state.entries.get_mut(name) {
+                entry.purpose = prior;
+            }
+            return Err(error);
+        }
+        Ok(prior)
+    }
+
+    /// Lift a [`Self::mark_retired`] mark (its stop settled): `prior` is the
+    /// purpose it returned. On a failed write the VM stays retired.
+    pub(crate) fn unmark_retired(&self, name: &str, prior: String) -> Result<(), SbxError> {
+        let mut state = self.lock();
+        let key = state.entries.get(name).map(|entry| entry.key.clone());
+        // A lookup during the stop handed out a new name for the same Kit:
+        // that one serves now, and this VM stays retired.
+        if state.entries.iter().any(|(other, entry)| {
+            other != name && entry.purpose == prior && Some(&entry.key) == key.as_ref()
+        }) {
+            return Err(SbxError::HostGrantFence(format!(
+                "{name} was replaced while it stopped"
+            )));
+        }
+        let Some(entry) = state.entries.get_mut(name) else {
+            return Err(SbxError::HostGrantFence(format!(
+                "{name} is not recorded in the VM ownership map"
+            )));
+        };
+        entry.purpose = prior;
+        if let Err(error) = self.persist(&state) {
+            if let Some(entry) = state.entries.get_mut(name) {
+                entry.purpose = RETIRED.into();
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn is_retired(&self, name: &str) -> bool {
+        self.lock()
+            .entries
+            .get(name)
+            .is_some_and(|entry| entry.purpose == RETIRED)
+    }
+
+    /// Every VM marked retired, removed or not yet.
+    pub(crate) fn retired_names(&self) -> Vec<String> {
+        self.lock()
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.purpose == RETIRED)
             .map(|(name, _)| name.clone())
             .collect()
     }

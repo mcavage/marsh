@@ -1,5 +1,5 @@
 //! Published Kit VMs: creation, ownership, worker lease, reset and quarantine.
-use super::stock_model::{marker_write, verb, verb_on};
+use super::stock_model::{ReadyFault, marker_write, verb, verb_on};
 use super::*;
 
 const KIT: &str = "marsh-kit-fixture";
@@ -662,4 +662,133 @@ fn a_project_restored_after_its_lost_mount_was_dropped_is_mounted_again() {
             .values()
             .all(|(host, _)| host == &project)
     );
+}
+
+#[test]
+fn a_stop_that_did_not_settle_retires_the_vm_for_good_across_a_restart() {
+    let model = StockModel::new();
+    let root = tempfile::tempdir().unwrap();
+    let map = root.path().join("ownership.json");
+    let live = BTreeSet::new();
+    let deadline = || Instant::now() + Duration::from_secs(60);
+    let first = model.adapter().with_vm_ownership(map.clone()).unwrap();
+    let mut kit = KitFixture::published(KIT);
+    let identity = kit.spec.workload_kit.identity().to_owned();
+    kit.spec.name = first.vm_name(VmPurpose::Kit, &identity).unwrap();
+    let old = kit.spec.clone();
+    first.ensure_kit_vm(&old).unwrap();
+    let old_id = model.vm(&old.name).unwrap().id;
+    // `sbx stop` expires before it lands (it may land at any later time),
+    // and the daemon dies before the VM's removal completes.
+    model.fault(
+        verb_on("stop", old.name.clone()),
+        Fault::TimedOut { applied: false },
+    );
+    model.fault(verb("rm"), Fault::Respond(failure("rm interrupted")));
+    let error = first
+        .stop_idle_kit_vm(&old.name, &live, deadline())
+        .unwrap_err();
+    assert!(
+        matches!(&error, SbxError::QuarantinedVm(why) if why.contains("retired for good")),
+        "{error}"
+    );
+    assert!(model.vm(&old.name).unwrap().running);
+    drop(first);
+
+    // The next daemon: the retired mark survived. The old VM is never
+    // prepared again, and its name is never handed out.
+    let restarted = model.adapter().with_vm_ownership(map).unwrap();
+    let spawns = model.retained_spawns(WORKER_PATH);
+    assert!(matches!(
+        restarted.ensure_kit_vm(&old),
+        Err(SbxError::QuarantinedVm(_))
+    ));
+    assert_eq!(model.retained_spawns(WORKER_PATH), spawns, "never admitted");
+    let fresh = restarted.vm_name(VmPurpose::Kit, &identity).unwrap();
+    assert_ne!(fresh, old.name);
+    // The late stop lands: nothing ran there.
+    model.with_vm(&old.name, |vm| vm.running = false);
+    let (removed, failed) = restarted.remove_retired_kit_vms();
+    assert_eq!(removed, std::slice::from_ref(&old.name));
+    assert!(failed.is_empty(), "{failed:?}");
+    assert!(model.vm(&old.name).is_none());
+    // A job gets a new VM under the new name.
+    kit.spec.name = fresh.clone();
+    assert!(restarted.ensure_kit_vm(&kit.spec).unwrap().cold_started);
+    assert_ne!(model.vm(&fresh).unwrap().id, old_id);
+    assert_eq!(restarted.vm_name(VmPurpose::Kit, &identity).unwrap(), fresh);
+}
+
+#[test]
+fn only_a_reported_stop_keeps_the_vm() {
+    let deadline = || Instant::now() + Duration::from_secs(60);
+    // The reply was lost although the stop landed: without stock's report
+    // it is not known to be done, so the VM is retired and removed at once.
+    let model = StockModel::new();
+    let adapter = model.adapter();
+    let mut kit = KitFixture::published(KIT);
+    let identity = kit.spec.workload_kit.identity().to_owned();
+    kit.spec.name = adapter.vm_name(VmPurpose::Kit, &identity).unwrap();
+    adapter.ensure_kit_vm(&kit.spec).unwrap();
+    model.fault(
+        verb_on("stop", kit.spec.name.clone()),
+        Fault::TimedOut { applied: true },
+    );
+    assert_eq!(
+        adapter
+            .stop_idle_kit_vm(&kit.spec.name, &BTreeSet::new(), deadline())
+            .unwrap(),
+        KitVmStop::Retired
+    );
+    assert!(model.vm(&kit.spec.name).is_none());
+    assert!(adapter.quarantined_vms().is_empty());
+    assert_ne!(
+        adapter.vm_name(VmPurpose::Kit, &identity).unwrap(),
+        kit.spec.name
+    );
+    // A reported stop is settled: the VM is kept.
+    let model = StockModel::new();
+    let (adapter, _kit, _) = warm_kit(&model, KIT);
+    assert_eq!(
+        adapter
+            .stop_idle_kit_vm(KIT, &BTreeSet::new(), deadline())
+            .unwrap(),
+        KitVmStop::Stopped
+    );
+    assert!(model.vm(KIT).is_some());
+    assert!(adapter.quarantined_vms().is_empty());
+}
+
+#[test]
+fn a_worker_that_fails_before_ready_is_reported_replaceable_and_its_vm_replaced() {
+    for fault in [ReadyFault::Eof, ReadyFault::Malformed] {
+        let model = StockModel::new();
+        let (adapter, kit, _) = warm_kit(&model, KIT);
+        let first = model.vm(KIT).unwrap().id;
+        let live = BTreeSet::new();
+        assert_eq!(
+            adapter
+                .stop_idle_kit_vm(KIT, &live, Instant::now() + Duration::from_secs(60))
+                .unwrap(),
+            KitVmStop::Stopped
+        );
+        model.fail_next_worker_ready(fault);
+        let error = adapter.ensure_kit_vm(&kit.spec).unwrap_err();
+        assert!(
+            matches!(error, SbxError::WorkerNotReady(_)),
+            "{fault:?}: {error}"
+        );
+        // The failed worker is reaped and no lease is kept for it.
+        assert!(!adapter.worker_leases.lock().unwrap().contains_key(KIT));
+
+        adapter
+            .replace_unhealthy_kit_vm(&kit.spec, &live, Instant::now() + Duration::from_secs(60))
+            .unwrap();
+        assert!(model.vm(KIT).is_none(), "{fault:?}: the old VM is removed");
+        let ready = adapter.ensure_kit_vm(&kit.spec).unwrap();
+        assert!(ready.cold_started, "{fault:?}");
+        let second = model.vm(KIT).unwrap().id;
+        assert_ne!(first, second, "{fault:?}: a new VM");
+        assert_eq!(adapter.ownership.uuid(KIT), Some(second));
+    }
 }

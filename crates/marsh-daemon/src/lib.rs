@@ -603,6 +603,10 @@ pub enum PublicRequest {
     ResetWorkers {
         selection: LoadSelection,
     },
+    /// `marsh workers stop`: stop the selected idle Kit VMs, keeping them.
+    StopWorkers {
+        selection: LoadSelection,
+    },
     /// `marsh gc`: remove this daemon's superseded and long-unused VMs now.
     GcVms {
         dry_run: bool,
@@ -870,6 +874,7 @@ pub enum PublicReply {
     WorkersReset {
         kits: Vec<String>,
     },
+    WorkersStopped(WorkersStopReport),
     VmGc(VmGcReport),
     ScopeLifecycle(ScopeLifecycleReport),
     PreparationAccepted,
@@ -1356,6 +1361,14 @@ pub trait DaemonBackend: Send + Sync + 'static {
     ) -> Result<Vec<String>, DaemonError> {
         Err(DaemonError::BackendUnavailable)
     }
+    /// `marsh workers stop`: stop each selected idle Kit VM, keeping it.
+    fn stop_workers(
+        &self,
+        _selection: &LoadSelection,
+        _store: &DaemonStore,
+    ) -> Result<WorkersStopReport, DaemonError> {
+        Err(DaemonError::BackendUnavailable)
+    }
     /// `marsh gc`: one garbage collection of this daemon's VMs now.
     fn gc_vms(&self, _dry_run: bool, _store: &DaemonStore) -> Result<VmGcReport, DaemonError> {
         Err(DaemonError::BackendUnavailable)
@@ -1601,6 +1614,10 @@ pub enum WorkerHealth {
     Ready,
     Repairing,
     Quarantined,
+    /// Stopped by `marsh workers stop`: the VM and its disk are kept, and
+    /// the Kit's next job (or `marsh --load`) starts it again. Only
+    /// `marsh status` reports it; the store never registers such a worker.
+    Stopped,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -1727,6 +1744,33 @@ pub struct VmGcEntry {
     pub action: String,
     pub reason: String,
     pub unix_ms: u64,
+}
+
+/// The reply to `marsh workers stop`: one entry per selected Kit VM.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WorkersStopReport {
+    pub entries: Vec<WorkerStopEntry>,
+}
+
+/// What `marsh workers stop` did with one Kit VM.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct WorkerStopEntry {
+    /// The selected command names that run on this VM.
+    pub kits: Vec<String>,
+    pub vm: String,
+    /// `stopped`, `already_stopped`, `absent` (no VM yet), `refused` (in
+    /// use; nothing was stopped), `removed` (the stop did not settle, so the
+    /// VM was retired for good and removed), or `failed`.
+    pub action: String,
+    /// Jobs running or starting on it, when refused for them.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub running_jobs: usize,
+    pub message: String,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if signature.
+const fn is_zero(count: &usize) -> bool {
+    *count == 0
 }
 
 /// The reply to `marsh gc`.
@@ -2190,6 +2234,7 @@ impl PublicRequest {
             | Self::AttachEphemeralShell { .. }
             | Self::Shutdown
             | Self::ResetWorkers { .. }
+            | Self::StopWorkers { .. }
             | Self::GcVms { .. }
             | Self::ForgetCloudCreate { .. }
             | Self::UninstallKit { .. }
@@ -3152,13 +3197,7 @@ impl DaemonStore {
         {
             return busy("may have a job starting on it");
         }
-        if state.jobs.values().any(|job| {
-            (job.worker_id.as_deref() == Some(vm) || job.vm_id.as_deref() == Some(vm))
-                && (matches!(
-                    job.state,
-                    JobState::Queued | JobState::Running | JobState::Detached | JobState::Unknown
-                ) || matches!(job.cleanup, CleanupState::Pending | CleanupState::Uncertain))
-        }) {
+        if Self::recorded_busy(&state, vm) {
             return busy("has a job that is unfinished or whose cleanup is not verified");
         }
         let Some(worker) = state.workers.get_mut(vm) else {
@@ -3170,6 +3209,26 @@ impl DaemonStore {
         worker.health = WorkerHealth::Repairing;
         worker.warm = false;
         Ok(true)
+    }
+
+    /// Whether a job recorded on `vm` is unfinished or its cleanup pending or
+    /// uncertain (a container of it may still run there).
+    fn recorded_busy(state: &State, vm: &str) -> bool {
+        state.jobs.values().any(|job| {
+            (job.worker_id.as_deref() == Some(vm) || job.vm_id.as_deref() == Some(vm))
+                && (matches!(
+                    job.state,
+                    JobState::Queued | JobState::Running | JobState::Detached | JobState::Unknown
+                ) || matches!(job.cleanup, CleanupState::Pending | CleanupState::Uncertain))
+        })
+    }
+
+    /// [`Self::recorded_busy`], or reserved: what replacing a resumed VM
+    /// that did not start healthy must not race.
+    #[must_use]
+    pub fn vm_jobs_unsettled(&self, vm: &str) -> bool {
+        let state = self.lock();
+        state.reservations.values().any(|worker| worker == vm) || Self::recorded_busy(&state, vm)
     }
 
     /// Complete one claimed reset. Successful removal forgets only the live
@@ -4128,6 +4187,26 @@ impl DaemonStore {
             peer_review: None,
             worker_recoveries: state.worker_recoveries.clone(),
         }
+    }
+
+    /// Jobs running on, or reserved for, a worker: what `marsh workers stop`
+    /// waits for (it refuses while any are).
+    #[must_use]
+    pub fn worker_job_count(&self, worker_id: &str) -> usize {
+        let state = self.lock();
+        let reserved = state
+            .reservations
+            .values()
+            .filter(|reserved_worker| *reserved_worker == worker_id)
+            .count();
+        reserved
+            + state.workers.get(worker_id).map_or(0, |worker| {
+                if worker.health == WorkerHealth::Quarantined {
+                    0
+                } else {
+                    worker.active_container_ids.len()
+                }
+            })
     }
 
     /// Whether a worker has a reserved or running job, as
@@ -6125,6 +6204,7 @@ impl ConnectionHandler {
             || matches!(
                 request.body,
                 PublicRequest::ResetWorkers { .. }
+                    | PublicRequest::StopWorkers { .. }
                     | PublicRequest::GcVms { .. }
                     | PublicRequest::UninstallKit { .. }
                     | PublicRequest::Status { .. }
@@ -6549,6 +6629,7 @@ fn authorize_request_session(
         | PublicRequest::RegisteredCommands
         | PublicRequest::RegisteredKits
         | PublicRequest::ResetWorkers { .. }
+        | PublicRequest::StopWorkers { .. }
         | PublicRequest::GcVms { .. }
         | PublicRequest::ForgetCloudCreate { .. }
         | PublicRequest::UninstallKit { .. }
@@ -6632,6 +6713,10 @@ fn dispatch_request(
                 Err(error) => public_error(&error),
             }
         }
+        PublicRequest::StopWorkers { selection } => match backend.stop_workers(&selection, store) {
+            Ok(report) => PublicReply::WorkersStopped(report),
+            Err(error) => public_error(&error),
+        },
         PublicRequest::GcVms { dry_run } => match backend.gc_vms(dry_run, store) {
             Ok(report) => PublicReply::VmGc(report),
             Err(error) => public_error(&error),
@@ -7748,6 +7833,32 @@ impl Client {
             PublicReply::WorkersReset { kits } => Ok(kits),
             reply => Err(unexpected_reply(reply)),
         }
+    }
+
+    pub fn stop_workers(
+        &self,
+        selection: &LoadSelection,
+    ) -> Result<WorkersStopReport, DaemonError> {
+        Self::wait_out_busy(TRANSIENT_BUSY_WAIT, || {
+            let mut stream = marsh_runtime::connect_unix(&self.paths.socket)?;
+            stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+            write_frame(
+                &mut stream,
+                &Envelope {
+                    protocol: PROTOCOL.into(),
+                    token: self.token.clone(),
+                    body: PublicRequest::StopWorkers {
+                        selection: selection.clone(),
+                    },
+                },
+            )?;
+            // `sbx stop` is bounded by the stock-SBX adapter's lifecycle timeout.
+            stream.set_read_timeout(None)?;
+            match read_frame(&mut stream)? {
+                PublicReply::WorkersStopped(report) => Ok(report),
+                reply => Err(unexpected_reply(reply)),
+            }
+        })
     }
 
     pub fn gc_vms(&self, dry_run: bool) -> Result<VmGcReport, DaemonError> {

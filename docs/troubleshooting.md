@@ -41,7 +41,8 @@ yours prints `[another marsh shell is setting up the shell VM; waiting…]` and
 attaches when it is ready (up to ten minutes; Ctrl-C cancels). Later calls reuse
 warm VMs.
 
-To boot them up front, use `marsh --load all` or `marsh --load claude,codex`.
+To boot them up front, use `marsh --load all` or `marsh --load claude,codex`;
+that also starts Kit VMs `marsh workers stop` stopped.
 
 ## marsh will not start
 
@@ -202,6 +203,7 @@ back for two minutes in case it still lands, then removed or retried.
 
 | Command | Effect |
 |---|---|
+| `marsh workers stop KIT\|all` | Stop idle Kit VMs and keep them; the next call starts them again ([Stopping VMs](kits.md#stopping-vms)) |
 | `marsh gc [--dry-run]` | Remove this home's superseded and long-unused VMs now ([below](#garbage-collection)) |
 | `marsh workers reset KIT` | Remove one idle or quarantined Kit VM |
 | `marsh workers reset all` | Remove all idle or quarantined Kit VMs |
@@ -234,7 +236,9 @@ longer needed:
 - **Unused:** a Kit or shell VM unused for 3 days. Change the limit with
   `marsh config vm-idle-days DAYS` (1 to 365), or keep idle VMs with
   `marsh config vm-idle-days off`. The next use creates the VM again, which
-  takes as long as a first start.
+  takes as long as a first start. A Kit VM `marsh workers stop` stopped counts
+  as unused from when it was last used; being stopped does not make it
+  superseded.
 
 The daemon does this when it starts and then every hour; `marsh gc` does it
 now and lists every VM of this home with what it did and why
@@ -259,6 +263,20 @@ including ones you made with `sbx`, is left alone.
 Remove marsh's VMs with `marsh workers reset`, `reset`, or `stop`, not with
 `sbx`. If you remove one with `sbx`, the daemon treats its state as unknown,
 not as cleaned up.
+
+### `marsh workers stop` says a VM is not stopped
+
+| Message | Cause and fix |
+|---|---|
+| `KIT has N running jobs; not stopped` | Jobs run there. Nothing was cancelled; run the stop again once they end (`marsh jobs`). |
+| `KIT's VM is held by a job's mounts or by an attached shell that ran KIT` | A marsh shell that ran the Kit is attached, or a job is ending. Exit that shell, or retry. |
+| `KIT: a job may be starting, or a job's cleanup is not verified yet` | A job is starting (retry), or one ended `cleanup uncertain` ([below](#cleanup-uncertain-and-quarantine)). |
+| `KIT's VM is quarantined; not stopped` | See [Cleanup uncertain and quarantine](#cleanup-uncertain-and-quarantine). |
+| `KIT: the stop did not settle, so its VM was removed instead` | `sbx` did not report the stop (it timed out or failed), so it could still land at any time. marsh never uses that VM again: it removes it (retrying, also after a restart), and the next call creates a new VM. |
+
+If a stopped Kit VM fails to start again for its next job, or a Kit VM's
+worker exits before it reports ready, marsh replaces the VM with a new one and
+the job runs there; the daemon log says why.
 
 ### A removal keeps failing
 
