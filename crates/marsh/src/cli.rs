@@ -61,6 +61,12 @@ pub enum ProductCommand {
     PeerReviewList {
         json: bool,
     },
+    /// `marsh peer-review classify MODEL... [--json]`: the class table's
+    /// answer, with no daemon.
+    PeerReviewClassify {
+        models: Vec<String>,
+        json: bool,
+    },
     /// `marsh config peer-review [on|off]`: show, or write `marsh.yaml`.
     PeerReviewConfig {
         set: Option<bool>,
@@ -438,8 +444,35 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
         [name, ls, json] if name == "peer-review" && ls == "ls" && json == "--json" => {
             ProductCommand::PeerReviewList { json: true }
         }
+        [name, classify, rest @ ..] if name == "peer-review" && classify == "classify" => {
+            let json = rest.iter().any(|word| word == "--json");
+            let models = rest
+                .iter()
+                .filter(|word| *word != "--json")
+                .cloned()
+                .collect::<Vec<_>>();
+            if models.is_empty() || models.iter().any(|model| model.starts_with('-')) {
+                return Err(CliError(
+                    "usage: marsh peer-review classify MODEL... [--json]".into(),
+                ));
+            }
+            ProductCommand::PeerReviewClassify { models, json }
+        }
+        [name, ..] if name == "peer-review" => {
+            return Err(CliError(
+                "usage: marsh peer-review [ls [--json] | classify MODEL... [--json]]".into(),
+            ));
+        }
         [config, name] if config == "config" && name == "peer-review" => {
             ProductCommand::PeerReviewConfig { set: None }
+        }
+        [config, name, ls] if config == "config" && name == "peer-review" && ls == "ls" => {
+            ProductCommand::PeerReviewList { json: false }
+        }
+        [config, name, ls, json]
+            if config == "config" && name == "peer-review" && ls == "ls" && json == "--json" =>
+        {
+            ProductCommand::PeerReviewList { json: true }
         }
         [config, name, value]
             if config == "config"
@@ -449,6 +482,11 @@ fn parse_product_command(args: &[String], argv0: &OsStr) -> Result<Option<Parsed
             ProductCommand::PeerReviewConfig {
                 set: Some(value == "on"),
             }
+        }
+        [config, name, ..] if config == "config" && name == "peer-review" => {
+            return Err(CliError(
+                "usage: marsh config peer-review [on | off | ls [--json]]".into(),
+            ));
         }
         [name] if name == "jobs" => ProductCommand::Results { json: false },
         [name, json] if name == "jobs" && json == "--json" => {
@@ -804,6 +842,29 @@ mod tests {
             command(&["marsh", "config", "peer-review"]),
             ProductCommand::PeerReviewConfig { set: None }
         );
+        assert_eq!(
+            command(&["marsh", "config", "peer-review", "ls", "--json"]),
+            ProductCommand::PeerReviewList { json: true }
+        );
+        assert_eq!(
+            command(&["marsh", "config", "peer-review", "ls"]),
+            ProductCommand::PeerReviewList { json: false }
+        );
+        assert_eq!(
+            command(&["marsh", "peer-review", "classify", "a", "--json", "b"]),
+            ProductCommand::PeerReviewClassify {
+                models: vec!["a".into(), "b".into()],
+                json: true
+            }
+        );
+        for bad in [
+            &["marsh", "config", "peer-review", "maybe"][..],
+            &["marsh", "peer-review", "classify"][..],
+            &["marsh", "peer-review", "classify", "--x"][..],
+            &["marsh", "peer-review", "lss"][..],
+        ] {
+            assert!(parse(strings(bad)).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! `marsh peer-review ls` and `marsh config peer-review [on|off]`
+//! `marsh peer-review ls|classify` and `marsh config peer-review [on|off|ls]`
 //! (`docs/peer-review.md`).
 
 use marsh_daemon::peer_review::{
@@ -9,7 +9,8 @@ use std::io::Write;
 use std::path::Path;
 
 pub const HELP: &str = "Usage: marsh peer-review ls [--json]
-       marsh config peer-review [on|off]
+       marsh peer-review classify MODEL... [--json]
+       marsh config peer-review [on|off|ls [--json]]
 
 Peer review: before an agent reports substantial work as done, it asks a
 model of another vendor in the same class (small, mid, large) for findings
@@ -18,10 +19,19 @@ through the `task` tool. It is off until a drop-in turns it on.
 ls      The effective table: each ready reviewer by class, vendor, agent and
         model, the drop-in that named it and how its class was found; the
         reviewers that are not ready, and why; files that failed validation.
+        `marsh config peer-review ls` is the same.
+classify
+        Print each MODEL's class, vendor and how it was classed, from the
+        same table the daemon uses ($MARSH_HOME/model-classes.yaml over
+        marsh's own); needs no daemon. --json prints
+        [{\"model\",\"class\",\"vendor\",\"how\"}]; class, vendor and how are null
+        for a model the table cannot class.
 on      Write $MARSH_HOME/peer-review.d/marsh.yaml with `enabled: true` and
         the reviewers marsh can detect: each registered agent whose Kit
         declares a model option, for each vendor it can reach whose key
-        `sbx secret ls` shows, that vendor's newest model in each class.
+        `sbx secret ls` shows, that vendor's newest model in each class. A
+        multi-provider agent (Pi, pix) is used for a vendor with no agent of
+        its own, with the id `vendor/model`.
 off     Set `enabled: false` in marsh.yaml (off in any drop-in is off).
 
 Drop-ins (Narwhal writes narwhal.yaml) and $MARSH_HOME/model-classes.yaml
@@ -40,6 +50,55 @@ pub fn status_of(value: &serde_json::Value) -> Result<PeerReviewStatus, String> 
         Some(field) => serde_json::from_value(field.clone())
             .map_err(|error| format!("cannot decode peer_review: {error}")),
     }
+}
+
+/// `marsh peer-review classify`: classes `models` with the daemon's
+/// classifier and `scope`'s `model-classes.yaml`. Returns the write result
+/// and a malformed override's error.
+pub fn classify(
+    out: &mut impl Write,
+    models: &[String],
+    scope: &Path,
+    json: bool,
+) -> (std::io::Result<()>, Option<String>) {
+    let (table, error) = ClassTable::load(scope);
+    let rows = models
+        .iter()
+        .map(|model| (model, table.classify(model)))
+        .collect::<Vec<_>>();
+    let written = if json {
+        #[derive(serde::Serialize)]
+        struct Row<'a> {
+            model: &'a str,
+            class: Option<&'static str>,
+            vendor: Option<&'a str>,
+            how: Option<&'a str>,
+        }
+        let document = rows
+            .iter()
+            .map(|(model, found)| Row {
+                model,
+                class: found.as_ref().map(|found| found.class.name()),
+                vendor: found.as_ref().and_then(|found| found.vendor.as_deref()),
+                how: found.as_ref().map(|found| found.how.as_str()),
+            })
+            .collect::<Vec<_>>();
+        serde_json::to_writer(&mut *out, &document)
+            .map_err(std::io::Error::from)
+            .and_then(|()| writeln!(out))
+    } else {
+        rows.iter().try_for_each(|(model, found)| match found {
+            Some(found) => writeln!(
+                out,
+                "{model}  {}  {}  ({})",
+                found.class.name(),
+                found.vendor.as_deref().unwrap_or("unknown vendor"),
+                found.how
+            ),
+            None => writeln!(out, "{model}  unknown (not in the class table or snapshot)"),
+        })
+    };
+    (written, error)
 }
 
 /// The table `marsh peer-review ls` prints.
@@ -250,6 +309,38 @@ pub fn write_switch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classify_prints_the_class_table_answer() {
+        let scope = tempfile::tempdir().unwrap();
+        let mut out = Vec::new();
+        let models =
+            ["claude-sonnet-5-5", "deepseek/deepseek-v4-flash", "nope-1"].map(String::from);
+        let (written, error) = classify(&mut out, &models, scope.path(), true);
+        assert!(written.is_ok() && error.is_none());
+        assert!(
+            out.starts_with(
+                br#"[{"model":"claude-sonnet-5-5","class":"mid","vendor":"anthropic","how":"#
+            ),
+            "{}",
+            String::from_utf8_lossy(&out)
+        );
+        let rows: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(
+            rows[0],
+            serde_json::json!({"model": "claude-sonnet-5-5", "class": "mid", "vendor": "anthropic",
+                "how": "model-classes: claude-sonnet-*"})
+        );
+        assert_eq!(rows[1]["class"], "small");
+        assert_eq!(rows[1]["vendor"], "deepseek");
+        assert_eq!(rows[2]["class"], serde_json::Value::Null);
+        let mut text = Vec::new();
+        let _ = classify(&mut text, &models[..1], scope.path(), false);
+        assert_eq!(
+            String::from_utf8(text).unwrap(),
+            "claude-sonnet-5-5  mid  anthropic  (model-classes: claude-sonnet-*)\n"
+        );
+    }
 
     #[test]
     fn on_detects_reviewers_and_off_keeps_them() {

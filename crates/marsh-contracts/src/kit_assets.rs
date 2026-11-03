@@ -208,6 +208,11 @@ pub struct KitAgent {
 /// marsh shows it as `model` in the agent's session verbs.
 pub const AGENT_MODEL_CAPABILITY: &str = "org.marsh/agent-model@1";
 
+/// `org.marsh/agent-model@1` `services: ["*"]` marks a multi-provider agent
+/// (Pi): it reaches every vendor whose key the host holds, and takes
+/// `provider/model` ids. It appears as this entry in `KitAgent::services`.
+pub const ANY_PROVIDER: &str = "*";
+
 /// marsh's own capability: which of the session's mounts a Kit's jobs get.
 pub const HOME_CAPABILITY: &str = "org.marsh/home@1";
 
@@ -221,6 +226,18 @@ fn agent_name(name: &str) -> String {
 
 /// `org.marsh/agent-model@1` `args`: 1-8 non-empty strings, one with the
 /// `{{.Model}}` placeholder.
+/// Whether the model capability's `services` marks a multi-provider agent:
+/// only `["*"]` is accepted.
+fn any_provider(config: &serde_json::Value) -> Result<bool, String> {
+    match config.get("services") {
+        None => Ok(false),
+        Some(services) if *services == serde_json::json!([ANY_PROVIDER]) => Ok(true),
+        Some(_) => Err(format!(
+            "{AGENT_MODEL_CAPABILITY}: services must be [\"{ANY_PROVIDER}\"]"
+        )),
+    }
+}
+
 fn model_option(config: &serde_json::Value) -> Result<serde_json::Value, String> {
     let placeholder = crate::process::MODEL_PLACEHOLDER;
     config
@@ -277,6 +294,7 @@ impl KitAgent {
         let mut adapters = Vec::new();
         let mut sessions = Vec::new();
         let mut model_args = None;
+        let mut multi_provider = false;
         for capability in capabilities {
             let config = capability.get("config").cloned().unwrap_or_default();
             match capability.get("type").and_then(serde_json::Value::as_str) {
@@ -295,7 +313,10 @@ impl KitAgent {
                     }
                     sessions.push(config);
                 }
-                Some(AGENT_MODEL_CAPABILITY) => model_args = Some(model_option(&config)?),
+                Some(AGENT_MODEL_CAPABILITY) => {
+                    model_args = Some(model_option(&config)?);
+                    multi_provider = multi_provider || any_provider(&config)?;
+                }
                 Some("com.docker.sandbox/credential@1") => {
                     if let Some(service) = config
                         .get("service")
@@ -320,6 +341,9 @@ impl KitAgent {
                 }
                 _ => {}
             }
+        }
+        if multi_provider {
+            agent.services.push(ANY_PROVIDER.to_owned());
         }
         agent.services.sort();
         agent.acp = adapters
@@ -618,6 +642,18 @@ mod tests {
             serde_json::json!(["--model", "{{.Model}}"])
         );
         assert!(KitAgent::from_descriptor(&model(serde_json::json!(["--model"]))).is_err());
+        // `services: ["*"]` declares a multi-provider agent.
+        let multi = |services: serde_json::Value| {
+            serde_json::json!({"capabilities": [credential("anthropic"),
+                {"type": AGENT_MODEL_CAPABILITY, "config": {"args": ["--model", "{{.Model}}"], "services": services}}]})
+        };
+        assert_eq!(
+            KitAgent::from_descriptor(&multi(serde_json::json!(["*"])))
+                .unwrap()
+                .services,
+            ["*", "anthropic"]
+        );
+        assert!(KitAgent::from_descriptor(&multi(serde_json::json!(["openai"]))).is_err());
         // Two adapters and an unnamed declaration: whose it is is unknown.
         let two = serde_json::json!({"capabilities": [adapter("a"), adapter("b"), sessions]});
         assert!(KitAgent::from_descriptor(&two).unwrap().sessions.is_none());

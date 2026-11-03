@@ -166,6 +166,8 @@ pub fn prepare(
                 &mut stderr,
             );
         }
+        // Answered by the CLI before any daemon exists (`peer_review_cli::classify`).
+        ProductCommand::PeerReviewClassify { .. } => return Ok(ProductOutcome::Complete(2)),
         ProductCommand::ResultsHelp => return write_help(&mut stdout, RESULTS_HELP),
         ProductCommand::WorkersHelp => return write_help(&mut stdout, WORKERS_HELP),
         ProductCommand::GcHelp => return write_help(&mut stdout, GC_HELP),

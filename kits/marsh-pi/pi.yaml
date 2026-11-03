@@ -57,6 +57,7 @@ capabilities:
     optional: true
     config:
       args: ["--model", "{{.Model}}"]
+      services: ["*"]   # multi-provider: any vendor whose key the host holds (`provider/model` ids)
 
   - type: com.docker.sandbox/agent-context@1
     config:

@@ -67,8 +67,9 @@ Usage:
   marsh config cloud-delegate [on|off] Let detached cloud runs start agent sandboxes
   marsh config vm-idle-days [DAYS|off] Show or set when unused VMs are removed
   marsh gc [--dry-run] [--json]        Remove this home's superseded and unused VMs now
-  marsh config peer-review [on|off]    Show or set peer review by another vendor's model
+  marsh config peer-review [on|off|ls] Show or set peer review by another vendor's model
   marsh peer-review ls [--json]        Show the peer reviewers and where they came from
+  marsh peer-review classify MODEL...  Show a model's class and vendor (no daemon)
   marsh stop [--json]                  Remove this home's VMs and stop its daemon
   marsh reset [--json]                 Remove this home's VMs; keep the daemon
   marsh init                           Create this home and copy your git name and email into it
@@ -764,6 +765,22 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
                 2,
             ));
         }
+    }
+    if let cli::ProductCommand::PeerReviewClassify { models, json } = &parsed.command {
+        let session = SessionConfig::from_environment(false)
+            .map_err(|error| RunError::new(error.to_string(), 1))?;
+        let scope = session
+            .home_backing
+            .parent()
+            .ok_or_else(|| RunError::new("selected home has no scope root", 1))?;
+        let mut stdout = std::io::stdout().lock();
+        let (written, table_error) =
+            marsh::peer_review_cli::classify(&mut stdout, models, scope, *json);
+        if let Some(error) = table_error {
+            eprintln!("marsh: {error}");
+        }
+        written.map_err(|error| RunError::new(format!("cannot write output: {error}"), 1))?;
+        return Ok(0);
     }
     let kit_names = match &parsed.command {
         cli::ProductCommand::KitUninstall { command } => vec![command.clone()],

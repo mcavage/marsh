@@ -781,39 +781,53 @@ pub fn context(status: &PeerReviewStatus, spawn: &[String]) -> String {
     text
 }
 
+/// The service a multi-provider agent's Kit declares (`org.marsh/agent-model@1`
+/// `services`): it reaches every vendor whose key the host holds.
+pub use marsh_contracts::kit_assets::ANY_PROVIDER;
+
 /// The reviewers `marsh config peer-review on` offers: for each class and
 /// each vendor an agent with a model option can reach with a stored
 /// credential, the vendor's newest model in that class. A vendor's own
-/// agent (one that reaches only it) is preferred.
+/// agent (one that reaches only it) is preferred. A multi-provider agent
+/// (services `["*"]`) reaches every vendor whose key is stored, and takes the
+/// provider-qualified id (`deepseek/deepseek-v4-flash`); it is the last resort.
 #[must_use]
 pub fn detect(
     table: &ClassTable,
     agents: &BTreeMap<String, BTreeSet<String>>,
     credentials: &BTreeSet<String>,
 ) -> Vec<DropInReviewer> {
-    let mut chosen = BTreeMap::<(ModelClass, String), (usize, String)>::new();
+    let mut chosen = BTreeMap::<(ModelClass, String), (usize, String, bool)>::new();
     for (agent, vendors) in agents {
-        for vendor in vendors
+        let any = vendors.contains(ANY_PROVIDER);
+        for vendor in credentials
             .iter()
-            .filter(|vendor| credentials.contains(*vendor))
+            .filter(|vendor| any || vendors.contains(*vendor))
         {
+            // An agent that names the vendor itself outranks a wildcard one.
+            let named = vendors.contains(vendor);
+            let rank = if named { vendors.len() } else { usize::MAX };
             for class in ModelClass::ALL {
                 if table.newest(vendor, class).is_none() {
                     continue;
                 }
-                let rank = vendors.len();
                 let key = (class, vendor.clone());
-                if chosen.get(&key).is_none_or(|(best, _)| rank < *best) {
-                    chosen.insert(key, (rank, agent.clone()));
+                if chosen.get(&key).is_none_or(|(best, _, _)| rank < *best) {
+                    chosen.insert(key, (rank, agent.clone(), !named));
                 }
             }
         }
     }
     chosen
         .into_iter()
-        .filter_map(|((class, vendor), (_, agent))| {
+        .filter_map(|((class, vendor), (_, agent, qualified))| {
+            let newest = table.newest(&vendor, class)?;
             Some(DropInReviewer {
-                model: table.newest(&vendor, class)?,
+                model: if qualified {
+                    format!("{vendor}/{newest}")
+                } else {
+                    newest
+                },
                 agent,
                 class: Some(class),
                 vendor: Some(vendor),
@@ -1144,6 +1158,54 @@ mod tests {
         }
         .render("written by marsh");
         assert!(DropIn::parse(&rendered).is_ok(), "{rendered}");
+    }
+
+    #[test]
+    fn a_multi_provider_agent_reaches_the_vendors_that_have_no_agent_of_their_own() {
+        let table = ClassTable::builtin();
+        let set = |list: &[&str]| {
+            list.iter()
+                .map(|v| (*v).to_owned())
+                .collect::<BTreeSet<_>>()
+        };
+        let agents = BTreeMap::from([
+            ("claude".to_owned(), set(&["anthropic"])),
+            ("pi".to_owned(), set(&[ANY_PROVIDER, "anthropic"])),
+        ]);
+        let found = detect(&table, &agents, &set(&["anthropic", "deepseek"]));
+        for class in ModelClass::ALL {
+            let by = |vendor: &str| {
+                found
+                    .iter()
+                    .find(|r| r.class == Some(class) && r.vendor.as_deref() == Some(vendor))
+                    .map(|r| (r.agent.as_str(), r.model.clone()))
+            };
+            assert_eq!(
+                by("anthropic").map(|(agent, _)| agent),
+                table
+                    .newest("anthropic", class)
+                    .is_some()
+                    .then_some("claude"),
+                "{class:?}"
+            );
+            let deepseek = table.newest("deepseek", class);
+            assert_eq!(
+                by("deepseek"),
+                deepseek.map(|model| ("pi", format!("deepseek/{model}"))),
+                "{class:?}"
+            );
+        }
+        assert!(
+            found
+                .iter()
+                .any(|r| r.agent == "pi" && r.model.starts_with("deepseek/deepseek-"))
+        );
+        // Alone, a multi-provider agent still takes its own vendor's bare id.
+        let alone = BTreeMap::from([("pi".to_owned(), set(&[ANY_PROVIDER, "anthropic"]))]);
+        let found = detect(&table, &alone, &set(&["anthropic"]));
+        assert!(found.iter().all(|r| !r.model.contains('/')), "{found:?}");
+        // No key, no reviewer: the wildcard reaches only held vendors.
+        assert_eq!(detect(&table, &agents, &BTreeSet::new()).len(), 0);
     }
 
     #[test]

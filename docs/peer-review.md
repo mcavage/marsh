@@ -10,7 +10,8 @@ does not give a second opinion on Claude.
 
 ```sh
 marsh config peer-review on     # detect reviewers, write peer-review.d/marsh.yaml
-marsh peer-review ls            # the effective table
+marsh peer-review ls            # the effective table (also: marsh config peer-review ls)
+marsh peer-review classify gpt-6.1-sol   # a model's class and vendor
 marsh config peer-review off
 ```
 
@@ -61,7 +62,13 @@ its own capability). `marsh status --json` shows it as `model` under
 |---|---|---|
 | `claude` | `["--model", "{{.Model}}"]` | `claude -p PROMPT --model M` |
 | `codex` | `["-m", "{{.Model}}"]` | `codex exec PROMPT -m M` |
-| `pi`, `pix` | `["--model", "{{.Model}}"]` | `pi -p PROMPT --model M` (`provider/id` works) |
+| `pi`, `pix` | `["--model", "{{.Model}}"]`, `services: ["*"]` | `pi -p PROMPT --model M` (`provider/id` works) |
+
+An agent that reaches any model vendor (Pi) says so with `services: ["*"]` in
+the same capability's `config`. `marsh status --json` then lists `"*"` in the
+agent's `commands[].services`, and `marsh config peer-review on` treats the
+agent as reaching every vendor whose key `sbx secret ls --global` holds. `["*"]`
+is the only value accepted.
 
 A call that sets `model` for an agent whose Kit has no model option fails with
 a tool error, and so does a malformed id (1 to 128 characters from
@@ -184,11 +191,21 @@ option: for each credential service the Kit declares (`credential@1`) that
 `sbx secret ls --global` shows as stored, marsh picks that vendor's newest
 model in each class from the snapshot. When several agents reach the same
 vendor, it prefers the vendor's own agent, meaning the one that reaches only
-that vendor. Credentials that sbx does not list, such as some OAuth logins,
+that vendor. A multi-provider agent (`services: ["*"]`: `pi`, `pix`) is the
+last resort for each vendor that has no agent of its own, and takes the
+provider-qualified id that agent accepts: with keys for `anthropic` and
+`deepseek` and the agents `claude` and `pi`, each class's Anthropic reviewer is
+`claude` and its DeepSeek reviewer is `pi` with `deepseek/deepseek-…` (the
+vendor name is used as Pi's provider). Alone, a multi-provider agent takes a
+vendor it names itself (Pi's `anthropic`) by the bare id. Credentials that sbx does not list, such as some OAuth logins,
 are not detected; add those reviewers to the file yourself. `off` sets
 `enabled: false` and keeps the list.
 
 ## `marsh peer-review ls` and `marsh status`
+
+`marsh config peer-review ls [--json]` is the same command. Any other word
+after `marsh config peer-review` prints the choices (`on`, `off`, `ls`), and an
+unknown `marsh config` setting prints the settings it has.
 
 `marsh peer-review ls` prints whether peer review is on, and which file turned
 it off if one did. It then prints one row per ready reviewer (class, vendor,
@@ -212,3 +229,22 @@ errors. `--json` prints the same document as `marsh status --json`
 `disabled_by` lists the files that say `enabled: false`. `marsh status --json`
 includes the `peer-review-v1` feature, and `commands[].services` gives each
 Kit's credential services.
+
+## `marsh peer-review classify`
+
+`marsh peer-review classify MODEL... [--json]` shows how marsh classes models,
+with the table the daemon uses (your `$MARSH_HOME/model-classes.yaml` over
+marsh's). It needs no daemon and starts none. It is how to check a model id
+before writing a reviewer, or why `ls` classed one the way it did.
+
+```console
+$ marsh peer-review classify claude-sonnet-5-5 deepseek/deepseek-v4-flash
+claude-sonnet-5-5  mid  anthropic  (model-classes: claude-sonnet-*)
+deepseek/deepseek-v4-flash  small  deepseek  (model-classes: deepseek-*flash*)
+$ marsh peer-review classify claude-sonnet-5-5 nope-1 --json
+[{"model":"claude-sonnet-5-5","class":"mid","vendor":"anthropic","how":"model-classes: claude-sonnet-*"},{"model":"nope-1","class":null,"vendor":null,"how":null}]
+```
+
+`how` is the same text as `classified` in `ls --json`. A model the table and
+the snapshot do not know has `null` for the last three fields. A model class
+file that fails validation is reported on stderr and ignored.

@@ -44,6 +44,7 @@ capabilities:
     optional: true
     config:
       args: ["--model", "{{.Model}}"]
+      services: ["*"]   # multi-provider: any vendor whose key the host holds (`provider/model` ids)
   - type: com.docker.sandbox/network-policy@1
     config:
       runtime:
