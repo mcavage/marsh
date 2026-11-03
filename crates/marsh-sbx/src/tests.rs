@@ -355,6 +355,6 @@ fn retained_worker_readiness_wait_is_bounded() {
     drop(writer);
     assert!(matches!(
         result,
-        Err(SbxError::WorkerLeaseLost(message)) if message.contains("readiness timed out")
+        Err(SbxError::WorkerNotReady(message)) if message.contains("readiness timed out")
     ));
 }

@@ -14,17 +14,24 @@
 (* transport detail is Worker.tla; VM ownership is Ownership.tla.         *)
 (* `marsh workers stop` stops a provably idle VM and keeps it: its claim  *)
 (* (UserStopClaim, the same as an automatic retirement's) holds off new   *)
-(* jobs until `sbx stop` is done (UserStopFinish). The next job starts    *)
-(* the same VM (Start); one that does not come back healthy is replaced   *)
-(* (Replace) only while stock lists it stopped and nothing is recorded on *)
-(* it.                                                                   *)
+(* jobs while `sbx stop` runs (UserStopSubmit). Stock lands it at once or *)
+(* later, or fails it (StopLands, StopFails). The stop is settled only    *)
+(* when stock reported it and lists the VM stopped (UserStopReturn);      *)
+(* otherwise the VM stays fenced (quarantined) and is retired only once   *)
+(* the stop can no longer land (FenceRetire, after STOP_SETTLE: the       *)
+(* timing assumption is that a stop not reported by then never lands). A  *)
+(* daemon restart forgets a pending stop; its late landing is then        *)
+(* indistinguishable from StopVM. The next job starts the same VM         *)
+(* (Start); one that does not come back healthy, or whose new worker      *)
+(* never reports Ready, is replaced (Replace) only while nothing recorded *)
+(* on it runs.                                                           *)
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Jobs, Kits, MaxChanges, MaxRestarts, MaxStops, Bug
 
 None == "none"
 Bugs == {"none", "retireBusy", "admitDraining", "trustTable", "gcRunning", "gcStale",
-         "stopBusy", "admitStopping", "replaceRunning"}
+         "stopBusy", "admitStopping", "replaceRunning", "cancelOnError", "noSettleWait"}
 ASSUME Bug \in Bugs
 
 VARIABLES
@@ -36,7 +43,9 @@ VARIABLES
   on,       \* [Jobs -> Kits] the VM a job runs on
   rec,      \* [Jobs -> "none" | "live" | "uncertain" | "ended"] its journaled receipt
   cand,     \* Kits a garbage collection pass observed as removable
-  stopping, \* Kits `marsh workers stop` claimed and is stopping
+  stopping, \* `marsh workers stop`: Kits claimed, submitted (`sbx stop` running),
+            \* reported (stock reported it done), inflight (stock may still land it),
+            \* fenced (quarantined: a stop that did not settle)
   changes, restarts, stops,
   killed,   \* ghost: a VM was removed while a container ran in it
   stale,    \* ghost: a job started on a VM the name had moved away from
@@ -46,6 +55,8 @@ vars == <<cur, vm, served, draining, job, on, rec, cand, stopping, changes, rest
           killed, stale, ended>>
 
 K0 == CHOOSE k \in Kits : TRUE
+NoStops == [claimed |-> {}, submitted |-> {}, reported |-> {}, inflight |-> {}, fenced |-> {}]
+Stopping == stopping.claimed \cup stopping.fenced  \* admits no job
 
 Init ==
   /\ cur = K0
@@ -56,7 +67,7 @@ Init ==
   /\ on = [j \in Jobs |-> K0]
   /\ rec = [j \in Jobs |-> "none"]
   /\ cand = {}
-  /\ stopping = {}
+  /\ stopping = NoStops
   /\ changes = 0 /\ restarts = 0 /\ stops = 0
   /\ killed = FALSE
   /\ stale = FALSE
@@ -72,7 +83,7 @@ RecLive(k) == \E j \in Jobs : rec[j] = "live" /\ on[j] = k
 \* (stopped, or `docker ps` empty) shows no container.
 CanRetire(k) ==
   IF Bug = "trustTable" THEN ~RecLive(k)
-  ELSE ~RecBusy(k) /\ (served[k] \/ ~PhysBusy(k))
+  ELSE ~RecBusy(k) /\ (served[k] \/ ~PhysBusy(k)) /\ k \notin stopping.fenced
 
 Remove(k) ==
   /\ vm' = [vm EXCEPT ![k] = "absent"]
@@ -85,7 +96,7 @@ Start(j, k) ==
   /\ job[j] = "idle"
   /\ \/ cur # None /\ k = cur
      \/ Bug = "admitDraining" /\ k \in draining /\ k # cur
-  /\ k \notin stopping \/ Bug = "admitStopping"
+  /\ k \notin Stopping \/ Bug = "admitStopping"
   /\ job' = [job EXCEPT ![j] = "running"]
   /\ on' = [on EXCEPT ![j] = k]
   /\ rec' = [rec EXCEPT ![j] = "live"]
@@ -119,7 +130,7 @@ Restart ==
   /\ served' = [k \in Kits |-> FALSE]
   /\ draining' = {}
   /\ cand' = {}
-  /\ stopping' = {}
+  /\ stopping' = NoStops
   /\ rec' = [j \in Jobs |-> IF rec[j] = "live" THEN "uncertain" ELSE rec[j]]
   /\ restarts' = restarts + 1
   /\ UNCHANGED <<cur, vm, job, on, changes, stops, killed, stale, ended>>
@@ -130,7 +141,7 @@ Change(k) ==
   LET old == cur IN
   /\ changes < MaxChanges
   /\ k # cur
-  /\ cur \notin stopping   \* both hold the Kit lock
+  /\ cur \notin stopping.claimed   \* both hold the Kit lock
   /\ cur' = k
   /\ changes' = changes + 1
   /\ IF old # None /\ vm[old] # "absent"
@@ -159,7 +170,7 @@ RetireDrained(k) ==
 \* Garbage collection: superseded or idle; only a stopped VM with no live
 \* or uncertain record, not draining.
 GcOk(k) ==
-  /\ k \notin draining /\ k \notin stopping
+  /\ k \notin draining /\ k \notin Stopping
   /\ IF Bug = "gcRunning" THEN vm[k] # "absent" /\ ~RecLive(k)
      ELSE vm[k] = "stopped" /\ ~RecBusy(k)
 
@@ -181,33 +192,72 @@ GcRetire(k) ==
 
 \* `marsh workers stop`: `automatic_claim` under the Kit lock (CanRetire;
 \* `stopBusy` skips it), which makes the worker Repairing so no job is
-\* admitted, then `sbx stop` under the VM's transition fence. The stopped VM
-\* is no registered worker.
+\* admitted, then `sbx stop` under the VM's transition fence.
 UserStopClaim(k) ==
-  /\ k = cur /\ vm[k] = "running" /\ k \notin stopping /\ k \notin draining
+  /\ k = cur /\ vm[k] = "running" /\ k \notin Stopping /\ k \notin draining
   /\ CanRetire(k) \/ Bug = "stopBusy"
-  /\ stopping' = stopping \cup {k}
+  /\ stopping' = [stopping EXCEPT !.claimed = @ \cup {k}]
   /\ UNCHANGED <<cur, vm, served, draining, job, on, rec, cand, changes, restarts, stops,
                  killed, stale, ended>>
 
-UserStopFinish(k) ==
-  /\ k \in stopping
-  /\ stopping' = stopping \ {k}
+UserStopSubmit(k) ==
+  /\ k \in stopping.claimed /\ k \notin stopping.submitted /\ k \notin stopping.inflight
+  /\ stopping' = [stopping EXCEPT !.submitted = @ \cup {k}, !.inflight = @ \cup {k}]
+  /\ UNCHANGED <<cur, vm, served, draining, job, on, rec, cand, changes, restarts, stops,
+                 killed, stale, ended>>
+
+\* Stock lands a submitted stop, now or late; it is reported only while
+\* the daemon still waits for it.
+StopLands(k) ==
+  /\ k \in stopping.inflight
+  /\ stopping' = [stopping EXCEPT !.inflight = @ \ {k},
+                     !.reported = IF k \in stopping.submitted THEN @ \cup {k} ELSE @]
   /\ vm' = [vm EXCEPT ![k] = IF @ = "running" THEN "stopped" ELSE @]
-  /\ served' = [served EXCEPT ![k] = FALSE]
   /\ ended' = (ended \/ PhysBusy(k))
   /\ job' = [j \in Jobs |-> IF on[j] = k /\ job[j] = "running" THEN "done" ELSE job[j]]
   /\ rec' = [j \in Jobs |-> IF on[j] = k /\ rec[j] = "live" THEN "uncertain" ELSE rec[j]]
-  /\ UNCHANGED <<cur, draining, on, cand, changes, restarts, stops, killed, stale>>
+  /\ UNCHANGED <<cur, served, draining, on, cand, changes, restarts, stops, killed, stale>>
 
-\* A stopped VM that did not start healthy for its next job is removed (the
-\* next Start creates it again): only while it is observed stopped, under
-\* the Kit lock, with no live or uncertain record (`replace_unhealthy_resumed`).
-\* `replaceRunning` trusts only the live records, whatever stock lists.
+StopFails(k) ==
+  /\ k \in stopping.inflight
+  /\ stopping' = [stopping EXCEPT !.inflight = @ \ {k}]
+  /\ UNCHANGED <<cur, vm, served, draining, job, on, rec, cand, changes, restarts, stops,
+                 killed, stale, ended>>
+
+\* `stop_idle_kit_vm` returns (at once after the report, or on its timeout
+\* or failure). Settled: the stopped VM is no registered worker. Otherwise
+\* the VM is fenced; `cancelOnError` reopens admission instead.
+UserStopReturn(k) ==
+  /\ k \in stopping.submitted
+  /\ LET settled == k \in stopping.reported /\ vm[k] = "stopped" IN
+     /\ stopping' = [stopping EXCEPT !.claimed = @ \ {k}, !.submitted = @ \ {k},
+                        !.reported = @ \ {k},
+                        !.fenced = IF settled \/ Bug = "cancelOnError" THEN @ ELSE @ \cup {k}]
+     /\ served' = IF settled THEN [served EXCEPT ![k] = FALSE] ELSE served
+  /\ UNCHANGED <<cur, vm, draining, job, on, rec, cand, changes, restarts, stops,
+                 killed, stale, ended>>
+
+\* Quarantine recovery retires a fenced VM once the stop can no longer land
+\* (`verify_no_running_containers` waits out STOP_SETTLE; `noSettleWait`
+\* does not); the next job creates a new one.
+FenceRetire(k) ==
+  /\ k \in stopping.fenced
+  /\ k \notin stopping.inflight \/ Bug = "noSettleWait"
+  /\ ~RecBusy(k)
+  /\ stopping' = [stopping EXCEPT !.fenced = @ \ {k}]
+  /\ IF vm[k] # "absent" THEN Remove(k) ELSE UNCHANGED <<vm, served, killed>>
+  /\ UNCHANGED <<cur, draining, job, on, rec, cand, changes, restarts, stops, stale, ended>>
+
+\* A VM whose start failed is removed (the next Start creates it again):
+\* one observed stopped before the start with no live or uncertain record,
+\* or (its new worker never reported Ready) a running one CanRetire allows
+\* (`replace_unhealthy`). Never a fenced one. `replaceRunning` trusts only
+\* the live records, whatever stock lists.
 Replace(k) ==
-  /\ k = cur /\ k \notin draining /\ k \notin stopping
+  /\ k = cur /\ k \notin draining /\ k \notin Stopping
   /\ IF Bug = "replaceRunning" THEN vm[k] # "absent" /\ ~RecLive(k)
-     ELSE vm[k] = "stopped" /\ ~RecBusy(k)
+     ELSE \/ vm[k] = "stopped" /\ ~RecBusy(k)
+          \/ vm[k] = "running" /\ CanRetire(k)
   /\ Remove(k)
   /\ UNCHANGED <<cur, draining, job, on, rec, cand, stopping, changes, restarts, stops,
                  stale, ended>>
@@ -217,18 +267,22 @@ Next ==
   \/ \E j \in Jobs : End(j)
   \/ \E k \in Kits \cup {None} : Change(k)
   \/ \E k \in Kits : Reuse(k) \/ RetireDrained(k) \/ StopVM(k) \/ GcObserve(k) \/ GcRetire(k)
-  \/ \E k \in Kits : UserStopClaim(k) \/ UserStopFinish(k) \/ Replace(k)
+  \/ \E k \in Kits : UserStopClaim(k) \/ UserStopSubmit(k) \/ StopLands(k) \/ StopFails(k)
+                     \/ UserStopReturn(k) \/ FenceRetire(k) \/ Replace(k)
   \/ Restart
 
 Spec == /\ Init /\ [][Next]_vars
         /\ \A j \in Jobs : WF_vars(End(j))
         /\ \A k \in Kits : WF_vars(Reuse(k)) /\ WF_vars(RetireDrained(k))
+        \* Stock resolves a submitted stop; quarantine recovery runs each minute.
+        /\ \A k \in Kits : WF_vars(StopLands(k) \/ StopFails(k)) /\ WF_vars(FenceRetire(k))
 
 TypeOK ==
   /\ cur \in Kits \cup {None}
   /\ vm \in [Kits -> {"absent", "running", "stopped"}]
   /\ served \in [Kits -> BOOLEAN]
-  /\ draining \subseteq Kits /\ cand \subseteq Kits /\ stopping \subseteq Kits
+  /\ draining \subseteq Kits /\ cand \subseteq Kits
+  /\ stopping \in [{"claimed", "submitted", "reported", "inflight", "fenced"} -> SUBSET Kits]
   /\ job \in [Jobs -> {"idle", "running", "done"}]
   /\ on \in [Jobs -> Kits]
   /\ rec \in [Jobs -> {"none", "live", "uncertain", "ended"}]
@@ -237,7 +291,8 @@ TypeOK ==
 (* VM removes a VM a container still runs in, across restarts.             *)
 ChangeSparesRunning == ~killed
 (* `marsh workers stop` never ends a running container: it stops only a    *)
-(* provably idle VM, and no job is admitted to it while it stops.           *)
+(* provably idle VM, and no job is admitted to it until its stop is settled *)
+(* or can no longer land.                                                   *)
 StopSparesRunning == ~ended
 (* New jobs start on the Kit the name names now, never a draining one. *)
 StartsOnCurrent == ~stale

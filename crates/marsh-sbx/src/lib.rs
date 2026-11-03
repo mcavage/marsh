@@ -105,6 +105,8 @@ const PREPARATION_SBX_TIMEOUT: Duration = Duration::from_mins(5);
 const PREPARATION_CREATE_TIMEOUT: Duration = Duration::from_mins(60);
 /// How long a create that did not report may still land under its name.
 const CREATE_SETTLE: Duration = Duration::from_mins(2);
+/// How long a submitted `sbx stop` that did not report may still land.
+const STOP_SETTLE: Duration = Duration::from_mins(2);
 /// Saved grant mounts of deleted projects dropped while starting one VM.
 const MAX_LOST_GRANT_MOUNTS: usize = 64;
 const PREPARATION_BUILD_TIMEOUT: Duration = Duration::from_mins(20);
@@ -132,6 +134,8 @@ pub struct VmQuarantine {
     pub since_unix_ms: u64,
     /// A submitted `sbx create` did not report: it may still land.
     pub create_pending: bool,
+    /// A submitted `sbx stop` did not settle: it may still land.
+    pub stop_pending: bool,
 }
 
 /// Whether a failed `sbx create` may still finish later: it timed out or its
@@ -2100,20 +2104,32 @@ impl StockSbx {
         self.ownership.invalidate();
         // Local stock SBX addresses sandboxes by name; the fresh
         // classification above fenced this name to the recorded UUID.
-        Self::require_success(
-            "stop Kit VM",
-            self.run_bounded_os(
-                "stop Kit VM",
-                self.lifecycle_timeout(deadline, "stop Kit VM")?,
-                ["stop", name],
-            )?,
-        )?;
-        match self.classify_vm(name, true)? {
-            VmClass::Owned { running: false, .. } => Ok(KitVmStop::Stopped),
-            _ => Err(SbxError::HostGrantFence(format!(
-                "stock SBX does not list {name} stopped after `sbx stop`"
-            ))),
+        let timeout = self.lifecycle_timeout(deadline, "stop Kit VM")?;
+        let outcome = self
+            .run_bounded_os("stop Kit VM", timeout, ["stop", name])
+            .and_then(|output| Self::require_success("stop Kit VM", output));
+        if matches!(&outcome, Err(SbxError::Io(error)) if marsh_runtime::command_not_started(error))
+        {
+            return outcome.map(|()| KitVmStop::Stopped);
         }
+        // Submitted: settled only when stock reported the stop done and
+        // lists the VM stopped. Otherwise (a timeout, a lost reply, a
+        // failure, or a VM still listed running) the stop may land later, so
+        // no job may start there: the VM is fenced like a create that did not
+        // report, and retired once the stop can no longer land
+        // (`verify_no_running_containers`).
+        if outcome.is_ok()
+            && let Ok(VmClass::Owned { running: false, .. }) = self.classify_vm(name, true)
+        {
+            return Ok(KitVmStop::Stopped);
+        }
+        let detail = match outcome {
+            Ok(()) => "stock SBX still lists it running".to_owned(),
+            Err(error) => error.to_string(),
+        };
+        let reason = format!("its `marsh workers stop` did not settle ({detail})");
+        self.quarantine_stop_pending(name, reason.clone());
+        Err(SbxError::QuarantinedVm(format!("{name} ({reason})")))
     }
 
     /// Replace a Kit VM that was stopped and did not come back healthy when
@@ -5029,7 +5045,25 @@ impl StockSbx {
                 reason,
                 since_unix_ms: unix_millis_now(),
                 create_pending,
+                stop_pending: false,
             });
+    }
+
+    /// Fence `vm` after a `sbx stop` that did not settle: no job starts
+    /// there until it is retired, which waits out [`STOP_SETTLE`] while the
+    /// VM still runs.
+    fn quarantine_stop_pending(&self, vm: &str, reason: String) {
+        self.quarantined_workers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(vm.to_owned())
+            .or_insert_with(|| VmQuarantine {
+                reason,
+                since_unix_ms: unix_millis_now(),
+                create_pending: false,
+                stop_pending: false,
+            })
+            .stop_pending = true;
     }
 
     /// Every Kit VM this adapter refuses, with why and since when.
@@ -5057,6 +5091,20 @@ impl StockSbx {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(vm)
             .cloned();
+        // A submitted stop may still land, whatever the VM shows now (stock
+        // may have stopped it for another reason): retiring the VM, and so
+        // creating the next under its name, before then would let the late
+        // stop end the next job.
+        if pending.as_ref().is_some_and(|quarantine| {
+            quarantine.stop_pending
+                && unix_millis_now().saturating_sub(quarantine.since_unix_ms)
+                    < u64::try_from(STOP_SETTLE.as_millis()).unwrap_or(u64::MAX)
+        }) {
+            return Err(format!(
+                "its stop did not report; waiting up to {} s for it to settle",
+                STOP_SETTLE.as_secs()
+            ));
+        }
         match self
             .classify_vm(vm, true)
             .map_err(|error| format!("cannot list stock sandboxes to check the VM: {error}"))?
@@ -6019,7 +6067,10 @@ impl StockSbx {
         if ready != (WorkerResponse::Ready { generation }) {
             let _ =
                 terminate_and_reap_process(lease.process, self.retained_process_teardown_timeout);
-            return Err(SbxError::WorkerLeaseLost(vm.name.clone()));
+            return Err(SbxError::WorkerNotReady(format!(
+                "{}: the worker's first frame was not Ready for generation {generation}",
+                vm.name
+            )));
         }
         let retained = Arc::new(RetainedWorker {
             generation,
@@ -7138,13 +7189,13 @@ fn read_worker_ready(
     });
     match receive.recv_timeout(timeout) {
         Ok((Ok(ready), output)) => Ok((ready, output)),
-        Ok((Err(error), _)) => Err(SbxError::Io(io::Error::other(format!(
+        Ok((Err(error), _)) => Err(SbxError::WorkerNotReady(format!(
             "worker readiness failed: {error}"
-        )))),
-        Err(mpsc::RecvTimeoutError::Timeout) => Err(SbxError::WorkerLeaseLost(
+        ))),
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(SbxError::WorkerNotReady(
             "worker readiness timed out".into(),
         )),
-        Err(mpsc::RecvTimeoutError::Disconnected) => Err(SbxError::WorkerLeaseLost(
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(SbxError::WorkerNotReady(
             "worker readiness reader exited".into(),
         )),
     }
@@ -8459,6 +8510,10 @@ pub enum SbxError {
     InvalidLocalBuildMetadata,
     #[error("trusted worker lease exited before dispatch: {0}")]
     WorkerLeaseLost(String),
+    /// A freshly started worker did not report Ready: it exited, wrote a
+    /// malformed frame, or did not answer in time. No job ran on it.
+    #[error("the trusted worker did not become ready: {0}")]
+    WorkerNotReady(String),
     #[error(
         "marsh was reinstalled while this daemon runs: its worker binary {0} changed on disk, and this daemon cannot start the new one; run `marsh stop` once no job is running (the next marsh call starts the new daemon)"
     )]

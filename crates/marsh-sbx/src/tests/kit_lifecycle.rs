@@ -1,5 +1,5 @@
 //! Published Kit VMs: creation, ownership, worker lease, reset and quarantine.
-use super::stock_model::{marker_write, verb, verb_on};
+use super::stock_model::{ReadyFault, marker_write, verb, verb_on};
 use super::*;
 
 const KIT: &str = "marsh-kit-fixture";
@@ -662,4 +662,119 @@ fn a_project_restored_after_its_lost_mount_was_dropped_is_mounted_again() {
             .values()
             .all(|(host, _)| host == &project)
     );
+}
+
+#[test]
+fn a_stop_that_did_not_settle_fences_the_vm_until_it_can_no_longer_land() {
+    let model = StockModel::new();
+    let (adapter, kit, _) = warm_kit(&model, KIT);
+    let live = BTreeSet::new();
+    // `sbx stop` expires before it lands: it may still land later.
+    model.fault(
+        verb_on("stop", KIT.into()),
+        Fault::TimedOut { applied: false },
+    );
+    let error = adapter
+        .stop_idle_kit_vm(KIT, &live, Instant::now() + Duration::from_secs(60))
+        .unwrap_err();
+    assert!(
+        matches!(&error, SbxError::QuarantinedVm(why) if why.contains("did not settle")),
+        "{error}"
+    );
+    assert!(model.vm(KIT).unwrap().running);
+    let quarantine = adapter.quarantined_vms()[KIT].clone();
+    assert!(quarantine.stop_pending, "{quarantine:?}");
+
+    // A job or `marsh --load` arriving now is refused, before any effect
+    // that the late stop could end.
+    let spawns = model.retained_spawns(WORKER_PATH);
+    assert!(matches!(
+        adapter.ensure_kit_vm(&kit.spec),
+        Err(SbxError::QuarantinedVm(_))
+    ));
+    assert_eq!(model.retained_spawns(WORKER_PATH), spawns);
+    // While it runs within the settle window, it is not retired.
+    let waiting = adapter.verify_no_running_containers(KIT).unwrap_err();
+    assert!(waiting.contains("waiting up to"), "{waiting}");
+
+    // It lands late: nothing ran there. The VM is retired only once the
+    // settle window is over (a stopped listing is no proof the stop is done).
+    model.with_vm(KIT, |vm| vm.running = false);
+    assert!(adapter.verify_no_running_containers(KIT).is_err());
+    adapter
+        .quarantined_workers
+        .lock()
+        .unwrap()
+        .get_mut(KIT)
+        .unwrap()
+        .since_unix_ms -= u64::try_from(STOP_SETTLE.as_millis()).unwrap();
+    assert_eq!(
+        adapter.verify_no_running_containers(KIT).unwrap(),
+        "the VM is stopped"
+    );
+    assert!(adapter.retire_quarantined_vm(KIT).unwrap());
+    assert!(model.vm(KIT).is_none());
+}
+
+#[test]
+fn only_a_reported_stop_is_settled() {
+    let deadline = || Instant::now() + Duration::from_secs(60);
+    // The reply was lost although the stop landed: without stock's report
+    // it is not known to be done, so the VM stays fenced.
+    let model = StockModel::new();
+    let (adapter, _kit, _) = warm_kit(&model, KIT);
+    model.fault(
+        verb_on("stop", KIT.into()),
+        Fault::TimedOut { applied: true },
+    );
+    assert!(matches!(
+        adapter.stop_idle_kit_vm(KIT, &BTreeSet::new(), deadline()),
+        Err(SbxError::QuarantinedVm(_))
+    ));
+    assert!(adapter.quarantined_vms()[KIT].stop_pending);
+    assert!(!model.vm(KIT).unwrap().running);
+    // A reported stop is settled: the VM is kept and not fenced.
+    let model = StockModel::new();
+    let (adapter, _kit, _) = warm_kit(&model, KIT);
+    assert_eq!(
+        adapter
+            .stop_idle_kit_vm(KIT, &BTreeSet::new(), deadline())
+            .unwrap(),
+        KitVmStop::Stopped
+    );
+    assert!(adapter.quarantined_vms().is_empty());
+}
+
+#[test]
+fn a_worker_that_fails_before_ready_is_reported_replaceable_and_its_vm_replaced() {
+    for fault in [ReadyFault::Eof, ReadyFault::Malformed] {
+        let model = StockModel::new();
+        let (adapter, kit, _) = warm_kit(&model, KIT);
+        let first = model.vm(KIT).unwrap().id;
+        let live = BTreeSet::new();
+        assert_eq!(
+            adapter
+                .stop_idle_kit_vm(KIT, &live, Instant::now() + Duration::from_secs(60))
+                .unwrap(),
+            KitVmStop::Stopped
+        );
+        model.fail_next_worker_ready(fault);
+        let error = adapter.ensure_kit_vm(&kit.spec).unwrap_err();
+        assert!(
+            matches!(error, SbxError::WorkerNotReady(_)),
+            "{fault:?}: {error}"
+        );
+        // The failed worker is reaped and no lease is kept for it.
+        assert!(!adapter.worker_leases.lock().unwrap().contains_key(KIT));
+
+        adapter
+            .replace_unhealthy_kit_vm(&kit.spec, &live, Instant::now() + Duration::from_secs(60))
+            .unwrap();
+        assert!(model.vm(KIT).is_none(), "{fault:?}: the old VM is removed");
+        let ready = adapter.ensure_kit_vm(&kit.spec).unwrap();
+        assert!(ready.cold_started, "{fault:?}");
+        let second = model.vm(KIT).unwrap().id;
+        assert_ne!(first, second, "{fault:?}: a new VM");
+        assert_eq!(adapter.ownership.uuid(KIT), Some(second));
+    }
 }

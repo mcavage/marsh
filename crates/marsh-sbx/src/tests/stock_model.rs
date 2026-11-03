@@ -211,6 +211,15 @@ pub(super) enum Fault {
     SpawnError(String),
 }
 
+/// How a started worker fails before its Ready frame.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum ReadyFault {
+    /// It exits at once: its output ends.
+    Eof,
+    /// It writes bytes that are no worker frame, then exits.
+    Malformed,
+}
+
 /// Holds matching calls before their effect until released.
 #[derive(Default)]
 pub(super) struct Gate {
@@ -336,6 +345,8 @@ struct State {
     /// Every byte written to each VM's worker input.
     worker_input: BTreeMap<String, Vec<u8>>,
     worker_ready_gate: Option<Arc<Gate>>,
+    /// The next worker started fails before Ready, this way.
+    worker_ready_fault: Option<ReadyFault>,
     worker_input_gate: Option<Arc<Gate>>,
     fail_worker_flush: bool,
     wedge_worker_termination: Option<Arc<Gate>>,
@@ -500,6 +511,10 @@ impl StockModel {
         let gate = Arc::new(Gate::default());
         self.state.lock().unwrap().worker_ready_gate = Some(Arc::clone(&gate));
         gate
+    }
+
+    pub fn fail_next_worker_ready(&self, fault: ReadyFault) {
+        self.state.lock().unwrap().worker_ready_fault = Some(fault);
     }
 
     pub fn gate_worker_input(&self) -> Arc<Gate> {
@@ -1291,11 +1306,12 @@ impl StockModel {
 
     fn spawn_worker(&self, vm: &str, generation: u64) -> io::Result<Attachment> {
         let (controller, mut worker) = UnixStream::pair()?;
-        let (ready_gate, wedge) = {
-            let state = self.state.lock().unwrap();
+        let (ready_gate, wedge, fault) = {
+            let mut state = self.state.lock().unwrap();
             (
                 state.worker_ready_gate.clone(),
                 state.wedge_worker_termination.clone(),
+                state.worker_ready_fault.take(),
             )
         };
         let state = Arc::new(ProcState {
@@ -1306,9 +1322,18 @@ impl StockModel {
         self.register(vm, ProcKind::Worker, &state);
         let model = self.this.clone();
         let name = vm.to_owned();
+        let exits = Arc::clone(&state);
         thread::spawn(move || {
             if let Some(gate) = ready_gate {
                 gate.pass();
+            }
+            match fault {
+                Some(ReadyFault::Eof) => return exits.finish(1),
+                Some(ReadyFault::Malformed) => {
+                    let _ = worker.write_all(b"\xff\xff\xff\x7fnot a worker frame");
+                    return exits.finish(1);
+                }
+                None => {}
             }
             let _ = marsh_worker::write_frame(
                 &mut worker,

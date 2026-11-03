@@ -272,9 +272,11 @@ not as cleaned up.
 | `KIT's VM is held by a job's mounts or by an attached shell that ran KIT` | A marsh shell that ran the Kit is attached, or a job is ending. Exit that shell, or retry. |
 | `KIT: a job may be starting, or a job's cleanup is not verified yet` | A job is starting (retry), or one ended `cleanup uncertain` ([below](#cleanup-uncertain-and-quarantine)). |
 | `KIT's VM is quarantined; not stopped` | See [Cleanup uncertain and quarantine](#cleanup-uncertain-and-quarantine). |
+| `KIT: the stop did not settle; no job starts on …` | `sbx` did not report the stop (it timed out or failed), so it may still land. No job starts there until marsh retires the VM, about two minutes later; the next call then creates a new VM. Check `sbx ls`. |
 
-If a stopped Kit VM fails to start again for its next job, marsh replaces it
-with a new VM and the job runs there; the daemon log says why.
+If a stopped Kit VM fails to start again for its next job, or a Kit VM's
+worker exits before it reports ready, marsh replaces the VM with a new one and
+the job runs there; the daemon log says why.
 
 ### A removal keeps failing
 

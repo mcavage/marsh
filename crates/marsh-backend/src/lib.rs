@@ -984,16 +984,16 @@ impl StockDaemonBackend {
                 let resuming =
                     ephemeral.is_none() && self.sbx.kit_vm_stopped(spec).map_err(backend_error)?;
                 let mut cold_boot = Some(cold_boot);
-                let mut start = || -> Result<ReadyKitVm, (DaemonError, bool)> {
+                let mut start = || -> Result<ReadyKitVm, (DaemonError, Replace)> {
                     let sbx = |error: marsh_sbx::SbxError| {
-                        let replaceable = unhealthy_after_start(&error);
-                        (backend_error(error), replaceable)
+                        let replace = replace_after(&error);
+                        (backend_error(error), replace)
                     };
                     if !self.sbx.kit_vm_exists(spec).map_err(sbx)?
                         && let Some(cold_boot) = cold_boot.take()
                     {
                         cold_boot(self.sbx.kit_image_download_needed(spec))
-                            .map_err(|error| (error, false))?;
+                            .map_err(|error| (error, Replace::No))?;
                     }
                     let vm = if let Some(token) = ephemeral {
                         self.sbx.ensure_ephemeral_kit_vm(spec, token)
@@ -1008,8 +1008,12 @@ impl StockDaemonBackend {
                 };
                 let vm = match start() {
                     Ok(vm) => vm,
-                    Err((error, true)) if resuming => {
-                        self.replace_unhealthy_resumed(spec, store, &error)?;
+                    Err((error, Replace::IfResumed)) if resuming => {
+                        self.replace_unhealthy(spec, store, &error, true)?;
+                        start().map_err(|(error, _)| error)?
+                    }
+                    Err((error, Replace::Always)) if ephemeral.is_none() => {
+                        self.replace_unhealthy(spec, store, &error, resuming)?;
                         start().map_err(|(error, _)| error)?
                     }
                     Err((error, _)) => return Err(error),
@@ -1065,20 +1069,31 @@ impl StockDaemonBackend {
     /// only while nothing is recorded on it. No job was admitted to it since
     /// it was observed stopped (the caller holds the Kit lock), so no
     /// container runs there.
-    fn replace_unhealthy_resumed(
+    fn replace_unhealthy(
         &self,
         spec: &KitVmSpec,
         store: &DaemonStore,
         error: &DaemonError,
+        observed_stopped: bool,
     ) -> Result<(), DaemonError> {
-        if self.vm_quarantined(store, &spec.name) || store.vm_jobs_unsettled(&spec.name) {
+        // A VM that was not observed stopped may run an earlier daemon's
+        // container: this run's records must be complete (it served it), or
+        // the VM must show none.
+        let idle = observed_stopped
+            || store
+                .status(None)
+                .workers
+                .iter()
+                .any(|worker| worker.worker_id == spec.name)
+            || self.sbx.verify_no_running_containers(&spec.name).is_ok();
+        if !idle || self.vm_quarantined(store, &spec.name) || store.vm_jobs_unsettled(&spec.name) {
             return Err(DaemonError::InvalidState(format!(
-                "{} did not start healthy ({error}) and is in use; not replaced",
+                "{} did not start healthy ({error}) and may be in use; not replaced",
                 spec.name
             )));
         }
         eprintln!(
-            "marshd: Kit VM {} did not start healthy after being stopped ({error}); replacing it",
+            "marshd: Kit VM {} did not start healthy ({error}); replacing it",
             spec.name
         );
         self.sbx
@@ -1174,18 +1189,29 @@ impl StockDaemonBackend {
     }
 }
 
-/// A failure of starting a stopped Kit VM that its replacement fixes: the VM
-/// did not boot, its marker or Docker is unreadable, or its worker would not
-/// start. Never quarantine, foreign ownership, or work in progress.
-const fn unhealthy_after_start(error: &marsh_sbx::SbxError) -> bool {
-    matches!(
-        error,
+/// Whether a failed Kit VM start is fixed by replacing the VM.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Replace {
+    No,
+    /// Only a VM observed stopped before the start (resumed): it did not
+    /// boot, its marker or Docker is unreadable, or stock failed.
+    IfResumed,
+    /// Its freshly started worker never reported Ready (early EOF, a
+    /// malformed frame, no answer), whether or not the VM was resumed.
+    Always,
+}
+
+/// Never quarantine, foreign ownership, or work in progress.
+const fn replace_after(error: &marsh_sbx::SbxError) -> Replace {
+    match error {
+        marsh_sbx::SbxError::WorkerNotReady(_) => Replace::Always,
         marsh_sbx::SbxError::CommandFailed { .. }
-            | marsh_sbx::SbxError::PreparationTimeout { .. }
-            | marsh_sbx::SbxError::IncompatibleVm { .. }
-            | marsh_sbx::SbxError::UnreadableVm { .. }
-            | marsh_sbx::SbxError::WorkerLeaseLost(_)
-    )
+        | marsh_sbx::SbxError::PreparationTimeout { .. }
+        | marsh_sbx::SbxError::IncompatibleVm { .. }
+        | marsh_sbx::SbxError::UnreadableVm { .. }
+        | marsh_sbx::SbxError::WorkerLeaseLost(_) => Replace::IfResumed,
+        _ => Replace::No,
+    }
 }
 
 fn public_worker_status(store: &DaemonStore, vm: &ReadyKitVm) -> WorkerStatus {
@@ -6127,6 +6153,32 @@ mod tests {
         let other_scope = second.kit_spec("agent").unwrap();
         assert_ne!(by_name.name, other_scope.name);
         assert_ne!(by_name.lifecycle_workspace, other_scope.lifecycle_workspace);
+    }
+
+    #[test]
+    fn a_worker_that_never_became_ready_is_replaced_whether_or_not_it_was_resumed() {
+        use marsh_sbx::SbxError;
+        for detail in ["worker readiness failed: unexpected EOF", "malformed frame"] {
+            assert_eq!(
+                replace_after(&SbxError::WorkerNotReady(detail.into())),
+                Replace::Always
+            );
+        }
+        assert_eq!(
+            replace_after(&SbxError::UnreadableVm {
+                vm: "v".into(),
+                detail: "no boot".into()
+            }),
+            Replace::IfResumed
+        );
+        for kept in [
+            SbxError::QuarantinedVm("v".into()),
+            SbxError::ForeignVm("v".into()),
+            SbxError::ActiveWorkerState("v".into()),
+            SbxError::Io(std::io::Error::other("x")),
+        ] {
+            assert_eq!(replace_after(&kept), Replace::No, "{kept}");
+        }
     }
 
     #[test]

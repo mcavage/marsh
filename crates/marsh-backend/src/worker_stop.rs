@@ -67,6 +67,7 @@ impl StockDaemonBackend {
         })
     }
 
+    #[allow(clippy::too_many_lines)] // One stop: refusals, claim, stop, and what it settled.
     fn stop_one_worker(
         &self,
         store: &DaemonStore,
@@ -138,14 +139,18 @@ impl StockDaemonBackend {
         // the VM afresh (and starts it if it is stopped).
         self.forget_prepared_worker(spec);
         if !claim.worker_ids.is_empty() {
-            if stopped.is_ok() {
+            match &stopped {
                 // A stopped VM is no registered worker; its next job
                 // registers it again.
-                if let Err(error) = store.finish_worker_reset(&spec.name, true) {
-                    return entry("failed", 0, format!("{label}: {error}"));
+                Ok(_) => {
+                    if let Err(error) = store.finish_worker_reset(&spec.name, true) {
+                        return entry("failed", 0, format!("{label}: {error}"));
+                    }
                 }
-            } else {
-                store.cancel_workers_reset(&claim.worker_ids);
+                // A submitted stop that did not settle may still land: the
+                // claim stays (the VM is quarantined until it is retired).
+                Err(marsh_sbx::SbxError::QuarantinedVm(_)) => {}
+                Err(_) => store.cancel_workers_reset(&claim.worker_ids),
             }
         }
         match stopped {
@@ -164,6 +169,13 @@ impl StockDaemonBackend {
                 "refused",
                 0,
                 format!("{label}: a job started on it meanwhile; not stopped"),
+            ),
+            Err(marsh_sbx::SbxError::QuarantinedVm(why)) => entry(
+                "failed",
+                0,
+                format!(
+                    "{label}: the stop did not settle; no job starts on {why} until marsh retires it (the next call then creates a new VM)"
+                ),
             ),
             Err(error) => entry(
                 "failed",
