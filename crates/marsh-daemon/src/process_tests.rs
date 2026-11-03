@@ -269,6 +269,7 @@ fn a_relay_cannot_name_a_parent_job() {
     let token = store.issue_relay_token(&session).unwrap();
     let request = |parent: &str| {
         PublicRequest::Execute(ExecuteSpec {
+            model: None,
             label: None,
             kit: None,
             acp: false,

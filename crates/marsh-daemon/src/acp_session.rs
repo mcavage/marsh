@@ -979,6 +979,7 @@ impl AcpSessionManager {
         std::thread::spawn(move || {
             let result = backend.execute(
                 ExecuteSpec {
+                    model: None,
                     label: None,
                     kit,
                     command,

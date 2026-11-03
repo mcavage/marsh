@@ -87,6 +87,10 @@ pub struct SplitCreateSpec {
     /// `split --label TEXT`: recorded on the split and its argv branch jobs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// `split --model M` (the task tool's `model` for a `copy` task):
+    /// recorded on its argv branch jobs' receipts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// The caller's narrowed spawn set (`MARSH_SPAWN`) for its argv branch
     /// jobs; admission intersects it with the parent's, so it only narrows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -230,6 +234,9 @@ pub struct SplitRecord {
     /// The creator's label (`split --label TEXT`), also on its argv branch jobs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// `split --model M`, recorded on its argv branch jobs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 /// What `marsh jobs --tree` keeps of a split, also after it is joined and
@@ -1973,6 +1980,10 @@ impl SplitEngine {
         if spec.branches.is_empty() {
             return Err("split: no branches".into());
         }
+        if let Some(model) = &spec.model {
+            crate::peer_review::valid_model(model)
+                .map_err(|error| format!("split: --model: {error}"))?;
+        }
         match &spec.label {
             Some(label) if !crate::valid_label(label) => {
                 return Err("split: a label is 1 to 128 bytes with no control characters".into());
@@ -2382,6 +2393,7 @@ impl SplitEngine {
             let spec = ExecuteSpec {
                 // The split's label is also its argv branch jobs' label.
                 label: record.label.clone(),
+                model: record.model.clone(),
                 kit: None,
                 command: String::from_utf8_lossy(&argv[0]).into_owned(),
                 arguments: argv[1..].to_vec(),
@@ -2848,6 +2860,7 @@ fn setup(
         closing: false,
         cancelled: false,
         label: spec.label.clone(),
+        model: spec.model.clone(),
     })
 }
 
@@ -3142,6 +3155,7 @@ impl LocalSplit {
         };
         Ok(Self {
             record: SplitRecord {
+                model: None,
                 id,
                 state: SplitState::Run,
                 creator: Creator::Host,

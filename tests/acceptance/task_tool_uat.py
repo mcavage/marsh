@@ -530,6 +530,18 @@ class TaskTool(ScenarioSuite):
         child = self.job_state(self.job_of(out[0]))
         require(child.get("model") == "gpt-6.1-terra" and child.get("label") == "task: review by fixture",
                 f"child receipt: model {child.get('model')!r} label {child.get('label')!r}")
+        # The model is only ever what the task passed: an agent's own argv,
+        # however it spells model options, records nothing.
+        before = self.job_ids()
+        plain = self.cli(["run", "fixture", "exec", "sh", "-c", "true", "--model", "opus",
+                          "--append-system-prompt", "--model=sonnet", "-p", "hi"], self.project, timeout=600)
+        require(plain.returncode == 0, f"plain fixture job failed: {text(plain.stderr)[-600:]!r}")
+        (fresh,) = self.settle(before, 1, timeout=180)
+        require("model" not in fresh, f"a job's argv recorded a model: {fresh.get('model')!r}")
+        copy = self.steps([["call", "task", {"description": "copy review", "agent": "fixture", "files": "copy",
+                                             "model": "gpt-6-luna", "prompt": "true"}]])
+        copied = self.job_state(self.job_of(copy[0]))
+        require(copied.get("model") == "gpt-6-luna", f"copy task receipt: model {copied.get('model')!r}")
         listed_jobs = self.document("jobs", "--json")
         require(any(j.get("job_id") == child["job_id"] and j.get("model") == "gpt-6.1-terra"
                     for j in listed_jobs.get("jobs", [])), "marsh jobs --json lacks the child's model")

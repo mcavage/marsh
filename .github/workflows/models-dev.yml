@@ -4,20 +4,19 @@ name: models.dev snapshot
 # review, docs/peer-review.md). marsh never fetches models.dev at run time.
 # Weekly and by hand: regenerate with scripts/update-models-dev.py and, when it
 # changed, open (or update) one pull request on the models-dev/snapshot
-# branch. Normal CI tests it; it merges like any other PR.
+# branch.
 #
-# Secrets:
-#   MODELS_DEV_TOKEN  a fine-grained PAT for this repository with only
-#                     Contents and Pull requests read/write (not Workflows:
-#                     this job only changes one data file). It must not be
-#                     GITHUB_TOKEN, whose PRs would not run CI. Unset, the
-#                     job regenerates the file and reports, opening no PR.
+# Token: the job's own GITHUB_TOKEN (contents and pull-requests write, below).
+# A pull request it opens does not start CI by itself: a maintainer approves
+# the workflow runs on it (the PR's "Approve and run" button), then it merges
+# like any other PR.
 on:
   schedule:
     - cron: '41 5 * * 1'
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 concurrency:
   group: models-dev
   cancel-in-progress: false
@@ -27,24 +26,17 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          token: ${{ secrets.MODELS_DEV_TOKEN || github.token }}
       - name: Regenerate
         run: python3 scripts/update-models-dev.py
       - name: Open or update the pull request
         env:
-          GH_TOKEN: ${{ secrets.MODELS_DEV_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           file=crates/marsh-daemon/data/models-dev.json
           if git diff --quiet -- "$file"; then
             echo "models.dev snapshot unchanged" | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          if [ -z "$GH_TOKEN" ]; then
-            echo "models.dev snapshot changed; set MODELS_DEV_TOKEN to open a pull request" | tee -a "$GITHUB_STEP_SUMMARY"
-            git diff --stat -- "$file" | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           branch=models-dev/snapshot

@@ -1031,6 +1031,7 @@ fn run_command(arguments: &[OsString]) -> i32 {
         environment.retain(|name, _| marsh_daemon::split::forwardable(name));
     }
     let spec = marsh_daemon::ExecuteSpec {
+        model: None,
         label,
         kit: None,
         command: name,
@@ -1452,6 +1453,7 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
     // A detached run reads nothing: its stdin is /dev/null.
     let stdin_null = stdin_null || detach;
     let spec = marsh_daemon::ExecuteSpec {
+        model: None,
         label,
         kit: None,
         command: "cloud".into(),

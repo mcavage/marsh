@@ -1747,6 +1747,7 @@ mod tests {
                 client
                     .execute_with_io(
                         ExecuteSpec {
+                            model: None,
                             label: None,
                             kit: None,
                             acp: false,

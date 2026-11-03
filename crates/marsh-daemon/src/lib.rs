@@ -1071,6 +1071,10 @@ pub struct ExecuteSpec {
     /// `marsh cloud -d --label TEXT`: recorded on the job receipt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// `marsh run --model M` (the task tool's `model`): recorded on the job
+    /// receipt as the model the job was asked to run (`docs/peer-review.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// The exact Kit generation this run must use (an ACP session's, as
     /// resolved when it started); refused if the command now names another.
     #[serde(default, skip_serializing_if = "Option::is_none")]

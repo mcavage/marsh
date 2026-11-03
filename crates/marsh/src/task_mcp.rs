@@ -736,18 +736,28 @@ impl Server {
                 .map_err(|error| format!("cannot create {}/{name}: {error}", directory.display()))
         };
         let label = task_label(request);
+        // The task's model is recorded on the child job from here, never
+        // read back from the agent's arguments.
+        let model = request
+            .model
+            .as_ref()
+            .map(|model| vec!["--model", model.as_str()])
+            .unwrap_or_default();
         let mut command = Command::new(&self.setup.marsh);
         match request.files {
             Files::Shared => {
                 command
                     .args(["run", "--label", &label])
+                    .args(&model)
                     .arg(&request.agent)
                     .args(&request.argv)
                     .env(crate::job::STARTED_FILE, directory.join("job"));
             }
             Files::Copy => {
                 command
-                    .args(["split", "-n", "--label", &label, ":::", id])
+                    .args(["split", "-n", "--label", &label])
+                    .args(&model)
+                    .args([":::", id])
                     .arg(&request.agent)
                     .args(&request.argv);
             }

@@ -69,22 +69,18 @@ a tool error, and so does a malformed id (1 to 128 characters from
 
 ### The job's `model`
 
-marsh records the model each job was asked to run as `model` on its receipt:
-`marsh jobs --json` (each job), `marsh jobs show ID` (`model:`, and `model`
-with `--json`), and the job lines of `marsh events --json`. The daemon reads it
-from the job's own arguments through its Kit's model option, so it is present
-for a `task(model: M)` child and for a caller's own `claude -p … --model M`.
-marsh reads the option the way the agent's parser does: `FLAG M` and, for a
-long flag, `FLAG=M` (`--model sonnet --model=opus` is `opus`); the last one
-wins; nothing after `--` is an option. When marsh cannot be sure, it records
-nothing rather than a guess: a malformed value, another spelling of a model
-flag than the Kit declares (`--model` for Codex's `-m`), or a Kit option that
-is not one `FLAG {{.Model}}` pair. When no model was passed, `model` is
-absent: the agent then uses its own default, which marsh does not read from
-the agent's settings and does not guess. A job
-event's `model` appears from the job's first transition after it is queued
-(the same as `args`). The task label stays `task: DESCRIPTION`, so a task card
-can show "Review by codex · gpt-6.1-terra" from `command`, `label` and `model`.
+marsh records the model a task asked for as `model` on the child job's
+receipt: `marsh jobs --json` (each job), `marsh jobs show ID` (`model:`, and
+`model` with `--json`), and the job lines of `marsh events --json`. It is
+exactly the task's `model` argument: the task server passes it to `marsh run
+--model M` (or `marsh split --model M` for a `"copy"` task), and the daemon
+records that. marsh never reads it back from the agent's arguments, so a
+job's own `--model` options (`claude -p … --model opus`) record nothing, and a
+task without `model` has no `model` field: the agent then uses its own
+default, which marsh does not guess. A job event's `model` appears from the
+job's first transition after it is queued (the same as `args`). The task label
+stays `task: DESCRIPTION`, so a task card can show "Review by codex ·
+gpt-6.1-terra" from `command`, `label` and `model`.
 
 ## Model classes
 
@@ -143,7 +139,8 @@ gives it no vendor, so it pairs only with an explicit `vendor` in a drop-in.
 
 The snapshot keeps only chat models that
 call tools and list a price. The `models-dev` workflow regenerates the
-snapshot weekly and opens a pull request when it changes. marsh never fetches
+snapshot weekly and opens a pull request with the job's own `GITHUB_TOKEN`
+when it changes; a maintainer approves that PR's CI runs. marsh never fetches
 models.dev at run time.
 
 ## Who is ready: drop-ins
