@@ -75,11 +75,15 @@ impl SplitWorkspace for CloudSplit {
                 .stdout(stdout)
                 .stderr(stderr)
                 .process_group(0);
+            // Cancellation is SIGINT to the branch group; a branch started
+            // from a thread that keeps SIGINT off must not inherit that.
+            brush_core::traps::restore_startup_interrupt_mask(&mut command);
             match command.spawn() {
                 Ok(mut child) => {
                     if let Some(mut stdin) = child.stdin.take() {
                         let input = input.clone();
                         std::thread::spawn(move || {
+                            brush_core::traps::keep_interrupts_off_this_thread();
                             let _ = stdin.write_all(&input);
                         });
                     }
@@ -115,6 +119,7 @@ impl SplitHandle for Running {
             signal_groups(&children, nix::sys::signal::Signal::SIGINT);
             let children = Arc::clone(&children);
             std::thread::spawn(move || {
+                brush_core::traps::keep_interrupts_off_this_thread();
                 std::thread::sleep(CANCEL_GRACE);
                 signal_groups(&children, nix::sys::signal::Signal::SIGKILL);
             });

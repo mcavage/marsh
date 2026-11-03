@@ -145,16 +145,25 @@ fn compose_std_command(
     #[cfg(unix)]
     let blocked = if forking {
         let blocked = crate::sys::signal::BlockedForFork::new();
-        let previous = blocked.previous();
+        let mask = blocked.for_child();
         // SAFETY: only sigaction and pthread_sigmask run after fork.
         unsafe {
             cmd.pre_exec(move || {
-                crate::sys::signal::restore_defaults_after_fork(&previous);
+                crate::sys::signal::restore_defaults_after_fork(&mask);
                 Ok(())
             });
         }
         Some(blocked)
     } else {
+        // An in-place exec may run on a thread that keeps SIGINT off, and the
+        // program would keep that thread's mask.
+        // SAFETY: only pthread_sigmask runs before exec.
+        unsafe {
+            cmd.pre_exec(|| {
+                crate::sys::signal::restore_interrupt_mask_for_child();
+                Ok(())
+            });
+        }
         None
     };
     #[cfg(not(unix))]

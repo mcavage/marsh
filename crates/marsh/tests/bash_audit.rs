@@ -1356,6 +1356,105 @@ fn noninteractive_self_sigint_is_acted_on_before_the_next_command() {
     }
 }
 
+/// Every way the shell starts a program gives it SIGINT unblocked, as Bash
+/// does, though only the shell's own thread takes SIGINT: a program the
+/// shell starts from another thread (a command substitution's) would
+/// otherwise inherit that thread's mask. Each `sh` signals itself, so a
+/// blocked SIGINT shows as `survived`. Asynchronous lists ignore SIGINT
+/// without job control, in both shells.
+#[test]
+fn programs_start_with_sigint_unblocked_from_every_path() {
+    use std::os::unix::process::ExitStatusExt as _;
+    differential(
+        r#"s() { sh -c 'kill -INT $$; echo survived'; echo "$1 $?"; }
+s fg; s stage | cat; true | s last-stage; { s group-stage; } | cat; ( s subshell )
+( sh -c 'kill -INT $$; echo survived' ); echo "subshell-command $?"
+( exec sh -c 'kill -INT $$; echo survived' ); echo "exec $?"
+x=$(s substitution); echo "$x"; echo "$(s substitution-pipeline | cat)"
+s background & wait $!"#,
+        0,
+        b"fg 130\nstage 130\nlast-stage 130\ngroup-stage 130\nsubshell 130\nsubshell-command 130\nexec 130\nsubstitution 130\nsubstitution-pipeline 130\nsurvived\nbackground 0\n",
+    );
+    let script = "echo before; exec sh -c 'kill -INT $$; echo survived'";
+    for program in ["bash", env!("CARGO_BIN_EXE_marsh-local")] {
+        let output = run(program, script, false);
+        assert_eq!(output.status.signal(), Some(2), "{program}: {output:?}");
+        assert_eq!(output.stdout, b"before\n", "{program}: {output:?}");
+    }
+}
+
+/// Cancelling a `split` in a cloud block (Ctrl-C at the shell) sends SIGINT
+/// to each branch's process group; branch shells and their commands start
+/// with SIGINT unblocked, so they end at once rather than at the SIGKILL
+/// 10 s later. Each branch's foreground command records its own PID, so the
+/// signal is sent once that command exists (one forked as the signal lands
+/// would miss it, in Bash too).
+#[test]
+fn cancelled_cloud_split_branches_end_by_sigint() {
+    struct Reap(std::path::PathBuf);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            if let Ok(text) = std::fs::read_to_string(&self.0) {
+                for pid in text.split_whitespace().filter_map(|pid| pid.parse().ok()) {
+                    let _ = nix::sys::signal::kill(
+                        nix::unistd::Pid::from_raw(pid),
+                        nix::sys::signal::Signal::SIGKILL,
+                    );
+                }
+            }
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    // The split's working directory must be inside the root as the shell sees it.
+    let project = std::fs::canonicalize(directory.path()).unwrap();
+    let marks = tempfile::tempdir().unwrap();
+    let pids = marks.path().join("pids");
+    let _reap = Reap(pids.clone());
+    let script = format!(
+        "split {{ a: sh -c 'echo $$ >>{0}; exec sleep 300'; echo survived, b: sh -c 'echo $$ >>{0}; exec sleep 300'; echo survived }} | join",
+        pids.display()
+    );
+    let mut command = shell(env!("CARGO_BIN_EXE_marsh-local"));
+    let child = common::spawn_group(
+        command
+            .env("MARSH_CLOUD_ROOT", &project)
+            .args(["--no-config", "--noprofile", "--norc", "-c", &script])
+            .current_dir(&project)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    );
+    let mut branches = Vec::new();
+    common::wait_until(&script, Duration::from_secs(30), || {
+        branches = std::fs::read_to_string(&pids)
+            .unwrap_or_default()
+            .split_whitespace()
+            .filter_map(|pid| pid.parse::<i32>().ok())
+            .collect();
+        branches.len() == 2
+    });
+    let started = std::time::Instant::now();
+    let group = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap());
+    nix::sys::signal::killpg(group, nix::sys::signal::Signal::SIGINT).unwrap();
+    let output = common::wait_for_exit(child, &script, Duration::from_secs(30));
+    for pid in branches {
+        common::wait_until(
+            &format!("{script}: branch {pid}"),
+            Duration::from_secs(30),
+            || common::has_exited(pid),
+        );
+    }
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "branches outlived SIGINT ({:?}): {output:?}",
+        started.elapsed()
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("survived"),
+        "{output:?}"
+    );
+}
+
 /// Syntax errors name the line Bash names: the line of an unexpected token,
 /// or the line after the last one read for an unexpected end of file.
 #[test]

@@ -175,6 +175,93 @@ pub(crate) async fn await_undelivered_term() -> Result<(), error::Error> {
     }
 }
 
+/// Whether `SIGINT` was blocked on the thread that started the shell. Programs
+/// the shell runs start with the mask the shell started with, as in Bash.
+static INTERRUPTS_BLOCKED_AT_START: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Records whether the calling thread, the one that is to run the shell,
+/// blocks `SIGINT`. Call it before any thread is kept from taking `SIGINT`.
+pub(crate) fn note_startup_mask() {
+    // SAFETY: queries the calling thread's mask into a zeroed set.
+    let blocked = unsafe {
+        let mut current: libc::sigset_t = std::mem::zeroed();
+        libc::pthread_sigmask(libc::SIG_BLOCK, std::ptr::null(), &raw mut current) == 0
+            && libc::sigismember(&raw const current, libc::SIGINT) == 1
+    };
+    INTERRUPTS_BLOCKED_AT_START.store(blocked, std::sync::atomic::Ordering::Release);
+}
+
+/// Whether the shell started with `SIGINT` blocked (safe in a forked child).
+pub(crate) fn interrupts_blocked_at_start() -> bool {
+    INTERRUPTS_BLOCKED_AT_START.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// Keeps `SIGINT` off the calling thread, which is not the one that runs the
+/// shell. See [`crate::traps::keep_interrupts_off_this_thread`].
+pub(crate) fn keep_interrupts_off_this_thread() {
+    // SAFETY: blocks one signal on the calling thread; the set is initialized
+    // by sigemptyset before it is used.
+    unsafe {
+        let mut only: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&raw mut only);
+        libc::sigaddset(&raw mut only, libc::SIGINT);
+        libc::pthread_sigmask(libc::SIG_BLOCK, &raw const only, std::ptr::null_mut());
+    }
+}
+
+/// `mask` as a program the shell starts gets it: with `SIGINT` as the shell
+/// started (a thread that is not the shell's blocks it).
+fn mask_for_child(mask: &libc::sigset_t) -> libc::sigset_t {
+    let mut mask = *mask;
+    if !interrupts_blocked_at_start() {
+        // SAFETY: edits a set this function owns.
+        unsafe { libc::sigdelset(&raw mut mask, libc::SIGINT) };
+    }
+    mask
+}
+
+/// In a child about to exec (or a forked shell) started from any thread:
+/// gives `SIGINT` the mask state the shell started with. Only
+/// async-signal-safe calls.
+pub(crate) fn restore_interrupt_mask_for_child() {
+    if interrupts_blocked_at_start() {
+        return;
+    }
+    // SAFETY: unblocks one signal on the calling thread; the set is
+    // initialized by sigemptyset before it is used.
+    unsafe {
+        let mut only: libc::sigset_t = std::mem::zeroed();
+        libc::sigemptyset(&raw mut only);
+        libc::sigaddset(&raw mut only, libc::SIGINT);
+        libc::pthread_sigmask(libc::SIG_UNBLOCK, &raw const only, std::ptr::null_mut());
+    }
+}
+
+/// The calling thread's signal mask, put back when dropped: an in-place exec
+/// that fails returns with the mask its pre-exec steps set.
+pub(crate) struct SavedMask(libc::sigset_t);
+
+impl SavedMask {
+    pub(crate) fn new() -> Self {
+        // SAFETY: queries the calling thread's mask into a zeroed set.
+        unsafe {
+            let mut current: libc::sigset_t = std::mem::zeroed();
+            libc::pthread_sigmask(libc::SIG_BLOCK, std::ptr::null(), &raw mut current);
+            Self(current)
+        }
+    }
+}
+
+impl Drop for SavedMask {
+    fn drop(&mut self) {
+        // SAFETY: restores the mask saved by `new` in this same thread.
+        unsafe {
+            libc::pthread_sigmask(libc::SIG_SETMASK, &raw const self.0, std::ptr::null_mut())
+        };
+    }
+}
+
 /// Blocks every signal in the calling thread until dropped, around a `fork`.
 ///
 /// A forked child starts with the shell's handlers, so a signal sent to it
@@ -197,9 +284,11 @@ impl BlockedForFork {
         }
     }
 
-    /// The calling thread's mask before blocking, which the child restores.
-    pub(crate) const fn previous(&self) -> libc::sigset_t {
-        self.previous
+    /// The mask the child restores: the calling thread's before blocking,
+    /// with `SIGINT` as the shell started (the fork may be on a thread that
+    /// keeps it off).
+    pub(crate) fn for_child(&self) -> libc::sigset_t {
+        mask_for_child(&self.previous)
     }
 }
 
@@ -217,10 +306,10 @@ impl Drop for BlockedForFork {
 }
 
 /// In a forked child about to exec: gives every caught signal its default
-/// action, then restores `previous` (see [`BlockedForFork`]), so a signal that
-/// arrived since the fork takes effect as it would on the executed program.
-/// Only async-signal-safe calls.
-pub(crate) fn restore_defaults_after_fork(previous: &libc::sigset_t) {
+/// action, then restores `mask` ([`BlockedForFork::for_child`]), so a signal
+/// that arrived since the fork takes effect as it would on the executed
+/// program. Only async-signal-safe calls.
+pub(crate) fn restore_defaults_after_fork(mask: &libc::sigset_t) {
     // SAFETY: sigaction queries and installs SIG_DFL only; pthread_sigmask
     // installs the saved mask.
     unsafe {
@@ -240,7 +329,7 @@ pub(crate) fn restore_defaults_after_fork(previous: &libc::sigset_t) {
                 libc::sigaction(signal, &raw const default, std::ptr::null_mut());
             }
         }
-        libc::pthread_sigmask(libc::SIG_SETMASK, previous, std::ptr::null_mut());
+        libc::pthread_sigmask(libc::SIG_SETMASK, mask, std::ptr::null_mut());
     }
 }
 

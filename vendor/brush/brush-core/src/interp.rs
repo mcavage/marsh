@@ -1021,6 +1021,8 @@ fn spawn_running<T: Send + 'static>(
 ) -> std::thread::JoinHandle<T> {
     let (running, started) = std::sync::mpsc::channel();
     let handle = std::thread::spawn(move || {
+        #[cfg(unix)]
+        crate::sys::signal::keep_interrupts_off_this_thread();
         let _ = running.send(());
         work()
     });

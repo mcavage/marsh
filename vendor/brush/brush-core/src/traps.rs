@@ -64,6 +64,49 @@ pub async fn await_int() -> Result<(), crate::error::Error> {
     Ok(())
 }
 
+/// Records the signal mask the shell starts with, on the thread that is to
+/// run it, before any thread is kept from taking SIGINT. Programs the shell
+/// runs start with SIGINT as it was here, as Bash passes on its mask.
+#[cfg(unix)]
+pub fn note_startup_signal_mask() {
+    crate::sys::signal::note_startup_mask();
+}
+
+/// Keeps SIGINT off the calling thread. Call it on every thread of the
+/// shell's process except the one that runs the shell (Tokio's
+/// `on_thread_start` for the runtime's workers and blocking threads).
+///
+/// The shell decides whether an INT arrived while it waited for a child once
+/// the child is reaped. The kernel gives a process-directed signal to any
+/// thread that does not block it, and that thread may be preempted before
+/// its handler records the signal. When it is not the shell's thread, the
+/// shell can reap the child and decide first, and the INT, recorded later,
+/// ends the shell between commands. When only the shell's thread can take
+/// it, the INT is either still pending at the decision (which counts it) or
+/// already recorded. Bash, single-threaded, has no such gap.
+///
+/// A program started from such a thread inherits its mask; the shell's own
+/// launches restore SIGINT, and an embedder's use
+/// [`restore_startup_interrupt_mask`].
+#[cfg(unix)]
+pub fn keep_interrupts_off_this_thread() {
+    crate::sys::signal::keep_interrupts_off_this_thread();
+}
+
+/// Makes `command` start with SIGINT as the shell started, whichever thread
+/// spawns it (see [`keep_interrupts_off_this_thread`]).
+#[cfg(unix)]
+pub fn restore_startup_interrupt_mask(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt as _;
+    // SAFETY: only pthread_sigmask runs between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            crate::sys::signal::restore_interrupt_mask_for_child();
+            Ok(())
+        });
+    }
+}
+
 /// Returns (and consumes) whether an interactive shell recorded a SIGINT that
 /// no command has observed yet, such as Ctrl-C typed during a plain
 /// (cooked-mode) line read.

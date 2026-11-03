@@ -340,6 +340,13 @@ pub fn run_from(mut args: Vec<String>) -> i32 {
     #[cfg(not(any(unix, windows)))]
     let mut builder = tokio::runtime::Builder::new_current_thread();
 
+    // This thread runs the shell and is the only one that takes SIGINT.
+    #[cfg(unix)]
+    {
+        brush_core::traps::note_startup_signal_mask();
+        builder.on_thread_start(brush_core::traps::keep_interrupts_off_this_thread);
+    }
+
     // Real-process subshells need to know which descriptors the runtime opens.
     brush_core::subshell::note_descriptors_before_runtime();
     let Ok(runtime) = builder.enable_all().build() else {

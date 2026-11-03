@@ -300,7 +300,7 @@ index de6324f5..c17a6346 100644
      }
  }
 diff --git a/brush-shell/src/entry.rs b/brush-shell/src/entry.rs
-index 59002a33..9e834546 100644
+index 59002a33..9ae9b3f1 100644
 --- a/brush-shell/src/entry.rs
 +++ b/brush-shell/src/entry.rs
 @@ -4,6 +4,31 @@ use crate::args::CommandLineArgs;
@@ -579,7 +579,7 @@ index 59002a33..9e834546 100644
          }
      };
  
-@@ -120,16 +332,27 @@ pub fn run() {
+@@ -120,16 +332,34 @@ pub fn run() {
      // Run.
      //
      #[cfg(any(unix, windows))]
@@ -592,6 +592,13 @@ index 59002a33..9e834546 100644
      #[cfg(not(any(unix, windows)))]
      let mut builder = tokio::runtime::Builder::new_current_thread();
  
++    // This thread runs the shell and is the only one that takes SIGINT.
++    #[cfg(unix)]
++    {
++        brush_core::traps::note_startup_signal_mask();
++        builder.on_thread_start(brush_core::traps::keep_interrupts_off_this_thread);
++    }
++
 +    // Real-process subshells need to know which descriptors the runtime opens.
 +    brush_core::subshell::note_descriptors_before_runtime();
      let Ok(runtime) = builder.enable_all().build() else {
@@ -609,7 +616,7 @@ index 59002a33..9e834546 100644
  
      let exit_code = match result {
          Ok(code) => code,
-@@ -139,7 +362,7 @@ pub fn run() {
+@@ -139,7 +369,7 @@ pub fn run() {
          }
      };
  
@@ -618,7 +625,7 @@ index 59002a33..9e834546 100644
  }
  
  /// Installs panic handlers to report our panic and cleanly exit on panic.
-@@ -210,7 +433,13 @@ async fn run_async(
+@@ -210,7 +440,13 @@ async fn run_async(
      // Run with the selected input backend. Each branch instantiates the concrete
      // backend type and calls `run_in_shell`, preserving static dispatch.
      let default_backend = get_default_input_backend_type(&args);
@@ -633,7 +640,7 @@ index 59002a33..9e834546 100644
  
      // Build UI options by merging config file with CLI args.
      #[allow(unused_variables, reason = "not used when no backend features enabled")]
-@@ -239,7 +468,7 @@ async fn run_async(
+@@ -239,7 +475,7 @@ async fn run_async(
  
          #[cfg(minimal_backend)]
          InputBackendType::Minimal => {
@@ -642,7 +649,7 @@ index 59002a33..9e834546 100644
              run_in_shell(&shell, args, &mut input_backend, &ui_options).await
          }
          #[cfg(not(minimal_backend))]
-@@ -305,8 +534,48 @@ async fn run_in_shell(
+@@ -305,8 +541,48 @@ async fn run_in_shell(
          )?;
      }
  
@@ -691,7 +698,7 @@ index 59002a33..9e834546 100644
  
      // If a command was specified via -c, then run that command and then exit. Its result
      // is also the shell's last exit status, which is what's returned below for every mode.
-@@ -326,7 +595,7 @@ async fn run_in_shell(
+@@ -326,7 +602,7 @@ async fn run_in_shell(
              .lock()
              .await
              .run_script(
@@ -700,7 +707,7 @@ index 59002a33..9e834546 100644
                  args.script_args.iter().skip(1),
              )
              .await?;
-@@ -365,6 +634,14 @@ async fn initialize_shell(
+@@ -365,6 +641,14 @@ async fn initialize_shell(
      };
  
      shell_ref.lock().await.load_config(&profile, &rc).await?;
@@ -715,7 +722,7 @@ index 59002a33..9e834546 100644
  
      Ok(())
  }
-@@ -471,6 +748,11 @@ async fn instantiate_shell_from_args(
+@@ -471,6 +755,11 @@ async fn instantiate_shell_from_args(
          brush_builtins::BuiltinSet::BashMode
      };
  
@@ -727,7 +734,7 @@ index 59002a33..9e834546 100644
      // Identify the file descriptors to inherit.
      let fds = args
          .inherited_fds
-@@ -493,6 +775,7 @@ async fn instantiate_shell_from_args(
+@@ -493,6 +782,7 @@ async fn instantiate_shell_from_args(
      // NOTE: We skip loading profile and rc files here; that will be handled later after we've
      // fully instantiated everything we want set before running any code.
      let shell = brush_core::Shell::builder_with_extensions::<BrushShellExtensions>()
@@ -735,7 +742,7 @@ index 59002a33..9e834546 100644
          .disable_options(args.disabled_options.clone())
          .disable_shopt_options(args.disabled_shopt_options.clone())
          .disallow_overwriting_regular_files_via_output_redirection(
-@@ -535,6 +818,21 @@ async fn instantiate_shell_from_args(
+@@ -535,6 +825,21 @@ async fn instantiate_shell_from_args(
      // Build the shell.
      let mut shell = shell.build().await?;
  
@@ -757,7 +764,7 @@ index 59002a33..9e834546 100644
      // Make adjustments.
      if let Some(xtrace_file_path) = &args.xtrace_file_path {
          enable_xtrace_to_file(&mut shell, xtrace_file_path)?;
-@@ -543,6 +841,14 @@ async fn instantiate_shell_from_args(
+@@ -543,6 +848,14 @@ async fn instantiate_shell_from_args(
      Ok(shell)
  }
  
@@ -772,7 +779,7 @@ index 59002a33..9e834546 100644
  fn enable_xtrace_to_file(
      shell: &mut brush_core::Shell<impl brush_core::ShellExtensions>,
      file_path: &Path,
-@@ -960,6 +1266,48 @@ mod tests {
+@@ -960,6 +1273,48 @@ mod tests {
          Ok(())
      }
  
