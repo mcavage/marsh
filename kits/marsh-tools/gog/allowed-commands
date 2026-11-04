@@ -49,27 +49,23 @@ gmail.thread.get
 gmail.url
 gmail.vacation.get
 
-# Calendar: read; create and update events (the wrapper rejects attendee and
-#   notification flags)
+# Calendar: read
 calendar.acl
 calendar.calendars
 calendar.changed
 calendar.colors
 calendar.conflicts
-calendar.create
 calendar.event
 calendar.events
 calendar.freebusy
-calendar.propose-time
 calendar.raw
 calendar.search
 calendar.team
 calendar.time
-calendar.update
 calendar.users
-calendar.working-location
 
-# Drive: read; create files and folders; copy, rename and upload
+# Drive: read; create folders and files in My Drive root (the wrapper rejects
+#   destination flags and conversions); copy, rename and upload
 drive.activity.query
 drive.audit.sharing
 drive.audit.user
@@ -94,13 +90,12 @@ drive.rename
 drive.revisions.get
 drive.revisions.list
 drive.search
-drive.shortcut.create
-drive.sync.push
 drive.tree
 drive.upload
 drive.url
 
-# Docs: read; create documents; edit content, tabs, tables and formatting
+# Docs: read; create documents; edit content, tabs, tables and formatting (the
+#   wrapper rejects image markup)
 docs.add-tab
 docs.cat
 docs.cell-style
@@ -140,7 +135,6 @@ docs.paragraphs.list
 docs.raw
 docs.rename-tab
 docs.section-columns
-docs.sed
 docs.structure
 docs.suggestions.list
 docs.table-column-width
@@ -157,7 +151,8 @@ docs.tabs.rename
 docs.update
 docs.write
 
-# Sheets: read; create spreadsheets; edit values, tabs, ranges and formatting
+# Sheets: read; create spreadsheets; edit values (always RAW, never evaluated
+#   as formulas), tabs, ranges and formatting
 sheets.add-tab
 sheets.append
 sheets.banding.list
@@ -180,7 +175,6 @@ sheets.datasource.table.read
 sheets.duplicate-tab
 sheets.export
 sheets.filter.set
-sheets.find-replace
 sheets.format
 sheets.freeze
 sheets.get
@@ -211,11 +205,11 @@ sheets.update-note
 sheets.validation.get
 sheets.validation.set
 
-# Slides: read; create decks; edit slides, text, shapes, tables and notes
+# Slides: read; create decks from templates or empty; edit slides, text,
+#   shapes, tables and notes
 slides.bullets
 slides.copy
 slides.create
-slides.create-from-markdown
 slides.create-from-template
 slides.duplicate-slide
 slides.element.alt-text

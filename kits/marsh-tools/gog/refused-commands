@@ -70,23 +70,30 @@ gmail.watch.start
 gmail.watch.status
 gmail.watch.stop
 
-# Calendar: delete, move, RSVP, focus-time and out-of-office (they auto-
-#   decline invitations), calendar list and calendar creation, local aliases
+# Calendar: every change (events can carry guests, conferencing, visibility
+#   and shared calendars that the wrapper can't constrain; RSVPs and auto-
+#   declines notify others), calendar list changes, local aliases, browser
+#   opener
 calendar.alias.list
 calendar.alias.set
 calendar.alias.unset
+calendar.create
 calendar.create-calendar
 calendar.delete
 calendar.delete-calendar
 calendar.focus-time
 calendar.move
 calendar.out-of-office
+calendar.propose-time
 calendar.respond
 calendar.subscribe
 calendar.unsubscribe
+calendar.update
+calendar.working-location
 
-# Drive: share, unshare and bulk permission changes; delete; move; comments
-#   (they notify collaborators); labels; webhooks and hook runners
+# Drive: share, unshare and bulk permission changes; delete; move; shortcuts
+#   and folder sync (destinations); comments (they notify collaborators);
+#   labels; webhooks and hook runners
 drive.bulk.remove-public
 drive.bulk.update-role
 drive.changes.poll
@@ -104,11 +111,13 @@ drive.labels.file.apply
 drive.labels.file.remove
 drive.move
 drive.share
+drive.shortcut.create
+drive.sync.push
 drive.unshare
 
-# Docs: delete and clear; comments (they notify collaborators) and the comment
-#   poller (it runs a shell hook); local image upload (briefly makes the file
-#   public)
+# Docs: delete and clear; sed (regex replacement with image side effects);
+#   comments (they notify collaborators) and the comment poller (it runs a
+#   shell hook); local image upload (briefly makes the file public)
 docs.clear
 docs.comments.add
 docs.comments.delete
@@ -123,12 +132,13 @@ docs.header.delete
 docs.insert-image
 docs.named-range.delete
 docs.replace-image
+docs.sed
 docs.table-column.delete
 docs.table-row.delete
 docs.tabs.delete
 
-# Sheets: delete and clear; arbitrary batch-request; Connected Sheets data
-#   sources (BigQuery)
+# Sheets: delete and clear; find-replace (may evaluate formulas); arbitrary
+#   batch-request; Connected Sheets data sources (BigQuery)
 sheets.banding.clear
 sheets.batch-request
 sheets.chart.delete
@@ -140,13 +150,17 @@ sheets.datasource.refresh
 sheets.datasource.update
 sheets.delete-dimension
 sheets.delete-tab
+sheets.find-replace
 sheets.named-ranges.delete
 sheets.table.clear
 sheets.table.delete
 sheets.validation.clear
 
-# Slides: delete; local image upload (briefly makes the file public)
+# Slides: delete; create-from-markdown (runs an arbitrary --mmdc program,
+#   publishes diagrams and deletes uploads); local image upload (briefly makes
+#   the file public)
 slides.add-slide
+slides.create-from-markdown
 slides.delete-slide
 slides.element.delete
 slides.insert-image

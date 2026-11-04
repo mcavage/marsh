@@ -8,7 +8,7 @@ The agent never sees it, and can't use it any other way.
 
 | Command | What it does |
 |---|---|
-| `gog` | Google Workspace through [gog](https://github.com/steipete/gogcli): read Gmail, Drive, Docs, Sheets, Slides, Calendar and more; create Gmail drafts, calendar events (without guests), tasks, documents, sheets, decks and forms, and edit the files it created. It cannot send or notify anyone, share, or delete anything. |
+| `gog` | Google Workspace through [gog](https://github.com/steipete/gogcli): read Gmail, Drive, Docs, Sheets, Slides, Calendar and more; create Gmail drafts, tasks, and private documents, sheets, decks and forms, and edit the ones it created. It cannot send or notify anyone, share or publish, delete, or run code. |
 | `bamboohr` | Read-only BambooHR directory: find people, reporting chains, org trees. |
 
 Both commands come from the same image, so marsh runs them in one VM. The
@@ -58,11 +58,15 @@ The command prints one access token. Sign in with these scopes, so Google
 itself limits edits to files the tool created: `gmail.readonly`,
 `gmail.compose`, `drive.readonly`, `drive.file`, `calendar.readonly`.
 
-The policy below allows more than these scopes do. To let agents also create
-and update calendar events or manage tasks, add `calendar.events` or `tasks`.
-Google doesn't limit those to tool-created items: `calendar.events` can edit
-any event, so the policy (no guests, no invitations) is the only bound there.
-An allowed command whose scope you didn't grant fails at Google, not in the Kit.
+The policy below allows more than these scopes do. To let agents also manage
+tasks, add `tasks`. An allowed command whose scope you didn't grant fails at
+Google, not in the Kit.
+
+`drive.file` limits which files the token can edit. It does **not** make them
+private: a file the tool created is an ordinary file in your My Drive, and
+anything you later share, move into a shared folder or open to others is open
+to them too. Privacy comes from the policy below: new files land in your My
+Drive root, and nothing the agent can run shares, moves or publishes them.
 
 ### BambooHR credential and company
 
@@ -103,74 +107,107 @@ so it keeps the network policy, credentials and home declaration.
 
 ## How `gog` stays safe
 
+### Threat model
+
+The agent is not trusted. With your Google credentials it must never:
+
+- **send or notify** anyone (mail, invitations, comments, chat, RSVPs);
+- **share or publish** anything, or leave it where others can see it;
+- **delete** anything;
+- **run code**, or make Google fetch a URL the agent chose (a way to carry
+  your data out).
+
+It may read what the token reads, and create and edit its own private files.
+
 ### The policy
 
 Every gog command path, hidden ones included, is either allowed
 ([`gog/allowed-commands`](gog/allowed-commands)) or refused
-([`gog/refused-commands`](gog/refused-commands)), by one rule set:
+([`gog/refused-commands`](gog/refused-commands)). [`gog/flag-rules`](gog/flag-rules)
+narrows the allowed commands that could still break the model.
 
 **Allow**
 
 - Reads everywhere: get, list, search, export, metadata, raw, and url.
-- Creating new files: documents, spreadsheets, decks, forms, folders,
-  uploads, copies, task lists.
+- Creating new files, always in My Drive root: documents, spreadsheets,
+  decks, forms, folders, uploads, copies, task lists. The wrapper rejects
+  `--parent` on creates and pins copies to `--parent root` (a copy would
+  otherwise land in its source's folder, which may be shared). It also rejects
+  conversions (Drive's conversion evaluates formulas and fetches images).
 - Editing content: write, update, append, insert, replace, formatting, and
-  adding, renaming, duplicating and reordering tabs, sheets and slides. Google
-  limits these to tool-created files when the token has `drive.file`.
-- Gmail drafts: create and update, including drafts of replies and forwards.
-  Nothing sends them; you do.
-- Calendar events: create and update, with no guests and no invitations (the
-  wrapper rejects `--attendees`, `--add-attendee` and `--send-updates`).
+  adding, renaming, duplicating and reordering tabs, sheets and slides.
+  Sheets values are always stored as typed (`--input RAW` is forced), so
+  `=IMAGE(...)` and `=IMPORTDATA(...)` are never evaluated. Docs content is
+  refused if it holds image markup (`![`, `<img`), in an argument or a file.
+- Gmail drafts: create and update, including drafts of replies and forwards,
+  as plain text. Nothing sends them; you do.
 - Tasks: add, update, complete.
 
 **Refuse**
 
 - Anything that sends or notifies others: sending mail, sending a draft,
-  replying, forwarding, RSVPs, Chat messages, Drive comments, calendar
-  auto-declines (focus time, out of office), Classroom, publishing a form.
-- Sharing, permissions, ownership, and bulk permission changes. This
-  includes commands that briefly make a file public so Docs or Slides can
-  fetch it: inserting or replacing a *local* image (`docs insert-image`,
-  `docs replace-image`, `slides insert-image`, `slides add-slide`,
-  `slides replace-slide`).
+  replying, forwarding, RSVPs, Chat messages, Drive comments, Classroom,
+  publishing a form.
+- **Calendar writes.** Creating or updating an event can carry guests,
+  conferencing, visibility or a shared calendar through flags and a
+  positional calendar ID that the wrapper can't constrain safely, and
+  updating can change an existing event that has guests.
+- Sharing, permissions, ownership, moving files (into a shared folder is
+  sharing), shortcuts, folder sync, and commands that briefly make a file
+  public so Docs or Slides can fetch it (inserting or replacing a *local*
+  image).
 - Deleting, trashing, clearing or removing anything, including text ranges,
-  rows, columns, tabs, slides, and elements. To remove content from a file
+  rows, columns, tabs, slides and elements. To remove content from a file
   the tool made, overwrite it with `write`, `update` or `edit`.
 - Changing the account: Gmail settings, filters, forwarding, delegation,
   send-as, vacation, labels and mailbox state; contacts, Keep, Meet, YouTube
-  and Photos changes; calendar lists and aliases.
+  and Photos changes.
 - Admin, auth and token commands, gog's own config (including its no-send
   guard), backup, and request batches.
-- Anything that runs code or talks to something other than Google's own APIs:
-  hooks and webhooks (`--on-change`, `--on-new`, Pub/Sub watches, `drive
-  changes serve`), Apps Script `run`, the MCP server, the generic `api call`,
-  Zoom, email tracking, and gog's update check.
+- Running code or talking to anything but Google's APIs: hooks and webhooks,
+  Apps Script `run`, the MCP server, the generic `api call`, Zoom, email
+  tracking, gog's update check, and `slides create-from-markdown` (its
+  `--mmdc` runs any program).
+- Commands whose side effects the wrapper can't bound: `docs sed` and
+  `sheets find-replace` (replacement text can bring in formulas or images).
 - Any command not classified above. The default for a command nobody has
   reviewed is refused.
 
-Limits of the policy: `slides create-from-markdown` briefly makes generated
-icon images (never your files) public while it builds the deck. `calendar
-update` can change an existing event that already has guests; Google sends no
-notification by default, but their calendars change.
+Reads are allowed everywhere, including reads of settings, sharing and
+permissions. The data the agent reads is the data your token can read.
 
 ### Keeping it true
 
 - **gog refuses everything not in `allowed-commands`**, using its own
   `--enable-commands-exact`. Aliases resolve first, so `gog gmail read` is
-  `gmail thread get`. The top-level shortcuts (`gog send`, `gog ls`) are
+  `gmail thread get`. The top-level shortcuts (`gog send`, `gog upload`) are
   separate commands with their own lines.
-- **A new gog command fails CI until someone decides.**
+- **The wrapper resolves the command before it applies the flag rules.** It
+  asks gog, with nothing enabled, which command the arguments are, so
+  `drive upload`, `upload` and any alias get the same rules. If gog can't name
+  a command (a usage error, `--help`), the wrapper runs it with nothing
+  enabled. Docs files are copied into the job's own `/tmp` and scanned, and the
+  copy is what runs, so the agent can't change a file after the check.
+- **A new gog command or flag fails CI until someone decides.**
   [`tests/kits/tools-policy.py`](../../tests/kits/tools-policy.py) lists every
-  command in the built image's gog (hidden ones too) and fails unless
-  allowed plus refused equals that list exactly, with no overlap and no stale
-  lines. The scheduled build therefore stops publishing `:stable` after a gog
-  release that adds commands, until both lists are updated.
+  command in the built image's gog (hidden ones too) and fails unless allowed
+  plus refused equals that list exactly. It also checks that each rule names a
+  real flag (every spelling of it), that the built wrapper enforces it, and
+  that no allowed command has a flag that runs a program, picks a destination,
+  converts a file, takes HTML, or evaluates formulas without a rule. The
+  scheduled build therefore stops publishing `:stable` after a gog release that
+  adds commands or such flags, until the lists and rules are updated.
 - **The wrapper's settings can't be changed.** The wrapper rejects
-  `--enable-commands`, `--access-token`, `--home` and similar flags. It runs
-  gog with a clean environment and an empty config folder. If the allowlist is
-  missing, it refuses to run, since an empty list would allow everything.
-- **Google limits edits.** With `drive.file`, edits work only on files this
-  tool created.
+  `--enable-commands`, `--access-token`, `--home` and similar flags, and `--`.
+  It runs gog with a clean environment and an empty config folder. If the
+  allowlist or the rules are missing, it refuses to run, since an empty list
+  would allow everything.
+- **Google limits edits, not visibility.** With `drive.file`, edits work only on
+  files this tool created (see the note under the credential).
+
+Known limit: plain text can still carry data to a place you later look at it
+(a draft, a document). The policy stops the agent from sending it anywhere;
+it doesn't stop it from writing it somewhere you can read.
 
 ## Develop
 

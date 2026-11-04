@@ -16,6 +16,7 @@ RUN go test ./... && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -l
 FROM docker.io/mcavage/marsh-shell:latest
 COPY --from=fetch --chmod=0755 /tmp/gog/gog /usr/local/libexec/gog
 COPY --chmod=0644 gog/allowed-commands /usr/local/share/gog-allowed-commands
+COPY --chmod=0644 gog/flag-rules /usr/local/share/gog-flag-rules
 COPY --chmod=0755 gog/gog /usr/local/libexec/marsh-tools/gog
 COPY --from=bamboohr --chmod=0755 /out/bamboohr /usr/local/libexec/marsh-tools/bamboohr
 COPY --chmod=0755 marsh-tools /usr/local/bin/marsh-tools
