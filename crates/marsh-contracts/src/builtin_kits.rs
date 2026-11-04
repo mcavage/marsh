@@ -16,8 +16,8 @@ pub const PACKAGED_REPOSITORY_PREFIX: &str = "docker.io/mcavage/";
 /// `bamboohr`, moved to [`RETIRED_KITS_MOVED_TO`]. A home that still has a
 /// command installed from one of them is moved there automatically.
 pub const RETIRED_KIT_REPOSITORIES: &[&str] = &[
-    "docker.io/mcavage/marsh-bamboohr",
     "docker.io/mcavage/marsh-gog",
+    "docker.io/mcavage/marsh-bamboohr",
 ];
 
 /// The tag the commands of [`RETIRED_KIT_REPOSITORIES`] move to, and the name

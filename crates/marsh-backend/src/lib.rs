@@ -4612,27 +4612,33 @@ impl StockDaemonBackend {
     /// repository. A tag or digest of any other repository stays, and so does
     /// a name whose recorded tag is another repository's.
     fn retired_kit_commands(&self) -> Vec<String> {
-        let retired = |repository: &str| {
-            marsh_contracts::builtin_kits::RETIRED_KIT_REPOSITORIES.contains(&repository)
-        };
+        let retired = marsh_contracts::builtin_kits::RETIRED_KIT_REPOSITORIES;
         let sources = kit_lifecycle::read_sources(&self.config.control_home).unwrap_or_default();
-        self.command_names()
+        let mut found = self
+            .command_names()
             .into_iter()
-            .filter(|name| {
-                if self.packaged.contains_key(name) {
-                    return false;
-                }
-                if let Some(tag) = sources.get(name) {
-                    return retired(tag.repository());
-                }
-                self.registered_kit(name).is_ok_and(|kit| {
-                    kit.workload
-                        .workload_image()
-                        .and_then(|image| image.as_str().rsplit_once('@'))
-                        .is_some_and(|(repository, _)| retired(repository))
-                })
+            .filter(|name| !self.packaged.contains_key(name))
+            .filter_map(|name| {
+                let repository = match sources.get(&name) {
+                    Some(tag) => tag.repository().to_owned(),
+                    None => self
+                        .registered_kit(&name)
+                        .ok()?
+                        .workload
+                        .workload_image()?
+                        .as_str()
+                        .rsplit_once('@')?
+                        .0
+                        .to_owned(),
+                };
+                let rank = retired.iter().position(|known| *known == repository)?;
+                Some((rank, name))
             })
-            .collect()
+            .collect::<Vec<_>>();
+        // In the order the repositories are listed (gog, then bamboohr), so
+        // the one-line notice reads the same everywhere.
+        found.sort();
+        found.into_iter().map(|(_, name)| name).collect()
     }
 
     /// Moves each command installed from a retired repository (`gog` from
@@ -8251,7 +8257,7 @@ mod kit_lifecycle_callers {
         let backend = retired_daemon(home.path(), &registry);
         // By tag (`gog`) or by digest of the retired repository (`bamboohr`);
         // another tag, marsh-tools itself and a lookalike repository stay.
-        assert_eq!(backend.retired_kit_commands(), ["bamboohr", "gog"]);
+        assert_eq!(backend.retired_kit_commands(), ["gog", "bamboohr"]);
         // A name whose recorded tag is another repository's is theirs, even
         // when its digest is a retired image's.
         kit_lifecycle::write_sources(
@@ -8264,7 +8270,7 @@ mod kit_lifecycle_callers {
         // The tag marsh-tools:stable is resolved once, then the VM that will
         // serve both commands is prepared; a registry or VM failure changes
         // nothing and is retried in ten minutes. (This fake sbx cannot create
-        // a VM; the move itself runs in `kit_retired_uat.py`.)
+        // a VM; the move itself runs in `tests/acceptance/kit_retired_live.py`.)
         let home = tempfile::tempdir().unwrap();
         let backend = retired_daemon(home.path(), &registry);
         let store = DaemonStore::new(home.path());
