@@ -168,8 +168,9 @@ narrows the allowed commands that could still break the model.
   Apps Script `run`, the MCP server, the generic `api call`, Zoom, email
   tracking, gog's update check, and `slides create-from-markdown` (its
   `--mmdc` runs any program).
-- Commands whose side effects the wrapper can't bound: `docs sed` and
-  `sheets find-replace` (replacement text can bring in formulas or images).
+- Commands whose side effects the wrapper can't bound: `docs sed`,
+  `sheets find-replace` and `sheets copy-paste` (they can bring in or propagate
+  formulas or images).
 - Any command not classified above. The default for a command nobody has
   reviewed is refused.
 
@@ -187,7 +188,8 @@ permissions. The data the agent reads is the data your token can read.
   `drive upload`, `upload` and any alias get the same rules. If gog can't name
   a command (a usage error, `--help`), the wrapper runs it with nothing
   enabled. Docs files are copied into the job's own `/tmp` and scanned, and the
-  copy is what runs, so the agent can't change a file after the check.
+  copy is what runs, so the agent can't change a file after the check. In docs commands stdin
+  is reachable only as `--file -`, which is scanned; gog never reads it directly.
 - **A new gog command or flag fails CI until someone decides.**
   [`tests/kits/tools-policy.py`](../../tests/kits/tools-policy.py) lists every
   command in the built image's gog (hidden ones too) and fails unless allowed

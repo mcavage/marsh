@@ -131,4 +131,8 @@ if [ -n "$scans" ]; then
   done
 fi
 
+# gog reads stdin itself when no content is given, which would skip the scan:
+# in these commands stdin is only reachable as --file -, scanned above.
+[ -z "$scans" ] || exec </dev/null
+
 run --enable-commands-exact="$allowed" "$@"

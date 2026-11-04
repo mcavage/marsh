@@ -137,13 +137,15 @@ docs.table-column.delete
 docs.table-row.delete
 docs.tabs.delete
 
-# Sheets: delete and clear; find-replace (may evaluate formulas); arbitrary
-#   batch-request; Connected Sheets data sources (BigQuery)
+# Sheets: delete and clear; find-replace and copy-paste (may bring in or
+#   propagate formulas); arbitrary batch-request; Connected Sheets data
+#   sources (BigQuery)
 sheets.banding.clear
 sheets.batch-request
 sheets.chart.delete
 sheets.clear
 sheets.conditional-format.clear
+sheets.copy-paste
 sheets.datasource.add
 sheets.datasource.delete
 sheets.datasource.refresh

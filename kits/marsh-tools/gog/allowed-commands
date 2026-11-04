@@ -165,7 +165,6 @@ sheets.chart.update
 sheets.conditional-format.add
 sheets.conditional-format.list
 sheets.copy
-sheets.copy-paste
 sheets.create
 sheets.datasource.describe
 sheets.datasource.list
