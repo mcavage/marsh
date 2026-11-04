@@ -1,9 +1,11 @@
 //! Peer review by another vendor's model (`docs/peer-review.md`).
 //!
 //! marsh owns the model classes: a curated table (`data/model-classes.yaml`,
-//! overridable in `$MARSH_HOME/model-classes.yaml`) and, for a model no rule
-//! names, its output price in a models.dev snapshot taken in CI
-//! (`data/models-dev.json`, `scripts/update-models-dev.py`); nothing is
+//! overridable in `$MARSH_HOME/model-classes.yaml`) of current families and a
+//! list of retired ones. Only curated models are ever picked or advertised
+//! automatically. For display, a model no rule names is still classed by its
+//! output price in a models.dev snapshot taken in CI (`data/models-dev.json`,
+//! `scripts/update-models-dev.py`), but it is not eligible; nothing is
 //! fetched at run time. Who may review comes from `$MARSH_HOME/peer-review.d/
 //! *.yaml` drop-ins (Narwhal writes `narwhal.yaml`, `marsh config peer-review
 //! on` writes `marsh.yaml`), read whenever they are needed (every job start
@@ -98,26 +100,61 @@ struct TableFile {
     bands: Option<Bands>,
     #[serde(default)]
     rules: Vec<Rule>,
+    /// Globs of superseded models: never eligible, whatever else matches
+    /// them later in the table.
+    #[serde(default)]
+    retired: Vec<String>,
+}
+
+/// What a table entry says about the models it matches.
+#[derive(Clone, Debug)]
+enum Kind {
+    Rule(Rule),
+    Retired(String),
+}
+
+#[derive(Clone, Debug)]
+struct Entry {
+    kind: Kind,
+    origin: &'static str,
+}
+
+impl Entry {
+    fn pattern(&self) -> &str {
+        match &self.kind {
+            Kind::Rule(rule) => &rule.pattern,
+            Kind::Retired(pattern) => pattern,
+        }
+    }
 }
 
 /// How a model was classed.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Classified {
-    pub class: ModelClass,
+    /// `None` for a retired model the table and snapshot give no class.
+    pub class: Option<ModelClass>,
     /// The model's maker; `None` when models.dev names none that marsh can
     /// trust (the host that lists a model is never its vendor), so it can
     /// only be paired with an explicit `vendor`.
     pub vendor: Option<String>,
     /// `model-classes: claude-sonnet-*`, `$MARSH_HOME/model-classes.yaml:
-    /// my-*`, `models.dev family gpt-sol: gpt-*sol*`, or `models.dev price
-    /// $5/M output`.
+    /// my-*`, `models.dev family gpt-sol: gpt-*sol*`, `models.dev price
+    /// $5/M output` (not curated), or `retired`.
     pub how: String,
+    /// Curated and not retired: the only models marsh picks or lists by
+    /// itself. A price-band class is for display only.
+    pub eligible: bool,
 }
 
-/// The effective class table: override rules first, then marsh's.
+/// `Classified::how` of a retired model.
+pub const RETIRED: &str = "retired";
+
+/// The effective class table, in order: the override's retired globs and
+/// rules, then marsh's retired globs and rules. The first entry that matches
+/// a model decides, so an override rule revives a model marsh retired.
 #[derive(Clone, Debug)]
 pub struct ClassTable {
-    rules: Vec<(Rule, &'static str)>,
+    entries: Vec<Entry>,
     bands: Bands,
 }
 
@@ -134,7 +171,7 @@ impl ClassTable {
         let file: TableFile =
             serde_yaml::from_str(BUILTIN_TABLE).expect("data/model-classes.yaml parses");
         Self {
-            rules: file.rules.into_iter().map(|rule| (rule, BUILTIN)).collect(),
+            entries: entries(file.retired, file.rules, BUILTIN),
             bands: file.bands.expect("data/model-classes.yaml has bands"),
         }
     }
@@ -152,13 +189,9 @@ impl ClassTable {
                     if let Some(bands) = file.bands {
                         table.bands = bands;
                     }
-                    let mut rules = file
-                        .rules
-                        .into_iter()
-                        .map(|rule| (rule, OVERRIDE))
-                        .collect::<Vec<_>>();
-                    rules.append(&mut table.rules);
-                    table.rules = rules;
+                    let mut found = entries(file.retired, file.rules, OVERRIDE);
+                    found.append(&mut table.entries);
+                    table.entries = found;
                     (table, None)
                 }
                 Err(error) => (table, Some(format!("{}: {error}", path.display()))),
@@ -172,43 +205,108 @@ impl ClassTable {
         self.bands
     }
 
-    fn rule_for(&self, text: &str) -> Option<&(Rule, &'static str)> {
-        self.rules
+    fn entry_for(&self, text: &str) -> Option<&Entry> {
+        self.entries
             .iter()
-            .find(|(rule, _)| glob(&rule.pattern.to_ascii_lowercase(), text))
+            .find(|entry| glob(&entry.pattern().to_ascii_lowercase(), text))
+    }
+
+    fn rule_for(&self, text: &str) -> Option<(&Rule, &'static str)> {
+        self.entries.iter().find_map(|entry| match &entry.kind {
+            Kind::Rule(rule) if glob(&rule.pattern.to_ascii_lowercase(), text) => {
+                Some((rule, entry.origin))
+            }
+            _ => None,
+        })
+    }
+
+    /// The rule that makes a model curated: the first entry matching its
+    /// name, else its models.dev family, when that entry is a rule and not
+    /// a retirement.
+    fn curated(&self, name: &str, family: &str) -> Option<(&Rule, &'static str)> {
+        let entry = self.entry_for(name).or_else(|| {
+            (!family.is_empty())
+                .then(|| self.entry_for(family))
+                .flatten()
+        })?;
+        match &entry.kind {
+            Kind::Rule(rule) => Some((rule, entry.origin)),
+            Kind::Retired(_) => None,
+        }
     }
 
     /// The class and vendor of `model` (an id as the agent's model option
-    /// takes it, optionally `provider/model`): the first rule matching its
-    /// name or its models.dev family, else its models.dev output price.
+    /// takes it, optionally `provider/model`): the first entry matching its
+    /// name or its models.dev family, else, for display only, its models.dev
+    /// output price. Only a model a rule names is `eligible`; a retired one
+    /// is not, and says `retired`.
     #[must_use]
     pub fn classify(&self, model: &str) -> Option<Classified> {
         let name = normalize(model);
         if name.is_empty() {
             return None;
         }
-        if let Some((rule, origin)) = self.rule_for(&name) {
-            return Some(Classified {
-                class: rule.class,
-                vendor: Some(rule.vendor.clone()),
-                how: format!("{origin}: {}", rule.pattern),
-            });
+        let row = lookup(model);
+        let family = row.map_or_else(String::new, |row| row.family.to_ascii_lowercase());
+        let by_name = self.entry_for(&name);
+        let by_family = (by_name.is_none() && !family.is_empty())
+            .then(|| self.entry_for(&family))
+            .flatten();
+        match (by_name, by_family) {
+            (
+                Some(Entry {
+                    kind: Kind::Rule(rule),
+                    origin,
+                }),
+                _,
+            ) => {
+                return Some(Classified {
+                    class: Some(rule.class),
+                    vendor: Some(rule.vendor.clone()),
+                    how: format!("{origin}: {}", rule.pattern),
+                    eligible: true,
+                });
+            }
+            (
+                _,
+                Some(Entry {
+                    kind: Kind::Rule(rule),
+                    origin,
+                }),
+            ) => {
+                return Some(Classified {
+                    class: Some(rule.class),
+                    vendor: Some(rule.vendor.clone()),
+                    how: format!("models.dev family {family}; {origin}: {}", rule.pattern),
+                    eligible: true,
+                });
+            }
+            (None, None) => {}
+            // Retired: the class and vendor are for display.
+            _ => {
+                let shown = self.rule_for(&name).or_else(|| {
+                    (!family.is_empty())
+                        .then(|| self.rule_for(&family))
+                        .flatten()
+                });
+                return Some(Classified {
+                    class: shown
+                        .map(|(rule, _)| rule.class)
+                        .or_else(|| row.map(|row| self.bands.class(row.output))),
+                    vendor: shown.map(|(rule, _)| rule.vendor.clone()).or_else(|| {
+                        row.and_then(|row| (!row.vendor.is_empty()).then(|| row.vendor.clone()))
+                    }),
+                    how: RETIRED.into(),
+                    eligible: false,
+                });
+            }
         }
-        let row = lookup(model)?;
-        let family = row.family.to_ascii_lowercase();
-        if !family.is_empty()
-            && let Some((rule, origin)) = self.rule_for(&family)
-        {
-            return Some(Classified {
-                class: rule.class,
-                vendor: Some(rule.vendor.clone()),
-                how: format!("models.dev family {family}; {origin}: {}", rule.pattern),
-            });
-        }
+        let row = row?;
         Some(Classified {
-            class: self.bands.class(row.output),
+            class: Some(self.bands.class(row.output)),
             vendor: (!row.vendor.is_empty()).then(|| row.vendor.clone()),
             how: format!("models.dev price ${}/M output", row.output),
+            eligible: false,
         })
     }
 
@@ -224,11 +322,7 @@ impl ClassTable {
         {
             let name = normalize(&row.id);
             let family = row.family.to_ascii_lowercase();
-            let Some((rule, _)) = self.rule_for(&name).or_else(|| {
-                (!family.is_empty())
-                    .then(|| self.rule_for(&family))
-                    .flatten()
-            }) else {
+            let Some((rule, _)) = self.curated(&name, &family) else {
                 continue;
             };
             if rule.class != class || rule.vendor != vendor {
@@ -261,11 +355,7 @@ impl ClassTable {
             }) {
                 let name = normalize(&row.id);
                 let family = row.family.to_ascii_lowercase();
-                let Some((rule, _)) = self.rule_for(&name).or_else(|| {
-                    (!family.is_empty())
-                        .then(|| self.rule_for(&family))
-                        .flatten()
-                }) else {
+                let Some((rule, _)) = self.curated(&name, &family) else {
                     continue;
                 };
                 if rule.vendor != *vendor {
@@ -313,6 +403,15 @@ impl ClassTable {
             })
             .collect()
     }
+}
+
+fn entries(retired: Vec<String>, rules: Vec<Rule>, origin: &'static str) -> Vec<Entry> {
+    retired
+        .into_iter()
+        .map(Kind::Retired)
+        .chain(rules.into_iter().map(Kind::Rule))
+        .map(|kind| Entry { kind, origin })
+        .collect()
 }
 
 /// The nickname people use for the family a rule names: its last word that
@@ -432,6 +531,11 @@ fn parse_table(text: &str) -> Result<TableFile, String> {
             && bands.small_below <= bands.large_from)
     {
         return Err("bands: need 0 <= small_below <= large_from".into());
+    }
+    for pattern in &file.retired {
+        if pattern.trim().is_empty() || pattern.len() > MAX_NAME_BYTES {
+            return Err(format!("retired {pattern:?}: a glob of 1-128 bytes"));
+        }
     }
     for rule in &file.rules {
         if rule.pattern.trim().is_empty() || rule.pattern.len() > MAX_NAME_BYTES {
@@ -683,6 +787,10 @@ pub struct DropInReviewer {
     pub class: Option<ModelClass>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vendor: Option<String>,
+    /// `true` lets a model marsh's table does not curate (retired, or named
+    /// by no rule) review anyway. Without it such a reviewer is skipped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_uncurated: Option<bool>,
 }
 
 impl DropIn {
@@ -813,10 +921,11 @@ pub fn load(scope: &Path, agents: &BTreeMap<String, AgentFacts>) -> PeerReviewSt
         }
         for entry in file.reviewers {
             let classified = table.classify(&entry.model);
+            let eligible = classified.as_ref().is_some_and(|found| found.eligible);
             let declared = entry.class.is_some() && entry.vendor.is_some();
             let class = entry
                 .class
-                .or_else(|| classified.as_ref().map(|found| found.class));
+                .or_else(|| classified.as_ref().and_then(|found| found.class));
             let vendor = entry
                 .vendor
                 .as_deref()
@@ -838,7 +947,9 @@ pub fn load(scope: &Path, agents: &BTreeMap<String, AgentFacts>) -> PeerReviewSt
                 reason: None,
             };
             let key = (entry.agent.clone(), entry.model.to_ascii_lowercase());
-            reviewer.reason = if class.is_none() {
+            reviewer.reason = if !eligible && entry.allow_uncurated != Some(true) {
+                Some(uncurated_reason(&entry.model, classified.as_ref()))
+            } else if class.is_none() {
                 Some(format!(
                     "marsh cannot class {}: add `class` and `vendor`, or a rule in $MARSH_HOME/{OVERRIDE_FILE}",
                     entry.model
@@ -880,6 +991,18 @@ pub fn load(scope: &Path, agents: &BTreeMap<String, AgentFacts>) -> PeerReviewSt
         (a.class, &a.vendor, &a.agent, &a.model).cmp(&(b.class, &b.vendor, &b.agent, &b.model))
     });
     status
+}
+
+fn uncurated_reason(model: &str, classified: Option<&Classified>) -> String {
+    if classified.is_some_and(|found| found.how == RETIRED) {
+        format!(
+            "{model} is retired: marsh's table lists it as superseded and never uses it for peer review. Name a current model (`marsh peer-review classify MODEL`), or set `allow_uncurated: true` on this reviewer"
+        )
+    } else {
+        format!(
+            "{model} is not in marsh's curated model table, so marsh does not use it for peer review (`marsh peer-review classify {model}`). Add a rule in $MARSH_HOME/{OVERRIDE_FILE}, or set `allow_uncurated: true` on this reviewer"
+        )
+    }
 }
 
 /// `peer-review.d/*.yaml` (and `.yml`) in name order; dotfiles are skipped.
@@ -1095,6 +1218,7 @@ pub fn detect(
             agent,
             class: Some(class),
             vendor: Some(vendor.to_owned()),
+            allow_uncurated: None,
         })
     };
     Detected {
@@ -1121,7 +1245,7 @@ mod tests {
     fn class(table: &ClassTable, model: &str) -> Option<(ModelClass, String)> {
         table
             .classify(model)
-            .map(|found| (found.class, found.vendor.unwrap_or_default()))
+            .map(|found| (found.class.unwrap(), found.vendor.unwrap_or_default()))
     }
 
     #[test]
@@ -1156,11 +1280,12 @@ mod tests {
             );
         }
         // A family rule reaches an id the patterns do not name.
-        let found = table.classify("gpt-5.6").unwrap();
+        let found = table.classify("gpt-daybreak-blue-latest").unwrap();
         assert_eq!(
             (found.class, found.vendor.as_deref()),
-            (large, Some("openai"))
+            (Some(large), Some("openai"))
         );
+        assert!(found.eligible);
         assert!(
             found.how.starts_with("models.dev family gpt-sol"),
             "{}",
@@ -1180,18 +1305,46 @@ mod tests {
         let (table, error) = ClassTable::load(scope.path());
         assert_eq!(error, None);
         let found = table.classify("gpt-6.1-sol").unwrap();
-        assert_eq!(found.class, ModelClass::Mid);
+        assert_eq!(found.class, Some(ModelClass::Mid));
         assert_eq!(found.how, "$MARSH_HOME/model-classes.yaml: gpt-*sol*");
         // An unnamed model moves with the bands: grok-4.7 lists $6/M output.
-        assert_eq!(table.classify("grok-4.7").unwrap().class, ModelClass::Large);
+        assert_eq!(
+            table.classify("grok-4.7").unwrap().class,
+            Some(ModelClass::Large)
+        );
         // A malformed override is reported and marsh's table still applies.
         std::fs::write(scope.path().join(OVERRIDE_FILE), "rules: [{match: x}]").unwrap();
         let (table, error) = ClassTable::load(scope.path());
         assert!(error.unwrap().contains("model-classes.yaml"));
         assert_eq!(
             table.classify("gpt-6.1-sol").unwrap().class,
-            ModelClass::Large
+            Some(ModelClass::Large)
         );
+    }
+
+    #[test]
+    fn the_override_can_retire_a_model_or_revive_a_retired_one() {
+        let scope = tempfile::tempdir().unwrap();
+        std::fs::write(
+            scope.path().join(OVERRIDE_FILE),
+            "retired: [\"claude-opus-5\"]\n\
+             rules:\n  - {match: \"o3*\", class: large, vendor: openai}\n",
+        )
+        .unwrap();
+        let (table, error) = ClassTable::load(scope.path());
+        assert_eq!(error, None);
+        assert!(!table.classify("claude-opus-5").unwrap().eligible);
+        assert!(table.classify("claude-opus-5-5").unwrap().eligible);
+        let revived = table.classify("o3-pro").unwrap();
+        assert!(revived.eligible, "{revived:?}");
+        assert!(
+            ClassTable::builtin()
+                .classify("claude-opus-5")
+                .unwrap()
+                .eligible
+        );
+        std::fs::write(scope.path().join(OVERRIDE_FILE), "retired: ['']").unwrap();
+        assert!(ClassTable::load(scope.path()).1.is_some());
     }
 
     #[test]
@@ -1201,9 +1354,11 @@ mod tests {
         let found = table.classify("grok-4.7").unwrap();
         assert_eq!(
             (found.class, found.vendor.as_deref()),
-            (ModelClass::Mid, Some("xai"))
+            (Some(ModelClass::Mid), Some("xai"))
         );
         assert_eq!(found.how, "models.dev price $6/M output");
+        // Price classes it for display, but nothing marsh does by itself uses it.
+        assert!(!found.eligible);
         // Meta's Muse Wonder lists $20/M output: large.
         assert_eq!(
             class(&table, "muse-wonder-1.0"),
@@ -1300,11 +1455,11 @@ mod tests {
              - {agent: pi, model: claude-opus-5-5}\n\
              - {agent: hermes, model: gpt-6-astra}\n\
              - {agent: shell, model: gpt-6-astra}\n\
-             - {agent: codex, model: my-house-model}\n\
-             - {agent: codex, model: my-house-model, class: large, vendor: openai}\n\
-             - {agent: codex, model: abliteration-ai/abliterated-model}\n\
-             - {agent: claude, model: x-ai/grok-4, vendor: x-ai}\n\
-             - {agent: codex, model: grok-4, vendor: xai}\n",
+             - {agent: codex, model: my-house-model, allow_uncurated: true}\n\
+             - {agent: codex, model: my-house-model, class: large, vendor: openai, allow_uncurated: true}\n\
+             - {agent: codex, model: abliteration-ai/abliterated-model, allow_uncurated: true}\n\
+             - {agent: claude, model: x-ai/grok-4, vendor: x-ai, allow_uncurated: true}\n\
+             - {agent: codex, model: grok-4, vendor: xai, allow_uncurated: true}\n",
         )
         .unwrap();
         std::fs::write(directory.join("broken.yaml"), "enabled: maybe\n").unwrap();
@@ -1616,6 +1771,130 @@ mod tests {
         assert_eq!(family_nickname("gpt-oss-20b*"), "oss");
         assert_eq!(family_nickname("mistral-large*"), "mistral-large");
         assert_eq!(family_nickname("haiku"), "haiku");
+    }
+
+    #[test]
+    fn a_fixture_agent_advertising_retired_models_gets_only_the_curated_newest() {
+        let scope = tempfile::tempdir().unwrap();
+        let directory = scope.path().join(DROPIN_DIR);
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(
+            directory.join("narwhal.yaml"),
+            "enabled: true\nreviewers:\n\
+             - {agent: pi, model: openai/o3-pro}\n\
+             - {agent: pi, model: openai/o3-pro, class: large, vendor: openai}\n\
+             - {agent: codex, model: gpt-4o}\n\
+             - {agent: codex, model: gpt-4.1-mini, class: small, vendor: openai}\n\
+             - {agent: claude, model: claude-3-opus}\n\
+             - {agent: claude, model: claude-3-opus-20240229, class: large, vendor: anthropic}\n\
+             - {agent: pi, model: x-ai/grok-4.7, class: mid, vendor: xai}\n\
+             - {agent: claude, model: claude-haiku-5-5}\n\
+             - {agent: claude, model: claude-sonnet-5-5}\n\
+             - {agent: claude, model: claude-opus-5-5}\n\
+             - {agent: codex, model: gpt-6-luna}\n\
+             - {agent: codex, model: gpt-6.1-terra}\n\
+             - {agent: codex, model: gpt-6.1-sol}\n\
+             - {agent: codex, model: gpt-4o, allow_uncurated: true}\n",
+        )
+        .unwrap();
+        let pi = AgentFacts {
+            prompt: true,
+            model_option: true,
+            multi_provider: true,
+            reaches: BTreeMap::from([(
+                "openai".to_owned(),
+                BTreeSet::from(["api.openai.com".to_owned()]),
+            )]),
+        };
+        let mut known = agents(&[("claude", true), ("codex", true)]);
+        known.insert("pi".into(), pi);
+        let status = load(scope.path(), &known);
+        assert_eq!(status.errors, Vec::<String>::new());
+        let ready = status
+            .reviewers
+            .iter()
+            .map(|r| r.model.as_str())
+            .collect::<Vec<_>>();
+        // The explicit opt-in (last line) is the only way a retired model gets in.
+        assert_eq!(
+            ready,
+            [
+                "claude-haiku-5-5",
+                "gpt-6-luna",
+                "claude-sonnet-5-5",
+                "gpt-4o",
+                "gpt-6.1-terra",
+                "claude-opus-5-5",
+                "gpt-6.1-sol",
+            ]
+        );
+        let skipped = status
+            .skipped
+            .iter()
+            .map(|r| (r.model.as_str(), r.reason.clone().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(skipped.len(), 7, "{skipped:?}");
+        for (model, reason) in &skipped {
+            let retired = !model.contains("grok");
+            assert_eq!(reason.contains("is retired"), retired, "{model}: {reason}");
+            assert!(reason.contains("allow_uncurated"), "{reason}");
+            assert!(reason.starts_with(*model), "{reason}");
+        }
+        // No peer-review context row names a retired model.
+        let text = context(&status, &["claude".into(), "codex".into(), "pi".into()]);
+        for old in ["o3-pro", "claude-3", "gpt-4.1"] {
+            assert!(!text.contains(old), "{text}");
+        }
+    }
+
+    #[test]
+    fn detection_and_the_task_tools_model_lists_never_reach_for_retired_models() {
+        let table = ClassTable::builtin();
+        let retired = [
+            "o3-pro", "o3", "o1", "o4-mini", "gpt-4", "gpt-4o", "gpt-4.1", "gpt-5",
+        ];
+        let services = VENDOR_HOSTS
+            .iter()
+            .map(|(vendor, _)| (*vendor).to_owned())
+            .collect::<Vec<_>>();
+        let reaches = VENDOR_HOSTS
+            .iter()
+            .map(|(vendor, host)| ((*vendor).to_owned(), vec![(*host).to_owned()]))
+            .collect::<BTreeMap<_, _>>();
+        let mut offered = agent_choices(&table, "pi", &[ANY_PROVIDER.to_owned()], &reaches)
+            .into_iter()
+            .map(|choice| choice.model)
+            .collect::<Vec<_>>();
+        for (name, service) in [("codex", "openai"), ("claude", "anthropic")] {
+            offered.extend(
+                agent_choices(&table, name, &[service.to_owned()], &BTreeMap::new())
+                    .into_iter()
+                    .map(|choice| choice.model),
+            );
+        }
+        for vendor in &services {
+            for class in ModelClass::ALL {
+                offered.extend(table.newest(vendor, class));
+            }
+        }
+        assert!(offered.len() > 8, "{offered:?}");
+        for model in &offered {
+            let found = table.classify(model).unwrap();
+            assert!(found.eligible, "{model}: {found:?}");
+            assert_ne!(found.how, RETIRED, "{model}");
+            assert!(!retired.contains(&normalize(model).as_str()), "{model}");
+        }
+        let both = BTreeMap::from([("claude".to_owned(), agent(&["anthropic"], &[]))]);
+        let detected = detect(&table, &both, &set(&["anthropic"]));
+        let models = detected
+            .ready
+            .iter()
+            .map(|r| r.model.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            models,
+            ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"]
+        );
     }
 
     #[test]
