@@ -1,62 +1,439 @@
-# gog commands this Kit allows, one exact command path per line.
-# Anything not listed is refused by gog itself (--enable-commands-exact).
-# Never add: gmail send/reply/forward, gmail drafts send, any share, delete,
-# trash, move, permission or auth command.
+# gog commands this Kit allows, one exact command path per line: exactly the
+# ALLOW set of the policy in ../README.md ("How gog stays safe"). gog refuses
+# everything else (--enable-commands-exact). Every command gog has is in either
+# this file or refused-commands, and tests/kits/tools-policy.py fails the build
+# when a gog release adds one that is in neither. Move a line only with a
+# policy decision. Never allow a command that sends or notifies others, shares,
+# deletes, changes settings or permissions, or touches admin or auth.
 
-# Gmail: read, and drafts that you send yourself
-gmail.search
-gmail.messages.search
-gmail.get
-gmail.thread.get
-gmail.thread.attachments
+# Gmail: read mail, labels, history and settings; save drafts (drafts are
+#   never sent)
 gmail.attachment
-gmail.url
-gmail.labels.list
-gmail.labels.get
-gmail.drafts.list
-gmail.drafts.get
+gmail.autoforward.get
+gmail.delegates.get
+gmail.delegates.list
 gmail.drafts.create
+gmail.drafts.forward
+gmail.drafts.get
+gmail.drafts.list
+gmail.drafts.reply
+gmail.drafts.reply-all
 gmail.drafts.update
+gmail.filters.export
+gmail.filters.get
+gmail.filters.list
+gmail.forwarding.get
+gmail.forwarding.list
+gmail.get
+gmail.history
+gmail.labels.get
+gmail.labels.list
+gmail.messages.search
+gmail.raw
+gmail.search
+gmail.sendas.get
+gmail.sendas.list
+gmail.settings.autoforward.get
+gmail.settings.delegates.get
+gmail.settings.delegates.list
+gmail.settings.filters.export
+gmail.settings.filters.get
+gmail.settings.filters.list
+gmail.settings.forwarding.get
+gmail.settings.forwarding.list
+gmail.settings.sendas.get
+gmail.settings.sendas.list
+gmail.settings.vacation.get
+gmail.thread.attachments
+gmail.thread.get
+gmail.url
+gmail.vacation.get
 
-# Drive: read
-drive.ls
-drive.search
-drive.get
+# Calendar: read; create and update events (the wrapper rejects attendee and
+#   notification flags)
+calendar.acl
+calendar.calendars
+calendar.changed
+calendar.colors
+calendar.conflicts
+calendar.create
+calendar.event
+calendar.events
+calendar.freebusy
+calendar.propose-time
+calendar.raw
+calendar.search
+calendar.team
+calendar.time
+calendar.update
+calendar.users
+calendar.working-location
+
+# Drive: read; create files and folders; copy, rename and upload
+drive.activity.query
+drive.audit.sharing
+drive.audit.user
+drive.changes.list
+drive.changes.start-token
+drive.comments.get
+drive.comments.list
+drive.copy
 drive.download
+drive.drives
+drive.du
+drive.get
+drive.inventory
+drive.labels.file.list
+drive.labels.get
+drive.labels.list
+drive.ls
+drive.mkdir
+drive.permissions
+drive.raw
+drive.rename
+drive.revisions.get
+drive.revisions.list
+drive.search
+drive.shortcut.create
+drive.sync.push
+drive.tree
+drive.upload
 drive.url
 
-# Docs: read; create and edit documents this tool created
-docs.info
-docs.cat
-docs.export
-docs.list-tabs
-docs.create
-docs.write
+# Docs: read; create documents; edit content, tabs, tables and formatting
 docs.add-tab
+docs.cat
+docs.cell-style
+docs.cell-update
+docs.comments.get
+docs.comments.list
+docs.comments.locate
+docs.copy
+docs.create
+docs.edit
+docs.export
+docs.find-range
+docs.find-replace
+docs.footer.create
+docs.footer.list
+docs.format
+docs.header.create
+docs.header.list
+docs.headings.list
+docs.images.list
+docs.info
+docs.insert
+docs.insert-date-chip
+docs.insert-file-chip
+docs.insert-footnote
+docs.insert-horizontal-rule
+docs.insert-page-break
+docs.insert-person
+docs.insert-section-break
+docs.insert-table
+docs.list-tabs
+docs.named-range.create
+docs.named-range.list
+docs.named-range.replace
+docs.page-layout
+docs.paragraphs.list
+docs.raw
+docs.rename-tab
+docs.section-columns
+docs.sed
+docs.structure
+docs.suggestions.list
+docs.table-column-width
+docs.table-column.insert
+docs.table-merge
+docs.table-row.insert
+docs.table-row.pin-header
+docs.table-row.style
+docs.table-unmerge
+docs.tables.list
+docs.tabs.add
+docs.tabs.list
+docs.tabs.rename
+docs.update
+docs.write
 
-# Sheets: read; create and edit sheets this tool created; add and rename tabs
-sheets.get
-sheets.metadata
-sheets.export
-sheets.create
-sheets.update
-sheets.append
+# Sheets: read; create spreadsheets; edit values, tabs, ranges and formatting
 sheets.add-tab
+sheets.append
+sheets.banding.list
+sheets.banding.set
+sheets.batch-update
+sheets.chart.create
+sheets.chart.get
+sheets.chart.list
+sheets.chart.update
+sheets.conditional-format.add
+sheets.conditional-format.list
+sheets.copy
+sheets.copy-paste
+sheets.create
+sheets.datasource.describe
+sheets.datasource.list
+sheets.datasource.table.describe
+sheets.datasource.table.list
+sheets.datasource.table.read
+sheets.duplicate-tab
+sheets.export
+sheets.filter.set
+sheets.find-replace
+sheets.format
+sheets.freeze
+sheets.get
+sheets.insert
+sheets.links.get
+sheets.links.set
+sheets.merge
+sheets.metadata
+sheets.named-ranges.add
+sheets.named-ranges.get
+sheets.named-ranges.list
+sheets.named-ranges.update
+sheets.notes
+sheets.number-format
+sheets.raw
+sheets.read-format
 sheets.rename-tab
+sheets.reorder-tab
+sheets.resize-columns
+sheets.resize-rows
+sheets.table.append
+sheets.table.create
+sheets.table.get
+sheets.table.list
+sheets.unmerge
+sheets.update
+sheets.update-note
+sheets.validation.get
+sheets.validation.set
 
-# Slides: read; create decks
-slides.info
-slides.list-slides
-slides.read-slide
-slides.export
+# Slides: read; create decks; edit slides, text, shapes, tables and notes
+slides.bullets
+slides.copy
 slides.create
 slides.create-from-markdown
+slides.create-from-template
+slides.duplicate-slide
+slides.element.alt-text
+slides.element.create-line
+slides.element.create-shape
+slides.element.group
+slides.element.style
+slides.element.transform
+slides.element.ungroup
+slides.element.z-order
+slides.export
+slides.info
+slides.insert-text
+slides.link
+slides.list-slides
+slides.locate
+slides.move-slide
+slides.new-slide
+slides.paragraph-style
+slides.raw
+slides.read-slide
+slides.replace-text
+slides.skip-slide
+slides.style-text
+slides.table.border.style
+slides.table.cell.style
+slides.table.column.insert
+slides.table.column.size
+slides.table.create
+slides.table.merge
+slides.table.row.insert
+slides.table.row.size
+slides.table.unmerge
+slides.thumbnail
+slides.unskip-slide
+slides.update-notes
 
-# Calendar: read
-calendar.calendars
-calendar.events
-calendar.event
-calendar.search
-calendar.freebusy
+# Forms: read forms and responses; create forms and edit questions
+forms.add-question
+forms.create
+forms.get
+forms.move-question
+forms.questions.add
+forms.questions.move
+forms.raw
+forms.responses.get
+forms.responses.list
+forms.update
+forms.watch.list
 
+# Tasks: read; add, update and complete tasks; create task lists
+tasks.add
+tasks.done
+tasks.get
+tasks.list
+tasks.lists.create
+tasks.lists.list
+tasks.raw
+tasks.undo
+tasks.update
+
+# Contacts: read and export
+contacts.batch.get
+contacts.directory.list
+contacts.directory.search
+contacts.export
+contacts.get
+contacts.list
+contacts.other.list
+contacts.other.search
+contacts.raw
+contacts.search
+
+# People: read profiles and the directory
+people.get
+people.me
+people.raw
+people.relations
+people.search
+
+# Groups: read
+groups.list
+groups.members
+
+# Chat: read messages and spaces
+chat.messages.list
+chat.messages.reactions.list
+chat.messages.search
+chat.spaces.find
+chat.spaces.list
+chat.threads.list
+
+# Keep: read
+keep.attachment
+keep.get
+keep.list
+keep.search
+
+# Meet: read
+meet.get
+meet.history
+meet.participants
+
+# Sites: read
+sites.get
+sites.list
+sites.search
+sites.url
+
+# Apps Script: read project source and metadata
+appscript.content
+appscript.deployments
+appscript.get
+appscript.pull
+appscript.versions
+
+# Analytics: read reports
+analytics.accounts
+analytics.report
+
+# Search Console: read
+searchconsole.inspect
+searchconsole.query
+searchconsole.searchanalytics.query
+searchconsole.sitemaps.get
+searchconsole.sitemaps.list
+searchconsole.sites.get
+searchconsole.sites.list
+
+# AdSense: read
+adsense.accounts.children
+adsense.accounts.get
+adsense.accounts.list
+adsense.adclients.adcode
+adsense.adclients.get
+adsense.adclients.list
+adsense.adunits.adcode
+adsense.adunits.get
+adsense.adunits.linkedcustomchannels
+adsense.adunits.list
+adsense.alerts.list
+adsense.customchannels.get
+adsense.customchannels.linkedadunits
+adsense.customchannels.list
+adsense.payments.list
+adsense.policyissues.get
+adsense.policyissues.list
+adsense.reports.query
+adsense.reports.saved.get
+adsense.reports.saved.list
+adsense.reports.saved.query
+adsense.sites.get
+adsense.sites.list
+adsense.urlchannels.get
+adsense.urlchannels.list
+
+# YouTube: read
+youtube.activities.list
+youtube.channels.list
+youtube.comments.list
+youtube.playlists.items.list
+youtube.playlists.list
+youtube.search.list
+youtube.subscriptions.list
+youtube.videos.list
+
+# Maps: read (geocoding, directions, places)
+maps.directions
+maps.distance
+maps.geocode
+maps.places.details
+maps.places.search
+maps.reverse-geocode
+
+# Photos: read app-created media
+photos.albums.list
+photos.download
+photos.get
+photos.list
+photos.search
+
+# Classroom: read
+classroom.announcements.get
+classroom.announcements.list
+classroom.courses.get
+classroom.courses.list
+classroom.courses.url
+classroom.coursework.get
+classroom.coursework.list
+classroom.guardian-invitations.get
+classroom.guardian-invitations.list
+classroom.guardians.get
+classroom.guardians.list
+classroom.invitations.get
+classroom.invitations.list
+classroom.materials.get
+classroom.materials.list
+classroom.profile.get
+classroom.roster
+classroom.students.get
+classroom.students.list
+classroom.submissions.get
+classroom.submissions.list
+classroom.teachers.get
+classroom.teachers.list
+classroom.topics.get
+classroom.topics.list
+
+# Local clock
+time.now
+
+# Top-level shortcuts and local utilities (read, plus upload)
+download
+ls
+me
+open
+schema
+search
+upload
 version
+whoami

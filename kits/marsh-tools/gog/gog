@@ -2,6 +2,7 @@
 # gog for agents. Full Google read access, drafts, and files this tool creates.
 # It cannot send mail, share, or delete: gog refuses every command not listed
 # in allowed-commands, and Google's grant limits edits to tool-created files.
+# Calendar events can be created and updated, but never with guests.
 # The access token never enters this job: SBX's proxy swaps the placeholder.
 set -eu
 
@@ -9,6 +10,9 @@ for arg in "$@"; do
   case "$arg" in
     --enable-commands*|--disable-commands*|--access-token*|--gmail-no-send*|--home*|--client*|--readonly*)
       echo "gog: $arg is fixed by this tool and can't be changed" >&2
+      exit 2 ;;
+    --attendees*|--add-attendee*|--send-updates*)
+      echo "gog: $arg is not available: events made here have no guests and send no invitations" >&2
       exit 2 ;;
   esac
 done

@@ -1,0 +1,348 @@
+# gog commands this Kit refuses, reviewed against the policy in ../README.md
+# ("How gog stays safe"). The wrapper never reads this file: it exists so that
+# allowed-commands plus refused-commands cover every command gog has, and a gog
+# release that adds a command forces a decision (tests/kits/tools-policy.py).
+# Includes gog's hidden commands.
+
+# Gmail: send, reply, forward and draft sending; label, archive, read-state
+#   and mailbox changes; delete and trash; import; autoreply; tracking pixels;
+#   filters, forwarding, delegation, send-as and vacation settings; Pub/Sub
+#   watches
+gmail.archive
+gmail.autoforward.update
+gmail.autoreply
+gmail.batch.delete
+gmail.batch.modify
+gmail.delegates.add
+gmail.delegates.remove
+gmail.drafts.delete
+gmail.drafts.send
+gmail.filters.create
+gmail.filters.delete
+gmail.forward
+gmail.forwarding.create
+gmail.forwarding.delete
+gmail.import
+gmail.labels.create
+gmail.labels.delete
+gmail.labels.modify
+gmail.labels.rename
+gmail.labels.style
+gmail.mark-read
+gmail.messages.modify
+gmail.reply
+gmail.reply-all
+gmail.send
+gmail.sendas.create
+gmail.sendas.delete
+gmail.sendas.update
+gmail.sendas.verify
+gmail.settings.autoforward.update
+gmail.settings.delegates.add
+gmail.settings.delegates.remove
+gmail.settings.filters.create
+gmail.settings.filters.delete
+gmail.settings.forwarding.create
+gmail.settings.forwarding.delete
+gmail.settings.sendas.create
+gmail.settings.sendas.delete
+gmail.settings.sendas.update
+gmail.settings.sendas.verify
+gmail.settings.vacation.update
+gmail.settings.watch.pull
+gmail.settings.watch.renew
+gmail.settings.watch.serve
+gmail.settings.watch.start
+gmail.settings.watch.status
+gmail.settings.watch.stop
+gmail.thread.modify
+gmail.track.key.rotate
+gmail.track.opens
+gmail.track.setup
+gmail.track.status
+gmail.trash
+gmail.unread
+gmail.vacation.update
+gmail.watch.pull
+gmail.watch.renew
+gmail.watch.serve
+gmail.watch.start
+gmail.watch.status
+gmail.watch.stop
+
+# Calendar: delete, move, RSVP, focus-time and out-of-office (they auto-
+#   decline invitations), calendar list and calendar creation, local aliases
+calendar.alias.list
+calendar.alias.set
+calendar.alias.unset
+calendar.create-calendar
+calendar.delete
+calendar.delete-calendar
+calendar.focus-time
+calendar.move
+calendar.out-of-office
+calendar.respond
+calendar.subscribe
+calendar.unsubscribe
+
+# Drive: share, unshare and bulk permission changes; delete; move; comments
+#   (they notify collaborators); labels; webhooks and hook runners
+drive.bulk.remove-public
+drive.bulk.update-role
+drive.changes.poll
+drive.changes.serve
+drive.changes.stop
+drive.changes.watch
+drive.comments.create
+drive.comments.delete
+drive.comments.reopen
+drive.comments.reply
+drive.comments.resolve
+drive.comments.update
+drive.delete
+drive.labels.file.apply
+drive.labels.file.remove
+drive.move
+drive.share
+drive.unshare
+
+# Docs: delete and clear; comments (they notify collaborators) and the comment
+#   poller (it runs a shell hook); local image upload (briefly makes the file
+#   public)
+docs.clear
+docs.comments.add
+docs.comments.delete
+docs.comments.poll
+docs.comments.reopen
+docs.comments.reply
+docs.comments.resolve
+docs.delete
+docs.delete-tab
+docs.footer.delete
+docs.header.delete
+docs.insert-image
+docs.named-range.delete
+docs.replace-image
+docs.table-column.delete
+docs.table-row.delete
+docs.tabs.delete
+
+# Sheets: delete and clear; arbitrary batch-request; Connected Sheets data
+#   sources (BigQuery)
+sheets.banding.clear
+sheets.batch-request
+sheets.chart.delete
+sheets.clear
+sheets.conditional-format.clear
+sheets.datasource.add
+sheets.datasource.delete
+sheets.datasource.refresh
+sheets.datasource.update
+sheets.delete-dimension
+sheets.delete-tab
+sheets.named-ranges.delete
+sheets.table.clear
+sheets.table.delete
+sheets.validation.clear
+
+# Slides: delete; local image upload (briefly makes the file public)
+slides.add-slide
+slides.delete-slide
+slides.element.delete
+slides.insert-image
+slides.replace-slide
+slides.table.column.delete
+slides.table.row.delete
+
+# Forms: delete; publish; response watches (Pub/Sub)
+forms.delete-question
+forms.publish
+forms.questions.delete
+forms.watch.create
+forms.watch.delete
+forms.watch.renew
+
+# Tasks: delete and clear
+tasks.clear
+tasks.delete
+
+# Contacts: any change to the address book
+contacts.batch.create
+contacts.batch.delete
+contacts.batch.update
+contacts.create
+contacts.dedupe
+contacts.delete
+contacts.update
+
+# Chat: send, react, create spaces and DMs (they notify others)
+chat.dm.send
+chat.dm.space
+chat.messages.react
+chat.messages.reactions.create
+chat.messages.reactions.delete
+chat.messages.send
+chat.spaces.create
+
+# Keep: create and delete
+keep.create
+keep.delete
+
+# Meet: create, update and end meetings
+meet.create
+meet.end
+meet.update
+
+# Apps Script: create projects; run functions (executes code)
+appscript.create
+appscript.run
+
+# Search Console: submit and delete sitemaps
+searchconsole.sitemaps.delete
+searchconsole.sitemaps.submit
+
+# YouTube: playlist and subscription changes
+youtube.playlists.add
+youtube.playlists.create
+youtube.playlists.delete
+youtube.playlists.remove
+youtube.subscriptions.subscribe
+youtube.subscriptions.unsubscribe
+
+# Photos: upload, album creation and picker sessions
+photos.albums.create
+photos.picker.create
+photos.picker.delete
+photos.picker.download
+photos.picker.get
+photos.picker.list
+photos.picker.wait
+photos.upload
+
+# Classroom: every change (they notify students, teachers and guardians)
+classroom.announcements.assignees
+classroom.announcements.create
+classroom.announcements.delete
+classroom.announcements.update
+classroom.courses.archive
+classroom.courses.create
+classroom.courses.delete
+classroom.courses.join
+classroom.courses.leave
+classroom.courses.unarchive
+classroom.courses.update
+classroom.coursework.assignees
+classroom.coursework.create
+classroom.coursework.delete
+classroom.coursework.update
+classroom.guardian-invitations.create
+classroom.guardians.delete
+classroom.invitations.accept
+classroom.invitations.create
+classroom.invitations.delete
+classroom.materials.create
+classroom.materials.delete
+classroom.materials.update
+classroom.students.add
+classroom.students.remove
+classroom.submissions.grade
+classroom.submissions.reclaim
+classroom.submissions.return
+classroom.submissions.turn-in
+classroom.teachers.add
+classroom.teachers.remove
+classroom.topics.create
+classroom.topics.delete
+classroom.topics.update
+
+# Workspace admin: everything, reads included
+admin.groups.list
+admin.groups.members.add
+admin.groups.members.list
+admin.groups.members.remove
+admin.orgunits.create
+admin.orgunits.delete
+admin.orgunits.get
+admin.orgunits.list
+admin.orgunits.update
+admin.users.create
+admin.users.delete
+admin.users.get
+admin.users.list
+admin.users.suspend
+
+# Auth and tokens: everything
+auth.add
+auth.alias.list
+auth.alias.set
+auth.alias.unset
+auth.credentials.list
+auth.credentials.remove
+auth.credentials.set
+auth.doctor
+auth.import
+auth.keep
+auth.keyring
+auth.list
+auth.manage
+auth.rekey
+auth.remove
+auth.service-account.set
+auth.service-account.status
+auth.service-account.unset
+auth.services
+auth.setup
+auth.status
+auth.tokens.delete
+auth.tokens.export
+auth.tokens.import
+auth.tokens.list
+
+# gog's own settings, including the no-send guard: everything
+config.get
+config.keys
+config.list
+config.no-send.list
+config.no-send.remove
+config.no-send.set
+config.path
+config.set
+config.unset
+
+# Mailbox and Drive backup: everything
+backup.cat
+backup.export
+backup.gmail.push
+backup.init
+backup.push
+backup.status
+backup.verify
+
+# Persisted request batches: everything (batch end submits arbitrary requests)
+batch.abort
+batch.begin
+batch.end
+batch.list
+batch.prune
+batch.show
+
+# Generic Discovery API passthrough: everything
+api.call
+api.describe
+api.list
+
+# Zoom credentials: everything
+zoom.auth.doctor
+zoom.auth.setup
+
+# gog self-update check
+update.status
+
+# Top-level aliases for refused commands, shell completion and the MCP server
+__complete
+completion
+login
+logout
+mcp
+send
+status

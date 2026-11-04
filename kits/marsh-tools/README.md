@@ -8,7 +8,7 @@ The agent never sees it, and can't use it any other way.
 
 | Command | What it does |
 |---|---|
-| `gog` | Google Workspace through [gog](https://github.com/steipete/gogcli): read Gmail, Drive, Docs, Sheets, Slides and Calendar; create Gmail drafts; create documents, sheets and decks and edit the ones it created. It cannot send mail, share, or delete anything. |
+| `gog` | Google Workspace through [gog](https://github.com/steipete/gogcli): read Gmail, Drive, Docs, Sheets, Slides, Calendar and more; create Gmail drafts, calendar events (without guests), tasks, documents, sheets, decks and forms, and edit the files it created. It cannot send or notify anyone, share, or delete anything. |
 | `bamboohr` | Read-only BambooHR directory: find people, reporting chains, org trees. |
 
 Both commands come from the same image, so marsh runs them in one VM. The
@@ -58,6 +58,12 @@ The command prints one access token. Sign in with these scopes, so Google
 itself limits edits to files the tool created: `gmail.readonly`,
 `gmail.compose`, `drive.readonly`, `drive.file`, `calendar.readonly`.
 
+The policy below allows more than these scopes do. To let agents also create
+and update calendar events or manage tasks, add `calendar.events` or `tasks`.
+Google doesn't limit those to tool-created items: `calendar.events` can edit
+any event, so the policy (no guests, no invitations) is the only bound there.
+An allowed command whose scope you didn't grant fails at Google, not in the Kit.
+
 ### BambooHR credential and company
 
 ```sh
@@ -97,10 +103,68 @@ so it keeps the network policy, credentials and home declaration.
 
 ## How `gog` stays safe
 
-- **gog refuses everything not listed** in
-  [`gog/allowed-commands`](gog/allowed-commands), using its own
-  `--enable-commands-exact`. Aliases resolve first, so `gog send` and
-  `gmail drafts post` are refused too.
+### The policy
+
+Every gog command path, hidden ones included, is either allowed
+([`gog/allowed-commands`](gog/allowed-commands)) or refused
+([`gog/refused-commands`](gog/refused-commands)), by one rule set:
+
+**Allow**
+
+- Reads everywhere: get, list, search, export, metadata, raw, and url.
+- Creating new files: documents, spreadsheets, decks, forms, folders,
+  uploads, copies, task lists.
+- Editing content: write, update, append, insert, replace, formatting, and
+  adding, renaming, duplicating and reordering tabs, sheets and slides. Google
+  limits these to tool-created files when the token has `drive.file`.
+- Gmail drafts: create and update, including drafts of replies and forwards.
+  Nothing sends them; you do.
+- Calendar events: create and update, with no guests and no invitations (the
+  wrapper rejects `--attendees`, `--add-attendee` and `--send-updates`).
+- Tasks: add, update, complete.
+
+**Refuse**
+
+- Anything that sends or notifies others: sending mail, sending a draft,
+  replying, forwarding, RSVPs, Chat messages, Drive comments, calendar
+  auto-declines (focus time, out of office), Classroom, publishing a form.
+- Sharing, permissions, ownership, and bulk permission changes. This
+  includes commands that briefly make a file public so Docs or Slides can
+  fetch it: inserting or replacing a *local* image (`docs insert-image`,
+  `docs replace-image`, `slides insert-image`, `slides add-slide`,
+  `slides replace-slide`).
+- Deleting, trashing, clearing or removing anything, including text ranges,
+  rows, columns, tabs, slides, and elements. To remove content from a file
+  the tool made, overwrite it with `write`, `update` or `edit`.
+- Changing the account: Gmail settings, filters, forwarding, delegation,
+  send-as, vacation, labels and mailbox state; contacts, Keep, Meet, YouTube
+  and Photos changes; calendar lists and aliases.
+- Admin, auth and token commands, gog's own config (including its no-send
+  guard), backup, and request batches.
+- Anything that runs code or talks to something other than Google's own APIs:
+  hooks and webhooks (`--on-change`, `--on-new`, Pub/Sub watches, `drive
+  changes serve`), Apps Script `run`, the MCP server, the generic `api call`,
+  Zoom, email tracking, and gog's update check.
+- Any command not classified above. The default for a command nobody has
+  reviewed is refused.
+
+Limits of the policy: `slides create-from-markdown` briefly makes generated
+icon images (never your files) public while it builds the deck. `calendar
+update` can change an existing event that already has guests; Google sends no
+notification by default, but their calendars change.
+
+### Keeping it true
+
+- **gog refuses everything not in `allowed-commands`**, using its own
+  `--enable-commands-exact`. Aliases resolve first, so `gog gmail read` is
+  `gmail thread get`. The top-level shortcuts (`gog send`, `gog ls`) are
+  separate commands with their own lines.
+- **A new gog command fails CI until someone decides.**
+  [`tests/kits/tools-policy.py`](../../tests/kits/tools-policy.py) lists every
+  command in the built image's gog (hidden ones too) and fails unless
+  allowed plus refused equals that list exactly, with no overlap and no stale
+  lines. The scheduled build therefore stops publishing `:stable` after a gog
+  release that adds commands, until both lists are updated.
 - **The wrapper's settings can't be changed.** The wrapper rejects
   `--enable-commands`, `--access-token`, `--home` and similar flags. It runs
   gog with a clean environment and an empty config folder. If the allowlist is
