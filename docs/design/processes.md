@@ -407,19 +407,28 @@ refused by the spawn set), and is counted in `marsh status`
   modes). Nothing is written into the project, the selected home, `CLAUDE.md`,
   `AGENTS.md`, `~/.codex`, or `~/.pi` (`agents.md`). Third-party Kits read
   `/run/marsh/context.md` or run `marsh context`.
-- **Kit skills and instructions.** Stock SBX applies `agent-context`,
-  `agent-skill@1` and `agent-skills@1` in the outer sandbox container, which
-  jobs never see. The daemon reads them instead from the image's
-  `vnd.docker.sandbox.kit.descriptor` annotation (linux/arm64 manifest; a kit
-  set's build has already composed its components there), once per digest,
-  cached in `kit-assets/` under the control home, and passes them in the job
+- **Kit skills and instructions.** Stock SBX prepares each `agent-skills@1`
+  folder in the outer sandbox container: links to the Kit's bundled
+  `agent-skill@1` entries and to the user's shared skills store
+  (`sbx skills add`), per `skills.defaultMode` (marsh no longer passes
+  `--skills` when it creates a Kit VM; the shell VM keeps `--skills off`). With
+  `readonly` the store is mounted read-only at `/run/sbx/skills-shared` and
+  the folder links into it (or, for a folder with no bundled skills, the store
+  is mounted over the folder itself); with `off` only the bundled links exist.
+  The runtime binds each declared folder that exists, read-only, at the same
+  path in the job, plus `/run/sbx/skills-shared` when it exists; a folder that
+  contains or lies inside a job mount (the selected home) is skipped, so the
+  home's own skills folders win. Stock SBX writes `agent-context` into the
+  agent's own home, which selected-home jobs do not use, so the daemon reads
+  those bodies from the image's `vnd.docker.sandbox.kit.descriptor`
+  annotation (linux/arm64 manifest; a kit set's build has already composed its
+  components there), once per digest, cached in `kit-assets/` under the
+  control home, and passes them, with the skills folder paths, in the job
   capability (`marsh_contracts::kit_assets`). The worker appends each
   instruction body to `context.md` (inline text, or a regular world-readable
-  file of the image, at most 64 KiB) and writes `skills/<index>/<name>` links;
-  the runtime binds each skills destination read-only when the Kit bundles
-  skills and the destination neither contains nor lies inside a job mount.
-  Nothing is written to the agent's home. A failed descriptor read starts the
-  job without them and says so on stderr; a local source Kit has none.
+  file of the image, at most 64 KiB). Nothing is written to the agent's home.
+  A failed descriptor read starts the job without them and says so on stderr;
+  a local source Kit has none.
 
 ## 10. Model
 

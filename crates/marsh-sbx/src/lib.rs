@@ -5288,8 +5288,6 @@ impl StockSbx {
                 OsString::from(&spec.name),
                 OsString::from("--pull"),
                 OsString::from("missing"),
-                OsString::from("--skills"),
-                OsString::from("off"),
                 OsString::from("-e"),
                 selected_home_environment,
                 // Stock ResolveReference stats an unprefixed argument before its
@@ -5335,8 +5333,6 @@ impl StockSbx {
                 OsStr::new(&spec.name),
                 OsStr::new("--pull"),
                 OsStr::new("never"),
-                OsStr::new("--skills"),
-                OsStr::new("off"),
                 OsStr::new("-e"),
                 selected_home_environment.as_os_str(),
                 source.as_os_str(),

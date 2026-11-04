@@ -2001,44 +2001,42 @@ fn later_host_commands_do_not_inherit_a_terminal_jobs_pty() {
 }
 
 #[test]
-fn kit_skills_bind_read_only_outside_host_mounts() {
+fn sbx_prepared_skills_bind_read_only_outside_host_mounts() {
     let kit = marsh_contracts::kit_assets::KitAssets {
         skill_destinations: vec![
             "/opt/pix/kit-skills".into(),
             "/Users/alice/.pi/skills".into(),
+            "/opt/absent".into(),
         ],
-        skills: vec![marsh_contracts::kit_assets::KitSkill {
-            name: "hello".into(),
-            path: "/opt/skills/hello".into(),
-        }],
         ..Default::default()
     };
+    let job = job();
+    let present = |path: &Path| path != Path::new("/opt/absent");
     let mut arguments = Vec::new();
-    kit_skill_mounts(
-        &mut arguments,
-        Path::new("/run/marsh-cap/attempt-1"),
-        &job(),
-        &kit,
-    )
-    .unwrap();
+    kit_skill_mounts(&mut arguments, &job, &kit, present).unwrap();
     assert_eq!(
         words(&arguments),
         [
             "--mount",
-            "type=bind,source=/run/marsh-cap/attempt-1/skills/0,target=/opt/pix/kit-skills,readonly"
+            "type=bind,source=/opt/pix/kit-skills,target=/opt/pix/kit-skills,readonly",
+            "--mount",
+            "type=bind,source=/run/sbx/skills-shared,target=/run/sbx/skills-shared,readonly",
         ]
     );
-    // A destination with nothing bundled for it is not mounted.
-    let destinations_only = marsh_contracts::kit_assets::KitAssets {
-        skill_destinations: vec!["/home/agent/.claude/skills".into()],
-        ..Default::default()
-    };
+    // `--skills off`: no store mount; the prepared folder alone.
+    let mut off = Vec::new();
+    kit_skill_mounts(&mut off, &job, &kit, |path: &Path| {
+        present(path) && path != Path::new(SBX_SKILLS_STORE)
+    })
+    .unwrap();
+    assert_eq!(off.len(), 2);
+    // A Kit without skills folders gets nothing.
     let mut none = Vec::new();
     kit_skill_mounts(
         &mut none,
-        Path::new("/run/marsh-cap/a"),
-        &job(),
-        &destinations_only,
+        &job,
+        &marsh_contracts::kit_assets::KitAssets::default(),
+        present,
     )
     .unwrap();
     assert_eq!(none, [] as [std::ffi::OsString; 0]);

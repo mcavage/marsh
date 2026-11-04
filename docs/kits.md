@@ -387,13 +387,16 @@ Publish the set with Docker Buildx and install it like any other Kit
 receives what the set declares:
 
 - **Instructions** (`agent-context`) are added to `/run/marsh/context.md`.
-- **Skills** (`agent-skill@1`) are linked, read-only, into each skills
-  folder the agent declares (`agent-skills@1`). A folder inside your home or
-  project is skipped, so marsh never creates files there.
+- **Skills** (`agent-skill@1`) are linked by Docker Sandboxes into each
+  skills folder the agent declares (`agent-skills@1`), beside the skills you
+  added with `sbx skills add` (per `skills.defaultMode`; `off` leaves them
+  out). Each job sees those folders read-only at the same path. A folder
+  inside your home or project is skipped, so your home's own skills win and
+  marsh never creates files there.
 
-marsh reads these from the image's published descriptor the first time a
-command runs, and keeps the result. A Kit run from a source directory has
-none.
+marsh reads the instructions and skills folders from the image's published
+descriptor the first time a command runs, and keeps the result. A Kit run from
+a source directory has none.
 
 ### Publishing a Kit
 

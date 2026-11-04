@@ -203,7 +203,9 @@ starts and once an hour.
 
 A team can add skills and instructions to your agent without changing your
 image: they publish a **mixin** and combine it with your Kit in a **kit set**.
-marsh links the mixin's skills into `/opt/myagent/kit-skills` and adds its
+Docker Sandboxes links the mixin's skills, and the ones added with
+`sbx skills add`, into `/opt/myagent/kit-skills`; marsh shows that folder to
+each job read-only and adds the mixin's
 instructions to `/run/marsh/context.md`. See
 [Adding skills and instructions with mixins](../kits.md#adding-skills-and-instructions-with-mixins).
 

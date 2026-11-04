@@ -5762,7 +5762,6 @@ mod tests {
             first.skill_destinations,
             [PathBuf::from("/opt/pix/kit-skills")]
         );
-        assert_eq!(first.skills[0].name, "hello");
         assert_eq!(backend.kit_assets(&image).unwrap(), first);
         assert_eq!(runner.1.load(std::sync::atomic::Ordering::SeqCst), 1);
         let local = OciImage::parse(format!("sha256:{}", "e".repeat(64))).unwrap();
