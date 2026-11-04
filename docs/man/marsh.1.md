@@ -239,8 +239,10 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 : Print each model's class (small, mid, large), vendor, and how it was
   classed, from the table the daemon uses (*MARSH_HOME*/**model-classes.yaml**
   over marsh's own). Needs no daemon. **--json** prints
-  **[{"model","class","vendor","how"}]**; the last three are **null** for a
-  model the table cannot class.
+  **[{"model","class","vendor","how","eligible"}]**. Only a model the table
+  names is eligible; a retired one (**how** is **retired**) or one classed by
+  price alone is shown but never picked. **class**, **vendor** and **how** are
+  **null** for a model the table cannot class.
 
 **kit install** *NAME* [*REPOSITORY*:*TAG*|*REPOSITORY*@sha256:*DIGEST*]
 : Register a published Kit under *NAME* in this scope. A tag is resolved to its

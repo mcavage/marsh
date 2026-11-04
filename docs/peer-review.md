@@ -96,7 +96,8 @@ Models (`model`: an id below, or just its family name such as `astra`): claude: 
 marsh builds the list for each job from the class table and the vendors the
 agent reaches: a single-vendor agent's credential services, or for a
 multi-provider agent (Pi) the vendors its Kit reaches, with `vendor/model`
-ids. It names each family's newest model that the vendor itself serves,
+ids. It names each curated family's newest model that the vendor itself serves
+(never a retired or uncurated model),
 leaves out families more than six months behind the vendor's newest, and
 shows at most eight models per agent. The family name is the last word of the
 rule that matched (`gpt-*luna*` is `luna`). It does not check that the host
@@ -130,19 +131,32 @@ gpt-6.1-terra" from `command`, `label` and `model`.
 
 ## Model classes
 
-marsh decides a model's class and vendor:
+marsh decides a model's class and vendor, and whether marsh may pick it:
 
 1. **Curated table.** Built-in glob rules (`crates/marsh-daemon/data/model-classes.yaml`)
    are matched against the model id, then against the model's models.dev
    family. Before matching, marsh lowercases the id and strips any
    `provider/` prefix, cloud region or vendor prefix (`us.`, `global.anthropic.`)
-   and host suffix (`@eu`, `:free`). The first match wins.
-2. **Price band.** A model with no matching rule is classed by its output price
-   in a models.dev snapshot: under $4 per million output tokens is small, $18
-   or more is large, and anything between is mid. The vendor is the model's
-   maker, never the host that lists it (see below).
-3. **Unknown.** marsh cannot class a model that is in neither the table nor the
-   snapshot. A reviewer with such a model needs explicit `class` and `vendor`.
+   and host suffix (`@eu`, `:free`). The first match wins. A model a rule names
+   is **eligible**.
+2. **Retired.** The table's `retired` globs name superseded models (`o1*`,
+   `o3*`, `o4-mini*`, `gpt-3*`, `gpt-4*`, `gpt-5*`, `claude-2*`, `claude-3*`,
+   `claude-opus-4*`, `claude-sonnet-4*`, `claude-haiku-4*`, `gemini-1*`,
+   `gemini-2.0*`, `gemini-2.5-flash*`, and older DeepSeek, Qwen, GLM and
+   MiniMax generations; the file has the full list). They are checked before
+   the rules, so a retired model is never eligible: `how` is `retired`.
+3. **Price band.** A model with no matching rule is classed, for display only,
+   by its output price in a models.dev snapshot: under $4 per million output
+   tokens is small, $18 or more is large, and anything between is mid. The
+   vendor is the model's maker, never the host that lists it (see below). Such
+   a model is **not eligible**.
+4. **Unknown.** marsh cannot class a model that is in neither the table nor the
+   snapshot. It is not eligible either.
+
+Only eligible models are ever picked or advertised by marsh itself:
+`marsh config peer-review on`, the `task` tool's model list, and the reviewers
+a drop-in names. A price band never makes a model eligible. Among eligible
+models, marsh uses each family's newest model per vendor.
 
 | Class | Anthropic | OpenAI | Google | Open families |
 |---|---|---|---|---|
@@ -154,13 +168,16 @@ Open-family vendors are `deepseek`, `alibaba` (Qwen), `moonshotai` (Kimi),
 `zai` (GLM), `minimax` and `mistral`. The bare aliases `haiku`, `sonnet`,
 `opus` and `fable` are Anthropic's.
 
-`$MARSH_HOME/model-classes.yaml` overrides the built-in table. Its rules are
-tried first, and its `bands` replace marsh's. If the file is malformed, marsh
-ignores it and reports the error in `marsh peer-review ls`.
+`$MARSH_HOME/model-classes.yaml` overrides the built-in table. Its `retired`
+globs and rules are tried first, and its `bands` replace marsh's. A rule there
+therefore makes a model eligible, including one marsh retired. If the file is
+malformed, marsh ignores it and reports the error in `marsh peer-review ls`.
 
 ```yaml
 bands: {small_below: 4, large_from: 18}
+retired: ["gpt-6-luna"]     # stop using a model marsh still curates
 rules:
+  - {match: "o3*", class: large, vendor: openai}   # use a retired one again
   - {match: "gpt-*sol*", class: mid, vendor: openai}
   - {match: "my-house-*", class: large, vendor: acme}
 ```
@@ -206,6 +223,7 @@ reviewers:
     class: mid        # optional: from the model classes
     vendor: openai    # optional: from the model classes
   - {agent: claude, model: claude-sonnet-5-5}
+  - {agent: codex, model: my-model, class: mid, vendor: acme, allow_uncurated: true}
 ```
 
 - Peer review is on when at least one file says `enabled: true` and no file
@@ -215,6 +233,11 @@ reviewers:
   credentials. marsh checks that the agent is a registered command and that
   its Kit declares a model option, and it fills in `class` and `vendor` from
   the model classes when the file leaves them out.
+- A reviewer's model must be eligible (see Model classes). A reviewer that
+  names a retired model, or one no rule names, is not ready: `peer-review ls`
+  lists it under "Not ready" with the reason (`o3-pro is retired: …`). Add a
+  rule to `$MARSH_HOME/model-classes.yaml`, or set `allow_uncurated: true` on
+  that reviewer to use it anyway.
 - Unknown keys, an unsupported `version`, a malformed agent name, model id or
   vendor (lowercase `a-z0-9-_.`), more than 64 reviewers in one file, or a file
   over 64 KiB each make that whole file invalid. An invalid file contributes
@@ -292,9 +315,15 @@ $ marsh peer-review classify claude-sonnet-5-5 deepseek/deepseek-v4-flash
 claude-sonnet-5-5  mid  anthropic  (model-classes: claude-sonnet-*)
 deepseek/deepseek-v4-flash  small  deepseek  (model-classes: deepseek-*flash*)
 $ marsh peer-review classify claude-sonnet-5-5 nope-1 --json
-[{"model":"claude-sonnet-5-5","class":"mid","vendor":"anthropic","how":"model-classes: claude-sonnet-*"},{"model":"nope-1","class":null,"vendor":null,"how":null}]
+[{"model":"claude-sonnet-5-5","class":"mid","vendor":"anthropic","how":"model-classes: claude-sonnet-*","eligible":true},{"model":"nope-1","class":null,"vendor":null,"how":null,"eligible":false}]
+$ marsh peer-review classify o3-pro
+o3-pro  large  openai  (retired)  not eligible
 ```
 
-`how` is the same text as `classified` in `ls --json`. A model the table and
-the snapshot do not know has `null` for the last three fields. A model class
+`how` is the same text as `classified` in `ls --json`. `eligible` is `true`
+only for a model the table names and has not retired. A retired model has
+`how: "retired"` (with its class and vendor when marsh knows them), and one
+classed by price alone has `how: "models.dev price …"`; both are
+`eligible: false`. A model the table and the snapshot do not know has `null`
+for `class`, `vendor` and `how`. A model class
 file that fails validation is reported on stderr and ignored.

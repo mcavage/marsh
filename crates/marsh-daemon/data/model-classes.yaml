@@ -5,16 +5,65 @@
 # against the model id (lowercased, without a `provider/` prefix or a cloud
 # region prefix such as `us.` or `global.`) and then against its models.dev
 # family. The first match wins, so narrow patterns come before broad ones.
-# A model no rule matches is classed by its models.dev output price (`bands`).
 #
-# $MARSH_HOME/model-classes.yaml overrides this file: its rules are tried
-# first, and its `bands` replace these.
+# Only a model a rule names is eligible: marsh picks and lists no other model
+# by itself (peer-review detection, `peer-review classify`, the `task` tool's
+# model list, drop-in reviewers). A model no rule matches is still classed by
+# its models.dev output price (`bands`), for display only, and is not
+# eligible. `retired` globs name superseded models: they are never eligible,
+# even where a rule below would match them.
+#
+# $MARSH_HOME/model-classes.yaml overrides this file: its `retired` globs and
+# rules are tried first (so a rule there revives a retired model), and its
+# `bands` replace these.
 
 # Output price in USD per million tokens: below `small_below` is small, from
 # `large_from` up is large, between is mid.
 bands:
   small_below: 4
   large_from: 18
+
+# Superseded models, by vendor: each has a newer model of the same vendor in
+# the rules below (checked against models.dev release dates).
+retired:
+  # OpenAI: the o-series, GPT-3.5/4/4o/4.1 and GPT-5.x are succeeded by GPT-6.
+  - "o1*"
+  - "o3*"
+  - "o4-mini*"
+  - "gpt-3*"
+  - "gpt-4*"
+  - "gpt-5*"
+  - "chatgpt*"
+  - "codex-mini*"
+  - "text-davinci*"
+  # Anthropic: Claude 2 and 3, and the 4.x Opus, Sonnet and Haiku, are
+  # succeeded by Claude 5.
+  - "claude-2*"
+  - "claude-3*"
+  - "claude-instant*"
+  - "claude-opus-4*"
+  - "claude-sonnet-4*"
+  - "claude-haiku-4*"
+  # Google: Gemini 1, 2.0 and 2.5 Flash are succeeded by Gemini 3 Flash
+  # (2.5 Pro stays until a non-preview Pro replaces it).
+  - "gemini-1*"
+  - "gemini-2.0*"
+  - "gemini-2.5-flash*"
+  - "gemini-exp*"
+  - "gemini-pro-vision"
+  # Open families
+  - "deepseek-v2*"
+  - "deepseek-v3*"
+  - "deepseek-r1*"
+  - "deepseek-coder*"
+  - "qwen1*"
+  - "qwen2*"
+  - "qwen3-*"
+  - "qwen3.5*"
+  - "glm-3*"
+  - "glm-4*"
+  - "minimax-m1*"
+  - "minimax-m2*"
 
 rules:
   # Anthropic

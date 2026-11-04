@@ -510,7 +510,8 @@ class TaskTool(ScenarioSuite):
             "  - {agent: fixture, model: gpt-6.1-terra}\n"
             "  - {agent: claude, model: claude-sonnet-5-5}\n"
             "  - {agent: shell, model: gpt-6-luna}\n"
-            "  - {agent: nope, model: gpt-6-astra}\n")
+            "  - {agent: nope, model: gpt-6-astra}\n"
+            "  - {agent: claude, model: o3-pro}\n")
         (dropins / "broken.yaml").write_text("enabled: maybe\n")
         listed = self.document("peer-review", "ls", "--json")
         ready = [(r["class"], r["vendor"], r["agent"], r["model"]) for r in listed["reviewers"]]
@@ -520,12 +521,13 @@ class TaskTool(ScenarioSuite):
         reasons = {r["agent"]: r["reason"] for r in listed["skipped"]}
         require("no prompt verbs" in reasons.get("shell", "") and "not a registered command" in reasons.get("nope", ""),
                 f"skipped: {listed['skipped']!r}"[:900])
+        require("is retired" in reasons.get("claude", ""), f"a retired model must be skipped: {listed['skipped']!r}"[:900])
         require(any("broken.yaml" in error for error in listed["errors"]), f"errors: {listed['errors']}")
         on = self.context_md()
         section = on.split(heading, 1)[-1].split("\n## ", 1)[0]
         require(heading in on and '| mid | openai | agent: "fixture", model: "gpt-6.1-terra" |' in section
                 and '| mid | anthropic | agent: "claude", model: "claude-sonnet-5-5" |' in section
-                and "shell" not in section and "nope" not in section,
+                and "shell" not in section and "nope" not in section and "o3-pro" not in section,
                 f"context while on: {section[:1500]!r}")
         narrowed = self.context_md(["fixture"]).split(heading, 1)[-1].split("\n## ", 1)[0]
         require("fixture" in narrowed and '"claude"' not in narrowed, f"MARSH_SPAWN=fixture: {narrowed[:900]!r}")

@@ -2,7 +2,7 @@
 //! (`docs/peer-review.md`).
 
 use marsh_daemon::peer_review::{
-    ClassTable, DROPIN_DIR, DetectAgent, DropIn, MARSH_DROPIN, PeerReviewStatus, detect,
+    ClassTable, DROPIN_DIR, DetectAgent, DropIn, MARSH_DROPIN, ModelClass, PeerReviewStatus, detect,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -25,8 +25,10 @@ classify
         Print each MODEL's class, vendor and how it was classed, from the
         same table the daemon uses ($MARSH_HOME/model-classes.yaml over
         marsh's own); needs no daemon. --json prints
-        [{\"model\",\"class\",\"vendor\",\"how\"}]; class, vendor and how are null
-        for a model the table cannot class.
+        [{\"model\",\"class\",\"vendor\",\"how\",\"eligible\"}]. Only a model the
+        table names is eligible; a retired one (how: \"retired\") or one classed
+        by price alone is shown but never picked. class, vendor and how are
+        null for a model the table cannot class.
 on      Write $MARSH_HOME/peer-review.d/marsh.yaml with `enabled: true` and
         the reviewers marsh can detect: each registered agent whose Kit
         declares a model option, for each vendor it can reach whose key
@@ -87,14 +89,19 @@ pub fn classify(
             class: Option<&'static str>,
             vendor: Option<&'a str>,
             how: Option<&'a str>,
+            eligible: bool,
         }
         let document = rows
             .iter()
             .map(|(model, found)| Row {
                 model,
-                class: found.as_ref().map(|found| found.class.name()),
+                class: found
+                    .as_ref()
+                    .and_then(|found| found.class)
+                    .map(ModelClass::name),
                 vendor: found.as_ref().and_then(|found| found.vendor.as_deref()),
                 how: found.as_ref().map(|found| found.how.as_str()),
+                eligible: found.as_ref().is_some_and(|found| found.eligible),
             })
             .collect::<Vec<_>>();
         serde_json::to_writer(&mut *out, &document)
@@ -104,12 +111,16 @@ pub fn classify(
         rows.iter().try_for_each(|(model, found)| match found {
             Some(found) => writeln!(
                 out,
-                "{model}  {}  {}  ({})",
-                found.class.name(),
+                "{model}  {}  {}  ({}){}",
+                found.class.map_or("unknown class", ModelClass::name),
                 found.vendor.as_deref().unwrap_or("unknown vendor"),
-                found.how
+                found.how,
+                if found.eligible { "" } else { "  not eligible" }
             ),
-            None => writeln!(out, "{model}  unknown (not in the class table or snapshot)"),
+            None => writeln!(
+                out,
+                "{model}  unknown (not in the class table or snapshot)  not eligible"
+            ),
         })
     };
     (written, error)
@@ -389,16 +400,64 @@ mod tests {
         assert_eq!(
             rows[0],
             serde_json::json!({"model": "claude-sonnet-5-5", "class": "mid", "vendor": "anthropic",
-                "how": "model-classes: claude-sonnet-*"})
+                "how": "model-classes: claude-sonnet-*", "eligible": true})
         );
         assert_eq!(rows[1]["class"], "small");
         assert_eq!(rows[1]["vendor"], "deepseek");
+        assert_eq!(rows[1]["eligible"], true);
         assert_eq!(rows[2]["class"], serde_json::Value::Null);
+        assert_eq!(rows[2]["eligible"], false);
         let mut text = Vec::new();
         let _ = classify(&mut text, &models[..1], scope.path(), false);
         assert_eq!(
             String::from_utf8(text).unwrap(),
             "claude-sonnet-5-5  mid  anthropic  (model-classes: claude-sonnet-*)\n"
+        );
+    }
+
+    #[test]
+    fn classify_marks_retired_and_price_classed_models_ineligible() {
+        let scope = tempfile::tempdir().unwrap();
+        let models = [
+            "openai/o3-pro",
+            "gpt-4o",
+            "claude-3-opus",
+            "gpt-3.5-turbo-0301",
+            "grok-4.7",
+            "gpt-6.1-terra",
+            "claude-opus-5-5",
+        ]
+        .map(String::from);
+        let mut out = Vec::new();
+        let (written, error) = classify(&mut out, &models, scope.path(), true);
+        assert!(written.is_ok() && error.is_none());
+        let rows: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        let rows = rows.as_array().unwrap();
+        let by = |model: &str| rows.iter().find(|row| row["model"] == model).unwrap();
+        for retired in [
+            "openai/o3-pro",
+            "gpt-4o",
+            "claude-3-opus",
+            "gpt-3.5-turbo-0301",
+        ] {
+            assert_eq!(by(retired)["eligible"], false, "{retired}");
+            assert_eq!(by(retired)["how"], "retired", "{retired}");
+        }
+        // Still shown with a class and vendor where marsh knows them.
+        assert_eq!(by("openai/o3-pro")["class"], "large");
+        assert_eq!(by("openai/o3-pro")["vendor"], "openai");
+        assert_eq!(by("gpt-3.5-turbo-0301")["class"], serde_json::Value::Null);
+        // The price band classes a model for display only.
+        assert_eq!(by("grok-4.7")["class"], "mid");
+        assert_eq!(by("grok-4.7")["eligible"], false);
+        for current in ["gpt-6.1-terra", "claude-opus-5-5"] {
+            assert_eq!(by(current)["eligible"], true, "{current}");
+        }
+        let mut text = Vec::new();
+        let _ = classify(&mut text, &models[..1], scope.path(), false);
+        assert_eq!(
+            String::from_utf8(text).unwrap(),
+            "openai/o3-pro  large  openai  (retired)  not eligible\n"
         );
     }
 

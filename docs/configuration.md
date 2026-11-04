@@ -121,7 +121,7 @@ When unset, control directories are in
 | `$MARSH_HOME/sbxenv.yaml` | Shared MCP servers and extra directories for every Kit and the shell. |
 | `$MARSH_HOME/sbxenv.d/*.yaml` | More shared servers and directories, same schema as `sbxenv.yaml`, read in name order after it. |
 | `$MARSH_HOME/peer-review.d/*.yaml` | Peer review on/off and the ready reviewers; `marsh config peer-review on\|off` writes `marsh.yaml`, Narwhal `narwhal.yaml`. Read at every job start. See [Peer review](peer-review.md). |
-| `$MARSH_HOME/model-classes.yaml` | Your model-class rules and price bands, tried before marsh's. See [Peer review](peer-review.md#model-classes). |
+| `$MARSH_HOME/model-classes.yaml` | Your model-class rules, retired globs and price bands, tried before marsh's. See [Peer review](peer-review.md#model-classes). |
 | `$MARSH_HOME/sbxenvs/NAME.yaml` | Additional servers and directories for registered command `NAME`; `shell.yaml` also configures the shell VM. |
 | `CONTROL/HASH/` | Host-only control directory for a scope. `marsh status` prints it. Never mounted into a VM. |
 | `CONTROL/HASH/commands.json` | Your command registry. Overrides packaged entries by name. See [Commands and Kits](kits.md#adding-a-command). |
