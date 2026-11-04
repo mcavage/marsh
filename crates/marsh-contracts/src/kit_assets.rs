@@ -5,8 +5,9 @@
 //! container: links to the Kit's bundled `agent-skill@1` entries and to the
 //! user's shared skills store (`sbx skills add`, per `skills.defaultMode`).
 //! marsh jobs run in a nested container from the same image, so the runtime
-//! binds those folders, and the store they link into, read-only at the same
-//! paths. Stock SBX writes `agent-context@*` into the agent's own home, which
+//! binds those folders, and the store they link into, read-only where the
+//! job's agent reads them (a folder in the image's home moves to the job's
+//! HOME). Stock SBX writes `agent-context@*` into the agent's own home, which
 //! marsh's selected-home jobs do not use, so marsh appends those bodies to
 //! `/run/marsh/context.md`. A kit set's build has already composed its
 //! components' entries into one descriptor (the
@@ -116,23 +117,6 @@ impl KitAssets {
             return Err("Kit declares too many skills folders or instructions".into());
         }
         Ok(assets)
-    }
-
-    /// The skills destinations a job can receive: those that neither contain
-    /// nor sit inside one of its host mounts (a bind there would hide a
-    /// grant, or create a mountpoint in the user's files).
-    pub fn deliverable_destinations<'a>(
-        &'a self,
-        mount_targets: &'a [&Path],
-    ) -> impl Iterator<Item = &'a Path> + 'a {
-        self.skill_destinations
-            .iter()
-            .filter(move |destination| {
-                !mount_targets.iter().any(|target| {
-                    destination.starts_with(target) || target.starts_with(destination)
-                })
-            })
-            .map(PathBuf::as_path)
     }
 }
 
@@ -721,20 +705,5 @@ mod tests {
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn skips_destinations_that_overlap_host_mounts() {
-        let assets = KitAssets {
-            skill_destinations: vec![
-                "/opt/pix/kit-skills".into(),
-                "/Users/me/.pi/skills".into(),
-                "/Users".into(),
-            ],
-            ..KitAssets::default()
-        };
-        let mounts = [Path::new("/Users/me"), Path::new("/Users/me/project")];
-        let kept: Vec<_> = assets.deliverable_destinations(&mounts).collect();
-        assert_eq!(kept, [Path::new("/opt/pix/kit-skills")]);
     }
 }

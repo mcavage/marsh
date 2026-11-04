@@ -874,6 +874,7 @@ fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
     write_workers(writer, &status)?;
     write_kit_updates(writer, status.kit_updates.as_deref())?;
     write_sbxenv(writer, status.sbxenv.as_deref())?;
+    write_skills_mirror(writer, status.skills_mirror.as_deref())?;
     write_job_defaults(writer, job_defaults.as_ref())?;
     Ok(())
 }
@@ -926,6 +927,48 @@ fn write_workers(
             recovery.reason,
             recovery.verified
         )?;
+    }
+    Ok(())
+}
+
+/// The skills mirror: when it last imported, clashes, and its errors.
+fn write_skills_mirror(
+    writer: &mut impl Write,
+    mirror: Option<&marsh_daemon::SkillsMirrorStatus>,
+) -> Result<(), ProductError> {
+    let Some(mirror) = mirror else {
+        return Ok(());
+    };
+    if !mirror.enabled {
+        writeln!(
+            writer,
+            "  skills:       mirror off (`marsh config skills-mirror on`)"
+        )?;
+        return Ok(());
+    }
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis()),
+    )
+    .unwrap_or(i64::MAX);
+    let imported = mirror.last_import.map_or_else(
+        || "not yet".to_owned(),
+        |unix_ms| crate::job::ago(now - i64::try_from(unix_ms).unwrap_or(i64::MAX)),
+    );
+    writeln!(
+        writer,
+        "  skills:       mirrored into the sbx skills store, last import {imported}"
+    )?;
+    if !mirror.clashes.is_empty() {
+        writeln!(
+            writer,
+            "    kept the `sbx skills add` copy of: {}",
+            mirror.clashes.join(", ")
+        )?;
+    }
+    for error in &mirror.errors {
+        writeln!(writer, "    error:      {error}")?;
     }
     Ok(())
 }

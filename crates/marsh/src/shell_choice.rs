@@ -109,7 +109,12 @@ pub fn resolve(
     Ok(configured(scope_root)?.unwrap_or_default())
 }
 
-pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n       marsh config auto-update [on|off]\n       marsh config open-urls [on|off]\n       marsh config cloud-delegate [on|off]\n       marsh config peer-review [on|off|ls]\n       marsh config vm-idle-days [DAYS|off]\n\nshell        Show or set this home's default interactive shell. `marsh` (the\n             default) is marsh's Brush; `bash` and `zsh` are the shell VM's own,\n             started with your ~/.bashrc or ~/.zshrc from the selected home. One\n             launch may override it with --shell NAME or MARSH_SHELL=NAME.\nauto-update  Show or set whether Kits that follow a tag update themselves, and\n             whether hermes and pix appear by themselves (default on).\n             MARSH_AUTO_UPDATE=0 at daemon start also turns it off.\nopen-urls    Show or set whether `xdg-open URL` in a shell or job started from\n             your terminal opens the link on your Mac (default on). Off, the\n             link is only printed. MARSH_OPEN_URLS=0 at daemon start also\n             turns it off.\ncloud-delegate\n             Show or set whether a detached cloud run (`cloud -d`) may start\n             agent sandboxes itself (default off). On, marsh uploads the Docker\n             access token stored in your Keychain (`security add-generic-password\n             -s marsh-cloud-delegate -a YOUR_DOCKER_ID -w`) into the run's\n             root-only state; it can use all of your Docker Cloud sandboxes\n             and quota. See docs/cloud.md.\npeer-review  Show or set peer review by another vendor's model; kept in\n             $MARSH_HOME/peer-review.d/marsh.yaml, not config.json. See\n             `marsh peer-review --help` and docs/peer-review.md. `ls [--json]` is\n             `marsh peer-review ls`.\nvm-idle-days Show or set after how many days without use marsh removes one\n             of its Kit or shell VMs (default 3, 1 to 365; `off` keeps them). The\n             next use creates it again. See `marsh gc`.\n\nStored in $MARSH_HOME/config.json. Run a script named `config` as\n`marsh ./config`.\n";
+pub const CONFIG_HELP: &str = "Usage: marsh config shell [marsh|bash|zsh]\n       marsh config auto-update [on|off]\n       marsh config open-urls [on|off]\n       marsh config cloud-delegate [on|off]\n       marsh config skills-mirror [on|off]\n       marsh config peer-review [on|off|ls]\n       marsh config vm-idle-days [DAYS|off]\n\nshell        Show or set this home's default interactive shell. `marsh` (the\n             default) is marsh's Brush; `bash` and `zsh` are the shell VM's own,\n             started with your ~/.bashrc or ~/.zshrc from the selected home. One\n             launch may override it with --shell NAME or MARSH_SHELL=NAME.\nauto-update  Show or set whether Kits that follow a tag update themselves, and\n             whether hermes and pix appear by themselves (default on).\n             MARSH_AUTO_UPDATE=0 at daemon start also turns it off.\nopen-urls    Show or set whether `xdg-open URL` in a shell or job started from\n             your terminal opens the link on your Mac (default on). Off, the\n             link is only printed. MARSH_OPEN_URLS=0 at daemon start also\n             turns it off.\ncloud-delegate\n             Show or set whether a detached cloud run (`cloud -d`) may start\n             agent sandboxes itself (default off). On, marsh uploads the Docker\n             access token stored in your Keychain (`security add-generic-password\n             -s marsh-cloud-delegate -a YOUR_DOCKER_ID -w`) into the run's\n             root-only state; it can use all of your Docker Cloud sandboxes\n             and quota. See docs/cloud.md.\nskills-mirror
+             Show or set whether marsh keeps the Docker Sandboxes skills store
+             in step with ~/.agents/skills, ~/.claude/skills and the other
+             folders `sbx skills import` reads (default on). Every job reads
+             skills from that store.
+peer-review  Show or set peer review by another vendor's model; kept in\n             $MARSH_HOME/peer-review.d/marsh.yaml, not config.json. See\n             `marsh peer-review --help` and docs/peer-review.md. `ls [--json]` is\n             `marsh peer-review ls`.\nvm-idle-days Show or set after how many days without use marsh removes one\n             of its Kit or shell VMs (default 3, 1 to 365; `off` keeps them). The\n             next use creates it again. See `marsh gc`.\n\nStored in $MARSH_HOME/config.json. Run a script named `config` as\n`marsh ./config`.\n";
 
 /// `auto_update` in `config.json`; read by the daemon (`docs/kits.md`).
 pub const AUTO_UPDATE_KEY: &str = "auto_update";
@@ -176,6 +181,18 @@ pub fn cloud_delegate(scope_root: &Path) -> Result<bool, String> {
     config_switch_default(scope_root, CLOUD_DELEGATE_KEY, false)
 }
 
+/// `skills_mirror` in `config.json`; read by the daemon on each pass.
+pub const SKILLS_MIRROR_KEY: &str = marsh_daemon::SKILLS_MIRROR_CONFIG_KEY;
+
+/// Whether the daemon mirrors the host's skills folders into the stock SBX
+/// skills store (default on).
+///
+/// # Errors
+/// Reports an unreadable or malformed config file.
+pub fn skills_mirror(scope_root: &Path) -> Result<bool, String> {
+    config_switch(scope_root, SKILLS_MIRROR_KEY)
+}
+
 fn config_switch(scope_root: &Path, key: &str) -> Result<bool, String> {
     config_switch_default(scope_root, key, true)
 }
@@ -234,16 +251,22 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
             println!("{}", if on { "on" } else { "off" });
             Ok(0)
         }
+        ["skills-mirror"] => {
+            let on = skills_mirror(scope_root).map_err(|message| (message, 1))?;
+            println!("{}", if on { "on" } else { "off" });
+            Ok(0)
+        }
         ["vm-idle-days", rest @ ..] if rest.len() <= 1 => {
             vm_idle_days_command(rest.first().copied(), scope_root)
         }
         [
-            key @ ("auto-update" | "open-urls" | "cloud-delegate"),
+            key @ ("auto-update" | "open-urls" | "cloud-delegate" | "skills-mirror"),
             value @ ("on" | "off"),
         ] => {
             let key = match *key {
                 "auto-update" => AUTO_UPDATE_KEY,
                 "open-urls" => OPEN_URLS_KEY,
+                "skills-mirror" => SKILLS_MIRROR_KEY,
                 _ => CLOUD_DELEGATE_KEY,
             };
             write_config(scope_root, key, (*value == "on").into()).map_err(|error| {
@@ -275,7 +298,7 @@ pub fn config_command(arguments: &[OsString], scope_root: &Path) -> Result<i32, 
         }
         _ => Err((
             format!(
-                "unknown setting{}; marsh config settings are: shell [marsh|bash|zsh], auto-update [on|off], open-urls [on|off], cloud-delegate [on|off], vm-idle-days [DAYS|off], peer-review [on|off|ls]",
+                "unknown setting{}; marsh config settings are: shell [marsh|bash|zsh], auto-update [on|off], open-urls [on|off], cloud-delegate [on|off], skills-mirror [on|off], vm-idle-days [DAYS|off], peer-review [on|off|ls]",
                 words
                     .first()
                     .map_or_else(String::new, |word| format!(" `{word}`"))
@@ -645,6 +668,20 @@ mod tests {
             Ok(0)
         );
         assert!(!marsh_daemon::cloud_delegate::configured(&config));
+    }
+
+    #[test]
+    fn skills_mirror_is_on_by_default_and_switches() {
+        let scope = tempfile::tempdir().unwrap();
+        let root = scope.path().join("scope");
+        assert_eq!(skills_mirror(&root), Ok(true));
+        assert_eq!(
+            config_command(&["skills-mirror".into(), "off".into()], &root),
+            Ok(0)
+        );
+        assert_eq!(skills_mirror(&root), Ok(false));
+        let config = std::fs::read_to_string(root.join(CONFIG_FILE)).unwrap();
+        assert!(config.contains("\"skills_mirror\": false"), "{config}");
     }
 
     #[test]

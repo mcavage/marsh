@@ -40,6 +40,7 @@ For skills, dotfiles, MCP connections, and extra directories, see
 | `MARSH_CLOUD_CPUS` | Default `--cpus` for [`cloud`](cloud.md#sandbox-size-lifetime-and-image) calls from this shell: 1, 2, 4, 8, or 16 (2 GiB of memory per CPU). Default 2. |
 | `MARSH_CLOUD_TTL` | Default `--ttl` for `cloud` calls: 1m to 24h, such as `30m` or `2h`. Default `4h`. |
 | `MARSH_CLOUD_IMAGE` | Default `--image` for `cloud` calls: an image pinned by digest. Read by the daemon too, as its own default. |
+| `MARSH_SKILLS_HOME` | For tests: the HOME whose skills folders the [skills mirror](guides/set-up-your-home.md#agent-settings-and-skills) reads, instead of yours. Read when the daemon starts. |
 | `MARSH_VM_IDLE_SECONDS` | For tests: the [idle VM limit](troubleshooting.md#garbage-collection) in seconds instead of `marsh config vm-idle-days`. Read when the daemon starts. |
 | `MARSH_AUTO_UPDATE` | `0` (or `off`) turns off [automatic Kit updates](kits.md#updates), and the automatic adding of `pix` and `hermes`, for the daemon it starts, as `marsh config auto-update off` does. Read when the daemon starts. |
 | `MARSH_CLOUD_CHILDREN` | The most agent sandboxes one [detached cloud run](cloud.md#agents-calling-agents-with-the-lid-closed) may start with `marsh config cloud-delegate on`: 1 to 64. Default 8. Read when the daemon starts. |
@@ -114,7 +115,8 @@ When unset, control directories are in
 
 | Path | Contents |
 |---|---|
-| `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, whether Kits update themselves, set by `marsh config auto-update on\|off`, whether `xdg-open` opens links on your Mac, set by `marsh config open-urls on\|off`, and whether detached cloud runs may start agent sandboxes, set by `marsh config cloud-delegate on\|off` (default off), and after how many days unused VMs are removed, set by `marsh config vm-idle-days DAYS\|off` (default 3). Default path `~/.marsh/config.json`. |
+| `$MARSH_HOME/config.json` | The default shell, set by `marsh config shell NAME`, whether Kits update themselves, set by `marsh config auto-update on\|off`, whether `xdg-open` opens links on your Mac, set by `marsh config open-urls on\|off`, and whether detached cloud runs may start agent sandboxes, set by `marsh config cloud-delegate on\|off` (default off), whether marsh mirrors your skills folders into the Docker Sandboxes skills store, set by `marsh config skills-mirror on\|off` (default on), and after how many days unused VMs are removed, set by `marsh config vm-idle-days DAYS\|off` (default 3). Default path `~/.marsh/config.json`. |
+| `CONTROL/HASH/skills-mirror.json` | The skills the skills mirror put in the Docker Sandboxes store, with a digest of each: only these are ever replaced or removed. |
 | `$MARSH_HOME/home/` | The guest home. Agent logins and settings (`.claude`, `.codex`) live here. Every job in the scope can read it. Default path `~/.marsh/home/`. |
 | `$MARSH_HOME/sbxenv.yaml` | Shared MCP servers and extra directories for every Kit and the shell. |
 | `$MARSH_HOME/sbxenv.d/*.yaml` | More shared servers and directories, same schema as `sbxenv.yaml`, read in name order after it. |
@@ -237,6 +239,33 @@ files' servers and directories.
 A declared server must register and load successfully before its VM can be
 used. [Setup errors](troubleshooting.md#environment-files-and-mcp-connections)
 explain authentication and name conflicts.
+
+## Skills mirror
+
+Every job reads skills from the Docker Sandboxes skills store
+([Set up your marsh home](guides/set-up-your-home.md#agent-settings-and-skills)).
+The daemon keeps that store in step with the folders `sbx skills import`
+scans on your Mac (`~/.agents/skills`, `~/.claude/skills`, and the others its
+`--help` lists): once at start, then about two seconds after a change there it
+runs `sbx skills import --force --no-input` for the skills whose store copy
+differs, and `sbx skills rm --force` for the skills it imported whose folder
+is gone. It never replaces or removes a skill it did not put there: when a
+name is already taken by a skill from `sbx skills add`, that skill wins and the
+name is listed as a clash.
+
+```sh
+marsh config skills-mirror        # on (the default) or off
+marsh config skills-mirror off
+```
+
+The setting is `skills_mirror` in `$MARSH_HOME/config.json`, read on every
+pass. `marsh status` shows the last import, clashes, and errors. `marsh status
+--json` has the feature `skills-mirror-v1` and a `skills_mirror` object:
+`enabled` (bool), `last_import` (unix ms of the last finished import or
+removal, or `null`), `errors` (strings from the last pass; empty when it
+succeeded), and `clashes` (skill names where the `sbx skills add` skill won).
+`sbx settings set skills.defaultMode off` keeps the store out of new Kit VMs;
+jobs then see only the Kit's own skills.
 
 ## Shell prompt and startup files
 

@@ -36,6 +36,7 @@ pub mod cloud;
 mod ephemeral_home;
 pub mod shell_supervisor;
 mod shell_template_reference;
+pub mod skills;
 mod source_chain;
 mod source_permissions;
 mod stock_inventory;

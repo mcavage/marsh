@@ -388,11 +388,12 @@ receives what the set declares:
 
 - **Instructions** (`agent-context`) are added to `/run/marsh/context.md`.
 - **Skills** (`agent-skill@1`) are linked by Docker Sandboxes into each
-  skills folder the agent declares (`agent-skills@1`), beside the skills you
-  added with `sbx skills add` (per `skills.defaultMode`; `off` leaves them
-  out). Each job sees those folders read-only at the same path. A folder
-  inside your home or project is skipped, so your home's own skills win and
-  marsh never creates files there.
+  skills folder the agent declares (`agent-skills@1`), beside the skills in
+  its skills store (`sbx skills add`, and the folders marsh mirrors; per
+  `skills.defaultMode`, `off` leaves them out). Each job sees those folders
+  read-only where its agent reads them: a folder under `/home/agent` appears
+  under the job's home instead (`~/.claude/skills`), over that folder in
+  `~/.marsh/home`.
 
 marsh reads the instructions and skills folders from the image's published
 descriptor the first time a command runs, and keeps the result. A Kit run from
