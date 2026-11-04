@@ -80,6 +80,11 @@ pub struct JobCapability {
     /// `task` tool's description and for `task(model)` family nicknames.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub model_choices: std::collections::BTreeMap<String, Vec<ModelChoice>>,
+    /// Each registered agent's usage option (`org.marsh/agent-usage@1`):
+    /// the words that make it report token usage and the parser, for the
+    /// task tool. A name without one runs as before and records no usage.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub usages: std::collections::BTreeMap<String, crate::usage::UsageOption>,
     /// The peer-review section of `context.md` (`docs/peer-review.md`):
     /// empty unless peer review is on and a ready reviewer is in `spawn`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -115,6 +120,9 @@ pub struct JobDocument {
     /// Registered agents' model choices (`JobCapability::model_choices`).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub model_choices: std::collections::BTreeMap<String, Vec<ModelChoice>>,
+    /// Registered agents' usage options (`JobCapability::usages`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub usages: std::collections::BTreeMap<String, crate::usage::UsageOption>,
 }
 
 /// One model an agent can run: the id its model option takes, marsh's class

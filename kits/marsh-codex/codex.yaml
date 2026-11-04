@@ -157,6 +157,15 @@ capabilities:
     config:
       args: ["-m", "{{.Model}}"]
 
+  # marsh's usage option for the task tool: `codex exec PROMPT --json` prints
+  # JSONL events (`turn.completed` usage, the `agent_message` final message),
+  # read with marsh's `codex-jsonl` parser (docs/agents.md).
+  - type: org.marsh/agent-usage@1
+    optional: true
+    config:
+      args: ["--json"]
+      parser: codex-jsonl
+
   # Where codex reads shared skills, so the host's store reaches it.
   - type: com.docker.sandbox/agent-skills@1
     optional: true

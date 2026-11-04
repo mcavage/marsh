@@ -2277,6 +2277,12 @@ impl DaemonBackend for StockDaemonBackend {
         if let Some(model) = request.model.as_deref() {
             store.set_job_model(&job_id, model);
         }
+        // `marsh run --usage PARSER` (the task tool): the agent reports its
+        // token usage on stdout; read it as the output streams past.
+        let mut usage_collector = request
+            .usage
+            .as_deref()
+            .and_then(marsh_contracts::usage::Collector::new);
         // Drop-ins are read at every job start, so an edit applies to the
         // next job (`docs/peer-review.md`). Only a root job (the agent that reports to the user) is asked for
         // a review: a reviewer or another child does not start its own.
@@ -2321,6 +2327,7 @@ impl DaemonBackend for StockDaemonBackend {
                 kit,
                 prompts: verbs.prompts,
                 models: verbs.models,
+                usages: verbs.usages,
                 model_choices,
                 peer_review,
             }),
@@ -2468,6 +2475,9 @@ impl DaemonBackend for StockDaemonBackend {
                 }
                 Ok(WorkerResponse::Stdout { bytes, .. }) => {
                     first_output_at.get_or_insert_with(Instant::now);
+                    if let Some(collector) = &mut usage_collector {
+                        collector.feed(&bytes);
+                    }
                     stdout_bytes =
                         stdout_bytes.saturating_add(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
                     if output_complete
@@ -2704,6 +2714,9 @@ impl DaemonBackend for StockDaemonBackend {
             capture_at,
             cleanup_at,
         };
+        if let Some(usage) = usage_collector.and_then(|collector| collector.finish().usage) {
+            store.set_job_usage(&job_id, usage);
+        }
         if let Err(error) = finish_job_with_timing(
             &store,
             &job_id,
@@ -5559,6 +5572,8 @@ struct AgentVerbs {
     registered: Vec<String>,
     prompts: BTreeMap<String, Vec<String>>,
     models: BTreeMap<String, Vec<String>>,
+    /// marsh's `usage` (`org.marsh/agent-usage@1`), for the task tool.
+    usages: BTreeMap<String, marsh_contracts::usage::UsageOption>,
     /// Each command's credential services and where its Kit can use them.
     services: BTreeMap<String, Vec<String>>,
     reaches: BTreeMap<String, BTreeMap<String, Vec<String>>>,
@@ -5596,6 +5611,12 @@ fn agent_verbs(catalog: &[marsh_daemon::CommandStatus]) -> AgentVerbs {
         found.prompts.insert(command.name.clone(), prompt);
         if let Some(model) = verbs(sessions, "model", MODEL_PLACEHOLDER) {
             found.models.insert(command.name.clone(), model);
+        }
+        if let Some(usage) = sessions
+            .get("usage")
+            .and_then(|usage| marsh_contracts::usage::UsageOption::from_config(usage).ok())
+        {
+            found.usages.insert(command.name.clone(), usage);
         }
     }
     found

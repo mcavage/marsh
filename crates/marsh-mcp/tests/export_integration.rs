@@ -1066,6 +1066,7 @@ fn run_decoy_job(
 ) {
     let spec = marsh_daemon::ExecuteSpec {
         model: None,
+        usage: None,
         label: None,
         kit: None,
         acp: false,

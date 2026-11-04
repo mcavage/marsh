@@ -980,6 +980,7 @@ impl AcpSessionManager {
             let result = backend.execute(
                 ExecuteSpec {
                     model: None,
+                    usage: None,
                     label: None,
                     kit,
                     command,

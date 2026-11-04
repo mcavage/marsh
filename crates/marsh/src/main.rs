@@ -1016,8 +1016,15 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
 /// `marsh run` from the host or the shell VM: a session-root job through
 /// `Execute` (`docs/design/processes.md` s3), narrowed by `--spawn`/`MARSH_SPAWN`.
 fn run_command(arguments: &[OsString]) -> i32 {
-    let (spawn, label, name, rest, acp) = match marsh::job::parse_run(arguments) {
-        Ok(Some(run)) => (run.spawn, run.label, run.name, run.arguments, run.acp),
+    let (spawn, label, usage, name, rest, acp) = match marsh::job::parse_run(arguments) {
+        Ok(Some(run)) => (
+            run.spawn,
+            run.label,
+            run.usage,
+            run.name,
+            run.arguments,
+            run.acp,
+        ),
         Ok(None) => {
             print!("{}", marsh::job::RUN_HELP);
             return 0;
@@ -1052,6 +1059,7 @@ fn run_command(arguments: &[OsString]) -> i32 {
     }
     let spec = marsh_daemon::ExecuteSpec {
         model: None,
+        usage,
         label,
         kit: None,
         command: name,
@@ -1474,6 +1482,7 @@ fn cloud_command(arguments: &[OsString]) -> i32 {
     let stdin_null = stdin_null || detach;
     let spec = marsh_daemon::ExecuteSpec {
         model: None,
+        usage: None,
         label,
         kit: None,
         command: "cloud".into(),

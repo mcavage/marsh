@@ -1149,6 +1149,7 @@ impl ExportMcp {
 
         let spec = ExecuteSpec {
             model: None,
+            usage: None,
             label: None,
             kit: None,
             process: None,

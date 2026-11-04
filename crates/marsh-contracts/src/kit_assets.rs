@@ -275,6 +275,22 @@ fn model_option(config: &serde_json::Value) -> Result<serde_json::Value, String>
         })
 }
 
+/// marsh's own options join the session verbs as `model` and `usage`.
+fn marsh_options(
+    sessions: &mut Option<serde_json::Value>,
+    model: Option<serde_json::Value>,
+    usage: Option<crate::usage::UsageOption>,
+) {
+    if let Some(serde_json::Value::Object(verbs)) = sessions {
+        if let Some(args) = model {
+            verbs.insert("model".into(), args);
+        }
+        if let Some(option) = usage {
+            verbs.insert("usage".into(), serde_json::json!(option));
+        }
+    }
+}
+
 impl KitAgent {
     /// Reads `acp@1` and `agent-sessions@1` from a descriptor (JSON). Entries
     /// with no agent or no command are not adapters. When a descriptor
@@ -310,6 +326,7 @@ impl KitAgent {
         let mut adapters = Vec::new();
         let mut sessions = Vec::new();
         let mut model_args = None;
+        let mut usage_option = None;
         let mut multi_provider = false;
         let mut allowed = BTreeSet::new();
         let mut injected = Vec::<(String, String)>::new();
@@ -334,6 +351,9 @@ impl KitAgent {
                 Some(AGENT_MODEL_CAPABILITY) => {
                     model_args = Some(model_option(&config)?);
                     multi_provider = multi_provider || any_provider(&config)?;
+                }
+                Some(crate::usage::AGENT_USAGE_CAPABILITY) => {
+                    usage_option = Some(crate::usage::UsageOption::from_config(&config)?);
                 }
                 Some("com.docker.sandbox/network-policy@1") => {
                     allowed.extend(allowed_hosts(&config));
@@ -377,11 +397,7 @@ impl KitAgent {
             })
             .or_else(|| (sessions.len() == 1 && adapters.len() <= 1).then(|| &sessions[0]))
             .cloned();
-        if let (Some(serde_json::Value::Object(verbs)), Some(args)) =
-            (&mut agent.sessions, model_args)
-        {
-            verbs.insert("model".into(), args);
-        }
+        marsh_options(&mut agent.sessions, model_args, usage_option);
         Ok(agent)
     }
 }
@@ -705,5 +721,25 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn the_usage_option_joins_the_session_verbs() {
+        let usage = |parser: &str| {
+            serde_json::json!({"capabilities": [
+                {"type": "com.docker.sandbox/agent-sessions@1", "config": {"prompt": ["-p", "{{.Prompt}}"]}},
+                {"type": crate::usage::AGENT_USAGE_CAPABILITY,
+                 "config": {"args": ["--output-format", "json"], "parser": parser}}
+            ]})
+        };
+        assert_eq!(
+            KitAgent::from_descriptor(&usage("claude-json"))
+                .unwrap()
+                .sessions
+                .unwrap()["usage"],
+            serde_json::json!({"args": ["--output-format", "json"], "parser": "claude-json"})
+        );
+        // A bad one fails closed.
+        assert!(KitAgent::from_descriptor(&usage("guess")).is_err());
     }
 }

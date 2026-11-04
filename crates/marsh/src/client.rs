@@ -1622,6 +1622,7 @@ impl DaemonClient for LocalDaemonClient {
         self.0
             .execute(marsh_daemon::ExecuteSpec {
                 model: None,
+                usage: None,
                 label: None,
                 kit: None,
                 command: request.command,

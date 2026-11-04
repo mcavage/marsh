@@ -427,14 +427,15 @@ fn validate_receipt_state(receipt: &JobReceipt) -> Result<(), DaemonError> {
 
 /// A settled receipt never changes, except a detached cloud run's own label
 /// (a kept patch applied or discarded later).
+/// A terminal receipt is rewritten only to relabel a detached run's state
+/// or to update `tree_usage` when a child ends after it.
 fn same_settlement(existing: &JobReceipt, receipt: &JobReceipt) -> bool {
+    let mut relabelled = receipt.clone();
+    relabelled.tree_usage.clone_from(&existing.tree_usage);
     if existing.detached.is_some() && receipt.detached.is_some() {
-        let mut relabelled = receipt.clone();
         relabelled.detached.clone_from(&existing.detached);
-        existing == &relabelled
-    } else {
-        existing == receipt
     }
+    existing == &relabelled
 }
 
 fn valid_transition(previous: JobState, next: JobState) -> bool {

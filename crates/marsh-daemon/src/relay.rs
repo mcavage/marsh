@@ -1748,6 +1748,7 @@ mod tests {
                     .execute_with_io(
                         ExecuteSpec {
                             model: None,
+                            usage: None,
                             label: None,
                             kit: None,
                             acp: false,
