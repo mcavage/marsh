@@ -76,6 +76,10 @@ pub struct JobCapability {
     /// one refuses `model`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub models: std::collections::BTreeMap<String, Vec<String>>,
+    /// The models each agent in `models` can run (`ModelChoice`), for the
+    /// `task` tool's description and for `task(model)` family nicknames.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub model_choices: std::collections::BTreeMap<String, Vec<ModelChoice>>,
     /// The peer-review section of `context.md` (`docs/peer-review.md`):
     /// empty unless peer review is on and a ready reviewer is in `spawn`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -108,6 +112,19 @@ pub struct JobDocument {
     /// Registered agents' model options (`JobCapability::models`).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub models: std::collections::BTreeMap<String, Vec<String>>,
+    /// Registered agents' model choices (`JobCapability::model_choices`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub model_choices: std::collections::BTreeMap<String, Vec<ModelChoice>>,
+}
+
+/// One model an agent can run: the id its model option takes, marsh's class
+/// for it (`small`, `mid` or `large`) and the family nickname people use
+/// (`luna`, `astra`, `opus`).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ModelChoice {
+    pub model: String,
+    pub class: String,
+    pub family: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

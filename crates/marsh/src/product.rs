@@ -450,6 +450,41 @@ fn detached_kept(stderr: &mut impl Write, kept: u64, command: &str) -> Result<()
     Ok(())
 }
 
+/// How long `marsh peer-review` waits for the daemon to read the registered
+/// agents' Kit descriptors (a registry read each, once per Kit version).
+const DESCRIPTOR_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// `marsh status --json` once the daemon has read every registered agent's
+/// Kit descriptor, so a fresh home lists its reviewers before any job ran. A
+/// status request starts the reads (`acp` is null until one is done); a Kit
+/// whose registry read keeps failing is left out after `wait`.
+fn status_with_agents(
+    status: &mut dyn FnMut() -> Result<serde_json::Value, ClientError>,
+    stderr: &mut impl Write,
+    wait: std::time::Duration,
+    poll: std::time::Duration,
+) -> Result<serde_json::Value, ClientError> {
+    let mut value = status()?;
+    let deadline = std::time::Instant::now() + wait;
+    let mut said = false;
+    loop {
+        let unread = crate::peer_review_cli::unread_agents(&value);
+        if unread.is_empty() || std::time::Instant::now() >= deadline {
+            return Ok(value);
+        }
+        if !said {
+            said = true;
+            let _ = writeln!(
+                stderr,
+                "marsh: reading the Kit descriptors of {} ...",
+                unread.join(", ")
+            );
+        }
+        std::thread::sleep(poll);
+        value = status()?;
+    }
+}
+
 /// `marsh peer-review ls` and `marsh config peer-review` (`docs/peer-review.md`).
 fn peer_review(
     command: &ProductCommand,
@@ -460,7 +495,12 @@ fn peer_review(
 ) -> Result<ProductOutcome, ProductError> {
     match *command {
         ProductCommand::PeerReviewList { json } => {
-            let value = client.status_json()?;
+            let value = status_with_agents(
+                &mut || client.status_json(),
+                stderr,
+                DESCRIPTOR_WAIT,
+                std::time::Duration::from_millis(500),
+            )?;
             let status =
                 crate::peer_review_cli::status_of(&value).map_err(ProductError::Operation)?;
             if json {
@@ -477,7 +517,12 @@ fn peer_review(
         }
         ProductCommand::PeerReviewConfig { set } => {
             if let Some(on) = set {
-                let value = client.status_json()?;
+                let value = status_with_agents(
+                    &mut || client.status_json(),
+                    stderr,
+                    DESCRIPTOR_WAIT,
+                    std::time::Duration::from_millis(500),
+                )?;
                 let agents = crate::peer_review_cli::model_agents(&value);
                 let credentials = if on {
                     crate::client::resolve_stock_sbx()
@@ -500,7 +545,12 @@ fn peer_review(
                     writeln!(stderr, "marsh: {note}")?;
                 }
             }
-            let value = client.status_json()?;
+            let value = status_with_agents(
+                &mut || client.status_json(),
+                stderr,
+                DESCRIPTOR_WAIT,
+                std::time::Duration::from_millis(500),
+            )?;
             let status =
                 crate::peer_review_cli::status_of(&value).map_err(ProductError::Operation)?;
             crate::peer_review_cli::render(stdout, &status)?;
@@ -1332,6 +1382,44 @@ mod tests {
     use super::*;
     use crate::{cli::LoadSelection, client::ExecuteRequest};
     use serde_json::json;
+
+    #[test]
+    fn peer_review_waits_for_the_daemon_to_read_agent_descriptors() {
+        use std::time::Duration;
+        let unread = json!({"commands": [{"name": "codex", "acp": null}]});
+        let read = json!({"commands": [{"name": "codex", "acp": true}]});
+        let mut calls = 0;
+        let mut stderr = Vec::new();
+        let found = status_with_agents(
+            &mut || {
+                calls += 1;
+                Ok(if calls < 3 {
+                    unread.clone()
+                } else {
+                    read.clone()
+                })
+            },
+            &mut stderr,
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+        )
+        .unwrap();
+        assert_eq!((found, calls), (read.clone(), 3));
+        assert_eq!(
+            String::from_utf8(stderr).unwrap(),
+            "marsh: reading the Kit descriptors of codex ...\n"
+        );
+        // A Kit that never reads is left out once the wait is over.
+        let mut stderr = Vec::new();
+        let found = status_with_agents(
+            &mut || Ok(unread.clone()),
+            &mut stderr,
+            Duration::from_millis(20),
+            Duration::from_millis(1),
+        )
+        .unwrap();
+        assert_eq!(found, unread);
+    }
 
     #[test]
     fn status_lists_the_kit_update_check_and_recent_switches() {

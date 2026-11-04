@@ -53,6 +53,19 @@ pub fn status_of(value: &serde_json::Value) -> Result<PeerReviewStatus, String> 
     }
 }
 
+/// The registered commands whose Kit descriptor the daemon has not read yet
+/// (`acp` is null while it fetches it), from `marsh status --json`.
+#[must_use]
+pub fn unread_agents(status: &serde_json::Value) -> Vec<String> {
+    status["commands"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|command| command["acp"].is_null())
+        .filter_map(|command| command["name"].as_str().map(str::to_owned))
+        .collect()
+}
+
 /// `marsh peer-review classify`: classes `models` with the daemon's
 /// classifier and `scope`'s `model-classes.yaml`. Returns the write result
 /// and a malformed override's error.
@@ -387,6 +400,18 @@ mod tests {
             String::from_utf8(text).unwrap(),
             "claude-sonnet-5-5  mid  anthropic  (model-classes: claude-sonnet-*)\n"
         );
+    }
+
+    #[test]
+    fn a_command_whose_descriptor_is_unread_has_a_null_acp() {
+        let status = serde_json::json!({"commands": [
+            {"name": "claude", "acp": true},
+            {"name": "shell", "acp": false},
+            {"name": "codex", "acp": null},
+            {"name": "pi"},
+        ]});
+        assert_eq!(unread_agents(&status), ["codex", "pi"]);
+        assert_eq!(unread_agents(&serde_json::json!({"schema": "x"})).len(), 0);
     }
 
     #[test]

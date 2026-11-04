@@ -424,7 +424,7 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `S05-interactive-rc-ctrl-c-exit`: Interactive bash/zsh on a PTY: the user's rc alias works, the session bin stays first on PATH
 - `S06-selection-precedence`: `marsh config shell` sets the home default; MARSH_SHELL overrides it; --shell overrides both;
 
-### Task tool (`task_tool_uat.py`, 12)
+### Task tool (`task_tool_uat.py`, 15)
 
 - `T01-protocol-and-refusals`: T01: tools/list carries the contract; refusals are tool errors that say why.
 - `T02-live-shared`: T02: a claude job's `task` (default agent, shared files) edits the caller's folder; the child is its job. (billed; only with `--live`)
@@ -438,6 +438,9 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `T10-conflicts-keep-edits`: T10: task_apply never overwrites the caller's concurrent edits: unstaged it refuses, staged it names conflicts.
 - `T11-fan-out-limit`: T11: 8 live tasks: a 9th is refused (shared and copy), the caller keeps working, every result returns.
 - `T12-peer-review-context-and-model`: T12: the peer-review section appears only while it is on and lists only ready reviewers
+- `T13-fresh-home-peer-review`: T13: in a fresh home no job has ever run in, peer review lists its reviewers at once: from a
+- `T14-live-model-family-name`: T14: told "ask codex with astra to review README.md", a claude job calls `task` for codex with the (billed; only with `--live`)
+- `T15-cwd-refusal-says-where`: T15: a registered command started from outside the project is refused with the way out.
 
 ### Kit changes (`kit_changes_uat.py`, 12)
 

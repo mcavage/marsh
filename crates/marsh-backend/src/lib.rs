@@ -734,6 +734,31 @@ impl StockDaemonBackend {
         marsh_daemon::peer_review::load(&scope, &agents)
     }
 
+    /// The models each agent that takes a `model` can run
+    /// (`peer_review::agent_choices`), for the `task` tool.
+    fn model_choices(
+        &self,
+        verbs: &AgentVerbs,
+    ) -> BTreeMap<String, Vec<marsh_contracts::process::ModelChoice>> {
+        let scope = self
+            .config
+            .daemon_home
+            .canonicalize()
+            .unwrap_or_else(|_| self.config.daemon_home.clone());
+        let (table, _) = marsh_daemon::peer_review::ClassTable::load(&scope);
+        verbs
+            .models
+            .keys()
+            .filter_map(|name| {
+                let services = verbs.services.get(name).cloned().unwrap_or_default();
+                let reaches = verbs.reaches.get(name).cloned().unwrap_or_default();
+                let choices =
+                    marsh_daemon::peer_review::agent_choices(&table, name, &services, &reaches);
+                (!choices.is_empty()).then(|| (name.clone(), choices))
+            })
+            .collect()
+    }
+
     fn kit_agent_for(&self, kit: &NativeKitRef) -> Result<KitAgent, DaemonError> {
         let agent = match cached_kit_agent(&self.config.control_home, kit) {
             Some(agent) => agent,
@@ -1334,6 +1359,41 @@ impl DaemonBackend for StockDaemonBackend {
 
     fn peer_review_status(&self) -> Option<marsh_daemon::peer_review::PeerReviewStatus> {
         Some(self.peer_review(&self.agent_verbs()))
+    }
+
+    fn read_agent_descriptors(&self) {
+        let scope = self
+            .config
+            .daemon_home
+            .canonicalize()
+            .unwrap_or_else(|_| self.config.daemon_home.clone());
+        if !marsh_daemon::peer_review::load(&scope, &BTreeMap::new()).enabled {
+            return;
+        }
+        // The same read a job start makes (`kit_agent_for`: the cache, else
+        // the descriptor, cached once final), one thread per Kit.
+        let kits = self
+            .command_names()
+            .into_iter()
+            .filter_map(|name| {
+                let exact = self
+                    .registered_kit(&name)
+                    .ok()?
+                    .workload
+                    .capture_generation()
+                    .ok()?;
+                cached_kit_agent(&self.config.control_home, &exact)
+                    .is_none()
+                    .then_some(exact)
+            })
+            .collect::<Vec<_>>();
+        thread::scope(|scope| {
+            for kit in &kits {
+                scope.spawn(|| {
+                    let _ = self.kit_agent_for(kit);
+                });
+            }
+        });
     }
 
     fn dynamic_protected_guest_roots(&self) -> Vec<PathBuf> {
@@ -2155,6 +2215,7 @@ impl DaemonBackend for StockDaemonBackend {
         // Drop-ins are read at every job start, so an edit applies to the
         // next job (`docs/peer-review.md`). Only a root job (the agent that reports to the user) is asked for
         // a review: a reviewer or another child does not start its own.
+        let model_choices = self.model_choices(&verbs);
         let peer_review = if lineage.depth <= 1 {
             marsh_daemon::peer_review::context(&self.peer_review(&verbs), &lineage.spawn)
         } else {
@@ -2195,6 +2256,7 @@ impl DaemonBackend for StockDaemonBackend {
                 kit,
                 prompts: verbs.prompts,
                 models: verbs.models,
+                model_choices,
                 peer_review,
             }),
         };

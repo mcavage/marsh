@@ -1335,6 +1335,11 @@ pub trait DaemonBackend: Send + Sync + 'static {
     fn peer_review_status(&self) -> Option<peer_review::PeerReviewStatus> {
         None
     }
+    /// While peer review is on, read each registered agent's Kit descriptor
+    /// into the cache, waiting for the registry: reviewers are then named
+    /// without any job having run (`docs/peer-review.md`). Called from a
+    /// background thread at start; never delays a request.
+    fn read_agent_descriptors(&self) {}
     /// Host-only paths that appeared after start (a live-reloaded local MCP
     /// server's executable); added to the guest-mount protection.
     fn dynamic_protected_guest_roots(&self) -> Vec<PathBuf> {
@@ -4696,6 +4701,7 @@ impl Server {
         self.spawn_sbxenv_watcher(Arc::clone(&updater_stop));
         self.spawn_cloud_collector(Arc::clone(&updater_stop));
         self.spawn_session_reaper(Arc::clone(&updater_stop));
+        self.spawn_agent_reader();
         let _stop_updater = StopOnDrop(updater_stop);
         let mut next_sbx_probe = Instant::now() + self.stock_sbx_probe_interval;
         while !stop() && !self.shutdown_requested.load(Ordering::Acquire) {
@@ -4776,6 +4782,23 @@ impl Server {
             });
         if let Err(error) = spawned {
             eprintln!("marshd: cannot start the Kit updater: {error}");
+        }
+    }
+
+    /// At start, read the registered agents' descriptors once, off the
+    /// request path (the backend does so only while peer review is on).
+    fn spawn_agent_reader(&self) {
+        let backend = Arc::downgrade(&self.backend);
+        let spawned = thread::Builder::new()
+            .name("marsh-agent-descriptors".into())
+            .spawn(move || {
+                let Some(backend) = backend.upgrade() else {
+                    return;
+                };
+                backend.read_agent_descriptors();
+            });
+        if let Err(error) = spawned {
+            eprintln!("marshd: cannot start the agent descriptor reader: {error}");
         }
     }
 
@@ -5546,7 +5569,11 @@ impl ConnectionHandler {
                         &mut stream,
                         &PublicReply::Error {
                             code: ErrorCode::InvalidRequest,
-                            message: "execution working directory is outside session grants".into(),
+                            message: format!(
+                                "execution working directory is outside session grants: run it \
+                                 from the project folder: cd {} (or a folder under it)",
+                                spec.session.launch_directory.display()
+                            ),
                         },
                     );
                 }
