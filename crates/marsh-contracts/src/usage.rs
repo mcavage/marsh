@@ -10,6 +10,7 @@
 //! that reports nothing gets no usage: it is never estimated.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// marsh's own capability: how an agent reports its token usage.
 pub const AGENT_USAGE_CAPABILITY: &str = "org.marsh/agent-usage@1";
@@ -58,6 +59,7 @@ impl Eq for Usage {}
 /// A job tree's usage: the job's own plus every descendant's that reported
 /// one. `jobs` counts the jobs that did; `cost_usd` sums the costs reported
 /// and `uncosted_jobs` counts jobs whose agent reported tokens but no cost.
+/// `models` breaks the totals down by model; its entries sum to them.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct TreeUsage {
     pub input_tokens: u64,
@@ -69,59 +71,102 @@ pub struct TreeUsage {
     pub jobs: u64,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub uncosted_jobs: u64,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub models: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub models: BTreeMap<String, ModelUsage>,
 }
 
 impl Eq for TreeUsage {}
+
+/// One model's share of a tree's usage: the jobs that reported it and what
+/// they used. `cost_usd` sums the costs those jobs reported.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct ModelUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: u64,
+    pub cache_write_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    pub jobs: u64,
+}
+
+impl Eq for ModelUsage {}
+
+/// The `models` key of a job whose agent reported no model.
+pub const UNKNOWN_MODEL: &str = "unknown";
+/// The `models` key past [`MAX_MODELS`] distinct models, so the entries
+/// still sum to the totals.
+pub const OTHER_MODELS: &str = "other";
+const MAX_MODELS: usize = 32;
 
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
+fn add_cost(total: &mut Option<f64>, cost: Option<f64>) {
+    if let Some(cost) = cost {
+        *total = Some(round_cost(total.unwrap_or(0.0) + cost));
+    }
+}
+
+impl ModelUsage {
+    fn add(&mut self, other: &Self) {
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        self.cached_tokens = self.cached_tokens.saturating_add(other.cached_tokens);
+        self.cache_write_tokens = self
+            .cache_write_tokens
+            .saturating_add(other.cache_write_tokens);
+        self.jobs = self.jobs.saturating_add(other.jobs);
+        add_cost(&mut self.cost_usd, other.cost_usd);
+    }
+}
+
 impl TreeUsage {
     /// Add one job's own usage.
     pub fn add_usage(&mut self, usage: &Usage) {
-        self.input_tokens = self.input_tokens.saturating_add(usage.input_tokens);
-        self.output_tokens = self.output_tokens.saturating_add(usage.output_tokens);
-        self.cached_tokens = self.cached_tokens.saturating_add(usage.cached_tokens);
-        self.cache_write_tokens = self
-            .cache_write_tokens
-            .saturating_add(usage.cache_write_tokens);
-        self.jobs = self.jobs.saturating_add(1);
-        match usage.cost_usd {
-            Some(cost) => self.cost_usd = Some(round_cost(self.cost_usd.unwrap_or(0.0) + cost)),
-            None => self.uncosted_jobs = self.uncosted_jobs.saturating_add(1),
+        if usage.cost_usd.is_none() {
+            self.uncosted_jobs = self.uncosted_jobs.saturating_add(1);
         }
-        if let Some(model) = &usage.model {
-            self.add_model(model);
-        }
+        let model = usage.model.as_deref().unwrap_or(UNKNOWN_MODEL);
+        self.add_model(
+            model,
+            &ModelUsage {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cached_tokens: usage.cached_tokens,
+                cache_write_tokens: usage.cache_write_tokens,
+                cost_usd: usage.cost_usd,
+                jobs: 1,
+            },
+        );
     }
 
     /// Add a child's tree.
     pub fn add_tree(&mut self, tree: &Self) {
-        self.input_tokens = self.input_tokens.saturating_add(tree.input_tokens);
-        self.output_tokens = self.output_tokens.saturating_add(tree.output_tokens);
-        self.cached_tokens = self.cached_tokens.saturating_add(tree.cached_tokens);
-        self.cache_write_tokens = self
-            .cache_write_tokens
-            .saturating_add(tree.cache_write_tokens);
-        self.jobs = self.jobs.saturating_add(tree.jobs);
         self.uncosted_jobs = self.uncosted_jobs.saturating_add(tree.uncosted_jobs);
-        if let Some(cost) = tree.cost_usd {
-            self.cost_usd = Some(round_cost(self.cost_usd.unwrap_or(0.0) + cost));
-        }
-        for model in &tree.models {
-            self.add_model(model);
+        for (model, share) in &tree.models {
+            self.add_model(model, share);
         }
     }
 
-    fn add_model(&mut self, model: &str) {
-        if !self.models.iter().any(|known| known == model) && self.models.len() < 16 {
-            self.models.push(model.to_owned());
-            self.models.sort();
-        }
+    /// Add one model's share to the totals and to its entry.
+    fn add_model(&mut self, model: &str, share: &ModelUsage) {
+        self.input_tokens = self.input_tokens.saturating_add(share.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(share.output_tokens);
+        self.cached_tokens = self.cached_tokens.saturating_add(share.cached_tokens);
+        self.cache_write_tokens = self
+            .cache_write_tokens
+            .saturating_add(share.cache_write_tokens);
+        self.jobs = self.jobs.saturating_add(share.jobs);
+        add_cost(&mut self.cost_usd, share.cost_usd);
+        let key = if self.models.contains_key(model) || self.models.len() < MAX_MODELS {
+            model
+        } else {
+            OTHER_MODELS
+        };
+        self.models.entry(key.to_owned()).or_default().add(share);
     }
 }
 
@@ -549,6 +594,57 @@ mod tests {
             .unwrap();
         collector.feed(end.as_bytes());
         assert_eq!(collector.finish().usage.unwrap().output_tokens, 4);
+    }
+
+    #[test]
+    fn tree_models_break_the_totals_down_and_name_unknown_models() {
+        let claude = read(CLAUDE_JSON, CLAUDE).usage.unwrap();
+        let codex = read(CODEX_JSONL, CODEX).usage.unwrap();
+        let mut child = TreeUsage::default();
+        child.add_usage(&codex);
+        let mut tree = TreeUsage::default();
+        tree.add_usage(&claude);
+        tree.add_tree(&child);
+        tree.add_usage(&claude);
+        let opus = &tree.models["claude-opus-5-5"];
+        let unknown = &tree.models[UNKNOWN_MODEL];
+        assert_eq!(tree.models.len(), 2);
+        assert_eq!(
+            (opus.jobs, opus.output_tokens, opus.cost_usd),
+            (2, 8, Some(0.145_196))
+        );
+        assert_eq!(
+            (unknown.jobs, unknown.cache_write_tokens, unknown.cost_usd),
+            (1, 12236, None)
+        );
+        assert_eq!(
+            (
+                tree.jobs,
+                tree.uncosted_jobs,
+                tree.output_tokens,
+                tree.cost_usd
+            ),
+            (3, 1, 13, Some(0.145_196))
+        );
+        assert_eq!(
+            tree.cache_write_tokens,
+            opus.cache_write_tokens + unknown.cache_write_tokens
+        );
+        // Past the cap, models share one entry and the sums still hold.
+        let mut wide = TreeUsage::default();
+        for index in 0..=MAX_MODELS {
+            wide.add_usage(&Usage {
+                model: Some(format!("m{index:02}")),
+                output_tokens: 1,
+                ..Usage::default()
+            });
+        }
+        assert_eq!(wide.models.len(), MAX_MODELS + 1);
+        assert_eq!(wide.models[OTHER_MODELS].jobs, 1);
+        assert_eq!(
+            wide.models.values().map(|m| m.output_tokens).sum::<u64>(),
+            wide.output_tokens
+        );
     }
 
     #[test]

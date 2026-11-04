@@ -817,7 +817,7 @@ fn a_job_cancelled_before_it_can_be_signalled_gets_the_cancel_at_registration() 
 
 #[test]
 fn tree_usage_sums_descendants_and_follows_a_late_child() {
-    use marsh_contracts::usage::Usage;
+    use marsh_contracts::usage::{ModelUsage, Usage};
     let home = tempfile::tempdir().unwrap();
     let store = reopen(home.path()).unwrap();
     let session = session(&store, home.path());
@@ -866,7 +866,26 @@ fn tree_usage_sums_descendants_and_follows_a_late_child() {
     );
     assert_eq!((task_tree.jobs, task_tree.uncosted_jobs), (2, 1));
     assert_eq!(task_tree.cost_usd, Some(0.05));
-    assert_eq!(task_tree.models, ["claude-opus-4-7", "gpt-6.1-terra"]);
+    // One entry per model, each with its own jobs and cost, summing to the totals.
+    let entry = |input, output, cached, write, cost| ModelUsage {
+        input_tokens: input,
+        output_tokens: output,
+        cached_tokens: cached,
+        cache_write_tokens: write,
+        cost_usd: cost,
+        jobs: 1,
+    };
+    assert_eq!(
+        task_tree.models,
+        [
+            (
+                "claude-opus-4-7".to_owned(),
+                entry(10, 300, 20_000, 5000, Some(0.05))
+            ),
+            ("gpt-6.1-terra".to_owned(), entry(9000, 200, 1000, 0, None)),
+        ]
+        .into()
+    );
     // The root reported nothing itself: its tree is its children's.
     let root_job = store.job(&root).unwrap();
     assert!(root_job.usage.is_none());
@@ -887,6 +906,11 @@ fn tree_usage_sums_descendants_and_follows_a_late_child() {
     end(&store, &late, CleanupState::Verified);
     let tree = store.job(&root).unwrap().tree_usage.unwrap();
     assert_eq!((tree.jobs, tree.output_tokens), (3, 507));
+    assert_eq!(tree.models.len(), 3);
+    assert_eq!(
+        tree.models["anthropic/claude-sonnet-4-5"].cost_usd,
+        Some(0.001)
+    );
     assert_eq!(tree.cost_usd, Some(0.051));
     drop(store);
     // Journaled: a restart keeps both.

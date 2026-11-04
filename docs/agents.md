@@ -133,15 +133,22 @@ them:
 
 ```json
 {"usage": {"model": "claude-opus-5-5", "input_tokens": 6, "output_tokens": 249,
-           "cached_tokens": 30121, "cache_write_tokens": 15759, "cost_usd": 0.089823,
+           "cached_tokens": 30177, "cache_write_tokens": 15880, "cost_usd": 0.090439,
            "source": "claude-json"},
- "tree_usage": {"input_tokens": 11, "output_tokens": 274, "cached_tokens": 41343,
-                "cache_write_tokens": 31516, "cost_usd": 0.1099, "jobs": 3,
-                "uncosted_jobs": 1, "models": ["claude-opus-5-5"]}}
+ "tree_usage": {"input_tokens": 11, "output_tokens": 274, "cached_tokens": 41396,
+                "cache_write_tokens": 31634, "cost_usd": 0.110511, "jobs": 3,
+                "uncosted_jobs": 1,
+                "models": {
+                  "claude-opus-5-5": {"input_tokens": 8, "output_tokens": 264,
+                                      "cached_tokens": 41396, "cache_write_tokens": 19384,
+                                      "cost_usd": 0.110511, "jobs": 2},
+                  "unknown": {"input_tokens": 3, "output_tokens": 10, "cached_tokens": 0,
+                              "cache_write_tokens": 12250, "jobs": 1}}}}
 ```
 
-That is a `claude` job that asked `codex` and `claude` one question each:
-its own usage, and the tree's (the `codex` child reported no cost).
+This is a `claude` job that asked `codex` and `claude` one question each. It
+shows the job's own usage and the tree's. The `codex` child reported no cost,
+and no model because the task named none.
 
 `input_tokens` counts input at full price only. Cache reads are counted in
 `cached_tokens` and cache writes in `cache_write_tokens`, never also in
@@ -151,7 +158,11 @@ reports none, it is the model the task asked for, and absent if the task
 named none. `cost_usd` is the agent's own figure, present only when the agent
 reports one. In `tree_usage`, `jobs` counts the jobs that reported usage,
 `cost_usd` sums the reported costs, and `uncosted_jobs` counts jobs that
-reported tokens without a cost. A task's result ends with the same two
+reported tokens without a cost. `models` breaks the totals down by model so
+a mixed tree can be priced. Each entry has the same token counts, its own
+`cost_usd` (when its jobs reported one), and `jobs`, and the entries sum to
+the totals. Jobs without a known model are under `"unknown"`. Past 32 models,
+the rest share `"other"`. A task's result ends with the same two
 objects (`usage: {...}` and `tree_usage ...: {...}`), so the caller sees what
 its delegation cost. `marsh status --json` lists the `task-usage-v1` feature.
 

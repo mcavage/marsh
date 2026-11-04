@@ -749,6 +749,14 @@ class TaskTool(ScenarioSuite):
                 f"parent tree_usage {tree!r} != own {own!r} + children")
             require(abs(tree["cost_usd"] - own["cost_usd"] - children["claude"]["usage"]["cost_usd"]) < 1e-5,
                     f"tree cost: {tree!r}")
+            # Per model: claude's model (the parent and its claude child) and codex's (its reported model,
+            # else "unknown"), each with its jobs, summing to the totals.
+            models = tree.get("models") or {}
+            codex_model = children["codex"]["usage"].get("model") or "unknown"
+            require(set(models) == {own["model"], codex_model} and models[own["model"]]["jobs"] == 2
+                    and models[codex_model]["jobs"] == 1 and "cost_usd" not in models[codex_model]
+                    and all(sum(m[k] for m in models.values()) == tree[k] for k in (*COUNTS, "jobs")),
+                    f"tree_usage.models: {models!r}")
             listed = {j["job_id"]: j for j in self.document("jobs", "--json")["jobs"]}
             for job in (*children.values(), parent):
                 require(listed[job["job_id"]].get("usage") == job["usage"]
