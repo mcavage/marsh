@@ -4667,7 +4667,10 @@ impl StockDaemonBackend {
         let (moved, failed) = match self.move_to_tools(&names, store) {
             Ok(moved) => (moved, false),
             Err((moved, error)) => {
-                eprintln!("marshd: cannot move {} to marsh-tools: {error}", names.join(", "));
+                eprintln!(
+                    "marshd: cannot move {} to marsh-tools: {error}",
+                    names.join(", ")
+                );
                 (moved, true)
             }
         };
@@ -4727,9 +4730,7 @@ impl StockDaemonBackend {
         // One VM serves every moved command; prepare it before any switch.
         let workload =
             NativeKitRef::immutable_oci(image.as_str()).map_err(|e| nothing(backend_error(e)))?;
-        let spec = self
-            .kit_spec_for_workload(workload)
-            .map_err(nothing)?;
+        let spec = self.kit_spec_for_workload(workload).map_err(nothing)?;
         let vm = self
             .prepare_one_with_progress(&spec, store, |_| Ok(()))
             .map_err(nothing)?;
@@ -4743,9 +4744,8 @@ impl StockDaemonBackend {
         let mut moved = Vec::new();
         for command in names {
             let result = (|| {
-                let _admission = store.begin_background_request(format!(
-                    "the move of {command} to marsh-tools"
-                ))?;
+                let _admission = store
+                    .begin_background_request(format!("the move of {command} to marsh-tools"))?;
                 let _install = self
                     .registry_install
                     .lock()
@@ -8274,12 +8274,9 @@ mod kit_lifecycle_callers {
         );
         backend.move_retired_kits(&store, DAY);
         assert!(
-            registry
-                .runs
-                .lock()
-                .unwrap()
+            registry.runs.lock().unwrap().iter().any(|argv| argv
                 .iter()
-                .any(|argv| argv.iter().any(|a| a == "docker.io/mcavage/marsh-tools:stable")),
+                .any(|a| a == "docker.io/mcavage/marsh-tools:stable")),
             "marsh-tools:stable is resolved"
         );
         assert!(registry.calls("sbx") > 0, "its VM is prepared first");
@@ -8293,10 +8290,17 @@ mod kit_lifecycle_callers {
             GOG_OLD
         );
         assert_eq!(
-            backend.registered_kit("bamboohr").unwrap().workload.identity(),
+            backend
+                .registered_kit("bamboohr")
+                .unwrap()
+                .workload
+                .identity(),
             BAMBOO_OLD
         );
-        assert!(kit_auto_update::read(&backend.config.control_home).recent.is_empty());
+        assert_eq!(
+            kit_auto_update::read(&backend.config.control_home).recent,
+            [] as [KitUpdateRecord; 0]
+        );
         assert_eq!(
             backend
                 .retired_due_ms
