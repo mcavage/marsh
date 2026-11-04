@@ -33,6 +33,17 @@ impl CommandRunner for EffectCounter {
     }
 }
 
+/// The daemon reads the registered agents' descriptors at start; wait for
+/// that, so the install attempts are held to adding nothing.
+fn settled(effects: &EffectCounter) -> usize {
+    let mut seen = usize::MAX;
+    while seen != effects.0.load(Ordering::SeqCst) {
+        seen = effects.0.load(Ordering::SeqCst);
+        thread::sleep(Duration::from_millis(300));
+    }
+    seen
+}
+
 #[test]
 fn invalid_overlay_or_install_has_zero_stock_and_registry_effects() {
     let root = tempfile::tempdir().unwrap();
@@ -91,6 +102,7 @@ fn invalid_overlay_or_install_has_zero_stock_and_registry_effects() {
     let done = stop.clone();
     let serving =
         thread::spawn(move || server.serve_until(|| done.load(Ordering::Relaxed)).unwrap());
+    let baseline = settled(&effects);
     let client = Client::connect(&home).unwrap();
     let registry = control.join("commands.json");
     let invalid_documents = [
@@ -114,7 +126,7 @@ fn invalid_overlay_or_install_has_zero_stock_and_registry_effects() {
             assert!(client.install_kit("newkit", &reference).is_err());
             assert_eq!(
                 effects.0.load(Ordering::SeqCst),
-                0,
+                baseline,
                 "invalid persisted overlay reached stock"
             );
             assert_eq!(fs::read_to_string(&registry).unwrap(), document);
@@ -124,7 +136,7 @@ fn invalid_overlay_or_install_has_zero_stock_and_registry_effects() {
         fs::write(&registry, "{}").unwrap();
         for name in ["ps", "-flag", "existing", &"x".repeat(129)] {
             assert!(client.install_kit(name, &reference).is_err());
-            assert_eq!(effects.0.load(Ordering::SeqCst), 0);
+            assert_eq!(effects.0.load(Ordering::SeqCst), baseline);
             assert_eq!(fs::read(&registry).unwrap(), b"{}");
         }
     }));

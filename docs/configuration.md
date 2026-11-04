@@ -151,6 +151,12 @@ The optional `sbxenv.yaml`, `sbxenv.d/*.yaml`, and `sbxenvs/NAME.yaml` files use
 
 Other fields are rejected. For examples, see the [home guide](guides/set-up-your-home.md).
 
+An `additionalWorkspaces` folder inside the project is already visible at the
+same path, so marsh skips it with a one-line note
+(`marsh: ~/dev/pack is inside the project; already visible`). A folder that
+contains the project, or overlaps the managed HOME, is refused with a message
+naming the file and entry to change.
+
 ### Files and merging
 
 - Each YAML file must be a regular file owned by your Mac account, not a

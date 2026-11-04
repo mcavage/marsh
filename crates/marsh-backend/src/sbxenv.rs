@@ -108,6 +108,8 @@ pub(crate) struct Live {
     last_attempt: Option<Instant>,
     last_reload_ms: Option<u64>,
     error: Option<LiveError>,
+    /// Inside-the-project notes already shown, per session and folder.
+    inside_noted: BTreeSet<(String, PathBuf)>,
     /// Counts accepted changes to the effective environments.
     generation: u64,
 }
@@ -125,6 +127,9 @@ pub(crate) struct Workspace {
     pub path: PathBuf,
     #[serde(default, rename = "readOnly")]
     pub read_only: bool,
+    /// The file and entry that declared this folder, for error messages.
+    #[serde(skip)]
+    pub origin: String,
 }
 
 #[derive(Deserialize)]
@@ -195,7 +200,12 @@ impl Environment {
         if document.schema != "1" {
             return Err(invalid(path, "schemaVersion must be \"1\""));
         }
-        for mut mount in document.mounts {
+        for (index, mut mount) in document.mounts.into_iter().enumerate() {
+            mount.origin = format!(
+                "{}: additionalWorkspaces[{index}] ({})",
+                path.display(),
+                mount.path.display()
+            );
             if mount.path.to_string_lossy().contains('$') || mount.path.starts_with("~") {
                 return Err(invalid(
                     path,
@@ -246,6 +256,26 @@ impl Environment {
             ));
         }
         Ok(())
+    }
+}
+
+impl Workspace {
+    fn origin_or_path(&self) -> String {
+        if self.origin.is_empty() {
+            "its sbxenv file".into()
+        } else {
+            self.origin.clone()
+        }
+    }
+}
+
+fn tilde(path: &Path) -> String {
+    match std::env::var_os("HOME").map(PathBuf::from) {
+        Some(home) if !home.as_os_str().is_empty() => match path.strip_prefix(&home) {
+            Ok(rest) => format!("~/{}", rest.display()),
+            Err(_) => path.display().to_string(),
+        },
+        _ => path.display().to_string(),
     }
 }
 
@@ -664,6 +694,91 @@ impl StockDaemonBackend {
         roots
     }
 
+    /// The environment as this session sees it: an extra folder inside the
+    /// project is already visible at its own path and is dropped (and
+    /// returned); one that contains the project or touches the managed HOME
+    /// is refused, naming the file and entry to change.
+    pub(crate) fn session_environment(
+        session: &SessionSpec,
+        environment: &Environment,
+    ) -> Result<Environment, DaemonError> {
+        Ok(Self::fit_environment(session, environment)?.0)
+    }
+
+    fn fit_environment(
+        session: &SessionSpec,
+        environment: &Environment,
+    ) -> Result<(Environment, Vec<PathBuf>), DaemonError> {
+        let mut fitted = Environment {
+            mounts: Vec::new(),
+            servers: environment.servers.clone(),
+        };
+        let mut inside = Vec::new();
+        if session.ephemeral_home {
+            return Ok((fitted, inside));
+        }
+        let project = session.launch_directory.canonicalize()?;
+        let home = session.home_backing.canonicalize()?;
+        for mount in &environment.mounts {
+            let conflict = |what: &str| {
+                DaemonError::InvalidState(format!(
+                    "extra folder {} {what}; change or remove that entry in {}",
+                    mount.path.display(),
+                    mount.origin_or_path()
+                ))
+            };
+            if overlaps(&mount.path, &home) || session.guest_home.starts_with(&mount.path) {
+                return Err(conflict("overlaps the managed HOME"));
+            }
+            if project.starts_with(&mount.path) && mount.path != project {
+                return Err(conflict(&format!(
+                    "contains the project {}",
+                    project.display()
+                )));
+            }
+            if mount.path.starts_with(&project) {
+                inside.push(mount.path.clone());
+                continue;
+            }
+            fitted.mounts.push(mount.clone());
+        }
+        Ok((fitted, inside))
+    }
+
+    /// One stderr line per session and folder for each extra folder that is
+    /// skipped because the project already contains it.
+    pub(crate) fn send_inside_project_notes(
+        &self,
+        session: &SessionSpec,
+        environment: &Environment,
+        attachment: &ServerAttachment,
+    ) {
+        let Ok((_, inside)) = Self::fit_environment(session, environment) else {
+            return;
+        };
+        for path in inside {
+            let fresh = {
+                let mut live = self
+                    .sbxenv
+                    .write()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                live.inside_noted.len() < 1024
+                    && live
+                        .inside_noted
+                        .insert((session.session_id.clone(), path.clone()))
+            };
+            if fresh {
+                let _ = attachment.send(&marsh_daemon::AttachmentFrame::Stderr {
+                    bytes: format!(
+                        "marsh: {} is inside the project; already visible\n",
+                        tilde(&path)
+                    )
+                    .into_bytes(),
+                });
+            }
+        }
+    }
+
     pub(crate) fn additional_grants(
         &self,
         session: &SessionSpec,
@@ -672,8 +787,7 @@ impl StockDaemonBackend {
         if session.ephemeral_home {
             return Ok(Vec::new());
         }
-        let project = session.launch_directory.canonicalize()?;
-        let home = session.home_backing.canonicalize()?;
+        let (environment, _) = Self::fit_environment(session, environment)?;
         let sources = environment
             .mounts
             .iter()
@@ -681,18 +795,22 @@ impl StockDaemonBackend {
             .collect::<Vec<_>>();
         marsh_daemon::reject_guest_mount_overlap(&sources, &self.protected_roots())
             .map_err(DaemonError::InvalidState)?;
-        let grants = environment.mounts.iter().map(|mount| {
-            if overlaps(&mount.path, &project) || overlaps(&mount.path, &home)
-                || session.guest_home.starts_with(&mount.path)
-            {
-                return Err(DaemonError::InvalidState(format!(
-                    "extra mount {} overlaps the project or managed HOME; use a separate external directory",
-                    mount.path.display())));
-            }
-            AdmittedHostGrant::open(mount.path.clone(), mount.path.clone(),
-                if mount.read_only { MountAccess::ReadOnly } else { MountAccess::ReadWrite })
+        let grants = environment
+            .mounts
+            .iter()
+            .map(|mount| {
+                AdmittedHostGrant::open(
+                    mount.path.clone(),
+                    mount.path.clone(),
+                    if mount.read_only {
+                        MountAccess::ReadOnly
+                    } else {
+                        MountAccess::ReadWrite
+                    },
+                )
                 .map_err(backend_error)
-        }).collect::<Result<Vec<_>, _>>()?;
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         self.sbx
             .preflight_host_grants_evicting_idle(&grants)
             .map_err(backend_error)?;
@@ -912,6 +1030,78 @@ mod tests {
         assert_eq!(configured.environment("pi").servers, Vec::new());
         assert_eq!(configured.environment("pi").mounts.len(), 1);
         assert!(!configured.refresh_sbxenv());
+    }
+
+    fn session(project: &Path, home: &Path) -> SessionSpec {
+        SessionSpec {
+            session_id: "s".into(),
+            username: "u".into(),
+            uid: 1000,
+            gid: 1000,
+            launch_directory: project.to_path_buf(),
+            guest_home: PathBuf::from("/home/u"),
+            home_backing: home.to_path_buf(),
+            ephemeral_home: false,
+            terminal: true,
+            terminal_size: None,
+        }
+    }
+
+    #[test]
+    fn extra_folder_inside_the_project_is_skipped_and_real_conflicts_name_the_entry() {
+        let root = tempfile::tempdir().unwrap();
+        let scope = root.path().canonicalize().unwrap();
+        let wrap = scope.join("wrap");
+        let project = wrap.join("dev");
+        let inside = project.join("pack");
+        let outside = scope.join("outside");
+        let home = scope.join("home");
+        for dir in [&inside, &outside, &home, &scope.join("sbxenvs")] {
+            fs::create_dir_all(dir).unwrap();
+        }
+        let write = |paths: &[&Path]| {
+            use std::fmt::Write as _;
+            let mut entries = String::new();
+            for path in paths {
+                writeln!(entries, "  - path: {}", path.display()).unwrap();
+            }
+            fs::write(
+                scope.join("sbxenvs/pi.yaml"),
+                format!("schemaVersion: '1'\nadditionalWorkspaces:\n{entries}"),
+            )
+            .unwrap();
+        };
+        let fit = |project: &Path, home: &Path| {
+            let configured = backend(&scope).with_sbxenvs().unwrap();
+            StockDaemonBackend::fit_environment(
+                &session(project, home),
+                &configured.environment("pi"),
+            )
+        };
+
+        write(&[&inside, &outside]);
+        let (environment, skipped) = fit(&project, &home).unwrap();
+        assert_eq!(skipped, std::slice::from_ref(&inside));
+        assert_eq!(environment.mounts.len(), 1);
+        assert_eq!(environment.mounts[0].path, outside);
+
+        // The project inside an extra folder: refused, naming file and entry.
+        write(&[&outside, &wrap]);
+        let message = fit(&project, &home).unwrap_err().to_string();
+        assert!(message.contains("contains the project"), "{message}");
+        assert!(
+            message.contains("sbxenvs/pi.yaml: additionalWorkspaces[1]"),
+            "{message}"
+        );
+
+        // Any overlap with the managed HOME: refused likewise.
+        write(&[&home]);
+        let message = fit(&project, &home).unwrap_err().to_string();
+        assert!(message.contains("managed HOME"), "{message}");
+        assert!(
+            message.contains("sbxenvs/pi.yaml: additionalWorkspaces[0]"),
+            "{message}"
+        );
     }
 
     #[test]

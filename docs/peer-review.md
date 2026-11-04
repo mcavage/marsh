@@ -246,8 +246,8 @@ are not detected; add those reviewers to the file yourself. `off` sets
 
 A reviewer needs its agent's Kit descriptor (prompt verbs, model option,
 credential services), which marsh reads from the registry the first time and
-then keeps. With peer review on, the daemon reads the descriptors of all
-registered agents when it starts, and `marsh config peer-review on` and
+then keeps. The daemon reads the descriptors of all
+registered agents when it starts (and after a Kit is installed or updated), and `marsh config peer-review on` and
 `marsh peer-review ls` wait (up to a minute, saying so) for the ones still
 being read, so a fresh home lists its reviewers before any job has run.
 

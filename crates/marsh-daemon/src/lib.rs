@@ -1335,10 +1335,11 @@ pub trait DaemonBackend: Send + Sync + 'static {
     fn peer_review_status(&self) -> Option<peer_review::PeerReviewStatus> {
         None
     }
-    /// While peer review is on, read each registered agent's Kit descriptor
-    /// into the cache, waiting for the registry: reviewers are then named
-    /// without any job having run (`docs/peer-review.md`). Called from a
-    /// background thread at start; never delays a request.
+    /// Read each registered agent's Kit descriptor into the cache, waiting
+    /// for the registry: models and reviewers are then known without any job
+    /// having run (`docs/peer-review.md`). Called from a background thread at
+    /// start and after each Kit pass; cheap when everything is cached; never
+    /// delays a request.
     fn read_agent_descriptors(&self) {}
     /// Host-only paths that appeared after start (a live-reloaded local MCP
     /// server's executable); added to the guest-mount protection.
@@ -4775,6 +4776,8 @@ impl Server {
                             "marshd: a background Kit/VM pass panicked; it runs again in a minute"
                         );
                     }
+                    // A Kit that was installed or updated has a new descriptor.
+                    spawn_agent_reader_for(&Arc::downgrade(&backend));
                     if !pause(KIT_UPDATER_INTERVAL) {
                         return;
                     }
@@ -4785,21 +4788,9 @@ impl Server {
         }
     }
 
-    /// At start, read the registered agents' descriptors once, off the
-    /// request path (the backend does so only while peer review is on).
+    /// At start, read the registered agents' descriptors, off the request path.
     fn spawn_agent_reader(&self) {
-        let backend = Arc::downgrade(&self.backend);
-        let spawned = thread::Builder::new()
-            .name("marsh-agent-descriptors".into())
-            .spawn(move || {
-                let Some(backend) = backend.upgrade() else {
-                    return;
-                };
-                backend.read_agent_descriptors();
-            });
-        if let Err(error) = spawned {
-            eprintln!("marshd: cannot start the agent descriptor reader: {error}");
-        }
+        spawn_agent_reader_for(&Arc::downgrade(&self.backend));
     }
 
     /// The `sbxenv` file watcher: a background thread that asks the backend
@@ -4965,6 +4956,21 @@ fn finish_session(
 /// (`client_liveness.rs`), as its own `DetachShell` would have. One whose shell
 /// VM is still bound becomes cleanup-uncertain instead, which `marsh reset` and
 /// `marsh stop` recover.
+fn spawn_agent_reader_for(backend: &std::sync::Weak<dyn DaemonBackend>) {
+    let backend = backend.clone();
+    let spawned = thread::Builder::new()
+        .name("marsh-agent-descriptors".into())
+        .spawn(move || {
+            let Some(backend) = backend.upgrade() else {
+                return;
+            };
+            backend.read_agent_descriptors();
+        });
+    if let Err(error) = spawned {
+        eprintln!("marshd: cannot start the agent descriptor reader: {error}");
+    }
+}
+
 fn release_departed(store: &DaemonStore, backend: &dyn DaemonBackend, acp: &AcpSessionManager) {
     let Ok(_admission) = store.begin_ordinary_request("the release of departed sessions") else {
         return;
