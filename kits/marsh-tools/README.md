@@ -16,8 +16,9 @@ image's entrypoint picks the tool from the name marsh records for the job
 (`/run/marsh/job.json`). Outside marsh, name the tool first
 (`docker run … marsh-tools gog gmail search …`).
 
-CI rebuilds the Kit within six hours of each gog release, and only publishes
-it once the offline smoke test passes.
+gog is pinned to an exact version and checksum in the [Dockerfile](Dockerfile),
+so upgrades are deliberate. CI builds the pin and only publishes it once the
+offline smoke test passes.
 
 ## Install
 
@@ -196,9 +197,13 @@ permissions. The data the agent reads is the data your token can read.
   plus refused equals that list exactly. It also checks that each rule names a
   real flag (every spelling of it), that the built wrapper enforces it, and
   that no allowed command has a flag that runs a program, picks a destination,
-  converts a file, takes HTML, or evaluates formulas without a rule. The
-  scheduled build therefore stops publishing `:stable` after a gog release that
-  adds commands or such flags, until the lists and rules are updated.
+  converts a file, takes HTML, or evaluates formulas without a rule. It also
+  checks that the image's gog is the version the Dockerfile pins.
+- **Upgrading gog is a reviewed change.** Edit `GOG_VERSION` and `GOG_SHA256` in
+  the Dockerfile (the checksum comes from the release's `checksums.txt`), then
+  run the smoke test. It fails until every new command is allowed or refused and
+  every new flag the policy cares about has a rule; list what is new since the
+  last pin in the PR and classify it by the policy above (refuse when in doubt).
 - **The wrapper's settings can't be changed.** The wrapper rejects
   `--enable-commands`, `--access-token`, `--home` and similar flags, and `--`.
   It runs gog with a clean environment and an empty config folder. If the

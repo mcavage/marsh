@@ -3,6 +3,8 @@
 
 Usage: tests/kits/tools-policy.py IMAGE
 
+0. The image's gog is the version the Dockerfile pins (a gog upgrade is a
+   deliberate change to that pin, made together with the lists below).
 1. Every gog command (hidden ones included) is in exactly one of
    kits/marsh-tools/gog/allowed-commands and refused-commands, so a gog release
    that adds a command forces a decision.
@@ -28,6 +30,11 @@ image_files = {"--file", "--content-file"}
 
 def lines(name):
     return [l.strip() for l in open(os.path.join(root, name)) if l.strip() and not l.strip().startswith("#")]
+
+
+def pinned_version():
+    dockerfile = os.path.join(root, "..", "Dockerfile")
+    return re.search(r"^ARG GOG_VERSION=(\S+)", open(dockerfile).read(), re.M).group(1)
 
 
 def gog_commands(image):
@@ -110,6 +117,13 @@ def main():
     actual, globals_ = gog_commands(image)
     rules = parse_rules()
     problems = []
+
+    # 0. The gog under test is the one the Dockerfile pins, so the lists below
+    # were reviewed against it.
+    version = subprocess.run(["docker", "run", "--rm", "--entrypoint", "/usr/local/libexec/gog", image, "--version"],
+                             capture_output=True, text=True).stdout.strip()
+    if version.lstrip("v").split()[0] != pinned_version():
+        problems.append(f"the image's gog is {version!r}, not the pinned {pinned_version()}")
 
     # 1. Every command is classified once.
     dup = sorted({c for c in allowed + refused if (allowed + refused).count(c) > 1})

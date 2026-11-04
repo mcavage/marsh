@@ -72,8 +72,8 @@ gmail.watch.stop
 
 # Calendar: every change (events can carry guests, conferencing, visibility
 #   and shared calendars that the wrapper can't constrain; RSVPs and auto-
-#   declines notify others), calendar list changes, local aliases, browser
-#   opener
+#   declines notify others), calendar list and calendar-level settings
+#   changes, local aliases, browser opener
 calendar.alias.list
 calendar.alias.set
 calendar.alias.unset
@@ -89,6 +89,7 @@ calendar.respond
 calendar.subscribe
 calendar.unsubscribe
 calendar.update
+calendar.update-calendar
 calendar.working-location
 
 # Drive: share, unshare and bulk permission changes; delete; move; shortcuts

