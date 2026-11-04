@@ -9,9 +9,9 @@ Usage: tests/kits/tools-policy.py IMAGE
    kits/marsh-tools/gog/allowed-commands and refused-commands, so a gog release
    that adds a command forces a decision.
 2. Every rule in flag-rules names a real flag, and the built wrapper enforces it.
-3. gog has no flag of an allowed command that runs a program, picks a
-   destination, converts a file, takes HTML, evaluates formulas, or reads image
-   markup from a file, unless flag-rules covers it.
+3. gog has no flag that runs or opens a program, no flag of an allowed command
+   that picks a destination, and no allowed command that writes a comment,
+   unless flag-rules covers it.
 """
 import fnmatch
 import json
@@ -25,7 +25,6 @@ root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "kit
 forbidden = re.compile(r"(^|-)(send|share|unshare|delete|trash|remove|clear|publish|respond)(-|$)")
 refused_services = {"admin", "auth", "config", "backup", "batch", "api", "zoom", "mcp", "login", "logout", "status", "update", "send"}
 never_allowed = {"drive.move", "calendar.move", "calendar.create", "calendar.update", "slides.create-from-markdown"}
-image_files = {"--file", "--content-file"}
 
 
 def lines(name):
@@ -63,8 +62,8 @@ def flags_of(node, globals_):
 def parse_rules():
     rules = []
     for l in lines("flag-rules"):
-        kind, pattern, spec = l.split(None, 2)
-        rules.append((kind, pattern, spec.split()))
+        kind, pattern, *spec = l.split(None, 2)
+        rules.append((kind, pattern, " ".join(spec).split()))
     return rules
 
 
@@ -145,12 +144,21 @@ def main():
 
     # 2. Rules name real flags, and the wrapper enforces each one.
     for kind, pattern, spec in rules:
-        if kind not in ("reject", "force", "scan"):
+        if kind not in ("reject", "force", "nomention"):
             problems.append(f"unknown rule kind: {kind}")
             continue
         targets = [p for p in actual if fnmatch.fnmatchcase(p, pattern) and (p in allowed or pattern == "*")]
         if not targets:
             problems.append(f"rule matches no allowed gog command: {kind} {pattern}")
+        if kind == "nomention":
+            for p in targets:
+                if p not in allowed:
+                    continue
+                words = [("x@x" if w == "x" else w) for w in sample_args(p, actual[p], globals_)]
+                out = wrapper(image, words)
+                if "isn't allowed in" not in out:
+                    problems.append(f"the wrapper doesn't enforce 'nomention {pattern}' ({' '.join(words)}): {out.strip()[:120]}")
+            continue
         for s in spec:
             flag, _, value = s.partition("=")
             having = [p for p in targets if any(flag in spellings(f) for f in flags_of(actual[p], globals_))]
@@ -162,8 +170,6 @@ def main():
                 for form in [x for x in spellings(f[0]) if x != flag]:
                     if not covered_token(rules, p, form):
                         problems.append(f"{flag} of {p} has another spelling, {form}, that flag-rules doesn't cover")
-            if kind == "scan":
-                continue
             p = [x for x in having if x in allowed or pattern == "*"][0]
             words = sample_args(p, actual[p], globals_)
             if kind == "reject":
@@ -197,17 +203,15 @@ def main():
             checks = []
             if re.search(r"destination folder|parent folder id", help_, re.I):
                 checks.append(("a destination", ("reject", "force")))
-            if name.startswith("convert"):
-                checks.append(("a conversion", ("reject",)))
-            if "html" in name or name == "raw-file":
-                checks.append(("HTML or raw message content", ("reject",)))
-            if name == "input" and "RAW" in help_:
-                checks.append(("formula evaluation", ("force",)))
-            if p.startswith("docs.") and "--" + name in image_files:
-                checks.append(("file content that could hold image markup", ("scan",)))
             for what, kinds in checks:
                 if not covered(rules, p, name, kinds):
                     problems.append(f"allowed command has a flag for {what} that flag-rules doesn't cover: {p} --{name}")
+
+    for p in allowed:
+        parts = p.split(".")
+        if "comments" in parts and parts[-1] in ("add", "create", "reply", "resolve", "reopen", "update"):
+            if not any(k == "nomention" and fnmatch.fnmatchcase(p, pt) for k, pt, _ in rules):
+                problems.append(f"allowed command writes a comment without a nomention rule: {p}")
 
     if problems:
         print("FAIL: tools policy", *problems, sep="\n  ", file=sys.stderr)

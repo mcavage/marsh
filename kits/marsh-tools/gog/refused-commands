@@ -93,19 +93,15 @@ calendar.update-calendar
 calendar.working-location
 
 # Drive: share, unshare and bulk permission changes; delete; move; shortcuts
-#   and folder sync (destinations); comments (they notify collaborators);
-#   labels; webhooks and hook runners
+#   and folder sync (destinations); comment edits and deletes; labels;
+#   webhooks and hook runners
 drive.bulk.remove-public
 drive.bulk.update-role
 drive.changes.poll
 drive.changes.serve
 drive.changes.stop
 drive.changes.watch
-drive.comments.create
 drive.comments.delete
-drive.comments.reopen
-drive.comments.reply
-drive.comments.resolve
 drive.comments.update
 drive.delete
 drive.labels.file.apply
@@ -116,16 +112,11 @@ drive.shortcut.create
 drive.sync.push
 drive.unshare
 
-# Docs: delete and clear; sed (regex replacement with image side effects);
-#   comments (they notify collaborators) and the comment poller (it runs a
-#   shell hook); local image upload (briefly makes the file public)
+# Docs: delete and clear; comment edits and deletes; the comment poller (it
+#   runs a shell hook); local image upload (briefly makes the file public)
 docs.clear
-docs.comments.add
 docs.comments.delete
 docs.comments.poll
-docs.comments.reopen
-docs.comments.reply
-docs.comments.resolve
 docs.delete
 docs.delete-tab
 docs.footer.delete
@@ -133,27 +124,23 @@ docs.header.delete
 docs.insert-image
 docs.named-range.delete
 docs.replace-image
-docs.sed
 docs.table-column.delete
 docs.table-row.delete
 docs.tabs.delete
 
-# Sheets: delete and clear; find-replace and copy-paste (may bring in or
-#   propagate formulas); arbitrary batch-request; Connected Sheets data
+# Sheets: delete and clear; arbitrary batch-request; Connected Sheets data
 #   sources (BigQuery)
 sheets.banding.clear
 sheets.batch-request
 sheets.chart.delete
 sheets.clear
 sheets.conditional-format.clear
-sheets.copy-paste
 sheets.datasource.add
 sheets.datasource.delete
 sheets.datasource.refresh
 sheets.datasource.update
 sheets.delete-dimension
 sheets.delete-tab
-sheets.find-replace
 sheets.named-ranges.delete
 sheets.table.clear
 sheets.table.delete
