@@ -21,10 +21,21 @@ import subprocess
 import sys
 
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "kits", "marsh-tools", "gog")
-# Words that mean a command sends, shares or deletes; never allowed, whatever the list says.
+# Words that mean a command sends, shares or deletes a file or anything outside
+# one; never allowed, whatever the list says. Inside the agent's own Docs,
+# Sheets, Slides and Forms files any edit is allowed, deleting content included,
+# so those four only forbid what leaves the file.
 forbidden = re.compile(r"(^|-)(send|share|unshare|delete|trash|remove|clear|publish|respond)(-|$)")
+leaves_the_file = re.compile(r"(^|-)(send|share|unshare|trash|publish|respond)(-|$)")
+in_file_services = {"docs", "sheets", "slides", "forms"}
 refused_services = {"admin", "auth", "config", "backup", "batch", "api", "zoom", "mcp", "login", "logout", "status", "update", "send"}
-never_allowed = {"drive.move", "calendar.move", "calendar.create", "calendar.update", "slides.create-from-markdown"}
+never_allowed = {
+    "drive.move", "drive.delete", "calendar.move", "calendar.create", "calendar.update", "slides.create-from-markdown",
+    # Comments are not file content, data sources reach outside, watches are webhooks.
+    "docs.comments.delete", "docs.comments.update", "docs.comments.poll", "drive.comments.delete", "drive.comments.update",
+    "sheets.datasource.add", "sheets.datasource.delete", "sheets.datasource.update", "sheets.datasource.refresh",
+    "forms.watch.create", "forms.watch.delete", "forms.watch.renew",
+}
 
 
 def lines(name):
@@ -138,8 +149,9 @@ def main():
     for c in allowed:
         if not re.fullmatch(r"[a-z0-9.-]+", c):
             problems.append(f"allowed command the wrapper would reject: {c}")
-        if (c.split(".")[0] in refused_services or c in never_allowed
-                or any(forbidden.search(seg) for seg in c.split("."))):
+        service = c.split(".")[0]
+        leaves = leaves_the_file if service in in_file_services else forbidden
+        if service in refused_services or c in never_allowed or any(leaves.search(seg) for seg in c.split(".")):
             problems.append(f"allowed command breaks the policy: {c}")
 
     # 2. Rules name real flags, and the wrapper enforces each one.

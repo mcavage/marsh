@@ -99,12 +99,13 @@ drive.tree
 drive.upload
 drive.url
 
-# Docs: read; create documents; edit content, tabs, tables and formatting;
-#   comment (the wrapper rejects @-mentions)
+# Docs: read; create documents; edit content, tabs, tables and formatting,
+#   deleting content included; comment (the wrapper rejects @-mentions)
 docs.add-tab
 docs.cat
 docs.cell-style
 docs.cell-update
+docs.clear
 docs.comments.add
 docs.comments.get
 docs.comments.list
@@ -114,14 +115,18 @@ docs.comments.reply
 docs.comments.resolve
 docs.copy
 docs.create
+docs.delete
+docs.delete-tab
 docs.edit
 docs.export
 docs.find-range
 docs.find-replace
 docs.footer.create
+docs.footer.delete
 docs.footer.list
 docs.format
 docs.header.create
+docs.header.delete
 docs.header.list
 docs.headings.list
 docs.images.list
@@ -137,6 +142,7 @@ docs.insert-section-break
 docs.insert-table
 docs.list-tabs
 docs.named-range.create
+docs.named-range.delete
 docs.named-range.list
 docs.named-range.replace
 docs.page-layout
@@ -148,33 +154,41 @@ docs.sed
 docs.structure
 docs.suggestions.list
 docs.table-column-width
+docs.table-column.delete
 docs.table-column.insert
 docs.table-merge
+docs.table-row.delete
 docs.table-row.insert
 docs.table-row.pin-header
 docs.table-row.style
 docs.table-unmerge
 docs.tables.list
 docs.tabs.add
+docs.tabs.delete
 docs.tabs.list
 docs.tabs.rename
 docs.update
 docs.write
 
 # Sheets: read; create spreadsheets; edit values (formulas included), tabs,
-#   ranges and formatting, and raw batchUpdate requests (the wrapper rejects
-#   data-source and comment requests)
+#   ranges and formatting, deleting and clearing content included, and raw
+#   batchUpdate requests (the wrapper rejects data-source and comment
+#   requests)
 sheets.add-tab
 sheets.append
+sheets.banding.clear
 sheets.banding.list
 sheets.banding.set
 sheets.batch-request
 sheets.batch-update
 sheets.chart.create
+sheets.chart.delete
 sheets.chart.get
 sheets.chart.list
 sheets.chart.update
+sheets.clear
 sheets.conditional-format.add
+sheets.conditional-format.clear
 sheets.conditional-format.list
 sheets.copy
 sheets.copy-paste
@@ -184,6 +198,8 @@ sheets.datasource.list
 sheets.datasource.table.describe
 sheets.datasource.table.list
 sheets.datasource.table.read
+sheets.delete-dimension
+sheets.delete-tab
 sheets.duplicate-tab
 sheets.export
 sheets.filter.set
@@ -197,6 +213,7 @@ sheets.links.set
 sheets.merge
 sheets.metadata
 sheets.named-ranges.add
+sheets.named-ranges.delete
 sheets.named-ranges.get
 sheets.named-ranges.list
 sheets.named-ranges.update
@@ -209,25 +226,30 @@ sheets.reorder-tab
 sheets.resize-columns
 sheets.resize-rows
 sheets.table.append
+sheets.table.clear
 sheets.table.create
+sheets.table.delete
 sheets.table.get
 sheets.table.list
 sheets.unmerge
 sheets.update
 sheets.update-note
+sheets.validation.clear
 sheets.validation.get
 sheets.validation.set
 
 # Slides: read; create decks from templates or empty; edit slides, text,
-#   shapes, tables and notes
+#   shapes, tables and notes, deleting content included
 slides.bullets
 slides.copy
 slides.create
 slides.create-from-template
+slides.delete-slide
 slides.duplicate-slide
 slides.element.alt-text
 slides.element.create-line
 slides.element.create-shape
+slides.element.delete
 slides.element.group
 slides.element.style
 slides.element.transform
@@ -249,10 +271,12 @@ slides.skip-slide
 slides.style-text
 slides.table.border.style
 slides.table.cell.style
+slides.table.column.delete
 slides.table.column.insert
 slides.table.column.size
 slides.table.create
 slides.table.merge
+slides.table.row.delete
 slides.table.row.insert
 slides.table.row.size
 slides.table.unmerge
@@ -260,12 +284,14 @@ slides.thumbnail
 slides.unskip-slide
 slides.update-notes
 
-# Forms: read forms and responses; create forms and edit questions
+# Forms: read forms and responses; create forms and edit or delete questions
 forms.add-question
 forms.create
+forms.delete-question
 forms.get
 forms.move-question
 forms.questions.add
+forms.questions.delete
 forms.questions.move
 forms.raw
 forms.responses.get

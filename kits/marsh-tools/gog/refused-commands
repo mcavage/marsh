@@ -112,54 +112,29 @@ drive.shortcut.create
 drive.sync.push
 drive.unshare
 
-# Docs: delete and clear; comment edits and deletes; the comment poller (it
-#   runs a shell hook); local image upload (briefly makes the file public)
-docs.clear
+# Docs: comment edits and deletes; the comment poller (it runs a shell hook);
+#   local image upload (briefly makes the file public)
 docs.comments.delete
 docs.comments.poll
-docs.delete
-docs.delete-tab
-docs.footer.delete
-docs.header.delete
 docs.insert-image
-docs.named-range.delete
 docs.replace-image
-docs.table-column.delete
-docs.table-row.delete
-docs.tabs.delete
 
-# Sheets: delete and clear; Connected Sheets data sources (BigQuery)
-sheets.banding.clear
-sheets.chart.delete
-sheets.clear
-sheets.conditional-format.clear
+# Sheets: Connected Sheets data sources (BigQuery)
 sheets.datasource.add
 sheets.datasource.delete
 sheets.datasource.refresh
 sheets.datasource.update
-sheets.delete-dimension
-sheets.delete-tab
-sheets.named-ranges.delete
-sheets.table.clear
-sheets.table.delete
-sheets.validation.clear
 
-# Slides: delete; create-from-markdown (runs an arbitrary --mmdc program,
-#   publishes diagrams and deletes uploads); local image upload (briefly makes
-#   the file public)
+# Slides: create-from-markdown (runs an arbitrary --mmdc program, publishes
+#   diagrams and deletes uploads); local image upload (briefly makes the file
+#   public)
 slides.add-slide
 slides.create-from-markdown
-slides.delete-slide
-slides.element.delete
 slides.insert-image
 slides.replace-slide
-slides.table.column.delete
-slides.table.row.delete
 
-# Forms: delete; publish; response watches (Pub/Sub)
-forms.delete-question
+# Forms: publish; response watches (Pub/Sub)
 forms.publish
-forms.questions.delete
 forms.watch.create
 forms.watch.delete
 forms.watch.renew
