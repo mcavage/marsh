@@ -12,7 +12,7 @@ docker run --rm --entrypoint /usr/local/libexec/gog "$image" --version | grep -q
 for cmd in "gmail send --to a@b.c --subject s --body b" "send --to a@b.c --subject s --body b" \
            "gmail drafts send d1" "gmail drafts post d1" "gmail reply m1 --body b" "gmail forward m1 --to a@b.c" \
            "drive share f1 --email a@b.c" "drive delete f1" "gmail trash m1" "calendar delete primary e1" \
-           "auth list" "drive upload x"; do
+           "auth list" "drive upload x" "sheets delete-tab s1 Tab" "sheets duplicate-tab s1 Tab New"; do
   gog $cmd | grep -q "is not enabled" || fail "not refused: $cmd"
 done
 
@@ -33,6 +33,10 @@ docker run --rm --network none -e HTTPS_PROXY=http://127.0.0.1:9 "$image" gog gm
 # An allowed command gets past the allowlist (and then fails only on the network).
 out=$(gog gmail search newer_than:1d --max 1)
 echo "$out" | grep -q "is not enabled" && fail "allowed command refused: $out"
+for cmd in "sheets add-tab s1 Tab" "sheets rename-tab s1 Old New"; do
+  out=$(gog $cmd)
+  echo "$out" | grep -q "is not enabled" && fail "allowed command refused: $cmd: $out"
+done
 
 # bamboohr: only directory reads exist, and the company comes from the image.
 docker run --rm --network none "$image" bamboohr update-employee 2>&1 | grep -q "operation is not allowed" || fail "bamboohr write op"

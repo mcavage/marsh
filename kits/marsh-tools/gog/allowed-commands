@@ -34,13 +34,15 @@ docs.create
 docs.write
 docs.add-tab
 
-# Sheets: read; create and edit sheets this tool created
+# Sheets: read; create and edit sheets this tool created; add and rename tabs
 sheets.get
 sheets.metadata
 sheets.export
 sheets.create
 sheets.update
 sheets.append
+sheets.add-tab
+sheets.rename-tab
 
 # Slides: read; create decks
 slides.info
