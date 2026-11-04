@@ -8,7 +8,7 @@ licenses: [MIT]
 # marsh shows this in "gog updated (A → B)". CI stamps it, and provides, with
 # gog's release and the date and commit of bamboohr's last change.
 version: "0.0.0-local"
-provides: ["gogcli@0.46.0", "bamboohr@0.0.0"]
+provides: ["gogcli@0.47.1", "bamboohr@0.0.0"]
 dockerfile: ./Dockerfile
 capabilities:
   - type: com.docker.sandbox/sbx@1

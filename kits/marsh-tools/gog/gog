@@ -1,29 +1,138 @@
 #!/bin/sh
-# gog for agents. Full Google read access, drafts, and files this tool creates.
-# It cannot send mail, share, or delete: gog refuses every command not listed
-# in allowed-commands, and Google's grant limits edits to tool-created files.
+# gog for agents. Reads Google; creates and edits only its own private files;
+# never sends, notifies, shares, publishes, deletes or runs code. gog refuses
+# every command not listed in allowed-commands, and flag-rules narrows the
+# commands that are listed (see the policy in the Kit's README).
 # The access token never enters this job: SBX's proxy swaps the placeholder.
 set -eu
+
+gogbin=/usr/local/libexec/gog
+list=/usr/local/share/gog-allowed-commands
+rules=/usr/local/share/gog-flag-rules
+die() { echo "gog: $*" >&2; exit 2; }
 
 for arg in "$@"; do
   case "$arg" in
     --enable-commands*|--disable-commands*|--access-token*|--gmail-no-send*|--home*|--client*|--readonly*)
-      echo "gog: $arg is fixed by this tool and can't be changed" >&2
-      exit 2 ;;
+      die "$arg is fixed by this tool and can't be changed" ;;
+    --) die "-- is not supported by this tool" ;;
   esac
 done
 
-list=/usr/local/share/gog-allowed-commands
 allowed=$(grep -v '^[[:space:]]*\(#\|$\)' "$list" | paste -sd, -) || allowed=
 # An empty list would mean "everything", so refuse to run without one.
 case "$allowed" in
-  ''|*[!a-z0-9.,-]*) echo "gog: the allowed-command list is missing or invalid" >&2; exit 2 ;;
+  ''|*[!a-z0-9.,-]*) die "the allowed-command list is missing or invalid" ;;
 esac
+[ -s "$rules" ] || die "the flag rules are missing"
 mkdir -p /tmp/gog-home
 
 # Inherited GOG_* settings can't widen what is allowed. Everything else stays:
 # SBX's proxy settings in the environment are how the credential gets attached.
 for name in $(env | sed -n 's/^\(GOG_[A-Za-z0-9_]*\)=.*/\1/p'); do unset "$name"; done
 export HOME=/tmp/gog-home
-exec /usr/local/libexec/gog --home=/tmp/gog-home --access-token=proxy-managed --gmail-no-send \
-  --enable-commands-exact="$allowed" "$@"
+
+run() {
+  exec "$gogbin" --home=/tmp/gog-home --access-token=proxy-managed --gmail-no-send "$@"
+}
+
+# Ask gog which command these arguments are, with nothing enabled: it parses
+# them (aliases resolved) and refuses by name, running nothing. If it doesn't
+# name a command (a usage error, --help), run the same way, so nothing runs.
+named=$("$gogbin" --home=/tmp/gog-home --access-token=proxy-managed --gmail-no-send \
+  --enable-commands-exact=none.none "$@" 2>&1 </dev/null || true)
+cmd=$(printf '%s\n' "$named" | sed -n 's/^command "\([a-z0-9_ -]*\)" is not enabled (set --enable-commands.*$/\1/p' \
+  | tail -n 1 | tr ' ' .)
+[ -n "$cmd" ] || run --enable-commands-exact=none.none "$@"
+
+rejects= forces= scans= scanfiles=
+while read -r kind pattern spec; do
+  case "$kind" in ''|'#'*) continue ;; esac
+  case "$cmd" in $pattern) ;; *) continue ;; esac
+  case "$kind" in
+    reject) rejects="$rejects $spec" ;;
+    force) forces="$forces $spec" ;;
+    scan) scans=1; scanfiles="$scanfiles $spec" ;;
+    *) die "unknown flag rule: $kind" ;;
+  esac
+done < "$rules"
+
+# A short flag (-f) is refused wherever its letter appears in a single-dash
+# argument, which also covers -fVALUE and bundles like -nf.
+for arg in "$@"; do
+  for flag in $rejects; do
+    case "$flag" in
+      --*) case "$arg" in
+             "$flag"|"$flag"=*) die "$flag is not available in $cmd: this tool keeps what it makes private and runs nothing" ;;
+           esac ;;
+      *) case "$arg" in
+           --*) ;;
+           -*"${flag#-}"*) die "$flag is not available in $cmd: this tool keeps what it makes private and runs nothing" ;;
+         esac ;;
+    esac
+  done
+done
+
+# force: the flag has the given value; any other value is refused, and a
+# missing flag is added.
+for spec in $forces; do
+  flag=${spec%%=*} value=${spec#*=} seen= pending=
+  for arg in "$@"; do
+    if [ -n "$pending" ]; then
+      [ "$arg" = "$value" ] || die "$flag is fixed to $value in $cmd"
+      pending=
+      continue
+    fi
+    case "$arg" in
+      "$flag") pending=1; seen=1 ;;
+      "$flag"=*) [ "${arg#*=}" = "$value" ] || die "$flag is fixed to $value in $cmd"; seen=1 ;;
+    esac
+  done
+  [ -z "$pending" ] || die "$flag needs a value"
+  [ -n "$seen" ] || set -- "$@" "$flag=$value"
+done
+
+# scan: no image markup, which Google would fetch from any URL the agent
+# picks. Files are copied into this job's own /tmp first and the copy is
+# checked and used, so the agent can't change a file after the check.
+if [ -n "$scans" ]; then
+  image='!\[|<img'
+  for arg in "$@"; do
+    if printf '%s' "$arg" | grep -qiE "$image"; then
+      die "image markup isn't allowed in $cmd content: Google would fetch the image from a URL the agent chooses"
+    fi
+  done
+  dir=$(mktemp -d /tmp/gog-input.XXXXXX)
+  count=$# n=0
+  while [ "$count" -gt 0 ]; do
+    arg=$1; shift; count=$((count - 1))
+    flag=${arg%%=*} value= attached=
+    case "$arg" in *=*) value=${arg#*=}; attached=1 ;; esac
+    match=
+    for f in $scanfiles; do [ "$flag" = "$f" ] && match=1; done
+    if [ -z "$match" ]; then set -- "$@" "$arg"; continue; fi
+    if [ -z "$attached" ]; then
+      [ "$count" -gt 0 ] || die "$arg needs a value"
+      value=$1; shift; count=$((count - 1))
+    fi
+    n=$((n + 1))
+    mkdir "$dir/$n"
+    if [ "$value" = - ]; then
+      name=stdin
+      cat > "$dir/$n/$name"
+    else
+      name=$(basename -- "$value")
+      cp -- "$value" "$dir/$n/$name" || die "can't read $value"
+    fi
+    if grep -qaiE "$image" "$dir/$n/$name"; then
+      die "image markup isn't allowed in $cmd content: Google would fetch the image from a URL the agent chooses"
+    fi
+    if [ -n "$attached" ]; then set -- "$@" "$flag=$dir/$n/$name"; else set -- "$@" "$flag" "$dir/$n/$name"; fi
+  done
+fi
+
+# gog reads stdin itself when no content is given, which would skip the scan:
+# in these commands stdin is only reachable as --file -, scanned above.
+[ -z "$scans" ] || exec </dev/null
+
+run --enable-commands-exact="$allowed" "$@"
