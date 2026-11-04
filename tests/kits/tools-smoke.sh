@@ -19,10 +19,10 @@ for cmd in "gmail send --to a@b.c --subject s --body b" "send --to a@b.c --subje
            "calendar create primary --summary s --from 2026-01-01T09:00:00Z --to 2026-01-01T10:00:00Z" "calendar update primary e1 --summary s" \
            "calendar working-location --from 2026-01-01 --to 2026-01-02 --type home" "calendar propose-time cal e1" \
            "drive share f1 --email a@b.c" "drive unshare f1 p1" "drive bulk remove-public --file f1" \
-           "drive delete f1" "gmail trash m1" "gmail batch delete m1" "calendar delete primary e1" "tasks delete l1 t1" "keep delete n1" \
-           "docs delete-tab d1 --tab t1" "docs clear d1" "sheets delete-tab s1 Tab" "sheets clear s1 A1:B2" "sheets batch-request s1 --requests-json []" \
-           "slides delete-slide p1 s1" "drive move f1 --parent p1" "drive sync push ./d --parent p1" "drive shortcut create f1 --parent p1" "forms publish f1" \
-           "slides create-from-markdown x.md" "drive comments delete f1 c1" "docs comments delete d1 c1" "drive comments update f1 c1 hi" \
+           "drive delete f1" "drive delete f1 --permanent" "gmail trash m1" "gmail batch delete m1" "calendar delete primary e1" "tasks delete l1 t1" "keep delete n1" \
+           \
+           "drive move f1 --parent p1" "drive sync push ./d --parent p1" "drive shortcut create f1 --parent p1" "forms publish f1" \
+           "slides create-from-markdown x.md" "drive comments delete f1 c1" "docs comments delete d1 c1" "sheets datasource delete s1 d1" "drive comments update f1 c1 hi" \
            "gmail settings filters create --from a@b.c --trash" "gmail filters create --from a@b.c --trash" "gmail settings forwarding create a@b.c" \
            "gmail settings delegates add a@b.c" "gmail settings sendas update a@b.c" "gmail settings vacation update --enable" \
            "auth list" "auth tokens export a@b.c" "login a@b.c" "config set x y" "admin users list" "backup push" "batch end b1" \
@@ -35,6 +35,9 @@ done
 # rules (and then fails only on the network or its own arguments).
 for cmd in "gmail search newer_than:1d --max 1" "gmail drafts create --to a@b.c --subject s --body b" "gmail settings filters list" \
            "calendar events --max 1" "drive ls" "drive upload ./x" "drive mkdir d" "drive rename f1 n" \
+           "docs delete-tab d1 --tab t1" "docs clear d1" "docs delete d1 --at x" "docs table-row delete d1 --row 1" \
+           "sheets delete-tab s1 Tab" "sheets clear s1 A1:B2" "sheets delete-dimension s1 Sheet1 --dimension ROWS --start 1 --end 2" \
+           "slides delete-slide p1 s1" "slides element delete p1 o1" "forms delete-question f1 0" \
            "docs create t" "docs write d1 --text x" "docs write d1 --markdown --append --text ![a](https://example.com/a.png)" "docs sed d1 s/a/b/" \
            "docs tabs rename d1 --tab t --title n" "docs add-tab d1 --title t" "docs rename-tab d1 --tab t --title n" \
            "sheets create t" "sheets update s1 A1 x" "sheets append s1 A1 x" "sheets append s1 A1 =IMAGE(\"https://example.com\") --input USER_ENTERED" \
@@ -77,6 +80,27 @@ gog docs comments reply d1 c1 "thanks @bob" | grep -q "isn't allowed in" || fail
 gog drive comments create f1 "cc cc@example.com" | grep -q "isn't allowed in" || fail "email accepted in a file comment"
 gog drive comments reply f1 c1 "thanks +bob@example.com" | grep -q "isn't allowed in" || fail "+email accepted in a file reply"
 gog docs comments add d1 "plain comment, no mention" | grep -qE "isn.t allowed in|is not (enabled|available)" && fail "plain comment refused"
+
+# Raw Sheets batchUpdate requests edit inside the spreadsheet: adding a sheet is allowed
+# (inline, from a file, and from stdin), data-source and comment requests are not.
+add='[{"addSheet":{"properties":{"title":"Notes"}}}]'
+work=$(mktemp -d)
+chmod 755 "$work"  # mktemp makes it 0700; the container's user must read it
+trap 'rm -rf "$work"' EXIT
+printf '%s' "$add" > "$work/add.json"
+printf '[{"addDataSource":{"dataSource":{}}}]' > "$work/data-source.json"
+chmod a+r "$work"/*.json
+gogv() { docker run --rm -i --network none -v "$work:/work" -w /work "$image" gog "$@" 2>&1 || true; }
+gog -n --json sheets batch-request s1 --requests-json "$add" | grep -q '"op": "sheets.batch-request"' || fail "batch-request refused"
+gogv -n --json sheets batch-request s1 --requests-json @add.json </dev/null | grep -q '"op": "sheets.batch-request"' || fail "batch-request @file refused"
+printf '%s' "$add" | gogv -n --json sheets batch-request s1 --requests-json @- | grep -q '"op": "sheets.batch-request"' || fail "batch-request @- refused"
+gog sheets batch-request s1 --requests-json "$add" --force | grep -qE "is not enabled|reaches outside" && fail "batch-request refused when applied"
+for bad in '[{"addDataSource":{}}]' '[{"refreshDataSource":{}}]' '[{"add_data_source":{}}]' '[{"insertComment":{}}]' '[{"deleteComment":{}}]' \
+           '[{"addSheet":{"x":[{"insert\u0043omment":1}]}}]' '[{"updateCells":{"rows":[{"values":[{"dataSourceTable":{}}]}]}}]'; do
+  gog -n --json sheets batch-request s1 --requests-json "$bad" | grep -q "reaches outside" || fail "request accepted: $bad"
+done
+gogv -n --json sheets batch-request s1 --requests-json @data-source.json </dev/null | grep -q "reaches outside" || fail "data-source request accepted from a file"
+printf '%s' '[{"addDataSource":{}}]' | gogv -n --json sheets batch-request s1 --requests-json=@- | grep -q "reaches outside" || fail "data-source request accepted from stdin"
 
 # Stdin is still the agent's to give: gog reads it itself when no content is given.
 out=$(printf '%s' 'from stdin' | docker run --rm -i --network none "$image" gog -n docs insert d1 2>&1 || true)

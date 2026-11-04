@@ -8,7 +8,7 @@ The agent never sees it, and can't use it any other way.
 
 | Command | What it does |
 |---|---|
-| `gog` | Google Workspace through [gog](https://github.com/steipete/gogcli): read Gmail, Drive, Docs, Sheets, Slides, Calendar and more; create, edit and comment on documents, sheets, decks and forms it created, and create Gmail drafts and tasks. Everything else is read-only: it cannot send or notify anyone, share or publish, delete files, or run code. |
+| `gog` | Google Workspace through [gog](https://github.com/steipete/gogcli): read Gmail, Drive, Docs, Sheets, Slides, Calendar and more; create, edit and comment on documents, sheets, decks and forms it created, and create Gmail drafts and tasks. Everything else is read-only: it cannot send or notify anyone, share or publish, delete or trash files, or run code. |
 | `bamboohr` | Read-only BambooHR directory: find people, reporting chains, org trees. |
 
 Both commands come from the same image, so marsh runs them in one VM. The
@@ -116,13 +116,13 @@ so it keeps the network policy, credentials and home declaration.
 read everything else.** Google's `drive.file` scope enforces "created by the
 agent" (see the credential note above). Within that, the agent can do useful
 things: formulas, Markdown and HTML images by URL, find and replace, copy and
-paste in a sheet, HTML drafts. The policy does not try to stop the agent from
+paste in a sheet, deleting content, HTML drafts. The policy does not try to stop the agent from
 sending data to a URL, because the agent can already reach arbitrary URLs
 through its own web tools.
 
 What it must never do with your Google credentials is **send or notify**
-anyone, **share or publish** anything, **delete** your files, change your
-**account**, or **run code**.
+anyone, **share or publish** anything, **delete or trash** a file or anything
+outside one, change your **account**, or **run code**.
 
 ### The policy
 
@@ -143,7 +143,20 @@ still break the model.
 - Editing the content, tabs, sheets, slides, tables and formatting of those
   files: write, update, append, insert, replace, `sed`, find and replace, copy
   and paste, with formulas, Markdown and HTML images by URL, and Drive's own
-  conversions.
+  conversions. Any edit includes deleting content: text ranges, `clear`, rows,
+  columns, tabs, slides, page elements, charts, named ranges, headers and
+  footers, form questions (`docs delete`, `sheets delete-tab`,
+  `slides delete-slide`, ...). Only the file itself stays out of reach.
+- Raw Sheets `batchUpdate` requests (`sheets batch-request`): they edit inside
+  the spreadsheet, and Google only lets the token edit one the agent created.
+  No request type can share a file, delete the file (`deleteSheet` removes a
+  tab, never the last one) or open another file. Two groups do reach beyond the
+  sheet, so the wrapper reads the JSON (inline, `@file` or stdin, all
+  decoded as Google reads them) and refuses any request type or field naming a
+  data source (`addDataSource`, `refreshDataSource`, `dataSourceTable`, ...:
+  external BigQuery data, billed to you) or a comment (`insertComment`,
+  `addCommentReply`, `deleteComment`, ...: they can @-mention, and comments are
+  handled by the comment commands).
 - Comments on those files (Docs, Sheets, Slides and Drive): create, reply,
   resolve, reopen. Comment text containing `@` is refused, because an
   @-mention or `+email` makes Google email that person.
@@ -166,10 +179,11 @@ still break the model.
   `docs replace-image`, `slides insert-image`, `slides add-slide`,
   `slides replace-slide`): gog makes the file public so Docs or Slides can
   fetch it. Images by URL in Markdown or HTML are fine.
-- Deleting, trashing, clearing or removing files, text ranges, rows, columns,
-  tabs, slides and elements, and editing or deleting comments. To remove
-  content from a file the agent made, overwrite it with `write`, `update` or
-  `edit`.
+- Deleting or trashing a file (`drive delete`, with or without `--permanent`),
+  and deleting anything outside a file: mail (`gmail trash`, `gmail batch
+  delete`), calendar events, contacts, tasks, Keep notes, comments (editing or
+  deleting one), data sources, watches. Deleting *content inside* a file the
+  agent created is an ordinary edit and is allowed (below).
 - Changing the account: Gmail settings, filters, forwarding, delegation,
   send-as, vacation, labels and mailbox state; contacts, Keep, Meet, YouTube
   and Photos changes.
@@ -199,9 +213,9 @@ still break the model.
   command in the built image's gog (hidden ones too) and fails unless allowed
   plus refused equals that list exactly. It also checks that each rule names a
   real flag (every spelling of it), that the built wrapper enforces it, that
-  gog has no program-running flag and no allowed command with a destination flag
-  or comment text that a rule doesn't cover, and that the image's gog is the
-  version the Dockerfile pins.
+  gog has no program-running flag and no allowed command with a destination
+  flag, comment text or raw request JSON that a rule doesn't cover, and that
+  the image's gog is the version the Dockerfile pins.
 - **Upgrading gog is a reviewed change.** Edit `GOG_VERSION` and `GOG_SHA256` in
   the Dockerfile (the checksum comes from the release's `checksums.txt`), then
   run the smoke test. It fails until every new command is allowed or refused and

@@ -10,8 +10,8 @@ Usage: tests/kits/tools-policy.py IMAGE
    that adds a command forces a decision.
 2. Every rule in flag-rules names a real flag, and the built wrapper enforces it.
 3. gog has no flag that runs or opens a program, no flag of an allowed command
-   that picks a destination, and no allowed command that writes a comment,
-   unless flag-rules covers it.
+   that picks a destination, no allowed command that writes a comment, and no
+   allowed command that takes raw request JSON, unless flag-rules covers it.
 """
 import fnmatch
 import json
@@ -21,10 +21,21 @@ import subprocess
 import sys
 
 root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "kits", "marsh-tools", "gog")
-# Words that mean a command sends, shares or deletes; never allowed, whatever the list says.
+# Words that mean a command sends, shares or deletes a file or anything outside
+# one; never allowed, whatever the list says. Inside the agent's own Docs,
+# Sheets, Slides and Forms files any edit is allowed, deleting content included,
+# so those four only forbid what leaves the file.
 forbidden = re.compile(r"(^|-)(send|share|unshare|delete|trash|remove|clear|publish|respond)(-|$)")
+leaves_the_file = re.compile(r"(^|-)(send|share|unshare|trash|publish|respond)(-|$)")
+in_file_services = {"docs", "sheets", "slides", "forms"}
 refused_services = {"admin", "auth", "config", "backup", "batch", "api", "zoom", "mcp", "login", "logout", "status", "update", "send"}
-never_allowed = {"drive.move", "calendar.move", "calendar.create", "calendar.update", "slides.create-from-markdown"}
+never_allowed = {
+    "drive.move", "drive.delete", "calendar.move", "calendar.create", "calendar.update", "slides.create-from-markdown",
+    # Comments are not file content, data sources reach outside, watches are webhooks.
+    "docs.comments.delete", "docs.comments.update", "docs.comments.poll", "drive.comments.delete", "drive.comments.update",
+    "sheets.datasource.add", "sheets.datasource.delete", "sheets.datasource.update", "sheets.datasource.refresh",
+    "forms.watch.create", "forms.watch.delete", "forms.watch.renew",
+}
 
 
 def lines(name):
@@ -138,13 +149,14 @@ def main():
     for c in allowed:
         if not re.fullmatch(r"[a-z0-9.-]+", c):
             problems.append(f"allowed command the wrapper would reject: {c}")
-        if (c.split(".")[0] in refused_services or c in never_allowed
-                or any(forbidden.search(seg) for seg in c.split("."))):
+        service = c.split(".")[0]
+        leaves = leaves_the_file if service in in_file_services else forbidden
+        if service in refused_services or c in never_allowed or any(leaves.search(seg) for seg in c.split(".")):
             problems.append(f"allowed command breaks the policy: {c}")
 
     # 2. Rules name real flags, and the wrapper enforces each one.
     for kind, pattern, spec in rules:
-        if kind not in ("reject", "force", "nomention"):
+        if kind not in ("reject", "force", "nomention", "json"):
             problems.append(f"unknown rule kind: {kind}")
             continue
         targets = [p for p in actual if fnmatch.fnmatchcase(p, pattern) and (p in allowed or pattern == "*")]
@@ -159,7 +171,17 @@ def main():
                 if "isn't allowed in" not in out:
                     problems.append(f"the wrapper doesn't enforce 'nomention {pattern}' ({' '.join(words)}): {out.strip()[:120]}")
             continue
+        if kind == "json":
+            for p in targets:
+                for flag in spec:
+                    words = [w for w in sample_args(p, actual[p], globals_) if not w.startswith(flag + "=")]
+                    for bad in ('[{"addDataSource":{}}]', '[{"insert_comment":{}}]', '[{"addSheet":{"x":[{"delete\\u0043omment":1}]}}]'):
+                        out = wrapper(image, words + [flag, bad])
+                        if "reaches outside" not in out:
+                            problems.append(f"the wrapper doesn't enforce 'json {pattern} {flag}' against {bad}: {out.strip()[:120]}")
         for s in spec:
+            if kind == "json":
+                break
             flag, _, value = s.partition("=")
             having = [p for p in targets if any(flag in spellings(f) for f in flags_of(actual[p], globals_))]
             if not having:
@@ -207,6 +229,11 @@ def main():
                 if not covered(rules, p, name, kinds):
                     problems.append(f"allowed command has a flag for {what} that flag-rules doesn't cover: {p} --{name}")
 
+    for p in allowed:
+        for f in flags_of(actual.get(p, {}), globals_):
+            if f["name"] == "requests-json" and not any(
+                    k == "json" and fnmatch.fnmatchcase(p, pt) and "--requests-json" in sp for k, pt, sp in rules):
+                problems.append(f"allowed command takes raw request JSON without a json rule: {p}")
     for p in allowed:
         parts = p.split(".")
         if "comments" in parts and parts[-1] in ("add", "create", "reply", "resolve", "reopen", "update"):

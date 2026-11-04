@@ -155,6 +155,20 @@ check).
 
 This happens even with automatic updates off. See [Upgrade](install.md#upgrade).
 
+Two images are retired: `docker.io/mcavage/marsh-gog` and
+`docker.io/mcavage/marsh-bamboohr` are no longer built, because `gog` and
+`bamboohr` now come from one Kit, `docker.io/mcavage/marsh-tools`. When the
+daemon starts, a command installed from either repository (from a tag, or from
+a digest of it) moves to `docker.io/mcavage/marsh-tools:stable` under the same
+name and follows that tag from then on. It is an update's switch: the new
+image's VM is prepared first, new jobs use it at once, and running jobs finish
+on the old VM, which is removed when it goes idle. `marsh status` says so once,
+under the Kit updates (`gog and bamboohr moved to marsh-tools`). A command from
+any other repository stays, whatever its tag or digest. A move that fails (an
+unreachable registry, say) changes nothing and is retried every ten minutes.
+This happens even with automatic updates off, since those repositories get no
+updates.
+
 ### Changes while jobs run
 
 A Kit change never waits for running work and never stops it. An update,

@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""Refuse Sheets batchUpdate requests that reach outside the spreadsheet.
+
+Usage: check-json FILE
+
+FILE is the JSON the agent gave `sheets batch-request`. Every other request
+type edits inside the spreadsheet, and Google only lets the token edit files the
+agent created. These do not stay inside it: data sources (BigQuery and other
+external data, billed to the user) and comments (they can @-mention, which
+emails people, and deleting one is refused everywhere else). Keys are compared
+as Google reads them: JSON escapes decoded, snake_case and camelCase alike, any
+case, at any depth, repeated keys included.
+"""
+import json
+import re
+import sys
+
+LIMIT = 16 * 1024 * 1024
+DENIED = re.compile(r"datasource|comment")
+
+
+def main():
+    path = sys.argv[1]
+    with open(path, "rb") as handle:
+        data = handle.read(LIMIT + 1)
+    if len(data) > LIMIT:
+        sys.exit("request JSON is too large")
+    found = []
+
+    def keys(pairs):
+        for key, _ in pairs:
+            if DENIED.search(re.sub(r"[^a-z0-9]", "", key.lower())):
+                found.append(key)
+        return dict(pairs)
+
+    try:
+        json.loads(data.decode("utf-8"), object_pairs_hook=keys)
+    except (ValueError, RecursionError) as error:
+        sys.exit(f"request JSON can't be read: {error}")
+    if found:
+        sys.exit(
+            "request type " + ", ".join(sorted(set(found)))
+            + " reaches outside the spreadsheet (data sources and comments)"
+        )
+
+
+main()

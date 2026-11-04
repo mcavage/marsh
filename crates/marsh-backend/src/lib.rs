@@ -151,6 +151,8 @@ pub struct StockDaemonBackend {
     /// When the next look for packaged commands an update left behind the
     /// Kits this marsh ships is due (unix ms; `u64::MAX` once done).
     shipped_due_ms: std::sync::atomic::AtomicU64,
+    /// When `move_retired_kits` runs next (0: at once).
+    retired_due_ms: std::sync::atomic::AtomicU64,
     /// VM garbage collection (`vm_gc.rs`): last uses noted this run, the
     /// record's lock, one pass at a time, and when the next pass is due.
     vm_used: Mutex<BTreeMap<String, u64>>,
@@ -494,6 +496,7 @@ impl StockDaemonBackend {
             auto_update: None,
             kit_updates: Mutex::new(()),
             shipped_due_ms: std::sync::atomic::AtomicU64::new(0),
+            retired_due_ms: std::sync::atomic::AtomicU64::new(0),
             vm_used: Mutex::new(BTreeMap::new()),
             vm_gc_lock: Mutex::new(()),
             vm_gc_pass: Mutex::new(()),
@@ -1367,6 +1370,7 @@ impl DaemonBackend for StockDaemonBackend {
         self.sbx.release_deferred_session_pins();
         self.recover_quarantined(store);
         self.bring_shipped_kits(store, unix_millis(SystemTime::now()));
+        self.move_retired_kits(store, unix_millis(SystemTime::now()));
         self.auto_update_pass(store, unix_millis(SystemTime::now()));
         self.gc_pass(store, unix_millis(SystemTime::now()));
     }
@@ -4619,10 +4623,193 @@ impl StockDaemonBackend {
             from: current.to_owned(),
             to: packaged.workload.identity().to_owned(),
             notified: from_version.is_some() && from_version == to_version,
+            note: None,
             from_version,
             to_version,
             unix_ms: unix_millis(SystemTime::now()),
         }))
+    }
+
+    /// Commands installed from a repository marsh no longer builds
+    /// (`builtin_kits::RETIRED_KIT_REPOSITORIES`): by a tag recorded in
+    /// `kit-sources.json`, or, with no tag recorded, by a digest of that
+    /// repository. A tag or digest of any other repository stays, and so does
+    /// a name whose recorded tag is another repository's.
+    fn retired_kit_commands(&self) -> Vec<String> {
+        let retired = marsh_contracts::builtin_kits::RETIRED_KIT_REPOSITORIES;
+        let sources = kit_lifecycle::read_sources(&self.config.control_home).unwrap_or_default();
+        let mut found = self
+            .command_names()
+            .into_iter()
+            .filter(|name| !self.packaged.contains_key(name))
+            .filter_map(|name| {
+                let repository = match sources.get(&name) {
+                    Some(tag) => tag.repository().to_owned(),
+                    None => self
+                        .registered_kit(&name)
+                        .ok()?
+                        .workload
+                        .workload_image()?
+                        .as_str()
+                        .rsplit_once('@')?
+                        .0
+                        .to_owned(),
+                };
+                let rank = retired.iter().position(|known| *known == repository)?;
+                Some((rank, name))
+            })
+            .collect::<Vec<_>>();
+        // In the order the repositories are listed (gog, then bamboohr), so
+        // the one-line notice reads the same everywhere.
+        found.sort();
+        found.into_iter().map(|(_, name)| name).collect()
+    }
+
+    /// Moves each command installed from a retired repository (`gog` from
+    /// `marsh-gog`, `bamboohr` from `marsh-bamboohr`) to
+    /// `docker.io/mcavage/marsh-tools:stable`, which now serves both under the
+    /// same names, and records the tag so it follows updates from there. A
+    /// move is an update's switch: the new image's VM is prepared first, new
+    /// jobs use it at once, and running jobs finish on the old VM, which is
+    /// removed when it goes idle. Runs once per daemon start, and again every
+    /// ten minutes after a failure (an offline registry, say); never touches
+    /// a command from another repository; runs even with automatic updates
+    /// off, since the old repositories no longer receive any.
+    fn move_retired_kits(&self, store: &DaemonStore, now_ms: u64) {
+        const RETRY_MS: u64 = 10 * 60 * 1000;
+        const RECHECK_MS: u64 = 60 * 60 * 1000;
+        let due = &self.retired_due_ms;
+        if now_ms < due.load(std::sync::atomic::Ordering::Acquire) || store.lifecycle_active() {
+            return;
+        }
+        if self.sbx.removed_executable().is_some() {
+            due.store(u64::MAX, std::sync::atomic::Ordering::Release);
+            return;
+        }
+        let names = self.retired_kit_commands();
+        if names.is_empty() {
+            due.store(
+                now_ms.saturating_add(RECHECK_MS),
+                std::sync::atomic::Ordering::Release,
+            );
+            return;
+        }
+        let (moved, failed) = match self.move_to_tools(&names, store) {
+            Ok(moved) => (moved, false),
+            Err((moved, error)) => {
+                eprintln!(
+                    "marshd: cannot move {} to marsh-tools: {error}",
+                    names.join(", ")
+                );
+                (moved, true)
+            }
+        };
+        due.store(
+            if failed {
+                now_ms.saturating_add(RETRY_MS)
+            } else {
+                now_ms.saturating_add(RECHECK_MS)
+            },
+            std::sync::atomic::Ordering::Release,
+        );
+        if moved.is_empty() {
+            return;
+        }
+        let note = format!(
+            "{} moved to marsh-tools",
+            match moved.as_slice() {
+                [only] => only.command.clone(),
+                [rest @ .., last] => format!(
+                    "{} and {}",
+                    rest.iter()
+                        .map(|update| update.command.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    last.command
+                ),
+                [] => String::new(),
+            }
+        );
+        self.update_kit_record(|record| {
+            for mut update in moved {
+                update.note = Some(note.clone());
+                record.record_update(update);
+            }
+        });
+    }
+
+    /// The moves of `move_retired_kits`: what moved, and why the rest did not.
+    fn move_to_tools(
+        &self,
+        names: &[String],
+        store: &DaemonStore,
+    ) -> Result<Vec<KitUpdateRecord>, (Vec<KitUpdateRecord>, DaemonError)> {
+        let nothing = |error: DaemonError| (Vec::new(), error);
+        let tag = KitTag::parse(marsh_contracts::builtin_kits::RETIRED_KITS_MOVED_TO)
+            .map_err(|error| nothing(backend_error(error)))?;
+        let image = self
+            .sbx
+            .resolve_kit_tag(&tag)
+            .map_err(|error| nothing(backend_error(error)))?;
+        let contract = self
+            .sbx
+            .kit_contract(&image)
+            .map_err(|error| nothing(backend_error(error)))?;
+        check_contract(contract, false)
+            .map_err(|reason| nothing(DaemonError::InvalidState(reason)))?;
+        // One VM serves every moved command; prepare it before any switch.
+        let workload =
+            NativeKitRef::immutable_oci(image.as_str()).map_err(|e| nothing(backend_error(e)))?;
+        let spec = self.kit_spec_for_workload(workload).map_err(nothing)?;
+        let vm = self
+            .prepare_one_with_progress(&spec, store, |_| Ok(()))
+            .map_err(nothing)?;
+        self.register_worker(store, &vm).map_err(nothing)?;
+        let version = |reference: &str| {
+            OciImage::parse(reference)
+                .ok()
+                .and_then(|image| self.sbx.kit_version(&image).ok().flatten())
+        };
+        let to_version = version(image.as_str());
+        let mut moved = Vec::new();
+        for command in names {
+            let result = (|| {
+                let _admission = store
+                    .begin_background_request(format!("the move of {command} to marsh-tools"))?;
+                let _install = self
+                    .registry_install
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                // Changed (or removed) since the list was made: leave it.
+                if !self.retired_kit_commands().contains(command) {
+                    return Ok(None);
+                }
+                let current = self.registered_kit(command)?;
+                let from = current.workload.identity().to_owned();
+                let from_version = version(&from);
+                self.apply_upgrade(command, &current, &image, store)
+                    .map_err(|UpgradeFailure::Failed(error)| error)?;
+                let mut sources = kit_lifecycle::read_sources(&self.config.control_home)?;
+                sources.insert(command.clone(), tag.clone());
+                kit_lifecycle::write_sources(&self.config.control_home, &sources)?;
+                Ok::<_, DaemonError>(Some(KitUpdateRecord {
+                    command: command.clone(),
+                    from,
+                    to: image.as_str().to_owned(),
+                    notified: true,
+                    from_version,
+                    to_version: to_version.clone(),
+                    unix_ms: unix_millis(SystemTime::now()),
+                    note: None,
+                }))
+            })();
+            match result {
+                Ok(Some(update)) => moved.push(update),
+                Ok(None) => {}
+                Err(error) => return Err((moved, error)),
+            }
+        }
+        Ok(moved)
     }
 
     /// Read, change and write `kit-updates.json` under its lock. A write
@@ -4863,6 +5050,7 @@ impl StockDaemonBackend {
                     to: image.as_str().to_owned(),
                     // A rebuild that names the same version is not worth a notice.
                     notified: from_version.is_some() && from_version == to_version,
+                    note: None,
                     from_version,
                     to_version,
                     unix_ms: unix_millis(SystemTime::now()),
@@ -8034,6 +8222,161 @@ mod kit_lifecycle_callers {
         assert_eq!(registry.calls("kit"), 1);
     }
 
+    const GOG_OLD: &str = "docker.io/mcavage/marsh-gog@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const BAMBOO_OLD: &str = "docker.io/mcavage/marsh-bamboohr@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const TOOLS: &str = "docker.io/mcavage/marsh-tools@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+    const NEARLY: &str = "docker.io/mcavage/marsh-gog-extra@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+
+    /// A home as an older marsh left it: `gog` installed from the tag
+    /// `marsh-gog:stable`, `bamboohr` by the digest of its retired image, and
+    /// commands that are not from a retired repository: `pix` (another tag),
+    /// `tools` (already `marsh-tools`), `nearly` (a repository that merely
+    /// starts like a retired one).
+    fn retired_daemon(home: &Path, registry: &Arc<Registry>) -> StockDaemonBackend {
+        let installed = [
+            ("gog", GOG_OLD),
+            ("bamboohr", BAMBOO_OLD),
+            ("pix", OLD),
+            ("tools", TOOLS),
+            ("nearly", NEARLY),
+        ];
+        let commands: BTreeMap<String, RegisteredKit> = installed
+            .iter()
+            .map(|(name, reference)| ((*name).to_owned(), kit(reference)))
+            .collect();
+        let template = tests::backend_for_kit_identity(home, commands.clone());
+        fs::create_dir_all(&template.config.control_home).unwrap();
+        fs::write(
+            template.config.control_home.join("commands.json"),
+            serde_json::to_vec(&BTreeMap::from(installed)).unwrap(),
+        )
+        .unwrap();
+        kit_lifecycle::write_sources(
+            &template.config.control_home,
+            &BTreeMap::from([
+                (
+                    "gog".to_owned(),
+                    KitTag::parse("docker.io/mcavage/marsh-gog:stable").unwrap(),
+                ),
+                ("pix".to_owned(), pix_tag()),
+                (
+                    "tools".to_owned(),
+                    KitTag::parse("docker.io/mcavage/marsh-tools:stable").unwrap(),
+                ),
+            ]),
+        )
+        .unwrap();
+        StockDaemonBackend::new(
+            Arc::new(StockSbx::new("sbx", registry.clone())),
+            commands,
+            template.config,
+        )
+    }
+
+    #[test]
+    fn only_commands_of_the_retired_repositories_are_moved_to_marsh_tools() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(TOOLS, Some(1));
+        let backend = retired_daemon(home.path(), &registry);
+        // By tag (`gog`) or by digest of the retired repository (`bamboohr`);
+        // another tag, marsh-tools itself and a lookalike repository stay.
+        assert_eq!(backend.retired_kit_commands(), ["gog", "bamboohr"]);
+        // A name whose recorded tag is another repository's is theirs, even
+        // when its digest is a retired image's.
+        kit_lifecycle::write_sources(
+            &backend.config.control_home,
+            &BTreeMap::from([("gog".to_owned(), pix_tag())]),
+        )
+        .unwrap();
+        assert_eq!(backend.retired_kit_commands(), ["bamboohr"]);
+
+        // The tag marsh-tools:stable is resolved once, then the VM that will
+        // serve both commands is prepared; a registry or VM failure changes
+        // nothing and is retried in ten minutes. (This fake sbx cannot create
+        // a VM; the move itself runs in `tests/acceptance/kit_retired_live.py`.)
+        let home = tempfile::tempdir().unwrap();
+        let backend = retired_daemon(home.path(), &registry);
+        let store = DaemonStore::new(home.path());
+        let (before, sources) = (
+            overlay(&backend),
+            kit_lifecycle::read_sources(&backend.config.control_home).unwrap(),
+        );
+        backend.move_retired_kits(&store, DAY);
+        assert!(
+            registry.runs.lock().unwrap().iter().any(|argv| argv
+                .iter()
+                .any(|a| a == "docker.io/mcavage/marsh-tools:stable")),
+            "marsh-tools:stable is resolved"
+        );
+        assert!(registry.calls("sbx") > 0, "its VM is prepared first");
+        assert_eq!(overlay(&backend), before);
+        assert_eq!(
+            kit_lifecycle::read_sources(&backend.config.control_home).unwrap(),
+            sources
+        );
+        assert_eq!(
+            backend.registered_kit("gog").unwrap().workload.identity(),
+            GOG_OLD
+        );
+        assert_eq!(
+            backend
+                .registered_kit("bamboohr")
+                .unwrap()
+                .workload
+                .identity(),
+            BAMBOO_OLD
+        );
+        assert_eq!(
+            kit_auto_update::read(&backend.config.control_home).recent,
+            [] as [KitUpdateRecord; 0]
+        );
+        assert_eq!(
+            backend
+                .retired_due_ms
+                .load(std::sync::atomic::Ordering::Acquire),
+            DAY + 10 * 60 * 1000
+        );
+        // Not again before the retry is due.
+        let asked = registry.runs.lock().unwrap().len();
+        backend.move_retired_kits(&store, DAY + 60_000);
+        assert_eq!(registry.runs.lock().unwrap().len(), asked);
+
+        // An image that needs a newer marsh is refused, like an update's.
+        let home = tempfile::tempdir().unwrap();
+        *registry.contract.lock().unwrap() = Some(SUPPORTED_CONTRACT_PLUS_ONE);
+        let backend = retired_daemon(home.path(), &registry);
+        let runs = registry.runs.lock().unwrap().len();
+        backend.move_retired_kits(&DaemonStore::new(home.path()), DAY);
+        let after = registry.runs.lock().unwrap()[runs..].to_vec();
+        assert!(
+            after
+                .iter()
+                .all(|argv| argv.iter().any(|a| a == "inspect" || a == "imagetools")),
+            "only the tag and its contract are read, no VM is prepared: {after:?}"
+        );
+        assert_eq!(
+            backend.registered_kit("gog").unwrap().workload.identity(),
+            GOG_OLD
+        );
+    }
+
+    #[test]
+    fn a_home_with_nothing_retired_never_asks_the_registry() {
+        let home = tempfile::tempdir().unwrap();
+        let registry = Registry::new(TOOLS, Some(1));
+        let backend = daemon(home.path(), &registry, None, None);
+        assert_eq!(backend.retired_kit_commands(), [] as [String; 0]);
+        backend.move_retired_kits(&DaemonStore::new(home.path()), DAY);
+        assert!(registry.runs.lock().unwrap().is_empty());
+        // Looked at again within the hour.
+        assert_eq!(
+            backend
+                .retired_due_ms
+                .load(std::sync::atomic::Ordering::Acquire),
+            DAY + HOUR
+        );
+    }
+
     /// A dev build: `pi` ships as the source Kit `kits/marsh-pi`; an earlier
     /// release's update pinned it to a published `marsh-pi` image.
     fn dev_daemon(home: &Path, registry: &Arc<Registry>, pi: &str) -> StockDaemonBackend {
@@ -8670,6 +9013,7 @@ mod kit_lifecycle_callers {
             to_version: Some("1.1.0".into()),
             unix_ms: 1,
             notified: false,
+            note: None,
         });
         kit_auto_update::write(&plain.config.control_home, &record).unwrap();
         let backend = automatic(plain, home.path(), None);
