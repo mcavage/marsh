@@ -12,6 +12,18 @@ pub const BUILTIN_KITS: &[(&str, &str)] = &[
 /// `docker.io/mcavage/marsh-claude`.
 pub const PACKAGED_REPOSITORY_PREFIX: &str = "docker.io/mcavage/";
 
+/// Repositories marsh stopped building (#220): their commands, `gog` and
+/// `bamboohr`, moved to [`RETIRED_KITS_MOVED_TO`]. A home that still has a
+/// command installed from one of them is moved there automatically.
+pub const RETIRED_KIT_REPOSITORIES: &[&str] = &[
+    "docker.io/mcavage/marsh-bamboohr",
+    "docker.io/mcavage/marsh-gog",
+];
+
+/// The tag the commands of [`RETIRED_KIT_REPOSITORIES`] move to, and the name
+/// `marsh status` gives it.
+pub const RETIRED_KITS_MOVED_TO: &str = "docker.io/mcavage/marsh-tools:stable";
+
 /// The tag a known Kit name installs from.
 #[must_use]
 pub fn reference(name: &str) -> Option<&'static str> {

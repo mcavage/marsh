@@ -162,11 +162,13 @@ docs.update
 docs.write
 
 # Sheets: read; create spreadsheets; edit values (formulas included), tabs,
-#   ranges and formatting
+#   ranges and formatting, and raw batchUpdate requests (the wrapper rejects
+#   data-source and comment requests)
 sheets.add-tab
 sheets.append
 sheets.banding.list
 sheets.banding.set
+sheets.batch-request
 sheets.batch-update
 sheets.chart.create
 sheets.chart.get

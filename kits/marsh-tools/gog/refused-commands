@@ -128,10 +128,8 @@ docs.table-column.delete
 docs.table-row.delete
 docs.tabs.delete
 
-# Sheets: delete and clear; arbitrary batch-request; Connected Sheets data
-#   sources (BigQuery)
+# Sheets: delete and clear; Connected Sheets data sources (BigQuery)
 sheets.banding.clear
-sheets.batch-request
 sheets.chart.delete
 sheets.clear
 sheets.conditional-format.clear

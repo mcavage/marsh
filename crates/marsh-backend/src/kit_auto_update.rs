@@ -166,6 +166,7 @@ mod tests {
             to_version: to.map(str::to_owned),
             unix_ms: 1,
             notified: false,
+            note: None,
         }
     }
 

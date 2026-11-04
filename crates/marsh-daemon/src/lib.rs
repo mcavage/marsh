@@ -1841,6 +1841,10 @@ pub struct KitUpdateRecord {
     /// The one-line notice was shown.
     #[serde(default)]
     pub notified: bool,
+    /// What `marsh status` says instead of "updated (from → to)": a move
+    /// between repositories, such as `gog and bamboohr moved to marsh-tools`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 impl KitUpdateRecord {
@@ -1848,6 +1852,9 @@ impl KitUpdateRecord {
     /// versions are unknown or equal.
     #[must_use]
     pub fn describe(&self) -> String {
+        if let Some(note) = &self.note {
+            return note.clone();
+        }
         let short = |reference: &str| {
             reference.rsplit_once("@sha256:").map_or_else(
                 || reference.to_owned(),

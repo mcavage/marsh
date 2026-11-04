@@ -144,6 +144,16 @@ still break the model.
   files: write, update, append, insert, replace, `sed`, find and replace, copy
   and paste, with formulas, Markdown and HTML images by URL, and Drive's own
   conversions.
+- Raw Sheets `batchUpdate` requests (`sheets batch-request`): they edit inside
+  the spreadsheet, and Google only lets the token edit one the agent created.
+  No request type can share a file, delete the file (`deleteSheet` removes a
+  tab, never the last one) or open another file. Two groups do reach beyond the
+  sheet, so the wrapper reads the JSON (inline, `@file` or stdin, all
+  decoded as Google reads them) and refuses any request type or field naming a
+  data source (`addDataSource`, `refreshDataSource`, `dataSourceTable`, ...:
+  external BigQuery data, billed to you) or a comment (`insertComment`,
+  `addCommentReply`, `deleteComment`, ...: they can @-mention, and comments are
+  handled by the comment commands).
 - Comments on those files (Docs, Sheets, Slides and Drive): create, reply,
   resolve, reopen. Comment text containing `@` is refused, because an
   @-mention or `+email` makes Google email that person.
@@ -199,9 +209,9 @@ still break the model.
   command in the built image's gog (hidden ones too) and fails unless allowed
   plus refused equals that list exactly. It also checks that each rule names a
   real flag (every spelling of it), that the built wrapper enforces it, that
-  gog has no program-running flag and no allowed command with a destination flag
-  or comment text that a rule doesn't cover, and that the image's gog is the
-  version the Dockerfile pins.
+  gog has no program-running flag and no allowed command with a destination
+  flag, comment text or raw request JSON that a rule doesn't cover, and that
+  the image's gog is the version the Dockerfile pins.
 - **Upgrading gog is a reviewed change.** Edit `GOG_VERSION` and `GOG_SHA256` in
   the Dockerfile (the checksum comes from the release's `checksums.txt`), then
   run the smoke test. It fails until every new command is allowed or refused and

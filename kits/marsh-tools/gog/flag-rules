@@ -8,11 +8,15 @@
 #   nomention PATTERN              refuse any argument containing "@": comment text
 #                                  with an @-mention or +email makes Google email
 #                                  that person
+#   json      PATTERN FLAG         the flag's JSON (inline, @file or @-) may not use a
+#                                  request type that reaches outside the spreadsheet
+#                                  (data sources, comments); see check-json
 #
 # PATTERN is a shell glob over the dotted command path ("*" is every command).
 # tests/kits/tools-policy.py checks that each rule names a real flag, that every
 # rule is enforced in the built image, and that gog has no executable or
-# destination flag, and no allowed comment command, these rules don't cover.
+# destination flag, no allowed comment command, and no allowed raw-request
+# command, these rules don't cover.
 
 # Nothing runs code or opens a program: external renderers, hooks, browsers.
 reject * --mmdc --on-change --on-new --open --browser
@@ -35,3 +39,8 @@ force slides.create-from-template --parent=root
 # Comments may not @-mention or +email anyone.
 nomention docs.comments.*
 nomention drive.comments.*
+
+# Raw Sheets batchUpdate requests edit inside the spreadsheet, which Google only
+# lets the token edit if the agent created it. Data-source requests (external
+# BigQuery data) and comment requests (@-mentions email people) don't stay in it.
+json sheets.batch-request --requests-json

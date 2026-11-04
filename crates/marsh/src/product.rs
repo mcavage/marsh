@@ -1016,8 +1016,16 @@ fn write_kit_updates(
             pending.vm
         )?;
     }
+    // One line for a move that covers several commands (gog and bamboohr
+    // moving to marsh-tools): they share a note.
+    let mut previous = None;
     for update in updates.recent.iter().rev().take(5) {
-        writeln!(writer, "    {}: {}", ago(update.unix_ms), update.describe())?;
+        let text = update.describe();
+        if update.note.is_some() && previous.as_ref() == Some(&text) {
+            continue;
+        }
+        writeln!(writer, "    {}: {text}", ago(update.unix_ms))?;
+        previous = Some(text);
     }
     Ok(())
 }
@@ -1422,6 +1430,37 @@ mod tests {
     }
 
     #[test]
+    fn status_says_once_that_retired_kits_moved_to_marsh_tools() {
+        let moved = |command: &str| marsh_daemon::KitUpdateRecord {
+            command: command.into(),
+            from: format!("docker.io/mcavage/marsh-{command}@sha256:1"),
+            to: "docker.io/mcavage/marsh-tools@sha256:2".into(),
+            unix_ms: u64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis(),
+            )
+            .unwrap()
+                - 2 * 60 * 60 * 1000,
+            notified: true,
+            note: Some("gog and bamboohr moved to marsh-tools".into()),
+            ..marsh_daemon::KitUpdateRecord::default()
+        };
+        let updates = marsh_daemon::KitUpdateStatus {
+            enabled: true,
+            recent: vec![moved("gog"), moved("bamboohr")],
+            ..marsh_daemon::KitUpdateStatus::default()
+        };
+        let mut text = Vec::new();
+        write_kit_updates(&mut text, Some(&updates)).unwrap();
+        assert_eq!(
+            String::from_utf8(text).unwrap(),
+            "  Kit updates:  on; not checked yet\n    2h ago: gog and bamboohr moved to marsh-tools\n"
+        );
+    }
+
+    #[test]
     fn status_lists_the_kit_update_check_and_recent_switches() {
         let now = u64::try_from(
             std::time::SystemTime::now()
@@ -1446,6 +1485,7 @@ mod tests {
                 to_version: Some("2.1.307".into()),
                 unix_ms: now - 2 * 60 * 60 * 1000,
                 notified: true,
+                note: None,
             }],
             pending: vec![marsh_daemon::PendingKitChange {
                 command: "claude".into(),
