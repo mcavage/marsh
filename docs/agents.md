@@ -63,7 +63,7 @@ also declare their prompt verbs (`pi -p`), so the tool can start them.
 | `description` | 3 to 6 words, shown to the user. |
 | `prompt` | Everything the agent needs; it does not see the caller's conversation. At most 100 KiB. |
 | `agent` | A registered agent. Default: the caller's own. The tool's description lists the agents this job may start. |
-| `model` | The model the agent runs, passed to its Kit's model option (`org.marsh/agent-model@1`, e.g. `claude --model M`, `codex exec -m M`). Default: the agent's own. An agent without one refuses it. See [Peer review](peer-review.md). |
+| `model` | The model the agent runs, passed to its Kit's model option (`org.marsh/agent-model@1`, e.g. `claude --model M`, `codex exec -m M`). Default: the agent's own. An agent without one refuses it. A family name such as `astra`, `opus` or `luna` stands for the agent's newest model of that family. The tool's description lists each agent's models. See [Peer review](peer-review.md#which-models-and-family-names). |
 | `files` | `"shared"` (default): the agent works in the caller's folder and its edits land at once. `"copy"`: it works on a private [split](split.md) fork; the result includes its diff. |
 | `background` | `false` (default) waits for the result; `true` returns a task id at once. |
 
@@ -91,7 +91,8 @@ An agent is offered when its Kit declares non-interactive prompt verbs
 --json` under `commands[].sessions`); the child runs `NAME VERBS...` with the
 prompt filled in, e.g. `claude -p PROMPT` or `codex exec PROMPT`, and its
 stdout is the final message. A published Kit's verbs are known once marsh has
-read its descriptor (after its first use, or a `marsh status`). `marsh
+read its descriptor (after its first use, or a `marsh status`; with peer review
+on, marsh reads them at daemon start and when you turn it on). `marsh
 status --json` lists the `task-tool-v1` feature.
 
 Each `"copy"` task leaves a kept split (`marsh splits` on your Mac lists it;
@@ -326,7 +327,10 @@ Every Kit job gets `/run/marsh/context.md`, written for that job. It contains:
 - that its subagents are marsh agents, started with the
   [`task` tool](#the-task-tool),
 - for agents without the tool, short examples of `codex exec`,
-  `marsh split`, `marsh fanout`, and `marsh jobs --tree`,
+  `marsh split`, `marsh fanout`, and `marsh jobs --tree`, and that registered
+  commands run from the project folder (or a folder under it): from anywhere
+  else the daemon refuses the job with "run it from the project folder: cd
+  ROOT",
 - the limits.
 
 `marsh context` prints it. Outside a job, it prints the shared text with no job

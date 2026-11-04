@@ -15,6 +15,8 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+pub use marsh_contracts::process::ModelChoice;
+
 /// The drop-in directory under `$MARSH_HOME`.
 pub const DROPIN_DIR: &str = "peer-review.d";
 /// The drop-in `marsh config peer-review on|off` writes.
@@ -27,6 +29,11 @@ const MAX_REVIEWERS: usize = 64;
 const MAX_NAME_BYTES: usize = 128;
 /// Rows of the reviewer table in `context.md`.
 const CONTEXT_ROWS: usize = 8;
+/// Models listed per agent in the `task` tool's description.
+const CHOICE_ROWS: usize = 8;
+/// A family whose newest model is older than the vendor's newest listed
+/// model by more than this many days is left out of the list.
+const CHOICE_RECENT_DAYS: i64 = 180;
 
 const BUILTIN_TABLE: &str = include_str!("../data/model-classes.yaml");
 const SNAPSHOT: &str = include_str!("../data/models-dev.json");
@@ -237,6 +244,183 @@ impl ClassTable {
         }
         best.map(|row| row.id.clone())
     }
+
+    /// The models of `vendors` an agent can be asked for by name: each
+    /// family's newest model the vendor itself serves (`luna`, `terra`,
+    /// `sol`, `astra`; `haiku`, `sonnet`), without families a half year
+    /// behind the vendor's newest, at most `CHOICE_ROWS` rows by recency,
+    /// ordered by class. `qualify` writes `vendor/model`, the id a
+    /// multi-provider agent takes.
+    #[must_use]
+    pub fn choices(&self, vendors: &[String], qualify: bool) -> Vec<ModelChoice> {
+        let mut picked = Vec::<(String, &SnapshotModel, ModelClass, String)>::new();
+        for vendor in vendors {
+            let mut families = BTreeMap::<String, (&SnapshotModel, ModelClass)>::new();
+            for row in snapshot().models.iter().filter(|row| {
+                row.vendor == *vendor && row.first_party() && plain_chat_model(&row.id)
+            }) {
+                let name = normalize(&row.id);
+                let family = row.family.to_ascii_lowercase();
+                let Some((rule, _)) = self.rule_for(&name).or_else(|| {
+                    (!family.is_empty())
+                        .then(|| self.rule_for(&family))
+                        .flatten()
+                }) else {
+                    continue;
+                };
+                if rule.vendor != *vendor {
+                    continue;
+                }
+                let key = family_nickname(&rule.pattern);
+                let better = families.get(&key).is_none_or(|(best, _)| {
+                    (row.released.as_str(), std::cmp::Reverse(row.id.len()))
+                        > (best.released.as_str(), std::cmp::Reverse(best.id.len()))
+                });
+                if better {
+                    families.insert(key, (row, rule.class));
+                }
+            }
+            let latest = families
+                .values()
+                .map(|(row, _)| day_number(&row.released))
+                .max()
+                .unwrap_or(0);
+            for (key, (row, class)) in families {
+                if day_number(&row.released) + CHOICE_RECENT_DAYS >= latest {
+                    picked.push((vendor.clone(), row, class, key));
+                }
+            }
+        }
+        picked.sort_by(|a, b| b.1.released.cmp(&a.1.released).then(a.1.id.cmp(&b.1.id)));
+        picked.truncate(CHOICE_ROWS);
+        picked.sort_by(|a, b| {
+            (a.2, &a.0, std::cmp::Reverse(&a.1.released)).cmp(&(
+                b.2,
+                &b.0,
+                std::cmp::Reverse(&b.1.released),
+            ))
+        });
+        picked
+            .into_iter()
+            .map(|(vendor, row, class, family)| ModelChoice {
+                model: if qualify {
+                    format!("{vendor}/{}", row.id)
+                } else {
+                    row.id.clone()
+                },
+                class: class.name().to_owned(),
+                family,
+            })
+            .collect()
+    }
+}
+
+/// The nickname people use for the family a rule names: its last word that
+/// is not a version (`gpt-*luna*` is `luna`, `claude-*-haiku*` is `haiku`).
+fn family_nickname(pattern: &str) -> String {
+    let pattern = pattern.to_ascii_lowercase();
+    let words = pattern
+        .split(['*', '-'])
+        .filter(|word| !word.is_empty() && !word.starts_with(|c: char| c.is_ascii_digit()))
+        .collect::<Vec<_>>();
+    match words.as_slice() {
+        // `mistral-large*` is `mistral-large`: a size alone names no family.
+        [first, .., size @ ("small" | "medium" | "large")] => format!("{first}-{size}"),
+        [.., last] => (*last).to_owned(),
+        [] => pattern,
+    }
+}
+
+/// Days since year 0 (365-day years, 31-day months: only for ordering and
+/// distances of release dates `YYYY-MM-DD`); 0 for anything else.
+fn day_number(date: &str) -> i64 {
+    let mut parts = date.split('-').map(|part| part.parse::<i64>().ok());
+    match (
+        parts.next().flatten(),
+        parts.next().flatten(),
+        parts.next().flatten(),
+    ) {
+        (Some(year), Some(month), Some(day)) => year * 372 + month * 31 + day,
+        _ => 0,
+    }
+}
+
+/// The models an agent can run, from its Kit's credential services and, for
+/// a multi-provider agent, the vendors its Kit reaches: what the `task`
+/// tool lists for it (`ClassTable::choices`).
+#[must_use]
+pub fn agent_choices(
+    table: &ClassTable,
+    agent: &str,
+    services: &[String],
+    reaches: &BTreeMap<String, Vec<String>>,
+) -> Vec<ModelChoice> {
+    let any = services.iter().any(|service| service == ANY_PROVIDER);
+    let reaches = reaches
+        .iter()
+        .map(|(service, hosts)| (service.clone(), hosts.iter().cloned().collect()))
+        .collect::<BTreeMap<String, BTreeSet<String>>>();
+    let vendors = if any {
+        VENDOR_HOSTS
+            .iter()
+            .map(|(vendor, _)| (*vendor).to_owned())
+            .filter(|vendor| cannot_reach(agent, vendor, &reaches).is_none())
+            .collect::<Vec<_>>()
+    } else {
+        services
+            .iter()
+            .map(|service| vendor_name(service))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    };
+    table.choices(&vendors, any)
+}
+
+/// `nickname` (a family such as `astra`) as the model id `choices` gives it;
+/// `None` when it names no family, or the id itself.
+///
+/// # Errors
+/// Returns the candidates when several vendors have a family of that name.
+pub fn resolve_family(
+    choices: &[ModelChoice],
+    nickname: &str,
+) -> Result<Option<ModelChoice>, String> {
+    let nickname = nickname.trim().to_ascii_lowercase();
+    let found = choices
+        .iter()
+        .filter(|choice| choice.family == nickname)
+        .collect::<Vec<_>>();
+    match found.as_slice() {
+        [] => Ok(None),
+        [one] => Ok(Some((*one).clone())),
+        many => Err(format!(
+            "`{nickname}` is more than one model here ({}): name one",
+            many.iter()
+                .map(|choice| choice.model.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
+}
+
+/// The list of models in the `task` tool's description: `NAME: MODEL (CLASS,
+/// FAMILY), ...` per agent with models.
+#[must_use]
+pub fn describe_choices(choices: &BTreeMap<String, Vec<ModelChoice>>) -> String {
+    choices
+        .iter()
+        .filter(|(_, models)| !models.is_empty())
+        .map(|(agent, models)| {
+            let models = models
+                .iter()
+                .map(|choice| format!("{} ({}, {})", choice.model, choice.class, choice.family))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{agent}: {models}")
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn parse_table(text: &str) -> Result<TableFile, String> {
@@ -1376,6 +1560,62 @@ mod tests {
                 "pi can't reach api.deepseek.com (its Kit must allow the host and inject the deepseek key for it)"
             ]
         );
+    }
+
+    #[test]
+    fn an_agents_models_are_each_familys_newest_and_nicknames_resolve() {
+        let table = ClassTable::builtin();
+        let none = BTreeMap::new();
+        let describe = |agent: &str, services: &[&str], reaches: &BTreeMap<String, Vec<String>>| {
+            let services = services.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+            describe_choices(&BTreeMap::from([(
+                agent.to_owned(),
+                agent_choices(&table, agent, &services, reaches),
+            )]))
+        };
+        assert_eq!(
+            describe("codex", &["openai"], &none),
+            "codex: gpt-6-luna (small, luna), gpt-6.1-terra (mid, terra), \
+             gpt-6.1-sol (large, sol), gpt-6-astra (large, astra)"
+        );
+        assert_eq!(
+            describe("claude", &["anthropic"], &none),
+            "claude: claude-haiku-5-5 (small, haiku), claude-sonnet-5-5 (mid, sonnet), \
+             claude-opus-5-5 (large, opus), claude-fable-5-1 (large, fable)"
+        );
+        // A multi-provider agent lists only the vendors its Kit reaches, with
+        // qualified ids, within the row cap.
+        let reaches = BTreeMap::from([("openai".to_owned(), vec!["api.openai.com".to_owned()])]);
+        let pi = agent_choices(&table, "pi", &[ANY_PROVIDER.to_owned()], &reaches);
+        assert!(!pi.is_empty() && pi.len() <= CHOICE_ROWS);
+        assert!(
+            pi.iter()
+                .all(|choice| choice.model.starts_with("openai/gpt-")),
+            "{pi:?}"
+        );
+        let unreached = agent_choices(&table, "pi", &[ANY_PROVIDER.to_owned()], &none);
+        assert_eq!(unreached.len(), 0);
+
+        let codex = agent_choices(&table, "codex", &["openai".to_owned()], &none);
+        let astra = resolve_family(&codex, " Astra ").unwrap().unwrap();
+        assert_eq!(
+            (astra.model.as_str(), astra.class.as_str()),
+            ("gpt-6-astra", "large")
+        );
+        assert_eq!(resolve_family(&codex, "gpt-6-astra"), Ok(None));
+        assert_eq!(resolve_family(&codex, "mystery"), Ok(None));
+        let sol = ModelChoice {
+            model: "x/sol".into(),
+            class: "large".into(),
+            family: "sol".into(),
+        };
+        let error = resolve_family(&[codex, vec![sol]].concat(), "sol").unwrap_err();
+        assert!(error.contains("gpt-6.1-sol, x/sol"), "{error}");
+        assert_eq!(family_nickname("gpt-*luna*"), "luna");
+        assert_eq!(family_nickname("claude-*-haiku*"), "haiku");
+        assert_eq!(family_nickname("gpt-oss-20b*"), "oss");
+        assert_eq!(family_nickname("mistral-large*"), "mistral-large");
+        assert_eq!(family_nickname("haiku"), "haiku");
     }
 
     #[test]

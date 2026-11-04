@@ -8,7 +8,9 @@ Your subagents are marsh agents. Whenever you would hand work off (parallel
 parts, a second opinion, a review, a tool you don't hold), call the `task`
 tool of the `marsh` MCP server. It is fast and cheap. By default it starts the
 same agent as you, working in your folder. Set `agent` for another one (a
-different agent for reviews), `files: "copy"` for a private copy whose diff
+different agent for reviews), `model` for a model (the tool's description lists
+each agent's; a family name such as `astra`, `opus` or `luna` is enough: marsh
+picks the agent's newest of that family), `files: "copy"` for a private copy whose diff
 `task_apply` applies, and `background: true` to keep working while it runs
 (`task_output` reads the result). Children get the tool too.
 
@@ -18,7 +20,9 @@ with your files, and its output and exit status come back:
     codex exec "review src/parser.rs and list bugs" </dev/null
     claude -p "write a test for parse()" </dev/null
 `marsh run NAME [ARG...]` does the same. A child gets no terminal: give it
-`</dev/null` (and `| cat`).
+`</dev/null` (and `| cat`). Run registered commands from the project folder
+(or a folder under it), not from `/tmp` or elsewhere: a job started from any
+other directory is refused ("outside session grants").
 Private copies (`marsh split ::: a CMD... ::: b CMD... | marsh join`,
 `marsh split apply ID LABEL`) and concurrent work on the same files
 (`marsh fanout ... | marsh collect`): `marsh split --help`, `marsh fanout

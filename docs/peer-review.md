@@ -84,6 +84,31 @@ a placeholder only then, from `SBX_CRED_<SERVICE>_MODE`; a Kit gets no raw key.
 A vendor with no sbx service, such as DeepSeek, has no key to inject, so no
 Kit reaches it through sbx.
 
+### Which models, and family names
+
+The `task` tool's description lists, per agent that takes a `model`, the models
+it can run, each with marsh's class and the family name people use:
+
+```text
+Models (`model`: an id below, or just its family name such as `astra`): claude: claude-haiku-5-5 (small, haiku), claude-sonnet-5-5 (mid, sonnet), claude-opus-5-5 (large, opus), claude-fable-5-1 (large, fable); codex: gpt-6-luna (small, luna), gpt-6.1-terra (mid, terra), gpt-6.1-sol (large, sol), gpt-6-astra (large, astra).
+```
+
+marsh builds the list for each job from the class table and the vendors the
+agent reaches: a single-vendor agent's credential services, or for a
+multi-provider agent (Pi) the vendors its Kit reaches, with `vendor/model`
+ids. It names each family's newest model that the vendor itself serves,
+leaves out families more than six months behind the vendor's newest, and
+shows at most eight models per agent. The family name is the last word of the
+rule that matched (`gpt-*luna*` is `luna`). It does not check that the host
+holds the vendor's key.
+
+`model` also takes a family name: `task(agent: "codex", model: "astra")` runs
+`codex exec PROMPT -m gpt-6-astra`. The result and the child job's receipt
+carry the id marsh used (`codex, model gpt-6-astra (from "astra")`). A name that
+is no family of that agent passes through unchanged as an id, and a name
+shared by several vendors of a multi-provider agent is refused with the
+candidates.
+
 A call that sets `model` for an agent whose Kit has no model option fails with
 a tool error, and so does a malformed id (1 to 128 characters from
 `A-Za-z0-9-_.:/@[]`, not starting with `-`).
@@ -218,6 +243,13 @@ key for it)`. The same check applies to a multi-provider agent you name in a
 drop-in yourself. Credentials that sbx does not list, such as some OAuth logins,
 are not detected; add those reviewers to the file yourself. `off` sets
 `enabled: false` and keeps the list.
+
+A reviewer needs its agent's Kit descriptor (prompt verbs, model option,
+credential services), which marsh reads from the registry the first time and
+then keeps. With peer review on, the daemon reads the descriptors of all
+registered agents when it starts, and `marsh config peer-review on` and
+`marsh peer-review ls` wait (up to a minute, saying so) for the ones still
+being read, so a fresh home lists its reviewers before any job has run.
 
 ## `marsh peer-review ls` and `marsh status`
 

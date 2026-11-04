@@ -12,12 +12,14 @@ removes only VMs from its own ownership map.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
 import re
 import shlex
 import signal
+import subprocess
 import sys
 import time
 from typing import Any
@@ -40,9 +42,12 @@ SCENARIOS = {
     "T10-conflicts-keep-edits": "conflicts_keep_edits",
     "T11-fan-out-limit": "fan_out_limit",
     "T12-peer-review-context-and-model": "peer_review",
+    "T13-fresh-home-peer-review": "fresh_home_peer_review",
+    "T14-live-model-family-name": "live_model_family_name",
+    "T15-cwd-refusal-says-where": "cwd_refusal",
 }
 ORDER = list(SCENARIOS)
-LIVE = {"T02-live-shared", "T03-live-copy-apply", "T04-live-background"}
+LIVE = {"T02-live-shared", "T03-live-copy-apply", "T04-live-background", "T14-live-model-family-name"}
 MCP_CONFIG = json.dumps({"mcpServers": {"marsh": {"command": "/run/marsh/bin/marsh", "args": ["task-mcp"]}}})
 
 # A minimal MCP client, run inside a `shell` job against `marsh task-mcp`.
@@ -246,6 +251,13 @@ class TaskTool(ScenarioSuite):
         require(description.startswith("Hand work to another agent. Fast and cheap: use it whenever you would "
                                         "hand work off") and f"Agents: {', '.join(agents)}." in description,
                 f"task description: {description!r}")
+        # Each agent that takes a model lists its newest model per family, with class and nickname.
+        listed = description.split("Models (", 1)[-1]
+        require(re.search(r"codex: gpt-\S+ \(small, luna\), gpt-\S+ \(mid, terra\), "
+                          r"gpt-\S+ \(large, (sol|astra)\)", listed)
+                and re.search(r"claude: claude-haiku-\S+ \(small, haiku\), claude-sonnet-\S+ \(mid, sonnet\), "
+                              r"claude-opus-\S+ \(large, opus\)", listed),
+                f"the task description lists no models: {description!r}"[:1500])
         properties = tools["task"]["inputSchema"]["properties"]
         require(set(properties) == {"description", "prompt", "agent", "model", "files", "background"}
                 and properties["files"]["enum"] == ["shared", "copy"]
@@ -553,6 +565,119 @@ class TaskTool(ScenarioSuite):
                 f"peer_review after off: {status!r}"[:900])
         for name in ("narwhal.yaml", "broken.yaml", "marsh.yaml"):
             (dropins / name).unlink()
+
+    def own_scope(self, name: str) -> tuple[pathlib.Path, dict[str, str]]:
+        """A second scope (home, control home, registry) beside the suite's, with its own daemon. It
+        registers the packaged agents as `make acceptance` ships them (published Kits in a release,
+        source Kits in a dev install) and no other command."""
+        root = self.root / name
+        home, control = root / "home", root / "control"
+        for directory in (home, home / "home", control):
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            directory.chmod(0o700)
+        scope = hashlib.sha256(os.fsencode(home.resolve(strict=True))).hexdigest()
+        (control / scope).mkdir(mode=0o700)
+        guest = pathlib.Path(self.environment["MARSH_GUEST_ARTIFACTS"])
+        shipped = json.loads((guest / "commands.json").read_text())
+        mapping = {agent: (ref if "@sha256:" in ref else str((guest / ref).resolve()))
+                   for agent, ref in shipped.items() if agent in ("claude", "codex", "shell")}
+        require({"claude", "codex"} <= set(mapping), f"the install registers no claude and codex: {shipped}")
+        (control / scope / "commands.json").write_text(json.dumps(mapping, sort_keys=True) + "\n")
+        (root / "project").mkdir(mode=0o700)
+        return root, {**self.host_env, "MARSH_HOME": str(home), "MARSH_CONTROL_HOME": str(control)}
+
+    def own_cli(self, root: pathlib.Path, env: dict[str, str], args: list[str], timeout: float = 300):
+        completed = subprocess.run([self.marsh, *args], cwd=root / "project", env=env, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, check=False)
+        self.records.append({"caller": "fresh-scope-cli", "argv": args, "status": completed.returncode,
+                             "stdout": text(completed.stdout)[-8000:], "stderr": text(completed.stderr)[-8000:]})
+        return completed
+
+    def fresh_home_peer_review(self) -> None:
+        """T13: in a fresh home no job has ever run in, peer review lists its reviewers at once: from a
+        drop-in at the first `peer-review ls`, and from `config peer-review on` (the agents' Kit
+        descriptors are read by the daemon, not by a first job)."""
+        root, env = self.own_scope("fresh-peer-review")
+        try:
+            dropins = root / "home" / "peer-review.d"
+            dropins.mkdir()
+            (dropins / "narwhal.yaml").write_text(
+                "enabled: true\nreviewers:\n"
+                "  - {agent: claude, model: claude-sonnet-5-5}\n"
+                "  - {agent: codex, model: gpt-6.1-terra}\n")
+            listed = self.own_cli(root, env, ["peer-review", "ls", "--json"])
+            require(listed.returncode == 0, f"peer-review ls: {text(listed.stderr)[-800:]!r}")
+            document = json.loads(listed.stdout)
+            ready = sorted((r["agent"], r["model"]) for r in document["reviewers"])
+            require(ready == [("claude", "claude-sonnet-5-5"), ("codex", "gpt-6.1-terra")],
+                    f"fresh home, drop-in: {document!r}"[:1200])
+            (dropins / "narwhal.yaml").unlink()
+            switched = self.own_cli(root, env, ["config", "peer-review", "on"])
+            out, err = text(switched.stdout), text(switched.stderr)
+            require(switched.returncode == 0 and "Peer review: on" in out, f"config peer-review on: {out!r} {err!r}")
+            require("with a model option (none)" not in err,
+                    f"`on` saw no agent with a model option on a fresh home: {err!r}")
+            secrets = subprocess.run([self.sbx, "secret", "ls", "--global", "--json"], capture_output=True,
+                                     timeout=60, check=False)
+            stored = {s["name"] for s in json.loads(secrets.stdout or b"{}").get("secrets", [])
+                      if s.get("type") == "service"} if secrets.returncode == 0 else set()
+            if {"anthropic", "openai"} <= stored:
+                rows = [line.split() for line in out.splitlines()]
+                require(any(r[2:3] == ["claude"] for r in rows) and any(r[2:3] == ["codex"] for r in rows),
+                        f"no claude and codex reviewers after `on` in a fresh home:\n{out}")
+            jobs = json.loads(self.own_cli(root, env, ["jobs", "--json"]).stdout)["jobs"]
+            require(not jobs, f"a job ran in the fresh scope: {jobs!r}"[:600])
+            (self.evidence / "fresh-home-peer-review.txt").write_text(f"$ marsh config peer-review on\n{err}{out}")
+        finally:
+            self.own_cli(root, env, ["stop"], timeout=300)
+
+    def cwd_refusal(self) -> None:
+        """T15: a registered command started from outside the project is refused with the way out."""
+        completed = self.cli(["run", "shell", "-c", "cd /tmp && marsh run shell true"], self.project, timeout=600)
+        err = text(completed.stderr) + text(completed.stdout)
+        require(completed.returncode != 0 and "outside session grants: run it from the project folder: cd "
+                f"{self.project.resolve()}" in err, f"cwd refusal ({completed.returncode}): {err[-800:]!r}")
+        context = self.cli(["run", "shell", "-c", "cat /run/marsh/context.md"], self.project, timeout=600)
+        require("Run registered commands from the project folder" in text(context.stdout),
+                f"context.md: {text(context.stdout)[-600:]!r}")
+
+    def live_model_family_name(self) -> None:
+        """T14: told "ask codex with astra to review README.md", a claude job calls `task` for codex with the
+        family name (or its id) at once, without asking which model astra is; marsh runs the newest astra."""
+        (self.project / "README.md").write_text("# demo\n\nA tiny tool that prints hello.\n\n## Usage\n\nRun `hello`.\n")
+        before = self.job_ids()
+        completed = self.cli(["run", "claude", "--mcp-config", MCP_CONFIG, "-p",
+                              "ask codex with astra to review README.md", "--output-format", "stream-json",
+                              "--verbose"], self.project, timeout=900)
+        out = text(completed.stdout)
+        require(completed.returncode == 0, f"claude job failed ({completed.returncode}): "
+                                           f"{out[-800:]!r} {text(completed.stderr)[-1200:]!r}")
+        calls, results = [], []
+        for line in out.splitlines():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            for part in (event.get("message") or {}).get("content") or []:
+                if not isinstance(part, dict):
+                    continue
+                if event.get("type") == "assistant" and part.get("type") == "tool_use":
+                    calls.append((part.get("name"), part.get("input")))
+                if event.get("type") == "user" and part.get("type") == "tool_result":
+                    results.append(json.dumps(part.get("content")))
+        tasks = [arguments for name, arguments in calls if name == "mcp__marsh__task"]
+        require(len(tasks) == 1 and not any(name == "AskUserQuestion" for name, _ in calls),
+                f"want one task call and no question: {calls!r}"[:1500])
+        task = tasks[0]
+        require(task.get("agent") == "codex" and "astra" in str(task.get("model", "")).lower(),
+                f"task call: {task!r}"[:900])
+        child = self.child_of_top_claude(before, "codex")
+        require("astra" in str(child.get("model")), f"codex child receipt model: {child.get('model')!r}")
+        (self.evidence / "model-family-name.json").write_text(json.dumps(
+            {"task_call": {k: v for k, v in task.items() if k != "prompt"}, "result": results[0][:400],
+             "child_model": child.get("model")}, indent=2))
+        self.git(self.project, "checkout", "-q", "--", ".")
+        (self.project / "README.md").unlink(missing_ok=True)
 
     def run_all(self) -> None:
         self.stock_before = stock_baseline(self.sbx)

@@ -5,7 +5,7 @@
 //! process rule (spawn set, limits, wall time) applies unchanged
 //! (`docs/agents.md`, "The task tool").
 
-use marsh_contracts::process::{self as contract, JOB_JSON, JobDocument, SOCKET};
+use marsh_contracts::process::{self as contract, JOB_JSON, JobDocument, ModelChoice, SOCKET};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -64,6 +64,8 @@ struct Setup {
     /// Agent name -> its model option (`org.marsh/agent-model@1`), for
     /// `task(model)`; an agent without one refuses `model`.
     models: BTreeMap<String, Vec<String>>,
+    /// Agent name -> the models it can run (id, class, family nickname).
+    choices: BTreeMap<String, Vec<ModelChoice>>,
     /// Why no agent is available, when none is.
     none_reason: Option<String>,
     /// The in-job marsh (the artifact) used to start children.
@@ -90,6 +92,12 @@ impl Setup {
             .filter(|(name, _)| agents.contains_key(*name))
             .map(|(name, verbs)| (name.clone(), verbs.clone()))
             .collect();
+        let choices = document
+            .model_choices
+            .iter()
+            .filter(|(name, _)| agents.contains_key(*name))
+            .map(|(name, choices)| (name.clone(), choices.clone()))
+            .collect();
         let none_reason = agents.is_empty().then(|| {
             if document.spawn.is_empty() || narrowed.is_some_and(<[String]>::is_empty) {
                 "this job may start no agents (it was started with --no-spawn or MARSH_SPAWN=none)"
@@ -109,6 +117,7 @@ impl Setup {
             caller: document.name.clone(),
             agents,
             models,
+            choices,
             none_reason,
             marsh: PathBuf::from(contract::ARTIFACT),
             dir: std::env::temp_dir().join(format!("marsh-tasks-{short}-{}", std::process::id())),
@@ -143,6 +152,18 @@ impl Setup {
             .join(", ")
     }
 
+    /// `Models: codex: gpt-6-luna (small, luna), ...` for the tool's
+    /// description; empty when no agent lists models.
+    fn model_list(&self) -> String {
+        let list = marsh_daemon::peer_review::describe_choices(&self.choices);
+        if list.is_empty() {
+            return String::new();
+        }
+        format!(
+            "\n\nModels (`model`: an id below, or just its family name such as `astra`): {list}."
+        )
+    }
+
     fn tools(&self) -> Value {
         let agents = self.agent_list();
         let names = self.agents.keys().cloned().collect::<Vec<_>>();
@@ -160,9 +181,10 @@ impl Setup {
         let model = json!({
             "type": "string",
             "description": format!(
-                "The model the agent runs, passed to its own model option (e.g. a reviewer's model \
-                 from the peer-review table). Default: the agent's own default. Agents that take \
-                 one: {}.",
+                "The model the agent runs, passed to its own model option: an id from the task \
+                 description or the peer-review table, or a family name (`astra`, `opus`) for the \
+                 newest model of that family the agent has. Default: the agent's own default. \
+                 Agents that take one: {}.",
                 if with_models.is_empty() { "none".to_owned() } else { with_models.join(", ") }
             ),
         });
@@ -171,7 +193,7 @@ impl Setup {
         json!([
             {
                 "name": "task",
-                "description": format!("{TASK_DESCRIPTION}\n\nAgents: {agents}."),
+                "description": format!("{TASK_DESCRIPTION}\n\nAgents: {agents}.{}", self.model_list()),
                 "_meta": {"anthropic/alwaysLoad": true},
                 "inputSchema": {
                     "type": "object",
@@ -231,6 +253,8 @@ struct TaskRequest {
     agent: String,
     /// The model passed to the agent's model option, when the call set one.
     model: Option<String>,
+    /// The family nickname the call named instead of an id (`astra`).
+    asked: Option<String>,
     argv: Vec<String>,
     files: Files,
     background: bool,
@@ -303,29 +327,32 @@ fn task_request(setup: &Setup, arguments: &Value) -> Result<TaskRequest, String>
         .iter()
         .map(|verb| verb.replace(contract::PROMPT_PLACEHOLDER, prompt))
         .collect::<Vec<_>>();
-    let model = model_argument(setup, &agent, arguments, &mut argv)?;
+    let (model, asked) = model_argument(setup, &agent, arguments, &mut argv)?;
     Ok(TaskRequest {
         description,
         agent,
         model,
+        asked,
         argv,
         files,
         background,
     })
 }
 
-/// `task(model)`: validate it and append the agent's model option to `argv`
-/// (after the prompt verbs, so `codex exec PROMPT -m M` keeps the subcommand
-/// first); an agent whose Kit declares none refuses it.
+/// `task(model)`: validate it, turn a family nickname (`astra`) into the
+/// agent's newest model of that family, and append the agent's model option
+/// to `argv` (after the prompt verbs, so `codex exec PROMPT -m M` keeps the
+/// subcommand first); an agent whose Kit declares none refuses it. Returns
+/// the model id and, for a nickname, the nickname.
 fn model_argument(
     setup: &Setup,
     agent: &str,
     arguments: &Value,
     argv: &mut Vec<String>,
-) -> Result<Option<String>, String> {
+) -> Result<(Option<String>, Option<String>), String> {
     let model = match arguments.get("model") {
-        None | Some(Value::Null) => return Ok(None),
-        Some(Value::String(model)) if model.trim().is_empty() => return Ok(None),
+        None | Some(Value::Null) => return Ok((None, None)),
+        Some(Value::String(model)) if model.trim().is_empty() => return Ok((None, None)),
         Some(Value::String(model)) => model.trim(),
         Some(_) => return Err("`model` is a string: the model id the agent should run".into()),
     };
@@ -341,12 +368,19 @@ fn model_argument(
             }
         ));
     };
+    let choices = setup.choices.get(agent).map_or(&[][..], Vec::as_slice);
+    let (model, asked) = match marsh_daemon::peer_review::resolve_family(choices, model)
+        .map_err(|error| format!("`model` for `{agent}`: {error}"))?
+    {
+        Some(choice) => (choice.model, Some(model.to_owned())),
+        None => (model.to_owned(), None),
+    };
     argv.extend(
         option
             .iter()
-            .map(|verb| verb.replace(contract::MODEL_PLACEHOLDER, model)),
+            .map(|verb| verb.replace(contract::MODEL_PLACEHOLDER, &model)),
     );
-    Ok(Some(model.to_owned()))
+    Ok((Some(model), asked))
 }
 
 /// The first words of `prompt` as a description: no control characters,
@@ -1199,11 +1233,15 @@ fn task_label(request: &TaskRequest) -> String {
     format!("{LABEL_PREFIX}{}", request.description)
 }
 
-/// `codex` or `codex, model gpt-6.1-terra`.
+/// `codex`, `codex, model gpt-6.1-terra` or, for a family name,
+/// `codex, model gpt-6-astra (from "astra")`.
 fn agent_words(request: &TaskRequest) -> String {
-    match &request.model {
-        Some(model) => format!("{}, model {model}", request.agent),
-        None => request.agent.clone(),
+    match (&request.model, &request.asked) {
+        (Some(model), Some(asked)) => {
+            format!("{}, model {model} (from \"{asked}\")", request.agent)
+        }
+        (Some(model), None) => format!("{}, model {model}", request.agent),
+        _ => request.agent.clone(),
     }
 }
 
@@ -1401,6 +1439,7 @@ mod tests {
                 description: "fix it".into(),
                 agent: "claude".into(),
                 model: None,
+                asked: None,
                 argv: vec!["-p".into(), "fix the bug".into()],
                 files: Files::Shared,
                 background: false,
@@ -1491,6 +1530,53 @@ mod tests {
             model.ends_with("Agents that take one: claude, codex."),
             "{model}"
         );
+    }
+
+    #[test]
+    fn the_description_lists_each_agents_models_and_a_family_name_picks_one() {
+        let choice = |model: &str, class: &str, family: &str| ModelChoice {
+            model: model.into(),
+            class: class.into(),
+            family: family.into(),
+        };
+        let mut setup = setup(&["claude", "codex"], None);
+        setup.choices = BTreeMap::from([(
+            "codex".to_owned(),
+            vec![
+                choice("gpt-6-luna", "small", "luna"),
+                choice("gpt-6-astra", "large", "astra"),
+            ],
+        )]);
+        let tools = setup.tools();
+        let description = tools[0]["description"].as_str().unwrap();
+        assert!(
+            description.ends_with(
+                "Models (`model`: an id below, or just its family name such as `astra`): \
+                 codex: gpt-6-luna (small, luna), gpt-6-astra (large, astra)."
+            ),
+            "{description}"
+        );
+        let request = task_request(
+            &setup,
+            &json!({"prompt": "review", "agent": "codex", "model": "Astra"}),
+        )
+        .unwrap();
+        assert_eq!(request.argv, ["exec", "review", "-m", "gpt-6-astra"]);
+        assert_eq!(request.model.as_deref(), Some("gpt-6-astra"));
+        assert_eq!(
+            agent_words(&request),
+            "codex, model gpt-6-astra (from \"Astra\")"
+        );
+        // An id, or a name that is no family, passes through unchanged.
+        for named in ["gpt-6-luna", "gpt-5.5"] {
+            let request = task_request(
+                &setup,
+                &json!({"prompt": "r", "agent": "codex", "model": named}),
+            )
+            .unwrap();
+            assert_eq!(request.argv, ["exec", "r", "-m", named]);
+            assert_eq!(request.asked, None);
+        }
     }
 
     #[test]

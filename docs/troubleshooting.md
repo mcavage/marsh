@@ -147,6 +147,7 @@ errors:
 | `no registered agent declares non-interactive prompt verbs` | no Kit declares `agent-sessions@1` `prompt`, or marsh has not read a published Kit's descriptor yet: run `marsh status` on your Mac, then start the agent again |
 | `` `NAME` is not an agent this job may start `` | NAME is outside the spawn set or has no prompt verbs; the message lists the agents it may start |
 | `task-mcp runs inside a marsh job` | `marsh task-mcp` was started outside a Kit job |
+| `execution working directory is outside session grants: run it from the project folder: cd ROOT` | a registered command (`marsh run`, `codex`, ...) was started from a directory outside the project and the guest home, e.g. `cd /tmp && codex exec ...`; run it from the project folder or a folder under it |
 
 A task's whole output is in the `transcript` path its result names, inside
 the calling job's container; `marsh jobs show ID` shows its job.
