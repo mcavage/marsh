@@ -111,6 +111,9 @@ pub struct StockDaemonBackend {
     registry_install: Mutex<()>,
     /// Published Kits whose descriptor `marsh status` is fetching.
     agent_fetches: Arc<Mutex<BTreeSet<String>>>,
+    /// When each Kit's last descriptor read failed: not retried by the
+    /// background reader, and not waited for at job start, for a while.
+    agent_failed: Arc<Mutex<BTreeMap<String, Instant>>>,
     config: BackendConfig,
     registered_workers: Mutex<BTreeSet<String>>,
     ready_kits: Mutex<BTreeMap<String, ReadyKitVm>>,
@@ -469,6 +472,7 @@ impl StockDaemonBackend {
             packaged_channel: None,
             registry_install: Mutex::new(()),
             agent_fetches: Arc::new(Mutex::new(BTreeSet::new())),
+            agent_failed: Arc::new(Mutex::new(BTreeMap::new())),
             config,
             registered_workers: Mutex::new(BTreeSet::new()),
             ready_kits: Mutex::new(BTreeMap::new()),
@@ -780,6 +784,46 @@ impl StockDaemonBackend {
             })
     }
 
+    /// Take the right to read a published Kit's descriptor, unless a read is
+    /// already running or failed a moment ago.
+    fn claim_agent_fetch(&self, kit: &NativeKitRef) -> Option<AgentFetch> {
+        if self
+            .agent_failed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(kit.identity())
+            .is_some_and(|failed| failed.elapsed() < AGENT_FETCH_BACKOFF)
+        {
+            return None;
+        }
+        self.agent_fetches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(kit.identity().to_owned())
+            .then(|| AgentFetch {
+                identity: kit.identity().to_owned(),
+                fetches: Arc::clone(&self.agent_fetches),
+                failed: Arc::clone(&self.agent_failed),
+            })
+    }
+
+    /// Wait (bounded) for the descriptor reads in flight, so a job's task tool
+    /// lists the models of agents whose Kit was never read. Reads are started
+    /// first for every registered Kit still unread.
+    fn wait_for_agent_descriptors(&self) {
+        let _ = marsh_daemon::DaemonBackend::command_catalog(self);
+        let deadline = Instant::now() + AGENT_FETCH_WAIT;
+        while Instant::now() < deadline
+            && !self
+                .agent_fetches
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
+        {
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     /// For `marsh status`, never waiting on a registry: the cached agent, a
     /// local Kit's (read from disk), or `None` while a published Kit's
     /// descriptor is fetched in the background (once at a time).
@@ -790,24 +834,15 @@ impl StockDaemonBackend {
         if kit.source_dir().is_some() {
             return self.kit_agent_for(kit).ok();
         }
-        if self
-            .agent_fetches
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(kit.identity().to_owned())
-        {
+        if let Some(fetch) = self.claim_agent_fetch(kit) {
             let (sbx, control_home, kit) = (
                 Arc::clone(&self.sbx),
                 self.config.control_home.clone(),
                 kit.clone(),
             );
-            let fetches = Arc::clone(&self.agent_fetches);
             thread::spawn(move || {
-                let _ = fetch_kit_agent(&sbx, &control_home, &kit);
-                fetches
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .remove(kit.identity());
+                let result = fetch_kit_agent(&sbx, &control_home, &kit);
+                fetch.finish(result.is_ok());
             });
         }
         None
@@ -1362,16 +1397,9 @@ impl DaemonBackend for StockDaemonBackend {
     }
 
     fn read_agent_descriptors(&self) {
-        let scope = self
-            .config
-            .daemon_home
-            .canonicalize()
-            .unwrap_or_else(|_| self.config.daemon_home.clone());
-        if !marsh_daemon::peer_review::load(&scope, &BTreeMap::new()).enabled {
-            return;
-        }
         // The same read a job start makes (`kit_agent_for`: the cache, else
-        // the descriptor, cached once final), one thread per Kit.
+        // the descriptor, cached once final), a few Kits at a time. A Kit
+        // already being read, or that failed a moment ago, is left alone.
         let kits = self
             .command_names()
             .into_iter()
@@ -1386,14 +1414,18 @@ impl DaemonBackend for StockDaemonBackend {
                     .is_none()
                     .then_some(exact)
             })
+            .filter_map(|kit| self.claim_agent_fetch(&kit).map(|fetch| (kit, fetch)))
             .collect::<Vec<_>>();
-        thread::scope(|scope| {
-            for kit in &kits {
-                scope.spawn(|| {
-                    let _ = self.kit_agent_for(kit);
-                });
-            }
-        });
+        for batch in kits.chunks(AGENT_READ_PARALLEL) {
+            thread::scope(|scope| {
+                for (kit, fetch) in batch {
+                    scope.spawn(|| {
+                        let result = self.kit_agent_for(kit);
+                        fetch.finish(result.is_ok());
+                    });
+                }
+            });
+        }
     }
 
     fn dynamic_protected_guest_roots(&self) -> Vec<PathBuf> {
@@ -1878,7 +1910,11 @@ impl DaemonBackend for StockDaemonBackend {
         } else {
             self.environment(&request.command)
         };
+        if link.parent_job.is_none() && !link.branch {
+            self.send_inside_project_notes(&request.session, &extra_environment, &attachment);
+        }
         // Validate every added source before VM preparation or MCP effects.
+        let extra_environment = Self::session_environment(&request.session, &extra_environment)?;
         let extra_grants = self.additional_grants(&request.session, &extra_environment)?;
         let mut mounts = match child_view {
             None => {
@@ -2205,6 +2241,7 @@ impl DaemonBackend for StockDaemonBackend {
         // Read after the grants are prepared, as the prompt verbs always
         // were: nothing here may widen the window in which a closing session
         // refuses a job's grant preparation.
+        self.wait_for_agent_descriptors();
         let verbs = self.agent_verbs();
         // The model the job was asked to run: only what the task tool
         // passed (`marsh run --model`, `marsh split --model`), never read
@@ -2743,6 +2780,7 @@ impl DaemonBackend for StockDaemonBackend {
             } else {
                 self.environment("shell")
             };
+            self.send_inside_project_notes(&request.session, &shell_environment, &attachment);
             admitted_mounts.extend(self.additional_grants(&request.session, &shell_environment)?);
             if let Some((_, grant)) = &dev_grant {
                 // Only the scratch leaves are mounted, at their host paths.
@@ -5218,6 +5256,41 @@ mod kit_agent_cache_tests {
     }
 }
 
+const AGENT_FETCH_BACKOFF: Duration = Duration::from_secs(60);
+/// The longest a job start waits for Kit descriptors still being read.
+const AGENT_FETCH_WAIT: Duration = Duration::from_secs(10);
+const AGENT_READ_PARALLEL: usize = 4;
+
+/// One descriptor read in progress; ends when it finishes.
+struct AgentFetch {
+    identity: String,
+    fetches: Arc<Mutex<BTreeSet<String>>>,
+    failed: Arc<Mutex<BTreeMap<String, Instant>>>,
+}
+
+impl AgentFetch {
+    fn finish(&self, ok: bool) {
+        let mut failed = self
+            .failed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if ok {
+            failed.remove(&self.identity);
+        } else {
+            failed.insert(self.identity.clone(), Instant::now());
+        }
+    }
+}
+
+impl Drop for AgentFetch {
+    fn drop(&mut self) {
+        self.fetches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.identity);
+    }
+}
+
 /// A `KIT_AGENT_CACHE` entry: the agent, and the marsh that read it. Another
 /// release's entry is read again: Kit images move under a running marsh
 /// (stable follows :latest), so an older marsh may have cached a Kit whose
@@ -5695,6 +5768,62 @@ mod tests {
         let local = OciImage::parse(format!("sha256:{}", "e".repeat(64))).unwrap();
         assert!(backend.kit_assets(&local).unwrap().is_empty());
         assert_eq!(runner.1.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn every_agents_models_are_known_before_any_job_ran() {
+        let home = tempfile::tempdir().unwrap();
+        let descriptor = serde_json::to_string(
+            r#"{"capabilities":[
+                {"type":"com.docker.sandbox/agent-sessions@1","config":{"prompt":["-p","{{.Prompt}}"]}},
+                {"type":"org.marsh/agent-model@1","config":{"args":["--model","{{.Model}}"]}}]}"#,
+        )
+        .unwrap();
+        let runner = Arc::new(ManifestRunner(
+            format!(
+                r#"{{"annotations":{{"{}":{descriptor}}}}}"#,
+                marsh_contracts::kit_assets::DESCRIPTOR_ANNOTATION
+            ),
+            std::sync::atomic::AtomicUsize::new(0),
+        ));
+        let kits = |home: &Path| {
+            let commands = ["claude", "codex"]
+                .into_iter()
+                .zip(['a', 'b'])
+                .map(|(name, digit)| {
+                    (
+                        name.to_owned(),
+                        RegisteredKit {
+                            workload: NativeKitRef::immutable_oci(format!(
+                                "docker.io/example/{name}@sha256:{}",
+                                digit.to_string().repeat(64)
+                            ))
+                            .unwrap(),
+                        },
+                    )
+                })
+                .collect::<BTreeMap<_, _>>();
+            let config = backend_for_kit_identity(home, BTreeMap::new()).config;
+            StockDaemonBackend::new(Arc::new(test_stock(runner.clone())), commands, config)
+        };
+        let models = |backend: &StockDaemonBackend| {
+            backend
+                .agent_verbs()
+                .models
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        // The daemon's start-up read fills the cache for agents that never ran.
+        let backend = kits(home.path());
+        marsh_daemon::DaemonBackend::read_agent_descriptors(&backend);
+        assert_eq!(models(&backend), ["claude", "codex"]);
+        assert_eq!(runner.1.load(std::sync::atomic::Ordering::SeqCst), 2);
+        // Nothing cached: the first job start waits for the reads it starts.
+        let fresh = tempfile::tempdir().unwrap();
+        let backend = kits(fresh.path());
+        backend.wait_for_agent_descriptors();
+        assert_eq!(models(&backend), ["claude", "codex"]);
     }
 
     fn test_stock(runner: Arc<dyn marsh_runtime::CommandRunner>) -> StockSbx {

@@ -91,8 +91,9 @@ An agent is offered when its Kit declares non-interactive prompt verbs
 --json` under `commands[].sessions`); the child runs `NAME VERBS...` with the
 prompt filled in, e.g. `claude -p PROMPT` or `codex exec PROMPT`, and its
 stdout is the final message. A published Kit's verbs are known once marsh has
-read its descriptor (after its first use, or a `marsh status`; with peer review
-on, marsh reads them at daemon start and when you turn it on). `marsh
+read its descriptor; marsh reads every registered agent's at daemon start and
+after a Kit is installed or updated, so a fresh home lists every agent's
+models from the first job. `marsh
 status --json` lists the `task-tool-v1` feature.
 
 Each `"copy"` task leaves a kept split (`marsh splits` on your Mac lists it;
