@@ -105,6 +105,7 @@ pub const FEATURES: &[&str] = &[
     "cloud-sync-v1",
     "task-tool-v1",
     "peer-review-v1",
+    "skills-mirror-v1",
 ];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while
@@ -1331,6 +1332,14 @@ pub trait DaemonBackend: Send + Sync + 'static {
     fn sbxenv_status(&self) -> Option<SbxenvStatus> {
         None
     }
+    /// One pass of the skills mirror, from the server's background thread:
+    /// mirrors the host's agent skills folders into stock SBX's store once
+    /// they changed and settled. Never delays a request.
+    fn mirror_skills(&self) {}
+    /// What `marsh status` reports about the skills mirror.
+    fn skills_mirror_status(&self) -> Option<SkillsMirrorStatus> {
+        None
+    }
     /// What `marsh status` reports about peer review (`docs/peer-review.md`).
     fn peer_review_status(&self) -> Option<peer_review::PeerReviewStatus> {
         None
@@ -1670,6 +1679,29 @@ pub struct StatusDocument {
     /// Quarantined worker VMs marsh retired on its own, newest last.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub worker_recoveries: Vec<WorkerRecovery>,
+    /// The mirror of the host's agent skills folders into stock SBX's
+    /// skills store (`marsh config skills-mirror`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills_mirror: Option<Box<SkillsMirrorStatus>>,
+}
+
+/// Key in `$MARSH_HOME/config.json`, written by `marsh config skills-mirror`
+/// (default on).
+pub const SKILLS_MIRROR_CONFIG_KEY: &str = "skills_mirror";
+
+/// `marsh status` `skills_mirror` (feature `skills-mirror-v1`): the mirror
+/// of the folders `sbx skills import` scans into stock SBX's skills store.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SkillsMirrorStatus {
+    /// False after `marsh config skills-mirror off`.
+    pub enabled: bool,
+    /// When the last import (or removal) finished, unix ms; `null` before one.
+    pub last_import: Option<u64>,
+    /// What went wrong in the last pass; empty when it succeeded.
+    pub errors: Vec<String>,
+    /// Skill names in a scanned folder whose store copy came from elsewhere
+    /// (`sbx skills add`): the repository's skill won and was left alone.
+    pub clashes: Vec<String>,
 }
 
 /// One registered command: its Kit reference, whether the Kit declares an ACP
@@ -4192,6 +4224,7 @@ impl DaemonStore {
             commands: Vec::new(),
             peer_review: None,
             worker_recoveries: state.worker_recoveries.clone(),
+            skills_mirror: None,
         }
     }
 
@@ -4700,6 +4733,7 @@ impl Server {
         let updater_stop = Arc::new(AtomicBool::new(false));
         self.spawn_kit_updater(Arc::clone(&updater_stop));
         self.spawn_sbxenv_watcher(Arc::clone(&updater_stop));
+        self.spawn_skills_mirror(Arc::clone(&updater_stop));
         self.spawn_cloud_collector(Arc::clone(&updater_stop));
         self.spawn_session_reaper(Arc::clone(&updater_stop));
         self.spawn_agent_reader();
@@ -4818,6 +4852,34 @@ impl Server {
             });
         if let Err(error) = spawned {
             eprintln!("marshd: cannot start the sbxenv watcher: {error}");
+        }
+    }
+
+    /// The skills mirror: a background thread that asks the backend every
+    /// second; the backend compares folder stamps and waits for them to
+    /// settle before it imports.
+    fn spawn_skills_mirror(&self, stop: Arc<AtomicBool>) {
+        let backend = Arc::downgrade(&self.backend);
+        let spawned = thread::Builder::new()
+            .name("marsh-skills-mirror".into())
+            .spawn(move || {
+                loop {
+                    let Some(backend) = backend.upgrade() else {
+                        return;
+                    };
+                    backend.mirror_skills();
+                    drop(backend);
+                    let until = Instant::now() + SKILLS_MIRROR_INTERVAL;
+                    while Instant::now() < until {
+                        if stop.load(Ordering::Acquire) {
+                            return;
+                        }
+                        thread::sleep(Duration::from_millis(250));
+                    }
+                }
+            });
+        if let Err(error) = spawned {
+            eprintln!("marshd: cannot start the skills mirror: {error}");
         }
     }
 
@@ -4992,6 +5054,7 @@ const CLOUD_COLLECTOR_START_DELAY: Duration = Duration::from_secs(2);
 const CLOUD_COLLECTOR_INTERVAL: Duration = Duration::from_secs(30);
 const KIT_UPDATER_INTERVAL: Duration = Duration::from_mins(1);
 const SBXENV_WATCH_INTERVAL: Duration = Duration::from_secs(2);
+const SKILLS_MIRROR_INTERVAL: Duration = Duration::from_secs(1);
 
 struct StopOnDrop(Arc<AtomicBool>);
 
@@ -6565,6 +6628,7 @@ impl ConnectionHandler {
                 status.kit_updates = self.backend.kit_update_status(&self.store).map(Box::new);
                 status.vm_gc = self.backend.vm_gc_status().map(Box::new);
                 status.sbxenv = self.backend.sbxenv_status().map(Box::new);
+                status.skills_mirror = self.backend.skills_mirror_status().map(Box::new);
                 status.stock_sbx_removed = self
                     .stock_sbx
                     .clone()

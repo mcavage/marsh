@@ -407,19 +407,39 @@ refused by the spawn set), and is counted in `marsh status`
   modes). Nothing is written into the project, the selected home, `CLAUDE.md`,
   `AGENTS.md`, `~/.codex`, or `~/.pi` (`agents.md`). Third-party Kits read
   `/run/marsh/context.md` or run `marsh context`.
-- **Kit skills and instructions.** Stock SBX applies `agent-context`,
-  `agent-skill@1` and `agent-skills@1` in the outer sandbox container, which
-  jobs never see. The daemon reads them instead from the image's
-  `vnd.docker.sandbox.kit.descriptor` annotation (linux/arm64 manifest; a kit
-  set's build has already composed its components there), once per digest,
-  cached in `kit-assets/` under the control home, and passes them in the job
-  capability (`marsh_contracts::kit_assets`). The worker appends each
-  instruction body to `context.md` (inline text, or a regular world-readable
-  file of the image, at most 64 KiB) and writes `skills/<index>/<name>` links;
-  the runtime binds each skills destination read-only when the Kit bundles
-  skills and the destination neither contains nor lies inside a job mount.
-  Nothing is written to the agent's home. A failed descriptor read starts the
-  job without them and says so on stderr; a local source Kit has none.
+- **Kit skills and instructions.** Stock SBX's skills store is the one
+  source of skills. The daemon mirrors the folders `sbx skills import` scans
+  into it (`skills_mirror.rs`, `marsh config skills-mirror`): at start, and
+  two seconds after those folders last changed, it imports the skills whose
+  store copy differs, through a HOME it prepares that holds links to just
+  those skills, and removes the ones it imported whose source is gone. It
+  replaces or removes only an entry whose content is what it last imported
+  (`skills-mirror.json` in the control home) or what the folder holds now;
+  any other entry (an `sbx skills add`) is a clash that `marsh status` names.
+  Stock SBX prepares each `agent-skills@1` folder in the outer sandbox
+  container per `skills.defaultMode` (marsh passes no `--skills` when it
+  creates a Kit VM; the shell VM keeps `--skills off`): with `readonly` and
+  bundled `agent-skill@1` entries, links to them and to each store entry, the
+  store mounted read-only at `/run/sbx/skills-shared`; with no bundled skills,
+  the store mounted over the folder; with `off`, the bundled links alone.
+  Stock links store entries only at container start, so at each job start the
+  worker adds links for new store entries and drops dangling ones (only links
+  into the store). The runtime binds each declared folder that exists,
+  read-only, where the job's agent reads it: a folder under `/home/agent`
+  moves to the same place under the job's HOME (the selected home), over the
+  home's own folder; plus `/run/sbx/skills-shared`. A folder is skipped when it
+  would hide a job mount, when a path component inside the home is a link or
+  not a directory, or when its mountpoint is missing in a read-only mount.
+  Stock SBX writes `agent-context` into the agent's own home, which
+  selected-home jobs do not use, so the daemon reads those bodies, and the
+  skills folder paths, from the image's `vnd.docker.sandbox.kit.descriptor`
+  annotation (linux/arm64 manifest; a kit set's build has already composed its
+  components there), once per digest, cached in `kit-assets/` under the
+  control home, and passes them in the job capability
+  (`marsh_contracts::kit_assets`). The worker appends each instruction body
+  to `context.md` (inline text, or a regular world-readable file of the image,
+  at most 64 KiB). A failed descriptor read starts the job without them and
+  says so on stderr; a local source Kit has none.
 
 ## 10. Model
 

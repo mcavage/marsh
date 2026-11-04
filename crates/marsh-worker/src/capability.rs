@@ -11,7 +11,7 @@
 
 use crate::{WorkerResponse, transport::Publisher};
 use marsh_contracts::{
-    kit_assets::{KitAssets, KitContext, MAX_CONTEXT_BYTES},
+    kit_assets::{KitContext, MAX_CONTEXT_BYTES},
     process::JobCapability,
 };
 use std::{
@@ -131,7 +131,6 @@ fn publish(dir: &Path, capability: &JobCapability) -> std::io::Result<()> {
     }
     fs::write(&context, text)?;
     fs::set_permissions(&context, fs::Permissions::from_mode(0o644))?;
-    publish_skills(dir, &capability.kit)?;
     // The mountpoint Docker binds the artifact over (the runtime refuses a
     // job when the artifact is missing); unbound, it is not executable.
     let artifact = dir.join("marsh");
@@ -166,26 +165,6 @@ fn kit_context(body: &KitContext) -> Option<String> {
         .read_to_end(&mut bytes)
         .ok()?;
     String::from_utf8(bytes).ok()
-}
-
-/// `skills/<index>/<name>` links to each bundled skill, one directory per
-/// skills destination; the runtime binds the deliverable ones read-only.
-fn publish_skills(dir: &Path, kit: &KitAssets) -> std::io::Result<()> {
-    if kit.skill_destinations.is_empty() || kit.skills.is_empty() {
-        return Ok(());
-    }
-    let root = dir.join("skills");
-    fs::create_dir(&root)?;
-    fs::set_permissions(&root, fs::Permissions::from_mode(0o755))?;
-    for index in 0..kit.skill_destinations.len() {
-        let destination = root.join(index.to_string());
-        fs::create_dir(&destination)?;
-        fs::set_permissions(&destination, fs::Permissions::from_mode(0o755))?;
-        for skill in &kit.skills {
-            std::os::unix::fs::symlink(&skill.path, destination.join(&skill.name))?;
-        }
-    }
-    Ok(())
 }
 
 fn valid_link(name: &str) -> bool {
@@ -372,10 +351,10 @@ impl Drop for Capability {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use marsh_contracts::kit_assets::KitSkill;
+    use marsh_contracts::kit_assets::KitAssets;
 
     #[test]
-    fn publishes_kit_instructions_and_skill_links() {
+    fn publishes_kit_instructions() {
         let root = std::env::temp_dir().join(format!("marsh-kit-assets-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let dir = root.join("attempt");
@@ -389,11 +368,7 @@ mod tests {
         let capability = JobCapability {
             name: "pix".into(),
             kit: KitAssets {
-                skill_destinations: vec!["/opt/a".into(), "/opt/b".into()],
-                skills: vec![KitSkill {
-                    name: "hello".into(),
-                    path: "/opt/skills/hello".into(),
-                }],
+                skill_destinations: vec!["/opt/a".into()],
                 contexts: vec![
                     KitContext::Text("Inline.".into()),
                     KitContext::File(readable),
@@ -417,17 +392,12 @@ mod tests {
             "{context}"
         );
         assert!(!context.contains("root only"));
-        for index in ["0", "1"] {
-            assert_eq!(
-                fs::read_link(dir.join("skills").join(index).join("hello")).unwrap(),
-                Path::new("/opt/skills/hello")
-            );
-        }
+        assert!(!dir.join("skills").exists());
         fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
-    fn a_kit_without_assets_publishes_no_skills_directory() {
+    fn a_kit_without_assets_publishes_only_the_capability() {
         let root = std::env::temp_dir().join(format!("marsh-kit-none-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
@@ -436,7 +406,6 @@ mod tests {
             ..JobCapability::default()
         };
         publish(&root, &capability).unwrap();
-        assert!(!root.join("skills").exists());
         for name in ["marsh", "xdg-open", "open"] {
             assert_eq!(
                 fs::read_to_string(root.join("bin").join(name)).unwrap(),

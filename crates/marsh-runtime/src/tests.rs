@@ -2001,45 +2001,71 @@ fn later_host_commands_do_not_inherit_a_terminal_jobs_pty() {
 }
 
 #[test]
-fn kit_skills_bind_read_only_outside_host_mounts() {
+fn sbx_prepared_skills_bind_read_only_where_the_agent_reads_them() {
     let kit = marsh_contracts::kit_assets::KitAssets {
         skill_destinations: vec![
             "/opt/pix/kit-skills".into(),
-            "/Users/alice/.pi/skills".into(),
+            "/home/agent/.claude/skills".into(),
+            "/Users/alice/dev".into(),
+            "/opt/absent".into(),
         ],
-        skills: vec![marsh_contracts::kit_assets::KitSkill {
-            name: "hello".into(),
-            path: "/opt/skills/hello".into(),
-        }],
         ..Default::default()
     };
+    let job = job();
+    let present = |path: &Path| path != Path::new("/opt/absent");
+    // The real check, with nothing to read under the fixture's grant paths.
     let mut arguments = Vec::new();
-    kit_skill_mounts(
-        &mut arguments,
-        Path::new("/run/marsh-cap/attempt-1"),
-        &job(),
-        &kit,
-    )
-    .unwrap();
+    kit_skill_mounts(&mut arguments, &job, &kit, present, skills_target_ok).unwrap();
     assert_eq!(
         words(&arguments),
         [
             "--mount",
-            "type=bind,source=/run/marsh-cap/attempt-1/skills/0,target=/opt/pix/kit-skills,readonly"
+            "type=bind,source=/opt/pix/kit-skills,target=/opt/pix/kit-skills,readonly",
+            // The image's home moves to the job's (selected) HOME.
+            "--mount",
+            "type=bind,source=/home/agent/.claude/skills,target=/Users/alice/.claude/skills,readonly",
+            "--mount",
+            "type=bind,source=/run/sbx/skills-shared,target=/run/sbx/skills-shared,readonly",
         ]
     );
-    // A destination with nothing bundled for it is not mounted.
-    let destinations_only = marsh_contracts::kit_assets::KitAssets {
-        skill_destinations: vec!["/home/agent/.claude/skills".into()],
-        ..Default::default()
-    };
+    // `skills.defaultMode off`: no store mount; the prepared folders alone.
+    let mut off = Vec::new();
+    kit_skill_mounts(
+        &mut off,
+        &job,
+        &kit,
+        |path: &Path| present(path) && path != Path::new(SBX_SKILLS_STORE),
+        skills_target_ok,
+    )
+    .unwrap();
+    assert_eq!(off.len(), 4);
+    // A Kit without skills folders gets nothing.
     let mut none = Vec::new();
     kit_skill_mounts(
         &mut none,
-        Path::new("/run/marsh-cap/a"),
-        &job(),
-        &destinations_only,
+        &job,
+        &marsh_contracts::kit_assets::KitAssets::default(),
+        present,
+        skills_target_ok,
     )
     .unwrap();
     assert_eq!(none, [] as [std::ffi::OsString; 0]);
+}
+
+#[test]
+fn a_skills_folder_never_follows_a_link_in_the_home() {
+    let grant = tempfile::tempdir().unwrap();
+    let mut job = job();
+    job.mounts[1].source = grant.path().to_owned();
+    let target = Path::new("/Users/alice/.claude/skills");
+    assert!(skills_target_ok(&job, target));
+    std::fs::create_dir(grant.path().join(".claude")).unwrap();
+    assert!(skills_target_ok(&job, target));
+    std::os::unix::fs::symlink("/etc", grant.path().join(".claude/skills")).unwrap();
+    assert!(!skills_target_ok(&job, target));
+    job.mounts[1].access = MountAccess::ReadOnly;
+    assert!(!skills_target_ok(
+        &job,
+        Path::new("/Users/alice/.agents/skills")
+    ));
 }

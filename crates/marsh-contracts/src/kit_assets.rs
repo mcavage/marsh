@@ -1,14 +1,18 @@
-//! The agent skills and instructions a Kit's descriptor declares, delivered to
-//! nested jobs (`docs/design/processes.md` s9).
+//! The agent skills folders and instructions a Kit's descriptor declares,
+//! delivered to nested jobs (`docs/design/processes.md` s9).
 //!
-//! Stock SBX applies `agent-skill@1`, `agent-skills@1` and `agent-context@*`
-//! in the outer sandbox container; marsh jobs run in a nested container from
-//! the same image and would otherwise never see them. A kit set's build has
-//! already composed its components' entries into one descriptor (the
+//! Stock SBX prepares each `agent-skills@1` folder in the outer sandbox
+//! container: links to the Kit's bundled `agent-skill@1` entries and to the
+//! user's shared skills store (`sbx skills add`, per `skills.defaultMode`).
+//! marsh jobs run in a nested container from the same image, so the runtime
+//! binds those folders, and the store they link into, read-only where the
+//! job's agent reads them (a folder in the image's home moves to the job's
+//! HOME). Stock SBX writes `agent-context@*` into the agent's own home, which
+//! marsh's selected-home jobs do not use, so marsh appends those bodies to
+//! `/run/marsh/context.md`. A kit set's build has already composed its
+//! components' entries into one descriptor (the
 //! `vnd.docker.sandbox.kit.descriptor` manifest annotation), with content
-//! files at absolute paths inside the image. marsh only delivers that result:
-//! instruction bodies are appended to `/run/marsh/context.md`, and each skills
-//! destination is a read-only directory of links to the bundled skills.
+//! files at absolute paths inside the image.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -20,7 +24,6 @@ pub const DESCRIPTOR_ANNOTATION: &str = "vnd.docker.sandbox.kit.descriptor";
 const MAX_DESTINATIONS: usize = 8;
 /// An `agent-sessions@1` config, serialized (it is shown by `marsh status`).
 const SESSIONS_BYTES: usize = 4 * 1024;
-const MAX_SKILLS: usize = 256;
 const MAX_CONTEXTS: usize = 16;
 /// Bytes of one inline instruction body or file read for `context.md`.
 pub const MAX_CONTEXT_BYTES: usize = 64 * 1024;
@@ -32,20 +35,9 @@ pub struct KitAssets {
     /// `agent-skills@1` paths: where the Kit's agent reads skills.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skill_destinations: Vec<PathBuf>,
-    /// `agent-skill@1` entries, one per effective name.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skills: Vec<KitSkill>,
     /// `agent-context` bodies, in declaration order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contexts: Vec<KitContext>,
-}
-
-/// One bundled skill: a directory in the image, linked as `name`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct KitSkill {
-    pub name: String,
-    pub path: PathBuf,
 }
 
 /// One instruction body: inline text, or a file inside the image.
@@ -59,12 +51,12 @@ pub enum KitContext {
 impl KitAssets {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.skill_destinations.is_empty() && self.skills.is_empty() && self.contexts.is_empty()
+        self.skill_destinations.is_empty() && self.contexts.is_empty()
     }
 
     /// Reads the assets from a descriptor (the annotation's JSON).
     /// Capabilities marsh does not deliver are ignored; malformed entries for
-    /// the three it does are refused.
+    /// the two it does are refused.
     ///
     /// # Errors
     /// Returns a description of the first invalid entry.
@@ -98,27 +90,6 @@ impl KitAssets {
                         assets.skill_destinations.push(path);
                     }
                 }
-                Some("com.docker.sandbox/agent-skill@1") => {
-                    let path = field("path").ok_or_else(|| invalid("missing path"))?;
-                    let path = PathBuf::from(path);
-                    if !canonical_absolute(&path) {
-                        return Err(invalid("skill path is not absolute and canonical"));
-                    }
-                    let name = match field("name") {
-                        Some(name) => name.to_owned(),
-                        None => path
-                            .file_name()
-                            .and_then(|name| name.to_str())
-                            .unwrap_or_default()
-                            .to_owned(),
-                    };
-                    if !valid_skill_name(&name) {
-                        return Err(invalid("invalid skill name"));
-                    }
-                    if !assets.skills.iter().any(|skill| skill.name == name) {
-                        assets.skills.push(KitSkill { name, path });
-                    }
-                }
                 Some(
                     "com.docker.sandbox/agent-context@1" | "com.docker.sandbox/agent-context@2",
                 ) => {
@@ -141,30 +112,11 @@ impl KitAssets {
             }
         }
         if assets.skill_destinations.len() > MAX_DESTINATIONS
-            || assets.skills.len() > MAX_SKILLS
             || assets.contexts.len() > MAX_CONTEXTS
         {
-            return Err("Kit declares too many skills or instructions".into());
+            return Err("Kit declares too many skills folders or instructions".into());
         }
         Ok(assets)
-    }
-
-    /// The skills destinations a job can receive: those that neither contain
-    /// nor sit inside one of its host mounts (a bind there would hide a
-    /// grant, or create a mountpoint in the user's files).
-    pub fn deliverable_destinations<'a>(
-        &'a self,
-        mount_targets: &'a [&Path],
-    ) -> impl Iterator<Item = (usize, &'a Path)> + 'a {
-        self.skill_destinations
-            .iter()
-            .enumerate()
-            .filter(move |(_, destination)| {
-                !mount_targets.iter().any(|target| {
-                    destination.starts_with(target) || target.starts_with(destination)
-                })
-            })
-            .map(|(index, destination)| (index, destination.as_path()))
     }
 }
 
@@ -512,15 +464,6 @@ fn skill_destination_shape(path: &Path) -> bool {
         })
 }
 
-fn valid_skill_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 128
-        && !matches!(name, "." | "..")
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,19 +485,6 @@ mod tests {
         assert_eq!(
             assets.skill_destinations,
             [PathBuf::from("/opt/pix/kit-skills")]
-        );
-        assert_eq!(
-            assets.skills,
-            [
-                KitSkill {
-                    name: "hello".into(),
-                    path: "/opt/docker/skills/hello".into()
-                },
-                KitSkill {
-                    name: "renamed".into(),
-                    path: "/opt/docker/skills/x".into()
-                },
-            ]
         );
         assert_eq!(
             assets.contexts,
@@ -588,8 +518,6 @@ mod tests {
             r#"{"type":"com.docker.sandbox/agent-skills@1","config":{"path":"/"}}"#,
             r#"{"type":"com.docker.sandbox/agent-skills@1","config":{"path":"/opt/../run"}}"#,
             r#"{"type":"com.docker.sandbox/agent-skills@1","config":{"path":"relative"}}"#,
-            r#"{"type":"com.docker.sandbox/agent-skill@1","config":{"path":"/opt/a/.."}}"#,
-            r#"{"type":"com.docker.sandbox/agent-skill@1","config":{"path":"/opt/a","name":"../x"}}"#,
             r#"{"type":"com.docker.sandbox/agent-context@1","config":{"contentFile":"./c.md"}}"#,
             r#"{"type":"com.docker.sandbox/agent-context@1","config":{}}"#,
         ] {
@@ -777,20 +705,5 @@ mod tests {
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn skips_destinations_that_overlap_host_mounts() {
-        let assets = KitAssets {
-            skill_destinations: vec![
-                "/opt/pix/kit-skills".into(),
-                "/Users/me/.pi/skills".into(),
-                "/Users".into(),
-            ],
-            ..KitAssets::default()
-        };
-        let mounts = [Path::new("/Users/me"), Path::new("/Users/me/project")];
-        let kept: Vec<_> = assets.deliverable_destinations(&mounts).collect();
-        assert_eq!(kept, [(0, Path::new("/opt/pix/kit-skills"))]);
     }
 }

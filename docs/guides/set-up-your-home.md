@@ -6,13 +6,24 @@ Inside marsh, that directory appears as your home (`~`). Its files survive
 
 ## Agent settings and skills
 
-Use these paths on your Mac:
+Skills come from the Docker Sandboxes skills store. marsh keeps that store
+in step with the skills folders on your Mac (`~/.agents/skills`,
+`~/.claude/skills`, and the others `sbx skills import --help` lists), a couple
+of seconds after you add, edit, or remove a skill there. Skills you add with
+`sbx skills add` are in the store too. Each Claude and Codex job sees the store,
+read-only, at its skills folder (`~/.claude/skills`, `~/.agents/skills`), in
+place of that folder in `~/.marsh/home`. `sbx settings set skills.defaultMode
+off` leaves the store out, and `marsh config skills-mirror off` stops the
+mirror. `marsh status` shows what is mirrored, and any skill whose name is
+already taken by an `sbx skills add` skill: the added skill wins.
+
+Use these paths on your Mac for instructions, and for Pi's own skills:
 
 | Agent | Skills | Global instructions |
 |---|---|---|
 | Pi | `~/.marsh/home/.agents/skills/NAME/SKILL.md` | `~/.marsh/home/.pi/agent/AGENTS.md` |
-| Codex | `~/.marsh/home/.agents/skills/NAME/SKILL.md` | `~/.marsh/home/.codex/AGENTS.md` |
-| Claude | `~/.marsh/home/.claude/skills/NAME/SKILL.md` | `~/.marsh/home/.claude/CLAUDE.md` |
+| Codex | `~/.agents/skills/NAME/SKILL.md` (mirrored) | `~/.marsh/home/.codex/AGENTS.md` |
+| Claude | `~/.claude/skills/NAME/SKILL.md` (mirrored) | `~/.marsh/home/.claude/CLAUDE.md` |
 
 Put shell startup files here too: `~/.marsh/home/.bashrc` on the Mac is
 `~/.bashrc` inside marsh. See [Choosing your shell](../shells.md) for startup

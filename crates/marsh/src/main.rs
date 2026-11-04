@@ -67,6 +67,7 @@ Usage:
   marsh config auto-update [on|off]    Show or set automatic Kit updates
   marsh config open-urls [on|off]      Show or set opening job links on the Mac
   marsh config cloud-delegate [on|off] Let detached cloud runs start agent sandboxes
+  marsh config skills-mirror [on|off]  Keep the sbx skills store in step with ~/.agents/skills etc.
   marsh config vm-idle-days [DAYS|off] Show or set when unused VMs are removed
   marsh gc [--dry-run] [--json]        Remove this home's superseded and unused VMs now
   marsh config peer-review [on|off|ls] Show or set peer review by another vendor's model

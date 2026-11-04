@@ -2296,32 +2296,126 @@ fn push_docker_mounts(arguments: &mut Vec<OsString>, spec: &JobSpec) -> Result<(
     Ok(())
 }
 
-/// The Kit's skills destinations, each a read-only bind of the worker's
-/// `skills/<index>` links (`marsh_contracts::kit_assets`). A destination that
-/// overlaps a host mount is skipped rather than hiding or touching it.
-fn kit_skill_mounts(
-    arguments: &mut Vec<OsString>,
-    capability_dir: &Path,
-    spec: &JobSpec,
-    kit: &marsh_contracts::kit_assets::KitAssets,
-) -> Result<(), RuntimeError> {
-    if kit.skills.is_empty() {
-        return Ok(());
+/// Where stock SBX mounts the user's shared skills store in the outer
+/// sandbox container when the Kit's skills folders link into it
+/// (`skills.defaultMode` readonly).
+const SBX_SKILLS_STORE: &str = "/run/sbx/skills-shared";
+
+/// The image's home, where stock SBX prepares HOME-relative skills folders
+/// (`/home/agent/.claude/skills`).
+const SBX_AGENT_HOME: &str = "/home/agent";
+
+/// Where a job's agent reads a skills folder: a folder under the image's
+/// home moves to the job's HOME (the selected home), keeping its place.
+fn job_skills_path(destination: &Path, spec: &JobSpec) -> PathBuf {
+    let home = spec.session_environment.get("HOME").map(Path::new);
+    match (home, destination.strip_prefix(SBX_AGENT_HOME)) {
+        (Some(home), Ok(rest)) if home.is_absolute() && home != Path::new(SBX_AGENT_HOME) => {
+            home.join(rest)
+        }
+        _ => destination.to_owned(),
     }
-    let targets: Vec<&Path> = spec
+}
+
+/// Whether a skills folder can be bound at `target` without hiding a job
+/// mount, or following a link or writing in a read-only mount on the way:
+/// inside a mount, every existing component below the mount (read through its
+/// source here) must be a real directory, and a missing one needs a writable
+/// mount for Docker to create the mountpoint.
+fn skills_target_ok(spec: &JobSpec, target: &Path) -> bool {
+    if spec
         .mounts
         .iter()
-        .map(|mount| mount.target.as_path())
-        .collect();
-    for (index, destination) in kit.deliverable_destinations(&targets) {
-        let source = docker_mount_field(
-            "source",
-            &capability_dir.join("skills").join(index.to_string()),
-        )?;
-        let target = docker_mount_field("target", destination)?;
+        .any(|mount| mount.target.starts_with(target))
+    {
+        return false;
+    }
+    let Some(mount) = spec
+        .mounts
+        .iter()
+        .filter(|mount| target.starts_with(&mount.target))
+        .max_by_key(|mount| mount.target.components().count())
+    else {
+        return true;
+    };
+    let Ok(rest) = target.strip_prefix(&mount.target) else {
+        return false;
+    };
+    let mut path = match &mount.subpath {
+        Some(subpath) => mount.source.join(subpath),
+        None => mount.source.clone(),
+    };
+    for component in rest.components() {
+        path.push(component);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return false,
+            Err(_) => return mount.access == MountAccess::ReadWrite,
+        }
+    }
+    true
+}
+
+/// Brings a prepared skills folder's store links up to date: stock SBX links
+/// store entries only at container start, so a skill added to the store since
+/// gets its link here, and a removed one loses its dangling link. Only links
+/// into the store are touched; a folder that is the store itself is left as
+/// it is.
+fn refresh_store_links(destination: &Path) {
+    use std::os::unix::fs::MetadataExt as _;
+    let store = Path::new(SBX_SKILLS_STORE);
+    let (Ok(entries), Ok(folder)) = (fs::read_dir(store), fs::metadata(destination)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let link = destination.join(entry.file_name());
+        if fs::symlink_metadata(&link).is_err()
+            && std::os::unix::fs::symlink(entry.path(), &link).is_ok()
+        {
+            let _ = std::os::unix::fs::lchown(&link, Some(folder.uid()), Some(folder.gid()));
+        }
+    }
+    for entry in fs::read_dir(destination).into_iter().flatten().flatten() {
+        let link = entry.path();
+        if fs::read_link(&link).is_ok_and(|target| target.starts_with(store)) && !link.exists() {
+            let _ = fs::remove_file(&link);
+        }
+    }
+}
+
+/// The Kit's skills folders as stock SBX prepared them in this (outer)
+/// container, each bound read-only where the job's agent reads it (under
+/// the job's HOME for a folder in the image's home), and the shared store
+/// their links point into (`marsh_contracts::kit_assets`). A folder that would
+/// hide a job mount, or cannot be placed safely, is skipped.
+fn kit_skill_mounts(
+    arguments: &mut Vec<OsString>,
+    spec: &JobSpec,
+    kit: &marsh_contracts::kit_assets::KitAssets,
+    present: impl Fn(&Path) -> bool,
+    target_ok: impl Fn(&JobSpec, &Path) -> bool,
+) -> Result<(), RuntimeError> {
+    let mut bound = false;
+    for destination in &kit.skill_destinations {
+        let target = job_skills_path(destination, spec);
+        if !present(destination) || !target_ok(spec, &target) {
+            continue;
+        }
+        let source = docker_mount_field("source", destination)?;
+        let target = docker_mount_field("target", &target)?;
         arguments.extend([
             "--mount".into(),
             format!("type=bind,{source},{target},readonly").into(),
+        ]);
+        bound = true;
+    }
+    let store = Path::new(SBX_SKILLS_STORE);
+    if bound && present(store) {
+        let path = docker_mount_field("source", store)?;
+        let target = docker_mount_field("target", store)?;
+        arguments.extend([
+            "--mount".into(),
+            format!("type=bind,{path},{target},readonly").into(),
         ]);
     }
     Ok(())
@@ -2480,7 +2574,16 @@ impl<R: CommandRunner> DockerCliRuntime<R> {
             .into(),
         ]);
         if let Some(capability) = &spec.capability {
-            kit_skill_mounts(arguments, directory, spec, &capability.kit)?;
+            for destination in &capability.kit.skill_destinations {
+                refresh_store_links(destination);
+            }
+            kit_skill_mounts(
+                arguments,
+                spec,
+                &capability.kit,
+                Path::is_dir,
+                skills_target_ok,
+            )?;
             let image_env = self.image_environment(spec, cancel)?;
             job_environment(arguments, directory, capability, &image_env, started)
                 .map_err(RuntimeError::Io)?;

@@ -11,6 +11,7 @@ mod kit_auto_update;
 mod kit_lifecycle;
 mod sbxenv;
 mod shell_attachment;
+mod skills_mirror;
 mod vm_gc;
 mod worker_recovery;
 mod worker_stop;
@@ -158,6 +159,8 @@ pub struct StockDaemonBackend {
     vm_gc_due_ms: std::sync::atomic::AtomicU64,
     /// `MARSH_VM_IDLE_SECONDS` at launch: the idle limit in seconds (tests).
     vm_idle_override: Option<String>,
+    /// The host's agent skills folders, mirrored into stock SBX's store.
+    skills_mirror: skills_mirror::Mirror,
 }
 
 /// How long one shell open waits for another opener's shell VM setup (or
@@ -495,6 +498,7 @@ impl StockDaemonBackend {
             vm_gc_lock: Mutex::new(()),
             vm_gc_pass: Mutex::new(()),
             vm_gc_due_ms: std::sync::atomic::AtomicU64::new(0),
+            skills_mirror: skills_mirror::Mirror::default(),
             vm_idle_override: None,
         }
     }
@@ -513,6 +517,14 @@ impl StockDaemonBackend {
             notices_pending: std::sync::atomic::AtomicBool::new(pending),
             checked: std::sync::atomic::AtomicBool::new(false),
         });
+        self
+    }
+
+    /// `MARSH_SKILLS_HOME` at launch: the HOME whose skills folders the
+    /// skills mirror scans, instead of the stock HOME (tests).
+    #[must_use]
+    pub fn with_skills_home(mut self, home: Option<PathBuf>) -> Self {
+        self.skills_mirror.scan_home = home.filter(|home| home.is_absolute());
         self
     }
 
@@ -1390,6 +1402,18 @@ impl DaemonBackend for StockDaemonBackend {
     fn sbxenv_status(&self) -> Option<marsh_daemon::SbxenvStatus> {
         self.refresh_sbxenv();
         Some(self.sbxenv_status_document())
+    }
+
+    fn mirror_skills(&self) {
+        self.skills_mirror.pass(
+            &self.sbx,
+            &self.config.daemon_home,
+            &self.config.control_home,
+        );
+    }
+
+    fn skills_mirror_status(&self) -> Option<marsh_daemon::SkillsMirrorStatus> {
+        Some(self.skills_mirror.status(&self.config.daemon_home))
     }
 
     fn peer_review_status(&self) -> Option<marsh_daemon::peer_review::PeerReviewStatus> {
@@ -5762,7 +5786,6 @@ mod tests {
             first.skill_destinations,
             [PathBuf::from("/opt/pix/kit-skills")]
         );
-        assert_eq!(first.skills[0].name, "hello");
         assert_eq!(backend.kit_assets(&image).unwrap(), first);
         assert_eq!(runner.1.load(std::sync::atomic::Ordering::SeqCst), 1);
         let local = OciImage::parse(format!("sha256:{}", "e".repeat(64))).unwrap();
