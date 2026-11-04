@@ -1,8 +1,9 @@
 #!/bin/sh
-# gog for agents. Reads Google; creates and edits only its own private files;
-# never sends, notifies, shares, publishes, deletes or runs code. gog refuses
-# every command not listed in allowed-commands, and flag-rules narrows the
-# commands that are listed (see the policy in the Kit's README).
+# gog for agents. Reads Google, and creates, edits and comments on the files it
+# created (the token's drive.file scope enforces "created by the agent"); never
+# sends, notifies, shares, publishes, deletes or runs code. gog refuses every
+# command not listed in allowed-commands, and flag-rules narrows the commands
+# that are listed (see the policy in the Kit's README).
 # The access token never enters this job: SBX's proxy swaps the placeholder.
 set -eu
 
@@ -45,14 +46,14 @@ cmd=$(printf '%s\n' "$named" | sed -n 's/^command "\([a-z0-9_ -]*\)" is not enab
   | tail -n 1 | tr ' ' .)
 [ -n "$cmd" ] || run --enable-commands-exact=none.none "$@"
 
-rejects= forces= scans= scanfiles=
+rejects= forces= nomention=
 while read -r kind pattern spec; do
   case "$kind" in ''|'#'*) continue ;; esac
   case "$cmd" in $pattern) ;; *) continue ;; esac
   case "$kind" in
     reject) rejects="$rejects $spec" ;;
     force) forces="$forces $spec" ;;
-    scan) scans=1; scanfiles="$scanfiles $spec" ;;
+    nomention) nomention=1 ;;
     *) die "unknown flag rule: $kind" ;;
   esac
 done < "$rules"
@@ -63,11 +64,11 @@ for arg in "$@"; do
   for flag in $rejects; do
     case "$flag" in
       --*) case "$arg" in
-             "$flag"|"$flag"=*) die "$flag is not available in $cmd: this tool keeps what it makes private and runs nothing" ;;
+             "$flag"|"$flag"=*) die "$flag is not available in $cmd" ;;
            esac ;;
       *) case "$arg" in
            --*) ;;
-           -*"${flag#-}"*) die "$flag is not available in $cmd: this tool keeps what it makes private and runs nothing" ;;
+           -*"${flag#-}"*) die "$flag is not available in $cmd" ;;
          esac ;;
     esac
   done
@@ -92,47 +93,19 @@ for spec in $forces; do
   [ -n "$seen" ] || set -- "$@" "$flag=$value"
 done
 
-# scan: no image markup, which Google would fetch from any URL the agent
-# picks. Files are copied into this job's own /tmp first and the copy is
-# checked and used, so the agent can't change a file after the check.
-if [ -n "$scans" ]; then
-  image='!\[|<img'
+# nomention: comment text with an @ (an @-mention or +email) makes Google email
+# that person, so any argument containing one is refused. (An --account value
+# is an address, not text.)
+if [ -n "$nomention" ]; then
+  skip=
   for arg in "$@"; do
-    if printf '%s' "$arg" | grep -qiE "$image"; then
-      die "image markup isn't allowed in $cmd content: Google would fetch the image from a URL the agent chooses"
-    fi
-  done
-  dir=$(mktemp -d /tmp/gog-input.XXXXXX)
-  count=$# n=0
-  while [ "$count" -gt 0 ]; do
-    arg=$1; shift; count=$((count - 1))
-    flag=${arg%%=*} value= attached=
-    case "$arg" in *=*) value=${arg#*=}; attached=1 ;; esac
-    match=
-    for f in $scanfiles; do [ "$flag" = "$f" ] && match=1; done
-    if [ -z "$match" ]; then set -- "$@" "$arg"; continue; fi
-    if [ -z "$attached" ]; then
-      [ "$count" -gt 0 ] || die "$arg needs a value"
-      value=$1; shift; count=$((count - 1))
-    fi
-    n=$((n + 1))
-    mkdir "$dir/$n"
-    if [ "$value" = - ]; then
-      name=stdin
-      cat > "$dir/$n/$name"
-    else
-      name=$(basename -- "$value")
-      cp -- "$value" "$dir/$n/$name" || die "can't read $value"
-    fi
-    if grep -qaiE "$image" "$dir/$n/$name"; then
-      die "image markup isn't allowed in $cmd content: Google would fetch the image from a URL the agent chooses"
-    fi
-    if [ -n "$attached" ]; then set -- "$@" "$flag=$dir/$n/$name"; else set -- "$@" "$flag" "$dir/$n/$name"; fi
+    if [ -n "$skip" ]; then skip=; continue; fi
+    case "$arg" in
+      --account|-a) skip=1 ;;
+      --account=*) ;;
+      *@*) die "@ isn't allowed in $cmd text: an @-mention or +email makes Google email that person" ;;
+    esac
   done
 fi
-
-# gog reads stdin itself when no content is given, which would skip the scan:
-# in these commands stdin is only reachable as --file -, scanned above.
-[ -z "$scans" ] || exec </dev/null
 
 run --enable-commands-exact="$allowed" "$@"

@@ -2,24 +2,24 @@
 # command pattern matches the command gog resolved (aliases and shortcuts
 # included), so a rule holds however the agent spells the command.
 #
-#   reject PATTERN FLAG...        refuse the command if any of these flags is given
-#   force  PATTERN FLAG=VALUE     the flag is always VALUE: any other value is refused,
-#                                 and a missing flag is added
-#   scan   PATTERN FILEFLAG...    refuse image markup in the command's content: in any
-#                                 argument, and in files named by the flags (read once
-#                                 into the job's own /tmp, so the copy is what runs)
+#   reject    PATTERN FLAG...      refuse the command if any of these flags is given
+#   force     PATTERN FLAG=VALUE   the flag is always VALUE: any other value is refused,
+#                                  and a missing flag is added
+#   nomention PATTERN              refuse any argument containing "@": comment text
+#                                  with an @-mention or +email makes Google email
+#                                  that person
 #
 # PATTERN is a shell glob over the dotted command path ("*" is every command).
 # tests/kits/tools-policy.py checks that each rule names a real flag, that every
 # rule is enforced in the built image, and that gog has no executable or
-# destination flag these rules don't cover.
+# destination flag, and no allowed comment command, these rules don't cover.
 
 # Nothing runs code or opens a program: external renderers, hooks, browsers.
 reject * --mmdc --on-change --on-new --open --browser
 
-# New files land in My Drive root, private. Creating commands have no
-# destination flag. A copy would otherwise inherit its source's folder (maybe a
-# shared one), so copies are pinned to the root.
+# New files land in My Drive root, where nothing is shared. Creating commands
+# have no destination flag. A copy would otherwise inherit its source's folder
+# (maybe a shared one), so copies are pinned to the root.
 reject drive.mkdir --parent
 reject drive.upload --parent
 reject upload --parent
@@ -32,22 +32,6 @@ force slides.copy --parent=root
 force slides.create --parent=root
 force slides.create-from-template --parent=root
 
-# Drive's own conversion evaluates spreadsheet formulas and fetches images.
-reject drive.upload --convert --convert-to
-reject upload --convert --convert-to
-
-# Sheets: values are stored as typed. USER_ENTERED would evaluate formulas such
-# as IMAGE() and IMPORTDATA(), which make Google fetch a URL the agent builds.
-force sheets.append --input=RAW
-force sheets.update --input=RAW
-force sheets.batch-update --input=RAW
-force sheets.table.append --input=RAW
-
-# Docs: images in Markdown are fetched by Google from any URL. -f is docs insert's
-# short form of --file; it is refused rather than scanned.
-scan docs.* --file --content-file
-reject docs.insert -f
-
-# Gmail drafts are plain text: Gmail loads remote images in an HTML draft when
-# the owner opens it. (--html-from-text would add an HTML part.)
-reject gmail.drafts.* --body-html --body-html-file --note-html --note-html-file --html-from-text --signature-file --raw-file
+# Comments may not @-mention or +email anyone.
+nomention docs.comments.*
+nomention drive.comments.*

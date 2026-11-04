@@ -6,8 +6,8 @@
 # policy decision. Never allow a command that sends or notifies others, shares,
 # deletes, changes settings or permissions, or touches admin or auth.
 
-# Gmail: read mail, labels, history and settings; save drafts (drafts are
-#   never sent)
+# Gmail: read mail, labels, history and settings; save drafts, HTML included
+#   (drafts are never sent)
 gmail.attachment
 gmail.autoforward.get
 gmail.delegates.get
@@ -65,14 +65,19 @@ calendar.time
 calendar.users
 
 # Drive: read; create folders and files in My Drive root (the wrapper rejects
-#   destination flags and conversions); copy, rename and upload
+#   destination flags); copy, rename and upload; comment on files the agent
+#   created (the wrapper rejects @-mentions)
 drive.activity.query
 drive.audit.sharing
 drive.audit.user
 drive.changes.list
 drive.changes.start-token
+drive.comments.create
 drive.comments.get
 drive.comments.list
+drive.comments.reopen
+drive.comments.reply
+drive.comments.resolve
 drive.copy
 drive.download
 drive.drives
@@ -94,15 +99,19 @@ drive.tree
 drive.upload
 drive.url
 
-# Docs: read; create documents; edit content, tabs, tables and formatting (the
-#   wrapper rejects image markup)
+# Docs: read; create documents; edit content, tabs, tables and formatting;
+#   comment (the wrapper rejects @-mentions)
 docs.add-tab
 docs.cat
 docs.cell-style
 docs.cell-update
+docs.comments.add
 docs.comments.get
 docs.comments.list
 docs.comments.locate
+docs.comments.reopen
+docs.comments.reply
+docs.comments.resolve
 docs.copy
 docs.create
 docs.edit
@@ -135,6 +144,7 @@ docs.paragraphs.list
 docs.raw
 docs.rename-tab
 docs.section-columns
+docs.sed
 docs.structure
 docs.suggestions.list
 docs.table-column-width
@@ -151,8 +161,8 @@ docs.tabs.rename
 docs.update
 docs.write
 
-# Sheets: read; create spreadsheets; edit values (always RAW, never evaluated
-#   as formulas), tabs, ranges and formatting
+# Sheets: read; create spreadsheets; edit values (formulas included), tabs,
+#   ranges and formatting
 sheets.add-tab
 sheets.append
 sheets.banding.list
@@ -165,6 +175,7 @@ sheets.chart.update
 sheets.conditional-format.add
 sheets.conditional-format.list
 sheets.copy
+sheets.copy-paste
 sheets.create
 sheets.datasource.describe
 sheets.datasource.list
@@ -174,6 +185,7 @@ sheets.datasource.table.read
 sheets.duplicate-tab
 sheets.export
 sheets.filter.set
+sheets.find-replace
 sheets.format
 sheets.freeze
 sheets.get
