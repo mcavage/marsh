@@ -2693,6 +2693,7 @@ fn job_environment(
         prompts: capability.prompts.clone(),
         models: capability.models.clone(),
         model_choices: capability.model_choices.clone(),
+        usages: capability.usages.clone(),
     };
     let bytes = serde_json::to_vec_pretty(&document).map_err(io::Error::other)?;
     let target = directory.join("job.json");

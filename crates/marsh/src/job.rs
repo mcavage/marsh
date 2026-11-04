@@ -34,7 +34,7 @@ Registered names in /run/marsh/bin are links: calling one starts a child job.
 See /run/marsh/context.md.
 ";
 
-pub const RUN_HELP: &str = "Usage: marsh run [--spawn NAME,...|--no-spawn] [--label TEXT] [--model M] [--acp] NAME [ARG...]\n\nRun registered command NAME as a new job (from a job: a child job). stdin,\nstdout, stderr, and the exit status are relayed; a refusal exits 125.\n--spawn and --no-spawn (or MARSH_SPAWN) narrow what NAME may start;\nnothing widens it. --label TEXT (1 to 128 bytes, no control characters)\nis recorded on the job (`marsh jobs --json`, `marsh events`), and so is\n--model M as its `model` (the task tool sets it). --acp runs\nNAME's ACP adapter (its Kit's acp@1) as an ACP server on stdin and stdout\n(not from inside a job).\n";
+pub const RUN_HELP: &str = "Usage: marsh run [--spawn NAME,...|--no-spawn] [--label TEXT] [--model M] [--usage PARSER] [--acp] NAME [ARG...]\n\nRun registered command NAME as a new job (from a job: a child job). stdin,\nstdout, stderr, and the exit status are relayed; a refusal exits 125.\n--spawn and --no-spawn (or MARSH_SPAWN) narrow what NAME may start;\nnothing widens it. --label TEXT (1 to 128 bytes, no control characters)\nis recorded on the job (`marsh jobs --json`, `marsh events`), and so is\n--model M as its `model` (the task tool sets it). --usage PARSER\n(claude-json, codex-jsonl, pi-jsonl) reads the agent's stdout and records\nthe token usage it reports as the job's `usage`. --acp runs\nNAME's ACP adapter (its Kit's acp@1) as an ACP server on stdin and stdout\n(not from inside a job).\n";
 
 /// When set, `marsh run` writes the child's job id to this file as soon as
 /// the daemon reports it (`marsh task-mcp`). Never forwarded (`MARSH_*`).
@@ -198,8 +198,7 @@ fn child(name: &str, arguments: &[OsString], spawn: Option<Vec<String>>, from_li
         spawn,
         from_link,
         marsh_daemon::Placement::Local,
-        None,
-        None,
+        Recorded::default(),
     )
 }
 
@@ -227,8 +226,7 @@ fn cloud_child(arguments: &[OsString]) -> i32 {
         None,
         false,
         marsh_daemon::Placement::Cloud,
-        None,
-        None,
+        Recorded::default(),
     )
 }
 
@@ -238,9 +236,13 @@ fn child_at(
     spawn: Option<Vec<String>>,
     from_link: bool,
     placement: marsh_daemon::Placement,
-    label: Option<String>,
-    model: Option<String>,
+    recorded: Recorded,
 ) -> i32 {
+    let Recorded {
+        label,
+        model,
+        usage,
+    } = recorded;
     let document = document().unwrap_or_default();
     let refused = if from_link { 126 } else { 125 };
     if !Path::new(SOCKET).exists() {
@@ -259,6 +261,7 @@ fn child_at(
     let (environment, start_env) = offered(&document);
     let spec = ExecuteSpec {
         model,
+        usage,
         label,
         kit: None,
         command: name.to_owned(),
@@ -389,8 +392,11 @@ fn cli(arguments: &[OsString]) -> i32 {
                 run.spawn,
                 false,
                 marsh_daemon::Placement::Local,
-                run.label,
-                run.model,
+                Recorded {
+                    label: run.label,
+                    model: run.model,
+                    usage: run.usage,
+                },
             ),
             Err(message) => {
                 eprintln!("marsh: {message}");
@@ -442,6 +448,7 @@ pub fn parse_run(arguments: &[OsString]) -> Result<Option<RunArguments>, String>
     let mut spawn = None;
     let mut label = None;
     let mut model = None;
+    let mut usage = None;
     let mut acp = false;
     let mut index = 0;
     while let Some(argument) = arguments.get(index).and_then(|argument| argument.to_str()) {
@@ -480,6 +487,20 @@ pub fn parse_run(arguments: &[OsString]) -> Result<Option<RunArguments>, String>
                     .map_err(|error| format!("run: --model: {error}"))?;
                 model = Some(value.to_owned());
             }
+            "--usage" => {
+                index += 1;
+                let value = arguments
+                    .get(index)
+                    .and_then(|value| value.to_str())
+                    .filter(|value| marsh_contracts::usage::PARSERS.contains(value))
+                    .ok_or_else(|| {
+                        format!(
+                            "run: --usage needs a usage parser ({})",
+                            marsh_contracts::usage::PARSERS.join(", ")
+                        )
+                    })?;
+                usage = Some(value.to_owned());
+            }
             _ => break,
         }
         index += 1;
@@ -488,11 +509,12 @@ pub fn parse_run(arguments: &[OsString]) -> Result<Option<RunArguments>, String>
         .get(index)
         .and_then(|name| name.to_str())
         .filter(|name| !name.starts_with('-'))
-        .ok_or("run: usage: marsh run [--spawn NAME,...|--no-spawn] [--label TEXT] [--model M] [--acp] NAME [ARG...]")?;
+        .ok_or("run: usage: marsh run [--spawn NAME,...|--no-spawn] [--label TEXT] [--model M] [--usage PARSER] [--acp] NAME [ARG...]")?;
     Ok(Some(RunArguments {
         spawn,
         label,
         model,
+        usage,
         name: name.to_owned(),
         arguments: arguments[index + 1..].to_vec(),
         acp,
@@ -507,9 +529,22 @@ pub struct RunArguments {
     /// `--model M`: recorded on the job's receipt as the model it was asked
     /// to run (the task tool sets it; marsh never reads it from the argv).
     pub model: Option<String>,
+    /// `--usage PARSER`: read the job's stdout with PARSER and record the
+    /// token usage its agent reports on the job (the task tool sets it, with
+    /// the words of the agent's `org.marsh/agent-usage@1` in its arguments).
+    pub usage: Option<String>,
     pub name: String,
     pub arguments: Vec<OsString>,
     pub acp: bool,
+}
+
+/// What a child's receipt records from its caller: `--label`, `--model`,
+/// and `--usage`.
+#[derive(Default)]
+struct Recorded {
+    label: Option<String>,
+    model: Option<String>,
+    usage: Option<String>,
 }
 
 /// Which job trees `marsh jobs` text shows (`docs/design/processes.md` s9).

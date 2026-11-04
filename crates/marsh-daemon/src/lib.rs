@@ -106,6 +106,7 @@ pub const FEATURES: &[&str] = &[
     "task-tool-v1",
     "peer-review-v1",
     "skills-mirror-v1",
+    "task-usage-v1",
 ];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while
@@ -519,6 +520,69 @@ fn hex(bytes: &[u8]) -> String {
         result.push(char::from(DIGITS[usize::from(byte & 0x0f)]));
     }
     result
+}
+
+/// A job's tree usage: its own usage plus each child's `tree_usage`. `None`
+/// when nothing in the tree reported usage.
+fn tree_usage(
+    jobs: &BTreeMap<String, JobReceipt>,
+    job_id: &str,
+    own: Option<&marsh_contracts::usage::Usage>,
+) -> Option<marsh_contracts::usage::TreeUsage> {
+    let parent = format!("job:{job_id}");
+    let mut tree = marsh_contracts::usage::TreeUsage::default();
+    if let Some(own) = own {
+        tree.add_usage(own);
+    }
+    for child in jobs.values().filter(|job| {
+        job.lineage
+            .as_ref()
+            .is_some_and(|lineage| lineage.parent == parent)
+    }) {
+        if let Some(child_tree) = &child.tree_usage {
+            tree.add_tree(child_tree);
+        }
+    }
+    (tree.jobs > 0).then_some(tree)
+}
+
+/// A job that ended after its parent (a background child cancelled with its
+/// tree) updates each already-ended ancestor's `tree_usage`, journaled.
+fn propagate_tree_usage(state: &mut State, ended: &JobReceipt) {
+    let mut cursor = ended
+        .lineage
+        .as_ref()
+        .and_then(|lineage| lineage.parent.strip_prefix("job:"))
+        .map(str::to_owned);
+    let mut steps = 0;
+    while let Some(id) = cursor.take() {
+        steps += 1;
+        let Some(ancestor) = state.jobs.get(&id).filter(|_| steps <= 64) else {
+            return;
+        };
+        if matches!(
+            ancestor.state,
+            JobState::Queued | JobState::Running | JobState::Detached
+        ) {
+            // It sums its children when it ends.
+            return;
+        }
+        let tree = tree_usage(&state.jobs, &id, ancestor.usage.as_ref());
+        if tree == ancestor.tree_usage {
+            return;
+        }
+        let mut updated = ancestor.clone();
+        updated.tree_usage = tree;
+        cursor = updated
+            .lineage
+            .as_ref()
+            .and_then(|lineage| lineage.parent.strip_prefix("job:"))
+            .map(str::to_owned);
+        if state.journal.append(&updated, false).is_err() {
+            return;
+        }
+        state.jobs.insert(id, updated);
+    }
 }
 
 fn unix_time_ms() -> u64 {
@@ -1081,6 +1145,11 @@ pub struct ExecuteSpec {
     /// receipt as the model the job was asked to run (`docs/peer-review.md`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// `marsh run --usage PARSER` (the task tool, from the agent's
+    /// `org.marsh/agent-usage@1`): read the job's stdout with PARSER and
+    /// record the token usage it reports on the job receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<String>,
     /// The exact Kit generation this run must use (an ACP session's, as
     /// resolved when it started); refused if the command now names another.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1970,6 +2039,12 @@ pub struct JobSummary {
     /// `JobReceipt::model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// `JobReceipt::usage`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<marsh_contracts::usage::Usage>,
+    /// `JobReceipt::tree_usage`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree_usage: Option<marsh_contracts::usage::TreeUsage>,
 }
 
 impl JobSummary {
@@ -1988,6 +2063,8 @@ impl JobSummary {
             detached: job.detached.clone(),
             label: job.label.clone(),
             model: job.model.clone(),
+            usage: job.usage.clone(),
+            tree_usage: job.tree_usage.clone(),
         }
     }
 }
@@ -2088,6 +2165,16 @@ pub struct JobReceipt {
     /// when none was passed (the agent then uses its own default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The job's own token usage, as its agent reported it on stdout when
+    /// started with a usage parser (`ExecuteSpec::usage`, the task tool;
+    /// `docs/agents.md`). Absent when the agent reported none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<marsh_contracts::usage::Usage>,
+    /// This job's usage plus every descendant's (children's `tree_usage`),
+    /// set when it ends and updated when a child ends after it. Absent when
+    /// no job in the tree reported usage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree_usage: Option<marsh_contracts::usage::TreeUsage>,
     /// `scheme://host` of each link this job opened on the Mac (`xdg-open`),
     /// at most `open_url::MAX_RECORDED`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3593,6 +3680,8 @@ impl DaemonStore {
             detached: None,
             label: job.label,
             model: None,
+            usage: None,
+            tree_usage: None,
             opened: Vec::new(),
             cloud_children: Vec::new(),
             mounts: job.mounts,
@@ -3648,6 +3737,20 @@ impl DaemonStore {
         if let Some(receipt) = self.lock().jobs.get_mut(job_id) {
             receipt.model = Some(model.to_owned());
         }
+    }
+
+    /// Record a job's own token usage, read from its stdout
+    /// (`ExecuteSpec::usage`). Journaled with the job's terminal transition,
+    /// which also sums its tree.
+    pub fn set_job_usage(&self, job_id: &str, mut usage: marsh_contracts::usage::Usage) {
+        let mut state = self.lock();
+        let Some(receipt) = state.jobs.get_mut(job_id) else {
+            return;
+        };
+        if usage.model.is_none() {
+            usage.model.clone_from(&receipt.model);
+        }
+        receipt.usage = Some(usage);
     }
 
     /// Record that a root job was started by a split's consumer (a stage
@@ -4157,6 +4260,7 @@ impl DaemonStore {
         updated.cleanup = cleanup;
         updated.timing = timing;
         updated.finished_unix_ms = Some(unix_time_ms());
+        updated.tree_usage = tree_usage(&state.jobs, job_id, updated.usage.as_ref());
         state.journal.append(&updated, true)?;
 
         state.reservations.remove(job_id);
@@ -4189,6 +4293,9 @@ impl DaemonStore {
             }
         }
         state.jobs.insert(job_id.into(), updated.clone());
+        if updated.tree_usage.is_some() {
+            propagate_tree_usage(&mut state, &updated);
+        }
         let trimmed = receipt_journal::trim_receipts(&mut state.jobs);
         if trimmed || state.journal.exceeds_size_limit() {
             let receipts = state.jobs.clone();

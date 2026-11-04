@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a1a89a-1019-7db3-ada4-458078887bbd"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n  user (/Users/example/.codex/config.toml): `mcp_servers.mcp-gateway.type` is ignored."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n  user (/Users/example/.codex/config.toml): `mcp_servers.mcp-gateway.type` is ignored."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"pong"}}
+{"type":"turn.completed","usage":{"input_tokens":12239,"cached_input_tokens":0,"cache_write_input_tokens":12236,"output_tokens":5,"reasoning_output_tokens":0}}

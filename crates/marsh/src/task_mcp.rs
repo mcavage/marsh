@@ -6,6 +6,7 @@
 //! (`docs/agents.md`, "The task tool").
 
 use marsh_contracts::process::{self as contract, JOB_JSON, JobDocument, ModelChoice, SOCKET};
+use marsh_contracts::usage::UsageOption;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -66,6 +67,9 @@ struct Setup {
     models: BTreeMap<String, Vec<String>>,
     /// Agent name -> the models it can run (id, class, family nickname).
     choices: BTreeMap<String, Vec<ModelChoice>>,
+    /// Agent name -> its usage option (`org.marsh/agent-usage@1`): the words
+    /// that make it report token usage, and the parser for its output.
+    usages: BTreeMap<String, UsageOption>,
     /// Why no agent is available, when none is.
     none_reason: Option<String>,
     /// The in-job marsh (the artifact) used to start children.
@@ -98,6 +102,12 @@ impl Setup {
             .filter(|(name, _)| agents.contains_key(*name))
             .map(|(name, choices)| (name.clone(), choices.clone()))
             .collect();
+        let usages = document
+            .usages
+            .iter()
+            .filter(|(name, _)| agents.contains_key(*name))
+            .map(|(name, option)| (name.clone(), option.clone()))
+            .collect();
         let none_reason = agents.is_empty().then(|| {
             if document.spawn.is_empty() || narrowed.is_some_and(<[String]>::is_empty) {
                 "this job may start no agents (it was started with --no-spawn or MARSH_SPAWN=none)"
@@ -118,6 +128,7 @@ impl Setup {
             agents,
             models,
             choices,
+            usages,
             none_reason,
             marsh: PathBuf::from(contract::ARTIFACT),
             dir: std::env::temp_dir().join(format!("marsh-tasks-{short}-{}", std::process::id())),
@@ -256,6 +267,9 @@ struct TaskRequest {
     /// The family nickname the call named instead of an id (`astra`).
     asked: Option<String>,
     argv: Vec<String>,
+    /// The parser for the agent's output when its Kit declares a usage
+    /// option (its words are then in `argv`).
+    usage: Option<String>,
     files: Files,
     background: bool,
 }
@@ -328,12 +342,18 @@ fn task_request(setup: &Setup, arguments: &Value) -> Result<TaskRequest, String>
         .map(|verb| verb.replace(contract::PROMPT_PLACEHOLDER, prompt))
         .collect::<Vec<_>>();
     let (model, asked) = model_argument(setup, &agent, arguments, &mut argv)?;
+    // Usage words go last: after the model option, as the agent's own flags.
+    let usage = setup.usages.get(&agent).map(|option| {
+        argv.extend(option.args.iter().cloned());
+        option.parser.clone()
+    });
     Ok(TaskRequest {
         description,
         agent,
         model,
         asked,
         argv,
+        usage,
         files,
         background,
     })
@@ -411,8 +431,12 @@ struct Outcome {
     code: Option<i32>,
     /// "exited 0", "failed: ...", "cancelled".
     status: String,
-    /// The agent's final message (its stdout).
+    /// The agent's final message (its stdout, or read from it by the
+    /// usage parser).
     message: String,
+    /// The child job's `usage` and `tree_usage`, as the daemon recorded them.
+    usage: Option<Value>,
+    tree_usage: Option<Value>,
     /// The tail of its stderr when it failed.
     stderr: String,
     /// Where the whole output is, in this container.
@@ -772,11 +796,15 @@ impl Server {
         let label = task_label(request);
         // The task's model is recorded on the child job from here, never
         // read back from the agent's arguments.
-        let model = request
+        let mut model = request
             .model
             .as_ref()
             .map(|model| vec!["--model", model.as_str()])
             .unwrap_or_default();
+        // The daemon reads the agent's usage from its output (`--usage`).
+        if let Some(parser) = &request.usage {
+            model.extend(["--usage", parser.as_str()]);
+        }
         let mut command = Command::new(&self.setup.marsh);
         match request.files {
             Files::Shared => {
@@ -831,6 +859,13 @@ impl Server {
             Files::Shared => shared_outcome(directory, code, signal),
             Files::Copy => self.copy_outcome(directory, code, signal),
         };
+        if let Some(message) = request
+            .usage
+            .as_deref()
+            .and_then(|parser| agent_message(&outcome.transcript, parser))
+        {
+            outcome.message = message;
+        }
         let copy_job = (request.files == Files::Copy)
             .then(|| read_json(&directory.join("manifest.json")))
             .flatten()
@@ -839,6 +874,15 @@ impl Server {
                     .as_str()
                     .map(str::to_owned)
             });
+        let job = copy_job.clone().or_else(|| {
+            lock(&self.tasks)
+                .tasks
+                .get(id)
+                .and_then(|task| task.job.clone())
+        });
+        if let Some(job) = &job {
+            (outcome.usage, outcome.tree_usage) = self.job_usage(job);
+        }
         let mut tasks = lock(&self.tasks);
         if let Some(task) = tasks.tasks.get_mut(id) {
             if copy_job.is_some() {
@@ -852,6 +896,22 @@ impl Server {
         }
         drop(tasks);
         self.changed.notify_all();
+    }
+
+    /// A finished child job's `usage` and `tree_usage` (`marsh jobs show`):
+    /// the daemon recorded them before the child's end reached us.
+    fn job_usage(&self, job: &str) -> (Option<Value>, Option<Value>) {
+        let Ok(output) = Command::new(&self.setup.marsh)
+            .args(["jobs", "show", job, "--json"])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+        else {
+            return (None, None);
+        };
+        let receipt = serde_json::from_slice::<Value>(&output.stdout).unwrap_or_default();
+        let field = |name: &str| receipt.get(name).filter(|value| value.is_object()).cloned();
+        (field("usage"), field("tree_usage"))
     }
 
     /// The child's job id, as `marsh run` wrote it from the daemon's
@@ -1298,6 +1358,12 @@ fn render(task: &Task, transcript: bool) -> Result<String, String> {
         };
         let _ = write!(text, "\n--- final message ---\n{message}\n");
     }
+    if let Some(usage) = &outcome.usage {
+        let _ = write!(text, "\nusage: {usage}\n");
+    }
+    if let Some(tree) = &outcome.tree_usage {
+        let _ = writeln!(text, "tree_usage (it and its own tasks): {tree}");
+    }
     if !outcome.stderr.trim().is_empty() {
         let _ = write!(
             text,
@@ -1331,6 +1397,35 @@ fn render(task: &Task, transcript: bool) -> Result<String, String> {
         }
     }
     Ok(text)
+}
+
+/// The agent's final message from its output, read with its usage parser
+/// (`claude -p --output-format json`'s `result`, ...): `None` when the
+/// output holds none, so the raw output stands.
+fn agent_message(path: &Path, parser: &str) -> Option<String> {
+    let mut collector = marsh_contracts::usage::Collector::new(parser)?;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buffer = vec![0_u8; 64 * 1024];
+    loop {
+        match file.read(&mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => collector.feed(&buffer[..read]),
+        }
+    }
+    let message = collector.finish().message?;
+    if message.len() <= MESSAGE_CAP {
+        return Some(message);
+    }
+    let mut end = MESSAGE_CAP;
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    Some(format!(
+        "{}\n[... cut at {MESSAGE_CAP} of {} bytes; the whole output is in {}]",
+        &message[..end],
+        message.len(),
+        path.display()
+    ))
 }
 
 /// Up to `cap` bytes of `path` (its tail when `tail`), lossy UTF-8, with a
@@ -1426,6 +1521,31 @@ mod tests {
     }
 
     #[test]
+    fn an_agent_with_a_usage_option_reports_usage_after_its_model() {
+        let mut setup = setup(&["claude", "codex", "pi"], None);
+        setup.usages.insert(
+            "codex".into(),
+            UsageOption {
+                args: vec!["--json".into()],
+                parser: "codex-jsonl".into(),
+            },
+        );
+        let request = task_request(
+            &setup,
+            &json!({"prompt": "review", "agent": "codex", "model": "gpt-6.1-terra"}),
+        )
+        .unwrap();
+        assert_eq!(
+            request.argv,
+            ["exec", "review", "-m", "gpt-6.1-terra", "--json"]
+        );
+        assert_eq!(request.usage.as_deref(), Some("codex-jsonl"));
+        // Without one the agent runs as before and reports nothing.
+        let request = task_request(&setup, &json!({"prompt": "go", "agent": "pi"})).unwrap();
+        assert_eq!((request.argv.len(), request.usage), (2, None));
+    }
+
+    #[test]
     fn defaults_are_the_callers_agent_shared_and_blocking() {
         let setup = setup(&["claude", "codex", "shell"], None);
         let request = task_request(
@@ -1441,6 +1561,7 @@ mod tests {
                 model: None,
                 asked: None,
                 argv: vec!["-p".into(), "fix the bug".into()],
+                usage: None,
                 files: Files::Shared,
                 background: false,
             }

@@ -270,6 +270,7 @@ fn a_relay_cannot_name_a_parent_job() {
     let request = |parent: &str| {
         PublicRequest::Execute(ExecuteSpec {
             model: None,
+            usage: None,
             label: None,
             kit: None,
             acp: false,
@@ -812,4 +813,84 @@ fn a_job_cancelled_before_it_can_be_signalled_gets_the_cancel_at_registration() 
     assert_eq!(*signals.lock().unwrap(), ["INT"]);
     end(&store, &job, CleanupState::Verified);
     assert_eq!(store.job(&job).unwrap().state, JobState::Cancelled);
+}
+
+#[test]
+fn tree_usage_sums_descendants_and_follows_a_late_child() {
+    use marsh_contracts::usage::Usage;
+    let home = tempfile::tempdir().unwrap();
+    let store = reopen(home.path()).unwrap();
+    let session = session(&store, home.path());
+    let root = launch(&store, &session, None, "claude", view(), false).unwrap();
+    let task = child(&store, &session, &root, "claude").unwrap();
+    let grandchild = child(&store, &session, &task, "codex").unwrap();
+    store.set_job_model(&grandchild, "gpt-6.1-terra");
+    store.set_job_usage(
+        &grandchild,
+        Usage {
+            input_tokens: 9000,
+            output_tokens: 200,
+            cached_tokens: 1000,
+            source: "codex-jsonl".into(),
+            ..Usage::default()
+        },
+    );
+    end(&store, &grandchild, CleanupState::Verified);
+    store.set_job_usage(
+        &task,
+        Usage {
+            model: Some("claude-opus-4-7".into()),
+            input_tokens: 10,
+            output_tokens: 300,
+            cached_tokens: 20_000,
+            cache_write_tokens: 5000,
+            cost_usd: Some(0.05),
+            source: "claude-json".into(),
+        },
+    );
+    end(&store, &task, CleanupState::Verified);
+    let late = child(&store, &session, &root, "pi").unwrap();
+    end(&store, &root, CleanupState::Verified);
+
+    // The codex job's model is the one it was asked to run.
+    let codex = store.job(&grandchild).unwrap();
+    assert_eq!(codex.usage.unwrap().model.as_deref(), Some("gpt-6.1-terra"));
+    let task_tree = store.job(&task).unwrap().tree_usage.unwrap();
+    assert_eq!(
+        (
+            task_tree.input_tokens,
+            task_tree.output_tokens,
+            task_tree.cached_tokens
+        ),
+        (9010, 500, 21_000)
+    );
+    assert_eq!((task_tree.jobs, task_tree.uncosted_jobs), (2, 1));
+    assert_eq!(task_tree.cost_usd, Some(0.05));
+    assert_eq!(task_tree.models, ["claude-opus-4-7", "gpt-6.1-terra"]);
+    // The root reported nothing itself: its tree is its children's.
+    let root_job = store.job(&root).unwrap();
+    assert!(root_job.usage.is_none());
+    assert_eq!(root_job.tree_usage.as_ref(), Some(&task_tree));
+
+    // A child that ends after its parent updates the ended ancestors.
+    store.set_job_usage(
+        &late,
+        Usage {
+            model: Some("anthropic/claude-sonnet-4-5".into()),
+            input_tokens: 5,
+            output_tokens: 7,
+            cost_usd: Some(0.001),
+            source: "pi-jsonl".into(),
+            ..Usage::default()
+        },
+    );
+    end(&store, &late, CleanupState::Verified);
+    let tree = store.job(&root).unwrap().tree_usage.unwrap();
+    assert_eq!((tree.jobs, tree.output_tokens), (3, 507));
+    assert_eq!(tree.cost_usd, Some(0.051));
+    drop(store);
+    // Journaled: a restart keeps both.
+    let store = reopen(home.path()).unwrap();
+    assert_eq!(store.job(&root).unwrap().tree_usage, Some(tree));
+    assert!(store.job(&task).unwrap().usage.is_some());
 }

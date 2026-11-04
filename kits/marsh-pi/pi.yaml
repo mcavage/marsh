@@ -103,6 +103,14 @@ capabilities:
     config:
       args: ["--model", "{{.Model}}"]
       services: ["*"]   # multi-provider: any vendor whose key the host holds (`provider/model` ids)
+  # marsh's usage option for the task tool: `-p PROMPT --mode json` prints
+  # JSONL events (assistant `message_end` usage and cost, the last assistant
+  # text as the final message), read with marsh's `pi-jsonl` parser.
+  - type: org.marsh/agent-usage@1
+    optional: true
+    config:
+      args: ["--mode", "json"]
+      parser: pi-jsonl
 
   - type: com.docker.sandbox/agent-context@1
     config:

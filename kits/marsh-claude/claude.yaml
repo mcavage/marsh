@@ -132,6 +132,16 @@ capabilities:
     config:
       args: ["--model", "{{.Model}}"]
 
+  # marsh's usage option for the task tool: these words go after the prompt
+  # verbs and the model option, so the agent prints one JSON result (its
+  # `result` is the final message; `modelUsage` and `total_cost_usd` its
+  # cost), read with marsh's `claude-json` parser (docs/agents.md).
+  - type: org.marsh/agent-usage@1
+    optional: true
+    config:
+      args: ["--output-format", "json"]
+      parser: claude-json
+
   - type: com.docker.sandbox/lifecycle@1
     config:
       install:

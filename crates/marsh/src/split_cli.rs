@@ -37,7 +37,8 @@ admitting lane jobs, waits up to 30 s for running ones, captures every lane,
 keeps the split, and prints its manifest. `apply` applies a captured lane's
 patch to the project in the shell VM. --from bases the forks on a checkpoint.
 --model M records M as the model of its argv branch jobs (`model` in `marsh
-jobs --json`; the task tool sets it). --label TEXT (1 to 128 bytes, no control characters) is recorded on the split
+jobs --json`; the task tool sets it), and --usage PARSER their token usage
+read from their stdout (`usage`). --label TEXT (1 to 128 bytes, no control characters) is recorded on the split
 (its manifest, `marsh splits --json`, its `marsh events` lines) and on its
 `:::` branch jobs.
 ";
@@ -137,6 +138,7 @@ struct SplitArguments {
     from: Option<String>,
     label: Option<String>,
     model: Option<String>,
+    usage: Option<String>,
 }
 
 /// `--model M`'s value: a model id the task tool passed.
@@ -150,11 +152,24 @@ fn model_value(value: Option<&OsString>) -> Result<String, String> {
         })
 }
 
+/// `--usage PARSER`'s value: a usage parser the task tool passed.
+fn usage_value(value: Option<&OsString>) -> Result<String, String> {
+    value
+        .and_then(text)
+        .filter(|parser| marsh_contracts::usage::PARSERS.contains(parser))
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            "split: --usage needs a usage parser (claude-json, codex-jsonl, pi-jsonl)".into()
+        })
+}
+
+#[allow(clippy::too_many_lines)] // One flat argument loop.
 fn parse_split(arguments: &[OsString]) -> Result<SplitArguments, String> {
     let mut branches = Vec::new();
     let mut no_input = false;
     let mut detach = false;
     let (mut open, mut from, mut label, mut model) = (false, None, None, None);
+    let mut usage = None;
     let mut index = 0;
     while index < arguments.len() {
         match text(&arguments[index]) {
@@ -175,6 +190,10 @@ fn parse_split(arguments: &[OsString]) -> Result<SplitArguments, String> {
             Some("--model") => {
                 index += 1;
                 model = Some(model_value(arguments.get(index))?);
+            }
+            Some("--usage") => {
+                index += 1;
+                usage = Some(usage_value(arguments.get(index))?);
             }
             Some("--from") => {
                 index += 1;
@@ -248,6 +267,7 @@ fn parse_split(arguments: &[OsString]) -> Result<SplitArguments, String> {
         from,
         label,
         model,
+        usage,
     })
 }
 
@@ -308,6 +328,7 @@ fn create(channel: &Channel, parsed: SplitArguments, spool: &[u8]) -> i32 {
     let (environment, start_env) = exported_environment();
     let spec = SplitCreateSpec {
         model: parsed.model,
+        usage: parsed.usage,
         session,
         cwd,
         branches: parsed.branches,
@@ -777,6 +798,7 @@ impl brush_shell::bundled::split::SplitWorkspace for SessionSplit {
     ) -> Result<Box<dyn brush_shell::bundled::split::SplitHandle>, String> {
         let spec = SplitCreateSpec {
             model: None,
+            usage: None,
             session: self.session.clone(),
             cwd: cwd.to_path_buf(),
             branches: branches

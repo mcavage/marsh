@@ -67,7 +67,10 @@ retire the affected owned VM; do not delete the journal to recover.
 already made, then one line per change, each with the next `seq`:
 
 - `{"seq","type":"job","job":<the jobs --json summary>}` whenever a receipt
-  is journaled;
+  is journaled. A job started with a usage parser (the task tool) carries
+  `usage` and `tree_usage` on the line for its terminal state, and an
+  ended ancestor gets a new line when a late child changes its
+  `tree_usage` (`docs/agents.md`, "What a task cost");
 - `{"seq","type":"split",...}` and `{"seq","type":"checkpoint",...}`
   (`workspaces.md`, s14);
 - `{"type":"heartbeat"}` every 15 s without a change.

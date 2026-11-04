@@ -45,9 +45,12 @@ SCENARIOS = {
     "T13-fresh-home-peer-review": "fresh_home_peer_review",
     "T14-live-model-family-name": "live_model_family_name",
     "T15-cwd-refusal-says-where": "cwd_refusal",
+    "T16-live-usage": "live_usage",
 }
 ORDER = list(SCENARIOS)
-LIVE = {"T02-live-shared", "T03-live-copy-apply", "T04-live-background", "T14-live-model-family-name"}
+LIVE = {"T02-live-shared", "T03-live-copy-apply", "T04-live-background", "T14-live-model-family-name",
+        "T16-live-usage"}
+COUNTS = ("input_tokens", "output_tokens", "cached_tokens", "cache_write_tokens")
 MCP_CONFIG = json.dumps({"mcpServers": {"marsh": {"command": "/run/marsh/bin/marsh", "args": ["task-mcp"]}}})
 
 # A minimal MCP client, run inside a `shell` job against `marsh task-mcp`.
@@ -681,6 +684,95 @@ class TaskTool(ScenarioSuite):
         self.git(self.project, "checkout", "-q", "--", ".")
         (self.project / "README.md").unlink(missing_ok=True)
 
+    def live_usage(self) -> None:
+        """T16: a claude job (itself run with `--usage`) calls task(codex) and task(claude): both child jobs
+        record their agent's usage (jobs --json, jobs show, the terminal events line), each task result
+        carries it, and the parent's tree_usage is its own usage plus both children's."""
+        status = self.document("status", "--json")
+        require("task-usage-v1" in status.get("features", []), f"status features: {status.get('features')}")
+        usages = {c["name"]: (c.get("sessions") or {}).get("usage") for c in status["commands"]}
+        require(usages.get("claude") == {"args": ["--output-format", "json"], "parser": "claude-json"}
+                and usages.get("codex") == {"args": ["--json"], "parser": "codex-jsonl"},
+                f"declared usage options: {usages!r}")
+        events = subprocess.Popen([self.marsh, "events", "--json"], cwd=self.project, env=self.environment,
+                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        try:
+            before = self.job_ids()
+            completed = self.cli(
+                ["run", "--usage", "claude-json", "claude", "--mcp-config", MCP_CONFIG, "-p",
+                 "Step 1: call the mcp__marsh__task tool with agent \"codex\", description \"codex says hi\" "
+                 "and prompt \"Reply with exactly: HI-FROM-CODEX\". Step 2: call the mcp__marsh__task tool with "
+                 "agent \"claude\", description \"claude says hi\" and prompt \"Reply with exactly: "
+                 "HI-FROM-CLAUDE\". Do nothing else. Then reply with exactly DONE.",
+                 "--output-format", "stream-json", "--verbose"], self.project, timeout=900)
+            out = text(completed.stdout)
+            require(completed.returncode == 0, f"claude job failed ({completed.returncode}): "
+                                               f"{out[-800:]!r} {text(completed.stderr)[-1200:]!r}")
+            results = []
+            for line in out.splitlines():
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                for part in (event.get("message") or {}).get("content") or []:
+                    if isinstance(part, dict) and event.get("type") == "user" and part.get("type") == "tool_result":
+                        content = part.get("content")
+                        results.append(content if isinstance(content, str) else
+                                       "".join(c.get("text", "") for c in content if isinstance(c, dict)))
+            require(len(results) == 2, f"want two task results: {results!r}"[:1500])
+            fresh = self.settle(before, 3, timeout=180, exact=False)
+            parent = next(r for r in fresh if r["command"] == "claude" and "session:" in self.lin(r)["parent"])
+            children = {r["command"]: self.job_state(r["job_id"]) for r in fresh
+                        if self.lin(r)["parent"] == f"job:{parent['job_id']}"}
+            require(set(children) == {"codex", "claude"}, f"children: {sorted(children)}")
+            for (command, parser, word), result in zip(
+                    (("codex", "codex-jsonl", "HI-FROM-CODEX"), ("claude", "claude-json", "HI-FROM-CLAUDE")),
+                    results):
+                usage = children[command].get("usage") or {}
+                require(usage.get("source") == parser and usage.get("output_tokens", 0) > 0
+                        and usage.get("input_tokens", 0) + usage.get("cached_tokens", 0)
+                        + usage.get("cache_write_tokens", 0) > 0, f"{command} child usage: {usage!r}")
+                # The final message stays the agent's text, not its JSON.
+                message = result.split("--- final message ---", 1)[-1].split("\nusage: ", 1)[0]
+                require(word in message and "{" not in message, f"{command} final message: {result[-1200:]!r}")
+                line = re.search(r"^usage: (\{.*\})$", result, re.M)
+                require(line and json.loads(line.group(1)) == usage, f"{command} task result usage: {result[-900:]!r}")
+                require(children[command].get("tree_usage", {}).get("jobs") == 1,
+                        f"{command} tree_usage: {children[command].get('tree_usage')!r}")
+            require(children["claude"]["usage"].get("cost_usd", 0) > 0 and children["claude"]["usage"].get("model"),
+                    f"claude child cost/model: {children['claude']['usage']!r}")
+            parent = self.job_state(parent["job_id"])
+            own, tree = parent.get("usage") or {}, parent.get("tree_usage") or {}
+            require(own.get("source") == "claude-json", f"parent usage: {own!r}")
+            require(tree.get("jobs") == 3 and tree.get("uncosted_jobs") == 1 and all(
+                tree[k] == own[k] + children["codex"]["usage"][k] + children["claude"]["usage"][k] for k in COUNTS),
+                f"parent tree_usage {tree!r} != own {own!r} + children")
+            require(abs(tree["cost_usd"] - own["cost_usd"] - children["claude"]["usage"]["cost_usd"]) < 1e-5,
+                    f"tree cost: {tree!r}")
+            listed = {j["job_id"]: j for j in self.document("jobs", "--json")["jobs"]}
+            for job in (*children.values(), parent):
+                require(listed[job["job_id"]].get("usage") == job["usage"]
+                        and listed[job["job_id"]].get("tree_usage") == job["tree_usage"],
+                        f"jobs --json for {job['command']}: {listed[job['job_id']]!r}"[:900])
+        finally:
+            time.sleep(1)
+            events.terminate()
+            lines = events.communicate(timeout=30)[0].decode().splitlines()
+        terminal = {}
+        for raw in lines:
+            event = json.loads(raw)
+            job = event.get("job") or {}
+            if event.get("type") == "job" and job.get("state") == "finished":
+                terminal.setdefault(job["job_id"], job)
+        for job in (*children.values(), parent):
+            line = terminal.get(job["job_id"]) or {}
+            require(line.get("usage") == job["usage"] and line.get("tree_usage") == job["tree_usage"],
+                    f"the finished events line of {job['command']} lacks its usage: {line!r}"[:900])
+        (self.evidence / "task-usage.json").write_text(json.dumps(
+            {"results": results, "children": {c: {k: r.get(k) for k in ("job_id", "usage", "tree_usage")}
+                                              for c, r in children.items()},
+             "parent": {k: parent.get(k) for k in ("job_id", "usage", "tree_usage")}}, indent=2))
+
     def run_all(self) -> None:
         self.stock_before = stock_baseline(self.sbx)
         self.source["stock_before"] = self.stock_before
@@ -707,7 +799,7 @@ def main() -> int:
         kit_help="fixture Kit: immutable OCI ref, native v3 source dir, or a commands.json whose \"fixture\" key "
                  "holds the ref (registered as the harness requires; the scenarios use claude, codex and shell)")
     parser.add_argument("--live", action="store_true",
-                        help="also run the billed scenarios (T02-T04: real claude and codex turns)")
+                        help="also run the billed scenarios (T02-T04, T14, T16: real claude and codex turns)")
     parser.add_argument("--stage-fixture", action="store_true",
                         help="register this checkout's fixture Kit source (with its prompt verbs) instead of --kit")
     return suite_main(TaskTool, parser)

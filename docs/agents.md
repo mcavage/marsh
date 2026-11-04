@@ -96,6 +96,65 @@ after a Kit is installed or updated, so a fresh home lists every agent's
 models from the first job. `marsh
 status --json` lists the `task-tool-v1` feature.
 
+### What a task cost
+
+When the agent's Kit declares marsh's usage option, each task job records the
+tokens its agent reported. The option, `org.marsh/agent-usage@1`, names the
+words that make the agent report usage and the parser that reads its stdout:
+
+```yaml
+  - type: org.marsh/agent-usage@1
+    optional: true
+    config:
+      args: ["--output-format", "json"]
+      parser: claude-json
+```
+
+| Agent | Words added after the prompt (and model) | Parser | What marsh reads |
+|---|---|---|---|
+| `claude` | `--output-format json` | `claude-json` | The `result` object: `modelUsage` for each model (else `usage`), `total_cost_usd`. Its `result` is the final message. |
+| `codex` | `--json` | `codex-jsonl` | Each `turn.completed` event's `usage`. The last `agent_message` item is the final message. Codex reports no cost. |
+| `pi`, `pix` | `--mode json` | `pi-jsonl` | Each assistant `message_end`: its `usage` and `usage.cost.total`, and its `model`. The last assistant text is the final message. |
+
+The task tool adds the words and starts the child with `marsh run --usage
+PARSER` (`marsh split --usage PARSER` for `"copy"`). The daemon reads the
+child's stdout with the parser as it streams and records the result on the
+job before the job ends. The tool still returns the agent's final message,
+taken from that output. Usage is never estimated. If an agent reports none,
+for example because it was killed first or its Kit declares no usage option,
+the job has no `usage`.
+
+The job's own usage is `usage`. `tree_usage` is that plus every descendant's
+`tree_usage`, so a task that started its own tasks counts their tokens too.
+`tree_usage` is summed when the job ends, and updated if a child ends after
+it. Both appear in `marsh jobs --json`, `marsh jobs show`, and the job lines of
+`marsh events --json`. The job line for the terminal state already includes
+them:
+
+```json
+{"usage": {"model": "claude-opus-5-5", "input_tokens": 6, "output_tokens": 249,
+           "cached_tokens": 30121, "cache_write_tokens": 15759, "cost_usd": 0.089823,
+           "source": "claude-json"},
+ "tree_usage": {"input_tokens": 11, "output_tokens": 274, "cached_tokens": 41343,
+                "cache_write_tokens": 31516, "cost_usd": 0.1099, "jobs": 3,
+                "uncosted_jobs": 1, "models": ["claude-opus-5-5"]}}
+```
+
+That is a `claude` job that asked `codex` and `claude` one question each:
+its own usage, and the tree's (the `codex` child reported no cost).
+
+`input_tokens` counts input at full price only. Cache reads are counted in
+`cached_tokens` and cache writes in `cache_write_tokens`, never also in
+`input_tokens`. Codex counts cache reads and writes inside its input total,
+so marsh subtracts them. `model` is the model the agent reported. For Codex, which
+reports none, it is the model the task asked for, and absent if the task
+named none. `cost_usd` is the agent's own figure, present only when the agent
+reports one. In `tree_usage`, `jobs` counts the jobs that reported usage,
+`cost_usd` sums the reported costs, and `uncosted_jobs` counts jobs that
+reported tokens without a cost. A task's result ends with the same two
+objects (`usage: {...}` and `tree_usage ...: {...}`), so the caller sees what
+its delegation cost. `marsh status --json` lists the `task-usage-v1` feature.
+
 Each `"copy"` task leaves a kept split (`marsh splits` on your Mac lists it;
 `marsh splits rm ID` removes it). When the agent closes the server (it
 exits), running tasks are cancelled.
