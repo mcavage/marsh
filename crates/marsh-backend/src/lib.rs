@@ -2095,17 +2095,24 @@ impl DaemonBackend for StockDaemonBackend {
         // so the home is never mounted into this Kit's VM.
         let guest_home = &request.session.guest_home;
         if self.kit_wants_no_home(&request.command, &spec.workload_kit)? {
-            if request
-                .effective_working_directory()
-                .starts_with(guest_home)
-            {
+            if let Err(reason) = no_home_view_admitted(
+                guest_home,
+                &request.session.home_backing,
+                &request.session.launch_directory,
+                request.effective_working_directory(),
+            ) {
                 return Err(DaemonError::Refused(format!(
-                    "{}: its Kit does not mount your home ({}); run it from the project",
+                    "{}: its Kit does not mount your home ({}): {reason}; run it from a project folder under it",
                     request.command,
                     guest_home.display()
                 )));
             }
-            mounts.retain(|mount| !mount.target.starts_with(guest_home));
+            // A project under the home stays mounted on its own; nothing else
+            // of the home does.
+            let project = &request.session.launch_directory;
+            mounts.retain(|mount| {
+                !mount.target.starts_with(guest_home) || mount.target.starts_with(project)
+            });
             admitted_grants.retain(|grant| grant.target() != guest_home.as_path());
         }
         let private_home = !mounts
@@ -3855,6 +3862,54 @@ fn observed_unix_ms(
 ) -> Result<u64, DaemonError> {
     observed_duration(name, boundaries.started, point)
         .map(|elapsed| boundaries.started_unix_ms + elapsed)
+}
+
+/// Whether a Kit that declares no home may run from `cwd` in a session whose
+/// project is `project`: the guest home's contents beyond the project stay
+/// out of its view, so it is refused from the home itself, from a
+/// dot-directory of the home (other agents' settings and saved logins), and
+/// when the project is the home or a dot-directory (after symlinks).
+fn no_home_view_admitted(
+    guest_home: &Path,
+    home_backing: &Path,
+    project: &Path,
+    cwd: &Path,
+) -> Result<(), String> {
+    let dot_dir_under = |home: &Path, path: &Path| {
+        path.strip_prefix(home).ok().and_then(|relative| {
+            relative
+                .components()
+                .any(|part| part.as_os_str().as_encoded_bytes().starts_with(b"."))
+                .then(|| relative.to_path_buf())
+        })
+    };
+    let resolved_project = fs::canonicalize(project).unwrap_or_else(|_| project.to_path_buf());
+    let mut homes = vec![guest_home.to_path_buf()];
+    homes.extend(fs::canonicalize(guest_home).ok());
+    homes.push(home_backing.to_path_buf());
+    homes.extend(fs::canonicalize(home_backing).ok());
+    for home in &homes {
+        for path in [project, resolved_project.as_path()] {
+            if path == home {
+                return Err("the project is the home".into());
+            }
+            if dot_dir_under(home, path).is_some() {
+                return Err("the project is inside a dot-directory of the home".into());
+            }
+        }
+    }
+    if cwd.starts_with(guest_home) {
+        if cwd == guest_home {
+            return Err("this is the home itself".into());
+        }
+        if dot_dir_under(guest_home, cwd).is_some() {
+            return Err("this is inside a dot-directory of the home".into());
+        }
+        if !cwd.starts_with(project) {
+            return Err("this is outside the project".into());
+        }
+    }
+    Ok(())
 }
 
 /// Receipt mounts: the project and home, or a split branch's narrower set.
@@ -5652,6 +5707,30 @@ mod tests {
         os::unix::net::UnixStream,
         sync::{Arc, mpsc},
     };
+
+    #[test]
+    fn no_home_kit_runs_from_a_project_under_the_home_only() {
+        let root = tempfile::tempdir().unwrap();
+        let home = fs::canonicalize(root.path()).unwrap().join("home");
+        fs::create_dir_all(home.join("proj/sub")).unwrap();
+        fs::create_dir_all(home.join(".config/x")).unwrap();
+        std::os::unix::fs::symlink(home.join(".config/x"), home.join("link")).unwrap();
+        let admitted =
+            |project: &Path, cwd: &Path| no_home_view_admitted(&home, &home, project, cwd);
+        let project = home.join("proj");
+        assert!(admitted(&project, &project).is_ok());
+        assert!(admitted(&project, &project.join("sub")).is_ok());
+        assert!(admitted(&project, &home).is_err());
+        assert!(admitted(&project, &home.join("other")).is_err());
+        assert!(admitted(&home, &home).is_err());
+        let dot = home.join(".config/x");
+        assert!(admitted(&dot, &dot).is_err());
+        assert!(admitted(&project, &dot).is_err());
+        assert!(admitted(&home.join("link"), &home.join("link")).is_err());
+        let outside = root.path().join("work");
+        fs::create_dir(&outside).unwrap();
+        assert!(admitted(&outside, &outside).is_ok());
+    }
 
     struct NeverRunner;
 
