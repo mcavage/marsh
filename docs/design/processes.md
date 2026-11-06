@@ -299,8 +299,8 @@ refused by the spawn set), and is counted in `marsh status`
 - **cwd.** The child's cwd must lie inside those mounts.
 - **Narrowing.** Splits narrow the project view; the late `.marsh` read-only
   bind also reduces writes. A Kit declaring `org.marsh/home@1` `mount: none`
-  drops the selected home from its job's view, root or child, and its own
-  children inherit that (`docs/kits.md` Mounts; model `NoHomeKitHome`).
+  drops the selected home from its job's view, root or child (a project under
+  the home stays mounted on its own), and its own children inherit that (`docs/kits.md` Mounts; model `NoHomeKitHome`).
   Nothing widens a child's view.
 - **Splits.** A split created by a job snapshots the job's view root.
   Capture waits for the creating branch's whole subtree (`workspaces.md` s13).

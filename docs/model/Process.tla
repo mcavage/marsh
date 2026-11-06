@@ -38,6 +38,8 @@
 (* (`org.marsh/home@1`, NoHomeKits): its jobs never hold the home view,  *)
 (* whether the session or a parent job (an agent calling a tool) starts  *)
 (* them. Dropping it only narrows, so Attenuation still holds.           *)
+(* A project that lies under the home is the "proj" right, never         *)
+(* "home": only the home itself and its dot-directories are refused.     *)
 (*                                                                       *)
 (* A tree uses at most MaxKitVMs distinct Kits (one warm VM each) among  *)
 (* its live jobs at once; a child of a Kit already live in it is free.  *)

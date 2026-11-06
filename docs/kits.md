@@ -364,8 +364,11 @@ capabilities:
 marsh then never mounts the guest home into the Kit's VM or its jobs, even
 when a job that has the home, such as an agent, starts the command. `HOME`
 and `MARSH_SELECTED_HOME` are the job's own `/tmp`, deleted with the job, and
-children it starts get no home either. A call from a folder inside the guest
-home is refused. In a Kit set, any component that declares `none` wins.
+children it starts get no home either. A call from a project folder under the
+guest home mounts only that project, as for a project elsewhere. A call from
+the home itself or from a dot-directory of it (any path component under the
+home starting with `.`, such as `~/.config`), or from a project that is the
+home or a dot-directory (after symlinks), is refused. In a Kit set, any component that declares `none` wins.
 
 marsh reads the declaration from the Kit's descriptor the first time the Kit
 runs (from the registry for a published Kit) and keeps it. If it can't read

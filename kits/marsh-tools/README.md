@@ -105,8 +105,9 @@ so it keeps the network policy, credentials and home declaration.
   the guest home (other agents' settings and saved logins) into this Kit's VM,
   even when an agent that has the home starts the tool. `HOME` is the job's
   own `/tmp`. The project stays mounted, so gog's downloads, exports and file
-  inputs work as usual. A job started from a folder inside the home is
-  refused.
+  inputs work as usual, including a project under your home, which is mounted
+  on its own. A job started from the home itself or from a dot-directory of it
+  (`~/.config`, `~/.claude`) is refused.
 
 ## How `gog` stays safe
 
