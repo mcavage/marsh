@@ -331,8 +331,13 @@ were not affected.
 - **`update pending: restarts on VERSION when idle`.** `brew upgrade` (or a
   new `marshd` from an installer) replaced the executable of a daemon that is
   still running a job, a marsh shell or a Kit start. It switches by itself
-  once they end; nothing needs stopping. From 0.3.12 on, a daemon notices this
+  once they end; nothing needs stopping. From 0.3.13 on, a daemon notices this
   itself; a daemon of an older release still waits for `marsh stop`.
+- **`update: the update to marsh VERSION failed: …; this daemon keeps
+  running …`.** The new marsh did not start (or its file changed after it was
+  checked). The old daemon keeps serving; reinstall, then it is checked again.
+- **`update: marsh VERSION installed is older than the running …`.** A
+  downgrade is never automatic: run `marsh restart` when nothing runs.
 - **A command fails with `can't read IMAGE: registry access denied`.** marsh
   never read that Kit image's descriptor and cannot now: sign in with an
   account that can pull it (`docker login REGISTRY` and

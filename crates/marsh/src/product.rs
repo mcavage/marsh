@@ -180,6 +180,12 @@ pub fn prepare(
         ProductCommand::ResultsHelp => return write_help(&mut stdout, RESULTS_HELP),
         ProductCommand::WorkersHelp => return write_help(&mut stdout, WORKERS_HELP),
         ProductCommand::GcHelp => return write_help(&mut stdout, GC_HELP),
+        // The host handles it before any session (`main.rs`).
+        ProductCommand::Restart => {
+            return Err(ProductError::Operation(
+                "marsh restart runs from a Mac terminal, not in a marsh shell".into(),
+            ));
+        }
         ProductCommand::Gc { dry_run, json } => {
             return gc_command(client.as_ref(), dry_run, json, &mut stdout);
         }
@@ -802,15 +808,12 @@ fn write_json(writer: &mut impl Write, value: &serde_json::Value) -> Result<(), 
         .map_err(|error| ProductError::Operation(format!("cannot write daemon response: {error}")))
 }
 
-fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(), ProductError> {
-    let status: marsh_daemon::StatusDocument = serde_json::from_value(value).map_err(|error| {
-        ProductError::Operation(format!("cannot decode daemon status: {error}"))
-    })?;
-    writeln!(
-        writer,
-        "Daemon {} (pid {})",
-        status.daemon_id, status.endpoint_owner.pid
-    )?;
+/// The daemon's version, a pending or refused update, and commands whose Kit
+/// descriptor could not be read.
+fn write_update_notes(
+    writer: &mut impl Write,
+    status: &marsh_daemon::StatusDocument,
+) -> Result<(), ProductError> {
     if let Some(version) = &status.version {
         writeln!(writer, "  version:      {version}")?;
     }
@@ -820,6 +823,9 @@ fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
             "  update pending: restarts on {} when idle (no job, shell or Kit start running)",
             update.version
         )?;
+    }
+    if let Some(notice) = &status.update_notice {
+        writeln!(writer, "  update:       {notice}")?;
     }
     for command in &status.commands {
         if let Some(marsh_daemon::DescriptorStatus {
@@ -839,6 +845,19 @@ fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
             )?;
         }
     }
+    Ok(())
+}
+
+fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(), ProductError> {
+    let status: marsh_daemon::StatusDocument = serde_json::from_value(value).map_err(|error| {
+        ProductError::Operation(format!("cannot decode daemon status: {error}"))
+    })?;
+    writeln!(
+        writer,
+        "Daemon {} (pid {})",
+        status.daemon_id, status.endpoint_owner.pid
+    )?;
+    write_update_notes(writer, &status)?;
     if let Some(removed) = &status.stock_sbx_removed {
         writeln!(
             writer,

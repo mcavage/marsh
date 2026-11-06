@@ -74,6 +74,7 @@ Usage:
   marsh peer-review ls [--json]        Show the peer reviewers and where they came from
   marsh peer-review classify MODEL...  Show a model's class and vendor (no daemon)
   marsh stop [--json]                  Remove this home's VMs and stop its daemon
+  marsh restart                        Restart this home's idle daemon on the installed marsh (VMs kept)
   marsh reset [--json]                 Remove this home's VMs; keep the daemon
   marsh init                           Create this home and copy your git name and email into it
   marsh recover-home SLOT --discard
@@ -865,6 +866,9 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
             }
             Ok(_) => {}
         }
+    }
+    if !parsed.guest && matches!(parsed.command, cli::ProductCommand::Restart) {
+        return restart_daemon(&daemon_home);
     }
     if parsed.guest && parsed.ephemeral_home && parsed.ephemeral_home_backing.is_none() {
         return Err(RunError::new(
@@ -2058,6 +2062,33 @@ fn absent_scope_report(
         cleanup_complete: components.is_empty(),
         components,
     })
+}
+
+/// `marsh restart`: stop the idle daemon (it refuses while work runs) and
+/// start one of this marsh; the VMs it owns are kept and reconciled.
+fn restart_daemon(daemon_home: &Path) -> Result<i32, RunError> {
+    let failed = |error: String| RunError::new(format!("marsh restart: {error}"), 1);
+    if let Some(client) = LocalDaemonClient::connect_existing(daemon_home)
+        .map_err(|error| failed(error.to_string()))?
+    {
+        client
+            .into_daemon()
+            .restart_resident()
+            .map_err(|error| failed(error.to_string()))?;
+    }
+    resolve_stock_sbx().map_err(|error| failed(error.to_string()))?;
+    let client = LocalDaemonClient::ensure_running(daemon_home)
+        .map_err(|error| failed(error.to_string()))?;
+    let status = client
+        .into_daemon()
+        .status(None)
+        .map_err(|error| failed(error.to_string()))?;
+    eprintln!(
+        "marsh: daemon restarted: marsh {} (pid {})",
+        status.version.as_deref().unwrap_or("?"),
+        status.endpoint_owner.pid
+    );
+    Ok(0)
 }
 
 /// `Some(status)` when there is nothing for a daemon to do (nothing is

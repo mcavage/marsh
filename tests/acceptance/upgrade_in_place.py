@@ -10,7 +10,9 @@ throwaway MARSH_HOME/control scope with the fixture Kit registered as
    fresh copies of A's). The job keeps running on the same daemon, and
    `marsh status` says `update pending: restarts on B when idle`.
 2. Once the job ends, the daemon restarts on B by itself (new pid, version
-   B, no update pending) and keeps the scope's VMs.
+   B, no update pending) and keeps the scope's VMs. An older build (A)
+   installed over it is not switched to (`marsh status` says so); `marsh
+   restart` switches.
 3. Kit descriptors survive upgrades: with Docker refused access to the
    fixture's registry (a `MARSH_DOCKER` wrapper, as for a private image),
    `fixture` still starts, from the descriptor saved earlier, and from an
@@ -157,6 +159,10 @@ def main() -> int:
     source = args.prefix.expanduser().resolve(strict=True)
     for part in ("bin", "libexec"):
         shutil.copytree(source / part, prefix / part, symlinks=True)
+    a_build = root / "a-build"
+    a_build.mkdir()
+    for name in BINARIES:
+        shutil.copy2(prefix / "bin" / name, a_build / name)
     next_build = root / "next"
     next_build.mkdir()
     for name in BINARIES:
@@ -214,6 +220,21 @@ def main() -> int:
         require(owned <= vm_names(sbx), f"VMs lost in the restart: {sorted(owned - vm_names(sbx))}")
         require(owned <= scope.owned(), "VMs dropped from the ownership map")
         print(f"ok: restarted on {version_b} (pid {after['endpoint_owner']['pid']}); kept VMs {sorted(owned)}")
+
+        # 2b. An older marsh is never switched to by itself; `marsh restart` uses it.
+        if version_b != version_a:
+            install(a_build, prefix / "bin")
+            notice = wait("the downgrade notice", lambda: scope.status().get("update_notice"), timeout=120)
+            require(f"marsh {version_a} installed is older than the running {version_b}; run `marsh restart`"
+                    in notice, f"notice: {notice}")
+            time.sleep(8)
+            require(scope.status()["version"] == version_b, "switched to an older marsh by itself")
+            restarted = scope.run("restart", timeout=300)
+            require(restarted.returncode == 0 and f"marsh {version_a}" in restarted.stderr,
+                    f"marsh restart: {restarted.returncode} {restarted.stderr}")
+            after = scope.status()
+            require(after["version"] == version_a and owned <= vm_names(sbx), f"after restart: {after.get('version')}")
+            print(f"ok: older {version_a} not switched to by itself; `marsh restart` did: {restarted.stderr.strip()}")
 
         # 3. Descriptors survive with the registry refused.
         again = scope.run("-c", "fixture exec echo after-upgrade", timeout=900)

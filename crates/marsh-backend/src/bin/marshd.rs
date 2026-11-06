@@ -53,15 +53,6 @@ fn main() {
         println!("marshd {}", env!("CARGO_PKG_VERSION"));
         return;
     }
-    // Started by the daemon it replaces (an upgrade): wait until it is gone.
-    if arguments
-        .iter()
-        .any(|word| marsh_daemon::is_handover_flag(word))
-        && let Err(error) = marsh_daemon::await_handover()
-    {
-        eprintln!("marshd: {error}");
-        std::process::exit(1);
-    }
     if let Err(error) = run() {
         eprintln!("marshd: {error}");
         std::process::exit(1);
@@ -230,6 +221,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("marshd: {error}");
     }
     let backend = Arc::new(backend.with_dev_broker(Arc::clone(&dev_broker)));
+    // Started by the daemon it replaces (an upgrade): everything but the
+    // endpoint is ready; say so, and wait until that daemon is gone.
+    if env::args_os()
+        .skip(1)
+        .any(|word| marsh_daemon::is_handover_flag(&word))
+    {
+        marsh_daemon::handover_ready()?;
+    }
     let server = Server::bind_with_stock_sbx_and_control_home(&home, &stock_sbx, &control_home)?
         .with_protected_guest_roots(protected_guest_roots)
         .with_job_defaults(defaults)
@@ -246,11 +245,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     marsh_daemon::finish_startup_diagnostics()?;
     drop(startup_lock);
     server.serve_until(|| stopping.load(Ordering::Relaxed))?;
-    // The executable was replaced and nothing ran: restart on the new one,
-    // which starts once this process (and every lock it holds) is gone.
-    if let Some(next) = server.handover() {
+    // Upgrading: the successor is ready. Release the endpoint, then the
+    // fence (the store and its journal), and only then let it bind.
+    if let Some((successor, fence)) = server.take_handover() {
         drop(server);
-        marsh_daemon::hand_over(&home, &next, &stock_sbx)?;
+        drop(fence);
+        drop(successor);
     }
     Ok(())
 }

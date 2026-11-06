@@ -127,7 +127,11 @@ brew upgrade mcavage/tap/marsh
 
 That is all. The running daemon notices that its executable was replaced and
 switches to the new marsh once it is idle: no job, marsh shell or Kit start
-running. It never stops running work for that. Meanwhile `marsh status` shows
+running. It never stops running work for that. It starts the new marsh first
+and lets go only once that one is ready; if it fails to start (or the file
+changed after it was checked), the old daemon keeps running and `marsh
+status` says why. It never switches to an older marsh by itself: `marsh
+status` says so, and `marsh restart` (when idle) uses it. Meanwhile `marsh status` shows
 `update pending: restarts on VERSION when idle`, and new marsh commands use
 the running daemon. The new daemon starts as after any restart: it keeps the
 VMs this home owns and reconciles them.

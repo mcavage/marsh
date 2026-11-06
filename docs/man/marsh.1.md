@@ -284,6 +284,12 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   **stop** start it when this scope has VMs recorded, then remove them; with
   none they print **nothing to stop** (**nothing to reset**) and exit 0.
 
+**restart**
+: Restart this scope's daemon on the installed marsh, keeping the VMs it
+  owns. Refuses while shells or jobs are active. A daemon switches to a newer
+  installed marsh by itself once idle; use **restart** for an older one (a
+  downgrade), which it never switches to by itself.
+
 **init**
 : Create the guest home (**~/.marsh/home** by default) if it is missing. When it
   has no **.gitconfig**, copy your git name and email from this Mac into one, so
