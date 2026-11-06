@@ -1,6 +1,7 @@
 # Pi Kit: the DHI Node.js runtime base plus the Kit VM floor (Docker Engine,
 # which runs this Kit's jobs from this same image), the POSIX tools, the build
-# toolchain a project's gate needs (make, gcc, python3) and ripgrep, assembled
+# toolchain a project's gate needs (make, gcc, python3), ripgrep, and
+# poppler-utils (pdftoppm, pdftotext: the agent reads PDFs), assembled
 # from Debian packages in a -dev build stage (image-base/assemble-packages.sh).
 # npm runs only in the Node -dev stage.
 FROM dhi.io/node:26-debian13@sha256:dea81b92cdabf3879e8edaad05c8aa4460603b6b0351fcf6c481eb12b24c8bd5 AS base
@@ -9,7 +10,7 @@ FROM dhi.io/debian-base:trixie-dev@sha256:af61a3296b0c92f16969f11ce8c2a93722e84c
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
-RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
+RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep poppler-utils
 
 # Pi, its MCP Gateway and task-tool extensions, and (for ACP mode, `pi --acp`) the community
 # pi-acp adapter, all pinned by package-lock.json.
@@ -44,7 +45,8 @@ ENTRYPOINT ["/usr/local/bin/marsh-pi"]
 # Exercise the installed runtime and commands before publishing.
 FROM image AS smoke
 USER root
-RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 python pi
+RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 python pi \
+ && pdftoppm -v 2>/dev/null && pdftotext -v 2>/dev/null
 
 FROM image
 RUN --mount=type=bind,from=smoke,source=/smoke.ok,target=/tmp/smoke.ok test -f /tmp/smoke.ok

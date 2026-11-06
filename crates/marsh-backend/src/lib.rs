@@ -778,6 +778,27 @@ impl StockDaemonBackend {
             .collect()
     }
 
+    /// The skills registered Kits bundle (`agent-skill@1`), for the skills
+    /// mirror; never waits on a registry (`status_kit_agent`).
+    fn bundled_skills(&self) -> skills_mirror::Bundled {
+        let mut bundled = skills_mirror::Bundled::default();
+        for name in self.command_names() {
+            let agent = self
+                .registered_kit(&name)
+                .ok()
+                .and_then(|kit| kit.workload.capture_generation().ok())
+                .and_then(|exact| self.status_kit_agent(&exact));
+            let Some(agent) = agent else {
+                bundled.pending = true;
+                continue;
+            };
+            for skill in agent.skills {
+                bundled.skills.entry(skill).or_default().push(name.clone());
+            }
+        }
+        bundled
+    }
+
     fn kit_agent_for(&self, kit: &NativeKitRef) -> Result<KitAgent, DaemonError> {
         let agent = match cached_kit_agent(&self.config.control_home, kit) {
             Some(agent) => agent,
@@ -1409,15 +1430,30 @@ impl DaemonBackend for StockDaemonBackend {
     }
 
     fn mirror_skills(&self) {
+        let bundled = self.bundled_skills();
         self.skills_mirror.pass(
             &self.sbx,
             &self.config.daemon_home,
             &self.config.control_home,
+            &bundled,
         );
     }
 
     fn skills_mirror_status(&self) -> Option<marsh_daemon::SkillsMirrorStatus> {
-        Some(self.skills_mirror.status(&self.config.daemon_home))
+        let mut status = self.skills_mirror.status(&self.config.daemon_home);
+        for withheld in self.sbx.withheld_skills().into_values() {
+            let kits = self.kit_names_for_workload(&withheld.kit);
+            let kit = if kits.is_empty() {
+                withheld.kit.clone()
+            } else {
+                kits.join(", ")
+            };
+            status.errors.push(format!(
+                "{kit} runs without shared skills: name clash with {}",
+                withheld.clashes
+            ));
+        }
+        Some(status)
     }
 
     fn peer_review_status(&self) -> Option<marsh_daemon::peer_review::PeerReviewStatus> {
@@ -5412,7 +5448,7 @@ fn pending_message(command: &str, removed: bool) -> String {
 /// model option, `services` and `reaches` (peer review), and the reading
 /// marsh's version (`CachedKitAgent`): 0.3.5 cached the post-#260 Kits it
 /// auto-updated to in v3, so 0.3.6 saw no agent with a model option.
-const KIT_AGENT_CACHE: &str = "kit-agent-v4";
+const KIT_AGENT_CACHE: &str = "kit-agent-v5";
 
 fn kit_agent_path(control_home: &Path, kit: &NativeKitRef) -> PathBuf {
     control_home
@@ -5439,6 +5475,7 @@ mod kit_agent_cache_tests {
             no_home: true,
             services: vec!["openai".into()],
             reaches: [("openai".to_owned(), vec!["api.openai.com".to_owned()])].into(),
+            skills: vec!["review".into()],
         };
         let value = serde_json::to_value(&agent).unwrap();
         let fields = value
@@ -5449,7 +5486,10 @@ mod kit_agent_cache_tests {
             .collect::<Vec<_>>();
         assert_eq!(
             (super::KIT_AGENT_CACHE, fields.join(",").as_str()),
-            ("kit-agent-v4", "acp,no_home,reaches,services,sessions"),
+            (
+                "kit-agent-v5",
+                "acp,no_home,reaches,services,sessions,skills"
+            ),
         );
     }
 

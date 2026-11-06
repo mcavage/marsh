@@ -416,6 +416,12 @@ refused by the spawn set), and is counted in `marsh status`
   replaces or removes only an entry whose content is what it last imported
   (`skills-mirror.json` in the control home) or what the folder holds now;
   any other entry (an `sbx skills add`) is a clash that `marsh status` names.
+  It never imports a name a registered Kit bundles (`agent-skill@1`, read
+  from the descriptors the daemon caches; the first sync waits up to 30 s
+  for them) and removes one it imported earlier. Stock SBX refuses a create
+  whose bundled skill shares a store entry's name and leaves no VM; marsh
+  then creates that Kit VM again with `--skills off` and reports it in
+  `skills_mirror.errors`, so a clash never fails a job.
   Stock SBX prepares each `agent-skills@1` folder in the outer sandbox
   container per `skills.defaultMode` (marsh passes no `--skills` when it
   creates a Kit VM; the shell VM keeps `--skills off`): with `readonly` and

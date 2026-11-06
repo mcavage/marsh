@@ -1,7 +1,8 @@
 # v2's sandbox.image, as content: the DHI Node.js runtime base plus the Kit VM
 # floor (Docker Engine, which runs this Kit's jobs from this same image), the
-# POSIX tools, the build toolchain a project's gate needs (make, gcc, python3)
-# and ripgrep, assembled from Debian packages in a -dev build stage
+# POSIX tools, the build toolchain a project's gate needs (make, gcc, python3),
+# ripgrep, and poppler-utils (pdftoppm renders the PDF pages Claude Code's Read
+# tool shows), assembled from Debian packages in a -dev build stage
 # (image-base/assemble-packages.sh), plus the Claude Code release this Kit
 # publishes, so the provide cannot claim a version the image does not ship.
 #
@@ -15,7 +16,7 @@ FROM dhi.io/debian-base:trixie-dev@sha256:af61a3296b0c92f16969f11ce8c2a93722e84c
 COPY --from=base /var/lib/dpkg /base/dpkg
 COPY --from=base /etc/passwd /etc/group /base/etc/
 COPY image-base /tmp/marsh-image-base
-RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep
+RUN sh /tmp/marsh-image-base/assemble-packages.sh /base /rootfs @kit-vm @userland @devtools ripgrep poppler-utils
 
 FROM dhi.io/debian-base:trixie-dev@sha256:af61a3296b0c92f16969f11ce8c2a93722e84c9e5c1bb42ed6afec796be71b04 AS download
 ARG CLAUDE_VERSION
@@ -73,7 +74,8 @@ ENTRYPOINT ["/usr/local/bin/marsh-claude"]
 # Exercise the installed runtime and commands before publishing.
 FROM image AS smoke
 USER root
-RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 python
+RUN --mount=type=bind,source=image-base/smoke.sh,target=/tmp/smoke.sh sh /tmp/smoke.sh node rg make gcc python3 python \
+ && pdftoppm -v 2>/dev/null && pdftotext -v 2>/dev/null
 
 FROM image
 RUN --mount=type=bind,from=smoke,source=/smoke.ok,target=/tmp/smoke.ok test -f /tmp/smoke.ok

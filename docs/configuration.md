@@ -253,6 +253,16 @@ is gone. It never replaces or removes a skill it did not put there: when a
 name is already taken by a skill from `sbx skills add`, that skill wins and the
 name is listed as a clash.
 
+A skill with the name of one a registered Kit bundles (`agent-skill@1`) is
+never imported: the Kit's copy wins, and the name is listed as a clash
+`NAME (bundled by KIT)`. One an earlier marsh imported is removed from the
+store. Docker Sandboxes refuses to create a VM whose Kit bundles a skill the
+store also holds; if that still happens (an `sbx skills add` skill of that
+name), marsh creates the Kit's VM without the store (`--skills off`), and
+`marsh status` says `KIT runs without shared skills: name clash with NAMES`.
+Remove the store's copy (`sbx skills rm NAME`), then `marsh workers reset KIT`
+to get the store back in that Kit.
+
 ```sh
 marsh config skills-mirror        # on (the default) or off
 marsh config skills-mirror off
@@ -263,7 +273,9 @@ pass. `marsh status` shows the last import, clashes, and errors. `marsh status
 --json` has the feature `skills-mirror-v1` and a `skills_mirror` object:
 `enabled` (bool), `last_import` (unix ms of the last finished import or
 removal, or `null`), `errors` (strings from the last pass; empty when it
-succeeded), and `clashes` (skill names where the `sbx skills add` skill won).
+succeeded, plus a line for each Kit VM running without the store), and
+`clashes` (skill names where the `sbx skills add` skill won, and
+`NAME (bundled by KIT)` for those a Kit bundles).
 `sbx settings set skills.defaultMode off` keeps the store out of new Kit VMs;
 jobs then see only the Kit's own skills.
 

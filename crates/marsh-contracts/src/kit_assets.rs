@@ -160,6 +160,11 @@ pub struct KitAgent {
     /// multi-provider agent only there).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub reaches: BTreeMap<String, Vec<String>>,
+    /// The effective names of its bundled skills (`agent-skill@1`: `name`,
+    /// else the source's last component), sorted. Stock SBX refuses to
+    /// create its VM while the shared store holds one of these names.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
 }
 
 /// marsh's own capability: the agent's model option for `task(model)`,
@@ -196,6 +201,21 @@ fn any_provider(config: &serde_json::Value) -> Result<bool, String> {
             "{AGENT_MODEL_CAPABILITY}: services must be [\"{ANY_PROVIDER}\"]"
         )),
     }
+}
+
+/// An `agent-skill@1`'s effective name: `name`, else the source's last
+/// component.
+fn bundled_skill_name(config: &serde_json::Value) -> Option<&str> {
+    config
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            config
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|path| path.rsplit('/').next())
+        })
+        .filter(|name| !name.is_empty() && name.len() <= 255)
 }
 
 /// Whether `org.marsh/home@1` says the selected home is never mounted.
@@ -298,6 +318,7 @@ impl KitAgent {
     ///
     /// # Errors
     /// Returns why the descriptor or an adapter is malformed.
+    #[allow(clippy::too_many_lines)]
     pub fn from_descriptor(descriptor: &serde_json::Value) -> Result<Self, String> {
         fn walk<'a>(capabilities: &'a serde_json::Value, found: &mut Vec<&'a serde_json::Value>) {
             for capability in capabilities.as_array().into_iter().flatten() {
@@ -369,6 +390,11 @@ impl KitAgent {
                         agent.services.push(service.to_owned());
                     }
                 }
+                Some("com.docker.sandbox/agent-skill@1") => {
+                    agent
+                        .skills
+                        .extend(bundled_skill_name(&config).map(str::to_owned));
+                }
                 // Any component of a set may narrow; none can widen back.
                 Some(HOME_CAPABILITY) => agent.no_home |= home_mount_none(&config)?,
                 _ => {}
@@ -379,6 +405,8 @@ impl KitAgent {
             agent.services.push(ANY_PROVIDER.to_owned());
         }
         agent.services.sort();
+        agent.skills.sort();
+        agent.skills.dedup();
         agent.acp = adapters
             .iter()
             .find(|adapter| provided.contains(&agent_name(&adapter.agent)))
@@ -585,6 +613,21 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    #[test]
+    fn names_the_bundled_skills_as_stock_sbx_exposes_them() {
+        let mut descriptor: serde_json::Value = serde_json::from_str(SET).unwrap();
+        descriptor["capabilities"].as_array_mut().unwrap().push(
+            serde_json::json!({"group": {"capabilities": [
+                {"type": "com.docker.sandbox/agent-skill@1",
+                 "config": {"path": "/opt/team/skills/account-brief"}}
+            ]}}),
+        );
+        assert_eq!(
+            KitAgent::from_descriptor(&descriptor).unwrap().skills,
+            ["account-brief", "hello", "renamed"]
+        );
     }
 
     #[test]
