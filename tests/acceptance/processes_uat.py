@@ -115,8 +115,9 @@ class Processes(ScenarioSuite):
         registry = self.control_home / "commands.json"
         mapping = json.loads(registry.read_text())
         mapping[ALT] = mapping["fixture"]
-        if "P39-six-kits-in-a-tree" in self.selected and pathlib.Path(str(mapping.get("shell", ""))).is_dir():
-            source = pathlib.Path(mapping["shell"])
+        packaged = arguments.guest_artifacts / "kits" / "marsh-shell"
+        if "P39-six-kits-in-a-tree" in self.selected and packaged.is_dir():
+            source = packaged
             for name in KIT_COPIES:
                 copy = self.control_home / "kit-copies" / name
                 if not copy.exists():
@@ -1257,11 +1258,11 @@ class Processes(ScenarioSuite):
         """s6 Kit VMs per tree, default 8: one fixture job runs children of 5 other Kits (shell and four
         copies of it, each its own Kit identity) all live at once: 6 distinct Kit VMs in one tree."""
         names = ["shell", *KIT_COPIES]
-        require(all(name in json.loads((self.control_home / "commands.json").read_text()) for name in names),
-                "the shell Kit is not a source directory here; cannot make distinct copies of it")
+        require(all(name in json.loads((self.control_home / "commands.json").read_text()) for name in KIT_COPIES),
+                "the packaged shell Kit is not a source directory here; cannot make distinct copies of it")
         gate = self.project / "p39-gate"
         before = self.job_ids()
-        starts = "; ".join(f"{name} -c \"touch $d/{name}; sleep 30\" &" for name in names)
+        starts = " ".join(f"{name} -c \"touch $d/{name}; sleep 30\" &" for name in names)
         script = (f"d=p39-gate; mkdir -p $d; {starts} "
                   f"n=0; while [ $(ls $d | wc -l) -lt {len(names)} ] && [ $n -lt 3000 ]; do sleep 0.2; n=$((n+1)); done; "
                   f"echo ready=$(ls $d | wc -l); wait; echo waited")
