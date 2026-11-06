@@ -271,7 +271,7 @@ queued child would deadlock the pool.
 | Depth | 4; a root job is depth 1 (`LineageWF`, `noDepth`) | `depth limit 4` |
 | Same-Kit chain | 2 consecutive parent→child steps with the same Kit identity (Kit source/image, not the registered name): claude → claude is allowed, a third claude is refused (`SameKitBound`, `noSameKit`) | `claude → claude → claude refused: same-Kit chain limit 2 (see /run/marsh/context.md)` |
 | Fan-out | 8 live children per job, including its splits' branches (`FanOutBound`, `noFan`) | `fan-out limit 8` |
-| Total | 128 launches per top-level tree (`TotalBound`, `noTotal`) | `total limit 128` |
+| Rate | 60 launches per top-level tree in any rolling 60 s by default (`MARSH_TREE_LAUNCH_RATE`); refused child calls count up to 8 per window (`RateBound`, `noRate`) | `rate limit: 60 launches in the last minute; retry in Ns` |
 | Wall time | min(the Kit's own limit, `MARSH_JOB_WALL_SECONDS`, and the parent's remaining time); a child needs 1 s left at admission. The receipt's `lineage.deadline_unix_ms` is the effective deadline and `parent_deadline` says it is the parent's. The worker stops the child at it (`exit.cause` `limit:wall: parent deadline`); if the parent's own wall kill lands first, its end cancels the child with the same cause | `fixture refused: deadline: parent job 1a2b3c4d has 420 ms of wall time left (MARSH_JOB_WALL_SECONDS)` |
 
 **No TTY children in v1.** A job's child gets no PTY. A `ProcessRun` whose
@@ -462,7 +462,7 @@ refused by the spawn set), and is counted in `marsh status`
 
 Invariants:
 
-- `LineageWF`, `Attenuation`, `BudgetBound`, `FanOutBound`, `TotalBound`;
+- `LineageWF`, `Attenuation`, `BudgetBound`, `FanOutBound`, `RateBound`;
 - `LiveUnderLive`, `NoOrphanRunning`, `CancelPropagates`;
 - `RevokedAtRestart`, `RestartUncertain`, `NoReplay`;
 - `EntryOnce`, `NoEntryRecursion`, `SameKitBound`, `SpawnSetAttenuates`,

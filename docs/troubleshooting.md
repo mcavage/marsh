@@ -125,7 +125,7 @@ excluded by `MARSH_SPAWN` exits 126; other refusals, including those through
 | `depth limit 4` | the tree is already 4 jobs deep |
 | `fan-out limit 8` | this job already has 8 running children |
 | `... refused: same-Kit chain limit 2` | the call would make the same Kit three times in a row |
-| `total limit 128` | the tree has used its 128 launches, including refused child calls |
+| `rate limit: 60 launches in the last minute; retry in Ns` | the tree launched jobs in a tight loop; wait the seconds it names, or raise `MARSH_TREE_LAUNCH_RATE` at daemon start |
 | `tree already uses ... Kit VMs (...) (MARSH_TREE_KIT_VMS)` | live jobs in the tree already use the configured number of distinct Kits; let one finish before adding another |
 | `deadline: parent job ... has ... ms of wall time left` | less than one second remains before the parent's deadline; a child cannot outlive it |
 | `spawn refused: NAME not in this job's spawn set` | `MARSH_SPAWN` or `--spawn` excludes it (126 from a registered-name link, 125 from `marsh run`) |

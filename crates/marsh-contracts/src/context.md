@@ -35,8 +35,9 @@ from your image (skills under /opt/...) into its prompt.
 - The user narrows what you may start with `MARSH_SPAWN=a,b` (or `none`);
   `marsh run --spawn a,b NAME` narrows one child. Nothing in a job widens it.
 - 16 jobs at once, depth 4, the same Kit at most twice in a row, 8 live
-  children per job, 128 jobs per tree, 4 distinct Kit VMs per tree; a
-  child's wall time ends with its parent's. A refusal starts nothing: `task`
+  children per job, 4 distinct Kit VMs per tree, and (by default) 60
+  launches per tree in any minute, which only a tight loop reaches (the
+  refusal says when to retry); a child's wall time ends with its parent's. A refusal starts nothing: `task`
   returns an error that says why; the CLI exits 125 (126 for a name outside
   the spawn set).
 - Exported variables reach children; credential-shaped names never do.

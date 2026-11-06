@@ -6,8 +6,9 @@
 (* its job capability (`marsh run`, a registered-name shim, or a split    *)
 (* branch, which is a child with a narrowed view). Every launch is        *)
 (* journaled with its parent before it is submitted, draws from one       *)
-(* session pool, and is checked against depth, fan-out and per-tree total *)
-(* caps. A child's rights (mounts and spawnable Kits) are a subset of its  *)
+(* session pool, and is checked against depth, fan-out and a per-tree   *)
+(* launch rate: at most MaxRate launches of one tree in any Window ticks *)
+(* of a discrete clock (Tick). A child's rights (mounts and spawnable Kits) are a subset of its  *)
 (* parent's; it may narrow further (a split fork, or no spawn at all).    *)
 (* A job's end, cancel, or transport loss revokes its capability and      *)
 (* cancels every descendant. A pool slot frees only on a confirmed end    *)
@@ -55,15 +56,16 @@
 (* two daemon steps; jobs exit whenever they like.                       *)
 EXTENDS Naturals, FiniteSets
 
-CONSTANTS Jobs, Kits, ScriptKits, NoHomeKits, MaxDepth, MaxConc, MaxFan, MaxTotal,
-          MaxSame, MaxKitVMs, MaxDetached, MaxRestarts, Bug
+CONSTANTS Jobs, Kits, ScriptKits, NoHomeKits, MaxDepth, MaxConc, MaxFan, MaxRate,
+          Window, MaxTime, MaxSame, MaxKitVMs, MaxDetached, MaxRestarts, Bug
 
-Bugs == {"none", "noDepth", "widen", "freeOnRevoke", "noFan", "noTotal",
+Bugs == {"none", "noDepth", "widen", "freeOnRevoke", "noFan", "noRate",
          "orphanChildren", "revokeOnly", "noPropagate", "restartKeepsCap",
          "keepRunning", "replay", "linkIgnoresMarker", "linkIgnoresPpid",
          "noSameKit", "spawnWiden", "noKitCap", "noDetachCap",
          "restartDetached", "detachHolds", "childKeepsHome"}
 ASSUME Bug \in Bugs
+ASSUME MaxRate >= 1 /\ Window >= 1
 ASSUME Jobs \subseteq (Nat \ {0}) /\ ScriptKits \subseteq Kits /\ NoHomeKits \subseteq Kits
 
 Session == 0
@@ -96,10 +98,14 @@ VARIABLES
   marker,    \* [Jobs -> BOOLEAN] MARSH_ENTRY in the main process's environment
   selfLocal, \* [Jobs -> Nat] own-name calls resolved to the image binary
   viaEntry,  \* [Jobs -> BOOLEAN] ghost: created by its parent's entry step
-  det        \* [Jobs -> BOOLEAN] ghost: the job detached (sticky)
+  det,       \* [Jobs -> BOOLEAN] ghost: the job detached (sticky)
+  now,       \* the clock (Tick), up to MaxTime
+  at         \* [Jobs -> Nat] when the job was launched
 
 vars == <<st, par, kit, rights, cap, cgen, alive, launches, runs, cancelled, restarts,
-          entry, marker, selfLocal, viaEntry, det>>
+          entry, marker, selfLocal, viaEntry, det, now, at>>
+model == <<st, par, kit, rights, cap, cgen, alive, launches, runs, cancelled, restarts,
+           entry, marker, selfLocal, viaEntry, det>>
 sv == <<entry, marker, selfLocal, viaEntry, det>>
 
 Init ==
@@ -119,6 +125,8 @@ Init ==
   /\ selfLocal = [j \in Jobs |-> 0]
   /\ viaEntry = [j \in Jobs |-> FALSE]
   /\ det = [j \in Jobs |-> FALSE]
+  /\ now = 0
+  /\ at = [j \in Jobs |-> 0]
 
 ---------------------------------------------------------------------------
 (* Helpers *)
@@ -137,6 +145,8 @@ SameN(j, n) == IF n = 0 \/ par[j] = Session \/ kit[par[j]] # kit[j] THEN 1
                ELSE 1 + SameN(par[j], n - 1)
 SameChain(j) == SameN(j, Cardinality(Jobs))
 \* Distinct Kits (warm VMs) of a tree's live jobs.
+\* The launches of tree r in the current window.
+Recent(r) == {d \in Tree(r) : at[d] + Window > now}
 TreeKits(r) == {kit[d] : d \in {x \in Tree(r) : st[x] \in Active}}
 
 \* A pool slot is held until the job's end is confirmed. Bug freeOnRevoke:
@@ -182,7 +192,7 @@ SpawnFrom(j, p, fromEntry) ==
           /\ (entry[p] = "done") # fromEntry                  \* entry step first
           /\ (Bug = "noDepth" \/ Depth(p) + 1 <= MaxDepth)
           /\ (Bug = "noFan" \/ Cardinality({c \in Children(p) : st[c] \in Holding}) < MaxFan)
-          /\ (Bug = "noTotal" \/ Cardinality(Tree(RootOf(p))) < MaxTotal)
+          /\ (Bug = "noRate" \/ Cardinality(Recent(RootOf(p))) < MaxRate)
   /\ PoolUse < MaxConc
   /\ LET R == IF p = Session THEN AllRights ELSE rights[p] IN
      \E k \in Kits, N \in Narrowings(R) :
@@ -359,7 +369,13 @@ ProcDie(j) ==
   /\ alive' = [alive EXCEPT ![j] = FALSE]
   /\ UNCHANGED <<sv, st, par, kit, rights, cap, cgen, launches, runs, cancelled, restarts>>
 
-Next ==
+\* Time passes; nothing else changes.
+Tick ==
+  /\ now < MaxTime
+  /\ now' = now + 1
+  /\ UNCHANGED <<model, at>>
+
+Step ==
   \/ Restart
   \/ \E j \in Jobs :
        \/ \E p \in {Session} \cup Jobs : Spawn(j, p)
@@ -369,11 +385,19 @@ Next ==
        \/ \E c \in Jobs : EntryDispatch(c, j)
        \/ \E a \in {Session} \cup Jobs : Cancel(j, a)
 
+\* Every step but Tick keeps the clock; a launch records its time.
+Next ==
+  \/ Tick
+  \/ /\ Step
+     /\ now' = now
+     /\ at' = [d \in Jobs |-> IF st[d] = "none" /\ st'[d] # "none" THEN now ELSE at[d]]
+
+\* Over the job state only: these actions leave the clock to Next.
 Fairness ==
-  \A j \in Jobs : /\ WF_vars(Start(j)) /\ WF_vars(Exit(j)) /\ WF_vars(Cleanup(j))
-                  /\ WF_vars(EntryLocal(j) \/ \E c \in Jobs : EntryDispatch(c, j))
-                  /\ WF_vars(Reap(j) \/ GraceExpire(j))
-                  /\ WF_vars(Collect(j))
+  \A j \in Jobs : /\ WF_model(Start(j)) /\ WF_model(Exit(j)) /\ WF_model(Cleanup(j))
+                  /\ WF_model(EntryLocal(j) \/ \E c \in Jobs : EntryDispatch(c, j))
+                  /\ WF_model(Reap(j) \/ GraceExpire(j))
+                  /\ WF_model(Collect(j))
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -418,7 +442,9 @@ DetachedSurvives == \A j \in Jobs : det[j] => st[j] \in {"detached", "done"}
 
 FanOutBound == \A p \in Jobs : Cardinality({c \in Children(p) : st[c] \in Holding}) <= MaxFan
 
-TotalBound == \A r \in Jobs : st[r] # "none" /\ par[r] = Session => Cardinality(Tree(r)) <= MaxTotal
+\* A runaway cannot exceed the rate: no tree has more than MaxRate launches
+\* in any window (checked in every state, so at every window's end).
+RateBound == \A r \in Jobs : st[r] # "none" /\ par[r] = Session => Cardinality(Recent(r)) <= MaxRate
 
 \* Revocation on parent end: no live capability under a revoked one.
 LiveUnderLive == \A j \in Jobs :

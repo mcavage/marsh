@@ -1,5 +1,5 @@
 //! Nested processes (`docs/design/processes.md`): one lineage tree, one admission
-//! for every job (pool, depth, same-Kit chain, fan-out, total, spawn set),
+//! for every job (pool, depth, same-Kit chain, fan-out, launch rate, spawn set),
 //! the job capability's `ProcessRun` relay, and `ProcessShow`.
 //! Model: `docs/model/Process.tla`.
 
@@ -9,8 +9,8 @@ use crate::{
     write_frame,
 };
 use marsh_contracts::process::{
-    DEPTH_LIMIT, FAN_OUT_LIMIT, MIN_CHILD_WALL_MS, POOL_LIMIT, SAME_KIT_LIMIT, TOTAL_LIMIT,
-    TREE_KIT_VM_LIMIT, TTY_REFUSAL, narrow_spawn,
+    DEPTH_LIMIT, FAN_OUT_LIMIT, MIN_CHILD_WALL_MS, POOL_LIMIT, REFUSAL_BURST, SAME_KIT_LIMIT,
+    TREE_KIT_VM_LIMIT, TREE_LAUNCH_RATE, TTY_REFUSAL, narrow_spawn,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -75,8 +75,10 @@ pub struct ProcessCounts {
 #[derive(Debug, Default)]
 pub(crate) struct ProcessTable {
     pub(crate) refused: u64,
-    /// Refused launches per tree root: they count toward `TotalBound`.
-    refused_roots: BTreeMap<String, usize>,
+    /// When refused child calls were made, per tree root, within the launch
+    /// window and at most `REFUSAL_BURST` of them: they count toward its
+    /// rate (`RateBound`).
+    refused_roots: BTreeMap<String, Vec<u64>>,
     /// Last successful `workers reset` per Kit command (`all` for every Kit),
     /// unix ms; persisted in `process-resets.json` in the control home.
     resets: BTreeMap<String, u64>,
@@ -215,7 +217,7 @@ pub(crate) fn admit(
 }
 
 /// A child's lineage under its parent, or the refusal (spawn set, depth,
-/// fan-out, total, same-Kit chain).
+/// fan-out, launch rate, same-Kit chain).
 fn child_lineage(
     state: &State,
     id: &String,
@@ -266,21 +268,7 @@ fn child_lineage(
             short(id)
         ));
     }
-    let tree = state
-        .jobs
-        .values()
-        .filter(|job| {
-            job.job_id == root
-                || job
-                    .lineage
-                    .as_ref()
-                    .is_some_and(|lineage| lineage.root == root)
-        })
-        .count()
-        + state.process.refused_roots.get(&root).copied().unwrap_or(0);
-    if tree >= TOTAL_LIMIT {
-        return Err(format!("total limit {TOTAL_LIMIT} launches in this tree"));
-    }
+    launch_rate(state, &root)?;
     wall_time_left(&inherited, id, command)?;
     if let Some(kit) = kit {
         kit_vm_cap(state, &root, command, kit)?;
@@ -405,12 +393,70 @@ fn kit_vm_cap(state: &State, root: &str, command: &str, kit: &str) -> Result<(),
     ))
 }
 
-/// Count one refusal, and toward its tree's total when it had a parent.
+fn rate(state: &State) -> marsh_contracts::process::LaunchRate {
+    state
+        .job_defaults
+        .as_ref()
+        .map_or(TREE_LAUNCH_RATE, |defaults| defaults.tree_launch_rate)
+}
+
+/// The per-tree launch rate (`RateBound`): the tree's launches in the
+/// rolling window, its refused child calls up to `REFUSAL_BURST` included.
+/// Only a tight loop reaches it; the refusal says when to retry.
+fn launch_rate(state: &State, root: &str) -> Result<(), String> {
+    let rate = rate(state);
+    let now = crate::unix_time_ms();
+    let window = rate.window_seconds.saturating_mul(1000);
+    let since = now.saturating_sub(window);
+    let mut times = state
+        .jobs
+        .values()
+        .filter(|job| {
+            job.job_id == root
+                || job
+                    .lineage
+                    .as_ref()
+                    .is_some_and(|lineage| lineage.root == root)
+        })
+        .map(|job| job.created_unix_ms)
+        .chain(
+            state
+                .process
+                .refused_roots
+                .get(root)
+                .into_iter()
+                .flatten()
+                .copied(),
+        )
+        .filter(|at| *at > since)
+        .collect::<Vec<_>>();
+    if times.len() < rate.launches {
+        return Ok(());
+    }
+    // Retry once enough of them have left the window for one more.
+    times.sort_unstable();
+    let frees = times[times.len() - rate.launches];
+    let retry = (frees + window).saturating_sub(now).div_ceil(1000).max(1);
+    Err(format!(
+        "rate limit: {} launches in {}; retry in {retry}s (MARSH_TREE_LAUNCH_RATE)",
+        times.len(),
+        rate.window_text()
+    ))
+}
+
+/// Count one refusal, and toward its tree's launch rate (at most
+/// `REFUSAL_BURST` in the window) when it had a parent.
 pub(crate) fn refused(state: &mut State, parent: Option<&str>) {
     state.process.refused += 1;
     if let Some(parent) = parent {
         let root = root_of(state, parent);
-        *state.process.refused_roots.entry(root).or_default() += 1;
+        let now = crate::unix_time_ms();
+        let since = now.saturating_sub(rate(state).window_seconds.saturating_mul(1000));
+        let times = state.process.refused_roots.entry(root).or_default();
+        times.retain(|at| *at > since);
+        if times.len() < REFUSAL_BURST {
+            times.push(now);
+        }
     }
 }
 
@@ -607,7 +653,7 @@ impl DaemonStore {
                         })
                         .map(|child| child.job_id.clone()),
                 );
-                if tree.len() > TOTAL_LIMIT * 2 {
+                if tree.len() > POOL_LIMIT * FAN_OUT_LIMIT {
                     break;
                 }
             }

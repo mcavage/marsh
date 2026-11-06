@@ -1174,6 +1174,22 @@ fn write_job_defaults(
             };
             writeln!(writer, "  {name}: {value} {unit} [{origin}]")?;
         }
+        let rate = defaults.tree_launch_rate;
+        writeln!(
+            writer,
+            "  launch rate: {} launches per {} s per job tree [{}]",
+            rate.launches,
+            rate.window_seconds,
+            if defaults
+                .environment_overrides
+                .iter()
+                .any(|name| name == "MARSH_TREE_LAUNCH_RATE")
+            {
+                "daemon launch environment: MARSH_TREE_LAUNCH_RATE"
+            } else {
+                "built-in default"
+            }
+        )?;
         writeln!(
             writer,
             "Later shells cannot override this snapshot. Close work and stop the scope before changing it, or use a separate MARSH_HOME."
