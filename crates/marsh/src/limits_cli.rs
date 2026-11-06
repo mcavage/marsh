@@ -17,6 +17,9 @@ pub enum Daemon {
     /// No daemon: this shell's environment, which the next daemon started
     /// from it would read.
     Stopped,
+    /// A daemon runs but did not answer: this shell's environment is shown,
+    /// and the daemon's own launch environment may differ.
+    Unreachable,
 }
 
 #[derive(Debug, Serialize)]
@@ -36,17 +39,21 @@ pub struct Listing {
 pub fn listing(scope_root: &Path) -> Result<Listing, String> {
     let config_path = scope_root.join(crate::shell_choice::CONFIG_FILE);
     let config = ConfigLimits::read(&config_path);
-    let running = marsh_daemon::Client::connect_if_running(scope_root)
-        .ok()
-        .flatten()
-        .and_then(|client| client.status(None).ok())
-        .and_then(|status| status.job_defaults);
+    let running = match marsh_daemon::Client::connect_if_running(scope_root) {
+        Ok(None) => Err(Daemon::Stopped),
+        Ok(Some(client)) => client
+            .status(None)
+            .ok()
+            .and_then(|status| status.job_defaults)
+            .ok_or(Daemon::Unreachable),
+        Err(_) => Err(Daemon::Unreachable),
+    };
     let (snapshot, daemon) = match running {
-        Some(effective) => (effective.environment_part(), Daemon::Running),
-        None => (
+        Ok(effective) => (effective.environment_part(), Daemon::Running),
+        Err(daemon) => (
             JobDefaults::from_environment(|name| std::env::var_os(name))
                 .map_err(|error| error.to_string())?,
-            Daemon::Stopped,
+            daemon,
         ),
     };
     Ok(Listing {
@@ -129,8 +136,14 @@ pub fn list_command(scope_root: &Path, json: bool) -> Result<i32, (String, i32)>
             line(&row.iter().map(String::as_str).collect::<Vec<_>>())
         );
     }
-    if listing.daemon == Daemon::Stopped {
-        println!("\nmarsh is not running here: env values are this shell's, read when it starts.");
+    match listing.daemon {
+        Daemon::Running => {}
+        Daemon::Stopped => println!(
+            "\nmarsh is not running here: env values are this shell's, read when it starts."
+        ),
+        Daemon::Unreachable => println!(
+            "\nmarsh did not answer: env values are this shell's; the running daemon's may differ."
+        ),
     }
     println!(
         "\nChange one with `marsh config limit NAME VALUE` (or `default`). \"now\" applies to the next launch; \"new jobs\" to jobs started after the change."
