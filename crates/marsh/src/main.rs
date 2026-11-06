@@ -851,9 +851,11 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
     ) {
         match std::fs::symlink_metadata(&daemon_home) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                // No scope directory exists here. Do not create
-                // it or launch a daemon merely to report the absent scope.
-                return write_absent_scope_report(&parsed.command, &daemon_home);
+                // No scope directory exists here. Do not create it or launch
+                // a daemon unless VMs are recorded for it.
+                if let Some(status) = write_absent_scope_report(&parsed.command, &daemon_home)? {
+                    return Ok(status);
+                }
             }
             Err(error) => {
                 return Err(RunError::new(
@@ -890,13 +892,23 @@ fn try_run(mut arguments: Vec<OsString>) -> Result<i32, RunError> {
                 &parsed.command,
                 cli::ProductCommand::Reset { .. } | cli::ProductCommand::Stop { .. }
             );
-            let client = if lifecycle_only {
+            let existing = if lifecycle_only {
                 match LocalDaemonClient::connect_existing(&daemon_home).map_err(|error| {
                     RunError::new(format!("cannot connect to the local daemon: {error}"), 1)
                 })? {
-                    Some(client) => client,
-                    None => return write_absent_scope_report(&parsed.command, &daemon_home),
+                    Some(client) => Some(client),
+                    // VMs are recorded: start the daemon (as `marsh status`
+                    // does) and let it clean them up.
+                    None => match write_absent_scope_report(&parsed.command, &daemon_home)? {
+                        Some(status) => return Ok(status),
+                        None => None,
+                    },
                 }
+            } else {
+                None
+            };
+            let client = if let Some(client) = existing {
+                client
             } else {
                 let shell_delivery =
                     !parsed.guest && matches!(parsed.command, cli::ProductCommand::Shell);
@@ -2004,6 +2016,7 @@ fn run_mcp_action(action: McpAction) -> Result<i32, RunError> {
 
 /// No daemon answers for this home. Only the home's VM ownership map can say
 /// whether anything is still running; never launch a daemon to find out.
+/// With VMs recorded, the caller starts the daemon to remove them.
 fn absent_scope_report(
     command: &cli::ProductCommand,
     recorded: std::io::Result<Vec<String>>,
@@ -2028,16 +2041,16 @@ fn absent_scope_report(
                 uncertain(
                     "recorded",
                     Some(name),
-                    format!(
-                        "daemon is not running, so this VM was not removed; run `marsh status` to start the daemon, then `marsh {word}`"
-                    ),
+                    format!("daemon is not running, so this VM was not removed by `marsh {word}`"),
                 )
             })
             .collect(),
         Err(error) => vec![uncertain(
             "ownership map",
             None,
-            format!("daemon is not running and its VM ownership map is unreadable ({error}); VM cleanup is unverified"),
+            format!(
+                "daemon is not running and its VM ownership map is unreadable ({error}); VM cleanup is unverified"
+            ),
         )],
     };
     Ok(marsh_daemon::ScopeLifecycleReport {
@@ -2047,10 +2060,13 @@ fn absent_scope_report(
     })
 }
 
+/// `Some(status)` when there is nothing for a daemon to do (nothing is
+/// recorded, or the record is unreadable); `None` when VMs are recorded and
+/// the daemon must be started to remove them.
 fn write_absent_scope_report(
     command: &cli::ProductCommand,
     daemon_home: &Path,
-) -> Result<i32, RunError> {
+) -> Result<Option<i32>, RunError> {
     let account_home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let control = env::var_os("MARSH_CONTROL_HOME").map(PathBuf::from);
     let recorded = marsh_daemon::host_state_directory::recorded_scope_vms(
@@ -2058,13 +2074,24 @@ fn write_absent_scope_report(
         control.as_deref(),
         daemon_home,
     );
+    if recorded.as_ref().is_ok_and(|names| !names.is_empty()) {
+        return Ok(None);
+    }
     let report = absent_scope_report(command, recorded)?;
     let json = matches!(
         command,
         cli::ProductCommand::Reset { json: true } | cli::ProductCommand::Stop { json: true }
     );
     if report.cleanup_complete {
-        eprintln!("marsh: nothing running for {}", daemon_home.display());
+        eprintln!(
+            "marsh: nothing to {} for {}",
+            if matches!(command, cli::ProductCommand::Reset { .. }) {
+                "reset"
+            } else {
+                "stop"
+            },
+            daemon_home.display()
+        );
         if json {
             let mut encoded = serde_json::to_vec(&report).map_err(|error| {
                 RunError::new(format!("cannot encode lifecycle report: {error}"), 1)
@@ -2074,7 +2101,7 @@ fn write_absent_scope_report(
                 RunError::new(format!("cannot write lifecycle report: {error}"), 1)
             })?;
         }
-        return Ok(0);
+        return Ok(Some(0));
     }
     let outcome = product::write_lifecycle_report(
         &report,
@@ -2085,7 +2112,7 @@ fn write_absent_scope_report(
     )
     .map_err(|error| RunError::new(error.to_string(), error.exit_code()))?;
     match outcome {
-        product::ProductOutcome::Complete(status) => Ok(status),
+        product::ProductOutcome::Complete(status) => Ok(Some(status)),
         product::ProductOutcome::GuestShell(_) => {
             Err(RunError::new("internal lifecycle mismatch", 1))
         }
@@ -4998,7 +5025,7 @@ exit 64
             text.contains("left scope recorded VM marsh-k-ab12cd34: daemon is not running"),
             "{text}"
         );
-        assert!(text.contains("then `marsh reset`"), "{text}");
+        assert!(!text.contains("marsh status"), "never a loop: {text}");
 
         let unreadable = absent_scope_report(&stop, Err(std::io::Error::other("bad map"))).unwrap();
         assert!(!unreadable.cleanup_complete);

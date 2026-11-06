@@ -811,6 +811,34 @@ fn write_status(writer: &mut impl Write, value: serde_json::Value) -> Result<(),
         "Daemon {} (pid {})",
         status.daemon_id, status.endpoint_owner.pid
     )?;
+    if let Some(version) = &status.version {
+        writeln!(writer, "  version:      {version}")?;
+    }
+    if let Some(update) = &status.update_pending {
+        writeln!(
+            writer,
+            "  update pending: restarts on {} when idle (no job, shell or Kit start running)",
+            update.version
+        )?;
+    }
+    for command in &status.commands {
+        if let Some(marsh_daemon::DescriptorStatus {
+            source,
+            error: Some(error),
+        }) = &command.descriptor
+        {
+            writeln!(
+                writer,
+                "  warning:      {}: its Kit descriptor could not be read; using the {} copy ({error})",
+                command.name,
+                if source == "cached" {
+                    "saved older"
+                } else {
+                    "local"
+                }
+            )?;
+        }
+    }
     if let Some(removed) = &status.stock_sbx_removed {
         writeln!(
             writer,

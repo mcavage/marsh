@@ -151,9 +151,17 @@ There is no ACP registry. A registered command is an ACP agent when its Kit's
 composed descriptor declares `com.docker.sandbox/acp@1` (`agent`, `command`
 as argv or a `/bin/sh -c` string, optional `env` and `protocolVersion`;
 capability groups, kit sets, and mixins included). The daemon reads the
-descriptor of a published image once per digest (cached under the control
-directory's `kit-agent-v5/`) and of a local source Kit from its last cached
-build, else its source YAML. An adapter's `env` is bounded like any exported
+descriptor of a published image once per digest and keeps the descriptor
+itself under the control directory's `kit-descriptors/`, which every release
+parses again (no cache-format bump drops it), and of a local source Kit from
+its last cached build, else its source YAML. When a published descriptor
+cannot be read (a private image Docker has no credentials for, no network),
+the daemon uses the image archive marsh keeps on this Mac, else an older
+release's saved reading (`kit-agent-v*/`): `marsh status` shows
+`commands[].descriptor` `{"source": "fresh"|"cached", "error": ...}`. Only a
+Kit generation whose descriptor was never seen fails, with
+`can't read IMAGE: registry access denied` and the `docker login` and
+`sbx secret set --registry` commands that fix it. An adapter's `env` is bounded like any exported
 environment and may not name a variable marsh sets; an `agent-sessions@1`
 config is at most 4 KiB and belongs to the adapter it names (`agent`), or is
 the Kit's only one when it has at most one adapter. An ACP job runs the

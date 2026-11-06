@@ -83,8 +83,10 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
 # COMMANDS
 
 **status** [**--json**]
-: Show the daemon, its host control directory, per-job limits, shells, and
-  Kit workers.
+: Show the daemon and its version, its host control directory, per-job
+  limits, shells, and Kit workers. After an upgrade replaced marsh while work
+  runs, **update pending: restarts on** *VERSION* **when idle**: the daemon
+  switches to the new marsh by itself once no job, shell or Kit start runs.
 
 **jobs** [**--all**] [**--tree**] [**--json**]
 : List Kit jobs, running first, then newest. **--tree** draws children under
@@ -278,7 +280,9 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   when the daemon starts again, unless **--detached** is given) and stop its
   daemon. Refuses while shells or
   jobs are active. The guest home and results are kept. Exits nonzero if any
-  cleanup could not be verified.
+  cleanup could not be verified. With no daemon running, **reset** and
+  **stop** start it when this scope has VMs recorded, then remove them; with
+  none they print **nothing to stop** (**nothing to reset**) and exit 0.
 
 **init**
 : Create the guest home (**~/.marsh/home** by default) if it is missing. When it

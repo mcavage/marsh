@@ -123,8 +123,14 @@ Upgrade marsh with Homebrew; Kits update themselves.
 
 ```sh
 brew upgrade mcavage/tap/marsh
-marsh stop                   # when nothing is running; the next launch uses the new marsh
 ```
+
+That is all. The running daemon notices that its executable was replaced and
+switches to the new marsh once it is idle: no job, marsh shell or Kit start
+running. It never stops running work for that. Meanwhile `marsh status` shows
+`update pending: restarts on VERSION when idle`, and new marsh commands use
+the running daemon. The new daemon starts as after any restart: it keeps the
+VMs this home owns and reconciles them.
 
 The commands (`claude`, `codex`, `pi`, `shell`, `pix`, `hermes`, and Kits you
 installed from a tag) move to newer images by themselves: marsh checks each
@@ -144,9 +150,10 @@ command to the version your marsh shipped.
 For a script install, run the installer again instead of `brew upgrade`. For a
 tarball install, repeat the extraction and copy steps with the new release.
 
-A running daemon keeps the old marsh until `marsh stop`: finish its jobs,
-`exit` every marsh shell, then run `marsh stop` from your **Mac terminal**.
-Stop refuses while shells or jobs are active; see
+Script and tarball installs switch the same way once the new `marshd`
+replaces the old one. To switch at once instead, finish its jobs, `exit`
+every marsh shell, then run `marsh stop` from your **Mac terminal**. Stop
+refuses while shells or jobs are active; see
 [Removing VMs](troubleshooting.md#removing-vms).
 
 After an `sbx` upgrade, marsh replaces its daemon automatically once no shell

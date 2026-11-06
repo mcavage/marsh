@@ -826,6 +826,16 @@ impl AcpSessionManager {
         })
     }
 
+    /// A session is being reserved or started (its job is not recorded yet).
+    pub(crate) fn starting(&self) -> bool {
+        self.starting.load(Ordering::Acquire) > 0
+            || !self
+                .pending
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
+    }
+
     pub(crate) fn set_cancel_timeout(&mut self, timeout: Duration) {
         self.cancel_timeout = timeout;
     }

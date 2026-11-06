@@ -3166,6 +3166,87 @@ fn a_daemon_whose_stock_sbx_was_removed_can_be_replaced_unless_work_is_attached(
     task.join().unwrap();
 }
 
+/// A replaced daemon executable: running work keeps the daemon, `marsh
+/// status` says it waits, a client of the new build uses it meanwhile, and
+/// once nothing runs it stops to restart on the new executable.
+#[test]
+fn a_replaced_daemon_restarts_on_the_new_build_only_once_idle() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let home = home();
+    let sbx = stock_sbx(b"stock-sbx");
+    let bin = tempfile::tempdir().unwrap();
+    let marshd = bin.path().join("marshd");
+    let install = |version: &str| {
+        let staged = bin.path().join("marshd.new");
+        fs::write(
+            &staged,
+            format!(
+                "#!/bin/sh\ncase \"$1\" in --version) echo \"marshd {version}\";; --check-config) echo ok;; *) exit 2;; esac\n"
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::rename(&staged, &marshd).unwrap();
+    };
+    install("0.0.1");
+    let server = Arc::new(
+        Server::bind_with_stock_sbx(home.path(), sbx.path())
+            .unwrap()
+            .with_upgrade_executable(&marshd)
+            .with_stock_sbx_probe_interval(Duration::from_millis(10)),
+    );
+    let store = server.store.clone();
+    let shell = store.attach_shell(
+        std::process::id(),
+        authority("/Users/example/project", home.path()),
+    );
+    let task_server = Arc::clone(&server);
+    let task = thread::spawn(move || task_server.serve_until(|| false).unwrap());
+    let status = || Client::connect(home.path()).unwrap().status(None).unwrap();
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(status().update_pending, None);
+
+    install("9.9.9");
+    // A client of the new build, even before the daemon's own next look, uses
+    // this daemon until it restarts; one of another build is refused as before.
+    let paths = EndpointPaths::for_home(home.path()).unwrap();
+    let new_build = runtime_identity(&fs::canonicalize(&marshd).unwrap(), sbx.path()).unwrap();
+    assert!(
+        Client::reconcile_resident(home.path(), &paths, &new_build)
+            .unwrap()
+            .is_some()
+    );
+    assert!(matches!(
+        Client::reconcile_resident(home.path(), &paths, "sha256:other"),
+        Err(DaemonError::Remote(ref message)) if busy_lifecycle_refusal(message)
+    ));
+    let deadline = Instant::now() + PATIENCE;
+    while status().update_pending.is_none() {
+        assert!(Instant::now() < deadline, "the update was not noticed");
+        thread::sleep(Duration::from_millis(10));
+    }
+    let next = fs::canonicalize(&marshd).unwrap();
+    assert_eq!(
+        status().update_pending,
+        Some(UpdatePending {
+            version: "9.9.9".into(),
+            executable: next.clone(),
+        })
+    );
+    assert!(!task.is_finished(), "an attached shell keeps the daemon");
+    assert!(!task.is_finished());
+    assert_eq!(server.handover(), None);
+
+    store.detach_shell(&shell).unwrap();
+    let deadline = Instant::now() + PATIENCE;
+    while !task.is_finished() {
+        assert!(Instant::now() < deadline, "the idle daemon did not restart");
+        thread::sleep(Duration::from_millis(10));
+    }
+    task.join().unwrap();
+    assert_eq!(server.handover(), Some(next));
+}
+
 #[test]
 fn a_daemon_whose_stock_sbx_was_removed_reports_it_and_stops_once_nothing_is_attached() {
     let home = home();
@@ -3332,6 +3413,7 @@ fn legacy_pong_is_compatible_but_ambiguous_owner_is_never_signalable() {
             daemon_id: "old".into(),
             build_identity: None,
             pid: None,
+            update_identity: None,
         }
     );
 

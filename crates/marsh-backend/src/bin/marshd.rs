@@ -49,6 +49,19 @@ fn main() {
             }
         }
     }
+    if arguments.first().is_some_and(|word| word == "--version") {
+        println!("marshd {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    // Started by the daemon it replaces (an upgrade): wait until it is gone.
+    if arguments
+        .iter()
+        .any(|word| marsh_daemon::is_handover_flag(word))
+        && let Err(error) = marsh_daemon::await_handover()
+    {
+        eprintln!("marshd: {error}");
+        std::process::exit(1);
+    }
     if let Err(error) = run() {
         eprintln!("marshd: {error}");
         std::process::exit(1);
@@ -148,7 +161,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     if env::var_os("MARSH_LOCAL_SHELL_AUTHORITY").is_some() {
         return Err("MARSH_LOCAL_SHELL_AUTHORITY was removed; pass a local shell image tag via the normal shell image setting".into());
     }
-    let mut stock_adapter = StockSbx::new(stock_sbx.clone(), runner)
+    let mut stock_adapter = StockSbx::new(stock_sbx.clone(), runner);
+    if let Some(docker) = env::var_os("MARSH_DOCKER") {
+        stock_adapter = stock_adapter.with_docker(PathBuf::from(docker));
+    }
+    let mut stock_adapter = stock_adapter
         .with_kit_image_cache(kit_image_cache)
         // Inside `marsh --dev` every stock call crosses the dev broker.
         .with_published_image_cache(env::var_os("MARSH_DEV_DEPTH").is_none())
@@ -229,6 +246,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     marsh_daemon::finish_startup_diagnostics()?;
     drop(startup_lock);
     server.serve_until(|| stopping.load(Ordering::Relaxed))?;
+    // The executable was replaced and nothing ran: restart on the new one,
+    // which starts once this process (and every lock it holds) is gone.
+    if let Some(next) = server.handover() {
+        drop(server);
+        marsh_daemon::hand_over(&home, &next, &stock_sbx)?;
+    }
     Ok(())
 }
 
@@ -256,7 +279,9 @@ fn check_config(arguments: &[std::ffi::OsString]) -> Result<String, Box<dyn std:
     let shell_image = fs::read_to_string(guest_artifacts.join("shell-image"))
         .map_err(|_| "cannot read shell-image")?;
     OciImage::parse(shell_image.trim().to_owned())?;
-    let local = guest_artifacts.join("local-build").exists();
+    // A local build and a dev install (`make dev`) run their source Kits.
+    let local = guest_artifacts.join("local-build").exists()
+        || guest_artifacts.join("dev-enabled").exists();
     if !local
         && commands
             .iter()
@@ -408,7 +433,11 @@ fn daemon_home() -> Result<PathBuf, Box<dyn std::error::Error>> {
         }
         Some(_) => return Err("usage: marshd [--home PATH]".into()),
     };
-    if arguments.next().is_some() {
+    if arguments
+        .next()
+        .is_some_and(|word| !marsh_daemon::is_handover_flag(&word))
+        || arguments.next().is_some()
+    {
         return Err("usage: marshd [--home PATH]".into());
     }
     Ok(home)

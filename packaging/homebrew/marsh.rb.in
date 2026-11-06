@@ -34,6 +34,8 @@ class @CLASS@ < Formula
       marsh needs Docker Sandboxes: brew install docker/tap/sbx; then `sbx login`
       (sbx 0.47.0 or newer). Then open a shell in a project:
         cd ~/your/project && marsh@CAVEAT_EXTRA@
+      After an upgrade, a running marsh daemon switches to the new version by
+      itself once no job or marsh shell is running; nothing needs stopping.
     EOS
   end
 

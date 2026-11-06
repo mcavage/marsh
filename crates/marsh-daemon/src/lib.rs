@@ -64,7 +64,9 @@ mod shell_client;
 pub mod split;
 pub mod split_confinement;
 pub mod split_fs;
+mod upgrade;
 pub use acp_bridge::{AcpAttachmentBridge, AcpAttachmentStatus};
+pub use upgrade::{HANDOVER_FLAG, UpdatePending, await_handover, hand_over, is_handover_flag};
 mod acp_session;
 pub use acp_session::{
     AcpPendingPermission, AcpSessionStatus, AcpSessionSummary, AcpUpdate, PromptAdmissionError,
@@ -107,6 +109,8 @@ pub const FEATURES: &[&str] = &[
     "peer-review-v1",
     "skills-mirror-v1",
     "task-usage-v1",
+    "descriptor-source-v1",
+    "update-pending-v1",
 ];
 // Scope cleanup may contain several independently bounded stock-SBX
 // operations. Keep the batch above those ordinary per-command limits while
@@ -928,6 +932,10 @@ pub enum PublicReply {
         build_identity: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pid: Option<u32>,
+        /// The build identity this daemon restarts on once idle
+        /// (`update_pending`): a client of that build may use it meanwhile.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        update_identity: Option<String>,
     },
     ShuttingDown,
     RegisteredCommands {
@@ -1752,6 +1760,13 @@ pub struct StatusDocument {
     /// skills store (`marsh config skills-mirror`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skills_mirror: Option<Box<SkillsMirrorStatus>>,
+    /// This daemon's marsh version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Its executable was replaced: it restarts on that version once no
+    /// job, shell or Kit start runs (`docs/install.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_pending: Option<UpdatePending>,
 }
 
 /// Key in `$MARSH_HOME/config.json`, written by `marsh config skills-mirror`
@@ -1794,6 +1809,22 @@ pub struct CommandStatus {
     /// service's key for (`KitAgent::reaches`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub reaches: BTreeMap<String, Vec<String>>,
+    /// Where the declarations above came from; `null` before a read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor: Option<DescriptorStatus>,
+}
+
+/// `marsh status` `commands[].descriptor` (feature `descriptor-source-v1`).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct DescriptorStatus {
+    /// `fresh`: the image's own descriptor (read from its registry, a saved
+    /// copy of such a read, or the image archive on this Mac). `cached`: an
+    /// older marsh's reading of it, used because the descriptor could not be
+    /// read; it may lack declarations that marsh reads now.
+    pub source: String,
+    /// Why the registry read failed, when it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// `marsh status` `sbxenv`: the environment files the daemon is using now.
@@ -4341,6 +4372,8 @@ impl DaemonStore {
             peer_review: None,
             worker_recoveries: state.worker_recoveries.clone(),
             skills_mirror: None,
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+            update_pending: None,
         }
     }
 
@@ -4631,6 +4664,10 @@ pub struct Server {
     dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
     events: Arc<events::Bus>,
+    /// Production daemons watch their own executable (`upgrade.rs`).
+    upgrade: Option<Arc<upgrade::UpgradeWatch>>,
+    /// The executable to restart on, once `serve_until` stopped for it.
+    handover: Mutex<Option<PathBuf>>,
 }
 
 impl Server {
@@ -4680,6 +4717,9 @@ impl Server {
             .with_defaults_home(journal_home.to_path_buf()),
         );
         server.stock_sbx = Some(stock_sbx.to_path_buf());
+        server.upgrade = upgrade::UpgradeWatch::new(&executable, stock_sbx)
+            .ok()
+            .map(Arc::new);
         Ok(server)
     }
 
@@ -4724,6 +4764,8 @@ impl Server {
             dev_broker: None,
             splits,
             events,
+            upgrade: None,
+            handover: Mutex::new(None),
         })
     }
 
@@ -4808,6 +4850,16 @@ impl Server {
         self
     }
 
+    /// Watch `executable` as this daemon's own (`upgrade.rs`).
+    #[cfg(test)]
+    fn with_upgrade_executable(mut self, executable: &Path) -> Self {
+        let stock = self.stock_sbx.clone().expect("a stock SBX is pinned");
+        self.upgrade = Some(Arc::new(
+            upgrade::UpgradeWatch::new(executable, &stock).unwrap(),
+        ));
+        self
+    }
+
     #[cfg(test)]
     fn with_stock_sbx_probe_interval(mut self, interval: Duration) -> Self {
         self.stock_sbx_probe_interval = interval;
@@ -4828,6 +4880,43 @@ impl Server {
         eprintln!("marshd: stopping: {STOCK_SBX_REMOVED}: {}", path.display());
         self.shutdown_requested.store(true, Ordering::Release);
         true
+    }
+
+    /// The executable was replaced and nothing runs: claim the lifecycle
+    /// (no request, job, shell or Kit start may begin) and record what to
+    /// restart on. Never with work in flight.
+    fn ready_to_hand_over(&self, active_connections: &AtomicUsize) -> Option<RequestAdmission> {
+        let (pending, _) = self.upgrade.as_ref()?.probe()?;
+        if active_connections.load(Ordering::Acquire) != 0
+            || !self.store.safe_to_shutdown()
+            || self.acp.starting()
+        {
+            return None;
+        }
+        let admission = self.store.begin_lifecycle_request().ok()?;
+        if !self.store.safe_to_shutdown() || self.acp.starting() {
+            return None;
+        }
+        eprintln!(
+            "marshd: restarting on marsh {} ({})",
+            pending.version,
+            pending.executable.display()
+        );
+        *self
+            .handover
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pending.executable);
+        Some(admission)
+    }
+
+    /// After `serve_until`: the replacement executable to start
+    /// (`hand_over`), when it stopped to upgrade.
+    #[must_use]
+    pub fn handover(&self) -> Option<PathBuf> {
+        self.handover
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     #[must_use]
@@ -4862,6 +4951,11 @@ impl Server {
                 if active_connections.load(Ordering::Acquire) == 0
                     && self.exit_for_removed_stock_sbx()
                 {
+                    break;
+                }
+                if let Some(admission) = self.ready_to_hand_over(&active_connections) {
+                    // Held until serving ends: nothing is admitted meanwhile.
+                    let _admission = admission;
                     break;
                 }
             }
@@ -5086,6 +5180,7 @@ impl Server {
             dev_broker: self.dev_broker.clone(),
             splits: Arc::clone(&self.splits),
             events: Arc::clone(&self.events),
+            upgrade: self.upgrade.clone(),
         }
     }
 }
@@ -5195,6 +5290,7 @@ struct ConnectionHandler {
     dev_broker: Option<Arc<dev_broker::DevBroker>>,
     splits: Arc<split::SplitEngine>,
     events: Arc<events::Bus>,
+    upgrade: Option<Arc<upgrade::UpgradeWatch>>,
 }
 
 /// Reject a guest mount containing, or contained by, a host-owned path.
@@ -6313,6 +6409,27 @@ impl ConnectionHandler {
                     }
                 }
             }
+            PublicRequest::Ping => {
+                let mut reply = dispatch_request(
+                    &self.store,
+                    self.backend.as_ref(),
+                    &self.build_identity,
+                    PublicRequest::Ping,
+                );
+                if let PublicReply::Pong {
+                    update_identity, ..
+                } = &mut reply
+                {
+                    // Probed now, not on the timer: a client of a build just
+                    // installed must not race this daemon's next look.
+                    *update_identity = self
+                        .upgrade
+                        .as_ref()
+                        .and_then(|watch| watch.probe())
+                        .map(|(_, identity)| identity);
+                }
+                write_frame(&mut stream, &reply)
+            }
             request => write_frame(
                 &mut stream,
                 &dispatch_request(
@@ -6751,6 +6868,11 @@ impl ConnectionHandler {
                     .filter(|path| stock_sbx_removed(Some(path)));
                 status.commands = self.backend.command_catalog();
                 status.peer_review = self.backend.peer_review_status().map(Box::new);
+                status.update_pending = self
+                    .upgrade
+                    .as_ref()
+                    .and_then(|watch| watch.probe())
+                    .map(|(pending, _)| pending);
                 self.backend.annotate_status(&mut status);
                 write_frame(&mut stream, &PublicReply::Status(Box::new(status)))
             }
@@ -6889,6 +7011,7 @@ fn dispatch_request(
             daemon_id: store.daemon_id(),
             build_identity: Some(build_identity.into()),
             pid: Some(std::process::id()),
+            update_identity: None,
         },
         PublicRequest::Shutdown | PublicRequest::ResetScope | PublicRequest::StopScope => {
             PublicReply::Error {
@@ -7461,11 +7584,25 @@ impl Client {
             && let Ok(PublicReply::Pong {
                 daemon_id,
                 build_identity,
+                update_identity,
                 ..
             }) = client.request(PublicRequest::Ping)
         {
             if build_identity.as_deref() == Some(expected_build_identity) {
                 return Ok(Some(client));
+            }
+            // It restarts on this build once idle: never stop running work
+            // for that; use it until then.
+            if update_identity.as_deref() == Some(expected_build_identity) {
+                match client.shutdown_resident_after_probe() {
+                    Ok(()) => {}
+                    Err(DaemonError::Remote(message)) if message.starts_with(BUSY_BLOCKED) => {
+                        return Ok(Some(client));
+                    }
+                    Err(error) => return Err(error),
+                }
+                wait_for_owner_release(paths)?;
+                return Ok(None);
             }
             if build_identity.is_some() {
                 client
