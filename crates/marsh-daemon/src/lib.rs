@@ -4910,41 +4910,45 @@ impl Server {
 
     /// The executable was replaced and nothing runs: take the lifecycle
     /// fence (no request, job, shell, Kit start or background pass may
-    /// begin), start the validated successor and wait until it is ready.
-    /// On success the fence is kept until this process exits; on failure it
-    /// is released and this daemon keeps serving.
-    fn hand_over(&self, active_connections: &AtomicUsize) -> bool {
-        let Some(watch) = self.upgrade.as_ref() else {
-            return false;
-        };
-        let Some((pending, _)) = watch.probe() else {
-            return false;
-        };
+    /// begin). Never with work in flight.
+    fn handover_fence(&self, active_connections: &AtomicUsize) -> Option<RequestAdmission> {
+        self.upgrade.as_ref()?.probe()?;
         if active_connections.load(Ordering::Acquire) != 0
             || !self.store.safe_to_shutdown()
             || self.acp.starting()
         {
-            return false;
+            return None;
         }
-        let Ok(fence) = self.store.begin_lifecycle_request() else {
+        let fence = self.store.begin_lifecycle_request().ok()?;
+        (self.store.safe_to_shutdown() && !self.acp.starting()).then_some(fence)
+    }
+
+    /// Behind the fence, with the background workers joined: start the
+    /// validated successor; it is kept only when ready and still alive.
+    fn start_successor(&self, fence: RequestAdmission) -> bool {
+        let Some(watch) = self.upgrade.as_ref() else {
             return false;
         };
-        if !self.store.safe_to_shutdown() || self.acp.starting() {
-            return false;
-        }
         let Ok(successor) = watch.start_successor() else {
             return false;
         };
         eprintln!(
-            "marshd: restarting on marsh {} ({})",
-            pending.version,
-            pending.executable.display()
+            "marshd: restarting on marsh {}",
+            successor.executable.display()
         );
         *self
             .handover
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((successor, fence));
         true
+    }
+
+    /// After `take_handover`, a successor that died before the release: this
+    /// daemon serves on and reports it.
+    pub fn handover_failed(&self, successor: Successor) {
+        if let Some(watch) = self.upgrade.as_ref() {
+            watch.fail(successor, "the successor exited before this daemon let go");
+        }
     }
 
     /// After `serve_until` stopped to upgrade: the successor, ready and
@@ -4986,16 +4990,8 @@ impl Server {
     {
         self.lifecycle.listener.set_nonblocking(true)?;
         let active_connections = Arc::new(AtomicUsize::new(0));
-        let updater_stop = Arc::new(AtomicBool::new(false));
-        let workers = [
-            self.spawn_kit_updater(Arc::clone(&updater_stop)),
-            self.spawn_sbxenv_watcher(Arc::clone(&updater_stop)),
-            self.spawn_skills_mirror(Arc::clone(&updater_stop)),
-            self.spawn_cloud_collector(Arc::clone(&updater_stop)),
-            self.spawn_session_reaper(Arc::clone(&updater_stop)),
-        ];
+        let (mut workers, mut stop_updater) = self.spawn_workers();
         self.spawn_agent_reader();
-        let stop_updater = StopOnDrop(updater_stop);
         let mut next_sbx_probe = Instant::now() + self.stock_sbx_probe_interval;
         while !stop() && !self.shutdown_requested.load(Ordering::Acquire) {
             if Instant::now() >= next_sbx_probe {
@@ -5006,15 +5002,20 @@ impl Server {
                 {
                     break;
                 }
-                if self.hand_over(&active_connections) {
-                    // The fence stays held: stop and join the background
-                    // workers (none can start a pass), then return; the
-                    // endpoint is released only when this process exits.
+                if let Some(fence) = self.handover_fence(&active_connections) {
+                    // Behind the fence no pass can start: stop and join the
+                    // background workers (a running pass ends first), then
+                    // start the successor. The endpoint is released only
+                    // when this process exits.
                     drop(stop_updater);
                     for worker in workers.into_iter().flatten() {
                         let _ = worker.join();
                     }
-                    return Ok(());
+                    if self.start_successor(fence) {
+                        return Ok(());
+                    }
+                    // It failed: serve on, background work included.
+                    (workers, stop_updater) = self.spawn_workers();
                 }
             }
             match marsh_runtime::accept_unix(&self.lifecycle.listener) {
@@ -5038,6 +5039,19 @@ impl Server {
             }
         }
         Ok(())
+    }
+
+    /// The background workers, and what stops them when dropped.
+    fn spawn_workers(&self) -> (Vec<Option<thread::JoinHandle<()>>>, StopOnDrop) {
+        let stop = Arc::new(AtomicBool::new(false));
+        let workers = vec![
+            self.spawn_kit_updater(Arc::clone(&stop)),
+            self.spawn_sbxenv_watcher(Arc::clone(&stop)),
+            self.spawn_skills_mirror(Arc::clone(&stop)),
+            self.spawn_cloud_collector(Arc::clone(&stop)),
+            self.spawn_session_reaper(Arc::clone(&stop)),
+        ];
+        (workers, StopOnDrop(stop))
     }
 
     /// The automatic Kit updater: a background thread that never delays a

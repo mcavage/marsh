@@ -244,15 +244,24 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     signal_hook::flag::register(SIGTERM, Arc::clone(&stopping))?;
     marsh_daemon::finish_startup_diagnostics()?;
     drop(startup_lock);
-    server.serve_until(|| stopping.load(Ordering::Relaxed))?;
-    // Upgrading: the successor is ready. Release the endpoint, then the
-    // fence (the store and its journal), and only then let it bind.
-    if let Some((successor, fence)) = server.take_handover() {
-        drop(server);
+    loop {
+        server.serve_until(|| stopping.load(Ordering::Relaxed))?;
+        let Some((mut successor, fence)) = server.take_handover() else {
+            return Ok(());
+        };
+        // Upgrading: the successor is ready. Checked alive right before the
+        // release: release the endpoint, then the fence (the store and its
+        // journal), and only then let it bind.
+        if successor.alive() {
+            drop(server);
+            drop(fence);
+            drop(successor);
+            return Ok(());
+        }
+        // It died: serve on (the fence goes, background work restarts).
         drop(fence);
-        drop(successor);
+        server.handover_failed(successor);
     }
-    Ok(())
 }
 
 /// `marshd --check-config [DIR]`: validate an install's packaged configuration

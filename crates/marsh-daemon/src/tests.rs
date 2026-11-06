@@ -3166,15 +3166,28 @@ fn a_daemon_whose_stock_sbx_was_removed_can_be_replaced_unless_work_is_attached(
     task.join().unwrap();
 }
 
+/// How a stand-in successor behaves.
+#[derive(Clone, Copy, PartialEq)]
+enum StandIn {
+    /// Reports ready, waits for its stdin to close, touches `PATH.ran`.
+    Waits,
+    /// Exits 1 before it is ready.
+    Fails,
+    /// Reports ready, then exits at once.
+    ReadyThenExits,
+}
+
 /// A stand-in `marshd` at `path`: `--version` reports `version`;
-/// `--handover` reports ready with its own digest and waits for its stdin
-/// to close (then touches `PATH.ran`), or, unless `ready`, exits 1.
-fn install_marshd(path: &Path, version: &str, ready: bool) {
+/// `--handover` touches `PATH.started` and behaves as `successor`.
+fn install_marshd(path: &Path, version: &str, successor: StandIn) {
     use std::os::unix::fs::PermissionsExt as _;
-    let handover = if ready {
-        "echo \"ready $(/usr/bin/shasum -a 256 \"$0\" | cut -d' ' -f1)\"; cat >/dev/null; touch \"$0.ran\""
-    } else {
-        "exit 1"
+    let ready = "echo \"ready $(/usr/bin/shasum -a 256 \"$0\" | cut -d' ' -f1)\"";
+    let handover = match successor {
+        StandIn::Waits => {
+            format!("touch \"$0.started\"; {ready}; cat >/dev/null; touch \"$0.ran\"")
+        }
+        StandIn::Fails => "touch \"$0.started\"; exit 1".to_owned(),
+        StandIn::ReadyThenExits => format!("touch \"$0.started\"; {ready}; exit 0"),
     };
     let staged = path.with_extension("new");
     fs::write(
@@ -3207,7 +3220,7 @@ impl Upgrading {
         let sbx = stock_sbx(b"stock-sbx");
         let bin = tempfile::tempdir().unwrap();
         let marshd = bin.path().join("marshd");
-        install_marshd(&marshd, env!("CARGO_PKG_VERSION"), true);
+        install_marshd(&marshd, env!("CARGO_PKG_VERSION"), StandIn::Waits);
         let mut server = Server::bind_with_stock_sbx(home.path(), sbx.path())
             .unwrap()
             .with_upgrade_executable(home.path(), &marshd)
@@ -3301,7 +3314,7 @@ fn a_replaced_daemon_restarts_on_the_new_build_only_once_idle() {
         Some(env!("CARGO_PKG_VERSION"))
     );
 
-    install_marshd(&up.marshd, env!("CARGO_PKG_VERSION"), true);
+    install_marshd(&up.marshd, env!("CARGO_PKG_VERSION"), StandIn::Waits);
     // A client of the new build, even before the daemon's own next look, uses
     // this daemon until it restarts; one of another build is refused as before.
     let paths = EndpointPaths::for_home(up.home.path()).unwrap();
@@ -3349,7 +3362,7 @@ fn a_replacement_that_is_not_what_was_checked_or_does_not_start_is_not_switched_
     use std::os::unix::fs::PermissionsExt as _;
     // Removed after it was checked.
     let up = Upgrading::start(None);
-    install_marshd(&up.marshd, "9.9.9", true);
+    install_marshd(&up.marshd, "9.9.9", StandIn::Waits);
     up.wait_pending();
     fs::remove_file(&up.marshd).unwrap();
     up.server.store.detach_shell(&up.shell).unwrap();
@@ -3364,7 +3377,7 @@ fn a_replacement_that_is_not_what_was_checked_or_does_not_start_is_not_switched_
     // the start.
     for change in ["truncate", "replace"] {
         let up = Upgrading::start(None);
-        install_marshd(&up.marshd, "9.9.9", true);
+        install_marshd(&up.marshd, "9.9.9", StandIn::Waits);
         up.wait_pending();
         let path = up.marshd.clone();
         up.server.before_successor_launch(move || {
@@ -3393,21 +3406,27 @@ fn a_replacement_that_is_not_what_was_checked_or_does_not_start_is_not_switched_
         up.still_serving();
     }
 
-    // A successor that fails before it is ready.
-    let up = Upgrading::start(None);
-    install_marshd(&up.marshd, "9.9.9", false);
-    up.wait_pending();
-    up.server.store.detach_shell(&up.shell).unwrap();
-    let notice = up.wait_notice();
-    assert!(notice.contains("before it was ready"), "{notice}");
-    assert!(notice.contains("this daemon keeps running"), "{notice}");
-    up.still_serving();
+    // A successor that fails before it is ready, or reports ready and then
+    // exits: this daemon keeps serving.
+    for (successor, why) in [
+        (StandIn::Fails, "before it was ready"),
+        (StandIn::ReadyThenExits, "exited after it reported ready"),
+    ] {
+        let up = Upgrading::start(None);
+        install_marshd(&up.marshd, "9.9.9", successor);
+        up.wait_pending();
+        up.server.store.detach_shell(&up.shell).unwrap();
+        let notice = up.wait_notice();
+        assert!(notice.contains(why), "{notice}");
+        assert!(notice.contains("this daemon keeps running"), "{notice}");
+        up.still_serving();
+    }
 }
 
 #[test]
 fn an_older_marsh_is_never_switched_to() {
     let up = Upgrading::start(None);
-    install_marshd(&up.marshd, "0.0.1", true);
+    install_marshd(&up.marshd, "0.0.1", StandIn::Waits);
     let notice = up.wait_notice();
     assert_eq!(
         notice,
@@ -3481,23 +3500,29 @@ fn a_handover_waits_for_running_background_passes_and_fences_new_ones() {
         assert!(Instant::now() < deadline, "the collector never ran");
         thread::sleep(Duration::from_millis(10));
     }
-    install_marshd(&up.marshd, "9.9.9", true);
+    install_marshd(&up.marshd, "9.9.9", StandIn::Waits);
     up.wait_pending();
     up.server.store.detach_shell(&up.shell).unwrap();
-    let deadline = Instant::now() + PATIENCE;
-    while up.server.handover.lock().unwrap().is_none() {
-        assert!(Instant::now() < deadline, "the successor was not started");
-        thread::sleep(Duration::from_millis(10));
+    // A long collection (minutes in production; time-scaled here): the
+    // fence is taken, and the successor is not even started until the pass
+    // has ended, so its own wait for this daemon never runs out meanwhile.
+    let started = up.marshd.with_extension("started");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        assert!(
+            !started.exists(),
+            "the successor started with a pass still running"
+        );
+        assert!(
+            !up.task.is_finished(),
+            "serving ended with a pass still running"
+        );
+        thread::sleep(Duration::from_millis(20));
     }
-    // The fence is taken, the successor is ready, and serving stops only
-    // once the running pass has ended.
-    thread::sleep(Duration::from_millis(200));
-    assert!(
-        !up.task.is_finished(),
-        "serving ended with a pass still running"
-    );
+    assert!(up.server.store.begin_background_request("a pass").is_err());
     collector.release.store(true, Ordering::Release);
     up.wait_finished();
+    assert!(started.exists());
     assert_eq!(*collector.admitted_after.lock().unwrap(), Some(false));
     let (successor, fence) = up.server.take_handover().unwrap();
     drop((fence, successor));

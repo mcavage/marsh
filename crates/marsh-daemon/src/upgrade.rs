@@ -70,8 +70,19 @@ pub(crate) struct UpgradeWatch {
 /// exit. Dropping it (when this process exits) lets it bind.
 pub struct Successor {
     _release: io::PipeWriter,
+    child: Child,
     pub executable: PathBuf,
 }
+
+impl Successor {
+    /// Whether it is still running (it waits for this process to exit).
+    pub fn alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+}
+
+/// How long a successor must stay up after reporting ready.
+const SETTLE: Duration = Duration::from_millis(200);
 
 impl UpgradeWatch {
     pub(crate) fn new(
@@ -191,13 +202,28 @@ impl UpgradeWatch {
     pub(crate) fn start_successor(&self) -> Result<Successor, String> {
         let result = self.try_start();
         if let Err(message) = &result {
-            eprintln!("marshd: {message}");
-            if let Some(candidate) = self.lock().as_mut() {
-                candidate.pending = None;
-                candidate.notice = Some(message.clone());
-            }
+            self.report(message);
         }
         result
+    }
+
+    /// A successor that died after it was accepted: reap it and report.
+    pub(crate) fn fail(&self, mut successor: Successor, why: &str) {
+        let _ = successor.child.kill();
+        let _ = successor.child.wait();
+        self.report(&format!(
+            "the update to {} failed: {why}; this daemon keeps running {}",
+            successor.executable.display(),
+            env!("CARGO_PKG_VERSION")
+        ));
+    }
+
+    fn report(&self, message: &str) {
+        eprintln!("marshd: {message}");
+        if let Some(candidate) = self.lock().as_mut() {
+            candidate.pending = None;
+            candidate.notice = Some(message.to_owned());
+        }
     }
 
     fn try_start(&self) -> Result<Successor, String> {
@@ -247,18 +273,30 @@ impl UpgradeWatch {
             .take()
             .ok_or_else(|| failed("no ready channel"))
             .and_then(|stdout| wait_ready(stdout, &mut child).map_err(|why| failed(&why)));
+        let ready = ready.and_then(|reported| {
+            if reported != digest {
+                return Err(failed(
+                    "the successor runs another file than the one checked",
+                ));
+            }
+            // Ready, and still waiting for this process: not one that
+            // reported and went away.
+            thread::sleep(SETTLE);
+            match child.try_wait() {
+                Ok(None) => Ok(()),
+                _ => Err(failed("the successor exited after it reported ready")),
+            }
+        });
         match ready {
-            Ok(reported) if reported == digest => Ok(Successor {
+            Ok(()) => Ok(Successor {
                 _release: writer,
+                child,
                 executable: pending.executable,
             }),
-            other => {
+            Err(message) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                Err(match other {
-                    Ok(_) => failed("the successor runs another file than the one checked"),
-                    Err(message) => message,
-                })
+                Err(message)
             }
         }
     }
