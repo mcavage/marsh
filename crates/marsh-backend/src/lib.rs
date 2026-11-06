@@ -876,10 +876,15 @@ impl StockDaemonBackend {
                 self.config.control_home.clone(),
                 kit.clone(),
             );
-            thread::spawn(move || {
-                let result = fetch_kit_agent(&sbx, &control_home, &kit);
-                fetch.finish(result.is_ok());
-            });
+            let spawned = thread::Builder::new()
+                .name("marsh-agent-fetch".into())
+                .spawn(move || {
+                    let result = fetch_kit_agent(&sbx, &control_home, &kit);
+                    fetch.finish(result.is_ok());
+                });
+            if let Err(error) = spawned {
+                eprintln!("marshd: cannot start the agent descriptor fetch: {error}");
+            }
         }
         None
     }
@@ -1483,10 +1488,15 @@ impl DaemonBackend for StockDaemonBackend {
         for batch in kits.chunks(AGENT_READ_PARALLEL) {
             thread::scope(|scope| {
                 for (kit, fetch) in batch {
-                    scope.spawn(|| {
-                        let result = self.kit_agent_for(kit);
-                        fetch.finish(result.is_ok());
-                    });
+                    let spawned = thread::Builder::new()
+                        .name("marsh-agent-read".into())
+                        .spawn_scoped(scope, || {
+                            let result = self.kit_agent_for(kit);
+                            fetch.finish(result.is_ok());
+                        });
+                    if spawned.is_err() {
+                        fetch.finish(false);
+                    }
                 }
             });
         }
