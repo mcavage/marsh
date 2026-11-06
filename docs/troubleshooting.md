@@ -121,18 +121,20 @@ excluded by `MARSH_SPAWN` exits 126; other refusals, including those through
 
 | Message | Cause |
 |---|---|
-| `capacity: 16 jobs` | 16 jobs are already running under this daemon |
-| `depth limit 4` | the tree is already 4 jobs deep |
-| `fan-out limit 8` | this job already has 8 running children |
-| `... refused: same-Kit chain limit 2` | the call would make the same Kit three times in a row |
-| `rate limit: 60 launches in the last minute; retry in Ns` | the tree launched jobs in a tight loop; wait the seconds it names, or raise `MARSH_TREE_LAUNCH_RATE` at daemon start |
-| `tree already uses ... Kit VMs (...) (MARSH_TREE_KIT_VMS)` | live jobs in the tree already use the configured number of distinct Kits; let one finish before adding another |
+| `capacity: N jobs at once in this scope` | N jobs are already running in this scope (`daemon-jobs`, 64 by default); retry when one ends |
+| `worker VM ... is at capacity` | that Kit's VM already runs 64 jobs; retry when one ends |
+| `depth limit N` | the tree is already N jobs deep (`tree-depth`, 4 by default) |
+| `fan-out limit N` | this job already has N running children (`job-children`, 16 by default); retry when one ends |
+| `rate limit: 60 launches in the last minute; retry in Ns` | the tree launched jobs in a tight loop; wait the seconds it names, or raise `tree-launch-rate` |
+| `tree already uses N Kit VMs (...)` | live jobs in the tree already use N distinct Kits (`tree-kit-vms`, 8 by default); let one finish before adding another |
 | `deadline: parent job ... has ... ms of wall time left` | less than one second remains before the parent's deadline; a child cannot outlive it |
 | `spawn refused: NAME not in this job's spawn set` | `MARSH_SPAWN` or `--spawn` excludes it (126 from a registered-name link, 125 from `marsh run`) |
 | `interactive child jobs are not supported yet` | a child job was given a terminal; redirect its stdin and stdout |
 
-Refused child calls count toward the tree's 64-launch budget. Avoid retry
-loops. A depth or same-Kit-chain refusal needs a different call structure;
+Each refusal names its limit and how to raise it: `marsh config limit NAME
+VALUE` changes it without a restart ([Job limits](configuration.md#job-limits)).
+Refused child calls count toward the tree's launch rate, up to 8 a window.
+Avoid retry loops. A depth refusal needs a different call structure;
 waiting will not clear it. See [job-tree limits](agents.md#limits-and-messages).
 
 ## The task tool

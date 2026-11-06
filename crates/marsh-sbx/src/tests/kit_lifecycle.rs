@@ -499,6 +499,47 @@ fn quarantine_stop_stops_only_its_vm_and_rejects_reuse_before_any_effect() {
 }
 
 #[test]
+fn a_first_create_is_not_bounded_like_other_stock_calls() {
+    // `sbx create` downloads the Kit's image on a cold host: it gets its own
+    // generous bound, never the 5-minute one of ordinary stock calls, so a
+    // slow pull is not killed while it makes progress.
+    let model = StockModel::new();
+    warm_kit(&model, KIT);
+    let creates = model.bounds_of("create");
+    assert_eq!(creates.len(), 1);
+    assert!(creates[0] >= Duration::from_mins(30), "{creates:?}");
+    assert!(
+        model
+            .bounds_of("ls")
+            .iter()
+            .chain(&model.bounds_of("inspect"))
+            .all(|bound| *bound < creates[0])
+    );
+}
+
+#[test]
+fn a_kit_vm_is_sized_to_fit_one_job_when_the_job_limit_exceeds_stock_default() {
+    const GIB: u64 = 1 << 30;
+    // At the defaults stock's VM (half the host) fits a job: no --memory.
+    assert_eq!(kit_vm_memory(8 * GIB, 32 * GIB), None);
+    assert_eq!(kit_vm_memory(4 * GIB, 8 * GIB), None);
+    // Larger, up to the 75% of the host stock accepts.
+    assert_eq!(kit_vm_memory(24 * GIB, 32 * GIB), Some("24576m".into()));
+    assert_eq!(kit_vm_memory(64 * GIB, 32 * GIB), Some("24576m".into()));
+    assert_eq!(kit_vm_memory(48 * GIB, 0), None);
+
+    let model = StockModel::new();
+    let adapter = model.adapter();
+    adapter.set_kit_job_memory(24 * GIB, 32 * GIB);
+    let kit = KitFixture::published(KIT);
+    adapter.ensure_kit_vm(&kit.spec).unwrap();
+    assert_eq!(
+        model.calls_of("create")[0].value("--memory"),
+        Some("24576m")
+    );
+}
+
+#[test]
 fn published_kit_create_timeout_is_typed_and_quarantines_the_name() {
     let model = StockModel::new();
     model.fault(verb("create"), Fault::TimedOut { applied: false });

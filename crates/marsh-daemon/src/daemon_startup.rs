@@ -6,9 +6,7 @@
 
 use super::{Client, DaemonError, EndpointPaths, PublicReply, PublicRequest};
 use marsh_contracts::JobResources;
-use serde::{Deserialize, Serialize};
 use std::{
-    ffi::OsString,
     fs::{self, File, OpenOptions},
     io::{self, Read},
     os::unix::{
@@ -28,7 +26,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const STDERR_LIMIT: usize = 8192;
 pub(super) const CAPTURE_ENV: &str = "MARSH_INTERNAL_STARTUP_STDERR";
 
-/// The defaults used by the real daemon, not a status-only copy.
+/// The per-job floors; CPU and memory scale up with the host
+/// (`limits::host_job_resources`).
 pub const DEFAULT_JOB_RESOURCES: JobResources = JobResources {
     cpu_millis: 2_000,
     memory_bytes: 4 * 1024 * 1024 * 1024,
@@ -38,113 +37,9 @@ pub const DEFAULT_JOB_RESOURCES: JobResources = JobResources {
     wall_seconds: 24 * 60 * 60,
 };
 
-/// Effective per-job policy, captured once when this daemon starts.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct JobDefaults {
-    pub resources: JobResources,
-    /// Fixed variable names supplied at daemon launch. All other fields use
-    /// the compiled defaults. Values are already represented in `resources`
-    /// and `tree_kit_vms`.
-    pub environment_overrides: Vec<String>,
-    /// Distinct Kit VMs one job tree may use at once (`MARSH_TREE_KIT_VMS`).
-    #[serde(default = "default_tree_kit_vms")]
-    pub tree_kit_vms: usize,
-    /// Launches one job tree may make in a rolling window
-    /// (`MARSH_TREE_LAUNCH_RATE`, e.g. `60/60s`).
-    #[serde(default = "default_tree_launch_rate")]
-    pub tree_launch_rate: marsh_contracts::process::LaunchRate,
-}
-
-fn default_tree_launch_rate() -> marsh_contracts::process::LaunchRate {
-    marsh_contracts::process::TREE_LAUNCH_RATE
-}
-
-fn default_tree_kit_vms() -> usize {
-    marsh_contracts::process::TREE_KIT_VM_LIMIT
-}
-
-impl Default for JobDefaults {
-    fn default() -> Self {
-        Self {
-            resources: DEFAULT_JOB_RESOURCES,
-            environment_overrides: Vec::new(),
-            tree_kit_vms: default_tree_kit_vms(),
-            tree_launch_rate: default_tree_launch_rate(),
-        }
-    }
-}
+pub use crate::limits::JobDefaults;
 
 impl JobDefaults {
-    pub fn from_environment(
-        mut value: impl FnMut(&str) -> Option<OsString>,
-    ) -> Result<Self, DaemonError> {
-        let mut result = Self::default();
-        if let Some(raw) = value(RATE_ENVIRONMENT) {
-            result.tree_launch_rate = raw
-                .to_str()
-                .ok_or_else(|| format!("{RATE_ENVIRONMENT} must be text"))
-                .and_then(marsh_contracts::process::LaunchRate::parse)
-                .map_err(DaemonError::InvalidState)?;
-            result.environment_overrides.push(RATE_ENVIRONMENT.into());
-        }
-        for name in JOB_ENVIRONMENT {
-            let Some(raw) = value(name) else { continue };
-            let parsed = raw
-                .to_str()
-                .filter(|text| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()))
-                .and_then(|text| text.parse::<u64>().ok())
-                .filter(|number| *number > 0)
-                .ok_or_else(|| {
-                    DaemonError::InvalidState(format!(
-                        "{name} must be a positive decimal integer within its supported range"
-                    ))
-                })?;
-            match name {
-                "MARSH_JOB_CPU_MILLIS" => {
-                    result.resources.cpu_millis =
-                        u32::try_from(parsed).map_err(|_| limit_range(name))?;
-                }
-                "MARSH_JOB_MEMORY_BYTES" => result.resources.memory_bytes = parsed,
-                "MARSH_JOB_PIDS" => {
-                    result.resources.pids = u32::try_from(parsed).map_err(|_| limit_range(name))?;
-                }
-                "MARSH_JOB_WRITABLE_BYTES" => result.resources.writable_bytes = parsed,
-                "MARSH_JOB_OUTPUT_BYTES" => result.resources.output_bytes = parsed,
-                "MARSH_JOB_WALL_SECONDS" => result.resources.wall_seconds = parsed,
-                "MARSH_TREE_KIT_VMS" => {
-                    result.tree_kit_vms = usize::try_from(parsed)
-                        .ok()
-                        .filter(|limit| *limit <= 64)
-                        .ok_or_else(|| {
-                            DaemonError::InvalidState(
-                                "MARSH_TREE_KIT_VMS must be between 1 and 64".into(),
-                            )
-                        })?;
-                }
-                _ => unreachable!("fixed job environment variable"),
-            }
-            result.environment_overrides.push(name.into());
-        }
-        Ok(result)
-    }
-
-    fn value(&self, name: &str) -> u64 {
-        match name {
-            "MARSH_JOB_CPU_MILLIS" => u64::from(self.resources.cpu_millis),
-            "MARSH_JOB_MEMORY_BYTES" => self.resources.memory_bytes,
-            "MARSH_JOB_PIDS" => u64::from(self.resources.pids),
-            "MARSH_JOB_WRITABLE_BYTES" => self.resources.writable_bytes,
-            "MARSH_JOB_OUTPUT_BYTES" => self.resources.output_bytes,
-            "MARSH_JOB_WALL_SECONDS" => self.resources.wall_seconds,
-            "MARSH_TREE_KIT_VMS" => self.tree_kit_vms as u64,
-            // Launches and window, packed: compared only for equality.
-            RATE_ENVIRONMENT => {
-                (self.tree_launch_rate.launches as u64) << 32 | self.tree_launch_rate.window_seconds
-            }
-            _ => unreachable!("fixed job environment variable"),
-        }
-    }
-
     fn validate_resident(&self, client: &Client) -> Result<(), DaemonError> {
         if self.environment_overrides.is_empty() {
             return Ok(());
@@ -152,30 +47,18 @@ impl JobDefaults {
         let effective = client.status(None)?.job_defaults.ok_or_else(|| DaemonError::InvalidState(
             "running daemon does not report job defaults; cannot verify explicit MARSH_JOB_* settings".into()))?;
         for name in &self.environment_overrides {
-            if self.value(name) != effective.value(name) {
+            let Some(spec) = crate::limits::spec(name) else {
+                continue;
+            };
+            if self.get(spec.name) != effective.get(spec.name) {
                 return Err(DaemonError::InvalidState(format!(
-                    "{name} differs from the running daemon's startup snapshot; inspect `marsh status` with MARSH_JOB_* unset. Use a separate MARSH_HOME, or close active work, run `marsh stop`, then launch with the desired settings"
+                    "{name} differs from the running daemon's value; inspect `marsh config limits` with {name} unset. Change it with `marsh config limit {} VALUE` (no restart), use a separate MARSH_HOME, or close active work, run `marsh stop`, then launch with the desired settings",
+                    spec.name
                 )));
             }
         }
         Ok(())
     }
-}
-
-const RATE_ENVIRONMENT: &str = "MARSH_TREE_LAUNCH_RATE";
-
-const JOB_ENVIRONMENT: [&str; 7] = [
-    "MARSH_JOB_CPU_MILLIS",
-    "MARSH_JOB_MEMORY_BYTES",
-    "MARSH_JOB_PIDS",
-    "MARSH_JOB_WRITABLE_BYTES",
-    "MARSH_JOB_OUTPUT_BYTES",
-    "MARSH_JOB_WALL_SECONDS",
-    "MARSH_TREE_KIT_VMS",
-];
-
-fn limit_range(name: &str) -> DaemonError {
-    DaemonError::InvalidState(format!("{name} exceeds u32"))
 }
 
 #[derive(Debug, thiserror::Error)]

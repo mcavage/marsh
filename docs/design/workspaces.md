@@ -577,7 +577,7 @@ cancelled.
 - **Several agents in one lane.** Jobs of any Kit run in a lane at once (a
   checkpoint's copy shared by N agents): every Kit VM mounts the same project
   root (identical sources are shared) and each job's container sees only the
-  fork. The per-tree Kit VM cap and the same-Kit chain bound a job's
+  fork. The per-tree Kit VM cap, depth, and launch rate bound a job's
   descendants, not sibling lane jobs, which are separate trees. Host
   `marsh fanout` in a lane's copy runs each branch as `marsh run NAME ARG...`
   from the copy (a confined lane job, counted live like any other),

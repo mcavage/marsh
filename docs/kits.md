@@ -215,7 +215,8 @@ When you invoke a registered command:
    checked. The VM stays warm for the next call.
 
 Each call gets its own container, including concurrent and background calls.
-Up to 16 jobs run at once per daemon.
+Up to 64 jobs run at once per scope by default, and at most 64 in one Kit VM
+([Job limits](configuration.md#job-limits)).
 
 An agent can edit or delete the project files its container mounts. The
 packaged agent Kits disable their agents' own sandboxes and permission
@@ -236,8 +237,8 @@ in the Kit's descriptor
 
 | Limit | Default |
 |---|---|
-| CPUs | 2 |
-| Memory | 4 GiB |
+| CPUs | half the Mac's cores, at least 2 |
+| Memory | a quarter of the Mac's memory, 4 to 8 GiB |
 | Processes | 4,096 |
 | Writable layer | 10 GiB |
 | Output | 256 MiB |

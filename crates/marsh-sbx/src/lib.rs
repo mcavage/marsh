@@ -170,6 +170,20 @@ impl Default for PreparationTimeouts {
     }
 }
 
+/// `sbx create --memory` for a Kit VM: none while stock SBX's default (half
+/// the host's memory, 512 MiB to 32 GiB) fits one job of `job` bytes; else
+/// the job's size, at most the 75% of the host stock SBX accepts, in MiB.
+#[must_use]
+pub fn kit_vm_memory(job: u64, host: u64) -> Option<String> {
+    const MIB: u64 = 1 << 20;
+    if job == 0 || host == 0 {
+        return None;
+    }
+    let default = (host / 2).clamp(512 * MIB, 32 << 30);
+    let most = (host / 4 * 3).max(512 * MIB);
+    (job > default).then(|| format!("{}m", job.min(most) / MIB))
+}
+
 /// Exact inputs needed to create or validate one reusable kit VM.
 #[derive(Clone, Debug, PartialEq)]
 pub struct KitVmSpec {
@@ -958,6 +972,10 @@ pub struct StockSbx {
     worker_leases: Mutex<BTreeMap<String, Arc<RetainedWorker>>>,
     shell_leases: Mutex<BTreeMap<String, Arc<shell_supervisor::Supervisor>>>,
     shell_generation: AtomicU64,
+    /// Per-job memory now (`job-memory-bytes`): a Kit VM created while it
+    /// exceeds stock SBX's default VM size gets `--memory` to fit it.
+    kit_job_memory: AtomicU64,
+    kit_host_memory: AtomicU64,
     local_resolution_locks: Mutex<BTreeMap<String, Arc<Mutex<()>>>>,
     local_resolutions: Mutex<BTreeMap<String, LocalResolution>>,
     retained_process_teardown_timeout: Duration,
@@ -1059,6 +1077,13 @@ impl StockSbx {
         (self.sbx.is_absolute() && !self.sbx.is_file()).then_some(self.sbx.as_path())
     }
 
+    /// The per-job memory limit in effect and the host's memory, so the
+    /// next Kit VM created fits one job of that size.
+    pub fn set_kit_job_memory(&self, job: u64, host: u64) {
+        self.kit_job_memory.store(job, Ordering::Relaxed);
+        self.kit_host_memory.store(host, Ordering::Relaxed);
+    }
+
     #[must_use]
     pub fn new(sbx: impl Into<PathBuf>, runner: Arc<dyn CommandRunner>) -> Self {
         Self {
@@ -1092,6 +1117,8 @@ impl StockSbx {
             worker_leases: Mutex::new(BTreeMap::new()),
             shell_leases: Mutex::new(BTreeMap::new()),
             shell_generation: AtomicU64::new(1),
+            kit_job_memory: AtomicU64::new(0),
+            kit_host_memory: AtomicU64::new(0),
             local_resolution_locks: Mutex::new(BTreeMap::new()),
             local_resolutions: Mutex::new(BTreeMap::new()),
             retained_process_teardown_timeout: RETAINED_PROCESS_TEARDOWN_TIMEOUT,
@@ -5342,6 +5369,12 @@ impl StockSbx {
                 ];
                 if skills_off {
                     arguments.extend([OsString::from("--skills"), OsString::from("off")]);
+                }
+                if let Some(memory) = kit_vm_memory(
+                    self.kit_job_memory.load(Ordering::Relaxed),
+                    self.kit_host_memory.load(Ordering::Relaxed),
+                ) {
+                    arguments.extend([OsString::from("--memory"), OsString::from(memory)]);
                 }
                 arguments.extend([
                     OsString::from("-e"),

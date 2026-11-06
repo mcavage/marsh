@@ -1,16 +1,16 @@
 //! Nested processes (`docs/design/processes.md`): one lineage tree, one admission
-//! for every job (pool, depth, same-Kit chain, fan-out, launch rate, spawn set),
+//! for every job (pool, depth, fan-out, Kit VMs, launch rate, spawn set),
 //! the job capability's `ProcessRun` relay, and `ProcessShow`.
 //! Model: `docs/model/Process.tla`.
 
+use crate::limits::raise;
 use crate::{
     AttachmentFrame, CleanupState, Client, DaemonError, DaemonStore, ErrorCode, ExecuteSpec,
     JobLineage, JobReceipt, JobState, PublicMount, PublicReply, SessionSpec, State, read_frame,
     write_frame,
 };
 use marsh_contracts::process::{
-    DEPTH_LIMIT, FAN_OUT_LIMIT, MIN_CHILD_WALL_MS, POOL_LIMIT, REFUSAL_BURST, SAME_KIT_LIMIT,
-    TREE_KIT_VM_LIMIT, TREE_LAUNCH_RATE, TTY_REFUSAL, narrow_spawn,
+    FAN_OUT_MAX, MIN_CHILD_WALL_MS, POOL_MAX, REFUSAL_BURST, TTY_REFUSAL, narrow_spawn,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -172,7 +172,9 @@ fn short(id: &str) -> &str {
 
 /// Admission under the process-table (store) lock: the lineage the new job
 /// gets, or the refusal. `kit` is the child's Kit identity once known
-/// (the same-Kit chain needs it; the pre-check passes `None`).
+/// (the Kit VM cap needs it; the pre-check passes `None`). The limits are
+/// the ones in effect now (`limits.rs`): a change applies to the next
+/// launch, and lowering one ends nothing that runs.
 pub(crate) fn admit(
     state: &State,
     session: &str,
@@ -188,15 +190,19 @@ pub(crate) fn admit(
             spawn: with_cloud(registered),
             ..JobLineage::default()
         },
-        // A split argv branch is bounded by the split depth limit; it is
-        // not a same-Kit step (`docs/design/processes.md` s13). It does use a Kit VM.
-        Some(id) => child_lineage(state, id, command, kit, link.branch)?,
+        // A split argv branch is bounded by the split depth limit
+        // (`docs/design/processes.md` s13). It does use a Kit VM.
+        Some(id) => child_lineage(state, id, command, kit)?,
     };
+    let pool = state.limits().daemon_jobs;
     let running = state.jobs.values().filter(|job| live(job)).count();
     let held_jobs = held(state).collect::<Vec<_>>();
     let held = held_jobs.len();
-    if running + held >= POOL_LIMIT {
-        let mut message = format!("capacity: {POOL_LIMIT} jobs");
+    if running + held >= pool {
+        let mut message = format!(
+            "capacity: {pool} jobs at once in this scope; retry when one ends, or {}",
+            raise("daemon-jobs")
+        );
         if held > 0 {
             let mut kits = held_jobs
                 .iter()
@@ -217,13 +223,12 @@ pub(crate) fn admit(
 }
 
 /// A child's lineage under its parent, or the refusal (spawn set, depth,
-/// fan-out, launch rate, same-Kit chain).
+/// fan-out, launch rate, Kit VMs).
 fn child_lineage(
     state: &State,
     id: &String,
     command: &str,
     kit: Option<&str>,
-    branch: bool,
 ) -> Result<JobLineage, String> {
     let parent = state
         .jobs
@@ -244,10 +249,13 @@ fn child_lineage(
         inherited.root.clone()
     };
     spawn_allowed(&inherited, command)?;
+    let limits = state.limits();
     let depth = inherited.depth.max(1) + 1;
-    if depth > DEPTH_LIMIT {
+    if depth > limits.tree_depth {
         return Err(format!(
-            "depth limit {DEPTH_LIMIT}: {command} would run at depth {depth}"
+            "depth limit {}: {command} would run at depth {depth}; use fewer levels, or {}",
+            limits.tree_depth,
+            raise("tree-depth")
         ));
     }
     let parent_ref = format!("job:{id}");
@@ -262,42 +270,18 @@ fn child_lineage(
                     .is_some_and(|lineage| lineage.parent == parent_ref)
         })
         .count();
-    if children >= FAN_OUT_LIMIT {
+    if children >= limits.job_children {
         return Err(format!(
-            "fan-out limit {FAN_OUT_LIMIT}: job {} already has {children} live children",
-            short(id)
+            "fan-out limit {}: job {} already has {children} live children; retry when one ends, or {}",
+            limits.job_children,
+            short(id),
+            raise("job-children")
         ));
     }
     launch_rate(state, &root)?;
     wall_time_left(&inherited, id, command)?;
     if let Some(kit) = kit {
         kit_vm_cap(state, &root, command, kit)?;
-    }
-    if let Some(kit) = kit.filter(|_| !branch) {
-        let mut chain = vec![command.to_owned()];
-        let mut cursor = Some(parent);
-        while let Some(job) = cursor.filter(|job| job.kit_ref == kit) {
-            chain.push(job.command.clone());
-            if job
-                .lineage
-                .as_ref()
-                .is_some_and(|lineage| lineage.split.is_some())
-            {
-                break;
-            }
-            cursor = job
-                .lineage
-                .as_ref()
-                .and_then(|lineage| lineage.parent.strip_prefix("job:"))
-                .and_then(|parent| state.jobs.get(parent));
-        }
-        if chain.len() > SAME_KIT_LIMIT {
-            chain.reverse();
-            return Err(format!(
-                "{} refused: same-Kit chain limit {SAME_KIT_LIMIT} (see /run/marsh/context.md)",
-                chain.join(" → ")
-            ));
-        }
     }
     Ok(JobLineage {
         parent: parent_ref,
@@ -355,10 +339,7 @@ fn wall_time_left(parent: &JobLineage, id: &str, command: &str) -> Result<(), St
 /// whose Kit switched images while jobs ran on the old one has two live
 /// identities in the tree: that is one Kit, and its new image is admitted.
 fn kit_vm_cap(state: &State, root: &str, command: &str, kit: &str) -> Result<(), String> {
-    let limit = state
-        .job_defaults
-        .as_ref()
-        .map_or(TREE_KIT_VM_LIMIT, |defaults| defaults.tree_kit_vms);
+    let limit = state.limits().tree_kit_vms;
     let mut tree = state
         .jobs
         .values()
@@ -386,18 +367,16 @@ fn kit_vm_cap(state: &State, root: &str, command: &str, kit: &str) -> Result<(),
         return Ok(());
     }
     Err(format!(
-        "{command} refused: tree already uses {} Kit VM{} ({}) (MARSH_TREE_KIT_VMS)",
+        "{command} refused: tree already uses {} Kit VM{} ({}); retry when one of their jobs ends, or {}",
         names.len(),
         if names.len() == 1 { "" } else { "s" },
-        names.join(", ")
+        names.join(", "),
+        raise("tree-kit-vms")
     ))
 }
 
 fn rate(state: &State) -> marsh_contracts::process::LaunchRate {
-    state
-        .job_defaults
-        .as_ref()
-        .map_or(TREE_LAUNCH_RATE, |defaults| defaults.tree_launch_rate)
+    state.limits().tree_launch_rate
 }
 
 /// The per-tree launch rate (`RateBound`): the tree's launches in the
@@ -438,9 +417,10 @@ fn launch_rate(state: &State, root: &str) -> Result<(), String> {
     let frees = times[times.len() - rate.launches];
     let retry = (frees + window).saturating_sub(now).div_ceil(1000).max(1);
     Err(format!(
-        "rate limit: {} launches in {}; retry in {retry}s (MARSH_TREE_LAUNCH_RATE)",
+        "rate limit: {} launches in {}; retry in {retry}s, or {}",
         times.len(),
-        rate.window_text()
+        rate.window_text(),
+        raise("tree-launch-rate")
     ))
 }
 
@@ -653,7 +633,7 @@ impl DaemonStore {
                         })
                         .map(|child| child.job_id.clone()),
                 );
-                if tree.len() > POOL_LIMIT * FAN_OUT_LIMIT {
+                if tree.len() > POOL_MAX * FAN_OUT_MAX {
                     break;
                 }
             }

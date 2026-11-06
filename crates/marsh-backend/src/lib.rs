@@ -1020,6 +1020,13 @@ impl StockDaemonBackend {
         ephemeral: Option<&marsh_sbx::EphemeralHomeToken>,
         cold_boot: impl FnOnce(bool) -> Result<(), DaemonError>,
     ) -> Result<ReadyKitVm, DaemonError> {
+        self.sbx.set_kit_job_memory(
+            store
+                .job_limits_over(self.config.resources)
+                .resources
+                .memory_bytes,
+            marsh_daemon::limits::host_size().1,
+        );
         let vm = self.prepare_one_unnoted(spec, store, ephemeral, cold_boot)?;
         self.note_vm_used(&vm.name);
         Ok(vm)
@@ -1974,8 +1981,8 @@ impl DaemonBackend for StockDaemonBackend {
             self.send_update_notices(Some(&request.command), &attachment);
             self.send_sbxenv_notice(&request.session.session_id, &attachment);
         }
-        // The Kit identity is known before VM work, so the same-Kit chain is
-        // checked here too, not only at record time.
+        // The Kit identity is known before VM work, so the per-tree Kit VM
+        // cap is checked here too, not only at record time.
         let kit_identity = self
             .kit_spec(&request.command)
             .map(|spec| spec.workload_kit.identity().to_owned())
@@ -2368,7 +2375,10 @@ impl DaemonBackend for StockDaemonBackend {
         } else {
             String::new()
         };
-        let mut resources = self.config.resources;
+        // The limits in effect now (`marsh config limit`): a change applies
+        // to jobs started after it.
+        let limits = store.job_limits_over(self.config.resources);
+        let mut resources = limits.resources;
         let (wall_seconds, parent_deadline) =
             store.set_job_deadline(&job_id, resources.wall_seconds);
         resources.wall_seconds = wall_seconds;
@@ -2406,6 +2416,7 @@ impl DaemonBackend for StockDaemonBackend {
                 usages: verbs.usages,
                 model_choices,
                 peer_review,
+                limits: Some(limits.process_limits()),
             }),
         };
         let output_budget = spec.resources.output_bytes;

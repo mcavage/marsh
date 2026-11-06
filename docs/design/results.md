@@ -86,17 +86,20 @@ most 8 subscribers at once", and a closed one frees its place.
 
 ## Scope configuration and job limits
 
-Use `marsh status` to find the host-control directory and inspect the daemon's
-per-job defaults. `marsh status --json` exposes `control_home` and `job_defaults`;
-`job_defaults.resources` contains the effective values and
-`job_defaults.environment_overrides` lists the fixed variable names supplied
-at daemon startup. Fields not listed use built-in defaults. An inspection-only
-daemon can report no job defaults; absence is not an unlimited policy.
+Use `marsh status` to find the host-control directory and inspect the limits in
+effect. `marsh status --json` exposes `control_home`, `job_defaults`, and
+`limits` (`{NAME: {value, default, source}}`, source `default`, `config`, or
+`env`); `job_defaults.resources` contains the effective per-job values,
+`job_defaults.environment_overrides` lists the variables supplied at daemon
+startup, and `job_defaults.config_overrides` the limits set with `marsh config
+limit`. An inspection-only daemon can report no job defaults; absence is not
+an unlimited policy. `marsh config limits [--json]` lists every limit with its
+range and when a change applies.
 
-| Resource | Built-in per-job value | Daemon-launch variable |
+| Resource | Default per-job value | Variable |
 | --- | --- | --- |
-| CPU | 2,000 millicpus (2 CPUs) | `MARSH_JOB_CPU_MILLIS` |
-| Memory | 4 GiB (4,294,967,296 bytes) | `MARSH_JOB_MEMORY_BYTES` |
+| CPU | half the host's cores, at least 2,000 millicpus | `MARSH_JOB_CPU_MILLIS` |
+| Memory | a quarter of the host's memory, from 4 GiB to 8 GiB | `MARSH_JOB_MEMORY_BYTES` |
 | PIDs | 4,096 | `MARSH_JOB_PIDS` |
 | Writable layer | 10 GiB (10,737,418,240 bytes) | `MARSH_JOB_WRITABLE_BYTES` |
 | Combined stdout/stderr | 256 MiB (268,435,456 bytes) | `MARSH_JOB_OUTPUT_BYTES` |

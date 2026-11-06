@@ -1820,15 +1820,7 @@ impl SplitEngine {
             let engine = Arc::clone(self);
             let id = id.clone();
             let runtime = Arc::clone(&runtime);
-            let deadline = Duration::from_secs(
-                store
-                    .lock()
-                    .job_defaults
-                    .as_ref()
-                    .map_or(crate::DEFAULT_JOB_RESOURCES.wall_seconds, |defaults| {
-                        defaults.resources.wall_seconds
-                    }),
-            );
+            let deadline = Duration::from_secs(store.job_limits().resources.wall_seconds);
             thread::spawn(move || {
                 let started = Instant::now();
                 while started.elapsed() < deadline {

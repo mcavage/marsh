@@ -126,9 +126,8 @@ Execution profiles are explicit and pinned:
   allowed places are the parent's or narrower. It cannot select the broader
   session-shell profile or add credentials/egress.
 - Registered Kit calls retain their Kit-authoritative entrypoint, argv,
-  credentials and policy, as today. A shell node does not reset consecutive
-  same-Kit accounting: it carries the originating Kit identity through shell
-  intermediaries. Shell crossings count toward depth/fan/total/concurrency.
+  credentials and policy, as today. Shell crossings count toward
+  depth/fan/rate/concurrency.
 
 Reproducing an inherited policy at another location is a preparation gate; if
 stock cannot enforce it, refuse the crossing. Do not approximate deny rules.
@@ -317,8 +316,7 @@ Transfer/control helpers are phases, not fake user jobs.
 
 Preserve daemon-wide concurrency, depth/fan/total/deadline limits and spawn-set
 narrowing across locations. Shell placement nodes must count toward bounded
-admission; there is no uncounted recursive-shell path. Define shell-node versus
-Kit-node same-Kit accounting explicitly in the Process model extension. Count
+admission; there is no uncounted recursive-shell path. Count
 actual worker identities by `(placement, execution profile, Kit identity)`, not
 Kit identity alone. Cloud has an additional explicit sandbox/shape ceiling and
 TTL, never unlimited provisioning. Suspended parents do not create unbounded

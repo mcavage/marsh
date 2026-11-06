@@ -70,8 +70,9 @@ prompt, and `marsh join --timing` reports split overhead.
 
 ### How much CPU and memory does a job get?
 
-Each job defaults to two CPUs and 4 GiB of memory, with at most 16
-concurrent jobs per daemon. The VMs also need resources beyond those job
+Each job defaults to half your Mac's cores (at least two) and a quarter of
+its memory (4 to 8 GiB), with at most 64 concurrent jobs per scope.
+`marsh config limits` shows the values for your Mac. The VMs also need resources beyond those job
 limits. See [Job limits](configuration.md#job-limits).
 
 ### Where do split copies go, and when are they removed?

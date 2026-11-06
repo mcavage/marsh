@@ -8,7 +8,12 @@
 (* journaled with its parent before it is submitted, draws from one       *)
 (* session pool, and is checked against depth, fan-out and a per-tree   *)
 (* launch rate: at most MaxRate launches of one tree in any Window ticks *)
-(* of a discrete clock (Tick). A child's rights (mounts and spawnable Kits) are a subset of its  *)
+(* of a discrete clock (Tick). Every one of those limits can be changed  *)
+(* while jobs run (`marsh config limit`): with LiveLimits, SetLimits     *)
+(* lowers or restores them all by one (Lim), and admission checks the    *)
+(* limits in effect at that step; lowering one ends nothing that runs.  *)
+(* There is no same-Kit chain cap: depth and the rate bound a Kit        *)
+(* calling itself. A child's rights (mounts and spawnable Kits) are a subset of its  *)
 (* parent's; it may narrow further (a split fork, or no spawn at all).    *)
 (* A job's end, cancel, or transport loss revokes its capability and      *)
 (* cancels every descendant. A pool slot frees only on a confirmed end    *)
@@ -26,8 +31,8 @@
 (* entrypoint; the link, invoked as the own name with the marker set and *)
 (* its parent = docker-init, clears the marker, and execs the image     *)
 (* binary by absolute path (PATH stays intact). Any other own-name call *)
-(* (an agent's tool call) is a child job of the same Kit, under a        *)
-(* same-Kit chain cap. Any job may spawn any Kit in its spawn set     *)
+(* (an agent's tool call) is a child job of the same Kit, under the      *)
+(* usual caps. Any job may spawn any Kit in its spawn set              *)
 (* (every registered Kit by default; the child runs under its own Kit's *)
 (* egress and credentials); a launcher may only narrow the set, never   *)
 (* widen it.                                                             *)
@@ -57,14 +62,15 @@
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Jobs, Kits, ScriptKits, NoHomeKits, MaxDepth, MaxConc, MaxFan, MaxRate,
-          Window, MaxTime, MaxSame, MaxKitVMs, MaxDetached, MaxRestarts, Bug
+          Window, MaxTime, MaxKitVMs, MaxDetached, MaxRestarts, LiveLimits, Bug
 
 Bugs == {"none", "noDepth", "widen", "freeOnRevoke", "noFan", "noRate",
          "orphanChildren", "revokeOnly", "noPropagate", "restartKeepsCap",
          "keepRunning", "replay", "linkIgnoresMarker", "linkIgnoresPpid",
-         "noSameKit", "spawnWiden", "noKitCap", "noDetachCap",
-         "restartDetached", "detachHolds", "childKeepsHome"}
+         "spawnWiden", "noKitCap", "noDetachCap",
+         "restartDetached", "detachHolds", "childKeepsHome", "staleLimits"}
 ASSUME Bug \in Bugs
+ASSUME LiveLimits \in BOOLEAN
 ASSUME MaxRate >= 1 /\ Window >= 1
 ASSUME Jobs \subseteq (Nat \ {0}) /\ ScriptKits \subseteq Kits /\ NoHomeKits \subseteq Kits
 
@@ -100,10 +106,12 @@ VARIABLES
   viaEntry,  \* [Jobs -> BOOLEAN] ghost: created by its parent's entry step
   det,       \* [Jobs -> BOOLEAN] ghost: the job detached (sticky)
   now,       \* the clock (Tick), up to MaxTime
-  at         \* [Jobs -> Nat] when the job was launched
+  at,        \* [Jobs -> Nat] when the job was launched
+  low,       \* the admission limits are lowered by one now (SetLimits)
+  adm        \* [Jobs -> BOOLEAN] ghost: admitted within the limits then in effect
 
 vars == <<st, par, kit, rights, cap, cgen, alive, launches, runs, cancelled, restarts,
-          entry, marker, selfLocal, viaEntry, det, now, at>>
+          entry, marker, selfLocal, viaEntry, det, now, at, low, adm>>
 model == <<st, par, kit, rights, cap, cgen, alive, launches, runs, cancelled, restarts,
            entry, marker, selfLocal, viaEntry, det>>
 sv == <<entry, marker, selfLocal, viaEntry, det>>
@@ -127,6 +135,8 @@ Init ==
   /\ det = [j \in Jobs |-> FALSE]
   /\ now = 0
   /\ at = [j \in Jobs |-> 0]
+  /\ low = FALSE
+  /\ adm = [j \in Jobs |-> TRUE]
 
 ---------------------------------------------------------------------------
 (* Helpers *)
@@ -139,15 +149,15 @@ Desc(j) == {d \in Jobs : st[d] # "none" /\ j \in Anc(d)}
 RootOf(j) == IF par[j] = Session THEN j ELSE CHOOSE r \in Anc(j) : par[r] = Session
 Tree(r) == {r} \cup Desc(r)
 Children(p) == {c \in Jobs : st[c] # "none" /\ par[c] = p}
-\* Length of the same-Kit ancestor chain ending at j (j included).
-RECURSIVE SameN(_, _)
-SameN(j, n) == IF n = 0 \/ par[j] = Session \/ kit[par[j]] # kit[j] THEN 1
-               ELSE 1 + SameN(par[j], n - 1)
-SameChain(j) == SameN(j, Cardinality(Jobs))
-\* Distinct Kits (warm VMs) of a tree's live jobs.
 \* The launches of tree r in the current window.
 Recent(r) == {d \in Tree(r) : at[d] + Window > now}
+\* Distinct Kits (warm VMs) of a tree's live jobs.
 TreeKits(r) == {kit[d] : d \in {x \in Tree(r) : st[x] \in Active}}
+\* A limit as in effect now: the configured bound, or one lower (never 0).
+Lim(m) == IF low /\ m > 1 THEN m - 1 ELSE m
+\* The bound admission uses. Bug staleLimits: the limits read at daemon
+\* start, never the ones in effect now.
+Use(m) == IF Bug = "staleLimits" THEN m ELSE Lim(m)
 
 \* A pool slot is held until the job's end is confirmed. Bug freeOnRevoke:
 \* the daemon stops counting a job once its capability is revoked.
@@ -190,20 +200,18 @@ SpawnFrom(j, p, fromEntry) ==
      ELSE /\ p \in Jobs /\ p < j
           /\ st[p] = "running" /\ alive[p] /\ cap[p] = "live"
           /\ (entry[p] = "done") # fromEntry                  \* entry step first
-          /\ (Bug = "noDepth" \/ Depth(p) + 1 <= MaxDepth)
-          /\ (Bug = "noFan" \/ Cardinality({c \in Children(p) : st[c] \in Holding}) < MaxFan)
-          /\ (Bug = "noRate" \/ Cardinality(Recent(RootOf(p))) < MaxRate)
-  /\ PoolUse < MaxConc
+          /\ (Bug = "noDepth" \/ Depth(p) + 1 <= Use(MaxDepth))
+          /\ (Bug = "noFan" \/ Cardinality({c \in Children(p) : st[c] \in Holding}) < Use(MaxFan))
+          /\ (Bug = "noRate" \/ Cardinality(Recent(RootOf(p))) < Use(MaxRate))
+  /\ PoolUse < Use(MaxConc)
   /\ LET R == IF p = Session THEN AllRights ELSE rights[p] IN
      \E k \in Kits, N \in Narrowings(R) :
        /\ k \in R \/ Bug = "widen"
        /\ fromEntry => k = kit[p]
-       /\ p # Session /\ k = kit[p] =>
-            (Bug = "noSameKit" \/ SameChain(p) + 1 <= MaxSame)
        \* Bug noKitCap: a child may bring one more Kit VM into a full tree.
        /\ p # Session =>
             (Bug = "noKitCap" \/ k \in TreeKits(RootOf(p))
-             \/ Cardinality(TreeKits(RootOf(p))) < MaxKitVMs)
+             \/ Cardinality(TreeKits(RootOf(p))) < Use(MaxKitVMs))
        /\ kit' = [kit EXCEPT ![j] = k]
        \* The child's rights are the launcher's recorded rights, narrowed.
        \* Bug widen: the view is recomputed from the session's grants. Bug
@@ -373,7 +381,26 @@ ProcDie(j) ==
 Tick ==
   /\ now < MaxTime
   /\ now' = now + 1
-  /\ UNCHANGED <<model, at>>
+  /\ UNCHANGED <<model, at, low, adm>>
+
+\* Ghost, for a job d this step launches (its parent and Kit in the
+\* primed journal): the launch fit every limit in effect before the step.
+WithinLimits(d) ==
+  LET p == par'[d]
+      k == kit'[d]
+  IN /\ PoolUse < Lim(MaxConc)
+     /\ p # Session =>
+          /\ Depth(p) + 1 <= Lim(MaxDepth)
+          /\ Cardinality({c \in Children(p) : st[c] \in Holding}) < Lim(MaxFan)
+          /\ Cardinality(Recent(RootOf(p))) < Lim(MaxRate)
+          /\ (k \in TreeKits(RootOf(p)) \/ Cardinality(TreeKits(RootOf(p))) < Lim(MaxKitVMs))
+
+\* `marsh config limit`: every admission limit is lowered by one, or put
+\* back. Nothing that runs is ended, cancelled, or reassigned.
+SetLimits ==
+  /\ LiveLimits
+  /\ low' = ~low
+  /\ UNCHANGED <<model, now, at, adm>>
 
 Step ==
   \/ Restart
@@ -388,9 +415,12 @@ Step ==
 \* Every step but Tick keeps the clock; a launch records its time.
 Next ==
   \/ Tick
+  \/ SetLimits
   \/ /\ Step
      /\ now' = now
+     /\ low' = low
      /\ at' = [d \in Jobs |-> IF st[d] = "none" /\ st'[d] # "none" THEN now ELSE at[d]]
+     /\ adm' = [d \in Jobs |-> IF st[d] = "none" /\ st'[d] # "none" THEN WithinLimits(d) ELSE adm[d]]
 
 \* Over the job state only: these actions leave the clock to Next.
 Fairness ==
@@ -474,8 +504,9 @@ EntryOnce == \A j \in Jobs : selfLocal[j] <= 1
 NoEntryRecursion == \A j \in Jobs :
   (st[j] # "none" /\ par[j] # Session /\ kit[j] = kit[par[j]]) => ~viaEntry[j]
 
-\* Same-Kit chains (claude -> claude -> ...) are capped.
-SameKitBound == \A j \in Jobs : st[j] # "none" => SameChain(j) <= MaxSame
+\* Every job was admitted within the limits in effect when it was: a
+\* changed limit applies to the next launch, without a restart.
+AdmittedUnderLimits == \A j \in Jobs : st[j] # "none" => adm[j]
 
 \* A tree's live jobs use at most MaxKitVMs distinct Kit VMs.
 KitVMBound == \A r \in Jobs : st[r] # "none" /\ par[r] = Session =>
