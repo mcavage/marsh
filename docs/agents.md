@@ -76,6 +76,10 @@ its status while it runs. `task_apply(id)` applies a `"copy"` task's diff to
 the caller's folder with [`marsh split apply ID LABEL --json`](split.md):
 3-way when it no longer applies cleanly, with conflicts named. A refusal (a
 limit, a name outside the spawn set) is a tool error with marsh's reason.
+One agent's task tool has at most 16 tasks running at once (`tasks-live`);
+finished tasks do not count, so a long session can start as many as it needs.
+A task's default agent is the caller's own, and it may hand work on the same
+way: there is no limit on `claude` calling `claude`.
 
 Each task's job carries the label `task: DESCRIPTION`, and `model` when the
 call set one ([Model on task jobs](peer-review.md#model-on-task-jobs)) (`label` in `marsh jobs
@@ -262,14 +266,15 @@ link outside `MARSH_SPAWN` exits 126; other refusals, including those through
 `marsh run`, exit 125. `marsh status` counts refusals
 (`processes: N running, N refused, N held`).
 
-| Limit | Message |
+| Limit (default; name to change it) | Message |
 |---|---|
-| 16 jobs at once per daemon, all depths | `capacity: 16 jobs` |
-| Depth 4 (your command is depth 1) | `depth limit 4` |
-| The same Kit at most twice in a row | `claude → claude → claude refused: same-Kit chain limit 2` |
-| 8 live children per job | `fan-out limit 8` |
-| 60 launches per tree in any rolling minute, by default (`MARSH_TREE_LAUNCH_RATE`); refused child calls count only up to 8 | `rate limit: 60 launches in the last minute; retry in 12s (MARSH_TREE_LAUNCH_RATE)` |
-| 4 distinct Kit VMs used by live jobs in one tree, by default | `tree already uses 4 Kit VMs (...) (MARSH_TREE_KIT_VMS)` |
+| 64 jobs at once in the scope, all depths (`daemon-jobs`) | `capacity: 64 jobs at once in this scope; retry when one ends, or raise it with `marsh config limit daemon-jobs N` or MARSH_DAEMON_JOBS` |
+| 64 jobs at once in one Kit VM | `worker VM ... is at capacity (... a Kit VM runs at most 64 jobs at once); retry when one ends` |
+| Depth 4; your command is depth 1 (`tree-depth`) | `depth limit 4: NAME would run at depth 5; use fewer levels, or raise it with ...` |
+| 16 live children per job (`job-children`) | `fan-out limit 16: job ... already has 16 live children; retry when one ends, or raise it with ...` |
+| 60 launches per tree in any rolling minute (`tree-launch-rate`); refused child calls count only up to 8 | `rate limit: 60 launches in the last minute; retry in 12s, or raise it with ...` |
+| 8 distinct Kit VMs used by live jobs in one tree (`tree-kit-vms`) | `NAME refused: tree already uses 8 Kit VMs (...); retry when one of their jobs ends, or raise it with ...` |
+| 16 running tasks per task tool (`tasks-live`) | `16 tasks are running in this task server (limit 16 at once); wait for one ...` |
 | At least one second must remain before the parent's deadline | `deadline: parent job ... has ... ms of wall time left` |
 | A name outside `MARSH_SPAWN` | `spawn refused: NAME not in this job's spawn set (MARSH_SPAWN)` |
 | No terminal for a child | `interactive child jobs are not supported yet` |
@@ -278,12 +283,14 @@ A child job gets no terminal. If either stdin or stdout is a terminal, marsh
 refuses it. Run the command as `codex exec '...' </dev/null | cat`.
 With a pipe, enable `pipefail` to preserve the child's failure status.
 
-After `capacity`, `fan-out limit`, or the Kit VM limit, let running jobs finish
-before retrying. Repeated refusals consume the tree's launch budget. Depth,
-same-Kit, and total limits need a different plan, such as fewer levels or
-fewer child calls. The Kit VM limit is configurable through
-[`MARSH_TREE_KIT_VMS`](configuration.md#job-limits); children share their
-parent's deadline.
+Each refusal says what to do: after `capacity`, `fan-out limit`, a full Kit
+VM, or the Kit VM limit, retry when a running job ends; after `rate limit`,
+retry after the time it gives. Repeated refusals consume the tree's launch
+budget. Depth needs a different plan, such as fewer levels. Every limit but a
+Kit VM's capacity can be changed without a restart, with
+`marsh config limit NAME VALUE` or its `MARSH_*` variable
+([Job limits](configuration.md#job-limits)); children share their parent's
+deadline.
 
 ## Reading the job tree
 

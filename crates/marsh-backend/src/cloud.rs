@@ -1631,7 +1631,7 @@ fn run_attached(
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct Binding {
     pub kit: OciImage,
-    /// The registered Kit's identity: same-Kit chains count across places.
+    /// The registered Kit's identity: the per-tree Kit VM cap counts it across places.
     pub identity: String,
 }
 

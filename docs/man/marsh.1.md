@@ -229,6 +229,17 @@ they do with Bash. After **-c** or **--**, marsh interprets nothing.
   there. Then prints the table, as **peer-review ls** does. See
   https://runmar.sh/docs/peer-review.html.
 
+**config limits** [**--json**]
+: List every job limit: its value, default, source (**default**, **config**,
+  or **env**), range, and whether a change applies now or to new jobs. See
+  https://runmar.sh/docs/configuration.html#job-limits.
+
+**config limit** *NAME* *VALUE*|**default**
+: Set a job limit in *MARSH_HOME*/**config.json**, or put it back to its
+  default. Admission limits apply to the next launch; per-job resources to
+  jobs started after the change. A **MARSH_*** variable set when the daemon
+  started wins until it restarts without it.
+
 **peer-review ls** [**--json**]
 : Print whether peer review is on, the ready reviewers (class, vendor, agent,
   model, the drop-in that named each, how its class was found), those not
@@ -448,8 +459,8 @@ See https://runmar.sh/docs/acp.html.
   *~/Library/Application Support/marsh/control*, publications in
   *~/Library/Application Support/marsh*.
 
-**MARSH_JOB_CPU_MILLIS**, **MARSH_JOB_MEMORY_BYTES**, **MARSH_JOB_PIDS**, **MARSH_JOB_WRITABLE_BYTES**, **MARSH_JOB_OUTPUT_BYTES**, **MARSH_JOB_WALL_SECONDS**, **MARSH_TREE_KIT_VMS**
-: Per-job limits, read when the daemon starts.
+**MARSH_DAEMON_JOBS**, **MARSH_JOB_CHILDREN**, **MARSH_TREE_DEPTH**, **MARSH_TREE_KIT_VMS**, **MARSH_TASKS_LIVE**, **MARSH_TREE_LAUNCH_RATE**, **MARSH_JOB_CPU_MILLIS**, **MARSH_JOB_MEMORY_BYTES**, **MARSH_JOB_PIDS**, **MARSH_JOB_WRITABLE_BYTES**, **MARSH_JOB_OUTPUT_BYTES**, **MARSH_JOB_WALL_SECONDS**
+: Job limits, read when the daemon starts; they win over **marsh config limit** until it restarts without them.
 
 **MARSH_PLACE**
 : Placement for registered commands. Only **local** is accepted.
@@ -480,7 +491,8 @@ See https://runmar.sh/docs/acp.html.
 *$MARSH_HOME/config.json* (default *~/.marsh/config.json*)
 : The default shell set by **marsh config shell**, and the
   **marsh config auto-update**, **marsh config open-urls** and
-  **marsh config cloud-delegate** settings.
+  **marsh config cloud-delegate** settings, and the job limits set by
+  **marsh config limit**.
 
 *$MARSH_HOME/sbxenv.yaml*, *$MARSH_HOME/sbxenv.d/\*.yaml*, *$MARSH_HOME/sbxenvs/NAME.yaml*
 : Optional shared and per-command MCP servers and extra directories. Reloaded

@@ -2687,7 +2687,7 @@ fn job_environment(
         registered: capability.registered.clone(),
         socket: PathBuf::from(process::SOCKET),
         path,
-        limits: process::Limits::default(),
+        limits: capability.limits.clone().unwrap_or_default(),
         env,
         forwarded: capability.forwarded.clone(),
         prompts: capability.prompts.clone(),

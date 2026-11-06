@@ -289,8 +289,10 @@ make it; observations 19-21 are the scenario suites indexed at the end.
     staying local, registered names and `marsh run` from any caller as child
     jobs with lineage, CLI splits and `marsh fanout | marsh collect` inside
     jobs and from the host and session, environment
-    forwarding of job-exported variables only, the depth, same-Kit, fan-out,
-    and pool caps (fail fast), spawn-set narrowing, branch confinement,
+    forwarding of job-exported variables only, the depth, fan-out, Kit VM,
+    and pool caps (fail fast; raised or lowered live with `marsh config limit`),
+    no same-Kit cap (a Kit calling itself three deep), 40 jobs at once across
+    trees, 6 distinct Kits in one tree, spawn-set narrowing, branch confinement,
     refused TTY children, Ctrl-C and parent-exit cascades with verified
     deletion, a daemon restart mid-tree (uncertain, no replay), the
     capability connection cap with a refusal frame, `marsh context`, and
@@ -375,7 +377,7 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `W31-shell-git-config`: Git uses the selected home, not SBX's agent-user config; session overrides still work.
 - `W32-detached-split`: s4: `split -d` returns at once and outlives its client; join waits for it. A plain
 
-### Processes (`processes_uat.py`, 37)
+### Processes (`processes_uat.py`, 40)
 
 - `P01-job-surface`: s4: PATH/MARSH_JOB; bash, sh and SHELL are the image's own; registered names route; read-only binds.
 - `P02-self-spawn-bash-c`: s1/s5/s9: a job's `bash -c 'fixture'` and `/bin/bash -c` become child jobs with lineage; `jobs --tree`.
@@ -389,9 +391,9 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `P10-env-i-links`: s4: a link and the in-job `marsh` start from job.json alone (`env -i`) and still spawn children.
 - `P11-env-forwarding`: s6: a child gets only job-exported (set or changed) vars, never image ENV, unexported vars, or secrets.
 - `P12-depth-cap`: s6 depth 4 (LineageWF): an alternating fixture/shell chain stops at depth 4 with exit 125.
-- `P13-same-kit-chain`: s6 same-Kit chain 2 (SameKitBound): fixture -> fixture is allowed, a third fixture is refused.
-- `P14-fan-out-cap`: s6 fan-out 8 (FanOutBound): a ninth live child of one job is refused fast; the eight run.
-- `P15-pool-fail-fast`: s6 session pool 16 (BudgetBound): a nested 17th job is refused at once with `capacity: 16 jobs`; no deadlock.
+- `P13-same-kit-chain`: s6 no same-Kit cap: fixture -> fixture -> fixture runs (as claude -> claude -> claude); depth bounds it.
+- `P14-fan-out-cap`: s6 live children (FanOutBound), raised to 20 with `marsh config limit job-children 20` (no restart):
+- `P15-pool-fail-fast`: s6 jobs at once (BudgetBound), lowered to 6 with `marsh config limit daemon-jobs 6`: a nested 7th job
 - `P16-spawn-narrowing`: s6 narrowing only (SpawnSetAttenuates): MARSH_SPAWN/--spawn/--no-spawn narrow; nothing widens.
 - `P17-branch-confinement`: s7: a split branch job's child gets the branch's mounts verbatim: the fork, never the project.
 - `P18-tty-child-refused`: s6 no TTY children: a link whose stdin/stdout are terminals is refused with the stated message.
@@ -414,6 +416,9 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `P36-tree-kit-vm-cap`: s6 Kit VMs per tree: a child needing one more distinct Kit VM than the cap is refused
 - `P37-split-lineage-tree`: s9: in the session, `jobs --tree` draws its split, each branch, and every job a branch's shell
 - `P38-fanout-cli`: s1: `marsh fanout | marsh collect` from host bash and in a session: concurrent branches on the shared
+- `P39-six-kits-in-a-tree`: s6 Kit VMs per tree, default 8: one fixture job runs children of 5 other Kits (shell and four
+- `P40-forty-jobs-across-trees`: s6 jobs at once, default 64: 40 top-level jobs (40 trees) from one session all run at once.
+- `P41-limits-config`: `marsh config limits --json` lists every limit (value, default, source, range, applies);
 
 ### Shells (`shells_uat.py`, 6)
 
@@ -431,12 +436,12 @@ Generated from the suites' `SCENARIOS` tables and scenario docstrings by
 - `T03-live-copy-apply`: T03: `files: "copy"` returns a diff and leaves the folder alone until `task_apply` applies it. (billed; only with `--live`)
 - `T04-live-background`: T04: `background: true` returns an id at once; `task_output(wait)` returns the result (codex child). (billed; only with `--live`)
 - `T05-spawn-narrowing-grandchild`: T05: MARSH_SPAWN narrowing reaches a task's child in shared and copy mode: its grandchild is refused.
-- `T06-admission-refusal`: T06: admission refusals (same-Kit chain; depth, shared and copy) are tool errors with marsh's reason.
+- `T06-admission-refusal`: T06: the same agent may hand work to itself three deep (fixture -> fixture -> fixture, as claude ->
 - `T07-cross-job-ids`: T07: a task id belongs to its own job's server: another job's server refuses it.
 - `T08-cancel-and-reap`: T08: cancelling a call stops its child or its wait; EOF and the caller's end stop and reap every task.
 - `T09-symlink-safe-copy`: T09: a copy task's links stay links: apply makes the link, never writes through one.
 - `T10-conflicts-keep-edits`: T10: task_apply never overwrites the caller's concurrent edits: unstaged it refuses, staged it names conflicts.
-- `T11-fan-out-limit`: T11: 8 live tasks: a 9th is refused (shared and copy), the caller keeps working, every result returns.
+- `T11-fan-out-limit`: T11: 16 running tasks: a 17th is refused (shared and copy) with the limit and how to raise it, the
 - `T12-peer-review-context-and-model`: T12: the peer-review section appears only while it is on and lists only ready reviewers
 - `T13-fresh-home-peer-review`: T13: in a fresh home no job has ever run in, peer review lists its reviewers at once: from a
 - `T14-live-model-family-name`: T14: told "ask codex with astra to review README.md", a claude job calls `task` for codex with the (billed; only with `--live`)

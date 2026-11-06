@@ -94,6 +94,23 @@ fn end(store: &DaemonStore, job: &str, cleanup: CleanupState) {
         .unwrap();
 }
 
+/// `marsh config limit NAME VALUE` for this store: written to the scope's
+/// `config.json`, which admission reads again when it changes.
+fn set_limit(store: &DaemonStore, home: &Path, name: &str, value: serde_json::Value) {
+    let path = home.join("config.json");
+    let mut document = std::fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .unwrap_or_else(|| serde_json::json!({"limits": {}}));
+    document["limits"][name] = value;
+    std::fs::write(&path, serde_json::to_vec(&document).unwrap()).unwrap();
+    let mut state = store.lock();
+    if state.job_defaults.is_none() {
+        state.job_defaults = Some(crate::JobDefaults::default());
+    }
+    state.limits_config = crate::limits::ConfigCache::new(path);
+}
+
 fn refusal(result: Result<String, DaemonError>) -> String {
     match result {
         Err(DaemonError::Refused(message)) => message,
@@ -109,12 +126,13 @@ fn pool_holds_uncertain_slots_across_restart_until_reset() {
     {
         let store = reopen(home.path()).unwrap();
         let session = session(&store, home.path());
-        let jobs = (0..16)
+        let jobs = (0..64)
             .map(|_| launch(&store, &session, None, "fixture", view(), false).unwrap())
             .collect::<Vec<_>>();
+        let full = refusal(launch(&store, &session, None, "fixture", view(), false));
         assert!(
-            refusal(launch(&store, &session, None, "fixture", view(), false))
-                .starts_with("capacity: 16 jobs")
+            full.starts_with("capacity: 64 jobs at once in this scope; retry when one ends, or raise it with `marsh config limit daemon-jobs N` or MARSH_DAEMON_JOBS"),
+            "{full}"
         );
         end(&store, &jobs[0], CleanupState::Uncertain);
         let held = refusal(launch(&store, &session, None, "fixture", view(), false));
@@ -127,9 +145,9 @@ fn pool_holds_uncertain_slots_across_restart_until_reset() {
     }
     // Restart: every unfinished job is uncertain and holds a slot.
     let store = reopen(home.path()).unwrap();
-    assert_eq!(store.process_counts().held, 16);
+    assert_eq!(store.process_counts().held, 64);
     store.release_process_slots(&["shell".to_owned()]);
-    assert_eq!(store.process_counts().held, 16);
+    assert_eq!(store.process_counts().held, 64);
     store.release_process_slots(&["fixture".to_owned()]);
     assert_eq!(store.process_counts().held, 0);
     drop(store);
@@ -149,16 +167,25 @@ fn depth_fan_out_and_parent_liveness() {
     }
     let deepest = chain.last().unwrap();
     assert_eq!(store.job(deepest).unwrap().lineage.unwrap().depth, 4);
-    assert!(refusal(child(&store, &session, deepest, "shell")).starts_with("depth limit 4"));
+    let deep = refusal(child(&store, &session, deepest, "shell"));
+    assert!(
+        deep.starts_with("depth limit 4: shell would run at depth 5; use fewer levels, or raise it with `marsh config limit tree-depth N` or MARSH_TREE_DEPTH"),
+        "{deep}"
+    );
     for job in chain.iter().rev() {
         end(&store, job, CleanupState::Verified);
     }
-    // noFan: eight live children, the ninth is refused until one ends.
+    // noFan: sixteen live children, the seventeenth is refused until one ends.
     let root = launch(&store, &session, None, "claude", view(), false).unwrap();
-    let kids = (0..8)
+    let kids = (0..16)
         .map(|_| child(&store, &session, &root, "shell").unwrap())
         .collect::<Vec<_>>();
-    assert!(refusal(child(&store, &session, &root, "shell")).starts_with("fan-out limit 8"));
+    let fan = refusal(child(&store, &session, &root, "shell"));
+    assert!(fan.starts_with("fan-out limit 16: job "), "{fan}");
+    assert!(
+        fan.ends_with("already has 16 live children; retry when one ends, or raise it with `marsh config limit job-children N` or MARSH_JOB_CHILDREN"),
+        "{fan}"
+    );
     end(&store, &kids[0], CleanupState::Verified);
     child(&store, &session, &root, "shell").unwrap();
     // Spawn is atomic with the parent's liveness: an ended parent starts nothing.
@@ -208,7 +235,11 @@ fn a_steady_tree_is_never_throttled_but_a_tight_loop_is() {
     assert_eq!(refusals.len(), 41, "{refusals:?}");
     let retry = refusals[0]
         .strip_prefix("rate limit: 60 launches in the last minute; retry in ")
-        .and_then(|rest| rest.split_once("s (MARSH_TREE_LAUNCH_RATE)"))
+        .and_then(|rest| {
+            rest.split_once(
+                "s, or raise it with `marsh config limit tree-launch-rate N` or MARSH_TREE_LAUNCH_RATE",
+            )
+        })
         .and_then(|(seconds, _)| seconds.parse::<u64>().ok());
     // The first launch was about two seconds (and a slow machine's real
     // time) ago: it leaves the window in under a minute.
@@ -255,21 +286,21 @@ fn refused_calls_count_toward_the_rate_only_up_to_a_burst() {
 }
 
 #[test]
-fn same_kit_chain_counts_consecutive_steps_and_stops_at_a_branch() {
-    // noSameKit: claude -> claude is allowed, a third claude is refused.
+fn the_same_kit_may_call_itself_down_to_the_depth_limit() {
+    // There is no same-Kit chain cap: claude -> claude -> claude (the task
+    // tool's default agent is the caller's) runs; depth bounds it.
     let home = tempfile::tempdir().unwrap();
     let store = reopen(home.path()).unwrap();
     let session = session(&store, home.path());
-    let root = launch(&store, &session, None, "claude", view(), false).unwrap();
-    let second = child(&store, &session, &root, "claude").unwrap();
-    assert_eq!(
-        refusal(child(&store, &session, &second, "claude")),
-        "claude → claude → claude refused: same-Kit chain limit 2 (see /run/marsh/context.md)"
+    let mut chain = vec![launch(&store, &session, None, "claude", view(), false).unwrap()];
+    for _ in 0..3 {
+        chain.push(child(&store, &session, chain.last().unwrap(), "claude").unwrap());
+    }
+    assert!(
+        refusal(child(&store, &session, chain.last().unwrap(), "claude"))
+            .starts_with("depth limit 4")
     );
-    // Another Kit breaks the chain.
-    let codex = child(&store, &session, &second, "codex").unwrap();
-    child(&store, &session, &codex, "claude").unwrap();
-    // A split argv branch is not a same-Kit step, and the walk stops there.
+    // A split argv branch keeps its lineage under a same-Kit parent.
     let fork = vec![PublicMount {
         target: format!("{PROJECT}/.marsh/split/0123456789ab/k").into(),
         access: "read_write".into(),
@@ -277,7 +308,7 @@ fn same_kit_chain_counts_consecutive_steps_and_stops_at_a_branch() {
     let branch = launch(
         &store,
         &session,
-        Some(&second),
+        Some(&chain[1]),
         "claude",
         fork.clone(),
         true,
@@ -288,25 +319,63 @@ fn same_kit_chain_counts_consecutive_steps_and_stops_at_a_branch() {
         (lineage.split.as_deref(), lineage.label.as_deref()),
         (Some("0123456789ab"), Some("k"))
     );
-    launch(
-        &store,
-        &session,
-        Some(&branch),
-        "claude",
-        fork.clone(),
-        false,
-    )
-    .unwrap();
-    for job in [codex, second, root] {
-        end(&store, &job, CleanupState::Verified);
-    }
-    // Under a branch, ProcessRun steps count again from the branch job.
-    let top = launch(&store, &session, None, "claude", view(), false).unwrap();
-    let branch = launch(&store, &session, Some(&top), "claude", fork.clone(), true).unwrap();
     let under = launch(&store, &session, Some(&branch), "claude", fork, false).unwrap();
     // A child copies the fork view but is not itself a branch job.
     assert_eq!(store.job(&under).unwrap().lineage.unwrap().split, None);
-    assert!(refusal(child(&store, &session, &under, "claude")).contains("same-Kit chain limit 2"));
+}
+
+#[test]
+fn admission_limits_follow_config_json_without_a_restart() {
+    // `marsh config limit` writes config.json; the next admission reads it.
+    // Lowering a limit ends nothing that runs; it refuses the next launch.
+    let home = tempfile::tempdir().unwrap();
+    let store = reopen(home.path()).unwrap();
+    let session = session(&store, home.path());
+    set_limit(&store, home.path(), "job-children", 20.into());
+    let root = launch(&store, &session, None, "claude", view(), false).unwrap();
+    let kids = (0..20)
+        .map(|_| child(&store, &session, &root, "shell").unwrap())
+        .collect::<Vec<_>>();
+    assert!(refusal(child(&store, &session, &root, "shell")).starts_with("fan-out limit 20"));
+    set_limit(&store, home.path(), "job-children", 2.into());
+    assert!(
+        kids.iter()
+            .all(|kid| store.job(kid).unwrap().state == JobState::Queued)
+    );
+    end(&store, &kids[0], CleanupState::Verified);
+    assert!(refusal(child(&store, &session, &root, "shell")).starts_with("fan-out limit 2"));
+    set_limit(&store, home.path(), "tree-depth", 2.into());
+    assert!(refusal(child(&store, &session, &kids[1], "shell")).starts_with("depth limit 2"));
+    set_limit(&store, home.path(), "daemon-jobs", 3.into());
+    assert!(
+        refusal(launch(&store, &session, None, "shell", view(), false))
+            .starts_with("capacity: 3 jobs")
+    );
+    let status = store.status(None);
+    assert_eq!(
+        status.limits["daemon-jobs"].source,
+        crate::limits::Source::Config
+    );
+    assert_eq!(
+        status.limits["daemon-jobs"].value,
+        crate::limits::LimitValue::Count(3)
+    );
+    assert_eq!(
+        status.limits["job-pids"].source,
+        crate::limits::Source::Default
+    );
+    // A launch-environment value wins over config.json.
+    store.lock().job_defaults = Some(
+        crate::JobDefaults::from_environment(|name| {
+            (name == "MARSH_DAEMON_JOBS").then(|| "100".into())
+        })
+        .unwrap(),
+    );
+    launch(&store, &session, None, "shell", view(), false).unwrap();
+    assert_eq!(
+        store.status(None).limits["daemon-jobs"].source,
+        crate::limits::Source::Env
+    );
 }
 
 #[test]
@@ -480,10 +549,12 @@ fn a_tree_cancel_signals_every_descendant_at_once_and_ends_them_cancelled() {
 
 #[test]
 fn tree_kit_vm_cap_counts_distinct_live_kits() {
-    // docs/design/processes.md s6: at most 4 distinct Kit VMs live in one tree; a Kit
-    // already live in the tree (an alias, a second call) costs nothing.
+    // docs/design/processes.md s6: at most `tree-kit-vms` distinct Kit VMs
+    // live in one tree (4 here); a Kit already live in the tree (an alias, a
+    // second call) costs nothing.
     let home = tempfile::tempdir().unwrap();
     let store = reopen(home.path()).unwrap();
+    set_limit(&store, home.path(), "tree-kit-vms", 4.into());
     let session = session(&store, home.path());
     let root = launch(&store, &session, None, "fixture", view(), false).unwrap();
     let middle = child(&store, &session, &root, "claude").unwrap();
@@ -511,7 +582,7 @@ fn tree_kit_vm_cap_counts_distinct_live_kits() {
         .unwrap_err();
     assert!(
         matches!(&refused, DaemonError::Refused(message) if message
-            == "pi refused: tree already uses 4 Kit VMs (claude, codex, fixture, shell) (MARSH_TREE_KIT_VMS)"),
+            == "pi refused: tree already uses 4 Kit VMs (claude, codex, fixture, shell); retry when one of their jobs ends, or raise it with `marsh config limit tree-kit-vms N` or MARSH_TREE_KIT_VMS"),
         "{refused:?}"
     );
     // The pre-check (Kit identity known before VM work) refuses the same.
@@ -533,6 +604,7 @@ fn tree_kit_vm_cap_counts_a_commands_old_and_new_image_once() {
     // at the limit, and it does not use up a second slot.
     let home = tempfile::tempdir().unwrap();
     let store = reopen(home.path()).unwrap();
+    set_limit(&store, home.path(), "tree-kit-vms", 4.into());
     let session = session(&store, home.path());
     let root = launch(&store, &session, None, "fixture", view(), false).unwrap();
     child(&store, &session, &root, "claude").unwrap();
@@ -561,7 +633,7 @@ fn tree_kit_vm_cap_counts_a_commands_old_and_new_image_once() {
         .unwrap_err();
     assert!(
         matches!(&refused, DaemonError::Refused(message) if message
-            == "pi refused: tree already uses 4 Kit VMs (claude, codex, fixture, shell) (MARSH_TREE_KIT_VMS)"),
+            == "pi refused: tree already uses 4 Kit VMs (claude, codex, fixture, shell); retry when one of their jobs ends, or raise it with `marsh config limit tree-kit-vms N` or MARSH_TREE_KIT_VMS"),
         "{refused:?}"
     );
 }
@@ -581,7 +653,7 @@ fn tree_kit_vm_cap_follows_the_daemon_setting() {
     child(&store, &session, &root, "fixture").unwrap();
     assert_eq!(
         refusal(child(&store, &session, &root, "shell")),
-        "shell refused: tree already uses 1 Kit VM (fixture) (MARSH_TREE_KIT_VMS)"
+        "shell refused: tree already uses 1 Kit VM (fixture); retry when one of their jobs ends, or raise it with `marsh config limit tree-kit-vms N` or MARSH_TREE_KIT_VMS"
     );
     // Another tree has its own budget.
     launch(&store, &session, None, "shell", view(), false).unwrap();

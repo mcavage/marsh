@@ -18,10 +18,23 @@ pub const ARTIFACT: &str = "/run/marsh/marsh";
 pub const SOCKET: &str = "/run/marsh/cap.sock";
 pub const JOB_JSON: &str = "/run/marsh/job.json";
 
-pub const POOL_LIMIT: usize = 16;
+/// Jobs at once per daemon, all depths, by default (`daemon-jobs`,
+/// `MARSH_DAEMON_JOBS`, 1 to [`POOL_MAX`]). Each Kit VM also takes at most
+/// [`crate::WORKER_CONTAINER_CAPACITY`] of them.
+pub const POOL_LIMIT: usize = 64;
+pub const POOL_MAX: usize = 512;
+/// Depth of a job tree by default (`tree-depth`, `MARSH_TREE_DEPTH`, 1 to
+/// [`DEPTH_MAX`]); the user's command is depth 1.
 pub const DEPTH_LIMIT: u32 = 4;
-pub const SAME_KIT_LIMIT: usize = 2;
-pub const FAN_OUT_LIMIT: usize = 8;
+pub const DEPTH_MAX: u32 = 16;
+/// Live children of one job by default (`job-children`, `MARSH_JOB_CHILDREN`,
+/// 1 to [`FAN_OUT_MAX`]).
+pub const FAN_OUT_LIMIT: usize = 16;
+pub const FAN_OUT_MAX: usize = 128;
+/// Tasks one `task-mcp` server has running at once by default (`tasks-live`,
+/// `MARSH_TASKS_LIVE`); finished tasks do not count.
+pub const TASKS_LIVE: usize = 16;
+pub const TASKS_LIVE_MAX: usize = 128;
 /// Launches one job tree may make in a rolling window, by default
 /// (`MARSH_TREE_LAUNCH_RATE` changes it at daemon start). Only a tight loop
 /// reaches it; a long session that calls tools steadily never does.
@@ -33,12 +46,13 @@ pub const TREE_LAUNCH_RATE: LaunchRate = LaunchRate {
 /// many: a caller retrying refused calls is slowed, not locked out.
 pub const REFUSAL_BURST: usize = 8;
 /// Distinct Kit VMs one job tree may use at once (`MARSH_TREE_KIT_VMS`
-/// lowers or raises it at daemon start).
-pub const TREE_KIT_VM_LIMIT: usize = 4;
+/// or `marsh config limit tree-kit-vms` changes it).
+pub const TREE_KIT_VM_LIMIT: usize = 8;
 /// A child needs at least this much of its parent's wall time left.
 pub const MIN_CHILD_WALL_MS: u64 = 1_000;
-/// Connections per attempt on `cap.sock`: `FAN_OUT_LIMIT + 4`.
-pub const CONNECTION_LIMIT: usize = FAN_OUT_LIMIT + 4;
+/// Connections per attempt on `cap.sock`: the most live children a job
+/// can be allowed, plus 4.
+pub const CONNECTION_LIMIT: usize = FAN_OUT_MAX + 4;
 pub const CONNECTION_REFUSAL: &str = "marsh: too many concurrent daemon requests in this job";
 /// The prompt in an `agent-sessions@1` `prompt` verb.
 pub const PROMPT_PLACEHOLDER: &str = "{{.Prompt}}";
@@ -98,6 +112,10 @@ pub struct JobCapability {
     /// empty unless peer review is on and a ready reviewer is in `spawn`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub peer_review: String,
+    /// The limits in effect when the job started, for `job.json` (the task
+    /// tool reads `tasks_live`); `None` writes the built-in defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Limits>,
 }
 
 /// `/run/marsh/job.json`, written by the worker (docs/design/processes.md s4).
@@ -209,9 +227,14 @@ impl std::fmt::Display for LaunchRate {
 pub struct Limits {
     pub pool: usize,
     pub depth: u32,
-    pub same_kit: usize,
     pub fan_out: usize,
     pub launch_rate: LaunchRate,
+    #[serde(default = "default_tasks_live")]
+    pub tasks_live: usize,
+}
+
+fn default_tasks_live() -> usize {
+    TASKS_LIVE
 }
 
 impl Default for Limits {
@@ -219,9 +242,9 @@ impl Default for Limits {
         Self {
             pool: POOL_LIMIT,
             depth: DEPTH_LIMIT,
-            same_kit: SAME_KIT_LIMIT,
             fan_out: FAN_OUT_LIMIT,
             launch_rate: TREE_LAUNCH_RATE,
+            tasks_live: TASKS_LIVE,
         }
     }
 }

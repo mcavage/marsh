@@ -47,6 +47,7 @@ pub mod checkpoint;
 mod client_liveness;
 mod daemon_startup;
 pub mod events;
+pub mod limits;
 mod receipt_journal;
 pub use daemon_startup::{
     DEFAULT_JOB_RESOURCES, JobDefaults, StartupFailure, adopt_startup_lock,
@@ -170,12 +171,12 @@ fn busy_lifecycle_refusal(message: &str) -> bool {
 }
 // Leave descriptor headroom for relay socket clones, active attachments,
 // worker transports, and the listener on macOS's default soft FD limit.
-/// Each connection holds one descriptor plus at most two transient ones. A
-/// split's 16 branches each hold one daemon-internal connection, and every
-/// argv branch at most four capability connections, so 128 leaves room for
-/// one full split beside ordinary shells. The server raises its descriptor
-/// soft limit at bind (`raise_descriptor_limit`) so 128 connections fit.
-const MAX_DAEMON_CONNECTIONS: usize = 128;
+/// Each connection holds one descriptor plus at most two transient ones.
+/// Every running job holds about two (its caller's and its children's
+/// relays), so 1024 leaves room for the largest job pool (`daemon-jobs`, 512)
+/// beside shells and splits. The server raises its descriptor soft limit at
+/// bind (`raise_descriptor_limit`) so they fit.
+const MAX_DAEMON_CONNECTIONS: usize = 1024;
 const DAEMON_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 // Publication replies may legitimately wait behind one cold Kit preparation
 // (stock sbx 5 + build 20 + load 10 + docker 2 minutes) and the five-minute
@@ -214,15 +215,21 @@ impl Drop for DaemonConnectionPermit {
 /// 256), capped at 4096: connections, relays, and splits all hold descriptors.
 fn raise_descriptor_limit() {
     let limit = rustix::process::getrlimit(rustix::process::Resource::Nofile);
-    let wanted = limit.maximum.map_or(4096, |maximum| maximum.min(4096));
-    if limit.current.is_some_and(|current| current < wanted) {
-        let _ = rustix::process::setrlimit(
-            rustix::process::Resource::Nofile,
-            rustix::process::Rlimit {
-                current: Some(wanted),
-                maximum: limit.maximum,
-            },
-        );
+    // macOS refuses more than `kern.maxfilesperproc`: fall back to 4096.
+    for want in [16_384, 4096] {
+        let wanted = limit.maximum.map_or(want, |maximum| maximum.min(want));
+        if limit.current.is_none_or(|current| current >= wanted)
+            || rustix::process::setrlimit(
+                rustix::process::Resource::Nofile,
+                rustix::process::Rlimit {
+                    current: Some(wanted),
+                    maximum: limit.maximum,
+                },
+            )
+            .is_ok()
+        {
+            return;
+        }
     }
 }
 
@@ -1656,7 +1663,7 @@ fn worker_refusal(worker: &WorkerStatus, vm_id: &str, reserved: usize) -> String
         )
     } else {
         format!(
-            "worker VM {} is at capacity ({} running, {reserved} starting, limit {})",
+            "worker VM {} is at capacity ({} running, {reserved} starting; a Kit VM runs at most {} jobs at once); retry when one ends",
             worker.vm_id,
             worker.active_container_ids.len(),
             worker.container_capacity
@@ -1715,7 +1722,12 @@ pub struct StatusDocument {
     /// Actual canonical host-only configuration and receipt directory.
     pub control_home: PathBuf,
     /// None for an inspection-only server without an execution backend.
+    /// The limits in effect now: the launch environment, then `config.json`.
     pub job_defaults: Option<JobDefaults>,
+    /// `{NAME: {value, default, source}}` for every limit
+    /// (`marsh config limits`); empty for an inspection-only server.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub limits: BTreeMap<String, limits::LimitStatus>,
     pub shells: Vec<ShellStatus>,
     pub workers: Vec<WorkerStatus>,
     /// Active, awaiting, and kept splits (`docs/design/workspaces.md` s5).
@@ -2296,6 +2308,8 @@ struct State {
     daemon_id: String,
     control_home: PathBuf,
     job_defaults: Option<JobDefaults>,
+    /// The scope's `config.json` limits, read again when it changes.
+    limits_config: limits::ConfigCache,
     owner: EndpointOwner,
     shells: BTreeMap<String, ShellStatus>,
     session_authorities: BTreeMap<String, SessionAuthority>,
@@ -2635,6 +2649,7 @@ impl DaemonStore {
             daemon_id: Uuid::new_v4().to_string(),
             control_home: fs::canonicalize(journal_home)?,
             job_defaults: None,
+            limits_config: limits::ConfigCache::default(),
             owner: EndpointOwner {
                 uid: rustix::process::getuid().as_raw(),
                 pid: std::process::id(),
@@ -4317,7 +4332,12 @@ impl DaemonStore {
             daemon_id: state.daemon_id.clone(),
             endpoint_owner: state.owner.clone(),
             control_home: state.control_home.clone(),
-            job_defaults: state.job_defaults.clone(),
+            job_defaults: state.job_defaults.as_ref().map(|_| state.limits()),
+            limits: state
+                .job_defaults
+                .as_ref()
+                .map(|_| state.limits().status())
+                .unwrap_or_default(),
             current_session_id,
             // An ended shell (detached, its authority released) is history, not
             // state: past `marsh -c` sessions do not accumulate here.
@@ -4584,6 +4604,40 @@ impl DaemonStore {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
+
+    /// The limits in effect now (`limits.rs`): what a job started now gets.
+    #[must_use]
+    pub fn job_limits(&self) -> JobDefaults {
+        self.lock().limits()
+    }
+
+    /// [`Self::job_limits`], with `resources` as the snapshot's when this
+    /// store has none (a backend built without `with_job_defaults`).
+    #[must_use]
+    pub fn job_limits_over(&self, resources: marsh_contracts::JobResources) -> JobDefaults {
+        let state = self.lock();
+        if state.job_defaults.is_some() {
+            state.limits()
+        } else {
+            JobDefaults {
+                resources,
+                ..JobDefaults::default()
+            }
+        }
+    }
+}
+
+impl State {
+    /// The daemon's launch snapshot with the scope's `config.json` limits
+    /// applied; the built-in defaults without a snapshot.
+    fn limits(&self) -> JobDefaults {
+        let config = self.limits_config.current();
+        self.job_defaults
+            .as_ref()
+            .map_or_else(JobDefaults::default, |defaults| {
+                defaults.with_config(&config)
+            })
+    }
 }
 
 fn project_identity(path: &Path) -> Option<(u64, u64)> {
@@ -4778,6 +4832,14 @@ impl Server {
     #[must_use]
     pub fn with_job_defaults(self, defaults: JobDefaults) -> Self {
         self.store.lock().job_defaults = Some(defaults);
+        self
+    }
+
+    /// The scope's `config.json`, whose `limits` apply over the defaults
+    /// (`marsh config limit`), read again on every admission.
+    #[must_use]
+    pub fn with_limits_config(self, config: PathBuf) -> Self {
+        self.store.lock().limits_config = limits::ConfigCache::new(config);
         self
     }
 

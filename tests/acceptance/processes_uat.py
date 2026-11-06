@@ -78,6 +78,9 @@ SCENARIOS = {
     "P36-tree-kit-vm-cap": "tree_kit_vm_cap",
     "P37-split-lineage-tree": "split_lineage_tree",
     "P38-fanout-cli": "fanout_cli",
+    "P39-six-kits-in-a-tree": "six_kits_in_a_tree",
+    "P40-forty-jobs-across-trees": "forty_jobs_across_trees",
+    "P41-limits-config": "limits_config",
 }
 LIVE = {"P32-live-claude-codex"}  # billed: only with --live
 # The restart scenario quarantines the fixture VM, so it runs last.
@@ -85,7 +88,9 @@ ORDER = [s for s in SCENARIOS if s != "P21-daemon-restart"] + ["P21-daemon-resta
 NEEDS_SHELL_KIT = {"P06-cross-kit-default", "P11-env-forwarding", "P12-depth-cap", "P14-fan-out-cap",
                    "P16-spawn-narrowing", "P19-ctrl-c-tree", "P20-parent-exit-cascade", "P28-env-whole-tree",
                    "P29-root-interrupt-cascade", "P30-inspection-text", "P31-agents-doc-examples",
-                   "P36-tree-kit-vm-cap"}
+                   "P36-tree-kit-vm-cap", "P39-six-kits-in-a-tree"}
+# P39: copies of the shell Kit, each its own Kit identity (and Kit VM).
+KIT_COPIES = [f"kitvm{n}" for n in range(1, 5)]
 ALT = "fixture-alt"  # a second registered name for the same fixture Kit
 FAN_FRAME = b"== copy (complete) ==\ninput\n\n== upper (complete) ==\nINPUT\n\n"
 STARTUP_BUDGET_US = 2000  # PATH `bash` is the image's own: p50 within 2 ms of /bin/bash
@@ -110,6 +115,17 @@ class Processes(ScenarioSuite):
         registry = self.control_home / "commands.json"
         mapping = json.loads(registry.read_text())
         mapping[ALT] = mapping["fixture"]
+        if "P39-six-kits-in-a-tree" in self.selected and pathlib.Path(str(mapping.get("shell", ""))).is_dir():
+            source = pathlib.Path(mapping["shell"])
+            for name in KIT_COPIES:
+                copy = self.control_home / "kit-copies" / name
+                if not copy.exists():
+                    copy.parent.mkdir(parents=True, exist_ok=True)
+                    subprocess.run(["cp", "-R", str(source), str(copy)], check=True)
+                    spec = next(copy.glob("*.yaml"))
+                    spec.write_text(spec.read_text().replace(
+                        "description: ", f"description: ({name}) ", 1))
+                mapping[name] = str(copy)
         if arguments.live:  # the packaged agent Kits, for the billed check
             for name in ("claude", "codex"):
                 mapping.setdefault(name, str(arguments.guest_artifacts / "kits" / f"marsh-{name}"))
@@ -457,57 +473,73 @@ class Processes(ScenarioSuite):
         self.verify_deleted(receipts)
 
     def same_kit_chain(self) -> None:
-        """s6 same-Kit chain 2 (SameKitBound): fixture -> fixture is allowed, a third fixture is refused."""
+        """s6 no same-Kit cap: fixture -> fixture -> fixture runs (as claude -> claude -> claude); depth bounds it."""
         before = self.job_ids()
         argv, _ = self.chain(["fixture", "fixture", "fixture"])
         completed = self.brush(q(argv), self.project, timeout=300)
         err = text(completed.stderr)
-        require(re.search(r"^L3=125$", err, re.M) and "same-Kit chain limit 2" in err
-                and "/run/marsh/context.md" in err, f"third same-Kit link not refused clearly: {err[-800:]!r}")
-        require(re.search(r"fixture → fixture → fixture refused", err), "refusal does not name the chain")
-        receipts = self.settle(before, 2)
+        require(completed.returncode == 0 and re.search(r"^L3=0$", err, re.M) and re.search(r"^L2=0$", err, re.M),
+                f"a third fixture in a row did not run: {completed.returncode} {err[-800:]!r}")
+        receipts = self.settle(before, 3)
+        require(sorted(self.lin(r).get("depth") for r in receipts) == [1, 2, 3],
+                f"want one fixture job at each depth 1-3: {[self.lin(r) for r in receipts]}")
         self.verify_deleted(receipts)
 
+    def limit(self, name: str, value: str) -> None:
+        """`marsh config limit NAME VALUE` from the host: no restart."""
+        completed = self.cli(["config", "limit", name, value], self.project, timeout=60)
+        require(completed.returncode == 0, f"config limit {name} {value}: {text(completed.stderr)[-400:]!r}")
+
     def fan_out_cap(self) -> None:
-        """s6 fan-out 8 (FanOutBound): a ninth live child of one job is refused fast; the eight run."""
+        """s6 live children (FanOutBound), raised to 20 with `marsh config limit job-children 20` (no restart):
+        20 live children of one job run; the 21st is refused fast with the limit and how to raise it."""
         gate = self.project / "p14-gate"
         before = self.job_ids()
-        script = ("d=p14-gate; mkdir -p $d; for i in 1 2 3 4 5 6 7 8; do shell -c \"touch $d/r$i; sleep 20\" & done; "
-                  "n=0; while [ $(ls $d | wc -l) -lt 8 ] && [ $n -lt 900 ]; do sleep 0.2; n=$((n+1)); done; "
-                  "echo ready=$(ls $d | wc -l); s=$(date +%s); shell -c true; echo ninth=$?; "
+        script = ("d=p14-gate; mkdir -p $d; for i in $(seq 1 20); do shell -c \"touch $d/r$i; sleep 30\" & done; "
+                  "n=0; while [ $(ls $d | wc -l) -lt 20 ] && [ $n -lt 1500 ]; do sleep 0.2; n=$((n+1)); done; "
+                  "echo ready=$(ls $d | wc -l); s=$(date +%s); shell -c true; echo extra=$?; "
                   "echo took=$(( $(date +%s) - s )); wait; echo waited")
+        self.limit("job-children", "20")
         try:
-            completed = self.injob(script, timeout=300)
+            completed = self.injob(script, timeout=400)
         finally:
+            self.limit("job-children", "default")
             if gate.exists():
                 for path in gate.iterdir():
                     path.unlink()
                 gate.rmdir()
-        v = self.kv(completed.stdout)
-        require(v.get("ready") == "8", f"eight children did not start: {v} {text(completed.stderr)[-500:]!r}")
-        require(v.get("ninth") == "125" and "fan-out limit 8" in text(completed.stderr),
-                f"ninth child not refused with `fan-out limit 8`: {v} {text(completed.stderr)[-500:]!r}")
+        v, err = self.kv(completed.stdout), text(completed.stderr)
+        require(v.get("ready") == "20", f"twenty children did not run at once: {v} {err[-500:]!r}")
+        require(v.get("extra") == "125" and "fan-out limit 20" in err and "retry when one ends" in err
+                and "marsh config limit job-children" in err and "MARSH_JOB_CHILDREN" in err,
+                f"21st child not refused with the limit and how to raise it: {v} {err[-500:]!r}")
         require(int(v.get("took", "99")) <= 10, "fan-out refusal was not fail-fast")
-        receipts = self.settle(before, 9)
-        self.assert_children(receipts, self.one_top(receipts, "fan-out"), ["shell"] * 8, "fan-out")
+        receipts = self.settle(before, 21, timeout=240)
+        self.assert_children(receipts, self.one_top(receipts, "fan-out"), ["shell"] * 20, "fan-out")
         self.verify_deleted(receipts)
 
     def pool_fail_fast(self) -> None:
-        """s6 session pool 16 (BudgetBound): a nested 17th job is refused at once with `capacity: 16 jobs`; no deadlock."""
+        """s6 jobs at once (BudgetBound), lowered to 6 with `marsh config limit daemon-jobs 6`: a nested 7th job
+        is refused at once with `capacity: 6 jobs` and how to raise it; no deadlock."""
         before = self.job_ids()
-        script = ("g=.git/marsh-p15; mkdir -p $g; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do fixture hold 45 > $g/h$i & done; "
-                  "n=0; while [ $(cat $g/h* 2>/dev/null | grep -c READY) -lt 15 ] && [ $n -lt 1200 ]; do sleep 0.2; "
+        script = ("g=.git/marsh-p15; mkdir -p $g; for i in 1 2 3 4 5; do fixture hold 45 > $g/h$i & done; "
+                  "n=0; while [ $(cat $g/h* 2>/dev/null | grep -c READY) -lt 5 ] && [ $n -lt 1200 ]; do sleep 0.2; "
                   "n=$((n+1)); done; echo held=$(cat $g/h* | grep -c READY); s=$(date +%s); "
                   + q(["fixture", "pipeline", "|", "bash", "-c", "fixture identity; echo inner=$?"])
                   + "; echo outer=$?; echo took=$(( $(date +%s) - s )); wait; rm -rf $g")
-        completed = self.brush(script, self.project, timeout=400)
-        v = self.kv(completed.stdout)
-        require(v.get("held") == "15", f"fifteen holds did not start: {v} {text(completed.stderr)[-500:]!r}")
-        require(v.get("inner") == "125" and "capacity: 16 jobs" in text(completed.stderr),
-                f"17th job not refused with `capacity: 16 jobs`: {v} {text(completed.stderr)[-600:]!r}")
+        self.limit("daemon-jobs", "6")
+        try:
+            completed = self.brush(script, self.project, timeout=400)
+        finally:
+            self.limit("daemon-jobs", "default")
+        v, err = self.kv(completed.stdout), text(completed.stderr)
+        require(v.get("held") == "5", f"five holds did not start: {v} {err[-500:]!r}")
+        require(v.get("inner") == "125" and "capacity: 6 jobs" in err and "marsh config limit daemon-jobs" in err
+                and "MARSH_DAEMON_JOBS" in err,
+                f"7th job not refused with `capacity: 6 jobs` and how to raise it: {v} {err[-600:]!r}")
         require(v.get("outer") == "0" and int(v.get("took", "999")) <= 30,
                 f"parent of the refused child did not finish promptly (queueing/deadlock): {v}")
-        receipts = self.settle(before, 16, timeout=180)
+        receipts = self.settle(before, 6, timeout=180)
         self.verify_deleted(receipts)
 
     def spawn_narrowing(self) -> None:
@@ -1207,7 +1239,8 @@ class Processes(ScenarioSuite):
             v, err = self.kv(completed.stdout), text(completed.stderr)
             require(v.get("alias") == "0", f"an alias of the live Kit was refused: {v} {err[-600:]!r}")
             require(v.get("other") == "125"
-                    and "shell refused: tree already uses 1 Kit VM (fixture) (MARSH_TREE_KIT_VMS)" in err,
+                    and "shell refused: tree already uses 1 Kit VM (fixture); retry when one of their jobs ends" in err
+                    and "MARSH_TREE_KIT_VMS" in err,
                     f"second distinct Kit VM not refused clearly: {v} {err[-600:]!r}")
             require(int(v.get("took", "99")) <= 10, "the Kit VM refusal was not fail-fast")
             receipts = self.settle(before, 2)
@@ -1219,6 +1252,75 @@ class Processes(ScenarioSuite):
             require(self.kv(other.stdout).get("top") == "0", f"a new tree was refused: {text(other.stderr)[-400:]!r}")
 
         self.with_daemon_settings({"MARSH_TREE_KIT_VMS": "1"}, body)
+
+    def six_kits_in_a_tree(self) -> None:
+        """s6 Kit VMs per tree, default 8: one fixture job runs children of 5 other Kits (shell and four
+        copies of it, each its own Kit identity) all live at once: 6 distinct Kit VMs in one tree."""
+        names = ["shell", *KIT_COPIES]
+        require(all(name in json.loads((self.control_home / "commands.json").read_text()) for name in names),
+                "the shell Kit is not a source directory here; cannot make distinct copies of it")
+        gate = self.project / "p39-gate"
+        before = self.job_ids()
+        starts = "; ".join(f"{name} -c \"touch $d/{name}; sleep 30\" &" for name in names)
+        script = (f"d=p39-gate; mkdir -p $d; {starts} "
+                  f"n=0; while [ $(ls $d | wc -l) -lt {len(names)} ] && [ $n -lt 3000 ]; do sleep 0.2; n=$((n+1)); done; "
+                  f"echo ready=$(ls $d | wc -l); wait; echo waited")
+        try:
+            completed = self.injob(script, timeout=900)
+        finally:
+            if gate.exists():
+                for path in gate.iterdir():
+                    path.unlink()
+                gate.rmdir()
+        v, err = self.kv(completed.stdout), text(completed.stderr)
+        require(v.get("ready") == str(len(names)) and "Kit VM" not in err,
+                f"children of {len(names)} more Kits did not run at once: {v} {err[-800:]!r}")
+        receipts = self.settle(before, len(names) + 1, timeout=300)
+        require(len({r.get("kit_ref") for r in receipts}) == len(names) + 1,
+                f"want {len(names) + 1} distinct Kits: {sorted(r.get('command') for r in receipts)}")
+        self.verify_deleted(receipts)
+
+    def forty_jobs_across_trees(self) -> None:
+        """s6 jobs at once, default 64: 40 top-level jobs (40 trees) from one session all run at once."""
+        count = 40
+        before = self.job_ids()
+        script = (f"g=.git/marsh-p40; mkdir -p $g; for i in $(seq 1 {count}); do fixture hold 40 > $g/h$i & done; "
+                  f"n=0; while [ $(cat $g/h* 2>/dev/null | grep -c READY) -lt {count} ] && [ $n -lt 3000 ]; do "
+                  "sleep 0.2; n=$((n+1)); done; echo held=$(cat $g/h* | grep -c READY); wait; echo waited; rm -rf $g")
+        completed = self.brush(script, self.project, timeout=900)
+        v, err = self.kv(completed.stdout), text(completed.stderr)
+        require(v.get("held") == str(count) and "capacity" not in err,
+                f"{count} jobs did not run at once: {v} {err[-800:]!r}")
+        receipts = self.settle(before, count, timeout=300)
+        require(all(self.lin(r).get("depth") == 1 for r in receipts), "want 40 top-level jobs")
+        self.verify_deleted(receipts)
+
+    def limits_config(self) -> None:
+        """`marsh config limits --json` lists every limit (value, default, source, range, applies);
+        `marsh config limit` changes one without a restart; `status --json` shows it; a bad value is refused."""
+        listing = json.loads(self.cli(["config", "limits", "--json"], self.project, timeout=60).stdout)
+        names = [entry["name"] for entry in listing["limits"]]
+        require(names == ["daemon-jobs", "job-children", "tree-depth", "tree-kit-vms", "tasks-live",
+                          "tree-launch-rate", "job-cpu-millis", "job-memory-bytes", "job-pids",
+                          "job-writable-bytes", "job-output-bytes", "job-wall-seconds"], f"limits: {names}")
+        require(listing["daemon"] == "running", f"daemon: {listing['daemon']}")
+        by_name = {entry["name"]: entry for entry in listing["limits"]}
+        require(by_name["daemon-jobs"]["value"] == 64 and by_name["daemon-jobs"]["applies"] == "live"
+                and by_name["job-memory-bytes"]["applies"] == "new_jobs", f"listing: {by_name['daemon-jobs']}")
+        bad = self.cli(["config", "limit", "tree-depth", "17"], self.project, timeout=60)
+        require(bad.returncode == 2 and "between 1 and 16" in text(bad.stderr), f"bad value: {text(bad.stderr)!r}")
+        self.limit("tree-depth", "2")
+        try:
+            status = self.document("status", "--json")
+            require(status["limits"]["tree-depth"] == {"value": 2, "default": 4, "source": "config"},
+                    f"status limits: {status['limits'].get('tree-depth')}")
+            argv, _ = self.chain(["fixture", "fixture", "fixture"])
+            completed = self.brush(q(argv), self.project, timeout=300)
+            err = text(completed.stderr)
+            require(re.search(r"^L3=125$", err, re.M) and "depth limit 2" in err,
+                    f"the lowered depth was not applied at once: {err[-600:]!r}")
+        finally:
+            self.limit("tree-depth", "default")
 
     @staticmethod
     def reap_pty(process: subprocess.Popen[bytes], master: int, output: bytearray) -> None:
@@ -1267,6 +1369,8 @@ class Processes(ScenarioSuite):
             self.run([self.marsh, "--load", "claude,codex", "-c", "true"], timeout=1800)
         if NEEDS_SHELL_KIT & set(self.selected):
             self.run([self.marsh, "--load", "shell", "-c", "true"], timeout=900)
+        if "P39-six-kits-in-a-tree" in self.selected and (self.control_home / "kit-copies").is_dir():
+            self.run([self.marsh, "--load", ",".join(KIT_COPIES), "-c", "true"], timeout=1800)
         self.document("status", "--json")
         self.run_scenarios()
 
