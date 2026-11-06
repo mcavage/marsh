@@ -1,6 +1,6 @@
 //! Admission boundaries of the process table (`docs/design/processes.md` s6),
 //! each mirroring a `Process.tla` negative control. Black-box acceptance
-//! cannot reach these cheaply (128 launches, a held slot across a restart,
+//! cannot reach these cheaply (a launch rate over minutes, a held slot across a restart,
 //! a forged relay parent).
 
 use super::*;
@@ -167,24 +167,91 @@ fn depth_fan_out_and_parent_liveness() {
     assert!(store.process_counts().refused >= 3);
 }
 
+/// Move the clock of every recorded launch and refusal back by `ms`, as if
+/// that much time had passed.
+fn elapse(store: &DaemonStore, ms: u64) {
+    let mut state = store.lock();
+    for job in state.jobs.values_mut() {
+        job.created_unix_ms = job.created_unix_ms.saturating_sub(ms);
+    }
+    for times in state.process.refused_roots.values_mut() {
+        for at in times {
+            *at = at.saturating_sub(ms);
+        }
+    }
+}
+
 #[test]
-fn refused_launches_count_toward_the_tree_total() {
-    // noTotal: 128 launches per tree, refusals included.
+fn a_steady_tree_is_never_throttled_but_a_tight_loop_is() {
+    // RateBound / noRate: 60 launches per rolling minute per tree.
     let home = tempfile::tempdir().unwrap();
     let store = reopen(home.path()).unwrap();
     let session = session(&store, home.path());
+    // A long session: 200 sequential tool calls over about four minutes.
+    let steady = launch(&store, &session, None, "claude", view(), false).unwrap();
+    for _ in 0..200 {
+        let call = child(&store, &session, &steady, "shell").unwrap();
+        end(&store, &call, CleanupState::Verified);
+        elapse(&store, 1_100);
+    }
+    // A tight loop: 100 calls in two seconds is stopped at the rate, and
+    // told when to retry.
+    let tight = launch(&store, &session, None, "claude", view(), false).unwrap();
+    let mut refusals = Vec::new();
+    for _ in 0..100 {
+        match child(&store, &session, &tight, "shell") {
+            Ok(call) => end(&store, &call, CleanupState::Verified),
+            Err(error) => refusals.push(refusal(Err(error))),
+        }
+        elapse(&store, 20);
+    }
+    assert_eq!(refusals.len(), 41, "{refusals:?}");
+    let retry = refusals[0]
+        .strip_prefix("rate limit: 60 launches in the last minute; retry in ")
+        .and_then(|rest| rest.split_once("s (MARSH_TREE_LAUNCH_RATE)"))
+        .and_then(|(seconds, _)| seconds.parse::<u64>().ok());
+    // The first launch was about two seconds (and a slow machine's real
+    // time) ago: it leaves the window in under a minute.
+    assert!(
+        retry.is_some_and(|seconds| (50..=59).contains(&seconds)),
+        "{}",
+        refusals[0]
+    );
+    // Another tree is unaffected.
+    let other = launch(&store, &session, None, "claude", view(), false).unwrap();
+    child(&store, &session, &other, "shell").unwrap();
+    // Once the minute has passed, the loop's tree launches again.
+    elapse(&store, 60_000);
+    child(&store, &session, &tight, "shell").unwrap();
+}
+
+#[test]
+fn refused_calls_count_toward_the_rate_only_up_to_a_burst() {
+    let home = tempfile::tempdir().unwrap();
+    let store = reopen(home.path()).unwrap();
+    store.lock().job_defaults = Some(crate::JobDefaults {
+        tree_launch_rate: marsh_contracts::process::LaunchRate {
+            launches: 10,
+            window_seconds: 30,
+        },
+        ..crate::JobDefaults::default()
+    });
+    let session = session(&store, home.path());
     let root = launch(&store, &session, None, "claude", view(), false).unwrap();
-    for _ in 0..127 {
+    // A caller retrying a refused call a hundred times at once.
+    for _ in 0..100 {
         let refused = refusal(child(&store, &session, &root, "unregistered"));
         assert!(
             refused.starts_with("spawn refused: unregistered"),
             "{refused}"
         );
     }
-    assert!(refusal(child(&store, &session, &root, "shell")).starts_with("total limit 128"));
-    // Another tree is unaffected.
-    let other = launch(&store, &session, None, "claude", view(), false).unwrap();
-    child(&store, &session, &other, "shell").unwrap();
+    // Only 8 of them count: the root and one more call fit, then the rate.
+    child(&store, &session, &root, "shell").unwrap();
+    assert!(
+        refusal(child(&store, &session, &root, "shell"))
+            .starts_with("rate limit: 10 launches in the last 30 s; retry in 30s"),
+    );
 }
 
 #[test]

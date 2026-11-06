@@ -61,6 +61,7 @@ job in the scope. Values are positive integers.
 | `MARSH_JOB_OUTPUT_BYTES` | 268435456 (256 MiB). stdout and stderr together. |
 | `MARSH_JOB_WALL_SECONDS` | 86400 (24 hours) |
 | `MARSH_TREE_KIT_VMS` | 4. Distinct Kit VMs used by live jobs in one tree, 1 to 64. Aliases of the same Kit share a VM. |
+| `MARSH_TREE_LAUNCH_RATE` | `60/60s`. Launches one job tree may make in any rolling window, as `LAUNCHES/SECONDS` (1 to 10000 in 1 to 3600 s; `60/1m` also works). It catches tight loops: a long session calling tools steadily never reaches it. Refused child calls count only up to 8 per window. The refusal says when to retry. |
 
 To see the values in effect, run `marsh status` (or `marsh status --json` and
 read `job_defaults`).
@@ -89,7 +90,6 @@ These cannot be changed. A call that exceeds one is refused with exit 125
 - depth 4
 - 8 live children per job
 - the same Kit at most twice in a row
-- 128 launches per tree, including refused child calls
 
 Children also inherit their parent's wall-time deadline. With less than one
 second remaining, a new child is refused. Parallel composition has separate

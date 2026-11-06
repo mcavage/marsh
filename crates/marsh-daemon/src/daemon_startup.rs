@@ -49,6 +49,14 @@ pub struct JobDefaults {
     /// Distinct Kit VMs one job tree may use at once (`MARSH_TREE_KIT_VMS`).
     #[serde(default = "default_tree_kit_vms")]
     pub tree_kit_vms: usize,
+    /// Launches one job tree may make in a rolling window
+    /// (`MARSH_TREE_LAUNCH_RATE`, e.g. `60/60s`).
+    #[serde(default = "default_tree_launch_rate")]
+    pub tree_launch_rate: marsh_contracts::process::LaunchRate,
+}
+
+fn default_tree_launch_rate() -> marsh_contracts::process::LaunchRate {
+    marsh_contracts::process::TREE_LAUNCH_RATE
 }
 
 fn default_tree_kit_vms() -> usize {
@@ -61,6 +69,7 @@ impl Default for JobDefaults {
             resources: DEFAULT_JOB_RESOURCES,
             environment_overrides: Vec::new(),
             tree_kit_vms: default_tree_kit_vms(),
+            tree_launch_rate: default_tree_launch_rate(),
         }
     }
 }
@@ -70,6 +79,14 @@ impl JobDefaults {
         mut value: impl FnMut(&str) -> Option<OsString>,
     ) -> Result<Self, DaemonError> {
         let mut result = Self::default();
+        if let Some(raw) = value(RATE_ENVIRONMENT) {
+            result.tree_launch_rate = raw
+                .to_str()
+                .ok_or_else(|| format!("{RATE_ENVIRONMENT} must be text"))
+                .and_then(marsh_contracts::process::LaunchRate::parse)
+                .map_err(DaemonError::InvalidState)?;
+            result.environment_overrides.push(RATE_ENVIRONMENT.into());
+        }
         for name in JOB_ENVIRONMENT {
             let Some(raw) = value(name) else { continue };
             let parsed = raw
@@ -120,6 +137,10 @@ impl JobDefaults {
             "MARSH_JOB_OUTPUT_BYTES" => self.resources.output_bytes,
             "MARSH_JOB_WALL_SECONDS" => self.resources.wall_seconds,
             "MARSH_TREE_KIT_VMS" => self.tree_kit_vms as u64,
+            // Launches and window, packed: compared only for equality.
+            RATE_ENVIRONMENT => {
+                (self.tree_launch_rate.launches as u64) << 32 | self.tree_launch_rate.window_seconds
+            }
             _ => unreachable!("fixed job environment variable"),
         }
     }
@@ -140,6 +161,8 @@ impl JobDefaults {
         Ok(())
     }
 }
+
+const RATE_ENVIRONMENT: &str = "MARSH_TREE_LAUNCH_RATE";
 
 const JOB_ENVIRONMENT: [&str; 7] = [
     "MARSH_JOB_CPU_MILLIS",

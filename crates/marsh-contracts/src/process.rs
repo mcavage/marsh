@@ -22,7 +22,16 @@ pub const POOL_LIMIT: usize = 16;
 pub const DEPTH_LIMIT: u32 = 4;
 pub const SAME_KIT_LIMIT: usize = 2;
 pub const FAN_OUT_LIMIT: usize = 8;
-pub const TOTAL_LIMIT: usize = 128;
+/// Launches one job tree may make in a rolling window, by default
+/// (`MARSH_TREE_LAUNCH_RATE` changes it at daemon start). Only a tight loop
+/// reaches it; a long session that calls tools steadily never does.
+pub const TREE_LAUNCH_RATE: LaunchRate = LaunchRate {
+    launches: 60,
+    window_seconds: 60,
+};
+/// Refused child calls count toward a tree's launch window only up to this
+/// many: a caller retrying refused calls is slowed, not locked out.
+pub const REFUSAL_BURST: usize = 8;
 /// Distinct Kit VMs one job tree may use at once (`MARSH_TREE_KIT_VMS`
 /// lowers or raises it at daemon start).
 pub const TREE_KIT_VM_LIMIT: usize = 4;
@@ -135,13 +144,74 @@ pub struct ModelChoice {
     pub family: String,
 }
 
+/// A launch rate: at most `launches` in any `window_seconds`.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct LaunchRate {
+    pub launches: usize,
+    pub window_seconds: u64,
+}
+
+impl LaunchRate {
+    /// `N/Ts` (also `N/Tm`, `N/T` in seconds), e.g. `60/60s`: 1 to 10000
+    /// launches in 1 s to 1 h.
+    ///
+    /// # Errors
+    /// Returns what is wrong with the text.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let invalid = || {
+            format!(
+                "MARSH_TREE_LAUNCH_RATE must be LAUNCHES/SECONDS (e.g. 60/60s): 1-10000 launches in 1-3600 s, not {text:?}"
+            )
+        };
+        let (launches, window) = text.trim().split_once('/').ok_or_else(invalid)?;
+        let (window, unit) = match window.strip_suffix('m') {
+            Some(minutes) => (minutes, 60),
+            None => (window.strip_suffix('s').unwrap_or(window), 1),
+        };
+        let number = |value: &str| {
+            value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit())
+                .then(|| value.parse::<u64>().ok())
+                .flatten()
+        };
+        let launches = number(launches)
+            .filter(|launches| (1..=10_000).contains(launches))
+            .ok_or_else(invalid)?;
+        let window_seconds = number(window)
+            .and_then(|window| window.checked_mul(unit))
+            .filter(|window| (1..=3600).contains(window))
+            .ok_or_else(invalid)?;
+        Ok(Self {
+            launches: usize::try_from(launches).map_err(|_| invalid())?,
+            window_seconds,
+        })
+    }
+
+    /// The window in words: `the last minute`, `the last 30 s`.
+    #[must_use]
+    pub fn window_text(&self) -> String {
+        match self.window_seconds {
+            60 => "the last minute".into(),
+            3600 => "the last hour".into(),
+            seconds => format!("the last {seconds} s"),
+        }
+    }
+}
+
+impl std::fmt::Display for LaunchRate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}/{}s", self.launches, self.window_seconds)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Limits {
     pub pool: usize,
     pub depth: u32,
     pub same_kit: usize,
     pub fan_out: usize,
-    pub total: usize,
+    pub launch_rate: LaunchRate,
 }
 
 impl Default for Limits {
@@ -151,7 +221,7 @@ impl Default for Limits {
             depth: DEPTH_LIMIT,
             same_kit: SAME_KIT_LIMIT,
             fan_out: FAN_OUT_LIMIT,
-            total: TOTAL_LIMIT,
+            launch_rate: TREE_LAUNCH_RATE,
         }
     }
 }
@@ -385,6 +455,23 @@ mod tests {
             )),
             "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
         );
+    }
+
+    #[test]
+    fn launch_rates_parse_from_their_variable() {
+        let rate = |launches, window_seconds| super::LaunchRate {
+            launches,
+            window_seconds,
+        };
+        assert_eq!(super::LaunchRate::parse("60/60s"), Ok(rate(60, 60)));
+        assert_eq!(super::LaunchRate::parse("120/2m"), Ok(rate(120, 120)));
+        assert_eq!(super::LaunchRate::parse("5/10"), Ok(rate(5, 10)));
+        assert_eq!(super::TREE_LAUNCH_RATE.to_string(), "60/60s");
+        for bad in [
+            "", "60", "0/60s", "60/0s", "60/2h", "-1/60s", "60/3601s", " 6 0/60s",
+        ] {
+            assert!(super::LaunchRate::parse(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
