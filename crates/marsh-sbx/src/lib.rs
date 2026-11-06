@@ -947,6 +947,10 @@ pub struct StockSbx {
     worker_generations: Mutex<BTreeMap<String, u64>>,
     /// Kit VMs refused to new work, with why and since when (`marsh status`).
     quarantined_workers: Mutex<BTreeMap<String, VmQuarantine>>,
+    /// Kit VMs created with `--skills off` because stock SBX refused to
+    /// compose the shared skills store with their bundled skills: by VM
+    /// name, the Kit identity and the clashing names (`marsh status`).
+    withheld_skills: Mutex<BTreeMap<String, WithheldSkills>>,
     /// Closed sessions whose pins are still to be released.
     deferred_pin_releases: Mutex<BTreeSet<String>>,
     worker_leases: Mutex<BTreeMap<String, Arc<RetainedWorker>>>,
@@ -1080,6 +1084,7 @@ impl StockSbx {
             worker_artifact_identities: Mutex::new(BTreeMap::new()),
             worker_generations: Mutex::new(BTreeMap::new()),
             quarantined_workers: Mutex::new(BTreeMap::new()),
+            withheld_skills: Mutex::new(BTreeMap::new()),
             deferred_pin_releases: Mutex::new(BTreeSet::new()),
             worker_leases: Mutex::new(BTreeMap::new()),
             shell_leases: Mutex::new(BTreeMap::new()),
@@ -5283,23 +5288,30 @@ impl StockSbx {
         let outcome = (|| {
             let mut selected_home_environment = OsString::from("MARSH_SELECTED_HOME=");
             selected_home_environment.push(spec.lifecycle_workspace.as_os_str());
-            let arguments = vec![
-                OsString::from("create"),
-                OsString::from("--name"),
-                OsString::from(&spec.name),
-                OsString::from("--pull"),
-                OsString::from("missing"),
-                OsString::from("-e"),
-                selected_home_environment,
-                // Stock ResolveReference stats an unprefixed argument before its
-                // OCI heuristic. Force immutable Kit authority despite a hostile
-                // cwd containing a directory named like registry/repo@sha256:...
-                OsString::from(format!("oci://{}", spec.workload_kit.identity())),
-                spec.lifecycle_workspace.as_os_str().to_os_string(),
-            ];
-            let output =
-                self.run_bounded_os("create kit VM", self.preparation_timeouts.create, arguments);
-            Self::require_success("create kit VM", output?)?;
+            let create = |skills_off: bool| {
+                let mut arguments = vec![
+                    OsString::from("create"),
+                    OsString::from("--name"),
+                    OsString::from(&spec.name),
+                    OsString::from("--pull"),
+                    OsString::from("missing"),
+                ];
+                if skills_off {
+                    arguments.extend([OsString::from("--skills"), OsString::from("off")]);
+                }
+                arguments.extend([
+                    OsString::from("-e"),
+                    selected_home_environment.clone(),
+                    // Stock ResolveReference stats an unprefixed argument before its
+                    // OCI heuristic. Force immutable Kit authority despite a hostile
+                    // cwd containing a directory named like registry/repo@sha256:...
+                    OsString::from(format!("oci://{}", spec.workload_kit.identity())),
+                    spec.lifecycle_workspace.as_os_str().to_os_string(),
+                ]);
+                self.run_bounded_os("create kit VM", self.preparation_timeouts.create, arguments)
+            };
+            let output = self.create_withholding_clashing_skills(spec, create)?;
+            Self::require_success("create kit VM", output)?;
             before.verify_path()?;
             self.adopt_created(&spec.name)?;
             Ok(())
@@ -5316,6 +5328,56 @@ impl StockSbx {
         result
     }
 
+    /// Run a Kit VM create; when stock SBX refuses it because a skill the
+    /// Kit bundles has the name of one in the shared store, which it then
+    /// leaves no VM behind for, create it again without the store
+    /// (`--skills off`) and remember why for `marsh status`.
+    fn create_withholding_clashing_skills(
+        &self,
+        spec: &KitVmSpec,
+        create: impl Fn(bool) -> Result<CommandOutput, SbxError>,
+    ) -> Result<CommandOutput, SbxError> {
+        self.withheld_skills
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&spec.name);
+        let output = create(false)?;
+        let Some(names) = (!output.succeeded())
+            .then(|| shared_skills_clash(&output))
+            .flatten()
+        else {
+            return Ok(output);
+        };
+        self.ownership.invalidate();
+        if !matches!(self.classify_vm(&spec.name, true)?, VmClass::Absent) {
+            return Ok(output);
+        }
+        let output = create(true)?;
+        if output.succeeded() {
+            self.withheld_skills
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .insert(
+                    spec.name.clone(),
+                    WithheldSkills {
+                        kit: spec.workload_kit.identity().to_owned(),
+                        clashes: names,
+                    },
+                );
+        }
+        Ok(output)
+    }
+
+    /// Kit VMs running without the shared skills store because of a name
+    /// clash with their bundled skills, by VM name.
+    #[must_use]
+    pub fn withheld_skills(&self) -> BTreeMap<String, WithheldSkills> {
+        self.withheld_skills
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     fn create_local_vm(
         &self,
         spec: &KitVmSpec,
@@ -5328,41 +5390,49 @@ impl StockSbx {
         let outcome = (|| {
             let mut selected_home_environment = OsString::from("MARSH_SELECTED_HOME=");
             selected_home_environment.push(spec.lifecycle_workspace.as_os_str());
-            let mut invocation = self.invocation([
-                OsStr::new("create"),
-                OsStr::new("--name"),
-                OsStr::new(&spec.name),
-                OsStr::new("--pull"),
-                OsStr::new("never"),
-                OsStr::new("-e"),
-                selected_home_environment.as_os_str(),
-                source.as_os_str(),
-                spec.lifecycle_workspace.as_os_str(),
-            ]);
-            // Stock builds this source on the same host BuildKit as marsh's own
-            // build; only a shared cache makes the two image digests agree.
-            invocation
-                .environment
-                .push(("SBX_KIT_BUILDER".into(), "host".into()));
-            if rebuild {
+            let create = |skills_off: bool| {
+                let mut arguments = vec![
+                    OsStr::new("create"),
+                    OsStr::new("--name"),
+                    OsStr::new(&spec.name),
+                    OsStr::new("--pull"),
+                    OsStr::new("never"),
+                ];
+                if skills_off {
+                    arguments.extend([OsStr::new("--skills"), OsStr::new("off")]);
+                }
+                arguments.extend([
+                    OsStr::new("-e"),
+                    selected_home_environment.as_os_str(),
+                    source.as_os_str(),
+                    spec.lifecycle_workspace.as_os_str(),
+                ]);
+                let mut invocation = self.invocation(arguments);
+                // Stock builds this source on the same host BuildKit as marsh's own
+                // build; only a shared cache makes the two image digests agree.
                 invocation
                     .environment
-                    .push(("SBX_KIT_REBUILD".into(), "1".into()));
-            }
-            let output = self
-                .runner
-                .run_bounded(&invocation, self.preparation_timeouts.create)
-                .map_err(|error| {
-                    if error.kind() == io::ErrorKind::TimedOut {
-                        SbxError::PreparationTimeout {
-                            operation: "create local kit VM",
-                            timeout: self.preparation_timeouts.create,
+                    .push(("SBX_KIT_BUILDER".into(), "host".into()));
+                if rebuild {
+                    invocation
+                        .environment
+                        .push(("SBX_KIT_REBUILD".into(), "1".into()));
+                }
+                self.runner
+                    .run_bounded(&invocation, self.preparation_timeouts.create)
+                    .map_err(|error| {
+                        if error.kind() == io::ErrorKind::TimedOut {
+                            SbxError::PreparationTimeout {
+                                operation: "create local kit VM",
+                                timeout: self.preparation_timeouts.create,
+                            }
+                        } else {
+                            SbxError::Io(error)
                         }
-                    } else {
-                        SbxError::Io(error)
-                    }
-                });
-            Self::require_success("create local kit VM", output?)?;
+                    })
+            };
+            let output = self.create_withholding_clashing_skills(spec, create)?;
+            Self::require_success("create local kit VM", output)?;
             before.verify_path()?;
             // The read-only outer inspect overlaps the inventory refresh that
             // adopts the new UUID; nothing enters the VM before both.
@@ -8083,6 +8153,30 @@ fn command_failed(operation: &'static str, output: CommandOutput) -> SbxError {
     }
 }
 
+/// A Kit VM created without the shared skills store: its Kit's identity
+/// and the bundled names stock SBX found in the store.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WithheldSkills {
+    pub kit: String,
+    pub clashes: String,
+}
+
+/// Stock SBX's refusal to expose a Kit's bundled skills over same-named
+/// shared ones (`agent-skill@1/existing-conflict`): the names it lists, or
+/// its message when they can't be picked out.
+fn shared_skills_clash(output: &CommandOutput) -> Option<String> {
+    let text = normalized_output(output);
+    let (_, rest) = text.split_once("failed to compose shared skills into the sandbox")?;
+    let rest = rest.trim_start_matches([':', ' ']);
+    let names = rest
+        .strip_prefix("bundled skills ")
+        .or_else(|| rest.strip_prefix("bundled skill "))
+        .and_then(|rest| rest.split_once(" cannot be exposed"))
+        .map_or(rest, |(names, _)| names);
+    let names: String = names.chars().take(1024).collect();
+    Some(names.trim().to_owned())
+}
+
 fn combined_output(output: &CommandOutput) -> String {
     let mut bytes = output.stdout.clone();
     bytes.extend_from_slice(&output.stderr);
@@ -8730,6 +8824,30 @@ mod kit_resolution_tests {
             let (sbx, _) = stock(unusable.into());
             assert_eq!(sbx.kit_created(&image).unwrap(), None, "{unusable}");
         }
+    }
+
+    #[test]
+    fn names_the_skills_stock_sbx_would_not_compose() {
+        let failed = |stderr: &str| CommandOutput {
+            exit_code: Some(1),
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+        };
+        assert_eq!(
+            shared_skills_clash(&failed(
+                "error: failed to compose shared skills into the sandbox: bundled skills account-brief, wf-sales cannot be exposed in /opt/pix/kit-skills: another skill already uses the name\n"
+            ))
+            .as_deref(),
+            Some("account-brief, wf-sales")
+        );
+        assert_eq!(
+            shared_skills_clash(&failed(
+                "error: failed to compose shared skills into the sandbox: something new"
+            ))
+            .as_deref(),
+            Some("something new")
+        );
+        assert_eq!(shared_skills_clash(&failed("error: image not found")), None);
     }
 
     #[test]

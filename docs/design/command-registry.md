@@ -152,7 +152,7 @@ composed descriptor declares `com.docker.sandbox/acp@1` (`agent`, `command`
 as argv or a `/bin/sh -c` string, optional `env` and `protocolVersion`;
 capability groups, kit sets, and mixins included). The daemon reads the
 descriptor of a published image once per digest (cached under the control
-directory's `kit-agent-v4/`) and of a local source Kit from its last cached
+directory's `kit-agent-v5/`) and of a local source Kit from its last cached
 build, else its source YAML. An adapter's `env` is bounded like any exported
 environment and may not name a variable marsh sets; an `agent-sessions@1`
 config is at most 4 KiB and belongs to the adapter it names (`agent`), or is

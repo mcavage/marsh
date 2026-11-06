@@ -11,6 +11,12 @@
 //! clash: the store's copy wins and `marsh status` names it. `sbx skills ls`
 //! does not say where a skill came from, so the content is the evidence.
 //!
+//! A skill a registered Kit bundles (`agent-skill@1`) is never imported:
+//! stock SBX refuses to create a VM whose bundled skill shares a name with
+//! a store entry, and the Kit's copy wins. One the daemon imported before
+//! (marsh 0.3.10) is removed again. Until every registered Kit's
+//! descriptor has been read (or `BUNDLED_WAIT` passed) nothing is imported.
+//!
 //! `sbx skills import` takes no names, so the import runs with a HOME the
 //! daemon prepares: `.agents/skills` holds links to just the skills to
 //! import, and the store's path leads to the real store.
@@ -37,6 +43,16 @@ const MAX_RECORD_BYTES: u64 = 1024 * 1024;
 const MAX_SKILL_FILES: usize = 4096;
 const MAX_SKILL_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_STAMPS: usize = 65_536;
+/// How long the first sync waits for registered Kits' descriptors.
+const BUNDLED_WAIT: Duration = Duration::from_secs(30);
+
+/// What the registered Kits bundle: each skill name with the commands
+/// whose Kit bundles it, and whether a Kit's descriptor is still unread.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct Bundled {
+    pub(crate) skills: BTreeMap<String, Vec<String>>,
+    pub(crate) pending: bool,
+}
 
 /// What the daemon imported: each name with its store content's digest.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -61,6 +77,10 @@ struct State {
     /// The stamps the store is in step with.
     synced: Option<Vec<Stamp>>,
     retry_at: Option<Instant>,
+    /// The bundled skills the store is in step with.
+    synced_bundled: Option<BTreeMap<String, Vec<String>>>,
+    /// When the mirror first waited for a Kit's descriptor.
+    waiting_since: Option<Instant>,
     status: SkillsMirrorStatus,
 }
 
@@ -96,13 +116,29 @@ impl Mirror {
     }
 
     /// One pass: sync at start, then once the folders changed and settled.
-    pub(crate) fn pass(&self, sbx: &StockSbx, scope_root: &Path, control_home: &Path) {
+    pub(crate) fn pass(
+        &self,
+        sbx: &StockSbx,
+        scope_root: &Path,
+        control_home: &Path,
+        bundled: &Bundled,
+    ) {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !enabled(scope_root) {
             state.synced = None;
+            return;
+        }
+        if !bundled.pending {
+            state.waiting_since = None;
+        } else if state
+            .waiting_since
+            .get_or_insert_with(Instant::now)
+            .elapsed()
+            < BUNDLED_WAIT
+        {
             return;
         }
         if state.folders.is_none() {
@@ -126,24 +162,27 @@ impl Mirror {
             state.retry_at = None;
             state.synced = None;
         }
-        if state.synced.as_ref() == Some(&stamps) {
+        let in_step = state.synced.as_ref() == Some(&stamps);
+        if in_step && state.synced_bundled.as_ref() == Some(&bundled.skills) {
             return;
         }
         let first = state.synced.is_none() && state.status.last_import.is_none();
-        match &state.seen {
-            Some((seen, since)) if *seen == stamps => {
-                if !first && since.elapsed() < SETTLE {
-                    return;
+        if !in_step {
+            match &state.seen {
+                Some((seen, since)) if *seen == stamps => {
+                    if !first && since.elapsed() < SETTLE {
+                        return;
+                    }
                 }
-            }
-            _ => {
-                state.seen = Some((stamps.clone(), Instant::now()));
-                if !first {
-                    return;
+                _ => {
+                    state.seen = Some((stamps.clone(), Instant::now()));
+                    if !first {
+                        return;
+                    }
                 }
             }
         }
-        match sync(sbx, &folders, control_home) {
+        match sync(sbx, &folders, control_home, &bundled.skills) {
             Ok(clashes) => {
                 state.status.clashes = clashes;
                 state.status.last_import = Some(now_ms());
@@ -152,6 +191,7 @@ impl Mirror {
             Err(message) => fail(&mut state, message),
         }
         state.synced = Some(stamps);
+        state.synced_bundled = Some(bundled.skills.clone());
     }
 }
 
@@ -273,18 +313,27 @@ fn digest(root: &Path) -> Option<String> {
 struct Plan {
     import: Vec<String>,
     remove: Vec<String>,
+    /// Sources whose store copy came from elsewhere (`sbx skills add`).
     clashes: Vec<String>,
+    /// Sources a registered Kit bundles, with those Kits.
+    bundled: Vec<(String, Vec<String>)>,
     record: BTreeMap<String, String>,
 }
 
-/// `store` holds the digest of each store entry; `sources` of each source.
+/// `store` holds the digest of each store entry; `sources` of each source;
+/// `bundled` the commands whose Kit bundles each name.
 fn plan(
     sources: &BTreeMap<String, Option<String>>,
     store: &BTreeMap<String, Option<String>>,
     record: &BTreeMap<String, String>,
+    bundled: &BTreeMap<String, Vec<String>>,
 ) -> Plan {
     let mut plan = Plan::default();
     for (name, source) in sources {
+        if let Some(kits) = bundled.get(name) {
+            plan.bundled.push((name.clone(), kits.clone()));
+            continue;
+        }
         let recorded = record.get(name);
         match store.get(name) {
             None => plan.import.push(name.clone()),
@@ -303,7 +352,7 @@ fn plan(
         }
     }
     for (name, recorded) in record {
-        if sources.contains_key(name) {
+        if sources.contains_key(name) && !bundled.contains_key(name) {
             continue;
         }
         if store
@@ -377,7 +426,12 @@ fn stage(
 }
 
 /// Brings the store in step; returns the clashes.
-fn sync(sbx: &StockSbx, folders: &[PathBuf], control_home: &Path) -> Result<Vec<String>, String> {
+fn sync(
+    sbx: &StockSbx,
+    folders: &[PathBuf],
+    control_home: &Path,
+    bundled: &BTreeMap<String, Vec<String>>,
+) -> Result<Vec<String>, String> {
     let store = sbx
         .skills_store()
         .map_err(|error| format!("cannot list the sbx skills store: {error}"))?;
@@ -392,10 +446,11 @@ fn sync(sbx: &StockSbx, folders: &[PathBuf], control_home: &Path) -> Result<Vec<
         .map(|name| (name.clone(), digest(&store.directory.join(name))))
         .collect();
     let mut record = read_record(control_home);
-    let plan = plan(&source_digests, &store_digests, &record.skills);
-    record
-        .skills
-        .retain(|name, _| found.contains_key(name) && !plan.clashes.contains(name));
+    let plan = plan(&source_digests, &store_digests, &record.skills, bundled);
+    record.skills.retain(|name, _| {
+        (found.contains_key(name) && !bundled.contains_key(name) && !plan.clashes.contains(name))
+            || plan.remove.contains(name)
+    });
     record.skills.extend(plan.record.clone());
     let mut result = Ok(());
     if !plan.import.is_empty() {
@@ -422,10 +477,19 @@ fn sync(sbx: &StockSbx, folders: &[PathBuf], control_home: &Path) -> Result<Vec<
         result = sbx
             .skills_remove(&plan.remove)
             .map_err(|error| format!("sbx skills rm failed: {error}"));
+        if result.is_ok() {
+            record.skills.retain(|name, _| !plan.remove.contains(name));
+        }
     }
     write_record(control_home, &record)?;
     result?;
-    Ok(plan.clashes)
+    let mut clashes = plan.clashes;
+    clashes.extend(
+        plan.bundled
+            .iter()
+            .map(|(name, kits)| format!("{name} (bundled by {})", kits.join(", "))),
+    );
+    Ok(clashes)
 }
 
 #[cfg(test)]
@@ -459,11 +523,39 @@ mod tests {
             ("gone".to_owned(), "g".to_owned()),
             ("changed-since".to_owned(), "c".to_owned()),
         ]);
-        let plan = plan(&sources, &store, &record);
+        let plan = plan(&sources, &store, &record, &BTreeMap::new());
         assert_eq!(plan.import, ["edited", "new"]);
         assert_eq!(plan.remove, ["gone"]);
         assert_eq!(plan.clashes, ["added"]);
         assert_eq!(plan.record, BTreeMap::from([("same".into(), "s".into())]));
+    }
+
+    #[test]
+    fn a_kit_bundled_name_is_never_imported_and_an_earlier_import_goes() {
+        let sources = map(&[
+            ("leftover", Some("l")),
+            ("fresh", Some("f")),
+            ("added", Some("mine")),
+        ]);
+        // `leftover` is what an earlier marsh imported; `added` is an
+        // `sbx skills add` copy, which stays (the VM create falls back).
+        let store = map(&[("leftover", Some("l")), ("added", Some("from-repo"))]);
+        let record = BTreeMap::from([("leftover".to_owned(), "l".to_owned())]);
+        let bundled: BTreeMap<_, _> = ["leftover", "fresh", "added"]
+            .map(|name| (name.to_owned(), vec!["pix".to_owned()]))
+            .into();
+        let plan = plan(&sources, &store, &record, &bundled);
+        assert!(plan.import.is_empty(), "{plan:?}");
+        assert_eq!(plan.remove, ["leftover"]);
+        assert_eq!(plan.clashes, [] as [String; 0]);
+        assert_eq!(
+            plan.bundled
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["added", "fresh", "leftover"]
+        );
+        assert!(plan.record.is_empty());
     }
 
     #[test]

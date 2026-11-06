@@ -944,6 +944,9 @@ fn write_skills_mirror(
             writer,
             "  skills:       mirror off (`marsh config skills-mirror on`)"
         )?;
+        for error in &mirror.errors {
+            writeln!(writer, "    error:      {error}")?;
+        }
         return Ok(());
     }
     let now = i64::try_from(
@@ -960,11 +963,23 @@ fn write_skills_mirror(
         writer,
         "  skills:       mirrored into the sbx skills store, last import {imported}"
     )?;
-    if !mirror.clashes.is_empty() {
+    let (bundled, added): (Vec<_>, Vec<_>) = mirror
+        .clashes
+        .iter()
+        .map(String::as_str)
+        .partition(|clash| clash.contains(" (bundled by "));
+    if !added.is_empty() {
         writeln!(
             writer,
             "    kept the `sbx skills add` copy of: {}",
-            mirror.clashes.join(", ")
+            added.join(", ")
+        )?;
+    }
+    if !bundled.is_empty() {
+        writeln!(
+            writer,
+            "    not imported, the Kit's own copy wins: {}",
+            bundled.join(", ")
         )?;
     }
     for error in &mirror.errors {

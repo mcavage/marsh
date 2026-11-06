@@ -1770,6 +1770,8 @@ pub struct SkillsMirrorStatus {
     pub errors: Vec<String>,
     /// Skill names in a scanned folder whose store copy came from elsewhere
     /// (`sbx skills add`): the repository's skill won and was left alone.
+    /// `NAME (bundled by KIT)`: a registered Kit bundles it, so it is not
+    /// imported (the Kit's copy wins).
     pub clashes: Vec<String>,
 }
 
