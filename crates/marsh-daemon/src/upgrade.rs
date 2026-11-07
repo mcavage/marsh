@@ -61,6 +61,9 @@ pub(crate) struct UpgradeWatch {
     watched: PathBuf,
     stock_sbx: PathBuf,
     candidate: Mutex<Option<Candidate>>,
+    /// One probe at a time: a second one (status, the serve loop) waits and
+    /// reuses the first's check instead of racing it with a staler result.
+    probing: Mutex<()>,
     /// Test hook: runs between the last check and the successor's start.
     #[cfg(test)]
     pub(crate) before_launch: Mutex<Option<Box<dyn Fn() + Send>>>,
@@ -98,6 +101,7 @@ impl UpgradeWatch {
             own,
             stock_sbx: stock_sbx.to_owned(),
             candidate: Mutex::new(None),
+            probing: Mutex::new(()),
             #[cfg(test)]
             before_launch: Mutex::new(None),
         })
@@ -128,6 +132,10 @@ impl UpgradeWatch {
     /// missing (an install in progress) changes nothing here; one that is
     /// this daemon's own clears the update.
     pub(crate) fn probe(&self) -> Option<(UpdatePending, String)> {
+        let _probing = self
+            .probing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some((path, artifact)) = canonical_executable(&self.watched).ok().and_then(|path| {
             artifact_identity(&path)
                 .ok()
@@ -148,7 +156,7 @@ impl UpgradeWatch {
                 .clone()
                 .map(|(pending, identity, _)| (pending, identity));
         }
-        // Outside the lock: `marsh status` reads the last result meanwhile.
+        // Outside the candidate lock: `notice` reads the last result meanwhile.
         let mut candidate = Candidate {
             path: path.clone(),
             artifact,
